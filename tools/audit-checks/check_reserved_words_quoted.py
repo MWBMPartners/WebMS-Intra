@@ -178,6 +178,31 @@ SCAN_ROOTS = (WEB, TOOLS)
 #    backtick is never wrong, and the alternative is a per-engine list the check
 #    cannot choose between, because it runs with no database and does not know
 #    which engine the customer has.
+#    **SIX MORE WORDS, FROM THE TWO ENGINES #475 PART 1 ADDED (4 November 2026).**
+#    Part 1 took the migration harness to MySQL 9.7 and MariaDB 12.3, and this
+#    list did not follow -- so it had gone stale for exactly the two engines that
+#    had just been proved, and the live test that exists to catch that was
+#    pointed at neither. Measured on real servers, not taken from a summary:
+#
+#      MySQL 9.7.4 reserves, and this list lacked:  external  library
+#        (both refused as a column name; both fine on MariaDB 12.3.3)
+#      MariaDB 12.3.3 reserves, and this list lacked:
+#        conversion  current_path  to_date  vector
+#        (each ERROR 1064 as a column name; `conversion` and `vector` are fine
+#         on MySQL 9.7.4)
+#
+#    None of the six is a column name in this schema, checked rather than
+#    assumed, so nothing was broken -- again luck, not coverage. `vector` is the
+#    one to notice: both engine families are adding vector types, so it is a
+#    plausible column name in a product that may later store embeddings.
+#
+#    **A WARNING FROM MEASURING IT.** A first probe loop reported `phase` and
+#    `recover` as reserved on MariaDB as well. Tried ONE AT A TIME, both are
+#    ACCEPTED -- the loop's generated table names collided, and a collision
+#    looks exactly like a refusal. Two false alarms would have been worse than
+#    none: a check that cries wolf gets switched off (#483). Probe one word at a
+#    time and READ THE ERROR, never just the exit code.
+#
 RESERVED = set("""
 accessible add all alter analyze and as asc asensitive before between bigint binary blob both by
 call cascade case change char character check collate column condition constraint continue convert
@@ -202,6 +227,7 @@ tinyblob tinyint tinytext to trailing trigger true undo union unique unlock unsi
 use using utc_date utc_time utc_timestamp values varbinary varchar varcharacter varying virtual
 when where while window with write xor year_month zerofill
 current_role delete_domain_id do_domain_ids ignore_domain_ids master_demote_to_replica master_demote_to_slave offset page_checksum parse_vcol_expr portion ref_system_id returning sql_after_gtids sql_before_gtids stats_auto_recalc stats_persistent stats_sample_pages
+conversion current_path external library to_date vector
 """.split())
 
 # Identifiers that ARE reserved words and are named that way on purpose.

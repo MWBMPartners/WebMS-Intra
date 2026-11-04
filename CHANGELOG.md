@@ -4,6 +4,63 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The reserved-word list had gone stale for the two engines #475 part 1 had just proved (#475 part 2)
+
+**Part 1 took the migration harness to MySQL 9.7 and MariaDB 12.3. The
+hard-coded reserved-word list did not follow, and the live test that exists to
+catch exactly that was pointed at neither engine.** So the staleness was live.
+
+Measured on real servers, not taken from any summary — the committed list
+**fails** on both and passes with the fix:
+
+| Engine | Reserves, and the list lacked |
+|---|---|
+| MySQL 9.7.4 | `external`, `library` (both fine on MariaDB 12.3) |
+| MariaDB 12.3.3 | `conversion`, `current_path`, `to_date`, `vector` (the first and last fine on MySQL 9.7) |
+
+Each refused as a column name with a real parse error. **None of the six is a
+column name in this schema**, checked rather than assumed, so nothing was
+broken — luck, not coverage. `vector` is the one to notice: both engine
+families are adding vector types, so it is a plausible column name in a product
+that may later store embeddings.
+
+**The fix is two changes together, because one without the other is no fix.**
+The six words went into the list, *and* `calendar-selftests.yml`'s matrix went
+from three engines to five — the same five as the harness. Adding a word
+without pointing the test at the server that reserves it would leave the next
+version just as blind.
+
+Those two engines and no others, deliberately: both are already in the
+harness's matrix, so this opens no gap between what these tests run on and what
+`DbServer::TESTED_LINES` describes. **That constant is NOT touched and must not
+be** — it describes the migration harness alone, and folding these tests into it
+would overstate the sentence a customer reads. Verified: its own both-ways
+guard still passes.
+
+**A warning from doing the measuring.** A first probe loop reported `phase` and
+`recover` as reserved on MariaDB as well. Tried one at a time, both are
+**accepted** — the loop's generated table names collided, and a collision looks
+exactly like a refusal. Two false alarms would have been worse than none here,
+because a check that cries wolf gets switched off (#483). **Probe one word at a
+time and read the error, never just the exit code.**
+
+**And a larger thing was found while doing it, now #754: six check workflows —
+`portal-selftests`, `calendar-selftests`, `mail-selftests`, `backup-selftest`,
+`package` and `end-of-life-watch` — are not on `main` and have never run on
+GitHub.** Not once. That is #646 one level up, and it makes "wired into
+`portal-selftests.yml`" true of the file but not yet a live gate. `pr-security.yml`
+is registered and does run, so its hard gates are real.
+
+**What DreamHost actually offers, for the record.** Shared hosting is MySQL
+8.0, moving to 8.4 "on a proactive schedule" with no dates published, and the
+customer gets no choice — its own help pages answer "Can I update the MySQL
+version?" with "No". **MariaDB is not offered.** Its reserved-word page still
+names `MANUAL` and `PARALLEL` as newly reserved in 8.4, which this repository
+measured as wrong two months ago and which is still wrong on 9.7.4 — one more
+reason the standing rule is to ask the server, never a summary of the server.
+Whether the 9 November move happened could not be established from DreamHost's
+own documentation or status page.
+
 ### One place hashes and stores a password (#728)
 
 **EIGHT places did it, each with its own SQL:** the installer,

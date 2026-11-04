@@ -157,6 +157,36 @@ jobs:
             image: 'mariadb:11.4'
             client: 'mariadb'
             admin: 'mariadb-admin'
+          # 🆕 The two engines #475 part 1 proved on the migration harness
+          #    (MySQL 9.7.4 and MariaDB 12.3.3, commit 52098f3). They are added
+          #    here because ONE step in this workflow depends on the engine's
+          #    own grammar: `reserved-words-live-selftest.php`, which compares
+          #    our hard-coded list with what the server really refuses. Against
+          #    these two the committed list FAILED -- measured locally, MySQL
+          #    9.7 reserves `external` and `library` and MariaDB 12.3 reserves
+          #    `conversion`, `current_path`, `to_date` and `vector`, none of
+          #    which the list held. So it had gone stale for exactly the two
+          #    engines part 1 had just proved, and nothing was pointed at
+          #    either.
+          #
+          #    These two and no others, deliberately: they are already in
+          #    `e2e-migrations.yml`'s matrix, so this opens no gap between what
+          #    is tested here and what `DbServer::TESTED_LINES` describes.
+          #    Adding, say, MariaDB 10.11 would create exactly the divergence
+          #    that constant's own guard says it cannot see.
+          #
+          #    ⚠️ `DbServer::TESTED_LINES` is NOT changed by this and must not
+          #    be: it describes the MIGRATION HARNESS alone, and folding these
+          #    tests into it would overstate what the sentence a customer reads
+          #    actually means.
+          - label: 'MySQL 9.7'
+            image: 'mysql:9.7'
+            client: 'mysql'
+            admin: 'mysqladmin'
+          - label: 'MariaDB 12.3'
+            image: 'mariadb:12.3'
+            client: 'mariadb'
+            admin: 'mariadb-admin'
 
     # 🗄️ The throwaway database. The password is not a secret: this
     # database exists only inside this one job, like the end-to-end

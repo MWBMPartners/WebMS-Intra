@@ -5,7 +5,8 @@
  * The hard-coded reserved-word list is checked against a REAL server 🗝️ (#719)
  * -----------------------------------------------------------------------------
  * `tools/audit-checks/check_reserved_words_quoted.py` carries a hard-coded set of
- * reserved words — the UNION of what MySQL 8.0, MySQL 8.4 and MariaDB 11.4
+ * reserved words — the UNION of what MySQL 8.0, 8.4 and 9.7 and MariaDB 11.4
+ * and 12.3
  * reserve, because the check runs with no database and cannot know which engine
  * a customer has. It has to run with no database — that is what lets the pre-push hook run every one of them in about nine
  * seconds. The cost is that **a hard-coded list goes stale silently**, and the
