@@ -4,6 +4,48 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A page that tells an administrator what is wrong with their own portal (#477, migration 249)
+
+Almost every fault the September 2026 audit found was invisible from inside the
+product. The notification preferences page could not be opened for months. Six
+help guides existed that nobody could find. Six menu links led to "page not
+found". Every fresh install carried 479 duplicate settings rows and reported
+itself as version 0.1.0.
+
+**Not one of those produced an error, a warning, or a log entry.** They were
+found by somebody reading the code against what it claims to do.
+
+**Admin → Check this portal** now runs the equivalent checks against this
+installation's own database and says, in ordinary words, what it found: an
+address with no page behind it, an app switched on that cannot be opened, a
+help guide the Help Centre does not link to, a data endpoint switched on with
+nothing behind it, and whether the version the portal reports is the version of
+its files.
+
+It is **read-only**. It reports and never fixes, because fixing from a page like
+this invites a different class of accident.
+
+**Three things it deliberately does not claim.** It says plainly that a clean
+result does not mean the portal is correct — only that none of the things it
+knows how to look for is wrong today. It says it cannot tell whether a page
+*works*, only whether the file it points at exists. And it says it cannot speak
+for the scheduled jobs: only the mail job records that it ran, so reminders or
+the clearing-out of old personal data could have been silent for months and
+nothing here would know (#775).
+
+**Who may open it is a choice, not something written into the page.** It ships
+to the `staff` role and an organisation can point it at any role it likes, like
+every other capability (D-017). It is deliberately not the narrowest possible
+gate: what it shows is exactly what a tester is most likely to hit and least
+able to describe, so hiding it would re-create the problem it exists to end.
+
+**One finding while building it is worth repeating.** The first version of the
+settings check asked "are any settings stored twice?" — and the database refused
+the self-test's attempt to plant one. A rule added in March makes a second copy
+impossible, so that question could never answer yes. The live question is
+whether that rule is still there, which a database restored from a very old
+backup would not have. The check asks that instead.
+
 ### One place writes the form token, and it writes every carrier (#768, D-050)
 
 The portal replaces the anti-forgery token every time it accepts one, and there

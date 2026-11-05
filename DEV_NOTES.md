@@ -5,6 +5,169 @@
 
 ---
 
+### A page that checks the portal against itself (#477, migration 249)
+
+**`Portal\Core\PortalCheck` is the ONE place the checks live**, and
+`/admin/check` only draws what it returns. It takes a connection and a site id,
+returns findings, and opens nothing of its own.
+
+**It is a different question from the health page, and the two are easy to
+confuse.** `/admin/maintenance/health` asks **is the server well** — database
+reachable, disk, backups, errors, mail. This asks **is the installation
+consistent with itself**. A portal can be perfectly healthy and still have a
+menu link going nowhere. Each page links to the other.
+
+**THE BEST THING THIS PACKAGE FOUND WAS ABOUT ITS OWN CHECK, and it came from
+planting.** The first `duplicateSettings()` asked "are any settings stored
+twice?", because #466 found 479 duplicate rows on every fresh install. The
+self-test tried to plant a duplicate and **the database refused it**: migration
+187 put a unique key on (`settingKey`, `siteScope`), where `siteScope` is a
+worked-out column holding the site number or -1 for an installation-wide row —
+because MySQL never treats one empty value as equal to another (#487). With that
+key present, a second row is impossible, so the scan was a clause that could not
+fire. **The live question is whether the KEY is still there**, which a database
+restored from a pre-187 snapshot would not have, and the moment it is absent
+#466 is possible again. The check asks that, and keeps the scan only as a
+backstop reported when the key is missing — the only state in which it can find
+anything. **Reporting "no duplicates found" while the key does the work would be
+the false reassurance this whole page exists to end.**
+
+**Ask of every check here: can the thing it looks for still happen?** That one
+was a check for a fault the schema already prevents. It is the same shape as a
+clause that cannot fail, one level up — in a file whose entire subject is faults
+that pass quietly.
+
+**ONE CHECK FAILING MUST NEVER EMPTY THE REPORT.** Each is wrapped, and a check
+that could not run says so as a finding of its own. If a thrown query emptied
+the page, an administrator would see a clean result and conclude all was well,
+which is worse than no page. Section H of the test forces it by renaming a table
+the checks read, and requires the others to survive AND the broken one to be
+reported as unanswered rather than clear.
+
+**It never prints a fault's own words.** A database message can quote the value
+that caused it, and this page is read by an administrator, not a developer. The
+area name is enough to find it in the error log. For the same reason the
+settings check prints KEYS and never values.
+
+**FOUR THINGS WERE READ FROM MEMORY INSTEAD OF ASKED, AND TWO OF THEM WERE
+WRONG ON EVERY INSTALLATION.** Two were caught before the review by calling the
+code; two got through to it.
+
+* `DbServer::classify()` returns `headline`, not `label`. Reading `label` would
+  have printed an empty sentence on the page with no error anywhere — exactly
+  the shape this page exists to catch. Caught by calling it.
+* `Site::currentId()` does not exist; it is `Site::id()`. Caught by grepping
+  for the definition.
+* **The version key.** The check read `portal.version`. The portal records its
+  version under `Maintenance::VERSION_SETTING` — `portal.installed_version` —
+  and migration 187 **DELETES** the old key. So every correctly-upgraded portal
+  was told for ever that it had not recorded its version, and the advice given
+  with it could not work: pressing Upgrade writes the key the check was not
+  reading. **Worse, the PROBLEM branch could never fire**, because the recorded
+  value was always empty — so the stale-version fault the check exists for
+  (#466, a portal reporting itself as 0.1.0) was unreachable. **A clause that
+  cannot fire, in the check whose own comment congratulates itself on having
+  found one.** It passed the self-test only because the TEST wrote
+  `portal.version` itself — a test keeping its own copy of the rule, which this
+  repository already records as proving nothing. Both now ask the class.
+* **The app's page key.** The check read `$meta['route']`. `landing` is the
+  page; `route` is only a prefix, and for Expenses, Kids and Worship that
+  prefix is not a page at all — `/expenses` does not exist, `expenses/submit`
+  does. Both of the portal's own menu builders say so in their own comments and
+  resolve `landing ?? route ?? slug`. Reading `route` named those three plus
+  `auth` (a core app that is not a destination) as broken, so **the only "needs
+  attention" line a correct portal ever showed was noise** — and #483 says a
+  check that cries wolf gets switched off, after which it catches nothing. It
+  now resolves exactly as `nav.php` does and skips the same list.
+
+**The common thread: every one was a name I was confident about.** None needed
+cleverness to find — `grep -n "VERSION_SETTING" web/_core/Maintenance.php` and
+`grep -n landing web/_core/apps/*.php` answer both in a second.
+
+**The test must be idempotent, and the first version was not.** A crashed run
+left one planted settings row behind; the next run inserted two more, found
+three where it expected two, and reported a failure that had nothing to do with
+the code. `tidyUp()` runs at both ends, every fixture is prefixed
+`zz.selftest` / `zz-selftest` so it can be exact rather than sweeping, and it
+also repairs a run that died between dropping the unique key and putting it
+back, or between the two table renames. **Proved by running the whole test twice
+in a row**, which is the only thing that actually tests idempotence.
+
+**Who may open it is a capability (D-017), not a role in the page.**
+`portal.check` ships with `staff` and an organisation may re-point it.
+Deliberately not the narrowest gate: what the page shows is what a TESTER is
+most likely to hit and least able to describe, so hiding it behind the smallest
+possible role would reproduce the problem — the fault visible to the people who
+cannot report it and invisible to the people who can.
+
+**THE ERROR WRAPPER IS RIGHT IN PRODUCTION AND IT HID TWO DEAD CHECKS IN THE
+TEST.** `run()` catches a Throwable per check so one broken query can never
+empty the page. In the self-test, `AppRegistry` and `MailQueue` were never
+`require`d — there is no autoloader there — so the Apps and Scheduled-jobs
+checks threw "class not found", the catch turned that into a tidy "This check
+could not be completed." warning, and section A was satisfied by it. **Two of
+the eight checks were never executed and the run was still 32/32. That is how
+the Apps fault shipped.** Section J now refuses to let ANY check report itself
+as unable to run against a healthy database, because **a silent check and a
+dead check look identical** — four of the eight are silent when all is well,
+which is right for the page and is exactly what makes J necessary.
+
+`App::db()` falls back to the global `$mysqli`, a seam that already exists, so
+the test sets `$GLOBALS['mysqli']` rather than loading bootstrap — which would
+start sessions and merge settings it has no use for.
+
+**And the capability was added to the registry and to none of the three lists
+in `capabilities-selftest.php` that exist to pin it** — whose own comments say,
+in capitals, to add it in the same change. A planted wrong shipped role
+(`volunteer` for `staff`) was invisible: 299 passed, 1 failed, identical, and
+all 61 audit scripts green. **That is #739's worst finding re-created, in the
+package after the one that wrote the rule down.** Fixed; the plant now goes red.
+
+Tests: `tools/portal-check-selftest.php` (42 checks, real MySQL, every finding
+planted AND removed, idempotent — proved by running it twice) and
+`tools/capabilities-selftest.php` (310). Nothing drives the page over HTTP —
+that is #776, and the capability gate is unproved until it exists.
+
+**ROUND 2 FOUND FOUR MORE, AND TWO WERE IN ROUND 1'S OWN CORRECTIONS.**
+
+* **"Nothing is written to the error log" was false for every finding the
+  Addresses check can produce.** That check reports a `tblRoutes` row whose
+  target file is missing — and that is exactly the branch `Router.php` LOGS
+  ("Route target file not found", with the route key and the file). The
+  unlogged 404 is the other branch, no route row at all, which produces no
+  finding here. The sentence was the page's own justification and it pointed
+  the administrator AWAY from the one place that already had the answer.
+* **The Apps message covered two branches with opposite consequences.**
+  `Router::routeExists()` reads only `routeKey` — it never looks for the file.
+  So a missing route row means the menu HIDES the app, while a present row with
+  a missing file means the menu DRAWS the link and clicking it 404s. Round 1
+  found the original wording ("they appear in the menu and lead nowhere")
+  untrue and replaced it with wording true only of the OTHER branch — the one
+  the test does not plant. **Each correction was right about the branch it was
+  written about and wrong about the other.** They are two findings now, with
+  their own advice: one says upload the file again, the other says the app has
+  no address.
+* **The Help needle was unanchored, and it was live for 2 of the 19 guides.**
+  `str_contains($centre, 'help/admin')` is satisfied by
+  `help/admin-first-steps`, and `help/calendar` by `help/calendar-imports`.
+  Measured: remove the Help Centre's card for the MAIN Calendar guide and the
+  check said nothing. Round 1 deleted a clause for being able to silence a real
+  finding; **the surviving clause had the same property**. Anchored with a
+  look-ahead now, and section N plants it — deriving the sibling pair from the
+  tree rather than naming one, so it cannot go stale.
+* **The underscore guard was pinned by nothing.** `if (false)` in its place
+  left all 42 checks green while the page began reporting
+  `api/assets/_coerce`, a shared helper the router refuses by pattern. Sections
+  F1-F3 pinned only the WARNING; nothing looked at the NOTE's contents, which
+  is where the guard shows. Section M pins it.
+
+**The pattern across both rounds: six of eleven findings were a NAME or a
+SENTENCE I was confident about** — `label`, `currentId`, `portal.version`,
+`route`, "nothing is written to the error log", "the menu hides it". Not one
+needed cleverness to find. Each was one command away.
+
+---
+
 ### One place writes the form token, and the copies were made from each other (#768)
 
 **The rule.** `Auth::verifyCsrf()` replaces the token on every acceptance and

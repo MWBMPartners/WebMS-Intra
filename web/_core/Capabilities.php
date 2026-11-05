@@ -235,6 +235,7 @@ final class Capabilities
     public const VENUES_MANAGE    = 'venues.manage';
     public const PHOTOS_STAFF     = 'photos.staff';
     public const PHOTOS_VOLUNTEER = 'photos.volunteer';
+    public const PORTAL_CHECK     = 'portal.check';
 
     /**
      * Every field an entry in either list MUST declare, in the order the
@@ -827,6 +828,34 @@ final class Capabilities
                 . 'not affected.',
             'askedAt' => [
                 'web/_core/Photos.php',
+            ],
+        ],
+
+        // 🔎 "Check this portal" (#477). Read-only: it reports and never
+        //    changes anything, which is why it ships to a wider role than the
+        //    pages that act on what it finds.
+        //
+        //    ⚠️ IT IS NOT A SECRET, AND THAT IS DELIBERATE. What it shows —
+        //       a menu link going nowhere, a help guide nobody can reach, a
+        //       setting stored twice — is the kind of thing a TESTER is most
+        //       likely to hit and least able to describe. Hiding it behind the
+        //       narrowest possible role would reproduce the problem the page
+        //       exists to end: the fault is visible to the people who cannot
+        //       report it and invisible to the people who can.
+        self::PORTAL_CHECK => [
+            'label' => 'Check this portal',
+            'opens' => 'The "Check this portal" page: a read-only list of anything inconsistent '
+                . 'in how this installation is set up — addresses with no page behind them, '
+                . 'settings stored twice, apps switched on that cannot be opened, help guides '
+                . 'nobody can reach, and whether the recorded version matches the files.',
+            'standard' => ['staff'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will open the check page. Administrators of this organisation '
+                . 'will still be able to, because this gate lets an administrator in as well. '
+                . 'Nothing stops working — the page only ever reports.',
+            'askedAt' => [
+                'web/_apps/admin/check/index.php',
             ],
         ],
     ];

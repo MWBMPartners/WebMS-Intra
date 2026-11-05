@@ -3198,6 +3198,14 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/maintenance/health', 'admin/maintenance/health.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- 🔎 "Check this portal" (#477, migration 249). Read-only: it reports what is
+--    inconsistent in this installation's own set-up and never changes a thing.
+--    Who may open it is the `portal.check` capability (D-017), not a role
+--    written into the page.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/check', 'admin/check/index.php', 1)
+ON DUPLICATE KEY UPDATE `isProtected` = VALUES(`isProtected`);
+
 INSERT INTO `tblMigrations` (`filename`) VALUES ('067_alerts_and_email_admin.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
@@ -11101,6 +11109,14 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('247_self_service_password.sql'
 -- endpoint off stays switched off.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('248_translation_reachable.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 249_portal_check_page.sql (#477) ───────────────────────────────────
+-- The address for "Check this portal", seeded above beside the health page's.
+-- The route row is the work; this is only the record that the migration has
+-- been accounted for, so a fresh install does not replay it needlessly.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('249_portal_check_page.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

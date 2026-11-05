@@ -75,6 +75,19 @@ $overallLabel = match ($overall) {
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-heart-pulse me-2"></i>System Health</h1>
         <p class="text-secondary mb-0">Live probes of database, disk, backups, errors, email, sessions, migrations.</p>
+        <?php
+        // 🔎 The other half of the pair (#477). This page asks whether the
+        //    SERVER is well; that one asks whether the installation is
+        //    consistent with itself — a portal can be perfectly healthy here
+        //    and still have a menu link going nowhere. The link is not
+        //    decoration: without it that page could only be reached by typing
+        //    the address, which is the very state it reports as a fault.
+        ?>
+        <p class="small mb-0">
+            For whether this portal is set up consistently — addresses with no page behind them,
+            apps that cannot be opened, help guides nobody can reach — see
+            <a href="<?php echo htmlspecialchars(Site::url('admin/check'), ENT_QUOTES, 'UTF-8'); ?>">Check this portal</a>.
+        </p>
     </div>
     <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary btn-sm">&larr; Admin</a>
 </div>

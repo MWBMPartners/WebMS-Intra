@@ -509,6 +509,11 @@ foreach ([
     // pointing at anything at all with every check green. That is #739's worst
     // finding, and it nearly handed the donor list to the wrong role.
     Capabilities::PHOTOS_VOLUNTEER   => 'Cap Volunteer',
+    // #477: the read-only "Check this portal" page. Added HERE in the same
+    // change that adds it to the registry, for the reason in the comment
+    // above — a capability missing from this list and `$shouldShipWith`
+    // ships pointing at any role at all with every check green.
+    Capabilities::PORTAL_CHECK       => 'Cap Check',
 ] as $capabilityKey => $personName) {
     $shippedRole = Capabilities::standardRoleKeys($capabilityKey)[0];
     $personId    = $capNewUser($personName, false);
@@ -555,6 +560,10 @@ $OTHERS = [
     // #756 / D-047: the volunteer photo rung is a real gate now, so it is a
     // capability like the rest.
     Capabilities::PHOTOS_VOLUNTEER,
+    // #477: the read-only "Check this portal" page. Ships to `staff` because
+    // what it shows is what a TESTER is most likely to hit and least able to
+    // describe, so the narrowest gate would defeat the point.
+    Capabilities::PORTAL_CHECK,
 ];
 
 // =============================================================================
@@ -1486,6 +1495,10 @@ $shouldShipWith = [
     Capabilities::PHOTOS_STAFF       => 'staff',
     // #756 / D-047 — see the note beside `$capHolders`.
     Capabilities::PHOTOS_VOLUNTEER   => 'volunteer',
+    // #477: the read-only "Check this portal" page. Ships to `staff` because
+    // what it shows is what a TESTER is most likely to hit and least able to
+    // describe, so the narrowest gate would defeat the point.
+    Capabilities::PORTAL_CHECK       => 'staff',
 ];
 foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     cap_check(
