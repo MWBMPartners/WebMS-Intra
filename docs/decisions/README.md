@@ -105,7 +105,9 @@ appended with its real date and a note that it was added later.
 | [D-047](047-only-volunteers-see-the-volunteer-photo-tier.md) | 2026-11-04 | Only volunteers may see the volunteer photo tier | in force |
 | [D-048](048-the-three-safety-settings-are-added.md) | 2026-11-04 | The three safety settings are added to `~/.claude/settings.json` | in force |
 | [D-049](049-content-translation-is-finished-for-the-first-release.md) | 2026-11-04 | Content translation is finished for the first release | in force |
+| [D-050](050-one-shared-helper-for-the-rotated-form-token.md) | 2026-11-05 | One shared helper for keeping the rotated form token, built next | in force |
+| [D-051](051-check-rounds-cap-at-three-except-money-and-privacy.md) | 2026-11-05 | Check rounds cap at three, except where money, privacy or data loss is at stake | in force |
 
-*49 decisions. This index is checked against the folder by
+*51 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

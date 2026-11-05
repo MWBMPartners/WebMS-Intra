@@ -656,6 +656,34 @@ no real problem. The machine-wide file's narrowing of WHAT gets reviewed applies
 here too (owner, 5 October 2026); this file adds only the timing above and the
 part 8 exception.
 
+**HOW MANY ROUNDS: THREE, EXCEPT WHERE MONEY, PRIVACY OR DATA LOSS IS AT STAKE
+(the owner, 5 November 2026 — D-051).** "Stop when a round finds no real
+problem" stays exactly true for the protected arm below and is now CAPPED for
+everything else.
+
+- **Rounds continue until one is clean** when the package touches money,
+  anybody's personal details, authentication or sign-in, erasure or retention,
+  backups and restores, or anything that writes or deletes stored data.
+- **Three rounds, then ship**, for everything else: presentation, developer
+  tooling, documentation, tests, workflow wiring, and features that read without
+  writing.
+- **Judge by what the package TOUCHES, not by how the last round felt**, or the
+  exception swallows the rule.
+- **Anything outstanding at a cap becomes its own issue**, named in the commit
+  message, so a capped package is visibly capped rather than quietly finished.
+- **Say which arm applied, and why**, in the report and the commit message. The
+  honest version of this rule is that somebody chose.
+
+**Why, with the instance that set it.** #485/#761 took SEVEN rounds. Findings
+per round were 5, 5, 3, 2, 1, 2, 1 — and rounds 2 through 7 found faults in the
+PREVIOUS round's fixes, not in the build: four consecutive rounds each got past
+the guard on one 220-line script with a one-edit change, each time after a
+comment had been written saying the class was shut. Every round was productive,
+so under the old wording none could be skipped. **That package would still run
+all seven under this rule**, because every finding was in the protected areas —
+which is the reason the exception exists rather than an argument against the
+cap.
+
 **Why this sits alongside the other checks, not instead of them.** The audit
 scripts and the migration harness catch mechanical faults — a mistyped
 column, SQL that only works on MariaDB, a route pointing at a missing file.

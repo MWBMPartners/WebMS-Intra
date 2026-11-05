@@ -114,7 +114,23 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
    point against the code before acting on it, and when the reviewer is
    wrong, say so plainly, with the evidence, rather than applying the
    finding anyway. Findings that do hold up get fixed and the change is
-   reviewed again, round after round, until a round finds no real problem.
+   reviewed again, round after round, until a round finds no real
+   problem — **CAPPED AT THREE ROUNDS, EXCEPT where money, anybody's
+   personal details, authentication, erasure or retention, backups, or
+   anything that writes or deletes stored data is at stake, where rounds
+   continue until one is clean (the owner, 5 November 2026 — D-051).**
+   Judge by what the package TOUCHES, not by how the last round felt, or
+   the exception swallows the rule; anything outstanding at a cap
+   becomes its own issue named in the commit message, so a capped
+   package is visibly capped rather than quietly finished; and say which
+   arm applied and why. **Why:** #485/#761 took SEVEN rounds (findings
+   5, 5, 3, 2, 1, 2, 1), and rounds 2-7 found faults in the PREVIOUS
+   round's FIXES — four consecutive rounds each got past the guard on
+   one 220-line script with a one-edit change, each time after a comment
+   had been written saying the class was shut. That package would still
+   run all seven under this rule, because every finding was in the
+   protected areas, which is the reason the exception exists rather than
+   an argument against the cap.
    **A real problem is** wrong behaviour, a security or privacy gap, possible
    data loss, a message or comment that is untrue, or a test that passes on
    broken code. The reviewer still reports everything it sees; hardening
