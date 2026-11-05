@@ -18189,6 +18189,172 @@ stopped doing it also fails -- and `--strict` fails while it holds anything.
 That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
 visible rather than permanent.
 
+### Round 5: a PUBLIC form was still storing the moved hour, and four rounds had missed it
+
+**The worst finding of the package, and it was found by reading the form rather
+than by any check.** `web/_apps/calendar/submit.php:120` is an ordinary
+`<input type="datetime-local" name="startDateTime">`, open to anybody the
+installation lets submit an event. Its handler did this:
+
+    $startRaw = trim((string) ($_POST['startDateTime'] ?? ''));
+    $startDt  = strtotime($startRaw);
+    $startUtc = date('Y-m-d H:i:s', (int) $startDt);
+    // ... bound into INSERT INTO tblEvents (…, startDateTime, …)
+
+Measured in Europe/London:
+
+    posted 2026-03-29T01:30  ->  STORED 2026-03-29 02:30:00
+    posted 2026-03-29T01:00  ->  STORED 2026-03-29 02:00:00
+    posted 2026-03-28T01:30  ->  STORED 2026-03-28 01:30:00   (right)
+
+`tblEvents.startDateTime` declares itself "Event start — wall-clock local
+(venue/site local); NOT UTC". The variable was called `$startUtc`, which was
+wrong twice over: not UTC, and not a moment.
+
+**This is worse than the reader faults the package found first, because nothing
+cancels it out.** A member submits an event for half past one, the diary holds
+half past two **for ever**, and every later reader shows half past two
+perfectly faithfully. The fix is the one `resources/book.php` already uses: keep
+the value on the wall clock, validate the TEXT for shape AND range, store the
+text, build no moment at all.
+
+It is stricter than what it replaced, which is worth stating rather than
+leaving to be discovered: a bare date with no time is now refused (the form
+cannot send one — the input is `required` and `isAllDay` is a literal `0` in
+the INSERT), `2026-02-31` is refused where it used to roll silently forward to
+3 March, and arbitrary English that `strtotime()` happened to understand is
+refused.
+
+### Why nothing could see it, and the sweep that should have
+
+**The gate matches a column being READ.** A write path builds its value from
+`$_POST`, converts it, and names the column only in the `INSERT` — so there is
+nothing for the pattern to match on, and the whole class of "store the moved
+hour" is invisible. Both instances of that class in this package
+(`resources/book.php`, `calendar/submit-save.php`) were found by eye. **That is
+#785.** The cheap first step recorded there: the fingerprint is
+`date('Y-m-d H:i:s', … strtotime …)`, which matches seven files today, five of
+them legitimately (`createdAt`, `updatedAt`, `strtotime('+60 days')`).
+
+And the OTHER blind spot — a reading copied into a variable and converted
+later — is now swept mechanically rather than by eye, because it has yielded a
+real fault twice:
+
+    # one hop: $x = (string) $row['<wall-clock or TIME column>'];  then a
+    # moment function applied to $x within the next 40 lines
+    python3 - <<'PY'
+    import os,re
+    COLS = ("startDateTime","endDateTime","snapStart","snapEnd","startAt","endAt",
+            "sessionTime","meetingTime","startTime","endTime","defaultStartTime",
+            "defaultEndTime","serviceTime","openTime","closeTime","reminderTime","cutoffTime")
+    assign = re.compile(r"\$(\w+)\s*=\s*(?:\((?:string|int)\)\s*)?\$\w+\[['\"](" + "|".join(COLS) + r")['\"]\]")
+    moment = re.compile(r"(?:strtotime|new\s+\\?DateTime(?:Immutable)?|\\?DateTime(?:Immutable)?::createFromFormat)\s*\(")
+    for folder,_,files in os.walk("web"):
+        if "vendor" in folder: continue
+        for n in files:
+            if not n.endswith(".php"): continue
+            p=os.path.join(folder,n); lines=open(p,errors="replace").read().split("\n")
+            for i,l in enumerate(lines):
+                for mm in assign.finditer(l):
+                    var,col = mm.group(1), mm.group(2)
+                    for j in range(i+1, min(i+40, len(lines))):
+                        if moment.search(lines[j]) and re.search(r"\$"+var+r"\b", lines[j]):
+                            print(f"{p}:{j+1}  [{col} via ${var}]"); break
+    PY
+
+Four sites today: two faults on the part-two backlog
+(`_core/Newsletter.php:682`, `calendar/zoom-create.php:94`) and two that are
+CORRECT, each passing a real zone on purpose — `_core/Venues.php:3590` with the
+venue's own, and `_core/Events.php:590`, which compares one reading in two zones
+deliberately to detect an old-form migration. **The pending file's header said
+round 4 "found two" there; it had found two of four by eye.**
+
+### An explicit `null` zone defeated round 4's new rule, in one word
+
+Round 4 taught the gate that a value plus a zone in one call is correct, and
+counted it by commas at the call's own bracket depth. **It counted the
+separator, not the zone.** All three of these were green:
+
+    new \DateTimeImmutable((string) $r['sessionTime'], null)
+    \DateTimeImmutable::createFromFormat('Y-m-d H:i', $d . ' ' . $r['sessionTime'], null)
+    new \DateTimeImmutable((string) $r['sessionTime'],)      // trailing comma
+
+And `null` really does the harm:
+
+    $ php -r 'date_default_timezone_set("Europe/London");
+              echo (new DateTimeImmutable("2026-03-29 01:30", null))->format("Y-m-d H:i:s P");'
+    2026-03-29 02:30:00 +01:00
+
+So the whole #777 fault, with the hard gate green. `null` is legal and means
+PHP's default zone — the thing the check exists to forbid. **An explicit
+`(null)` is one of the shapes that already walked through #763's guard**, so
+this repository had paid for the lesson once. The last argument is read now, not
+counted. What it still cannot see, stated: a variable that happens to hold null,
+which needs to know what a variable holds — not a question a source-reading
+check answers (D-065).
+
+### The backlog forgave SIX columns where three places said FOUR
+
+Round 4 narrowed the exemption from forgiving a FILE to forgiving a COLUMN —
+and then forgave every column in `wall_clock`, all **six** declared wall-clock
+columns, where the backlog is about **four**. So `tblResourceBooking.startAt`
+and `endAt` — the pair migration 252 declared, the pair round 2 fixed three
+reader pages for — were forgiven in all 25 listed files. Planted one line in
+the listed `venues/booking.php`:
+
+    $planted = date('g:i A', (int) strtotime((string) $ev['startAt']));
+
+**Gate exit 0, output byte-identical.** Three statements were untrue at once,
+and all three were the note describing the narrowing: the pending file's "IT
+FORGIVES THESE FOUR COLUMNS … AND NOTHING ELSE", the gate's success message, and
+the code comment at the exemption itself.
+
+**That is round 4's own finding 1 one level on: the narrowing was right, the
+note overstated it, and the overstatement was exactly where the hole was.**
+Round 4 even wrote the right framing — "a `TIME`-column fault in a listed file
+still fails" — tested that case, and never tested a `startAt` one.
+`BACKLOG_COLUMNS` names the four now; both directions are planted.
+
+### Three more sentences that were untrue
+
+**`.OpenAI/CONTEXT.md` still asserted the withdrawn "87 against 79" figure** at
+line 3229, twenty-eight lines above its own correction. Introduced by `04a6226`,
+survived rounds 2, 3 and 4 — and `1bfd057` added 73 lines to that very file for
+the stated purpose of bringing both instruction files into line. `.claude/CLAUDE.md`
+was fixed; its mirror was not. **The fifth repeat of "a correction recorded in
+one place and not applied to the others", inside the finding that names the
+pattern.** When a finding is "both files", diff the two against each other
+afterwards instead of editing them in sequence.
+
+**The constructor-with-zone trio named the wrong third file.** The gate and
+DEV_NOTES both said `calendar/event-attendance.php`, `calendar/event.php` and
+`_core/Venues.php`. `Venues.php` does use the spelling, but it reads the column
+into a variable first, so the gate **never saw it** and never reported it — it
+cannot have been told to rewrite anything, and was never on the backlog. The
+real third is `events/api/create.php`, which the sentence omitted and which the
+diff shows is one of the two actually removed from the list.
+
+**"Gains no hit" gains one.** The gate said re-running the pattern without the
+newline restriction "gains no hit, so nothing live is hidden today". Verified
+independently by running both patterns over all 912 files and diffing the match
+sets: it gains exactly one, `_core/Livestream.php:99`, whose `createFromFormat`
+carries its zone on the next line and is the correct construction. The
+conclusion holds; the premise the "so" rested on did not — in the paragraph
+whose own rule is to paste what the command returned.
+
+### And `--repin` wrote a degraded pin and reported success
+
+With every `WALL-CLOCK` comment reworded away, `--repin` wrote a pin holding
+**zero** columns and printed "Repinned 0 wall-clock column(s)", exit 0. **That
+is #697's lesson about this exact shape:** a `--repin` that writes the fault
+into the sidecar and prints success is the one way a text pin fails silently.
+Today an ordinary run still goes red afterwards through the stale-entry rule —
+but round 4 itself recorded that the protection vanishes the day the backlog is
+emptied, which is precisely when somebody will be editing those comments. It
+refuses an empty set outright now, and refuses a shrinking one without an
+explicit `--repin-shrink`, so the intent is in the command and not only in the
+diff.
+
 ### Round 4: eight findings, and two were guards that passed on broken code
 
 Every one of the eight landed in a previous round's fix rather than in the
@@ -18247,9 +18413,17 @@ given a date **and** a zone is equally correct by the gate's own stated rule:
     new \DateTimeImmutable($row['sessionDate'] . ' ' . $row['sessionTime'], $tz)
 
 That was reported as a fault, with a message telling its author to rewrite it or
-add the file to `ALLOWED`. Three live files use that spelling
-(`calendar/event-attendance.php`, `calendar/event.php`, `_core/Venues.php`) —
-and **two of them went into the part-two backlog as work to do because of it.**
+add the file to `ALLOWED`. Three live files use that spelling **and were reported for it**:
+`calendar/event-attendance.php`, `calendar/event.php` and
+`events/api/create.php` — and **two of those went into the part-two backlog as
+work to do because of it.**
+
+**An earlier version of that sentence named `_core/Venues.php` as the third and
+left `events/api/create.php` out.** `Venues.php` does use the spelling (3590,
+3596), but it reads the column into a variable on an earlier line, so the gate
+never saw it and never reported it — it cannot have been told to rewrite
+anything, and it was never on the backlog. That is a fact about the blind spot,
+not a file this fix rescued, and mixing the two overstated what the fix did.
 So the check was crying wolf and miscounting its own backlog in one breath, and
 under #483 crying wolf is the direction that gets a check switched off.
 

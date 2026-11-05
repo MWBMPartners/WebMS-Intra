@@ -49,8 +49,19 @@
 #
 # ── AND TWO THAT ARE MISSING, because the check cannot see them ───────────
 # The check's own header says it cannot see a reading pulled into a variable
-# several lines earlier and converted there. Round 4 went looking in exactly
-# that blind spot and found two:
+# several lines earlier and converted there. Round 4 went looking there and
+# found two. **Round 5 swept it MECHANICALLY and found four sites, of which
+# these two are the faults** -- the other two are correct, each passing a real
+# zone on purpose (`_core/Venues.php:3590` the venue's own,
+# `_core/Events.php:590` comparing one reading in two zones to detect an
+# old-form migration). Sweep it rather than reading it; the command is in
+# DEV_NOTES.
+#
+# ⚠️ AND ROUND 5 FOUND A THIRD BLIND SPOT THAT MATTERS MORE: a WRITE path reads
+#    no column at all, so nothing here can see one. `calendar/submit-save.php`
+#    -- the PUBLIC event submission form -- stored 01:30 as 02:30 for ever, and
+#    FOUR review rounds missed it. Fixed in round 5; a guard for the class is
+#    #785.
 #
 #     web/_apps/calendar/zoom-create.php  -- $start = (string) $event['startDateTime']; (86)
 #                                            then strtotime($start) at 94, 95 and 104,

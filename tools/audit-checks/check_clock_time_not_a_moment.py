@@ -109,9 +109,30 @@ moment function **by name, on one line**. It does NOT mean the portal is correct
 across a clock change. Two blind spots, both stated rather than implied:
 
   * **A reading pulled into a variable several lines earlier** and converted
-    there. Two real faults were found exactly there — the attendance API's
-    `createFromFormat('H:i', $timeRaw)` in `create.php` and `update.php`. **A
-    stated blind spot is a place to go looking, not a place to stop.**
+    there. **A stated blind spot is a place to go looking, not a place to
+    stop** -- and it has yielded a real fault twice now, so it is SWEPT
+    MECHANICALLY rather than by eye. The attendance API's
+    `createFromFormat('H:i', $timeRaw)` in `create.php` and `update.php` came
+    from here. A one-hop sweep over all 912 files today finds four sites: two
+    faults on the part-two backlog (`_core/Newsletter.php:682`,
+    `calendar/zoom-create.php:94`) and two that are CORRECT, each passing a
+    real zone deliberately -- `_core/Venues.php:3590` with the venue's own
+    zone, and `_core/Events.php:590`, which compares one reading in two zones
+    on purpose to detect an old-form migration. The sweep command is in
+    DEV_NOTES; run it rather than trusting this snapshot.
+
+  * **A WRITE PATH, which reads no column at all, and this is the worst of
+    them.** This check matches a column being READ. A handler that builds its
+    value from `$_POST`, converts it, and INSERTs it never names the column
+    anywhere near the conversion -- so the entire class of "store the moved
+    hour" is invisible here. **Four review rounds missed
+    `calendar/submit-save.php` for exactly that reason**: a public form whose
+    01:30 submission was stored for ever as 02:30, found by reading the FORM
+    rather than by any check. `resources/book.php` was the same class and was
+    also found by eye. Both are fixed. A guard for the class is #785; until it
+    exists, the fingerprint worth grepping is
+    `date('Y-m-d H:i:s', ... strtotime ...)` applied to anything that is not a
+    relative string.
   * **A call split over lines.** The search stops at a newline, which is what
     stopped it crying wolf over a date and a time side by side in one array
     literal — so
@@ -121,7 +142,7 @@ across a clock change. Two blind spots, both stated rather than implied:
           );
 
     is missed. Re-running the pattern without the newline restriction across
-    all 912 files gains no hit, so nothing live is hidden today.
+    all 912 files gains exactly ONE hit -- `_core/Livestream.php:99`, whose `createFromFormat` carries its zone on the next line and is the CORRECT construction -- so nothing live is hidden today; an earlier version of this said "gains no hit".
 
 THE ONE PLACE A CLOCK READING IS PUT INTO WORDS
 -----------------------------------------------
@@ -204,10 +225,20 @@ CORRECT_WITH_DATE_AND_ZONE = re.compile(
 #    date and a zone in one call, exactly as the `createFromFormat` form does,
 #    and only the latter was recognised -- so the gate reported CORRECT code
 #    and told its author to rewrite it or add the file to ALLOWED. Three live
-#    files use that spelling (`calendar/event-attendance.php`,
-#    `calendar/event.php`, `_core/Venues.php`), and two of them went into the
-#    part-two backlog as work to do because of it, which is also what made the
-#    "28 files" count wrong. **A check that cries wolf gets switched off
+#    files use that spelling and were REPORTED for it:
+#    `calendar/event-attendance.php`, `calendar/event.php` and
+#    `events/api/create.php`. Two of those three went into the part-two backlog
+#    as work to do because of it, which is also what made the "28 files" count
+#    wrong.
+#
+#    ⚠️ AN EARLIER VERSION OF THIS SENTENCE NAMED `_core/Venues.php` AS THE
+#       THIRD AND LEFT `events/api/create.php` OUT, and that was wrong in a way
+#       worth keeping. `Venues.php` DOES use the spelling (3590, 3596) -- but
+#       it reads the column into a variable on an earlier line, so this check
+#       NEVER SAW IT and never reported it. It could not have been "told to
+#       rewrite", and it was never on the backlog. It is a fact about the blind
+#       spot, not a file this fix rescued, and mixing the two overstated what
+#       the fix did. **A check that cries wolf gets switched off
 #    (#483)**, and this one was crying wolf and miscounting its own backlog in
 #    one breath.
 CONSTRUCTOR_CALL = re.compile(r"new\s+\\?DateTime(?:Immutable)?\s*\(")
@@ -223,6 +254,26 @@ def has_a_zone_argument(call: str, wanted: int = 2) -> bool:
     `wanted` is how many commas mean the zone is handed over:
       * 2 for `createFromFormat(format, value, zone)`
       * 1 for `new DateTimeImmutable(value, zone)` -- no format string in front
+
+    ⚠️ COUNTING THE SEPARATOR IS NOT ENOUGH, AND ONE WORD DEFEATED THE FIRST
+       VERSION OF THIS. `new DateTimeImmutable($clock, null)` has the comma and
+       no zone: `null` is legal and means PHP's DEFAULT zone, which is the very
+       thing this check exists to forbid. Measured --
+
+           php -r 'date_default_timezone_set("Europe/London");
+                   echo (new DateTimeImmutable("2026-03-29 01:30", null))
+                         ->format("Y-m-d H:i:s P");'
+           2026-03-29 02:30:00 +01:00
+
+       -- so the whole #777 fault, with the hard gate green. An explicit
+       `(null)` is also one of the shapes that already walked through #763's
+       guard, so this repository had paid for the lesson once already.
+
+       The last argument is read now, not merely counted. What this still
+       cannot see, said plainly: a VARIABLE that happens to hold null
+       (`$tz = null; new DateTimeImmutable($clock, $tz)`). That needs to know
+       what a variable holds, which is not a question a source-reading check
+       answers -- D-065's line.
     """
     depth = 0
     commas = 0
@@ -250,7 +301,18 @@ def has_a_zone_argument(call: str, wanted: int = 2) -> bool:
         elif ch == "," and depth == 1:
             commas += 1
         i += 1
-    return commas >= wanted
+    if commas < wanted:
+        return False
+    # The text of the LAST argument, which is where the zone belongs. `i` is
+    # sitting on the call's closing bracket, and `last_comma` is the separator
+    # in front of that argument.
+    last_comma = call.rfind(",", 0, i)
+    if last_comma == -1:
+        return False
+    tail = call[last_comma + 1:i].strip()
+    if tail == "" or tail.lower() in ("null", "(null)", "\\null"):
+        return False
+    return True
 
 # 📁 Places where this is RIGHT, each with its reason. Fails both ways: an entry
 #    that no longer does it fails too, because an allow-list that has stopped
@@ -291,6 +353,36 @@ ALLOWED: dict[str, str] = {
 #    backlog-is-empty mode never fires by itself. It is there for the person
 #    who finishes part two to run once, as the proof that it IS finished.
 PENDING_FILE = os.path.join("tools", "audit-checks", "clock_wall_clock_datetime_pending.txt")
+
+# ⚠️ THE FOUR COLUMNS THE BACKLOG IS ABOUT, NAMED RATHER THAN DERIVED -- AND
+#    ROUND 4 DERIVED THEM, WHICH LEFT A HOLE EXACTLY WHERE ITS OWN NOTE SAID
+#    THERE WAS NONE. Round 4 narrowed the exemption from forgiving a FILE to
+#    forgiving a COLUMN, and then forgave every column in `wall_clock` -- all
+#    SIX declared wall-clock columns, not the four this backlog exists for. So
+#    `tblResourceBooking.startAt` and `endAt` -- the pair migration 252
+#    declared, and the pair round 2 fixed three reader pages for -- were
+#    forgiven in all 25 listed files. Planted: one line in the listed
+#    `venues/booking.php` --
+#    `date('g:i A', strtotime($ev['startAt']))` -- left the gate GREEN with its
+#    output byte-identical.
+#
+#    Three statements were untrue at once, and all three were the note
+#    describing the narrowing: the pending file's "IT FORGIVES THESE FOUR
+#    COLUMNS ... AND NOTHING ELSE", this check's success message, and the code
+#    comment at the exemption itself. **The narrowing was right and the note
+#    overstated it, and the overstatement is precisely where the hole was** --
+#    round 4's own finding 1, one level on.
+#
+#    So the four are written down. A fifth column declaring itself WALL-CLOCK
+#    is NOT forgiven anywhere, which is the right default: a new column's
+#    readers should be correct from the start, and the pin makes its arrival
+#    visible.
+BACKLOG_COLUMNS = (
+    "startDateTime",   # tblEvents
+    "endDateTime",     # tblEvents
+    "snapStart",       # tblEventSnapshots
+    "snapEnd",         # tblEventSnapshots
+)
 
 
 # ── The wall-clock `DATETIME` columns, and why the SET is pinned ───────────
@@ -585,12 +677,17 @@ def main() -> int:
             #    forgotten to implement, written in the same commit by the same
             #    hand.
             #
-            #    So a hit is forgiven only when the COLUMN it matched is one of
-            #    the wall-clock `DATETIME` columns the backlog is about. A
-            #    `TIME`-column hit in a listed file still fails.
+            #    So a hit is forgiven only when the column it matched is one
+            #    of `BACKLOG_COLUMNS` -- the FOUR this backlog is about, named
+            #    there rather than derived from the six declared wall-clock
+            #    columns. Round 4 derived them, which forgave
+            #    `tblResourceBooking.startAt`/`endAt` in all 25 files while
+            #    this comment said "nothing else"; see BACKLOG_COLUMNS. A
+            #    `TIME`-column hit in a listed file still fails, and so now
+            #    does a `startAt` one.
             if relative in pending:
-                forgiven = [h for h in hits if h[1] in wall_clock]
-                hits = [h for h in hits if h[1] not in wall_clock]
+                forgiven = [h for h in hits if h[1] in BACKLOG_COLUMNS]
+                hits = [h for h in hits if h[1] not in BACKLOG_COLUMNS]
                 if len(forgiven) > 0:
                     seen_pending.add(relative)
                 if len(hits) == 0:
@@ -638,6 +735,41 @@ def main() -> int:
     pin_path = os.path.join(root, PIN_FILE)
     found_wall = sorted(wall_clock)
     if "--repin" in sys.argv:
+        # ⚠️ REFUSE BEFORE WRITING, which is #697's lesson about exactly this
+        #    shape: a `--repin` that writes the fault into the sidecar and
+        #    prints success is the one way a text pin fails silently. Measured
+        #    on the first version: with every `WALL-CLOCK` comment reworded
+        #    away, `--repin` wrote a pin holding ZERO columns and printed
+        #    "Repinned 0 wall-clock column(s)", exit 0.
+        #
+        #    Today an ordinary run would still go red afterwards, through the
+        #    stale-entry rule on the backlog -- but that protection goes the
+        #    day the backlog is emptied, which is precisely when somebody will
+        #    be editing these comments.
+        was = pinned_wall_clock(root)
+        if len(found_wall) == 0:
+            print(
+                "FAIL: the schema declares NO `DATETIME` column as a "
+                "WALL-CLOCK reading, so there is nothing to pin. Repinning an "
+                "empty set would record the fault and report success. Check "
+                "that full_schema.sql still carries those column comments."
+            )
+            return 1
+        if was is not None and len(found_wall) < len(was):
+            lost = [c for c in sorted(was) if c not in found_wall]
+            print(
+                f"FAIL: repinning would SHRINK the pinned set from "
+                f"{len(was)} to {len(found_wall)}, dropping: "
+                f"{', '.join(lost)}.\n"
+                f"       Each dropped column silently removes this check's "
+                f"only guard over every page that reads it. If that is really "
+                f"intended -- a column removed from the schema, or one that "
+                f"genuinely never held a clock reading -- pass --repin-shrink "
+                f"as well, so the intent is in the command and not only in the "
+                f"diff."
+            )
+            if "--repin-shrink" not in sys.argv:
+                return 1
         with open(pin_path, "w", encoding="utf-8") as handle:
             handle.write(
                 "# The `DATETIME` columns whose own comment in full_schema.sql\n"
@@ -783,8 +915,10 @@ def main() -> int:
         "anybody remembering to add it here.\n"
         f"   It does NOT yet mean every wall-clock column is read correctly: "
         f"{len(pending)} file(s) are listed in {PENDING_FILE} as #777 part "
-        f"two's backlog, and this run accepted those four columns in those "
-        f"files -- nothing else. The number is printed rather than written "
+        f"two's backlog, and this run accepted {len(BACKLOG_COLUMNS)} named "
+        f"columns ({', '.join(BACKLOG_COLUMNS)}) in those files -- nothing "
+        f"else, and that sentence is now true: it forgave all six declared "
+        f"wall-clock columns until round 5. The number is printed rather than written "
         f"down, because the first version of this sentence said 28 and would "
         f"have become untrue the day part two fixed one file.\n"
         "   It canNOT see a reading "

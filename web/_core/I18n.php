@@ -787,7 +787,8 @@ class I18n
      *    it does not.
      *
      * ⚠️ DO NOT PASS A ZONE-BEARING FORMAT CHARACTER. Because the moment is
-     *    built in UTC, `'c'`, `'r'`, `'T'`, `'P'`, `'O'` and `'U'` would each
+     *    built in UTC, `'c'`, `'r'`, `'T'`, `'P'`, `'p'`, `'O'`, `'e'`,
+     *    `'I'`, `'Z'` and `'U'` would each
      *    assert that this organisation's wall-clock reading IS UTC -- the very
      *    untruth this method exists to avoid, stated more confidently than the
      *    code it replaced ever did. Nothing does it today (every caller uses

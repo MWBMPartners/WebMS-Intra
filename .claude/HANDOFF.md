@@ -63,7 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one: rounds 3 and 4 are done; round 5's check is next.** The three rounds so far found, in order: a display fault in four
+**#777 part one: rounds 3, 4 and 5 are done; round 6's check is next.** The rounds so far found, in order: a display fault in four
 pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
 faults refusing valid input (round 2); three READER faults my own write fix made
 visible, and the fact that those three readers were guarded by nothing (round
@@ -91,6 +91,20 @@ spelling of the correct construction, which is what made its own "28 files"
 count wrong — it is 25, with two more the check cannot see, named in the list's
 header. #784 raised: two helpers now turn a wall-clock reading into words and
 part two needs one answer before it converts 27 files.
+
+**Round 5 found SIX, and the first is the worst thing in the package: a form
+open to the PUBLIC was still storing the moved hour.** `calendar/submit-save.php`
+turned a `datetime-local` value into a moment and back before the INSERT, so an
+event submitted for 01:30 on the spring-forward morning was stored as 02:30 FOR
+EVER — nothing cancels it, unlike the reader faults. **Four rounds missed it,
+and it was found by reading the FORM, not by any check**, because this gate
+matches a column being READ and a write path reads no column at all. That class
+is #785. Also: an explicit `null` zone defeated round 4's new rule in one word
+(`new DateTimeImmutable($clock, null)` is PHP's default zone, and the gate
+counted the comma rather than reading the argument); and round 4's per-column
+exemption forgave all SIX declared wall-clock columns where three places said
+FOUR, so a `startAt` fault in any listed file was green. All six fixed, each
+planted both ways.
 
 #763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
 write and delete stored data, so rounds ran until one was clean. Twelve

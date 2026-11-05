@@ -110,15 +110,90 @@ if ($eventName === '' || $startRaw === '') {
     exit();
 }
 
-$startDt = strtotime($startRaw);
-$endDt   = $endRaw !== '' ? strtotime($endRaw) : 0;
-if ($startDt === false) {
+// 🕐 A TIME ON A CLOCK IS NOT A MOMENT, AND THIS FORM USED TO STORE THE
+//    MOVED HOUR PERMANENTLY (#777).
+//
+//    `tblEvents.startDateTime` says so in its own column comment: "Event
+//    start - wall-clock local (venue/site local); NOT UTC". The form sends a
+//    `datetime-local` value, which is a reading from a clock with no zone in
+//    it. The old code was:
+//
+//        $startDt  = strtotime($startRaw);
+//        $startUtc = date('Y-m-d H:i:s', (int) $startDt);
+//
+//    -- a round trip through a MOMENT. On the morning the clocks go forward
+//    the hour the reading names does not exist, so PHP moves it, and the moved
+//    value went into the INSERT. Measured in Europe/London:
+//
+//        posted 2026-03-29T01:30  ->  STORED 2026-03-29 02:30:00
+//        posted 2026-03-29T01:00  ->  STORED 2026-03-29 02:00:00
+//        posted 2026-03-28T01:30  ->  STORED 2026-03-28 01:30:00  (right)
+//
+//    ⚠️ THIS IS WORSE THAN THE READER FAULTS #777 FOUND FIRST, because nothing
+//       cancels it out. A member submits an event for half past one, the diary
+//       holds half past two FOR EVER, and every later reader shows half past
+//       two perfectly faithfully. The variable was even called `$startUtc`,
+//       which was wrong twice over: not UTC, and not a moment.
+//
+//    The cure is the one `_apps/resources/book.php` already uses: keep the
+//    value on the WALL CLOCK, which is what the column holds. Validate the
+//    TEXT -- shape AND range, because `\d{2}` accepts `25` -- and store the
+//    text. No moment is built here at all, so there is no zone to get wrong.
+//
+//    `datetime-local` sends `Y-m-d\TH:i` and may add `:ss`, so the `T`
+//    becomes a space and the seconds are supplied when the browser left them
+//    out.
+//
+//    ⚠️ IT IS STRICTER THAN WHAT IT REPLACED, in three ways, said plainly
+//       rather than left to be discovered. Measured old against new:
+//
+//        "2026-03-29T01:30"  old 02:30:00     new 01:30:00   <- the fix
+//        "2026-03-29"        old 00:00:00     new REFUSED
+//        "2026-02-31T10:00"  old 3 March!     new REFUSED
+//        "tomorrow"          old tomorrow     new REFUSED
+//
+//       Only the bare date is a real loss, and this form cannot produce one:
+//       the input is `type="datetime-local"` and `required`, and `isAllDay` is
+//       a literal `0` in the INSERT below, so there is no all-day path that
+//       would legitimately send a date with no time. A crafted post that sends
+//       one now gets `?err=date` instead of a silent midnight. The other two
+//       were faults: `2026-02-31` rolled forward to 3 March without a word,
+//       and any English `strtotime()` happened to understand was accepted.
+$toWallClock = static function (string $posted): ?string {
+    $text = str_replace('T', ' ', trim($posted));
+    if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]$/', $text) === 1) {
+        $text .= ':00';
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/', $text) !== 1) {
+        return null;
+    }
+    // 📅 The SHAPE is not the RANGE: `2026-02-31` matches the pattern above.
+    if (checkdate((int) substr($text, 5, 2), (int) substr($text, 8, 2), (int) substr($text, 0, 4)) === false) {
+        return null;
+    }
+    return $text;
+};
+
+$startUtc = $toWallClock($startRaw);
+if ($startUtc === null) {
     header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
     exit();
 }
-
-$startUtc = date('Y-m-d H:i:s', (int) $startDt);
-$endUtc   = $endDt > 0 ? date('Y-m-d H:i:s', (int) $endDt) : null;
+$endUtc = null;
+if ($endRaw !== '') {
+    $endUtc = $toWallClock($endRaw);
+    if ($endUtc === null) {
+        header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
+        exit();
+    }
+    // ⏱️ Two wall-clock readings COMPARE CORRECTLY AS TEXT, which is #435's
+    //    own fix -- `Y-m-d H:i:s` sorts the same way as the clock does. Making
+    //    moments of them to compare would put the fault straight back.
+    if ($endUtc <= $startUtc) {
+        header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
+        exit();
+    }
+}
 
 if ($isLoggedIn === false && ($submitterName === '' || $submitterEmail === '')) {
     header('Location: ' . Site::url('calendar/submit') . '?err=contact', true, 302);

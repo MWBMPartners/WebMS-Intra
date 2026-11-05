@@ -44,6 +44,17 @@ see.** Those are listed rather than fixed: an event's time zone need not be the
 organisation's, so each needs a person to look at it, and that is the next part
 of this work. Nothing new may join the list.
 
+**And a fifth place was still storing the wrong hour — a form open to the
+public.** Submitting an event for 01:30 on the morning the clocks go forward
+saved it as **02:30, permanently**, because the submission handler turned the
+time into a moment and back before storing it. This is worse than the display
+faults above: nothing cancels it out, so the diary simply holds the wrong time
+and every page shows it faithfully. Four reviews of this work missed it, and it
+was found by reading the form rather than by any automatic check — so a check
+for that whole shape (storing a time, rather than showing one) is now raised as
+its own piece of work. The submission form also now refuses an impossible date
+such as 31 February, which it used to accept and silently move to 3 March.
+
 **The first count given for that was 28, and it was the count of nothing.** The
 fourth review of this work re-derived it: two of the 28 were already correct
 (they hand over a time zone in the same breath, which the check had not been

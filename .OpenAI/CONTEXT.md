@@ -3226,7 +3226,10 @@ place to go looking, not a place to stop.**
 **And the gate was wrong BOTH ways:** `[^;]{0,200}` blocks a semicolon
 but not a NEWLINE, so it crossed a multi-line statement and reported
 correct code; and `new\s+DateTime` disallowed a LEADING BACKSLASH,
-which is the MAJORITY style under `web/` (87 against 79). It also
+which is live in this codebase (**NOT the "majority style, 87 against
+79" this sentence used to assert — see the correction below, which has
+sat twenty-eight lines away since `04a6226` while the claim stayed**).
+It also
 skipped every `createFromFormat` where the header claimed only the
 date-and-zone form was. Eight cases measured each way now.
 
@@ -3344,6 +3347,26 @@ guards that passed on broken code.**
    `<?=` is ordinary PHP and nothing forbids it.
 6. The gate's own header said **"two do today"** where six do — the wrong answer
    in the one place that defines the rule.
+
+**ROUND 5 FOUND SIX, AND THE FIRST IS THE WORST THING IN THE PACKAGE: A FORM OPEN TO THE PUBLIC WAS STILL STORING THE MOVED HOUR.** `calendar/submit-save.php` took a `datetime-local` value, put it through `strtotime()` and `date('Y-m-d H:i:s', …)`, and bound the result into `INSERT INTO tblEvents` — so an event submitted for 01:30 on the spring-forward morning was stored as 
+
+**02:30 FOR EVER** (measured), and every later reader shows 02:30 faithfully. 
+
+**Nothing cancels this out, unlike the reader faults**, and the variable was called `$startUtc`, wrong twice over. 
+
+**FOUR ROUNDS MISSED IT AND IT WAS FOUND BY READING THE FORM, NOT BY ANY CHECK** — because this gate matches a column being READ, and a write path builds its value from `$_POST` and names the column only in the INSERT, so the whole class of "store the moved hour" is invisible to it. Both instances of that class here (`resources/book.php`, `submit-save.php`) were found by eye; the class is 
+
+**#785**, whose cheap first step is the fingerprint `date('Y-m-d H:i:s', … strtotime …)` (seven files, five legitimate). The fix is `book.php`'s: validate the TEXT for shape AND range, store the text, build no moment — and say that it is STRICTER, since `2026-02-31` used to roll silently to 3 March. 
+
+**AN EXPLICIT `null` ZONE DEFEATED ROUND 4'S NEW RULE IN ONE WORD:** `new DateTimeImmutable($clock, null)` has the comma and no zone, `null` means PHP's DEFAULT zone, and measured it really gives `02:30` — so the whole fault with the gate green, and an explicit `(null)` is one of the shapes that already walked through #763's guard. 
+
+**COUNT THE ARGUMENT, NEVER THE SEPARATOR.** 
+
+**AND THE PER-COLUMN EXEMPTION FORGAVE SIX COLUMNS WHERE THREE PLACES SAID FOUR:** round 4 narrowed it from a FILE to a COLUMN and then used all six declared wall-clock columns, so `tblResourceBooking.startAt`/`endAt` were forgiven in all 25 listed files — planted, a `startAt` fault in `venues/booking.php` left the gate green with byte-identical output, while the pending file said "THESE FOUR COLUMNS … AND NOTHING ELSE". 
+
+**Round 4's own finding 1 one level on: the narrowing was right, the note overstated it, and the overstatement was exactly where the hole was.** `BACKLOG_COLUMNS` names the four. Three more sentences were untrue: the mirror `.OpenAI/CONTEXT.md` STILL asserted the withdrawn "87 against 79" twenty-eight lines above its own correction, surviving three rounds including the one that added 73 lines to that file to bring both into line — 
+
+**the fifth repeat of "corrected in one place, not the others", inside the finding that names the pattern, so when a finding is "both files", DIFF THE TWO AGAINST EACH OTHER afterwards**; the constructor-with-zone trio named `_core/Venues.php`, which the gate NEVER SAW (it reads the column into a variable first) so it cannot have been "told to rewrite" — the real third is `events/api/create.php`; and "gains no hit" gains one, `Livestream.php:99`, verified by diffing both patterns' match sets over all 912 files. Also `--repin` wrote a pin holding ZERO columns and printed success — #697's lesson about that exact shape — so it refuses an empty set and refuses a shrinking one without `--repin-shrink`. And the variable blind spot is swept MECHANICALLY now, because it has yielded a real fault twice: four sites, two faults and two correct (each passing a real zone on purpose).
 
 **Do not read the length of the backlog as the size of the work, and count every
 figure here from the command.** The comment split was stated as 123 of 486 in
