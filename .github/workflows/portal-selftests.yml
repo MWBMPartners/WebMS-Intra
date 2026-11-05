@@ -1121,6 +1121,17 @@ jobs:
       #    "class not found", `run()`'s catch turned that into a tidy "could not
       #    be completed" warning, and the run stayed green with those checks
       #    never executed. Needs a database and nothing else.
+      # 🕐 BOTH CHANGE NIGHTS, BOTH DIRECTIONS, in zones that really change
+      #    (#549). The issue's own words: "a test written in December passes in
+      #    London whatever the code does", which is how the overnight-event
+      #    fault stayed hidden. Every case here names a date on or across a real
+      #    clock change, and section B proves the test can tell the fixed
+      #    arithmetic from the old — measured, three red in three zones.
+      #    Needs no database and no server.
+      - name: 'Clock changes self-test (#549)'
+        if: ${{ !cancelled() }}
+        run: php tools/clock-change-selftest.php
+
       - name: 'Check this portal self-test (#477)'
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
         env:
