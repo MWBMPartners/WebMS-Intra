@@ -63,10 +63,12 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 round 5 is built and awaiting its check** (the protected arm of D-051 —
+**#763 round 6 is built and awaiting its check** (the protected arm of D-051 —
 it writes and deletes stored data, so rounds run until one is clean). Twelve
-findings, then seven, six, six — and **almost every one after the first round was
-in a previous round's fix**. Everything else below is unstarted.
+findings, then seven, six, six, three — and **almost every one after the first
+round was in a previous round's fix**. #777's fact base is gathered (read-only,
+in `.claude-work/777/inventory-notes.md`) and is next. Everything else below is
+unstarted.
 
 ## Next, in this order
 
@@ -123,7 +125,16 @@ as the evidence), #549's arithmetic half, #767, #765, #768, #763.
 
 ## The lesson this run earned, in one line
 
-**An allow-list written from the spellings you were handed is not a rule.** It
+**When a rule keeps being defeated, the rule is asking the wrong question.** Four
+versions asked about the CHARACTER before a pinned region; the fifth checker said
+why none could work — nothing about one character can tell "a fresh statement at
+the level this belongs to" from "a fresh statement inside a dead block". The
+question was always NESTING. Pinning three numbers (open braces, open
+alternative-syntax blocks, returns at the region's own level) caught all nine
+spellings, including five nobody handed me.
+
+**And its corollary, which is where the four wasted rounds went:** an allow-list
+written from the spellings you were handed is not a rule. It
 is the same mistake four times over, each time one level up: I answered
 `if (false) { }` with a brace count, "the argument dropped" with "are the
 brackets empty", and then — having finally pinned the regions as text — wrote a

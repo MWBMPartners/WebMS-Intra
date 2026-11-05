@@ -2919,9 +2919,45 @@ version of this claimed -- the fourth round measured the other two.**
 
 (a) It cannot see something glued IN FRONT of its first statement:
 `if (false)` on the line above, no braces, makes the whole region the
-body of something that never runs while its text is untouched. So a
-pinned region must BEGIN A FRESH STATEMENT -- the last thing before
-it, whitespace aside, is `;`, `}` or an opening `<?php`. **The first
+body of something that never runs while its text is untouched.
+
+**THE CHARACTER RULE WRITTEN FOR THAT CALLED ITSELF GENERAL THREE
+TIMES AND WAS DEFEATED THREE TIMES. The fifth round diagnosed it
+better than any of the fixes:** "`;`/`}` is not a weaker allow-list
+than `;{}:>`, it is the same KIND of rule. Nothing about the last
+character can distinguish 'a fresh statement at the level the region
+belongs to' from 'a fresh statement inside a dead block'." Measured:
+`if (false) { ;` and `switch (0) { case 1: {}` both end in an ALLOWED
+character and both wrap a whole region in dead code -- and combining
+one with a differently-spelled live copy defeated the uniqueness rule
+too, because the anchor then matched only the dead copy.
+
+**So the question is NESTING.** `structure_at()` pins three numbers
+beside each region's text: open braces, open alternative-syntax blocks
+(`if (…):` … `endif;`, which change no brace count), and
+`return`/`exit`/`die` at the region's own level before it -- a bare
+`return;` changes neither count and hides the region just as well.
+Nine wrapping spellings go red, five of them ones nobody handed me.
+**It still cannot prove reachability** (a conditional `require` of the
+file, a `goto`, a throw above it), and says so rather than implying
+otherwise.
+
+**And the structure check nearly shipped inert:** it looked for the
+anchor in a strings-MASKED copy, the anchor contains `'locale'`, so it
+was never found and returned a neutral sentinel that then got pinned
+-- a check that could not fail, dressed as the strongest guard in the
+file. The only tell was the negative numbers in the sidecar. Two views
+now, offsets shared because masking preserves length.
+
+**(a2) `readable_code()` applied PHP's comment rules to RAW MARKUP** --
+#485's U+2028 shape one level up: the reader's rule is not the rule
+that applies where it is being applied. One added line,
+`# <?php $langStored = ''; ?>`, was blanked as a comment together with
+the real PHP after it, so the pin matched byte for byte while the
+select carried NO `selected` attribute -- every browser then
+pre-selects "forget my choice" and the member's next Save deletes
+their language. `php_spans()` confines PHP's rules to `<?php … ?>`;
+outside, only `<!-- -->` is a comment. **The first
 version of that rule allowed `:` and `{`, and both reach across**
 (`if (false): ... endif;` and `function neverCalled() { ... }`, each
 measured with `php -l` clean while the guard printed "nothing is glued

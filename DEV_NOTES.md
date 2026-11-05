@@ -17710,8 +17710,43 @@ statement. `if (false)` on the line above, no braces, makes the entire region
 the body of a conditional that never runs while the region's own text is
 untouched -- measured, the gate green while a member's language could never be
 stored. Moving the start anchor one statement earlier only moves the hole, so
-the rule is general: **a pinned region must BEGIN A FRESH STATEMENT**, meaning
-the last thing before it, whitespace aside, is `;`, `}` or an opening `<?php`.
+**a pinned region must BEGIN A FRESH STATEMENT** — the last thing before it,
+whitespace aside, `;`, `}` or an opening `<?php`.
+
+**THAT RULE CALLED ITSELF GENERAL THREE TIMES AND WAS DEFEATED THREE TIMES, AND
+THE FIFTH CHECK ROUND DIAGNOSED IT BETTER THAN ANY OF MY FIXES HAD.** Its words
+are worth keeping: "`;`/`}` is not a weaker allow-list than `;{}:>`, it is the
+same KIND of rule. Nothing about the last character can distinguish 'a fresh
+statement at the level the region belongs to' from 'a fresh statement inside a
+dead block'." Measured: `if (false) { ;` and `switch (0) { case 1: {}` both end
+in an allowed character and both wrap the whole region in dead code, `php -l`
+clean, gate green — and combining one with a differently-spelled live copy
+defeated the uniqueness rule too, because the anchor then matched only the dead
+copy.
+
+**So the question is NESTING, not the preceding token, and that is what is
+pinned now.** `structure_at()` records three numbers beside each region's text:
+how many `{` are open where it starts, how many alternative-syntax blocks
+(`if (…):` … `endif;`, which change no brace count), and how many `return` /
+`exit` / `die` sit at its own level before it — because a bare `return;` above a
+region changes neither count and makes it unreachable just the same. Nine
+wrapping spellings now go red, including five nobody handed me
+(`while (false) { }`, `else if (false) {`, `foreach ([] as $x): … endforeach;`,
+`do { } while (false);`, and the bare `return;`). **That is the test the lesson
+demanded: try the spellings nobody gave you.**
+
+**What it still cannot see, enumerated rather than implied:** the whole file
+being required conditionally, a `goto`, an exception thrown above it, or an
+`exit` inside a function called above it. A static check cannot prove
+reachability, and saying so is better than a check that implies it can.
+
+**And the structure check nearly shipped inert.** It looked for the anchor in a
+copy whose string literals were masked — and the anchor contains `'locale'`, so
+it was never found, and the function returned a neutral sentinel which I then
+pinned: a check that could not fail, dressed as the strongest guard in the file.
+**The only tell was the negative numbers in the sidecar.** It uses two views
+now, offsets shared because masking preserves length, and a not-found anchor
+returns a value that cannot equal any real measurement.
 
 **The first version of that rule also allowed `:` and `{`, and both let
 something reach across** — `if (false): ...region... endif;` and
