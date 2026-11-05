@@ -163,6 +163,11 @@ function tidyUp(mysqli $db): void
 {
     $db->query("DELETE FROM `tblSettings` WHERE `settingKey` LIKE 'zz.selftest%'");
     $db->query("DELETE FROM `tblSettings` WHERE `settingKey` LIKE 'api.zzselftest%'");
+    // Section O gives every job a token; put them back as a fresh install has
+    // them, so a run that died mid-section does not leave the next one
+    // measuring a portal that looks configured when it is not.
+    $db->query("UPDATE `tblSettings` SET `settingValue` = '' "
+        . "WHERE `settingValue` = 'zz-selftest-token' AND `siteID` IS NULL");
     $db->query("DELETE FROM `tblRoutes` WHERE `routeKey` LIKE 'zz-selftest%'");
     // Section K points the calendar's page at a file that is not there and puts
     // it back; a run that died in between would leave the app unopenable.
@@ -509,6 +514,69 @@ if (count($siblings) > 0) {
     check('N3 and the Help Centre is byte-identical again',
         (string) file_get_contents($helpIndex) === $centreWas, true);
 }
+
+echo "O. A job with no token has never run, and the page says so\n";
+// 🚨 EVERY ONE OF THESE PAGES REFUSES WHEN ITS STORED TOKEN IS EMPTY, so a job
+//    nobody gave a token is silently doing nothing — for ever. On a fresh
+//    install that is ALL ELEVEN, including the one that clears personal data
+//    past its retention period. Knowable from the database, and reported by
+//    nothing before #477.
+$jobs = PortalCheck::JOB_TOKENS;
+check('O1 the table names every job gate', count($jobs) >= 11, true);
+check('O2 it names the shared maintenance token, which the retention sweep uses',
+    array_key_exists('maintenance.cronToken', $jobs), true);
+
+$silentFinding = static function (array $f): ?array {
+    foreach (inArea($f, 'Scheduled jobs') as $one) {
+        if (str_contains($one['what'], 'can never run') === true) {
+            return $one;
+        }
+    }
+    return null;
+};
+
+$fresh = $silentFinding(PortalCheck::run($db, ORG));
+check('O3 a fresh install reports every job as unable to run',
+    $fresh === null ? -1 : (int) $fresh['count'], count($jobs));
+check('O4 and it is a PROBLEM, not a note',
+    $fresh === null ? '' : $fresh['severity'], PortalCheck::PROBLEM);
+
+// Give every job a token and the finding must go entirely.
+foreach (array_keys($jobs) as $key) {
+    $stmt = $db->prepare(
+        'INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`) VALUES (NULL, ?, ?) '
+        . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)'
+    );
+    $value = 'zz-selftest-token';
+    $stmt->bind_param('ss', $key, $value);
+    $stmt->execute();
+    $stmt->close();
+}
+check('O5 with every token set, the finding goes', $silentFinding(PortalCheck::run($db, ORG)), null);
+
+// Take ONE away again — the count must be exact, not just non-zero.
+$stmt = $db->prepare('UPDATE `tblSettings` SET `settingValue` = \'\' WHERE `settingKey` = ? AND `siteID` IS NULL');
+$one = 'giving.cron_token';
+$stmt->bind_param('s', $one);
+$stmt->execute();
+$stmt->close();
+$justOne = $silentFinding(PortalCheck::run($db, ORG));
+check('O6 emptying one token reports exactly one',
+    $justOne === null ? -1 : (int) $justOne['count'], 1);
+check('O7 and it names what stops, not the setting key',
+    $justOne !== null && in_array('Giving statements', $justOne['examples'], true), true);
+
+// ⚠️ THE TOKEN IS A SECRET — anybody holding it can run the job. The page must
+//    never print it, and this is the check that would notice if it did.
+$leaked = false;
+foreach (PortalCheck::run($db, ORG) as $finding) {
+    $all = $finding['what'] . ' ' . $finding['why'] . ' ' . $finding['todo']
+        . ' ' . implode(' ', $finding['examples']);
+    if (str_contains($all, 'zz-selftest-token') === true) {
+        $leaked = true;
+    }
+}
+check('O8 no token value appears anywhere on the page', $leaked, false);
 
 echo "I. The tally matches the findings\n";
 $final = PortalCheck::run($db, ORG);

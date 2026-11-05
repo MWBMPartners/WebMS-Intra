@@ -87,6 +87,36 @@ final class PortalCheck
     public const NOT_A_DESTINATION = ['site', 'auth', 'portal', 'features', 'api', 'email', 'i18n'];
 
     /**
+     * Each scheduled job, and the setting holding the token that lets it run.
+     *
+     * ⚠️ AN EMPTY TOKEN MEANS THE JOB ALWAYS ANSWERS 403, so it has never run
+     *    and never will. Every one of these pages refuses when its stored token
+     *    is empty — deliberately, so an endpoint is inert until somebody sets
+     *    a real token. That is right, and it means **a job nobody gave a token
+     *    is silently doing nothing**, which is knowable from the database and
+     *    was reported by nothing until #477.
+     *
+     *    Ten jobs carry their own token so it can be rotated independently;
+     *    five share `maintenance.cronToken`. The sentence beside each says what
+     *    STOPS if it never runs, in terms of what happens to a person — not
+     *    what happens to the code.
+     */
+    public const JOB_TOKENS = [
+        'maintenance.cronToken' => 'Backups, the health check, the mail queue and the clearing-out '
+            . 'of personal data past its retention period',
+        'reminders.cron_token' => 'Event reminders and the morning summary',
+        'user_reminders.cron_token' => 'Task and personal reminders',
+        'feeds.cron_token' => 'Importing outside calendars',
+        'assets.cron_token' => 'Asset reminders',
+        'venues.cron_token' => 'Venue agreement reminders',
+        'giving.cron_token' => 'Giving statements',
+        'discipleship.cron_token' => 'The discipleship sweep',
+        'push.cron_token' => 'The "We are live" push',
+        'webhooks.cron_token' => 'Retrying payment webhooks that failed',
+        'workflows.cron_token' => 'Chasing approvals that have timed out',
+    ];
+
+    /**
      * Run every check.
      *
      * ⚠️ ONE CHECK FAILING MUST NEVER STOP THE OTHERS. A page whose whole
@@ -653,12 +683,49 @@ final class PortalCheck
                 : 'Check with whoever set this portal up that the scheduled jobs are running.',
             'examples' => [],
         ];
+        // 🚨 A JOB WITH NO TOKEN HAS NEVER RUN AND NEVER WILL. Every one of
+        //    these pages refuses when its stored token is empty, so this is
+        //    knowable from the database — unlike whether a job with a token
+        //    actually ran, which nothing records (#775).
+        $silent = [];
+        foreach (self::JOB_TOKENS as $key => $whatStops) {
+            $stmt = $db->prepare(
+                'SELECT `settingValue` FROM `tblSettings` '
+                . 'WHERE `settingKey` = ? AND `siteID` IS NULL LIMIT 1'
+            );
+            $stmt->bind_param('s', $key);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            // ⚠️ NEVER PRINT THE VALUE. It is a secret that lets anybody run
+            //    the job. Only whether it is empty is ever said out loud.
+            if ($row === null || trim((string) $row['settingValue']) === '') {
+                $silent[] = $whatStops;
+            }
+        }
+        if (count($silent) > 0) {
+            $findings[] = [
+                'severity' => self::PROBLEM,
+                'what'     => 'Some scheduled jobs can never run, because no token has been set.',
+                'why'      => 'Each of these refuses every request until somebody sets its token, '
+                    . 'so it has never run and never will. Nothing anywhere says so — the job '
+                    . 'simply does nothing. If the clearing-out of personal data is among them, '
+                    . 'this portal is keeping records it told people it would delete.',
+                'todo'     => 'Set a token for each in Admin, Settings, then give the address and '
+                    . 'that token to whoever runs the scheduled tasks for this portal. The '
+                    . 'installation guide has the addresses.',
+                'count'    => count($silent),
+                'examples' => array_slice($silent, 0, self::EXAMPLES),
+            ];
+        }
+
         $findings[] = [
             'severity' => self::NOTE,
-            'what'     => 'Nothing here can tell you whether the other scheduled jobs have run.',
+            'what'     => 'For the jobs that CAN run, nothing records whether they did.',
             'why'      => 'Only the mail job records that it ran. Reminders, clearing out old '
                 . 'personal data, and the nightly tidy-up leave no trace this page can read, so '
-                . 'they could have been silent for months without anything showing it here.',
+                . 'one with a token set could still have been silent for months without anything '
+                . 'showing it here.',
             'todo'     => 'Treat this as unknown rather than clear. Making every job record its '
                 . 'own runs is tracked as issue #775.',
             'examples' => [],
