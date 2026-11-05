@@ -21,9 +21,8 @@ year.
 **And in a fifth place the stored data was wrong too.** Booking a resource
 built the same kind of value and then put it through the same conversion, so on
 that morning a room asked for from 01:00 to 01:30 was **saved as 02:00 to
-02:30**, a half-hour booking from 00:30 could be saved as two hours, and a
-booking from 01:30 was refused with "End time must be after start time" — which
-was not true. Two places in the data-entry interface for attendance also
+02:30**, an hour asked for from 00:30 was saved as two, and a booking from 01:30
+was refused with "End time must be after start time" — which was not true. Two places in the data-entry interface for attendance also
 rejected every session time between 01:00 and 01:59 that morning as invalid.
 All three are fixed, and all three were found by the independent review rather
 than by the first sweep.

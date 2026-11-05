@@ -261,11 +261,44 @@ check('G12 the old way really did move 01:30 on the change morning',
     $oldWay, '2:30 AM');
 check('G13 ...and the new way does not', I18n::formatClockTime('01:30:00'), '1:30 AM');
 
+echo "H. A wall-clock DATE AND TIME, for a stored booking (#777 round 2)\n";
+// 🚨 FIXING THE WRITE SIDE MADE THREE READERS WRONG, which is the lesson here.
+//    `tblResourceBooking.startAt/endAt` hold wall-clock values. Once the
+//    booking form stopped moving them on the way IN, the three pages that
+//    show them back — My Bookings, the approvals queue and the resource page —
+//    were still doing `date(…, strtotime($stored))`, so the member was shown
+//    an hour LATER than their booking for one morning a year. Before the write
+//    was fixed the two wrongs cancelled out and nothing looked odd.
+//
+//    **A fix on one side of a stored value makes the other side's fault
+//    visible. Look at both sides before calling it done.**
+foreach (['Europe/London', 'America/New_York', 'Australia/Sydney', 'UTC'] as $zone) {
+    date_default_timezone_set($zone);
+    check("H1 a booking stored at 01:30 reads back as 01:30 in {$zone}",
+        I18n::formatClockDateTime('2027-03-28 01:30:00', 'H:i'), '01:30');
+}
+date_default_timezone_set('Europe/London');
+check('H2 ...and the old way really did move it',
+    date('H:i', (int) strtotime('2027-03-28 01:30:00')), '02:30');
+check('H3 the day and month come out right', 
+    I18n::formatClockDateTime('2027-03-28 01:30:00', 'D j M, H:i'), 'Sun 28 Mar, 01:30');
+check('H4 an ordinary day is unchanged from the old wording',
+    I18n::formatClockDateTime('2027-06-01 09:00:00', 'D j M, H:i'),
+    date('D j M, H:i', (int) strtotime('2027-06-01 09:00:00')));
+check('H5 nothing comes back as nothing', I18n::formatClockDateTime(null), '');
+check('H6 a date that does not exist is handed back, not invented',
+    I18n::formatClockDateTime('2027-02-30 10:00:00'), '2027-02-30 10:00:00');
+check('H7 an hour out of range is handed back too',
+    I18n::formatClockDateTime('2027-06-01 25:00:00'), '2027-06-01 25:00:00');
+check('H8 something that is not a reading at all is handed back',
+    I18n::formatClockDateTime('tomorrow'), 'tomorrow');
+
 echo "\n";
 echo ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
-echo "Sections A-F cover the ARITHMETIC of #549's mistake 3. Section G covers\n";
-echo "ONE instance of mistake 1 — a time on a clock treated as a moment — the\n";
-echo "four display sites #777 fixed. The rest of mistake 1 still needs reading:\n";
-echo "a reading pulled into a variable and converted several lines later is\n";
-echo "invisible to both this and check_clock_time_not_a_moment.py.\n";
+echo "Sections A-F cover the ARITHMETIC of #549's mistake 3. G and H cover TWO\n";
+echo "instances of mistake 1 — a time on a clock treated as a moment — the four\n";
+echo "display sites and the three booking readers #777 fixed. The rest of\n";
+echo "mistake 1 still needs reading: a reading pulled into a variable and\n";
+echo "converted several lines later, or a call split over lines, is invisible to\n";
+echo "both this and check_clock_time_not_a_moment.py, which says so too.\n";
 exit($failed === 0 ? 0 : 1);

@@ -76,10 +76,23 @@ switched off (#483)
     year in every zone, and the model the fix copied.
 
 So a green run means no PHP under `web/` hands a clock-reading column to a
-moment function **by name, in one expression**. It does NOT mean the portal is
-correct across a clock change: a reading pulled into a variable several lines
-earlier and converted there is invisible here, and saying so is better than a
-check that pretends otherwise.
+moment function **by name, on one line**. It does NOT mean the portal is correct
+across a clock change. Two blind spots, both stated rather than implied:
+
+  * **A reading pulled into a variable several lines earlier** and converted
+    there. Two real faults were found exactly there — the attendance API's
+    `createFromFormat('H:i', $timeRaw)` in `create.php` and `update.php`. **A
+    stated blind spot is a place to go looking, not a place to stop.**
+  * **A call split over lines.** The search stops at a newline, which is what
+    stopped it crying wolf over a date and a time side by side in one array
+    literal — so
+
+          $a = strtotime(
+              (string) $row['sessionTime']
+          );
+
+    is missed. Re-running the pattern without the newline restriction across
+    all 912 files gains no hit, so nothing live is hidden today.
 
 THE ONE PLACE A CLOCK READING IS PUT INTO WORDS
 -----------------------------------------------
@@ -105,12 +118,25 @@ SCHEMA = os.path.join("web", "_sql", "full_schema.sql")
 
 # A clock reading handed straight to something that wants a moment.
 #
-# ⚠️ THE LEADING BACKSLASH IS NOT OPTIONAL, and leaving it out meant this check
-#    missed the MAJORITY spelling of the thing it exists to catch. Measured
-#    under `web/`: `new \DateTime*` appears 87 times against 79 for the bare
-#    form, and `attendance/api/create.php` -- one of the files this package
-#    fixed -- writes `\DateTimeImmutable`. Planted,
+# ⚠️ THE LEADING BACKSLASH IS NOT OPTIONAL. Leaving it out meant this check
+#    missed a spelling that is live in this codebase -- `attendance/api/
+#    create.php`, one of the files this package fixed, writes
+#    `\DateTimeImmutable`. Planted,
 #    `new \DateTimeImmutable((string) $row['meetingTime'])` passed.
+#
+#    **An earlier version of this comment called it the MAJORITY spelling, "87
+#    against 79", and that was wrong: those figures counted `DateTimeZone` as
+#    well.** For the class this sentence is about:
+#
+#        grep -rEo 'new[[:space:]]+\\DateTime(Immutable)?[^A-Za-z0-9_]' web | wc -l   # 51
+#        grep -rEo 'new[[:space:]]+DateTime(Immutable)?[^A-Za-z0-9_]'   web | wc -l   # 55
+#
+#    so the backslashed form is the MINORITY. Allowing it is still right --
+#    fifty-one places is not a corner case, and the check's own message
+#    promises it catches "a DateTime constructor". But the evidence given for
+#    it was not what the command returned, in a commit whose own stated lesson
+#    is "write what the command returned, and quote the command". **A word
+#    boundary is not a detail when you are counting.**
 #
 # ⚠️ AND `createFromFormat` IS INCLUDED, with one exception below. The header
 #    used to say this skipped "a clock reading given a date AND a zone
@@ -124,11 +150,60 @@ MOMENT_FUNCTIONS = (
 )
 
 # The one construction that is RIGHT: a reading given a date AND a zone in the
-# same call, as `web/_core/Livestream.php` does. Recognised by the format string
-# carrying a date part, which `'H:i'` does not.
+# same call, as `web/_core/Livestream.php` does.
+#
+# ⚠️ IT MUST REQUIRE THE ZONE, and the first version only required the DATE —
+#    so `createFromFormat('Y-m-d H:i:s', $date . ' ' . $clock)` with no third
+#    argument was exempt, while the constant's own name said "AND a zone". That
+#    construction resolves in PHP's DEFAULT zone, which is the #777 fault in
+#    exactly the form the exemption claimed to have excluded. No live instance
+#    names a TIME column today, so it was a hole in a tripwire rather than a
+#    missed fault — but an exemption whose name overstates what it checks is
+#    how the next reader is misled.
+#
+#    A zone is "a third argument", recognised by a second comma at the call's
+#    own bracket depth. The format string's own commas are inside quotes and
+#    the date expression's are inside its own brackets, so depth is what tells
+#    them apart.
 CORRECT_WITH_DATE_AND_ZONE = re.compile(
     r"createFromFormat\s*\(\s*['\"][^'\"]*[Yy][^'\"]*['\"]"
 )
+
+
+def has_a_zone_argument(call: str) -> bool:
+    """
+    Whether a `createFromFormat(` call hands over a third argument.
+
+    Counted at the call's own bracket depth: a comma inside the format string
+    or inside the date expression's own brackets is not an argument separator.
+    """
+    depth = 0
+    commas = 0
+    i = call.find("(")
+    if i == -1:
+        return False
+    while i < len(call):
+        ch = call[i]
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            while i < len(call):
+                if call[i] == "\\":
+                    i += 2
+                    continue
+                if call[i] == quote:
+                    break
+                i += 1
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+            if depth == 0:
+                break
+        elif ch == "," and depth == 1:
+            commas += 1
+        i += 1
+    return commas >= 2
 
 # 📁 Places where this is RIGHT, each with its reason. Fails both ways: an entry
 #    that no longer does it fails too, because an allow-list that has stopped
@@ -292,8 +367,13 @@ def main() -> int:
             for found in pattern.finditer(code):
                 # A reading given a date AND a zone together is the correct
                 # construction, not a fault -- see CORRECT_WITH_DATE_AND_ZONE.
+                # Exempt only when BOTH are true: the format string carries a
+                # date part AND a zone is handed over. The whole call is needed
+                # to see the third argument, not just the matched prefix.
                 if CORRECT_WITH_DATE_AND_ZONE.search(found.group(0)) is not None:
-                    continue
+                    whole = code[found.start():found.start() + 400]
+                    if has_a_zone_argument(whole) is True:
+                        continue
                 hits.append(code[:found.start()].count("\n") + 1)
             if len(hits) == 0:
                 continue

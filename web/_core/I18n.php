@@ -735,6 +735,82 @@ class I18n
     }
 
     /**
+     * 🗓️ A wall-clock DATE AND TIME put into words, with no zone involved.
+     *
+     * 🚨 THIS EXISTS BECAUSE FIXING A WRITE PATH MADE THREE READERS WRONG.
+     *    `tblResourceBooking.startAt/endAt` hold wall-clock values local to
+     *    the organisation. #777 stopped the booking form moving them on the
+     *    way IN — and the three pages that show them back still did
+     *    `date('D j M, H:i', strtotime($stored))`, which resolves the stored
+     *    text as a moment in PHP's default zone.
+     *
+     *    Measured in Europe/London, stored against displayed:
+     *
+     *        2027-03-28 01:00:00  ->  Sun 28 Mar, 02:00
+     *        2027-03-28 01:30:00  ->  Sun 28 Mar, 02:30
+     *        2027-06-01 09:00:00  ->  Tue 1 Jun, 09:00   (ordinary day, right)
+     *
+     *    Before the write was fixed the two wrongs cancelled: a 01:30 ask was
+     *    stored as 02:30 and shown as 02:30 — wrong, but self-consistent. With
+     *    the database now holding what was asked, the member is shown an hour
+     *    late and the approver approves a window they are reading wrongly.
+     *    **A fix on one side of a stored value makes the other side's fault
+     *    visible; look at both sides before calling it done.**
+     *
+     * ⚠️ IT BUILDS ITS MOMENT IN UTC, deliberately, and that is not a fudge.
+     *    UTC has no transitions, so a wall-clock reading put into it and read
+     *    straight back out cannot move. The day name and the month name need a
+     *    calendar, and a calendar is zone-independent; the clock part needs no
+     *    zone at all. The same reasoning is written out beside
+     *    `shiftWallClock()` in `_apps/resources/book.php`.
+     *
+     * @param string|null $wallClock `Y-m-d H:i:s`, or anything else, which
+     *                               comes back trimmed and unchanged rather
+     *                               than guessed at.
+     * @param string      $format    A `date()` format, applied to the reading.
+     *
+     * @return string The words, or '' for nothing.
+     */
+    public static function formatClockDateTime(?string $wallClock, string $format = 'D j M, H:i'): string
+    {
+        $text = trim((string) $wallClock);
+        if ($text === '') {
+            return '';
+        }
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/', $text, $parts) !== 1) {
+            // Not a wall-clock reading. Hand it back rather than inventing a
+            // date: a wrong day shown confidently is worse than unstyled text.
+            return $text;
+        }
+        [$whole, $year, $month, $day, $hour, $minute] = $parts;
+        $second = isset($parts[6]) === true ? (int) $parts[6] : 0;
+        if (checkdate((int) $month, (int) $day, (int) $year) === false
+            || (int) $hour > 23 || (int) $minute > 59 || $second > 59
+        ) {
+            return $text;
+        }
+
+        try {
+            $reading = new \DateTimeImmutable(
+                sprintf(
+                    '%04d-%02d-%02dT%02d:%02d:%02d',
+                    (int) $year,
+                    (int) $month,
+                    (int) $day,
+                    (int) $hour,
+                    (int) $minute,
+                    $second
+                ),
+                new \DateTimeZone('UTC')
+            );
+        } catch (\Throwable $e) {
+            return $text;
+        }
+
+        return $reading->format($format);
+    }
+
+    /**
      * Format a date according to the current locale.
      *
      * @param string $date   Date string (Y-m-d or datetime)

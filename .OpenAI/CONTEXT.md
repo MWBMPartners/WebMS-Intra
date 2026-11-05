@@ -3230,6 +3230,36 @@ which is the MAJORITY style under `web/` (87 against 79). It also
 skipped every `createFromFormat` where the header claimed only the
 date-and-zone form was. Eight cases measured each way now.
 
+**Round 2 found eight more, and the worst was a regression the fix
+itself created.** Fixing the booking WRITE path made THREE READERS
+wrong: `tblResourceBooking.startAt/endAt` hold wall-clock values, and
+`my-bookings.php`, `approvals.php` and `resource.php` all read them
+back with `date(…, strtotime($stored))` — so with the database finally
+holding what was asked, a booking stored at 01:30 was SHOWN as 02:30.
+The member arrives an hour late; the approver approves a window they
+are reading wrongly. **Before the fix the two wrongs cancelled out and
+nothing looked odd.** `I18n::formatClockDateTime()` is the ONE place a
+wall-clock date and time becomes words, and it builds its moment in
+**UTC on purpose, because UTC has no transitions**.
+
+**THE RULE: a fix on one side of a stored value makes the other side's
+fault visible — look at both sides before calling it done.**
+
+Second live fault: `$wellFormed` checked the SHAPE and not the RANGE,
+so a crafted `startTime=25:00` reached `shiftWallClock()` and threw,
+giving an HTTP 500 where the code it replaced had refused politely. **A
+caller that promises "well formed" has to check the range too.**
+
+**And three wrong numbers in three consecutive commits**, each cheap to
+check: the column breakdown dropped the two `TIMESTAMP` columns;
+"six changed PHP files" where five changed, inside a section headed
+FIGURES CORRECTED; and "`new \DateTimeImmutable` is the MAJORITY
+style, 87 against 79" — those counts had no word boundary and counted
+`DateTimeZone`. The class itself is 51 against 55, so the backslashed
+form is the MINORITY. **A word boundary is not a detail when you are
+counting, and the habit that fixes this is not care — it is running
+the command and pasting its answer.**
+
 What remains of #777 is the bulk: **486 time-shaped columns and only
 123 with any comment**, so "does this column hold a moment or a clock
 reading" is answered NO for three quarters of them before any reading

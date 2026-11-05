@@ -17997,10 +17997,23 @@ newline**, so the search walked out of the call and across the rest of a
 multi-line statement: a date and a time side by side in one array literal —
 ordinary, and already the shape of `calendar/feed.php` and
 `venues/schedule-pdf.php` — was reported as a fault. And it passed on broken
-code because `new\s+DateTime` did not allow a **leading backslash**, and
-`new \DateTimeImmutable` is the MAJORITY style under `web/`: 87 occurrences
-against 79, including in `attendance/api/create.php`, one of the files this
-package fixed.
+code because `new\s+DateTime` did not allow a **leading backslash**, which is
+live in this codebase — `attendance/api/create.php`, one of the files this
+package fixed, writes `\DateTimeImmutable`.
+
+**And the figure I gave for that was wrong, which is its own lesson.** I wrote
+"the MAJORITY style under `web/`: 87 occurrences against 79", and those counts
+had no word boundary, so they counted `DateTimeZone` too. For the class the
+sentence is about:
+
+    grep -rEo 'new[[:space:]]+\\DateTime(Immutable)?[^A-Za-z0-9_]' web | wc -l   # 51
+    grep -rEo 'new[[:space:]]+DateTime(Immutable)?[^A-Za-z0-9_]'   web | wc -l   # 55
+
+so the backslashed form is the **minority**. Allowing it is still right — 51
+places is not a corner case — but the evidence was not what the command
+returned, in the very commit whose lesson was "write what the command returned,
+and quote the command". **A word boundary is not a detail when you are
+counting**, and the figure appeared in three places before anybody checked it.
 
 It also skipped **every** `createFromFormat`, where the header claimed only the
 date-AND-zone form was skipped — so the no-date-no-zone form was invisible, and
@@ -18043,6 +18056,13 @@ and the same per type. **The commit message for part one printed the breakdown
 as "402 DATETIME, 66 DATE, 16 TIME", which sums to 484 under the 486 two lines
 above** — it dropped the two `TIMESTAMP` columns. Quote the command, and make
 the parts add up to the whole.
+
+**And then the commit that corrected that one said "`php -l` clean on all six
+changed PHP files" where five changed** — a wrong count inside the section
+headed FIGURES CORRECTED. Three wrong numbers in three consecutive commits, each
+one cheap to check (`git show --name-only --pretty= <sha> | grep -c '\.php$'`).
+**The habit that fixes this is not care, it is running the command and pasting
+its answer.**
     338 strtotime( under web/_apps and web/_core
      54 new DateTime(Immutable)?(
     479 date( / gmdate(

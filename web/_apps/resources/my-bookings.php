@@ -12,6 +12,9 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -67,8 +70,23 @@ $csrf = Auth::csrfToken();
                             </a>
                         </div>
                         <div class="col-md-3 small">
-                            <?php echo htmlspecialchars(date('D j M, H:i', strtotime((string) $r['startAt'])), ENT_QUOTES, 'UTF-8'); ?>
-                            → <?php echo htmlspecialchars(date('H:i', strtotime((string) $r['endAt'])), ENT_QUOTES, 'UTF-8'); ?>
+                            <?php
+                            // 🕐 READ AS A WALL CLOCK, which is what the column
+                            //    holds. This was `date(…, strtotime($stored))`,
+                            //    which resolves the stored text as a moment in
+                            //    PHP's default zone — so on the morning the
+                            //    clocks go forward it showed an hour later than
+                            //    the booking. Measured: stored `01:30` displayed
+                            //    as `02:30` (#777).
+                            //
+                            //    It was invisible until the write side was fixed:
+                            //    the ask used to be MOVED on the way in too, so
+                            //    the two wrongs cancelled. **A fix on one side of
+                            //    a stored value makes the other side's fault
+                            //    visible — look at both sides.**
+                            ?>
+                            <?php echo htmlspecialchars(I18n::formatClockDateTime((string) $r['startAt'], 'D j M, H:i'), ENT_QUOTES, 'UTF-8'); ?>
+                            → <?php echo htmlspecialchars(I18n::formatClockDateTime((string) $r['endAt'], 'H:i'), ENT_QUOTES, 'UTF-8'); ?>
                         </div>
                         <div class="col-md-3 small text-muted"><?php echo htmlspecialchars((string) ($r['purpose'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-1"><span class="badge bg-<?php echo $statusCls; ?>"><?php echo htmlspecialchars((string) $r['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>

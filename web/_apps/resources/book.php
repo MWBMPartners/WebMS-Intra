@@ -59,10 +59,18 @@ $prefillNotes = '';
  *    window an hour on the morning the clocks go forward — away from the very
  *    bookings it exists to overlap.
  *
- *    Minutes are an EXACT length, so adding them to a reading is arithmetic, not
- *    a calendar question. Crossing midnight is handled by letting the date carry,
- *    which `mktime()` does without consulting a zone for this purpose: the value
- *    goes in and comes out in the same frame.
+ *    Minutes are an EXACT length, so adding them to a reading is arithmetic,
+ *    not a calendar question. Crossing midnight is handled by letting the date
+ *    carry, which is why the reading is put into **UTC**: UTC has no
+ *    transitions, so a value goes in and comes out in the same frame and the
+ *    arithmetic is pure.
+ *
+ * ⚠️ AN EARLIER VERSION OF THIS SENTENCE CREDITED `mktime()`, which this
+ *    function does not call — and `mktime()` resolves through PHP's DEFAULT
+ *    zone, so it would have been the wrong tool as well as the wrong name. A
+ *    comment that misdescribes its own code is bad anywhere; in the file whose
+ *    fault was a zone-dependent conversion it is worse, because it is the
+ *    sentence the next reader checks the design against.
  *
  * @param string $wallClock `Y-m-d H:i:s`, assumed well formed by the caller.
  * @param int    $minutes   Positive or negative.
@@ -127,8 +135,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
 
     // Shaped like a date and a time? Asked of the TEXT, because that is what
     // these values are. `strtotime()` used to answer this and also moved them.
-    $wellFormed = preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/', $startAt) === 1
-        && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/', $endAt) === 1
+    // ⚠️ THE HOUR AND THE MINUTE ARE RANGE-CHECKED HERE, and the first version
+    //    of this check was not. `\d{2}` accepts `25` and `99`, and `checkdate()`
+    //    only guards the DATE — so a crafted post of `startTime=25:00` passed
+    //    the shape test, reached `shiftWallClock()`, and PHP threw
+    //    `DateMalformedStringException: Double time specification`. Measured:
+    //    bootstrap's exception handler turned that into an HTTP 500 and a
+    //    `tblErrors` row, where the code this replaced had answered "Please
+    //    supply a valid date and time range."
+    //
+    //    Nothing was stored either way, so this was a rude refusal rather than
+    //    a data fault — but `shiftWallClock()`'s docblock says its input is
+    //    "assumed well formed by the caller", and that was only true of the
+    //    SHAPE. A caller that promises well-formed input has to check the
+    //    range too.
+    $clockShape = '/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]:00$/';
+    $wellFormed = preg_match($clockShape, $startAt) === 1
+        && preg_match($clockShape, $endAt) === 1
         && checkdate((int) substr($date, 5, 2), (int) substr($date, 8, 2), (int) substr($date, 0, 4)) === true;
 
     // ⏱️ "Is the start in the past" is the ONE question here that genuinely
