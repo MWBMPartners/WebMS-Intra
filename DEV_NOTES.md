@@ -17703,79 +17703,39 @@ brace-depth test came OUT: two guards over one fact drift apart, and a pattern
 left as dead code under an authoritative comment is one somebody will edit
 believing it works.
 
-**And a whole-region pin has exactly one hole, which is worth knowing before
-anybody builds another one: it cannot see something glued IN FRONT of its first
-statement.** `if (false)` on the line above, no braces, makes the entire region
+**And a whole-region pin has THREE holes, not the "exactly one" an earlier
+version of this paragraph claimed — the fourth check round measured the other
+two.** The first: it cannot see something glued IN FRONT of its first
+statement. `if (false)` on the line above, no braces, makes the entire region
 the body of a conditional that never runs while the region's own text is
 untouched -- measured, the gate green while a member's language could never be
 stored. Moving the start anchor one statement earlier only moves the hole, so
 the rule is general: **a pinned region must BEGIN A FRESH STATEMENT**, meaning
-the last thing before it, whitespace aside, is `;`, `{`, `}`, `:`, `>` or an
-opening `<?php`. All three regions are checked for it, and the first version of
-that rule cried wolf on the account page, whose region legitimately starts right
-after its own `<?php`.
+the last thing before it, whitespace aside, is `;`, `}` or an opening `<?php`.
 
-**Say the cost out loud: a pure reformat fails a text pin.** Whitespace runs are
-freed, but PHP needs a space where a re-wrapped call previously had none, so
-splitting a call across lines really does change the normalised text. Taking
-whitespace out altogether is not available -- `new Foo` would become `newFoo`.
-The failure message says this, and the justification is the same one #485 gave
-for `portal-translate.pinned.js`: **nothing EXECUTES this code in any test**, so
-a text pin is the only guard there is.
+**The first version of that rule also allowed `:` and `{`, and both let
+something reach across** — `if (false): ...region... endif;` and
+`function neverCalled() { ...region... }`, each measured with `php -l` clean and
+the guard printing "nothing is glued in front of any of them" while no member's
+language could ever be stored. `switch (0) { case 1:` has the same shape. **An
+allow-list written from the spellings you were handed is not a rule**, which is
+the lesson of this whole file arriving one level up. (And the first version
+cried wolf the other way, on the account page's own `<?php`, so both directions
+have to be checked together — #483.)
 
-**The sixth finding was a data-loss path my own round-2 fix brought into view.**
-`storedChoice()` answered null for BOTH "has not chosen" and "could not be
-read", under a docblock asserting that "nothing a caller could do differs". The
-account page could: after a failed read it drew "Follow my browser" as the
-selected option, and the member's next Save -- for any unrelated reason, a
-telephone number -- posted an empty language and wrote SQL NULL over the choice
-they still had. Silently. **A reassuring sentence in a docblock is how that
-survived two review rounds.** It answers three things now -- a code, null for
-"has not chosen", **false for "could not be read"** -- and the page leaves the
-control out and says why, because a member who cannot see their language is far
-better off than one whose language is quietly deleted.
+**The second hole: the region is found by its FIRST match, so a dead duplicate
+above the live code satisfies the pin while the live code is gutted.** Measured:
+a copy of the handler block inside `if (false) { }` above the real one, the real
+one replaced by a block that does nothing, guard green, and the only surviving
+`chooseLanguage()` call the dead one. The start anchor must appear exactly once.
 
-**Three documents were wrong, and one was the guard's own failure message.** It
-still said the account page and the top-bar menu "can never offer different
-languages" -- the menu also hides anything below
-`portal.i18n.minimum_coverage_for_switcher`, and `coverage('cy')` measures 0.30,
-so at the 0.95 that setting's own comment suggests the MENU VANISHES while the
-account page still offers Welsh -- and it still said the list "keeps a
-right-to-left language with no translation file off", which is the behaviour
-round 2 deliberately removed. **That is the sentence whoever hits the failure
-will act on.**
-
-**A THIRD ROUND FOUND SIX MORE, FIVE OF THEM IN ROUND 2'S GUARD WORK, AND THE
-PATTERN IS NOW THE FINDING.** Round 1 handed me `if (false) { ... }`, so I
-answered with a brace count -- and `if (false)` with NO BRACES walked through,
-and so did `false &&` glued in front. Round 2 handed me "the argument dropped",
-so I answered "are the brackets empty" -- and the literal `(null)` walked
-through. Round 2 pinned the gate CONDITIONS, so emptying the block BODY walked
-through, and so did `chooseLanguage(null)` (every profile save deletes every
-member's language) and `$langStored === false` inside the option loop. Six
-spellings, one fault: **the statement is still there and does nothing.**
-
-**The remedy was not a fifth pattern. It is the one #485 took four rounds to
-reach: pin the whole region as TEXT.** Three regions now --
-`index.php` from `Auth::ensureSession()` through the `?lang=` block, the account
-page's control, and the account handler's language block -- held in
-`tools/audit-checks/member-language.pinned.txt` and regenerated by `--repin`, so
-a deliberate change is a separate visible act. The four substring pins and the
-brace-depth test came OUT: two guards over one fact drift apart, and a pattern
-left as dead code under an authoritative comment is one somebody will edit
-believing it works.
-
-**And a whole-region pin has exactly one hole, which is worth knowing before
-anybody builds another one: it cannot see something glued IN FRONT of its first
-statement.** `if (false)` on the line above, no braces, makes the entire region
-the body of a conditional that never runs while the region's own text is
-untouched -- measured, the gate green while a member's language could never be
-stored. Moving the start anchor one statement earlier only moves the hole, so
-the rule is general: **a pinned region must BEGIN A FRESH STATEMENT**, meaning
-the last thing before it, whitespace aside, is `;`, `{`, `}`, `:`, `>` or an
-opening `<?php`. All three regions are checked for it, and the first version of
-that rule cried wolf on the account page, whose region legitimately starts right
-after its own `<?php`.
+**The third: a heredoc inside a region.** Its internal whitespace is
+significant and the normalisation frees whitespace, so two genuinely different
+regions compare equal. Refused outright. An earlier comment claimed
+`readable_code()` already refused one, citing a `NO_HEREDOC` that had never been
+written — so **the enumeration #485's rule asks for was itself unsupported**,
+which is the worse kind of wrong, because it is the sentence the next reader
+relies on.
 
 **Say the cost out loud: a pure reformat fails a text pin.** Whitespace runs are
 freed, but PHP needs a space where a re-wrapped call previously had none, so

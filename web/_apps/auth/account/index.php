@@ -411,10 +411,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     //    So it is offered, and labelled honestly rather than
                     //    hidden: the member can see what they chose and change it.
                     if ($langStored !== '' && isset($langChoices[$langStored]) === false) {
+                        // ⚠️ NO SUFFIX HERE. A first version added
+                        //    "— not translated yet, so pages read in English",
+                        //    and the coverage suffix below was then appended ON
+                        //    TOP of it, so the one control a member uses to pick
+                        //    a language read "Deutsch — not translated yet, so
+                        //    pages read in English — 0% translated, so some pages
+                        //    read in English". Two clauses contradicting each
+                        //    other, and "some pages" is untrue at 0%, where EVERY
+                        //    page reads in English. The suffix below says the same
+                        //    thing with a number, and says it once.
                         $langStoredMeta = \Portal\Core\I18n::localeMeta($langStored);
                         $langChoices[$langStored] = [
-                            'native' => ($langStoredMeta['native'] ?? $langStored)
-                                . ' — not translated yet, so pages read in English',
+                            'native' => ($langStoredMeta['native'] ?? $langStored),
                         ];
                     }
 
@@ -473,8 +482,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     && isset($langMeta['native']) === true
                                 ) {
                                     $langCover = \Portal\Core\I18n::coverage((string) $langCode);
-                                    if ($langCover < 0.95) {
-                                        $langPart = ' — ' . ((int) round($langCover * 100))
+                                    $langPct   = (int) round($langCover * 100);
+                                    // ⚠️ "SOME pages" IS UNTRUE AT 0%, where EVERY
+                                    //    page reads in English — and 0% is the
+                                    //    ordinary case for a stored language with
+                                    //    no translation file, which is exactly the
+                                    //    member this control exists to help.
+                                    if ($langPct <= 0) {
+                                        $langPart = ' — not translated yet, so every'
+                                            . ' page reads in English';
+                                    } elseif ($langCover < 0.95) {
+                                        $langPart = ' — ' . $langPct
                                             . '% translated, so some pages read in English';
                                     }
                                 }

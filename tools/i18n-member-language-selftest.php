@@ -267,6 +267,11 @@ $_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'en';
 //    unable to fail if it were about the stored value. It is not: it is about
 //    the method RETURNING AT ALL rather than throwing, and the `check()` below
 //    only runs if it did.
+// ⚠️ READ "HAS NOT CHOSEN" BEFORE THE TABLE GOES, or E8b below compares two
+//    FAILED reads and passes for the wrong reason. Account 8's `locale` is
+//    NULL, so this is the genuine "has not chosen" answer.
+$noChoiceAnswer = I18n::storedChoice(8, $db);
+
 $_SESSION = ['user_id' => 7];
 $db->query('DROP TABLE `tblUsers`');
 I18n::reconsiderNowSessionExists($db);
@@ -279,11 +284,32 @@ check('E7 a missing table falls back rather than throwing',
 //    account page could: after a failed read it drew "Follow my browser" as
 //    the selected option, and the member's next Save — for any unrelated
 //    reason — posted an empty language and wrote SQL NULL over the choice they
-//    still had. Silently. These two checks are what stop that coming back.
+//    still had. Silently. These four checks are what stop that coming back.
 check('E8 a read that FAILED answers false, never null',
     I18n::storedChoice(7, $db), false);
-check('E8b ...so the account page leaves the control out rather than guessing',
-    I18n::storedChoice(7, $db) === false, true);
+// ⚠️ THE POINT IS THE DIFFERENCE, AND THE CHECK HAS TO BE OF THE DIFFERENCE.
+//    An earlier E8b read `storedChoice(7, $db) === false` and compared it with
+//    true — the same assertion as E8 written another way, under a label
+//    claiming it proved the account page leaves the control out, which it
+//    never looked at. What matters is that false and null are TOLD APART, so
+//    that is what is checked: account 8 has chosen nothing and must answer
+//    null, while this failed read must answer false, and the two must not be
+//    equal even loosely (`null == false` is TRUE in PHP, which is exactly how
+//    the two cases came to be conflated in the first place).
+// ⚠️ NOT `$failed` — that is this file's own FAILURE COUNTER, which `check()`
+//    reaches by `global`. Naming a local after it at top level IS that global,
+//    so assigning false to it set the count to false: the summary printed
+//    "43 passed,  failed." with an empty number, and `exit($failed === 0)`
+//    became `false === 0`, so a wholly green run would have exited 1. Caught by
+//    reading the output rather than the exit code.
+$readFailed = I18n::storedChoice(7, $db);
+$noChoice   = $noChoiceAnswer;
+check('E8b "could not read" and "has not chosen" are different values',
+    $readFailed === $noChoice, false);
+check('E8c ...and loose comparison would NOT have told them apart, which is '
+    . 'how they came to be conflated', $readFailed == $noChoice, true);
+check('E8d "has not chosen" is still null, so no caller has to change',
+    $noChoice, null);
 
 echo "F. Choosing a language from an address really saves it now\n";
 // ⚠️ `switchLocale()` is the ONLY thing that has ever written

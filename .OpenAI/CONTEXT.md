@@ -2914,14 +2914,38 @@ to reach: pin the whole region as TEXT.** Three regions, held in
 `--repin`. The four substring pins and the brace-depth test came out,
 because two guards over one fact drift apart.
 
-**A whole-region pin has exactly one hole, worth knowing before
-building another: it cannot see something glued IN FRONT of its first
-statement.** `if (false)` on the line above, no braces, makes the
-whole region the body of something that never runs while its text is
-untouched. So the general rule: **a pinned region must begin a fresh
-statement** -- the last thing before it, whitespace aside, is `;`,
-`{`, `}`, `:`, `>` or an opening `<?php`. The first version of that
-rule cried wolf on the account page's own `<?php`.
+**A whole-region pin has THREE holes, not the "exactly one" a first
+version of this claimed -- the fourth round measured the other two.**
+
+(a) It cannot see something glued IN FRONT of its first statement:
+`if (false)` on the line above, no braces, makes the whole region the
+body of something that never runs while its text is untouched. So a
+pinned region must BEGIN A FRESH STATEMENT -- the last thing before
+it, whitespace aside, is `;`, `}` or an opening `<?php`. **The first
+version of that rule allowed `:` and `{`, and both reach across**
+(`if (false): ... endif;` and `function neverCalled() { ... }`, each
+measured with `php -l` clean while the guard printed "nothing is glued
+in front of any of them"; `switch (0) { case 1:` is the same shape).
+**An allow-list written from the spellings you were handed is not a
+rule.** It also cried wolf the other way on the account page's own
+`<?php`, so both directions must be checked together (#483).
+
+(b) The region is found by its FIRST match, so a dead duplicate ABOVE
+the live code satisfies the pin while the live code is gutted --
+measured, the only surviving `chooseLanguage()` call being the dead
+one. The start anchor must appear exactly once.
+
+(c) A heredoc inside a region makes two different regions compare
+equal, because its internal whitespace is significant and the
+normalisation frees whitespace. Refused outright -- and the comment
+claiming `readable_code()` already refused one cited a `NO_HEREDOC`
+**that had never been written**, so the enumeration #485's rule
+demands was itself unsupported: the worse kind of wrong, because it is
+the sentence the next reader relies on.
+
+**And `--repin` now REFUSES over any of the three**, because repinning
+a glued or duplicated region writes the fault into the sidecar and
+prints success -- the one way a text pin fails silently.
 
 **The cost, said out loud: a pure reformat fails a text pin.**
 Whitespace runs are freed, but PHP needs a space where a re-wrapped

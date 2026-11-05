@@ -68,7 +68,7 @@ Locale prints blanks, and one filtering `Locale = en` — which used to match
 every member — now matches nobody, with nothing warning whoever saved it.
 Tracked separately rather than guessed at.
 
-Guards: `tools/i18n-member-language-selftest.php` (41 checks, with a real
+Guards: `tools/i18n-member-language-selftest.php` (43 checks, with a real
 MySQL, including the fault put back) and the hard gate
 `tools/audit-checks/check_member_language_applied.py`. That gate pins **three
 whole regions of code as text** — the part of `index.php` that starts the

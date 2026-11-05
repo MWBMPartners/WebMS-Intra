@@ -63,9 +63,9 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 round 4 is built and awaiting its check** (the protected arm of D-051 —
+**#763 round 5 is built and awaiting its check** (the protected arm of D-051 —
 it writes and deletes stored data, so rounds run until one is clean). Twelve
-findings, then seven, then six — and **almost every one after the first round was
+findings, then seven, six, six — and **almost every one after the first round was
 in a previous round's fix**. Everything else below is unstarted.
 
 ## Next, in this order
@@ -123,8 +123,16 @@ as the evidence), #549's arithmetic half, #767, #765, #768, #763.
 
 ## The lesson this run earned, in one line
 
-**When a guard has been bypassed three times, stop writing patterns and pin the
-text.** Round 1 handed me `if (false) { }`, so I answered with a brace count;
+**An allow-list written from the spellings you were handed is not a rule.** It
+is the same mistake four times over, each time one level up: I answered
+`if (false) { }` with a brace count, "the argument dropped" with "are the
+brackets empty", and then — having finally pinned the regions as text — wrote a
+"begins a fresh statement" rule whose allowed characters included the two that
+let `if (false):` and `function neverCalled() {` wrap a whole region in dead
+code. **Before writing a rule, try the two spellings nobody handed you.**
+
+**And the runner-up, which is the one to reach for first:** when a guard has
+been bypassed three times, stop writing patterns and pin the text. Round 1 handed me `if (false) { }`, so I answered with a brace count;
 round 2 handed me "the argument dropped", so I answered "are the brackets
 empty"; each answer closed one spelling of "the statement is still there and
 does nothing" and the next round found another. #485 had already learnt this and

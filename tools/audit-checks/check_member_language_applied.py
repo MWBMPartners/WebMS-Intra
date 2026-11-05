@@ -114,10 +114,20 @@ ACCOUNT_SAVE = os.path.join("web", "_apps", "auth", "account", "save.php")
 #    Comments go, and runs of whitespace become one space. **PHP does not care
 #    about whitespace except inside a string literal or a heredoc**, so the
 #    only thing given up is telling `'a b'` from `'a  b'` -- immaterial in these
-#    three regions, where no logic reads a string's internal spacing, and
-#    `readable_code()` refuses a heredoc outright (see `NO_HEREDOC`). Freeing
+#    three regions, where no logic reads a string's internal spacing, and a
+#    heredoc inside a pinned region is REFUSED outright (`HEREDOC_MARK`), because
+#    a heredoc's internal whitespace IS significant and freeing it would make two
+#    genuinely different regions compare equal. An earlier version of this
+#    comment cited a `NO_HEREDOC` that had never been written -- so the
+#    enumeration #485 asks for was itself unsupported, which is the worse kind of
+#    wrong. Freeing
 #    whitespace rather than keeping line breaks is deliberate: a rewrap must not
 #    turn this red, because a check that cries wolf gets switched off (#483).
+# A heredoc or nowdoc opener. Refused inside a pinned region: its internal
+# whitespace is significant, so freeing whitespace would make two different
+# regions compare equal, and the pin would pass on changed behaviour.
+HEREDOC_MARK = "<<<"
+
 PINNED_REGIONS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "member-language.pinned.txt"
 )
@@ -135,7 +145,11 @@ PINNED_REGIONS = (
     (
         "account page: the language control",
         ACCOUNT,
-        "$langRead",
+        # ⚠️ THE WHOLE ASSIGNMENT, not just `$langRead`. That name appears three
+        #    times in as many lines -- the read, the "could not read" test and
+        #    the "is it a string" test -- so the bare name was not unique and the
+        #    uniqueness rule rejected it, correctly.
+        "$langRead    = \\Portal\\Core\\I18n::storedChoice",
         None,
     ),
     (
@@ -192,19 +206,32 @@ def nothing_glued_in_front(raw: str, start_anchor: str) -> bool:
     """
     Whether the pinned region begins a fresh statement.
 
-    🚨 THE LAST HOLE THE THIRD CHECK ROUND FOUND, AND IT IS WORTH THE WHOLE
-       COMMENT. A whole-region pin cannot see something glued IN FRONT of its
-       first statement: `if (false)` on the line above, with no braces, makes
-       the entire region the body of a conditional that never runs, and the
-       region's own text is unchanged, so it matched. Measured on
-       `save.php` -- the gate was green while a member's language could never
-       be stored.
+    🚨 A WHOLE-REGION PIN CANNOT SEE SOMETHING GLUED IN FRONT OF ITS FIRST
+       STATEMENT, and this is the rule that closes it. `if (false)` on the line
+       above, with no braces, makes the entire region the body of a conditional
+       that never runs while the region's own text is unchanged -- measured on
+       `save.php`, the gate green while a member's language could never be
+       stored.
 
-       Moving the start anchor one statement earlier would have moved the hole
-       rather than closed it, so the rule is general: the last thing before the
-       region, ignoring whitespace, must be `;`, `{`, `}`, `:` or the `>` of a
-       `?>`. Anything else -- `)`, `&&`, `else`, a bare `if (false)` -- is
-       something reaching across into the region.
+       Moving the start anchor one statement earlier only moves the hole, so the
+       rule is general: the last thing before the region, whitespace aside, must
+       be `;`, `}` or an opening `<?php` / `<?=`.
+
+    ⚠️ `:` AND `{` WERE ALLOWED AND BOTH LET SOMETHING REACH ACROSS. The fourth
+       check round measured two more spellings past the first version of this
+       rule, each wrapping a whole region in code that never runs, each with
+       `php -l` clean and the gate printing "nothing is glued in front of any of
+       them":
+
+         if (false):                      ...region...   endif;
+         function portalNeverCalled() {   ...region...   }
+
+       and `switch (0) { case 1:` has the same shape. So the allowed set is now
+       `;`, `}` and an opening tag, and nothing else. **The lesson is the one
+       this file keeps re-learning: an allow-list written from the spellings you
+       were handed is not a rule.** None of the three regions legitimately begins
+       inside a block, so nothing is lost; if one ever needs to, this message is
+       where to start.
     """
     code = readable_code(raw, mask_strings=False)
     at = code.find(start_anchor)
@@ -219,7 +246,29 @@ def nothing_glued_in_front(raw: str, start_anchor: str) -> bool:
     # both directions were checked before this was committed.
     if before.endswith("<?php") is True or before.endswith("<?=") is True:
         return True
-    return before[-1] in ";{}:>"
+    # ⚠️ `;` and `}` ONLY. `:` admitted `if (false):` and `case 1:`; `{` admitted
+    #    `function neverCalled() {`. Both were measured green against the first
+    #    version of this rule while a whole region sat in dead code.
+    return before[-1] in ";}"
+
+
+def anchor_is_unique(raw: str, start_anchor: str) -> bool:
+    """
+    Whether the region's start anchor appears exactly once in the file.
+
+    🚨 WITHOUT THIS, A DEAD DUPLICATE SATISFIES THE PIN WHILE THE LIVE CODE IS
+       GUTTED. `region_text()` takes the FIRST match, so the fourth check round
+       planted `if (false) {` + an exact copy of the region + `}` ABOVE the real
+       one, replaced the live block with one that does nothing, and the gate
+       printed "all three pinned regions match the sidecar byte for byte".
+       `nothing_glued_in_front()` cannot help: it inspects the text before the
+       FIRST match, which is the dead copy's own `{`.
+
+       Measured on `save.php`: `php -l` clean, guard exit 0, and the only
+       surviving `chooseLanguage()` call was the one inside `if (false)`.
+    """
+    code = readable_code(raw, mask_strings=False)
+    return code.count(start_anchor) == 1
 
 
 def region_text(raw: str, start_anchor: str, block_anchor) -> str:
@@ -474,14 +523,35 @@ def main() -> int:
     pinned = read_pinned()
     now = {}
     glued: list[str] = []
+    duplicated: list[str] = []
+    heredoc: list[str] = []
     for label, relative, start_anchor, block_anchor in PINNED_REGIONS:
         with open(os.path.join(root, relative), "r", encoding="utf-8") as handle:
             raw = handle.read()
         now[label] = region_text(raw, start_anchor, block_anchor)
         if nothing_glued_in_front(raw, start_anchor) is False:
             glued.append(f"{relative} ({label})")
+        if anchor_is_unique(raw, start_anchor) is False:
+            duplicated.append(f"{relative} ({label}): {start_anchor!r}")
+        if HEREDOC_MARK in now[label]:
+            heredoc.append(f"{relative} ({label})")
 
     if "--repin" in sys.argv:
+        # ⚠️ REFUSE TO REPIN OVER A STRUCTURAL PROBLEM. Repinning while a region
+        #    is glued, duplicated or holds a heredoc would write the fault into
+        #    the sidecar and print nothing but success -- the pin would then
+        #    follow the fault, which is the one way a text pin fails silently.
+        blocking = (
+            [f"glued in front: {w}" for w in glued]
+            + [f"anchor not unique: {w}" for w in duplicated]
+            + [f"heredoc inside: {w}" for w in heredoc]
+        )
+        if len(blocking) > 0:
+            print("REFUSED to repin: the regions are not in a state worth pinning.")
+            for line in blocking:
+                print(f"  - {line}")
+            print("Fix those first, then repin.")
+            return 1
         with open(PINNED_REGIONS_FILE, "w", encoding="utf-8") as handle:
             handle.write(
                 "# The three pinned regions of #763, regenerated by\n"
@@ -494,6 +564,29 @@ def main() -> int:
                 handle.write(f"\n### {label}\n{now[label]}\n")
         print(f"Repinned {len(PINNED_REGIONS)} region(s) to {PINNED_REGIONS_FILE}")
         return 0
+
+    for where in duplicated:
+        problems.append(
+            f"{where} appears more than once, so this pin is worthless.\n"
+            f"       The region is found by its FIRST match, so a dead duplicate "
+            f"above the live code satisfies the pin while the live code is "
+            f"gutted -- measured: a copy inside `if (false) {{ }}` above the real "
+            f"block left the gate printing 'all three pinned regions match the "
+            f"sidecar byte for byte' while the only surviving chooseLanguage() "
+            f"call was the dead one.\n"
+            f"       Either remove the duplicate, or give this region a start "
+            f"anchor that is unique."
+        )
+
+    for where in heredoc:
+        problems.append(
+            f"{where} now contains a heredoc or nowdoc, which this pin refuses.\n"
+            f"       A heredoc's internal whitespace is significant, and this pin "
+            f"frees runs of whitespace -- so two genuinely different regions "
+            f"would compare equal and the pin would pass on changed behaviour. "
+            f"Move the heredoc out of the pinned region, or teach the "
+            f"normalisation to leave heredocs alone."
+        )
 
     for where in glued:
         problems.append(
@@ -572,8 +665,8 @@ def main() -> int:
         "OK: the language question is asked after the session starts, start-up "
         "asks it nowhere, the account page offers a control that is neither "
         "disabled nor hidden and asks browserLanguage(), all three pinned regions "
-        "match the sidecar byte for byte, and nothing is glued in front of any of "
-        "them."
+        "match the sidecar byte for byte, each region's anchor is unique and holds "
+        "no heredoc, and nothing is glued in front of any of them."
     )
     print(
         "   It cannot tell whether a page RENDERS in that language -- that needs "
