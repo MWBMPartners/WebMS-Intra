@@ -108,7 +108,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-secondary">
         With this on, a <strong>Translate</strong> button appears on announcements,
         project descriptions and project updates, offering them in your own language
-        (<strong><?php echo htmlspecialchars($readerLanguage, ENT_QUOTES, 'UTF-8'); ?></strong>).
+        (<strong><?php
+            // A NAME, not a code. This printed a bare `en` before #763 and
+            // would now print a bare `fr` — on the one page whose job is
+            // informed permission, where "Français" reads as a language and
+            // "fr" reads as a typing error. `localeMeta()` answers null for a
+            // code the portal does not know, and the code itself is then the
+            // honest fallback.
+            $rlMeta = \Portal\Core\I18n::localeMeta($readerLanguage);
+            echo htmlspecialchars(
+                (string) ($rlMeta['native'] ?? $readerLanguage),
+                ENT_QUOTES,
+                'UTF-8'
+            );
+        ?></strong>).
         The original always stays on the page, unchanged, above the translation.
     </p>
     <p class="text-secondary">

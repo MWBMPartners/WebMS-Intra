@@ -3,6 +3,22 @@
 **Date:** 2026-11-05  
 **Status:** in force
 
+> ⚠️ **TWO FACTS IN THE REASONING BELOW ARE WRONG. The answer stands; the
+> reasoning does not.** It says the rejected option would have left "no control
+> anywhere to change it" — there is a language menu in the top bar of every
+> page (`grep -rn languageSwitcher web tools`), which is D-062, and D-062's own
+> "Rules out" forbids that sentence in any document. And it says "twelve
+> languages are matched from the browser's request"; there are **thirteen**
+> (count them from `I18n::$locales`: en, cy, fr, de, es, pt, ar, he, fa, ur,
+> zh, ja, ko). References below to "once the control exists (D-061)" should be
+> read as D-062.
+>
+> The answer — an untouched `'en'` counts as "not chosen" — is unaffected: it
+> rests on the `git log -S` measurement, not on either wrong fact. This note is
+> the only addition; a decision is never edited. It is here because this file
+> was written in the same commit that corrected those two claims everywhere
+> else, so it could simply have been written true.
+
 **Question:** a member's saved interface language was applied nowhere (#763),
 because the question is asked before their session exists. Fixing that makes
 `tblUsers.locale` start deciding what language every signed-in person sees —

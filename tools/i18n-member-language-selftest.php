@@ -24,6 +24,8 @@
  *   E    the database read, against a real MySQL: a member whose
  *        `tblUsers.locale` is `cy` is served `cy`.
  *   G    forgetting a choice — the account page's "follow my browser" option.
+ *   H    `browserLanguage()`, which the account page's label needs and which
+ *        is NOT the same as `locale()` for anybody who has chosen.
  *   F    the other half — `switchLocale()` really storing a choice. It is the
  *        ONLY thing that has ever written that column, and until #763 its one
  *        caller sat where no session existed, so it wrote nothing at all.
@@ -135,6 +137,32 @@ $_SESSION = [];
 I18n::reconsiderNowSessionExists(null);
 check('D1 with no member it falls back to Accept-Language rather than throwing',
     I18n::locale(), 'fr');
+
+echo "H. What the browser asks for, which is NOT what the page is drawn in\n";
+// ⚠️ THE ACCOUNT PAGE'S "Follow my browser (X today)" LABEL DEPENDS ON THIS,
+//    and a first version built it from `I18n::locale()`. That is the language
+//    the page is BEING DRAWN IN, and for anybody who has a stored choice it IS
+//    that choice — so the label named the stored language to the only people
+//    who would ever read it, the option existing purely to undo a choice.
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'fr';
+session_id('i18n763sectionh');
+session_start();
+$_SESSION = ['user_id' => 1, 'user_locale' => 'cy'];
+I18n::reconsiderNowSessionExists(null);
+check('H1 the page is drawn in the member\'s stored language', I18n::locale(), 'cy');
+check('H2 ...and browserLanguage() still answers what the BROWSER asked',
+    I18n::browserLanguage(), 'fr');
+check('H3 so the two really do differ — which is the whole point of H2',
+    I18n::locale() === I18n::browserLanguage(), false);
+
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'kl-GL,kl;q=0.9';
+check('H4 a language the portal does not know answers null, not a guess',
+    I18n::browserLanguage(), null);
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = '';
+check('H5 no header at all answers null too', I18n::browserLanguage(), null);
+session_write_close();
+$_SESSION = [];
+$_SERVER['HTTP_ACCEPT_LANGUAGE'] = 'en';
 
 echo "E. The database read, against a real MySQL\n";
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);

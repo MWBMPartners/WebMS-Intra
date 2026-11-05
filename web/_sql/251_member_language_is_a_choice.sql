@@ -49,6 +49,27 @@
 -- (measured, twice, on mariadb:11.4), it simply rebuilds the table again. The
 -- reasoning is beside section A.
 --
+-- ⚠️ WHO ELSE READS THIS COLUMN, WHICH IS THE QUESTION TO ASK OF ANY COLUMN
+--    YOU ARE ABOUT TO EMPTY. Exactly THREE places read it -- establish that
+--    with `grep -rn "u\.locale\|\`locale\`" web/_apps web/_core`, not by
+--    memory, because a first version of this header named two:
+--
+--      1. `I18n::storedChoice()` -- the language the portal is shown in. This
+--         is the one the migration is FOR.
+--      2. `ContentTranslation::readLanguage()` -- which language to TRANSLATE
+--         into, falling back to the browser's when the column is empty. So
+--         emptying it makes the Translate button really translate, and really
+--         charge, for anybody on a non-English browser. Accepted deliberately
+--         (D-063).
+--      3. `ReportRegistry` -- the Members report offers `locale` as a
+--         displayable and filterable column, and report definitions are SAVED
+--         (`tblReportDefinitions`). Before this migration every row held
+--         'en'; afterwards an un-chosen row is empty. **So a saved report
+--         showing Locale prints a column of blanks, and one filtering
+--         `Locale = en` -- which used to match every member -- now matches
+--         nobody.** Nothing warns whoever saved it. Tracked rather than
+--         guessed at.
+--
 -- ⚠️ AND A RESTORE FROM A SNAPSHOT TAKEN BEFORE THIS MIGRATION PUTS 'en' BACK
 --    IN EVERY ROW, with this migration already recorded as run, so it will not
 --    run again -- and the portal then reads that 'en' as a deliberate choice

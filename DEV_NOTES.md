@@ -17618,12 +17618,71 @@ run twice" was also MySQL-only: MariaDB reports `COLUMN_DEFAULT` as a literal
 expression, never SQL NULL, so the `ALTER` re-runs on every replay. Same end
 state, measured twice -- just not free.
 
+**A SECOND ROUND FOUND SEVEN MORE, SIX OF THEM IN ROUND 1'S FIXES, AND THE
+HEADLINE IS ONE SENTENCE: I CLOSED THE SPELLINGS I WAS HANDED.** Round 1's plant
+was "the argument dropped", so the gate was taught to ask whether the brackets
+held anything -- and `reconsiderNowSessionExists(null)` passed it, one word, the
+same harm, with the check printing "the reconsider call is passed a connection"
+while it was not. The account-page checks were presence-only, so `false &&` in
+front of the save gate left a member picking a language, pressing Save, being
+told it worked, and nothing stored, ever. **This is #485's four-round lesson
+re-made inside a single round**, and the remedy is the same one that closed it
+there: pin the whole statement, not a substring of it. Five statements are
+pinned now.
+
+**The worst live bug was the control I had just built, and it DELETED things.**
+The select was filled from `enabledLocales()` -- readable `web/_lang/*.php`
+files, two on a stock installation -- while a choice is accepted by
+`isSupported()`, a hard-coded list of thirteen. So a member who had stored `ar`
+matched no option, and because `$langStored !== ''` the "Follow my browser"
+option got no `selected` either: the whole `<select>` carried no `selected`
+attribute, every browser pre-selected the first option, `value=""`, and pressing
+"Save Changes" **to correct a telephone number** posted an empty language and
+wiped their choice. Measured on the real class. **A `<select>` with no
+`selected` option is not neutral -- it is a vote for option one**, and if option
+one means "forget my choice" then every unrelated save is a deletion. The stored
+language is always offered now, labelled "not translated yet, so pages read in
+English" rather than hidden.
+
+**And the label was wrong for exactly the people who would read it.** "Follow my
+browser (X today)" was built from `I18n::locale()` -- the language the page is
+being DRAWN in, which after this very fix IS the member's stored choice. The
+option exists only to undo a choice, so it was shown only to people with one,
+and for every one of them it named the wrong language. `I18n::browserLanguage()`
+exists for this. **When a label describes an alternative, build it from the
+alternative, never from the current state.**
+
+**Two sentences were untrue in the reassuring direction, again.** "Both offer
+the same languages, from the same list" -- the top-bar menu additionally hides
+any language below `portal.i18n.minimum_coverage_for_switcher`, a real seeded
+setting, and `coverage('cy')` measures 0.30, so at the threshold the menu's own
+comment suggests the menu vanishes entirely while the account page still offers
+Welsh. And **D-060, written in the very commit that corrected "no control
+anywhere" and "twelve languages" everywhere else, contained both of them** --
+the register's permanent record of the decision in force, stating the falsehood
+with no correction beside it. It has a note now. **Writing the correction is not
+the same as applying it to the thing you are writing.**
+
+**And a third reader of the column was missed, after I had written the rule for
+finding it.** `ReportRegistry` offers `u.locale` as a displayable, filterable
+column of the Members report, and report definitions are SAVED. Before the
+migration every row held `'en'`; afterwards a saved report showing Locale prints
+blanks and one filtering `Locale = en` -- which matched every member -- matches
+nobody. The commit's own transferable lesson was "ask of any column you are
+about to empty: who else reads it, and what does their fallback do?" It reached
+two of three. **Enumerate with a command** -- `grep -rn "u\.locale\|\`locale\`"
+web/_apps web/_core` answers exactly three -- **not from memory, and not from the
+sweep you did before you wrote the rule.** #780.
+
 **Still open**, each recorded rather than guessed at: a restore from a snapshot
 taken before this migration puts `'en'` back in every row with the migration
 already marked as run, and the portal then reads it as a deliberate choice of
 English (noted in the migration header, on #763); `?lang=` is a state-changing
 GET with no form token, so a third-party page can set a member's language with
 an `<img>` tag -- nuisance rather than data loss, and the top-bar dropdown is a
-GET link by design; and there is still no setting for which languages an
-installation offers, because `isSupported()` reads a hard-coded list and
-`enabledLocales()` reads the filesystem (#779).
+GET link by design; there is still no setting for which languages an installation
+offers, because `isSupported()` reads a hard-coded list and `enabledLocales()`
+reads the filesystem (#779); and a globe click made while signed OUT writes the
+session key, so for that one session a member's own stored language is never
+read -- no cross-member leak, because `Auth::logout()` empties and destroys the
+session.

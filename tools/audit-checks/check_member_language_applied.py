@@ -55,7 +55,12 @@ WHAT IT CHECKS
      cannot be told from a form that never carried the control, and a post from
      anywhere else would silently wipe a member's language. #677 cost this
      project a cleared portal address exactly that way.
-  G. The reconsider call is PASSED a connection. `reconsiderNowSessionExists()`
+  G. The reconsider call, pinned WHOLE. Not "is there an argument": passing
+     the literal `null` satisfied that and does exactly what dropping the
+     argument does -- with no connection the member's `tblUsers.locale` is
+     never read, nothing sets `$_SESSION['user_locale']`, and
+     `resolveLocale()` falls through to `Accept-Language`. The self-test cannot
+     see it either, because it passes a connection explicitly. `reconsiderNowSessionExists()`
      takes a nullable mysqli with a default of null, so `reconsiderNowSessionExists()` with no
      argument is legal PHP, reads as a harmless tidy-up, and **restores the
      member-locale half of #763 completely** -- with no connection the column
@@ -103,6 +108,37 @@ ACCOUNT_SAVE = os.path.join("web", "_apps", "auth", "account", "save.php")
 PINNED_LANG_CONDITION = (
     "if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true "
     "&& $_GET['lang'] !== '') {"
+)
+
+# 📌 The reconsider call, WHOLE.
+#
+# ⚠️ AN EARLIER VERSION ASKED ONLY WHETHER SOMETHING SAT BETWEEN THE BRACKETS,
+#    so `reconsiderNowSessionExists(null)` passed it -- one word, the same harm
+#    as dropping the argument, and the check printed "the reconsider call is
+#    passed a connection" while it was not. Round 1 handed us the spelling
+#    "argument dropped" and we closed that spelling rather than the class,
+#    which is #485's lesson in four rounds, re-made in one.
+PINNED_RECONSIDER_CALL = "I18n::reconsiderNowSessionExists($mysqli ?? null);"
+
+# 📌 The account handler's gate, WHOLE, for the same reason: `false &&` in front
+#    of it left the member's language silently unsaved with the gate green --
+#    the member picks a language, presses Save, is told it worked, and nothing
+#    is stored, ever (#671's "a lie with a Save button").
+PINNED_LOCALE_GATE = (
+    "if (array_key_exists('locale', $_POST) === true "
+    "&& is_string($_POST['locale']) === true) {"
+)
+
+# 📌 The account page's read of the stored choice, WHOLE. Leaving the call in
+#    place and throwing its value away (`$langStored = '';`) was green too, and
+#    the select then always reads "Follow my browser" -- which, with the stored
+#    language no longer an option, is how an unrelated Save came to delete it.
+# ⚠️ Written as the WHITESPACE-FREED form, because that is what it is compared
+#    against. The source has two spaces before the `=` for alignment, and a
+#    first version pinned it with them, so the check failed on correct code --
+#    crying wolf, which gets a check switched off (#483).
+PINNED_STORED_READ = (
+    "$langStored = (string) (\\Portal\\Core\\I18n::storedChoice($userId, $mysqli) ?? '');"
 )
 
 
@@ -332,27 +368,29 @@ def main() -> int:
                     f"check green because the call is still in the file."
                 )
 
-    # G. The reconsider call must be PASSED a connection.
+    # G. The reconsider call, pinned WHOLE.
     #
-    # ⚠️ The parameter is `?\mysqli $db = null`, so dropping the argument is
-    #    legal PHP and reads as a tidy-up -- and it restores the member-locale
-    #    half of #763 in full. The self-test cannot see it: it passes a
-    #    connection explicitly.
-    if reconsider is not None:
-        tail = index_code[reconsider.end():]
-        closing = tail.find(")")
-        inside = tail[:closing] if closing != -1 else ""
-        if inside.strip() == "":
-            line = index_code[:reconsider.start()].count("\n") + 1
-            problems.append(
-                f"{INDEX} line {line}: reconsiderNowSessionExists() is called "
-                f"with NO argument. Its parameter defaults to null, so this is "
-                f"legal PHP and looks harmless -- and with no connection the "
-                f"member's tblUsers.locale is never read, nothing sets "
-                f"$_SESSION['user_locale'], and resolveLocale() falls through to "
-                f"Accept-Language. That is the member-locale half of #763, whole. "
-                f"Pass the request's connection."
-            )
+    # ⚠️ AN EARLIER VERSION ASKED ONLY WHETHER THE BRACKETS HELD ANYTHING, and
+    #    `reconsiderNowSessionExists(null)` passed it. The parameter is a
+    #    nullable mysqli defaulting to null, so both that and dropping the
+    #    argument are legal PHP, read as a tidy-up, and restore the
+    #    member-locale half of #763 in full. Pinning the statement is the only
+    #    reading that does not need us to guess the next spelling.
+    if PINNED_RECONSIDER_CALL not in whitespace_freed(index_keys):
+        problems.append(
+            f"{INDEX}: the reconsiderNowSessionExists() call is not what it was "
+            f"pinned as.\n"
+            f"       pinned: {PINNED_RECONSIDER_CALL}\n"
+            f"       It must be passed THIS REQUEST's connection. Its parameter "
+            f"defaults to null, so both `()` and `(null)` are legal PHP and look "
+            f"like a tidy-up -- and with no connection the member's "
+            f"tblUsers.locale is never read, nothing sets "
+            f"$_SESSION['user_locale'], and resolveLocale() falls through to "
+            f"Accept-Language. That is the member-locale half of #763, whole, and "
+            f"no self-test can see it because they all pass a connection.\n"
+            f"       If the change is deliberate, update PINNED_RECONSIDER_CALL "
+            f"in {os.path.basename(__file__)} as a separate, visible act."
+        )
 
     # H. The account page's control, and its handler.
     with open(os.path.join(root, ACCOUNT), "r", encoding="utf-8") as handle:
@@ -362,20 +400,73 @@ def main() -> int:
     save_code = readable_code(save_raw)
     save_keys = readable_code(save_raw, mask_strings=False)
 
-    if re.search(r"name=.locale.", account_keys) is None:
+    field = re.search(r"<select[^>]*name=.locale.[^>]*>", account_keys)
+    if field is None:
         problems.append(
-            f"{ACCOUNT} no longer offers a language control (no field named "
+            f"{ACCOUNT} no longer offers a language control (no <select> named "
             f"'locale'). D-062 put it there because the top-bar menu CHANGES a "
             f"language but is not a place a member can see what the portal has "
             f"stored about them, and offers no way back to following their "
             f"browser."
         )
-    if "I18n::storedChoice" not in account_keys:
+    elif re.search(r"\bdisabled\b|\btype=.hidden.", field.group(0)) is not None:
+        # ⚠️ A `disabled` control IS NOT SUBMITTED, so the handler sees no
+        #    field, decides nothing, and the member's choice is never stored --
+        #    while this check stays green over a control that looks present.
+        #    That is the GoCardless lesson (#569): disabling the option would
+        #    have made Save switch the payment provider silently.
         problems.append(
-            f"{ACCOUNT} does not ask I18n::storedChoice(). Reading the column "
-            f"here instead would be a second reader of one fact, and two "
-            f"readers of a language can disagree -- which is how this page came "
-            f"to tell every member their language was 'en'."
+            f"{ACCOUNT}: the language control is disabled or hidden. A disabled "
+            f"control is NOT submitted, so the handler sees no field and stores "
+            f"nothing, and a hidden one cannot be used -- either way the member "
+            f"has a control that does nothing while this check reads it as "
+            f"present."
+        )
+    # ⚠️ PINNED WHOLE. Leaving the call in place and discarding its value
+    #    (`$langStored = '';`) was green against a presence-only check, and the
+    #    select then always reads "Follow my browser" -- which is how an
+    #    unrelated Save came to delete a stored choice.
+    if PINNED_STORED_READ not in whitespace_freed(account_keys):
+        problems.append(
+            f"{ACCOUNT}: the read of the stored language is not what it was "
+            f"pinned as.\n"
+            f"       pinned: {PINNED_STORED_READ}\n"
+            f"       It must ask I18n::storedChoice() -- reading the column here "
+            f"instead is a second reader of one fact, and two readers of a "
+            f"language can disagree, which is how this page came to tell every "
+            f"member their language was 'en' -- and its VALUE must reach the "
+            f"select, because a select that always shows 'Follow my browser' "
+            f"deletes the member's choice on the next Save.\n"
+            f"       If the change is deliberate, update PINNED_STORED_READ in "
+            f"{os.path.basename(__file__)} as a separate, visible act."
+        )
+
+    # The stored language must be offered even when it has no translation file,
+    # or it matches no option, nothing is `selected`, every browser pre-selects
+    # "Follow my browser", and an unrelated Save wipes it. Measured.
+    if "isset($langChoices[$langStored]) === false" not in whitespace_freed(account_keys):
+        problems.append(
+            f"{ACCOUNT} no longer offers the member's STORED language when it is "
+            f"absent from enabledLocales(). enabledLocales() lists readable "
+            f"web/_lang/*.php files -- two on a stock installation -- while "
+            f"isSupported() accepts any of the thirteen the code knows, so a "
+            f"stored 'ar' matches no option, nothing carries `selected`, every "
+            f"browser pre-selects value=\"\", and pressing Save to correct a "
+            f"TELEPHONE NUMBER deletes the member's language. The page also "
+            f"states something untrue about what the portal holds."
+        )
+
+    # And "Follow my browser (X)" must name what the BROWSER asks for, never
+    # I18n::locale() -- which, for anybody with a stored choice, IS that choice.
+    if "I18n::browserLanguage" not in account_keys:
+        problems.append(
+            f"{ACCOUNT}: the 'Follow my browser' label does not ask "
+            f"I18n::browserLanguage(). Built from I18n::locale() it names the "
+            f"language the page is being DRAWN in, which for anybody who has a "
+            f"stored choice is that choice -- so the label was wrong for every "
+            f"single person who would ever read it, the option existing only to "
+            f"undo a choice. Measured: stored cy, Accept-Language fr, label said "
+            f"Cymraeg, answer would be Fran\u00e7ais."
         )
     if "I18n::enabledLocales" not in account_keys:
         problems.append(
@@ -394,16 +485,41 @@ def main() -> int:
             f"also exactly one, in the wrong place, and that is the whole of "
             f"#763."
         )
-    if re.search(r"array_key_exists\s*\(\s*'locale'\s*,\s*\$_POST\s*\)", save_keys) is None:
+    # ⚠️ PINNED WHOLE, not matched for the array_key_exists() call alone: one
+    #    `false &&` in front of that condition left the member's language
+    #    silently unsaved with this check green. They pick a language, press
+    #    Save, are told it worked, and nothing is stored, ever.
+    if PINNED_LOCALE_GATE not in whitespace_freed(save_keys):
         problems.append(
-            f"{ACCOUNT_SAVE} does not ask whether the 'locale' field ARRIVED "
-            f"(array_key_exists('locale', $_POST)). An empty value is a real "
-            f"instruction here -- forget my choice and follow my browser -- so "
-            f"reading it as $_POST['locale'] ?? '' cannot be told from a form "
-            f"that never carried the control, and any post to this handler from "
-            f"elsewhere would silently wipe the member's language. #677 cost "
-            f"this project a cleared portal address the same way."
+            f"{ACCOUNT_SAVE}: the language gate is not what it was pinned as.\n"
+            f"       pinned: {PINNED_LOCALE_GATE}\n"
+            f"       Two things it holds at once. It must ask whether the field "
+            f"ARRIVED, because an empty value is a real instruction here -- "
+            f"forget my choice and follow my browser -- so $_POST['locale'] ?? "
+            f"'' cannot be told from a form that never carried the control, and "
+            f"any post to this handler from elsewhere would wipe the member's "
+            f"language (#677 cost a cleared portal address to that exact shape). "
+            f"And it is pinned as a WHOLE condition, because `false &&` in front "
+            f"of it is a control that reports success and saves nothing.\n"
+            f"       If the change is deliberate, update PINNED_LOCALE_GATE in "
+            f"{os.path.basename(__file__)} as a separate, visible act."
         )
+
+    # And `chooseLanguage()` must sit inside that gate, one level in -- not
+    # above it, where it would run on every profile save, and not two levels in,
+    # where something else would be deciding.
+    gate_at = whitespace_freed(save_keys).find(PINNED_LOCALE_GATE)
+    choose_at = save_code.find("I18n::chooseLanguage")
+    if gate_at != -1 and choose_at != -1:
+        depth = brace_depth(save_code, choose_at)
+        gate_raw = save_code.find("array_key_exists")
+        if gate_raw != -1 and depth != brace_depth(save_code, gate_raw) + 1:
+            problems.append(
+                f"{ACCOUNT_SAVE}: I18n::chooseLanguage() is not directly inside "
+                f"the pinned gate. Above it, it runs on every profile save and a "
+                f"post without the control wipes the language; deeper, something "
+                f"else is deciding whether a member's choice is stored."
+            )
 
     print(
         "Member language applied: index.php read "
@@ -426,8 +542,9 @@ def main() -> int:
     print(
         "OK: the language question is asked after the session starts, start-up "
         "asks it nowhere, neither call is behind a condition, the reconsider call "
-        "is passed a connection, the ?lang= condition is as pinned, and the "
-        "account page offers the control through the one reader and the one writer."
+        "is pinned whole, the ?lang= condition is as pinned, and the account page "
+        "offers the control -- including a stored language with no translation "
+        "file -- through the one reader and the one writer."
     )
     print(
         "   It cannot tell whether a page RENDERS in that language -- that needs "

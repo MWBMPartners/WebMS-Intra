@@ -42,7 +42,19 @@ Translate button starts really translating and **charging**, because it reads
 the same column and falls back to the browser. The owner accepted that
 deliberately (D-063). **Three of the first five plants also got past the hard
 gate** — `if (false)`, the argument dropped (legal PHP, restores half the
-fault), and `&& false` on the condition. Thirteen plants now, all caught.
+fault), and `&& false` on the condition.
+
+**Round 2 then found seven more, six in round 1's fixes, and the headline is one
+sentence: I closed the spellings I was handed.** The gate was taught to ask
+whether the brackets held anything, so `reconsiderNowSessionExists(null)` passed
+it — one word, the same harm, while the check printed "the reconsider call is
+passed a connection". Five whole statements are pinned now. **And the worst live
+bug was the control I had just built: it deleted things.** The select listed
+`enabledLocales()` (two languages on a stock install) while a choice is accepted
+from a hard-coded thirteen, so a stored `ar` matched no option and nothing
+carried `selected` — and a `<select>` with no `selected` option is a vote for
+option one, which here means "forget my choice". Pressing Save to correct a
+telephone number wiped the member's language.
 
 **#768 (before it) — one place writes the form token, every carrier (D-050).**
 Five copies, no two agreeing how many carriers a page has, and the shared one
@@ -51,9 +63,10 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 round 2 is built and awaiting its next check** (the protected arm of
-D-051 — it writes and deletes stored data, so rounds run until one is clean).
-All twelve round-1 findings are addressed. Everything else below is unstarted.
+**#763 round 3 is built and awaiting its check** (the protected arm of D-051 —
+it writes and deletes stored data, so rounds run until one is clean). Round 1
+found twelve, round 2 found seven, **six of the seven in round 1's own fixes**.
+Everything else below is unstarted.
 
 ## Next, in this order
 
@@ -110,8 +123,14 @@ as the evidence), #549's arithmetic half, #767, #765, #768, #763.
 
 ## The lesson this run earned, in one line
 
-**A claim that something does not exist ANYWHERE needs the search that
-establishes it — exactly as a claim about history needs its `git log`.** This
+**Closing the spelling you were handed is not closing the class**, and
+**writing a correction is not the same as applying it to the thing you are
+writing** — D-060 was created in the commit that corrected its own two
+falsehoods everywhere else. Both are old lessons here (#485 took four rounds for
+the first), re-made inside a single package.
+
+**Runner-up, and still worth its own line:** a claim that something does not
+exist ANYWHERE needs the search that establishes it — exactly as a claim about history needs its `git log`.** This
 repository already has that rule, written for the past tense ("a claim that
 something never worked must carry the command that proved it"), and I broke it
 in the present tense: "there is no control anywhere for choosing a language"
@@ -175,7 +194,8 @@ list names them; it never restates them. **63 on file.**
 | Issue | What |
 |---|---|
 | #769 | Nothing exercises `api/livechat/prompt-publish`; no test drove two rotating actions in sequence |
-| #779 | A member has nowhere to choose their language (D-061) |
+| #779 | No setting for which languages an installation offers (D-062) |
+| #780 | Saved reports filtering on a member's language changed answer at migration 251 |
 | #762 | The spend limit cannot bite on the LibreTranslate route (D-059 answers it) |
 | #764 | Three smaller findings from #485/#761 |
 | #765 | Translation spend is counted installation-wide |

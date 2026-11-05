@@ -2894,9 +2894,54 @@ over two rounds. **THREE of the first five got past the gate:** the
 call wrapped in `if (false)`, the call with its ARGUMENT DROPPED
 (legal PHP, the parameter defaults to null, and it restores half of
 #763 while reading as a tidy-up), and `&& false` appended to the
-`?lang=` condition. Brace depth is compared with
-`Auth::ensureSession()`'s, the argument is required, and the whole
-condition is pinned as one string. **Neither can
+`?lang=` condition.
+
+**A SECOND ROUND FOUND SEVEN MORE, SIX IN ROUND 1'S OWN FIXES, AND THE
+HEADLINE IS: THE SPELLINGS I WAS HANDED WERE CLOSED, NOT THE CLASS.**
+Round 1's plant was "the argument dropped", so the gate asked whether
+the brackets held anything -- and `reconsiderNowSessionExists(null)`
+passed it: one word, the same harm, while the check printed "the
+reconsider call is passed a connection". The account checks were
+presence-only, so `false &&` on the save gate left a member picking a
+language, pressing Save, being told it worked and nothing stored.
+**#485's four-round lesson re-made inside one round. The remedy is the
+same: pin the WHOLE statement.** Five are pinned now.
+
+**The worst live bug was the control just built, and it DELETED
+things.** The select was filled from `enabledLocales()` -- readable
+`_lang/*.php` files, two on a stock installation -- while a choice is
+accepted by `isSupported()`, a hard-coded thirteen. A stored `ar`
+matched no option, and `$langStored !== ''` denied the empty option
+its `selected` too. **A `<select>` with no `selected` option is not
+neutral; it is a vote for option one** -- so every browser pre-selected
+`value=""`, and pressing Save to correct a TELEPHONE NUMBER wiped the
+member's language. The stored language is always offered now, labelled
+rather than hidden.
+
+**And the "Follow my browser (X today)" label was built from
+`I18n::locale()`** -- the language the page is DRAWN in, which after
+this fix IS the stored choice -- so it was wrong for every single
+person who would read it, the option existing only to undo a choice.
+`I18n::browserLanguage()` exists for that. **When a label describes an
+alternative, build it from the alternative, never from the current
+state.**
+
+Two more reassuring untruths: "both offer the same languages" (the
+menu also hides anything below
+`portal.i18n.minimum_coverage_for_switcher`, and `coverage('cy')` is
+0.30, so at the threshold the MENU VANISHES while the account page
+still offers Welsh); and **D-060, written in the very commit that
+corrected "no control anywhere" and "twelve languages" everywhere
+else, contained both.** It has a note now. **Writing a correction is
+not the same as applying it to the thing you are writing.**
+
+And **a third reader of the column was missed after the rule for
+finding it had been written**: `ReportRegistry` offers `u.locale` on
+the Members report, and report definitions are SAVED, so a saved
+filter `Locale = en` went from matching everybody to matching nobody
+(#780). Enumerate with
+`grep -rn "u\.locale\|\`locale\`" web/_apps web/_core`, which
+answers exactly three -- not from memory. **Neither can
 tell whether a page RENDERS in the chosen language** — that needs HTTP
 and a seeded installation, and both say so in their own output. The
 technical record is DEV_NOTES.md, "A question asked too early (#763)".

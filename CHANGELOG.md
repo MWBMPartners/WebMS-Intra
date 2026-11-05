@@ -37,11 +37,21 @@ page since March 2026, signed in and signed out, and it has never done
 anything: one click now sets a member's language for good, on every device they
 sign in on. A language control has also been added to the account page, beside
 their name and telephone number, with a "Follow my browser" option so a choice
-can be undone (D-062). Both offer the same languages, from the same list.
+can be undone (D-062).
 
-**Two things DO change on the day this ships, and one of them costs money.** An
+The two do **not** always offer the same languages, and the account page says
+so. The top-bar menu hides any language translated less thoroughly than
+`portal.i18n.minimum_coverage_for_switcher` allows, which an administrator can
+set; the account page does not, because that is where a member needs to see and
+change what the portal actually holds about them. The account page also always
+offers the language a member has already stored, **even one with no translation
+file at all** — leaving it out meant it matched no option, so every browser
+pre-selected "Follow my browser" and pressing Save to correct a telephone
+number silently deleted their language.
+
+**THREE things change on the day this ships, and one of them costs money.** An
 earlier draft of this entry said nothing anybody sees changes, which was wrong
-twice over. The globe menu starts working, as above. And the **Translate**
+three times over. The globe menu starts working, as above. And the **Translate**
 button reads the same stored language to decide what to translate *into*,
 falling back to the browser's language when nothing is stored — so for a member
 whose browser asks for something other than English it will now really
@@ -50,6 +60,13 @@ English, saw English and charged nothing. The owner accepted that deliberately
 (D-063): it is what the feature is for. The exposure is bounded — translation
 ships switched off and each member must also switch it on for themselves — and
 the monthly money limit and translation count still apply.
+
+**And the Members report changes answer.** It offers the stored language as a
+column you can show and filter on, and report definitions are saved. Every row
+held "en" before; an un-chosen row is now empty. So a saved report showing
+Locale prints blanks, and one filtering `Locale = en` — which used to match
+every member — now matches nobody, with nothing warning whoever saved it.
+Tracked separately rather than guessed at.
 
 Guards: `tools/i18n-member-language-selftest.php` (34 checks, with a real
 MySQL, including the fault put back) and the hard gate

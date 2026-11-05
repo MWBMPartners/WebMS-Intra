@@ -37,6 +37,18 @@ work rather than later.
 the sentence "there is no control anywhere" in any document; and deferring the
 account-page control to a later package.
 
+**One thing measured while building it, because the obvious design was
+wrong.** The account page must offer the language a member has ALREADY STORED
+even when it has no translation file, and must not simply list
+`enabledLocales()`. That list is readable `web/_lang/*.php` files — two on a
+stock installation — while a choice is accepted by `isSupported()`, a
+hard-coded list of thirteen. A stored `ar` therefore matched no option, nothing
+carried `selected`, every browser pre-selected "Follow my browser", and
+pressing Save to correct a telephone number deleted the member's language. The
+two controls also do not offer the same languages: the top-bar menu hides any
+language below `portal.i18n.minimum_coverage_for_switcher`, and the account
+page says so rather than claiming they match.
+
 **What this does NOT settle**, each still on #779: there is no way to clear a
 stored choice back to "follow my browser"; there is no setting for which
 languages an installation offers (`isSupported()` reads a hard-coded list of

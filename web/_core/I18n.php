@@ -480,6 +480,27 @@ class I18n
     }
 
     /**
+     * 🌍 What the browser is asking for — the ONE public answer to that.
+     *
+     * The account page's "Follow my browser" option names this, and it has to
+     * be this rather than `locale()`. **`locale()` is the language the page is
+     * being drawn in, which for anybody who HAS a stored choice IS that stored
+     * choice** — so a first version of that label said "Follow my browser
+     * (Cymraeg today)" to a member whose browser asks for French, which is the
+     * wrong language for exactly the people the option exists for. Measured:
+     * stored `cy`, `Accept-Language: fr`, label said Cymraeg, answer would be
+     * Français.
+     *
+     * @return string|null The matched code, or null when the browser asks for
+     *                     nothing this portal knows — in which case the
+     *                     installation's default decides and the page says so.
+     */
+    public static function browserLanguage(): ?string
+    {
+        return self::detectBrowserLocale();
+    }
+
+    /**
      * 🗣️ Read a member's stored language choice — the ONE place it is read.
      *
      * Both the resolver (`reconsiderNowSessionExists()`) and the control on the

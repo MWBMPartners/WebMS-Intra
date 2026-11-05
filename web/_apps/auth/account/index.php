@@ -361,40 +361,70 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     //    it offers no way back to "follow my browser". Both are
                     //    why this is here.
                     //
-                    //    The list is `I18n::enabledLocales()`, the same list the
-                    //    top-bar menu uses, so the two can never offer different
-                    //    languages. That also keeps a right-to-left language with
-                    //    no translation file off the list, which would otherwise
-                    //    give a right-to-left page of English words.
+                    //    `App::user()` does not select `locale`, and widening that
+                    //    shared, cached read for one control would reach every
+                    //    page, so `I18n::storedChoice()` is asked — the one place
+                    //    the stored choice is read, which the resolver also asks.
                     //
                     //    An EMPTY value means "forget my choice". That is not a
                     //    nicety: on this portal an empty stored language IS "not
                     //    chosen" (D-060), so without it a member who once picked
                     //    a language could never go back to being asked.
-                    //    `App::user()` does not select `locale`, and widening that
-                    //    shared, cached read for one control would reach every page.
-                    //    `I18n::storedChoice()` is the one place the stored choice is
-                    //    read, and the resolver asks the same method.
-                    $langChoices = \Portal\Core\I18n::enabledLocales();
                     $langStored  = (string) (\Portal\Core\I18n::storedChoice($userId, $mysqli) ?? '');
+                    $langChoices = \Portal\Core\I18n::enabledLocales();
+
+                    // 🚨 THE STORED LANGUAGE IS ALWAYS AN OPTION, EVEN WHEN IT
+                    //    HAS NO TRANSLATION FILE, AND LEAVING IT OUT SILENTLY
+                    //    DELETED IT. `enabledLocales()` lists readable
+                    //    `web/_lang/*.php` files — two on a stock installation —
+                    //    while `isSupported()` ACCEPTS any of the thirteen the
+                    //    code knows. So a member who had stored `ar` matched no
+                    //    option, and `$langStored !== ''` meant the "Follow my
+                    //    browser" option got no `selected` either: the whole
+                    //    `<select>` carried no `selected` attribute, every
+                    //    browser pre-selected the first option, `value=""`, and
+                    //    pressing "Save Changes" to correct a TELEPHONE NUMBER
+                    //    posted an empty language and wiped their choice. The
+                    //    page also stated something untrue about what the portal
+                    //    holds. Measured on the real class: stored `ar`, rendered
+                    //    options `"" / en / cy`, not one of them `selected`.
+                    //
+                    //    That is the #667 and #677 shape, which this very package
+                    //    cites twice in its own comments. Reachable by hand-typing
+                    //    `?lang=ar`, and by a deployment that later removes a
+                    //    `_lang` file members had already chosen.
+                    //
+                    //    So it is offered, and labelled honestly rather than
+                    //    hidden: the member can see what they chose and change it.
+                    if ($langStored !== '' && isset($langChoices[$langStored]) === false) {
+                        $langStoredMeta = \Portal\Core\I18n::localeMeta($langStored);
+                        $langChoices[$langStored] = [
+                            'native' => ($langStoredMeta['native'] ?? $langStored)
+                                . ' — not translated yet, so pages read in English',
+                        ];
+                    }
+
+                    // 🌍 What "follow my browser" would REALLY give, which is NOT
+                    //    `I18n::locale()`. That is the language this page is being
+                    //    drawn in, and for anybody who HAS a stored choice it IS
+                    //    that choice — so a first version of this label told a
+                    //    member whose browser asks for French that following their
+                    //    browser meant Welsh. It is only ever read by somebody with
+                    //    a choice to undo, so it was wrong for every single person
+                    //    who would look at it.
+                    $langBrowser     = \Portal\Core\I18n::browserLanguage();
+                    $langBrowserMeta = $langBrowser === null
+                        ? null
+                        : \Portal\Core\I18n::localeMeta($langBrowser);
+                    $langBrowserWords = $langBrowser === null
+                        ? 'your browser asks for nothing this portal offers, so the default is used'
+                        : ((string) ($langBrowserMeta['native'] ?? $langBrowser)) . ' today';
                     ?>
                     <div class="mb-3">
                         <label for="locale" class="form-label">Language</label>
                         <select class="form-select" id="locale" name="locale">
                             <option value=""<?php echo $langStored === '' ? ' selected' : ''; ?>>
-                                Follow my browser<?php
-                                    // What that actually means right now, so the
-                                    // choice is not an abstraction.
-                                    $langNowMeta = \Portal\Core\I18n::localeMeta(
-                                        \Portal\Core\I18n::locale()
-                                    );
-                                    echo ' (' . htmlspecialchars(
-                                        (string) ($langNowMeta['native']
-                                            ?? \Portal\Core\I18n::locale()),
-                                        ENT_QUOTES,
-                                        'UTF-8'
-                                    ) . ' today)';
-                                ?>
+                                Follow my browser (<?php echo htmlspecialchars($langBrowserWords, ENT_QUOTES, 'UTF-8'); ?>)
                             </option>
                             <?php foreach ($langChoices as $langCode => $langMeta): ?>
                                 <option value="<?php echo htmlspecialchars((string) $langCode, ENT_QUOTES, 'UTF-8'); ?>"
@@ -405,7 +435,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </select>
                         <div class="form-text">
                             The language the portal is shown in. It follows you to
-                            any device you sign in on.
+                            any device you sign in on. The globe menu at the top of
+                            every page changes it too; that menu can offer fewer
+                            languages than this list, because an administrator may
+                            hide the ones that are only part-translated.
                         </div>
                     </div>
 
