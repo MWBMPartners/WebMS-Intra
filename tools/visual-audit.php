@@ -218,6 +218,31 @@ file_put_contents(
 );
 file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', bin2hex(random_bytes(32)));
 
+// 🔑 A FRESH KEY CANNOT READ A SECRET ENCRYPTED WITH ANY OTHER ONE, and
+//    leaving those rows makes the portal log a CRITICAL error on every page —
+//    so the audit failed for a reason that had nothing to do with the pages.
+//
+//    It happened the first time this ran against a database that had been used
+//    for an earlier run: `Recordings::podcastToken()` had minted a token and
+//    stored it encrypted, this run wrote a NEW key, and every page load then
+//    recorded "1 stored secret cannot be read with this installation's key
+//    file". The portal was behaving correctly; the FIXTURE was inconsistent.
+//
+//    This is a throwaway database and a throwaway key, so the honest fix is to
+//    empty the secrets rather than pretend to hold them. **A real installation
+//    keeps its key and must never do this** — which is why it lives here, in
+//    the audit's own setup, and not anywhere under `web/`.
+$secrets = $db->query('SELECT COUNT(*) AS `n` FROM `tblSettings` '
+    . "WHERE `isSensitive` = 1 AND `settingValue` <> ''");
+$howMany = (int) ($secrets->fetch_assoc()['n'] ?? 0);
+$secrets->free();
+if ($howMany > 0) {
+    $db->query("UPDATE `tblSettings` SET `settingValue` = '' WHERE `isSensitive` = 1");
+    echo "Emptied {$howMany} stored secret(s): this run minted a new key, so nothing\n"
+        . "  could read them and every page would have logged a critical error about\n"
+        . "  the fixture rather than about itself.\n";
+}
+
 // 🛣️ The router imitates web/public_html/.htaccess, as the other page tests do.
 $router = <<<'ROUTER'
 <?php
@@ -318,20 +343,70 @@ if ($up === false) {
         . 'Its log is in the temporary folder, which is about to be removed');
 }
 
-// 📄 The pages a signed-OUT visitor can reach. Each is asked for over HTTP
-//    FIRST: a page that does not answer 200 is left out and SAID SO, because
-//    photographing an error page and calling it clean is exactly the kind of
-//    quiet pass this project keeps finding.
-$candidates = [
-    '/'                           => 'the front door',
-    '/login'                      => 'the sign-in page',
-    '/forgot-password'            => 'asking for a password reset',
-    '/help'                       => 'the help index',
-    '/visit'                      => 'the visitor page',
-    '/prayer-requests/anonymous'  => 'sending a prayer request without signing in',
-    '/unsubscribe'                => 'unsubscribing from e-mails',
-    '/error.php'                  => 'the stand-alone error page',
-];
+// 📄 The pages a signed-OUT visitor can reach, TAKEN FROM THE ROUTES TABLE
+//    RATHER THAN TYPED OUT (#569).
+//
+//    🚨 THE HAND-WRITTEN LIST WAS EIGHT ADDRESSES AND FOUR DISTINCT PAGES,
+//       while the portal has FORTY-TWO signed-out pages a person can actually
+//       open. Its own header said so — "a narrow first pass, not coverage" —
+//       and that honesty is exactly why it had to stop being hand-written: a
+//       list somebody maintains is a list that falls behind the moment a page
+//       is added, and nothing would say so.
+//
+//       Now it asks the database. `isProtected = 0` is the portal's own answer
+//       to "can a signed-out visitor reach this", so the audit cannot drift
+//       from what the portal actually serves.
+//
+//    WHAT IS LEFT OUT, and why each is not a page a person looks at:
+//      * `cron/…`      — scheduled jobs; they answer 403 without a token.
+//      * `…/save`, `…-action`, `…/verify`, `api/…` — handlers that expect a
+//        POST. A GET of one is not a page.
+//      * `.ics`, `.json`, `.xml`, `.txt`, `manifest`, `openapi`, `robots`,
+//        `sitemap` — machine-readable answers, not pages.
+//      * `…/serve`, `…/media`, `…/track/…` — files and tracking pixels.
+//      * Anything needing a token or an argument to mean anything —
+//        `unsubscribe`, `auth/invite`, `calendar/rsvp-by-link`,
+//        `account/erasure-confirm`, `privacy/consent`, `login/webauthn`.
+//
+//    Each surviving address is still asked for over HTTP FIRST: a page that
+//    does not answer 200 is left out and SAID SO, because photographing an
+//    error page and calling it clean is exactly the kind of quiet pass this
+//    project keeps finding.
+$notAPage = '~^cron/|/save$|-action$|/verify$|(^|/)api/|\.(ics|json|xml|txt)$'
+    . '|^manifest|^openapi|^robots|^sitemap'
+    . '|/serve$|/media$|/track/'
+    . '|^unsubscribe$|^auth/invite$|^calendar/rsvp-by-link$|^account/erasure-confirm$'
+    . '|^privacy/consent$|^login/webauthn$|^calendar/export$~';
+
+$candidates = ['/' => 'the front door', '/error.php' => 'the stand-alone error page'];
+$rows = $db->query('SELECT `routeKey` FROM `tblRoutes` WHERE `isProtected` = 0 ORDER BY `routeKey`');
+while (($row = $rows->fetch_assoc()) !== null) {
+    $key = (string) $row['routeKey'];
+    if (preg_match($notAPage, $key) === 1) {
+        continue;
+    }
+    $candidates['/' . $key] = 'a page a visitor can open';
+}
+$rows->free();
+
+// 📌 THE HIGH-WATER MARK, TAKEN BEFORE ANY PAGE IS FETCHED.
+//
+//    🚨 THIS USED TO COUNT EVERY ROW IN `tblErrors`, so ONE row left by an
+//       earlier run made every later run fail — and the failure named a page
+//       this run had not broken. Measured: a run reported "at /login" for an
+//       error recorded forty minutes earlier by a different run.
+//
+//       That is #671's recorded remedy, in a new place: "read `MAX(logID)`
+//       BEFORE `exec()` and ask only about rows after it." A run must report
+//       what IT caused, or the report is about somebody else.
+$beforeRun = 0;
+mysqli_report(MYSQLI_REPORT_OFF);
+$markRow = @$db->query('SELECT COALESCE(MAX(`errorID`), 0) AS `high` FROM `tblErrors`');
+if ($markRow !== false) {
+    $beforeRun = (int) ($markRow->fetch_assoc()['high'] ?? 0);
+    $markRow->free();
+}
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 echo "Portal up on 127.0.0.1:{$port}; checking which pages answer\n";
 $pages = [];
@@ -375,25 +450,60 @@ echo implode("\n", $lines) . "\n";
 
 echo str_repeat('-', 72) . "\n";
 if (count($skipped) > 0) {
-    echo "NOT looked at, because they did not answer 200: "
-        . implode(', ', array_map(
-            static fn (string $p, int $s): string => $p . ' (' . $s . ')',
-            array_keys($skipped),
-            array_values($skipped)
-        )) . "\n";
-    // ❗ A page that answers 500 is a FAILURE, not a page to pass over. An
-    //    earlier version only refused when NOT ONE page answered, so a fatal
-    //    in a single page printed "SKIPPED" and the run still exited 0 --
-    //    the quiet pass this script's own comment says it exists to avoid.
-    //    The three below CANNOT answer 200 in a default install and are not
-    //    failures: /visit needs `visitors.public_capture_enabled`,
-    //    /unsubscribe needs a token, and error.php returns the status it is
-    //    given. Anything else means a page that used to work has stopped.
-    $expected = ['/visit', '/unsubscribe', '/error.php'];
-    $unexpected = array_diff(array_keys($skipped), $expected);
-    if (count($unexpected) > 0) {
-        echo "\n❗ THESE USED TO ANSWER AND NOW DO NOT: " . implode(', ', $unexpected) . "\n"
-            . "   That is a failure of this audit, not a page to skip over.\n";
+    // 📋 WHY A PAGE WAS NOT LOOKED AT, split into the two kinds — because they
+    //    are not the same news and one of them is a failure.
+    //    A page that needs an ARGUMENT cannot answer on its own.
+    //
+    //    🚨 THIS USED TO BE A HAND-WRITTEN LIST OF THREE ADDRESSES, and
+    //       widening the audit from 4 distinct pages to 50 turned it into a
+    //       wolf-crier: fifteen pages that have never been able to answer
+    //       without an argument were all reported as "used to answer and now
+    //       do not", and the run failed because of it. `/calendar/event` needs
+    //       an event, `/photos/album` needs an album, `/projects/pledge` needs
+    //       a project. None is broken; none was ever in the old list, because
+    //       the old list only had to cover four pages.
+    //
+    //       So it judges by WHAT THE PORTAL SAID rather than by a list
+    //       somebody keeps:
+    //         * 400 — it wanted an argument it did not get
+    //         * 403 — it wants a token this audit does not have
+    //         * 404 — it was asked about something that is not there, because
+    //                 this is an empty portal with no fixture data
+    //       Each of those is "cannot answer without something", not "broken".
+    //
+    //       **A 500, or no answer at all, IS a failure** and still fails the
+    //       run: that is a page that threw, which is exactly what this audit
+    //       is for. An address with no page behind it is caught elsewhere, by
+    //       `/admin/check` and `check_webroot_shadowing.py`, so nothing is
+    //       lost by not treating a 404 as one here.
+    // `/error.php` is the one address that answers with a status BY DESIGN —
+    // it returns whatever it is given, and 500 is its default when nothing
+    // asks for anything else. It is not a page that threw, and treating it as
+    // one would make every run fail for ever.
+    $answersWithAStatus = ['/error.php'];
+
+    $needsSomething = [];
+    $reallyBroken   = [];
+    foreach ($skipped as $path => $status) {
+        if (in_array($path, $answersWithAStatus, true) === true) {
+            $needsSomething[] = $path . ' (' . $status . ', which is what it is for)';
+            continue;
+        }
+        if (in_array((int) $status, [400, 403, 404], true) === true) {
+            $needsSomething[] = $path . ' (' . $status . ')';
+            continue;
+        }
+        $reallyBroken[] = $path . ' (' . $status . ')';
+    }
+    if (count($needsSomething) > 0) {
+        echo "\nNot looked at, because each needs an argument, a token or data this\n"
+            . "audit does not have — not because anything is broken:\n   "
+            . implode(', ', $needsSomething) . "\n";
+    }
+    if (count($reallyBroken) > 0) {
+        echo "\n❗ THESE ANSWERED WITH AN ERROR, WHICH IS A FAILURE: "
+            . implode(', ', $reallyBroken) . "\n"
+            . "   A page that throws is exactly what this audit exists to find.\n";
         $code = $code === 0 ? 1 : $code;
     }
 }
@@ -426,7 +536,7 @@ if (is_file($errLog) === true && trim((string) file_get_contents($errLog)) !== '
 
 // Reporting must never be what kills the run. mysqli throws by default here.
 mysqli_report(MYSQLI_REPORT_OFF);
-$errRows = @$db->query('SELECT COUNT(*) AS n FROM tblErrors');
+$errRows = @$db->query('SELECT COUNT(*) AS n FROM tblErrors WHERE errorID > ' . $beforeRun);
 $errCount = $errRows !== false ? (int) ($errRows->fetch_assoc()['n'] ?? 0) : 0;
 if ($errCount > 0) {
     echo "\n❗ THE PORTAL RECORDED {$errCount} ERROR(S) IN tblErrors while these pages\n"
@@ -438,7 +548,7 @@ if ($errCount > 0) {
     // at the very moment it was trying to report somebody else's fatal.
     $recent = $db->query(
         'SELECT errorPlatform, errorSeverity, errorCode, errorTitle, requestURL '
-        . 'FROM tblErrors ORDER BY errorID DESC LIMIT 5'
+        . 'FROM tblErrors WHERE errorID > ' . $beforeRun . ' ORDER BY errorID DESC LIMIT 5'
     );
     if ($recent !== false) {
         while (($row = $recent->fetch_assoc()) !== null) {
