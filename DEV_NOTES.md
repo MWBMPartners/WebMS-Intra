@@ -17758,10 +17758,56 @@ missing and has **no fallback to reading the PHP itself**, because six rounds
 proved there is no second-best reading to drop to. After that, `$endif` is a
 `T_VARIABLE` and `endif` is `T_ENDIF`; `#[` is an attribute; a brace in a
 heredoc is part of an encapsed string; a `'?>'` in a string is a string; and PHP
-in an HTML comment is PHP. **None of the six spellings is expressible any more,
-and neither are the ones nobody has thought of**, because the distinctions were
-never in the text — they are in the grammar. Fourteen wrapping spellings go red;
-all three cry-wolf cases stay green.
+in an HTML comment is PHP. **None of the six spellings is expressible any
+more**, because the distinctions were never in the text — they are in the
+grammar.
+
+**A FIRST VERSION OF THAT SENTENCE ADDED "and neither are the ones nobody has
+thought of", AND THE SEVENTH ROUND MEASURED THREE THAT ARE.** Each is one
+ordinary statement, one line above a region, `php -l` clean, killing the region
+with the probe reporting no change at all:
+
+    if (true) { exit; }
+    { exit; }                 (a bare block — it runs unconditionally)
+    while (true) { }
+
+The first two are braced, so the `exit` sits a level deeper than the region and
+the own-level test skipped it. **They are caught now**, by a second count of
+exits at ANY depth above the region, whose cost is stated rather than hidden:
+adding a new guard above the region needs a `--repin`, which is a visible act,
+and an exit newly placed above the code that stores somebody's language is worth
+having to acknowledge.
+
+**The third is not caught and cannot be.** "Does this loop finish" is not a
+question a parser answers, and neither is "can this condition be false" — which
+is why a legitimate `if (badRequest) { exit; }` above a region must not read as
+a kill. That is the honest end of what a static guard does here, and exactly why
+#781 exists: all three of those wrappings fail a test that drives the page.
+
+**The seventh round also found three ways this guard CRIED WOLF on correct code,
+and under #483 those are what get a check switched off.** The anchor was found
+and counted in the RAW source — the one path left that did not ask PHP, in a
+file whose whole argument is that raw text cannot be trusted — so a comment
+quoting it reported "appears 2 times, so this pin is worthless" and sent the
+reader hunting for dead code that does not exist. `index.php` already carries
+two such comments and was saved only by their missing semicolon; a string
+quoting it was worse, relocating the whole region inside the string. `else:` and
+`elseif:` were counted as alternative-syntax OPENERS, so adding an ordinary
+`else` branch to a balanced block eighty-five lines above the region reported
+the region had MOVED. And `die` as a plain name was counted as an exit "to be
+safe" — measured on PHP 8.5, `die` is `T_EXIT` in every context where it exits
+and a plain name only as a method, so the branch caught no exit and fired on
+`$log->die()`. **"Counting both to be safe" was the cry-wolf direction.**
+
+**Two things were also dead under authoritative comments:** a `HEREDOC_MARK`
+constant that a comment named as the mechanism refusing a heredoc, when the
+refusal is the probe's own token flag, and a sixty-line `block_end()` helper
+nothing called. That is the second time in this package a comment has named a
+heredoc safeguard that did not do the work — the first named one that had never
+been written at all. **Name the thing that does the work, and delete what does
+not.**
+
+Fourteen wrapping spellings go red, and the three cry-wolf cases stay green.
 
 **The transferable rule, and it is the lesson of the whole package:** when a
 guard has to understand a language, use that language's own parser. Six rounds

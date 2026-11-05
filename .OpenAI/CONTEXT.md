@@ -2932,6 +2932,43 @@ second-best reading to drop to. The precedent for the wrapper is
 `check_static_calls.py`. Fourteen wrapping spellings go red; all three
 cry-wolf cases stay green.
 
+**A SEVENTH ROUND FOUND SIX MORE, ALL IN THE GUARD, AND THREE WERE
+CRY-WOLF** -- which under #483 is what gets a check switched off. The
+anchor was found and counted in the RAW source, the one path left that
+did not ask PHP: a COMMENT quoting it reported "appears 2 times, so
+this pin is worthless" (and `index.php` already carries two such
+comments, saved only by their missing semicolon), while a STRING
+quoting it relocated the region inside the string. `else:` and
+`elseif:` were counted as alternative-syntax OPENERS, so an ordinary
+added `else` branch eighty-five lines away reported the region had
+MOVED. And `die` as a plain name was counted as an exit "to be safe"
+-- measured on PHP 8.5, `die` is `T_EXIT` wherever it exits and a
+plain name only as a METHOD, so the branch caught no exit and fired on
+`$log->die()`. **"Counting both to be safe" was the cry-wolf
+direction.**
+
+Also: mode `endif` stopped at the FIRST alternative closer, so the
+account page's region ended at its inner `endforeach;` and the
+control's last ten lines sat outside a pin whose docstring said every
+statement in it was covered. And two things were dead under
+authoritative comments -- `HEREDOC_MARK`, named in a comment as the
+heredoc mechanism when the probe's token flag does that work, and a
+sixty-line `block_end()` nothing called. **That is the second time in
+this package a comment named a heredoc safeguard that did not do the
+work; the first named one that had never been written at all.**
+
+**And "neither are the ones nobody has thought of" was untrue:**
+`if (true) { exit; }`, a bare `{ exit; }` and `while (true) { }`, each
+one ordinary statement above a region, each `php -l` clean, each
+killing it with no change reported. The first two are caught now by a
+second count of exits at ANY depth, with the cost stated -- a new
+guard above the region needs a `--repin`. **The third cannot be
+caught:** "does this loop finish" is not a question a parser answers,
+and neither is "can this condition be false", which is why a
+legitimate `if (badRequest) { exit; }` must not read as a kill. That
+is the honest end of a static guard here, and why **#781** exists --
+all three fail a test that drives the page.
+
 **When a guard has to understand a language, use that language's own
 parser.** And writing that file broke it in the most fitting way
 available: a comment explaining the HTML-comment case wrote the

@@ -129,15 +129,45 @@ ACCOUNT_SAVE = os.path.join("web", "_apps", "auth", "account", "save.php")
 # A heredoc or nowdoc opener. Refused inside a pinned region: its internal
 # whitespace is significant, so freeing whitespace would make two different
 # regions compare equal, and the pin would pass on changed behaviour.
-HEREDOC_MARK = "<<<"
+# 🧰 The probe that does the actual PHP reading, and the only thing here that
+#    knows what PHP is. Its header records the seven rounds of hand-written
+#    parsing that argue for its existence.
+STRUCTURE_PROBE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "member-language-structure.php"
+)
+
+# A generous limit: the probe reads four files and takes well under a second.
+# It exists to stop a hang, not to race a slow machine.
+PROBE_TIMEOUT_SECONDS = 30
+
+# The characters that may immediately precede a pinned region, measured from
+# TOKENS rather than text, so a `;` inside a comment or a string cannot answer
+# for it. **The failure message is built from this constant**, because round 4
+# narrowed the set and left the message naming the two characters it had just
+# removed — so the sentence somebody acts on told them the cause was allowed.
+FRESH_START_CHARS = ";}"
 
 PINNED_REGIONS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "member-language.pinned.txt"
 )
 
-# Each region: (label, file, the code it starts at, the `if` whose closing brace
-# ends it). The second anchor is walked to its matching `}`, so the region always
-# covers the WHOLE block however it is reformatted.
+# Each region: (label, file, the code it starts at, the MODE that ends it).
+#   "block"  run to the `}` that closes the first `{` at or after the anchor
+#   "endif"  run to the `endif;` that closes the block the anchor sits in
+# Both are walked by the probe with PHP's own tokeniser, so the region covers
+# the WHOLE block however it is reformatted.
+#
+# ⚠️ An earlier version of this comment called the fourth element "the `if` whose
+#    closing brace ends it" and said it was "walked to its matching `}`". It is
+#    the mode string, and for the account page no `}` walk happens at all. A
+#    comment describing the wrong mechanism is how the next reader passes the
+#    wrong thing — and this file has corrected two of those already.
+#
+# ⚠️ An earlier version of this comment called the fourth element "the `if`
+#    whose closing brace ends it" and said it was "walked to its matching `}`".
+#    It is the mode string, and for the account page no `}` walk happens at all.
+#    A comment describing the wrong mechanism is how the next reader passes the
+#    wrong thing.
 PINNED_REGIONS = (
     (
         "index.php: the session starts, the language is resolved, ?lang= is handled",
@@ -166,62 +196,6 @@ PINNED_REGIONS = (
 def whitespace_freed(text: str) -> str:
     """Runs of whitespace to one space, so indentation and wrapping are free."""
     return re.sub(r"\s+", " ", text)
-
-
-def block_end(code: str, start: int) -> int:
-    """
-    The offset just past the `}` that closes the first `{` at or after `start`.
-
-    ⚠️ IT STEPS OVER STRING LITERALS. The money pages and
-       `check_table_name_comparisons.py` both record that a `{` inside a message
-       otherwise swallows the rest of a function, and a walk that cannot do this
-       passes on a removed gate.
-    """
-    i = code.find("{", start)
-    if i == -1:
-        return -1
-    depth = 0
-    while i < len(code):
-        ch = code[i]
-        if ch in "'\"":
-            quote = ch
-            i += 1
-            while i < len(code):
-                if code[i] == "\\":
-                    i += 2
-                    continue
-                if code[i] == quote:
-                    i += 1
-                    break
-                i += 1
-            continue
-        if ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return i + 1
-        i += 1
-    return -1
-
-
-# 🧰 The probe that does the actual PHP reading, and the only thing that knows
-#    what PHP is. See its header for the six rounds of hand-written parsing that
-#    argue for its existence.
-STRUCTURE_PROBE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "member-language-structure.php"
-)
-
-# A generous limit: the probe reads four files and takes well under a second.
-# It exists to stop a hang, not to race a slow machine.
-PROBE_TIMEOUT_SECONDS = 30
-
-# The characters that may immediately precede a pinned region, measured from
-# TOKENS rather than text, so a `;` inside a comment or a string cannot answer
-# for it. **The failure message is built from this constant**, because round 4
-# narrowed the set and left the message naming the two characters it had just
-# removed — so the sentence somebody acts on told them the cause was allowed.
-FRESH_START_CHARS = ";}"
 
 
 def repo_root() -> str:
@@ -498,7 +472,8 @@ def main() -> int:
             continue
         now[label] = whitespace_freed(str(answer["text"])).strip()
         now[label + " :: structure"] = (
-            f"braces={answer['braces']} alt={answer['alt']} exits={answer['exits']}"
+            f"braces={answer['braces']} alt={answer['alt']} "
+            f"exits={answer['exits']} anyexit={answer.get('anyexit', '?')}"
         )
         if answer["count"] != 1:
             duplicated.append(
@@ -607,7 +582,16 @@ def main() -> int:
                 f"       now:    {now[key]}\n"
                 f"       `braces` is how many `{{` are open where it starts, `alt` "
                 f"how many `if (…):` blocks, `exits` how many `return` / `exit` / "
-                f"`die` sit at its own level before it. Any of them changing means "
+                f"`die` sit at its own LEVEL before it, and `anyexit` how many "
+                f"sit before it at ANY depth.\n"
+                f"       `anyexit` exists because `if (true) {{ exit; }}` and a "
+                f"bare `{{ exit; }}` both put the exit one level deeper than the "
+                f"region, so `exits` skipped them while the region was dead -- "
+                f"measured, with this check green. Its cost is that adding a new "
+                f"guard above the region needs a `--repin`, which is deliberate: "
+                f"an exit newly placed above the code that stores somebody's "
+                f"language is worth having to acknowledge.\n"
+                f"       Any of them changing means "
                 f"something now decides whether the region runs -- and the "
                 f"region's own TEXT can be untouched while that is true.\n"
                 f"       All three come from PHP's own tokeniser, so `$endif`, "

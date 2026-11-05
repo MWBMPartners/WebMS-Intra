@@ -63,12 +63,16 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 round 7 is built and awaiting its check** (the protected arm of D-051 —
+**#763 round 8 is built and awaiting its check** (the protected arm of D-051 —
 it writes and deletes stored data, so rounds run until one is clean). Twelve
-findings, then seven, six, six, three, three — and **every one after the first
-round was in a previous round's fix, all of them in the GUARD rather than the
-fix.** Round 7 stopped hand-parsing PHP and asked PHP; #781 is the behavioural
-test that should have been built instead of inferring reachability statically.
+findings, then seven, six, six, three, three, six — and **every one after the
+first round was in a previous round's fix, all of them in the GUARD rather than
+the fix.** Round 7 stopped hand-parsing PHP and asked PHP, which ended the
+whole bypass class; round 8's six were the probe's own remaining faults, three
+of them CRY-WOLF on ordinary edits. **#781 is the behavioural test that should
+have been built instead of inferring reachability statically**, and the one
+remaining hole (`while (true) { }` above a region) is the halting problem, so it
+is #781's to close, not a parser's.
 #777's fact base is gathered (read-only, `.claude-work/777/inventory-notes.md`,
 with one measured fault) and is next. Everything else below is unstarted.
 

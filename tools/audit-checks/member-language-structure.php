@@ -38,8 +38,28 @@
  * heredoc is part of `T_ENCAPSED_AND_WHITESPACE`; `#[` is `T_ATTRIBUTE`, not
  * `T_COMMENT`; a `'?>'` in a string is part of `T_CONSTANT_ENCAPSED_STRING`;
  * and PHP inside an HTML comment is PHP, because that is what PHP does with it.
- * None of round 6's spellings is expressible any more, and neither are the ones
- * nobody has thought of yet.
+ * None of round 6's spellings is expressible any more.
+ *
+ * ⚠️ AN EARLIER VERSION OF THIS SENTENCE ADDED "and neither are the ones nobody
+ *    has thought of yet", AND THAT IS UNTRUE. The seventh round measured three
+ *    ordinary statements, each one line above a region, each `php -l` clean,
+ *    each killing the region with this probe reporting no change at all:
+ *
+ *        if (true) { exit; }
+ *        { exit; }                 (a bare block, which runs unconditionally)
+ *        while (true) { }
+ *
+ *    The first two are braced, so the `exit` sits one level deeper than the
+ *    region and the depth test skips it. The third terminates nothing and
+ *    exits nowhere: it simply never finishes.
+ *
+ *    **The braced ones are now caught** by `exitsAnywhere`, below. The third is
+ *    not, and cannot be: "does this loop finish" is not a question a parser can
+ *    answer. Neither can "is this condition ever true", which is why a
+ *    legitimate `if (badRequest) { exit; }` guard above a region must not be
+ *    read as a kill. That boundary is the honest end of what this file can do,
+ *    and **#781 is the test that measures the property directly** by driving
+ *    the page. All three of those wrappings fail it.
  *
  * WHAT IT PRINTS
  *   One JSON object per region asked for, on one line, with:
@@ -91,7 +111,19 @@ if (is_array($request) === false) {
  *    `if (false):` wrapper. Measured, with the guard green and the whole region
  *    dead. Here `$endif` is `T_VARIABLE` and cannot be mistaken for anything.
  */
-const ALT_OPEN = [T_IF, T_ELSEIF, T_ELSE, T_WHILE, T_FOR, T_FOREACH, T_SWITCH];
+const ALT_OPEN = [T_IF, T_WHILE, T_FOR, T_FOREACH, T_SWITCH];
+
+/**
+ * ⚠️ `else:` AND `elseif:` ARE NOT OPENERS, and counting them was a cry-wolf.
+ *    An `if (…):` chain opens ONCE and closes once, with a single `endif;`
+ *    however many branches it has — so counting each `else:` as another opener
+ *    left `alt` permanently one too high per extra branch. Measured: adding an
+ *    ordinary `<?php else: ?>` branch to a balanced block eighty-five lines
+ *    ABOVE the pinned region reported that the region had MOVED, which was
+ *    untrue, over a thoroughly ordinary template edit. A check that cries wolf
+ *    gets switched off (#483).
+ */
+const ALT_BRANCH = [T_ELSEIF, T_ELSE];
 const ALT_CLOSE = [T_ENDIF, T_ENDWHILE, T_ENDFOR, T_ENDFOREACH, T_ENDSWITCH];
 
 /** Tokens that end a run of statements at the current depth. */
@@ -124,19 +156,98 @@ function tokensOf(string $source): array
     return $out;
 }
 
-/** The index of the token at or after which the anchor text begins. */
-function anchorIndex(array $tokens, string $source, string $anchor, int $from = 0): ?int
+/**
+ * The file rendered as CODE ONLY, plus a map back to token indexes.
+ *
+ * 🚨 THE ANCHOR USED TO BE FOUND WITH `strpos()` OVER THE RAW SOURCE — the one
+ *    place in this file that did not ask PHP, in a file whose whole argument is
+ *    that raw text cannot be trusted. Measured consequences, both on correct
+ *    code:
+ *
+ *      // Note: Auth::ensureSession(); must stay above this.
+ *          -> "appears 2 times, so this pin is worthless", and the message sent
+ *             the reader hunting for dead code that does not exist. `index.php`
+ *             ALREADY carries two comments naming that call and was saved only
+ *             by their missing semicolon.
+ *
+ *      $note = "Auth::ensureSession(); runs below";
+ *          -> three failures, because the region was relocated INSIDE the
+ *             string: the token before it "ends '='", and the pinned text was
+ *             nonsense.
+ *
+ *    The probe already drops comments from the token list so that rewording one
+ *    cannot change the pinned text. This path denied that intention.
+ *
+ *    So the anchor is searched for in a rendering built from TOKENS: comments
+ *    gone, every string literal masked to `x` of the same length. A comment or
+ *    a string that quotes the anchor cannot be found, and cannot be counted.
+ *
+ * @return array{0: string, 1: array<int,int>} the code-only text, and for each
+ *         of its byte offsets the index of the token it came from.
+ */
+function codeOnly(array $tokens): array
 {
-    $at = strpos($source, $anchor, $from);
-    if ($at === false) {
-        return null;
-    }
-    foreach ($tokens as $i => [, $text, $offset]) {
-        if ($offset + strlen($text) > $at) {
-            return $i;
+    $text = '';
+    $map  = [];
+    foreach ($tokens as $i => [$id, $piece]) {
+        if ($id === T_COMMENT || $id === T_DOC_COMMENT) {
+            continue;
+        }
+        /* ⚠️ STRINGS ARE KEPT HERE, and a first version masked them. The
+         *    handler's anchor IS `if (array_key_exists('locale', $_POST)` --
+         *    it contains a string -- so masking made it unfindable and the
+         *    probe answered "anchor not found" for a region that is plainly
+         *    there. That is the same trap as round 5's masked-copy search,
+         *    which returned a neutral sentinel and nearly pinned an inert
+         *    check. Instead, a match that LANDS INSIDE a string token is
+         *    rejected below, which is what finding 2's string case needs. */
+        $start = strlen($text);
+        $text .= $piece;
+        for ($k = $start; $k < strlen($text); $k += 1) {
+            $map[$k] = $i;
         }
     }
+    return [$text, $map];
+}
+
+/** The index of the token at which the anchor begins, searched in CODE only. */
+function anchorIndex(array $tokens, string $codeText, array $map, string $anchor): ?int
+{
+    foreach (anchorOffsets($tokens, $codeText, $map, $anchor) as $at) {
+        return $map[$at];
+    }
     return null;
+}
+
+/**
+ * Every offset in the code-only text where the anchor really begins AS CODE.
+ *
+ * A match whose first byte belongs to a string literal is not code: it is a
+ * string that happens to quote the anchor. `index.php` already carries two
+ * comments naming `Auth::ensureSession()`, and a string naming it relocated the
+ * whole region INSIDE that string, so the token before it "ended `=`" and the
+ * pinned text was nonsense. Comments are dropped before we get here; strings
+ * are kept, because an anchor may legitimately contain one, and rejected here.
+ *
+ * @return list<int>
+ */
+function anchorOffsets(array $tokens, string $codeText, array $map, string $anchor): array
+{
+    $out = [];
+    $from = 0;
+    while (true) {
+        $at = strpos($codeText, $anchor, $from);
+        if ($at === false) {
+            break;
+        }
+        $from = $at + 1;
+        $tokenId = $tokens[$map[$at] ?? -1][0] ?? null;
+        if ($tokenId === T_CONSTANT_ENCAPSED_STRING || $tokenId === T_ENCAPSED_AND_WHITESPACE) {
+            continue;
+        }
+        $out[] = $at;
+    }
+    return $out;
 }
 
 /**
@@ -153,9 +264,6 @@ function opensAlternativeSyntax(array $tokens, int $i): bool
     // Step over whitespace.
     while ($j < $n && $tokens[$j][0] === T_WHITESPACE) {
         $j += 1;
-    }
-    if ($id === T_ELSE) {
-        return $j < $n && $tokens[$j][1] === ':';
     }
     if ($j >= $n || $tokens[$j][1] !== '(') {
         return false;
@@ -227,15 +335,18 @@ foreach ($request as $want) {
         continue;
     }
 
-    $start = anchorIndex($tokens, $source, $anchor);
+    [$codeText, $codeMap] = codeOnly($tokens);
+    $start = anchorIndex($tokens, $codeText, $codeMap, $anchor);
     if ($start === null) {
         $answers[] = ['error' => 'anchor not found', 'count' => 0];
         continue;
     }
 
     // How many times the anchor appears, so a dead duplicate above the live
-    // code cannot satisfy a pin that takes the first match.
-    $count = substr_count($source, $anchor);
+    // code cannot satisfy a pin that takes the first match. Counted in CODE
+    // only — a comment or a string that quotes it is not a duplicate, and
+    // saying it is was this check's worst cry-wolf.
+    $count = count(anchorOffsets($tokens, $codeText, $codeMap, $anchor));
 
     // ── Where the region sits ────────────────────────────────────────────
     $braces = 0;
@@ -280,20 +391,49 @@ foreach ($request as $want) {
             $depth += 1;
         } elseif (in_array($id, EXIT_TOKENS, true) === true && $depth === $braces) {
             $exits += 1;
-        } elseif ($id === T_STRING && strcasecmp($text, 'die') === 0 && $depth === $braces) {
-            // PHP tokenises `die` as T_EXIT in most versions, but it is also a
-            // plain name in some contexts; counting both is the safe direction.
-            $exits += 1;
         }
+        /* ⚠️ THERE IS NO `die`-AS-A-NAME BRANCH HERE, AND AN EARLIER VERSION HAD
+         *    ONE "because counting both is the safe direction". It was the
+         *    cry-wolf direction. Measured on PHP 8.5.11 with `token_get_all()`:
+         *    `die` is `T_EXIT` in EVERY context where it exits — `die();`,
+         *    `die;`, `@die()`, `(die)`, even `Foo::DIE` and `const DIE = 1` —
+         *    and `T_STRING` only as a method or property name after `->`. So
+         *    the branch caught no real exit and fired on `$log->die();`, which
+         *    reported the region had MOVED when nothing had. */
     }
 
     // ── Where the region ends ────────────────────────────────────────────
     $end = null;
     if ($mode === 'endif') {
+        /* ⚠️ IT MUST BALANCE. An earlier version stopped at the FIRST
+         *    alternative-syntax closer of any kind, and the account page's
+         *    region contains a `foreach (…):` of its own — so the region ended
+         *    at that inner `endforeach;` and the last ten lines of the control
+         *    (the closing `</select>`, the whole help text, and the control's
+         *    real `endif;`) were OUTSIDE the pin, while the docstring said
+         *    "any change to any statement in them fails". Measured by printing
+         *    the region: it ended `?> </option> <?php endforeach` and contained
+         *    no `endif` at all. */
+        $open = 0;
         for ($i = $start; $i < count($tokens); $i += 1) {
-            if (in_array($tokens[$i][0], ALT_CLOSE, true) === true) {
-                $end = $i;
-                break;
+            $id = $tokens[$i][0];
+            if (in_array($id, ALT_OPEN, true) === true
+                && opensAlternativeSyntax($tokens, $i) === true
+            ) {
+                $open += 1;
+                continue;
+            }
+            if (in_array($id, ALT_CLOSE, true) === true) {
+                /* The region BEGINS inside the block this closes, so the closer
+                 * that brings the count back to zero is the region's end. A
+                 * first version ended on the first closer seen at zero, which
+                 * for the account page meant its inner `endforeach;` and left
+                 * the last ten lines of the control outside the pin. */
+                if ($open <= 1) {
+                    $end = $i;
+                    break;
+                }
+                $open -= 1;
             }
         }
     } else {
@@ -387,11 +527,31 @@ foreach ($request as $want) {
         break;
     }
 
+    /* 🚪 EXITS AT ANY DEPTH ABOVE THE REGION, pinned separately from `exits`.
+     *
+     *    `exits` counts only the region's OWN level, so that a legitimate
+     *    guard — `if (the form token is wrong) { exit; }`, of which the handler
+     *    has several above the region — is not read as killing it. That is
+     *    right, and it is also how `if (true) { exit; }` walked through: one
+     *    pair of braces put the exit a level deeper.
+     *
+     *    Counting them all catches that. **The cost, said plainly: adding a new
+     *    guard above the region now needs a `--repin`.** That is a visible,
+     *    deliberate act, and an exit newly placed above the code that stores
+     *    somebody's language is a thing worth having to acknowledge. */
+    $exitsAnywhere = 0;
+    for ($i = 0; $i < $start; $i += 1) {
+        if (in_array($tokens[$i][0], EXIT_TOKENS, true) === true) {
+            $exitsAnywhere += 1;
+        }
+    }
+
     $answers[] = [
         'text'    => $text,
         'braces'  => $braces,
         'alt'     => $alt,
         'exits'   => $exits,
+        'anyexit' => $exitsAnywhere,
         'before'  => $before,
         'count'   => $count,
         'heredoc' => $heredoc,
