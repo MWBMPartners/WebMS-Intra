@@ -231,13 +231,30 @@ class Translation
     public static function monthSpendPence(): int
     {
         $db = App::db();
+        // 🏢 THIS ORGANISATION'S SPENDING, NOT THE INSTALLATION'S (#765).
+        //    The budget this is compared against can differ by organisation —
+        //    `SettingLimit` lets one hold itself to less than the installation
+        //    allows, and the two administrators may be different parties
+        //    (D-013). Summing across the installation meant one organisation's
+        //    spending counted against every organisation's budget.
+        //
+        //    A row with NO organisation is counted by nobody, deliberately: it
+        //    is a translation whose source has since been deleted, and
+        //    attributing it would move real money between two parties' budgets
+        //    on a guess. See migration 250.
+        $siteId = Site::id();
         $stmt = $db->prepare(
-            'SELECT COALESCE(SUM(costPence), 0) FROM tblContentTranslation '
-            . 'WHERE translatedAt >= DATE_FORMAT(NOW(), "%Y-%m-01")'
+            'SELECT COALESCE(SUM(`costPence`), 0) FROM `tblContentTranslation` '
+            . 'WHERE `siteID` = ? AND `translatedAt` >= DATE_FORMAT(NOW(), "%Y-%m-01")'
         );
         if ($stmt === false) {
             return 0;
         }
+        // ⚠️ BIND IT. The query gained a `?` when the sum was scoped to this
+        //    organisation, and a prepared statement executed without its
+        //    parameter throws — which would have turned a budget check into a
+        //    fatal on the one page that spends money.
+        $stmt->bind_param('i', $siteId);
         $stmt->execute();
         $stmt->bind_result($s);
         $stmt->fetch();
@@ -495,17 +512,28 @@ class Translation
     private static function persist(string $table, int $id, string $field, string $source, string $target, string $content, string $provider, int $cost): void
     {
         $db = App::db();
+        // 🏢 THE ORGANISATION IS RECORDED, so its spending can be told apart
+        //    from another's (#765, migration 250). Without it the monthly sum
+        //    covered the whole installation while the BUDGET was per
+        //    organisation, so a busy church exhausted a small one's allowance
+        //    and the small one simply found translation had stopped.
+        //
+        //    `siteID` is set on a duplicate too: a row rewritten for a new
+        //    translation of the same thing belongs to whoever owns it now.
+        $siteId = Site::id();
         $stmt = $db->prepare(
-            'INSERT INTO tblContentTranslation (sourceTable, sourceID, sourceField, sourceLanguage, '
-            . 'targetLanguage, translatedContent, provider, costPence) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?) '
-            . 'ON DUPLICATE KEY UPDATE translatedContent = VALUES(translatedContent), '
-            . '    provider = VALUES(provider), costPence = VALUES(costPence), translatedAt = NOW()'
+            'INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, '
+            . '`sourceLanguage`, `targetLanguage`, `translatedContent`, `provider`, `costPence`, '
+            . '`siteID`) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+            . 'ON DUPLICATE KEY UPDATE `translatedContent` = VALUES(`translatedContent`), '
+            . '    `provider` = VALUES(`provider`), `costPence` = VALUES(`costPence`), '
+            . '    `siteID` = VALUES(`siteID`), `translatedAt` = NOW()'
         );
         if ($stmt === false) {
             return;
         }
-        $stmt->bind_param('sissssis', $table, $id, $field, $source, $target, $content, $provider, $cost);
+        $stmt->bind_param('sissssisi', $table, $id, $field, $source, $target, $content, $provider, $cost, $siteId);
         $stmt->execute();
         $stmt->close();
     }

@@ -5229,10 +5229,13 @@ CREATE TABLE IF NOT EXISTS `tblContentTranslation` (
     `provider`          VARCHAR(30)  NOT NULL DEFAULT 'anthropic',
     `qualityScore`      TINYINT      DEFAULT NULL,
     `costPence`         INT          DEFAULT NULL,
+    `siteID`            INT          DEFAULT NULL
+                        COMMENT 'The organisation whose content this was, so a monthly budget can be told apart from another organisation''s (#765, migration 250). NULL means the source row has gone and it cannot be attributed without guessing, which would move money between two parties'' budgets. No foreign key on purpose: a cascade would delete the spending record when an organisation is removed, and what an installation was charged should outlive the organisation that caused it.',
     `translatedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`translationID`),
     UNIQUE KEY `uq_ct_lookup` (`sourceTable`, `sourceID`, `sourceField`, `targetLanguage`),
-    KEY `idx_ct_dated` (`translatedAt`)
+    KEY `idx_ct_dated` (`translatedAt`),
+    KEY `idx_ct_site_dated` (`siteID`, `translatedAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 CREATE TABLE IF NOT EXISTS `tblUserTranslationPref` (
@@ -11117,6 +11120,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('248_translation_reachable.sql'
 -- been accounted for, so a fresh install does not replay it needlessly.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('249_portal_check_page.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 250_translation_spend_per_organisation.sql (#765) ──────────────────
+-- The `siteID` column and its index are declared above, on the table itself.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('250_translation_spend_per_organisation.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
