@@ -1179,7 +1179,22 @@ class Giving
             return 0;
         }
 
-        $daysElapsed = max(0, intdiv($asOfTs - $startTs, 86400));
+        // 🚨 A DAY IS NOT ALWAYS 86,400 SECONDS (#549's mistake 3). Both of
+        //    these are bare DATES, so `strtotime()` puts them at midnight in
+        //    PHP's own zone — and when a clock change falls between them the
+        //    span is 23 or 25 hours short of a multiple of 86,400, so the
+        //    integer division loses a day. A weekly pledge would then be a
+        //    whole instalment out for the rest of its window, because
+        //    `$periodsElapsed` is derived from this.
+        //
+        //    A date has no zone, so UTC is the honest way to read two of them:
+        //    `diff()->days` then counts whole calendar days with no clock
+        //    change to fall over. The monthly branch below already avoids the
+        //    same trap, and its comment says why.
+        $utc        = new \DateTimeZone('UTC');
+        $startDay   = new \DateTimeImmutable(date('Y-m-d', $startTs) . ' 00:00:00', $utc);
+        $asOfDay    = new \DateTimeImmutable(date('Y-m-d', $asOfTs) . ' 00:00:00', $utc);
+        $daysElapsed = max(0, (int) $startDay->diff($asOfDay)->days);
 
         $periodsElapsed = match ($schedule) {
             'one-off' => 1,

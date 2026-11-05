@@ -61,7 +61,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     $firstVisit  = strtotime((string) $r['firstVisitedAt']);
                     $overdue = false;
                     if ($lastContact === null) {
-                        $daysSinceVisit = (int) (($today - $firstVisit) / 86400);
+                        // 🚨 #549's mistake 3: a day is 23 or 25 hours twice a
+                        //    year, so dividing a span by 86,400 loses or gains
+                        //    one and a follow-up is called overdue a day early
+                        //    or late. Count calendar days instead.
+                        $daysSinceVisit = (int) (new DateTimeImmutable('@' . $firstVisit))
+                            ->diff(new DateTimeImmutable('@' . $today))->days;
                         $overdue = $daysSinceVisit > $initialDays;
                     }
                 ?>

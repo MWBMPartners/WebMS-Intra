@@ -1420,6 +1420,24 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_one_csrf_writer.py
 
+      # 🕐 A DAY IS NOT ALWAYS 86,400 SECONDS (#549). The portal is a diary, so
+      # an hour wrong is a congregation arriving at a locked building. Dividing
+      # a span by 86,400 to count DAYS is out by one on the two weekends a year
+      # the clocks change - and it was not hypothetical: the calendar month
+      # view rendered 41 cells where March 2026 needs 42 (a whole day missing,
+      # in London and New York alike), and a weekly pledge was an instalment
+      # out for the rest of its window.
+      #
+      # It reads PHP only, ignores multiplication and constants (a cache TTL
+      # and a cookie expiry want exact seconds and are right), and skips
+      # JavaScript countdowns inside PHP pages - because a check that cries
+      # wolf gets switched off (#483). It does NOT cover #549's mistake 2, a
+      # `diff()` result used as a length, and says so rather than implying it.
+      - name: 'A day is not always 86,400 seconds (hard gate, #549)'
+        id: clock_change_arithmetic
+        if: always()
+        run: python3 -I tools/audit-checks/check_clock_change_arithmetic.py
+
       # The BEHAVIOURAL half of #768. It is NOT the first test here to drive a
       # real browser - `tools/layout-audit.mjs` has done so since 30 October
       # (#569) - but it IS the first wired into a workflow; that one is in
@@ -1793,6 +1811,7 @@ jobs:
             echo "- bind_param() tells the database the right number of values: ${{ steps.bind_param_arity.outcome }} (hard gate, #730)"
             echo "- Every key a fresh install declares, an upgrade also gets: ${{ steps.fk_references_unique_key.outcome }} (hard gate, #747)"
             echo "- One place writes the form token, and writes every carrier: ${{ steps.one_csrf_writer.outcome }} (hard gate, #768)"
+            echo "- A day is not always 86,400 seconds: ${{ steps.clock_change_arithmetic.outcome }} (hard gate, #549)"
             echo "- The form token really reaches every carrier, in a browser: ${{ steps.csrf_carriers_browser.outcome }} (#768)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a

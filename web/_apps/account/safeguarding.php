@@ -46,7 +46,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php else:
         $latest = $rows[0];
         $exp = strtotime((string) $latest['expiresAt']);
-        $daysLeft = (int) (($exp - $today) / 86400);
+        // #549 mistake 3: a day is 23 or 25 hours twice a year, so dividing a span
+        // by 86,400 counts EXACT days where this wants CALENDAR days. `diff()->days`
+        // is zone-aware and counts whole days between two moments.
+        $daysLeft = (int) (new DateTimeImmutable('@' . $today))
+            ->diff(new DateTimeImmutable('@' . $exp))->days
+            * ($exp < $today ? -1 : 1);
         $isValid = ((string) $latest['status'] === 'valid') && ($daysLeft >= 0);
     ?>
         <div class="card mb-3">

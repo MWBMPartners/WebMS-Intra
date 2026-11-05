@@ -213,7 +213,12 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
                                     </span>
                                     <?php
                                     if ($ag['renewalDate'] !== null) {
-                                        $days = (int) ((strtotime((string) $ag['renewalDate']) - strtotime('today')) / 86400);
+                                        // #549 mistake 3: a day is 23 or 25 hours twice a year, so dividing a span
+                                        // by 86,400 counts EXACT days where this wants CALENDAR days. `diff()->days`
+                                        // is zone-aware and counts whole days between two moments.
+                                        $days = (int) (new DateTimeImmutable('@' . strtotime('today')))
+                                            ->diff(new DateTimeImmutable('@' . strtotime((string) $ag['renewalDate'])))->days
+                                            * (strtotime((string) $ag['renewalDate']) < strtotime('today') ? -1 : 1);
                                         $badgeClass = $days <= 30 ? 'bg-danger' : 'bg-light text-dark';
                                         echo ' <span class="badge ' . $badgeClass . '">renews in ' . $days . 'd</span>';
                                     }

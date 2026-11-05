@@ -58,7 +58,19 @@ $gridStart = $firstOfMonth->modify('-' . $leadDays . ' days');
 $trailDays = 7 - ((int) $lastOfMonth->format('N'));
 $gridEnd   = $lastOfMonth->modify('+' . $trailDays . ' days');
 
-$totalCells = (int) (($gridEnd->getTimestamp() - $gridStart->getTimestamp()) / 86400) + 1;
+// 🚨 A DAY IS NOT ALWAYS 86,400 SECONDS, AND THIS DROPPED ONE FROM THE GRID.
+//    Dividing the span by 86400 counts EXACT days; a calendar grid wants
+//    CALENDAR days, and on the night the clocks go forward a day is 23 hours.
+//    Measured: March 2026 rendered 41 cells where it needs 42, in Europe/London
+//    and America/New_York alike — the last day of the grid simply was not
+//    drawn. October was unaffected, because a 25-hour day rounds the other way
+//    and the integer division swallows it.
+//
+//    `diff()->days` counts whole calendar days between two zone-aware moments,
+//    which is the question actually being asked. This is #549's mistake 3:
+//    "anything adding 86,400 seconds to get tomorrow, or dividing a span by
+//    86,400 to count days, is wrong twice a year."
+$totalCells = (int) $gridStart->diff($gridEnd)->days + 1;
 
 $weekdayHeader = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 

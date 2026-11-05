@@ -102,7 +102,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php foreach ($users as $u):
         $missing = ($u['dbsCheckID'] === null);
         $expiresTs = $missing ? null : strtotime((string) $u['expiresAt']);
-        $daysLeft  = $missing ? null : (int) (($expiresTs - $today) / 86400);
+        // #549 mistake 3: a day is 23 or 25 hours twice a year, so dividing a span
+        // by 86,400 counts EXACT days where this wants CALENDAR days. `diff()->days`
+        // is zone-aware and counts whole days between two moments.
+        $daysLeft  = $missing ? null : (int) (new DateTimeImmutable('@' . $today))
+            ->diff(new DateTimeImmutable('@' . $expiresTs))->days
+            * ($expiresTs < $today ? -1 : 1);
         $status = 'missing';
         if ($missing === false) {
             if ((string) $u['status'] === 'revoked') { $status = 'revoked'; }

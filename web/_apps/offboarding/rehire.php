@@ -112,7 +112,11 @@ if ($o['rehiredAt'] !== null) {
     header('Location: ' . Site::url('offboarding'));
     exit();
 }
-$ageDays = (time() - strtotime((string) $o['offboardedAt'])) / 86400;
+// #549 mistake 3: a day is 23 or 25 hours twice a year, so dividing a span
+// by 86,400 counts EXACT days where this wants CALENDAR days. `diff()->days`
+// is zone-aware and counts whole days between two moments.
+$ageDays = (int) (new DateTimeImmutable('@' . strtotime((string) $o['offboardedAt'])))
+    ->diff(new DateTimeImmutable('@' . time()))->days;
 if ($ageDays > $undoWindowDays) {
     $_SESSION['flash_msg']  = 'Undo window has passed.';
     $_SESSION['flash_type'] = 'danger';
