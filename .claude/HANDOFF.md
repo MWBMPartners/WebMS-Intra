@@ -63,7 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one: rounds 3, 4 and 5 are done; round 6's check is next.** The rounds so far found, in order: a display fault in four
+**#777 part one: rounds 3 to 6 are done; round 7's check is next.** The rounds so far found, in order: a display fault in four
 pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
 faults refusing valid input (round 2); three READER faults my own write fix made
 visible, and the fact that those three readers were guarded by nothing (round
@@ -105,6 +105,26 @@ counted the comma rather than reading the argument); and round 4's per-column
 exemption forgave all SIX declared wall-clock columns where three places said
 FOUR, so a `startAt` fault in any listed file was green. All six fixed, each
 planted both ways.
+
+**Round 6 found NINE and the first inverts the package's own rule: the events
+API had the same fault WITH THE CORRECT ZONE PASSED, and my own gate declared
+it correct.** `new DateTimeImmutable($reading, $theRightZone)` still moves the
+skipped hour — building a moment AT ALL is the fault, so "we passed the right
+zone" is no defence. Round 4's date-and-zone exemption is sound for a READ and
+wrong for a WRITE, and nothing in the check knew the difference: a check that
+passed on broken code, in the round that added it. Both endpoints are seeded
+live. A THIRD write path (`calendar/manage/import.php`) was on the part-two
+backlog, which describes its entries as DISPLAY work — so stored-data
+corruption was queued behind cosmetic work. **The rule now lives in ONE place**
+(`I18n::wallClockFromInput()` / `inputCarriesOffset()`), because the four fixes
+started as four copies. Round 5's fix was pinned by nothing (section I of the
+clock test, 20 checks, now drives the real methods); `--repin` still wrote a
+wrong pin on an equal-sized SWAP; the public form's EIGHT error codes were
+never shown to anybody; and `submit-save.php` stored every submitted venue as
+`'0'` from a one-character `bind_param` fault predating this work. #785's
+specification was wrong in all three parts and is re-measured on the issue.
+**Part two is NOT cosmetic: 24 listed files now disagree visibly with correct
+data, the moderation screen among them.**
 
 #763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
 write and delete stored data, so rounds ran until one was clean. Twelve

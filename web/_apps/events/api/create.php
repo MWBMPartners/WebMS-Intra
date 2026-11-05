@@ -52,6 +52,9 @@ use Portal\Core\App;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\Site;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 
 ApiAuth::requireMethod('POST');
 $body = ApiAuth::requireWrite('events:write');
@@ -81,22 +84,81 @@ $zone     = new \DateTimeZone($zoneName);
 //    carries an offset of its own, and then put ONTO the event's clock.
 //    (This used strtotime() and date(), which read and wrote on PHP's clock:
 //    the organisation the address belongs to, not the one the key is for.)
-try {
-    $startAt = (new \DateTimeImmutable($startDateTime, $zone))->setTimezone($zone);
-} catch (\Throwable $e) {
-    ApiResponse::error('startDateTime is not a valid timestamp', 400);
+// 🕐 A READING WITH NO OFFSET IS NOT A MOMENT, AND GIVING IT THE RIGHT ZONE
+//    DOES NOT SAVE IT (#777). This is the part that is easy to get wrong, so
+//    it is spelled out.
+//
+//    `tblEvents.startDateTime` holds a WALL-CLOCK reading. The old code built
+//    a moment from every value, even one with no offset in it:
+//
+//        $startAt = (new \DateTimeImmutable($startDateTime, $zone))->setTimezone($zone);
+//
+//    That looks safe because the zone is the RIGHT one -- the event's own. It
+//    is not. On the morning the clocks go forward the hour the reading names
+//    does not EXIST in that zone, so PHP moves it, and the moved value is what
+//    `format('Y-m-d H:i:s')` writes at line 162. Measured:
+//
+//        London,   2026-03-29T01:30 in Europe/London     -> 2026-03-29 02:30:00
+//        New York, 2026-03-08T02:30 in America/New_York  -> 2026-03-08 03:30:00
+//
+//    ⚠️ SO "WE PASSED THE CORRECT ZONE" IS NOT A DEFENCE. Building a moment AT
+//       ALL is what moves it. #777's rule cuts the other way here: a reading
+//       becomes a moment when something gives it a date AND A ZONE, and for a
+//       value that is going to be STORED as a wall-clock reading that is
+//       precisely what must not happen.
+//
+//    But an offset IS a zone, written into the value itself, so a value
+//    carrying one (`...+02:00`, or a trailing `Z`) really is an instant and
+//    must be converted onto the event's clock -- which is what the comment
+//    above promises and what an integration in another country needs. That
+//    distinction is the whole fix:
+//
+//      * no offset -> a reading on the event's own clock; store the text.
+//      * an offset -> an instant; convert it onto the event's clock, as before.
+// 📌 Both rules live in `I18n` -- the ONE place for each -- because this
+//    handler, `update.php`, `calendar/submit-save.php` and the CSV import all
+//    had their own copy for about an hour (#768's shape, caught early).
+$startSqlEarly = null;
+if (I18n::inputCarriesOffset($startDateTime) === false) {
+    $startSqlEarly = I18n::wallClockFromInput($startDateTime);
+    if ($startSqlEarly === null) {
+        ApiResponse::error('startDateTime is not a valid timestamp', 400);
+    }
+    $startAt = null;
+} else {
+    try {
+        $startAt = (new \DateTimeImmutable($startDateTime, $zone))->setTimezone($zone);
+    } catch (\Throwable $e) {
+        ApiResponse::error('startDateTime is not a valid timestamp', 400);
+    }
 }
 $endDateTime = isset($body['endDateTime']) === true && $body['endDateTime'] !== ''
     ? trim((string) $body['endDateTime'])
     : null;
 $endAt = null;
+$endSqlEarly = null;
 if ($endDateTime !== null) {
-    try {
-        $endAt = (new \DateTimeImmutable($endDateTime, $zone))->setTimezone($zone);
-    } catch (\Throwable $e) {
-        $endAt = null;
+    if (I18n::inputCarriesOffset($endDateTime) === false) {
+        $endSqlEarly = I18n::wallClockFromInput($endDateTime);
+    } else {
+        try {
+            $endAt = (new \DateTimeImmutable($endDateTime, $zone))->setTimezone($zone);
+        } catch (\Throwable $e) {
+            $endAt = null;
+        }
     }
-    if ($endAt === null || $endAt->getTimestamp() < $startAt->getTimestamp()) {
+    // ⏱️ Two readings on the SAME clock compare correctly as TEXT (#435's own
+    //    fix); `Y-m-d H:i:s` sorts the way the clock does. Where one side is a
+    //    real instant and the other a reading, the reading is put onto the
+    //    event's clock FOR THE COMPARISON ONLY -- never for storage, which is
+    //    the whole point above.
+    $startForCompare = $startSqlEarly !== null
+        ? $startSqlEarly
+        : $startAt->format('Y-m-d H:i:s');
+    $endForCompare = $endSqlEarly !== null
+        ? $endSqlEarly
+        : ($endAt !== null ? $endAt->format('Y-m-d H:i:s') : null);
+    if ($endForCompare === null || $endForCompare < $startForCompare) {
         ApiResponse::error('endDateTime must be a valid timestamp and ≥ startDateTime', 400);
     }
 }
@@ -159,8 +221,13 @@ $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
 $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
 
 $siteId    = Site::id();
-$startSql  = $startAt->format('Y-m-d H:i:s');
-$endSql    = $endAt !== null ? $endAt->format('Y-m-d H:i:s') : null;
+// 🕐 A reading with no offset is stored EXACTLY as it was sent (#777); only a
+//    value that carried an offset went through a moment, and that one really
+//    was an instant.
+$startSql  = $startSqlEarly !== null ? $startSqlEarly : $startAt->format('Y-m-d H:i:s');
+$endSql    = $endSqlEarly !== null
+    ? $endSqlEarly
+    : ($endAt !== null ? $endAt->format('Y-m-d H:i:s') : null);
 $creatorId = ApiAuth::actorUserId();
 
 $db = App::db();

@@ -77,6 +77,35 @@ $pageSection = 'calendar';
 $csrf        = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 $success     = isset($_GET['submitted']) === true;
 
+// 💬 WHY THE REFUSAL IS SHOWN AT ALL (#777 round 6).
+//    `submit-save.php` redirects back here with `?err=<code>` for EIGHT
+//    different refusals, and this page read only `?submitted` -- so every one
+//    of them was a bounce to a blank form with no message and everything the
+//    visitor had typed gone. On a form reachable without signing in, that is
+//    worse than most of the faults it refuses for.
+//
+//    Seven of the eight were already silent before #777; the eighth (`date`)
+//    was effectively unreachable from a real browser, because a
+//    `datetime-local` value never made `strtotime()` return false. Round 5
+//    added range checking and an end-before-start test, which made `date`
+//    reachable by ordinary user error -- so the silence stopped being
+//    theoretical, and that is why this is fixed here rather than left.
+//
+//    ⚠️ THE LIST IS AN ALLOW-LIST, not the posted value. `$_GET` is the
+//       visitor's, so printing it back would be their text on our page.
+$errorCodes = [
+    'required' => 'Please give the event a name and a start date and time.',
+    'date'     => 'Please check the dates. Give a real date and time, and make sure the end is not before the start.',
+    'contact'  => 'Please give your name and email address so we can tell you what happens to your event.',
+    'email'    => 'That email address does not look right. Please check it.',
+    'captcha'  => 'The anti-robot check did not pass. Please try again.',
+    'csrf'     => 'The form expired while you were filling it in. Please try again.',
+    'db'       => 'Something went wrong at our end and the event was not saved. Please try again.',
+    'save'     => 'Something went wrong at our end and the event was not saved. Please try again.',
+];
+$errorCode   = isset($_GET['err']) === true && is_string($_GET['err']) === true ? $_GET['err'] : '';
+$errorText   = $errorCodes[$errorCode] ?? '';
+
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 // 📦 The anti-robot provider's own script. Missing entirely until now, so
@@ -96,6 +125,12 @@ if ($captchaOn === true) {
         calendar. Submissions are reviewed by an admin before going live.
     </p>
 
+    <?php if ($errorText !== ''): ?>
+        <div class="alert alert-warning">
+            <i class="fa-solid fa-triangle-exclamation me-1"></i>
+            <?php echo htmlspecialchars($errorText, ENT_QUOTES, 'UTF-8'); ?>
+        </div>
+    <?php endif; ?>
     <?php if ($success === true): ?>
         <div class="alert alert-success">
             <i class="fa-solid fa-check-circle me-1"></i>

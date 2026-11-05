@@ -33,6 +33,15 @@
 #    `calendar/event.php` left the check green. Round 4 of #777 found that, and
 #    this very paragraph used to promise the opposite.
 #
+# ⚠️ EVERY ENTRY HERE IS A READER. ONE USED TO BE A WRITE PATH AND THAT WAS
+#    CARRIED AS A DISPLAY ITEM. `calendar/manage/import.php` stored an
+#    imported row's 01:30 as 02:30 permanently, and sat on this list, whose
+#    prose describes its entries as files needing a DISPLAY fix -- so a fault
+#    that corrupts stored data was queued behind cosmetic work. Found in round
+#    6 of #777 and fixed there, so it has left the list. **If a write path is
+#    ever added here, say so on its line.** A reader shows a wrong hour until
+#    somebody fixes it; a writer is wrong for ever.
+#
 # ── THE COUNT, AND WHY IT IS NOT 28 ───────────────────────────────────────
 # The first version of this list said 28, in six documents. Round 4 re-derived
 # it by printing the matched line for each entry, and 28 was not the count of
@@ -46,6 +55,10 @@
 #   * `calendar/manage/save.php` reads `$_POST['startDateTime']`, not a column,
 #     and takes only date parts from it. It is in the check's ALLOWED list now,
 #     with that reason, because a line here asserts there is work to do.
+#   * `calendar/manage/import.php` was a WRITE path, not a display item (see
+#     the warning above). Fixed in round 6; gone from this list. So the count
+#     went 28 -> 25 -> 24, and each step was a correction rather than work
+#     completed, except this last one.
 #
 # ── AND TWO THAT ARE MISSING, because the check cannot see them ───────────
 # The check's own header says it cannot see a reading pulled into a variable
@@ -90,7 +103,6 @@ web/_apps/calendar/anon-checkin.php
 web/_apps/calendar/event-hub.php
 web/_apps/calendar/event-invites-send.php
 web/_apps/calendar/event.php
-web/_apps/calendar/manage/import.php
 web/_apps/calendar/my-events.php
 web/_apps/calendar/public-landing.php
 web/_apps/calendar/rsvp-by-link.php

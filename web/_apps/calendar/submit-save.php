@@ -24,6 +24,9 @@ use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\Site;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: ' . Site::url('calendar/submit'), true, 302);
@@ -159,29 +162,17 @@ if ($eventName === '' || $startRaw === '') {
 //       one now gets `?err=date` instead of a silent midnight. The other two
 //       were faults: `2026-02-31` rolled forward to 3 March without a word,
 //       and any English `strtotime()` happened to understand was accepted.
-$toWallClock = static function (string $posted): ?string {
-    $text = str_replace('T', ' ', trim($posted));
-    if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]$/', $text) === 1) {
-        $text .= ':00';
-    }
-    if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/', $text) !== 1) {
-        return null;
-    }
-    // 📅 The SHAPE is not the RANGE: `2026-02-31` matches the pattern above.
-    if (checkdate((int) substr($text, 5, 2), (int) substr($text, 8, 2), (int) substr($text, 0, 4)) === false) {
-        return null;
-    }
-    return $text;
-};
-
-$startUtc = $toWallClock($startRaw);
+// 📌 `I18n::wallClockFromInput()` is the ONE place this rule lives (#768's
+//    shape caught early): this handler, the two events API handlers and the
+//    CSV import all had their own copy for about an hour.
+$startUtc = I18n::wallClockFromInput($startRaw);
 if ($startUtc === null) {
     header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
     exit();
 }
 $endUtc = null;
 if ($endRaw !== '') {
-    $endUtc = $toWallClock($endRaw);
+    $endUtc = I18n::wallClockFromInput($endRaw);
     if ($endUtc === null) {
         header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
         exit();
@@ -189,7 +180,16 @@ if ($endRaw !== '') {
     // ⏱️ Two wall-clock readings COMPARE CORRECTLY AS TEXT, which is #435's
     //    own fix -- `Y-m-d H:i:s` sorts the same way as the clock does. Making
     //    moments of them to compare would put the fault straight back.
-    if ($endUtc <= $startUtc) {
+    //
+    // ⚠️ "BEFORE", NOT "BEFORE OR EQUAL", and the first version of this line
+    //    had it the other way round. `calendar/manage/save.php` -- the admin
+    //    handler for the SAME column -- says so in as many words: "An equal
+    //    end and start is allowed: a moment in a diary is a reasonable thing
+    //    to record, and the comparison below is deliberately 'before', not
+    //    'before or equal'." Two handlers writing one column must not disagree
+    //    about what it may hold, and the decision was already taken and
+    //    written down.
+    if ($endUtc < $startUtc) {
         header('Location: ' . Site::url('calendar/submit') . '?err=date', true, 302);
         exit();
     }
@@ -228,6 +228,25 @@ $slug  = $base . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
 $zoneArg = Site::timezone();
 
 // 12 params, types = i (siteID) + s s s s s (name/slug/desc/start/end) + s (zone) + s (loc) + i (cat) + i (submitterId) + s s (name/email).
+//
+// ⚠️ THE 8th CHARACTER WAS `i` AND IT DESTROYED EVERY SUBMITTED LOCATION
+//    (#777 round 6). `locationName` is `VARCHAR(255)`; bound as an integer,
+//    mysqli casts the string, so "Main Hall" was stored as `'0'` and the
+//    moderator saw `0`. Measured on a real MySQL 8.0.36:
+//
+//        bound 'i': locationName => '0'
+//        bound 's': locationName => 'Main Hall'
+//
+//    The comment on the line above has always described the RIGHT string
+//    (`isssssssiiss`) while the code had the wrong one -- a comment stating
+//    the thing the code had forgotten to do, which is this repository's named
+//    worst fault, and it survived because `php -l` cannot see a type string
+//    and nothing posts to this handler with a location.
+//
+//    It came in with #604 (`d8177e4`), NOT with #777 -- established with
+//    `git log -S"issssssiiiss" -- web/_apps/calendar/submit-save.php`. It is
+//    fixed here because round 5 rewrote 87 lines of this file and read this
+//    very INSERT to establish that `isAllDay` is a literal `0`.
 $stmt = $mysqli->prepare(
     'INSERT INTO tblEvents '
     . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, isAllDay, '
@@ -241,7 +260,7 @@ if ($stmt === false) {
     header('Location: ' . Site::url('calendar/submit') . '?err=db', true, 302);
     exit();
 }
-$stmt->bind_param('issssssiiiss', $siteId, $eventName, $slug, $descArg, $startUtc, $endUtc, $zoneArg, $locArg, $categoryArg, $submitterId, $nameArg, $emailArg);
+$stmt->bind_param('isssssssiiss', $siteId, $eventName, $slug, $descArg, $startUtc, $endUtc, $zoneArg, $locArg, $categoryArg, $submitterId, $nameArg, $emailArg);
 $ok = $stmt->execute();
 $newId = (int) $stmt->insert_id;
 $stmt->close();

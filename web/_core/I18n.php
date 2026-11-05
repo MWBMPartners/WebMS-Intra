@@ -677,6 +677,84 @@ class I18n
     }
 
     /**
+     * 🕐 THE ONE PLACE A POSTED TIME BECOMES A STORED WALL-CLOCK READING.
+     *
+     * Three handlers write a wall-clock column from something somebody typed
+     * or sent -- `_apps/calendar/submit-save.php` (a form open to the public),
+     * `_apps/events/api/create.php` and `_apps/events/api/update.php` -- and
+     * `_apps/calendar/manage/import.php` uses it for a CSV row. Each had its
+     * own copy of this rule for about an hour, which is #768's shape (five
+     * copies of one rule, no two agreeing), so it lives here instead, BEFORE
+     * that could start.
+     *
+     * ⚠️ IT BUILDS NO MOMENT, which is the whole point. These columns hold a
+     *    reading from a clock. Giving such a reading a date and a zone makes
+     *    it a moment, and on the morning the clocks go forward the hour it
+     *    names does not EXIST, so PHP moves it -- **even when the zone is the
+     *    correct one.** Measured:
+     *
+     *        2026-03-29T01:30 in Europe/London     -> 2026-03-29 02:30:00
+     *        2026-03-08T02:30 in America/New_York  -> 2026-03-08 03:30:00
+     *
+     *    So "we passed the right zone" is not a defence; building a moment at
+     *    all is the fault. That cost three live write paths -- a room booking,
+     *    a public event submission and the events API (#777 rounds 2, 5, 6).
+     *
+     * ⚠️ AND IT CHECKS THE RANGE, NOT ONLY THE SHAPE. `\d{2}` accepts `25`,
+     *    and `2026-02-31` matches any shape pattern, so `checkdate()` is what
+     *    makes this a validator rather than a sieve. `strtotime()` used to
+     *    accept `2026-02-31` and roll it silently forward to 3 March.
+     *
+     * @param  string $posted What arrived: `Y-m-d\TH:i` or `Y-m-d H:i`, with
+     *                        or without seconds. A `datetime-local` input
+     *                        sends one of the first two.
+     *
+     * @return string|null The reading as `Y-m-d H:i:s`, EXACTLY as sent, or
+     *                     null when it is not a real date and time. Null means
+     *                     refuse; never fall back to building a moment.
+     */
+    public static function wallClockFromInput(string $posted): ?string
+    {
+        $clock = str_replace('T', ' ', trim($posted));
+        if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]$/', $clock) === 1) {
+            $clock .= ':00';
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/', $clock) !== 1) {
+            return null;
+        }
+        if (checkdate((int) substr($clock, 5, 2), (int) substr($clock, 8, 2), (int) substr($clock, 0, 4)) === false) {
+            return null;
+        }
+        return $clock;
+    }
+
+    /**
+     * 🕰️ Whether a posted time carries a time zone OF ITS OWN.
+     *
+     * An offset -- `Z`, `+02:00`, `-0500`, `+02` -- is a zone written into the
+     * value, so such a value really IS a moment in history and must be put
+     * onto the event's own clock before it is stored. A value without one is a
+     * reading, and is stored as it stands by `wallClockFromInput()` above.
+     *
+     * **This distinction is what lets the events API serve an integration in
+     * another country without the #777 fix breaking it.** Refusing offsets, or
+     * treating them as readings, would store a time hours out.
+     *
+     * ⚠️ ONLY THE TIME PART IS EXAMINED, because a date's own hyphens
+     *    (`2026-03-28`) would otherwise read as a negative offset. Checked
+     *    rather than assumed -- I19 and I20 of
+     *    `tools/clock-change-selftest.php`.
+     *
+     * @param  string $posted What arrived.
+     *
+     * @return bool True when the value names its own zone.
+     */
+    public static function inputCarriesOffset(string $posted): bool
+    {
+        $timePart = (string) preg_replace('/^\d{4}-\d{2}-\d{2}[T ]?/', '', trim($posted));
+        return preg_match('/(?:Z|[+-]\d{2}(?::?\d{2})?)$/', $timePart) === 1;
+    }
+    /**
      * 🕐 A time on a CLOCK, put into words without ever becoming a moment.
      *
      * 🚨 THIS EXISTS BECAUSE `date('g:i A', strtotime($clock))` IS WRONG ONE

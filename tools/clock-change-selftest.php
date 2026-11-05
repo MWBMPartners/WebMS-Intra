@@ -293,6 +293,81 @@ check('H7 an hour out of range is handed back too',
 check('H8 something that is not a reading at all is handed back',
     I18n::formatClockDateTime('tomorrow'), 'tomorrow');
 
+// ══════════════════════════════════════════════════════════════════════════
+// SECTION I — THE THREE WRITE PATHS, over the hour that does not exist
+// ══════════════════════════════════════════════════════════════════════════
+// 🚨 WHY THIS SECTION HAD TO BE WRITTEN: ROUND 5's FIX WAS PINNED BY NOTHING.
+//    Putting the old round trip back in `calendar/submit-save.php` --
+//
+//        $startUtc = date('Y-m-d H:i:s', (int) strtotime($startRaw));
+//
+//    -- left `php -l` clean, all 65 audit scripts GREEN and this test at 51 of
+//    51. The one test that posts to that handler
+//    (`tools/time-zones-selftest.php` W06) uses a fixture 24 days ahead at
+//    19:00, so the old and new code agree on it exactly. **#549's trap: a test
+//    written on an ordinary day passes whatever the code does.**
+//
+//    Three handlers and the CSV import store a wall-clock reading, and for
+//    about an hour each kept its own copy of the rule -- which this
+//    repository's own lesson says is not a test at all ("a test holding its
+//    own copy of the logic it tests is not testing anything", #647). So the
+//    rule MOVED: `I18n::wallClockFromInput()` and `I18n::inputCarriesOffset()`
+//    are the ONE place for each, every handler calls them, and this section
+//    calls THE REAL METHODS. Deleting the rule from a handler is a different
+//    question, and the gate covers a column READ while #785 covers a WRITE.
+echo "\n-- Section I: a reading on the way IN is stored as it stands --\n";
+
+// 📅 2027-03-28 is a real transition in Europe/London, as 2027-03-14 is in
+//    America/New_York. Both are fixed dates, so this does not rot.
+$wasZone = date_default_timezone_get();
+date_default_timezone_set('Europe/London');
+
+check('I1 the skipped hour survives the way IN (London)',
+    I18n::wallClockFromInput('2027-03-28T01:30'), '2027-03-28 01:30:00');
+check('I2 and the OLD round trip really did move it, so I1 is not vacuous',
+    date('Y-m-d H:i:s', (int) strtotime('2027-03-28T01:30')), '2027-03-28 02:30:00');
+check('I3 01:00 and 01:30 stay DIFFERENT on the way in',
+    I18n::wallClockFromInput('2027-03-28T01:00') === I18n::wallClockFromInput('2027-03-28T01:30'), false);
+check('I4 and the old round trip made them different too — so I3 needs I5',
+    date('Y-m-d H:i:s', (int) strtotime('2027-03-28T01:00'))
+        === date('Y-m-d H:i:s', (int) strtotime('2027-03-28T01:30')), false);
+check('I5 the old round trip moved BOTH of them, which is what I1 catches',
+    date('Y-m-d H:i:s', (int) strtotime('2027-03-28T01:00')), '2027-03-28 02:00:00');
+check('I6 an ordinary day is unchanged, so the rule has not simply broken',
+    I18n::wallClockFromInput('2027-06-01T19:00'), '2027-06-01 19:00:00');
+check('I7 and on that day the old round trip agrees — #549s trap, stated',
+    date('Y-m-d H:i:s', (int) strtotime('2027-06-01T19:00')), '2027-06-01 19:00:00');
+check('I8 seconds already present are kept', I18n::wallClockFromInput('2027-06-01T19:00:45'), '2027-06-01 19:00:45');
+check('I9 an impossible date is refused, where strtotime rolled it forward',
+    I18n::wallClockFromInput('2027-02-30T10:00'), null);
+check('I10 and strtotime really did roll it, so I9 is not vacuous',
+    date('Y-m-d H:i:s', (int) strtotime('2027-02-30T10:00')), '2027-03-02 10:00:00');
+check('I11 an hour out of range is refused', I18n::wallClockFromInput('2027-06-01T25:00'), null);
+check('I12 arbitrary English is refused', I18n::wallClockFromInput('tomorrow'), null);
+
+// 🌎 THE OTHER DIRECTION OF #653's LESSON: a zone that resolves the other way.
+//    London was the only zone in the fixtures that found #653 three times, so
+//    one American transition is pinned here as well.
+date_default_timezone_set('America/New_York');
+check('I13 the skipped hour survives the way in (New York)',
+    I18n::wallClockFromInput('2027-03-14T02:30'), '2027-03-14 02:30:00');
+check('I14 and the old round trip moved it there too',
+    date('Y-m-d H:i:s', (int) strtotime('2027-03-14T02:30')), '2027-03-14 03:30:00');
+
+// 🕰️ THE EVENTS API's extra rule: an OFFSET in the value IS a zone, so such a
+//    value really is an instant and must still be converted. Getting this
+//    wrong in the safe-looking direction would refuse every integration in
+//    another country.
+check('I15 no offset means a reading', I18n::inputCarriesOffset('2027-03-28T01:30:00'), false);
+check('I16 a trailing Z is an offset', I18n::inputCarriesOffset('2027-03-28T01:30:00Z'), true);
+check('I17 +hh:mm is an offset', I18n::inputCarriesOffset('2027-03-28T01:30:00+02:00'), true);
+check('I18 +hhmm is an offset', I18n::inputCarriesOffset('2027-03-28T01:30:00-0500'), true);
+check('I19 the DATE\'s own hyphens are not read as an offset',
+    I18n::inputCarriesOffset('2027-03-28T01:30:00'), false);
+check('I20 a bare date is not an offset', I18n::inputCarriesOffset('2027-03-28'), false);
+
+date_default_timezone_set($wasZone);
+
 echo "\n";
 echo ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 echo "Sections A-F cover the ARITHMETIC of #549's mistake 3. G and H cover TWO\n";

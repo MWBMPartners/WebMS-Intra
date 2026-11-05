@@ -18015,6 +18015,18 @@ returned, in the very commit whose lesson was "write what the command returned,
 and quote the command". **A word boundary is not a detail when you are
 counting**, and the figure appeared in three places before anybody checked it.
 
+**AND DO NOT STATE THAT RATIO AT ALL — round 6 showed a third way this bites.**
+The figures move with every commit, including the ones that cite them: this
+round's own fixes added `new \DateTimeImmutable` uses, so for that class alone
+it went from minority to MAJORITY (47 backslashed against 46 bare, measured)
+while the corrected sentence still read "minority". **A ratio between two live
+styles is not a stable fact; it is a moving number.** The only load-bearing
+point is that BOTH forms are live, so both must be matched. Today's figures:
+
+    grep -rEo 'new[[:space:]]+\\DateTime(Immutable)?[^A-Za-z0-9_]' web | wc -l
+    grep -rEo 'new[[:space:]]+DateTime(Immutable)?[^A-Za-z0-9_]'   web | wc -l
+
+
 It also skipped **every** `createFromFormat`, where the header claimed only the
 date-AND-zone form was skipped — so the no-date-no-zone form was invisible, and
 that form was live in the two files above. The right construction is now
@@ -18189,6 +18201,181 @@ stopped doing it also fails -- and `--strict` fails while it holds anything.
 That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
 visible rather than permanent.
 
+### Round 6: the SAME fault in the events API, with my own gate declaring it correct
+
+**Nine findings. The first is the one to remember, because it inverts the rule
+the package is built on.**
+
+`events/api/create.php:85` and `events/api/update.php:105` wrote
+`tblEvents.startDateTime`/`endDateTime` like this:
+
+    $startAt = (new \DateTimeImmutable($startDateTime, $zone))->setTimezone($zone);
+
+That looks safe, and it was reviewed as safe five times, because **the zone is
+the right one** — the event's own. It is not safe. Measured:
+
+    2026-03-29T01:30 in Europe/London     ->  2026-03-29 02:30:00
+    2026-03-08T02:30 in America/New_York  ->  2026-03-08 03:30:00
+
+**"We passed the correct zone" is not a defence. Building a moment AT ALL is
+what moves it.** #777's own rule — "a reading becomes a moment when something
+gives it a date AND A ZONE" — cuts the other way for a value about to be STORED
+as a reading: there, giving it a zone is precisely what must not happen.
+
+**And my gate actively declared it correct.** `CORRECT_WITH_DATE_AND_ZONE` and
+the constructor exemption added in round 4 exist so that a genuine READ which
+needs a moment stays green — `Livestream.php`, `calendar/event.php`'s
+schema.org JSON-LD. The exemption is sound for a read and wrong for a write,
+and nothing in the check knew the difference. Planted, removing the zone
+argument from `create.php:85` makes the gate name the line, so **the only thing
+keeping it green was the zone.** A check that passes on broken code, in the
+round that added it.
+
+Both endpoints are seeded live (`api.events.create.enabled` and
+`api.events.update.enabled`, `full_schema.sql:3750-3751`) and the documented
+request example is exactly the affected shape. An integration creating an event
+for 01:30 that morning got 02:30 stored for ever, with no error.
+
+**The fix keeps the feature that made the old code look reasonable.** An OFFSET
+in the value (`+02:00`, a trailing `Z`) is a zone written into the value, so
+such a value really IS an instant and must be converted onto the event's clock —
+which is what the old comment promised and what an integration abroad needs. So:
+
+  * no offset → a reading; store the text, build nothing.
+  * an offset → an instant; convert it, exactly as before.
+
+Measured each way: every offset-bearing value behaves identically to before,
+`2026-06-01T10:00:00` (the documented example) is unchanged, and
+`2026-02-31T10:00:00` is now refused where it used to roll silently to 3 March.
+
+### And a third write path, carried on the backlog as a display item
+
+`calendar/manage/import.php:238` did
+`date('Y-m-d H:i:s', strtotime($r['startDateTime']))` into `INSERT INTO
+tblEvents`, **and its own comment at 210-219 described that round trip as the
+design.** It was on the part-two backlog — a list whose prose describes its
+entries as files needing a DISPLAY fix — so a fault that corrupts stored data
+was queued behind cosmetic work, and the per-column exemption forgave it.
+
+Fixed, and the backlog's header now says that every entry is a reader and that
+a write path must be labelled if one is ever added. **A reader shows a wrong
+hour until somebody fixes it; a writer is wrong for ever.**
+
+A spreadsheet column carries no offset, so every value is a reading on the
+import's chosen zone — which is why a moment was never needed. Loose formats a
+person might type (`1/3/26 7pm`, `March 3 2026 10:00`) fall back to the old
+round trip deliberately, because the upstream check only asks whether
+`strtotime()` can read them and refusing here would break imports that work
+today. Measured: those behave exactly as before.
+
+### THE RULE MOVED, because four handlers had four copies of it
+
+Each of the four fixes started as its own closure, which is #768's shape — five
+copies of one rule, no two agreeing — and this repository's own lesson is that
+**a test holding its own copy of the logic it tests is not testing anything**
+(#647). So `I18n::wallClockFromInput()` and `I18n::inputCarriesOffset()` are
+the ONE place for each, all four handlers call them, and section I of
+`clock-change-selftest.php` calls THE REAL METHODS rather than a copy.
+
+Each caller needed its own `use Portal\Core\I18n;` line, and `php -l` is happy
+without it — #536's trap, which only fails when the line runs.
+
+### Round 5's fix was pinned by NOTHING, and section I exists because of it
+
+Putting the old round trip back into `submit-save.php` left `php -l` clean, all
+65 audit scripts GREEN and `clock-change-selftest.php` at 51 of 51. The one
+test that posts to that handler (`time-zones-selftest.php` W06) uses a fixture
+24 days ahead at 19:00, where old and new code agree exactly — **#549's trap, a
+test written on an ordinary day passing whatever the code does.**
+
+Section I (20 checks) drives the real methods over the hour that does not exist
+in two zones that resolve differently, and pins the OLD behaviour beside each
+so no check can be vacuous. Planted: the round trip back inside
+`wallClockFromInput()` fails five of them.
+
+### `--repin` still wrote a wrong pin silently — the exact shape its own comment cited
+
+Round 5 added refusals for an empty set and a shrinking set, citing #697. **The
+test was on `len()`, so an equal-sized swap walked through.** Measured: reword
+`startAt`'s comment away, add `WALL-CLOCK` to another column, and `--repin`
+reports success while `tblResourceBooking.startAt` — the column round 2 fixed
+three reader pages for — loses its only guard. It compares the SETS now.
+`--repin-shrink` also printed `FAIL:` and then exited 0, so a successful run
+read as a failure.
+
+### A new silent refusal, and EIGHT error codes that were never shown
+
+`submit-save.php` gained `if ($endUtc <= $startUtc)`. The admin handler for the
+same column says the opposite in as many words: *"An equal end and start is
+allowed … the comparison below is deliberately 'before', not 'before or
+equal'."* Two handlers writing one column must not disagree about what it may
+hold, and the decision was already taken. Now `<`.
+
+Worse, `calendar/submit.php` read only `?submitted`. **The handler emits eight
+error codes and the page showed none of them** — every refusal was a bounce to
+a blank form with no message and everything the visitor had typed gone. Seven
+were already silent before #777; round 5 made the eighth reachable by ordinary
+user error. All eight are worded now, from an allow-list, never from the posted
+value.
+
+### Finding 8: the stored value is right and the screens are now visibly wrong
+
+Round 2's recorded lesson is *"a fix on one side of a stored value makes the
+other side's fault VISIBLE — look at both sides."* Round 5 fixed a writer and
+checked no reader. `admin/calendar/moderation.php:111` — the screen a submission
+is reviewed on — is on the part-two backlog:
+
+    date('j M Y, H:i', strtotime('2026-03-29 01:30:00'))  ->  29 Mar 2026, 02:30
+
+So after round 5: member submits 01:30 → the database correctly holds 01:30 →
+**the reviewing administrator sees 02:30.** Before round 5 the two agreed, both
+wrong. The stored value being right is the correct trade, but **part two is not
+cosmetic: 24 listed files now disagree visibly with correct data**, and the one
+a submission passes through is among them.
+
+### Two wrong counts, and a wrong specification
+
+**#785's specification was wrong in all three parts**, which matters because it
+is what the guard would be built from. I wrote that the fingerprint
+`date('Y-m-d H:i:s', … strtotime …)` "matches seven files, five legitimately, so
+a narrow idiom check would have caught both faults and would cry wolf nowhere".
+Measured: it matches **four**; it would have caught **neither** fault (in both,
+the `strtotime()` and the `date()` are 7 and 15 lines apart); and one of the
+four was a real fault. The specification that works follows the VALUE — a moment
+assigned to a variable, then that variable reaching `date('Y-m-d H:i(:s)', …)` —
+and catches both, measured at `05a8097^`. Recorded on #785 with the commands.
+
+My first attempt at measuring even that reported `submit-save.php` as missed,
+because `[^)]*` cannot cross the `)` in `(int) $startDt`. I nearly wrote that
+down as the design's limit when it was my regex's.
+
+**And the published one-hop sweep typed its own column list.** It named 17 and
+the gate derives 17 — which hid that **five were wrong in each direction**: it
+missed `eventTime`, `overrideStartTime`, `overrideEndTime`, `parsedStartTime`
+and `parsedEndTime`, and invented `closeTime`, `cutoffTime`, `openTime`,
+`reminderTime` and `serviceTime`, which are not clock columns at all. Both
+totals being 17 was coincidence. #706's named shape — somebody's memory wearing
+a schema-driven check's clothes — in the paragraph that calls itself mechanical.
+It imports `clock_columns()` from the gate now.
+
+### And a data-loss bug in the file round 5 rewrote
+
+`submit-save.php`'s `bind_param` type string was `issssssiiiss`. The 8th
+parameter is `$locArg`, the location name, and the 8th character was `i`:
+
+    bound 'i': locationName => '0'
+    bound 's': locationName => 'Main Hall'
+
+So **every public submission that named a venue stored `'0'`**, and the
+moderator saw `0`. The comment on the line above has always described the right
+string (`isssssssiiss`). A comment stating what the code had forgotten to do —
+this repository's named worst fault — and it survived because `php -l` cannot
+see a type string and nothing posts to this handler with a location.
+
+It came in with #604, not with #777 (`git log -S"issssssiiiss"` → `d8177e4`).
+Fixed here because round 5 rewrote 87 lines of this file and read this very
+INSERT to establish that `isAllDay` is a literal `0`.
+
 ### Round 5: a PUBLIC form was still storing the moved hour, and four rounds had missed it
 
 **The worst finding of the package, and it was found by reading the form rather
@@ -18232,33 +18419,58 @@ refused.
 nothing for the pattern to match on, and the whole class of "store the moved
 hour" is invisible. Both instances of that class in this package
 (`resources/book.php`, `calendar/submit-save.php`) were found by eye. **That is
-#785.** The cheap first step recorded there: the fingerprint is
-`date('Y-m-d H:i:s', … strtotime …)`, which matches seven files today, five of
-them legitimately (`createdAt`, `updatedAt`, `strtotime('+60 days')`).
+#785.** The first step recorded there follows the VALUE: a moment assigned to a
+variable, then that variable reaching `date('Y-m-d H:i(:s)', …)`.
+
+**ROUND 5 SPECIFIED THE SAME-LINE IDIOM INSTEAD AND IT WAS WRONG IN ALL THREE
+PARTS**, which round 6 measured — four files not seven; it would have caught
+NEITHER fault, because in both the `strtotime()` and the `date()` are 7 and 15
+lines apart; and one of the four it does match was a real fault, not a
+cry-wolf. The corrected specification, with the commands, is on #785. **A
+number written before the command is run is a guess however carefully it is
+phrased — and a SPECIFICATION written that way sends somebody to build the
+wrong thing.**
 
 And the OTHER blind spot — a reading copied into a variable and converted
 later — is now swept mechanically rather than by eye, because it has yielded a
 real fault twice:
 
-    # one hop: $x = (string) $row['<wall-clock or TIME column>'];  then a
-    # moment function applied to $x within the next 40 lines
+    # One hop: $x = (string) $row['<a clock-reading column>'];  then a moment
+    # function applied to $x within the next 40 lines.
+    #
+    # ⚠️ THE COLUMN LIST IS IMPORTED FROM THE GATE, never typed here. The first
+    #    version of this sweep typed its own, and round 6 measured the result:
+    #    it named 17 columns and the gate derives 17, which hid the fact that
+    #    FIVE were wrong in each direction -- it missed eventTime,
+    #    overrideStartTime, overrideEndTime, parsedStartTime and parsedEndTime,
+    #    and invented closeTime, cutoffTime, openTime, reminderTime and
+    #    serviceTime, which are not clock columns at all. Both totals being 17
+    #    was coincidence. #706's named shape -- somebody's memory wearing a
+    #    schema-driven check's clothes -- in the paragraph that calls itself
+    #    mechanical. The conclusion happened to hold (re-run with the real set,
+    #    the same four sites come back) but that was luck.
     python3 - <<'PY'
-    import os,re
-    COLS = ("startDateTime","endDateTime","snapStart","snapEnd","startAt","endAt",
-            "sessionTime","meetingTime","startTime","endTime","defaultStartTime",
-            "defaultEndTime","serviceTime","openTime","closeTime","reminderTime","cutoffTime")
-    assign = re.compile(r"\$(\w+)\s*=\s*(?:\((?:string|int)\)\s*)?\$\w+\[['\"](" + "|".join(COLS) + r")['\"]\]")
-    moment = re.compile(r"(?:strtotime|new\s+\\?DateTime(?:Immutable)?|\\?DateTime(?:Immutable)?::createFromFormat)\s*\(")
-    for folder,_,files in os.walk("web"):
+    import os, re, importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "gate", "tools/audit-checks/check_clock_time_not_a_moment.py")
+    gate = importlib.util.module_from_spec(spec); spec.loader.exec_module(gate)
+    root = gate.repo_root()
+    cols = gate.clock_columns(open(os.path.join(root, gate.SCHEMA)).read())
+    assign = re.compile(r"\$(\w+)\s*=\s*(?:\((?:string|int)\)\s*)?\$\w+\[[\'\"](" 
+                        + "|".join(map(re.escape, cols)) + r")[\'\"]\]")
+    moment = re.compile(r"(?:strtotime|new\s+\\?DateTime(?:Immutable)?"
+                        r"|\\?DateTime(?:Immutable)?::createFromFormat)\s*\(")
+    for folder, _, files in os.walk("web"):
         if "vendor" in folder: continue
         for n in files:
             if not n.endswith(".php"): continue
-            p=os.path.join(folder,n); lines=open(p,errors="replace").read().split("\n")
-            for i,l in enumerate(lines):
+            p = os.path.join(folder, n)
+            lines = open(p, errors="replace").read().split("\n")
+            for i, l in enumerate(lines):
                 for mm in assign.finditer(l):
-                    var,col = mm.group(1), mm.group(2)
-                    for j in range(i+1, min(i+40, len(lines))):
-                        if moment.search(lines[j]) and re.search(r"\$"+var+r"\b", lines[j]):
+                    var, col = mm.group(1), mm.group(2)
+                    for j in range(i + 1, min(i + 40, len(lines))):
+                        if moment.search(lines[j]) and re.search(r"\$" + var + r"\b", lines[j]):
                             print(f"{p}:{j+1}  [{col} via ${var}]"); break
     PY
 
@@ -18338,7 +18550,8 @@ diff shows is one of the two actually removed from the list.
 newline restriction "gains no hit, so nothing live is hidden today". Verified
 independently by running both patterns over all 912 files and diffing the match
 sets: it gains exactly one, `_core/Livestream.php:99`, whose `createFromFormat`
-carries its zone on the next line and is the correct construction. The
+is split over five lines with its zone on line 102, and is the correct
+construction. The
 conclusion holds; the premise the "so" rested on did not — in the paragraph
 whose own rule is to paste what the command returned.
 

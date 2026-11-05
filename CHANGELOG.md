@@ -44,6 +44,28 @@ see.** Those are listed rather than fixed: an event's time zone need not be the
 organisation's, so each needs a person to look at it, and that is the next part
 of this work. Nothing new may join the list.
 
+**And the same mistake was in the events API, where passing the *correct* time
+zone did not help.** Creating or updating an event through the API turned the
+time given into a moment in history before storing it. That looks right —
+it used the event's own time zone — but on the morning the clocks go forward
+the hour named does not exist at all, so it still moved: a 01:30 event became
+02:30, stored for ever, with no error. An offset given in the value itself
+(`+02:00`, or a trailing `Z`) really does name a moment and is still converted
+exactly as before, so an integration in another country is unaffected.
+
+The same mistake was also in the **spreadsheet import**, where its own comment
+described the conversion as the design.
+
+**And the location on a submitted event was being thrown away.** Every event
+submitted through the public form that named a venue stored the venue as `0`,
+because of a one-character mistake in the list of parameter types — fixed, and
+it predates this work.
+
+**The public submission form now says why it refused.** It could refuse for
+eight different reasons and showed none of them: a visitor was simply returned
+to an empty form with no message and everything they had typed gone. All eight
+now explain themselves.
+
 **And a fifth place was still storing the wrong hour — a form open to the
 public.** Submitting an event for 01:30 on the morning the clocks go forward
 saved it as **02:30, permanently**, because the submission handler turned the

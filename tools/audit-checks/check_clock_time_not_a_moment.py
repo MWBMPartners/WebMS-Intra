@@ -142,7 +142,7 @@ across a clock change. Two blind spots, both stated rather than implied:
           );
 
     is missed. Re-running the pattern without the newline restriction across
-    all 912 files gains exactly ONE hit -- `_core/Livestream.php:99`, whose `createFromFormat` carries its zone on the next line and is the CORRECT construction -- so nothing live is hidden today; an earlier version of this said "gains no hit".
+    all 912 files gains exactly ONE hit -- `_core/Livestream.php:99`, whose `createFromFormat` is split over five lines with its zone on line 102 and is the CORRECT construction -- so nothing live is hidden today; an earlier version of this said "gains no hit".
 
 THE ONE PLACE A CLOCK READING IS PUT INTO WORDS
 -----------------------------------------------
@@ -303,14 +303,57 @@ def has_a_zone_argument(call: str, wanted: int = 2) -> bool:
         i += 1
     if commas < wanted:
         return False
-    # The text of the LAST argument, which is where the zone belongs. `i` is
-    # sitting on the call's closing bracket, and `last_comma` is the separator
-    # in front of that argument.
-    last_comma = call.rfind(",", 0, i)
-    if last_comma == -1:
+    # The text of the LAST argument, which is where the zone belongs.
+    #
+    # ⚠️ A TRAILING COMMA IS LEGAL PHP AND MADE THE FIRST VERSION OF THIS CRY
+    #    WOLF. `new \DateTimeImmutable($t, $tz,)` has a real zone and an empty
+    #    last slot, so reading "the text after the last comma" found nothing
+    #    and answered "no zone" -- reporting CORRECT code, which is the
+    #    direction that gets a check switched off (#483). Round 5 closed "a
+    #    trailing comma read as a zone" and opened its mirror in the same edit.
+    #
+    #    So the arguments are split and the last NON-EMPTY one is read. A
+    #    comment is stripped too, because `new \DateTimeImmutable($t, /* z */
+    #    null)` passed as a zone -- measured.
+    pieces = []
+    depth = 0
+    start = call.find("(") + 1
+    j = start
+    while j < i:
+        ch = call[j]
+        if ch in "'\"":
+            quote = ch
+            j += 1
+            while j < i:
+                if call[j] == "\\":
+                    j += 2
+                    continue
+                if call[j] == quote:
+                    break
+                j += 1
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            pieces.append(call[start:j])
+            start = j + 1
+        j += 1
+    pieces.append(call[start:i])
+
+    def bare(text: str) -> str:
+        text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+        text = re.sub(r"//[^\n]*", " ", text)
+        # A named argument names the parameter, not the value: `timezone: null`
+        # is still null, and `timezone: $tz` is still a zone.
+        text = re.sub(r"^\s*[A-Za-z_]\w*\s*:(?!:)", "", text)
+        return text.strip()
+
+    filled = [bare(p) for p in pieces if bare(p) != ""]
+    if len(filled) <= wanted:
         return False
-    tail = call[last_comma + 1:i].strip()
-    if tail == "" or tail.lower() in ("null", "(null)", "\\null"):
+    tail = filled[wanted].lower()
+    if tail in ("null", "(null)", "\\null"):
         return False
     return True
 
@@ -755,11 +798,22 @@ def main() -> int:
                 "that full_schema.sql still carries those column comments."
             )
             return 1
-        if was is not None and len(found_wall) < len(was):
+        # ⚠️ COMPARE THE SETS, NOT THE LENGTHS. The first version of this
+        #    refusal tested `len()`, so an EQUAL-SIZED SWAP walked straight
+        #    through -- measured in round 6: rewording `startAt`'s comment away
+        #    and adding WALL-CLOCK to `heldAtUtc` repinned "6 wall-clock
+        #    column(s)", exit 0, and `tblResourceBooking.startAt` -- the column
+        #    round 2 fixed three reader pages for -- lost its only guard with
+        #    an ordinary run afterwards saying nothing.
+        #
+        #    That is the exact shape this refusal was added to close, which is
+        #    why the length test was worse than none: it carried #697's
+        #    citation while leaving the hole.
+        if was is not None and len([c for c in was if c not in found_wall]) > 0:
             lost = [c for c in sorted(was) if c not in found_wall]
             print(
-                f"FAIL: repinning would SHRINK the pinned set from "
-                f"{len(was)} to {len(found_wall)}, dropping: "
+                f"FAIL: repinning would DROP {len(lost)} column(s) from the "
+                f"pinned set ({len(was)} -> {len(found_wall)}): "
                 f"{', '.join(lost)}.\n"
                 f"       Each dropped column silently removes this check's "
                 f"only guard over every page that reads it. If that is really "
@@ -770,6 +824,15 @@ def main() -> int:
             )
             if "--repin-shrink" not in sys.argv:
                 return 1
+            # ⚠️ SAY THE OPPOSITE THING ON THE WAY THROUGH. The first version
+            #    printed the FAIL above and then exited 0, so a successful run
+            #    read as a failure -- which is how somebody comes to ignore the
+            #    word FAIL in this check's output.
+            print(
+                "   --repin-shrink was given, so the drop above is being "
+                "recorded deliberately. Check the diff of the pin file says "
+                "what you meant."
+            )
         with open(pin_path, "w", encoding="utf-8") as handle:
             handle.write(
                 "# The `DATETIME` columns whose own comment in full_schema.sql\n"

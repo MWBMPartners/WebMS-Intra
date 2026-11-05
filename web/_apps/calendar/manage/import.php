@@ -26,6 +26,9 @@ use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 
 $pageTitle   = 'Bulk Import Events';
 $pageSection = 'calendar';
@@ -235,10 +238,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', (string) $r['eventName']), '-'));
                         $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
 
-                        $startSql = date('Y-m-d H:i:s', strtotime((string) $r['startDateTime']));
+                        // 🕐 STORE THE READING, DO NOT ROUND-TRIP IT (#777).
+                        //    `tblEvents.startDateTime` holds a WALL-CLOCK
+                        //    reading. This was
+                        //    `date('Y-m-d H:i:s', strtotime($r['startDateTime']))`
+                        //    -- a moment built and formatted back -- so on the
+                        //    morning the clocks go forward a row reading 01:30
+                        //    was imported as 02:30, permanently, and the
+                        //    comment above described that round trip as the
+                        //    design. Measured in Europe/London: `2026-03-29
+                        //    01:30` came out `2026-03-29 02:30`.
+                        //
+                        //    A spreadsheet column has no offset in it, so
+                        //    every value here is a reading on the clock named
+                        //    by `$importZone` -- which is exactly why building
+                        //    a moment was never needed. `$fmtClock()` puts the
+                        //    text into the column's shape without resolving
+                        //    anything; a row whose value cannot be read at all
+                        //    was already refused upstream (line 133).
+                        $fmtClock = static function (string $text): ?string {
+                            // 📌 `I18n::wallClockFromInput()` is the ONE place
+                            //    the rule lives; this closure adds only the
+                            //    spreadsheet fallback below.
+                            $clock = I18n::wallClockFromInput($text);
+                            if ($clock !== null) {
+                                return $clock;
+                            }
+                            $clock = str_replace('T', ' ', trim($text));
+                            // ⚠️ ANYTHING ELSE FALLS BACK TO THE OLD ROUND
+                            //    TRIP, deliberately. A spreadsheet holds
+                            //    whatever somebody typed -- "1/3/26 7pm",
+                            //    "March 3 2026" -- and the upstream check only
+                            //    asks whether `strtotime()` can read it, so
+                            //    refusing here would turn imports that work
+                            //    today into failures. Such a value is still
+                            //    exposed to the moved hour; it is the narrower
+                            //    harm, and an import file is reviewed on a
+                            //    preview screen before it is confirmed.
+                            //    Normalising the file's own formats is #777
+                            //    part two's to settle, not a change to make
+                            //    inside a fix round.
+                            $moment = strtotime($clock);
+                            return $moment === false ? null : date('Y-m-d H:i:s', $moment);
+                        };
+                        $startSql = $fmtClock((string) $r['startDateTime']);
                         $endSql   = $r['endDateTime'] !== null && $r['endDateTime'] !== ''
-                                  ? date('Y-m-d H:i:s', strtotime((string) $r['endDateTime']))
+                                  ? $fmtClock((string) $r['endDateTime'])
                                   : null;
+                        if ($startSql === null) {
+                            $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'startDateTime could not be read'];
+                            continue;
+                        }
 
                         $name    = (string) $r['eventName'];
                         $desc    = (string) $r['description'];

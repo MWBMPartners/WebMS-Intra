@@ -26,6 +26,9 @@ use Portal\Core\App;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\Site;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 
 ApiAuth::requireMethod('POST');
 $body = ApiAuth::requireWrite('events:write');
@@ -97,15 +100,44 @@ foreach ($columnMap as $col => $type) {
         ApiResponse::error("status must be one of: " . implode(', ', $validStatuses), 400);
     }
     if (in_array($col, ['startDateTime', 'endDateTime'], true) === true && $value !== null && $value !== '') {
-        // Read on the EVENT's clock unless the value carries an offset of
-        // its own, then written as that clock's reading. This used
-        // strtotime() and date(), which are PHP's clock: for an event in
-        // another zone than the organisation's the stored time was out by
-        // the difference between the two.
-        try {
-            $value = (new \DateTimeImmutable((string) $value, $eventZone))->setTimezone($eventZone)->format('Y-m-d H:i:s');
-        } catch (\Throwable $e) {
-            ApiResponse::error("$col is not a valid timestamp", 400);
+        // 🕐 A READING WITH NO OFFSET IS STORED AS IT STANDS. GIVING IT THE
+        //    RIGHT ZONE DOES NOT SAVE IT (#777).
+        //
+        //    These two columns hold a WALL-CLOCK reading. The code here built
+        //    a moment from every value, even one with no offset:
+        //
+        //        $value = (new \DateTimeImmutable((string) $value, $eventZone))
+        //                 ->setTimezone($eventZone)->format('Y-m-d H:i:s');
+        //
+        //    The zone was the RIGHT one -- the event's own -- and it still
+        //    moved the hour, because on the morning the clocks go forward the
+        //    hour the reading names does not EXIST in that zone. Measured:
+        //    `2026-03-29T01:30` in Europe/London came out `02:30`, and
+        //    `2026-03-08T02:30` in America/New_York came out `03:30`.
+        //
+        //    ⚠️ "WE PASSED THE CORRECT ZONE" IS NOT A DEFENCE. Building a
+        //       moment at all is what moves it. An OFFSET in the value is a
+        //       zone written into the value itself, so such a value really IS
+        //       an instant and is still converted onto the event's clock --
+        //       which is what the old comment promised and what an
+        //       integration in another country needs.
+        //
+        //    `create.php` carries the same pair of helpers and the same
+        //    reasoning; the two handlers must agree about one column.
+        // 📌 Both rules live in `I18n`, the ONE place for each; `create.php`
+        //    and this handler must agree about one column.
+        if (I18n::inputCarriesOffset((string) $value) === false) {
+            $clock = I18n::wallClockFromInput((string) $value);
+            if ($clock === null) {
+                ApiResponse::error("$col is not a valid timestamp", 400);
+            }
+            $value = $clock;
+        } else {
+            try {
+                $value = (new \DateTimeImmutable((string) $value, $eventZone))->setTimezone($eventZone)->format('Y-m-d H:i:s');
+            } catch (\Throwable $e) {
+                ApiResponse::error("$col is not a valid timestamp", 400);
+            }
         }
     }
     if (in_array($col, ['isAllDay', 'isPublic', 'isFeatured'], true) === true) {
