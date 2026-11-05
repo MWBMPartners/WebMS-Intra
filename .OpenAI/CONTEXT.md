@@ -3169,6 +3169,47 @@ tell whether a page RENDERS in the chosen language** — that needs HTTP
 and a seeded installation, and both say so in their own output. The
 technical record is DEV_NOTES.md, "A question asked too early (#763)".
 
+## A time on a clock is not a moment, and the test for it cannot work (#777 part one)
+
+`I18n::formatClockTime()` is the ONE place a stored clock reading
+becomes words, and it builds NO moment: hours and minutes come off the
+digits. Four pages used `date('g:i A', strtotime($clock))`, which
+resolves a bare reading against TODAY in PHP's DEFAULT zone. Measured
+in Europe/London on a stored `01:30`: **2:30 AM on 29 March 2026** —
+and `01:00` and `01:30` both read as the same words that day. The
+round trip was only ever right because both halves used the same wrong
+zone and cancelled out, on 364 days a year.
+
+`web/_apps/rota/` already did it correctly by SLICING THE TEXT and is
+the model. `Venues.php:3658` compares clock readings as TEXT (#435's
+own fix) and `Livestream.php` gives a reading a date AND a zone
+together with `createFromFormat(…, $tzObj)`. Both are RIGHT — leave
+them.
+
+**THE MOST USEFUL THING HERE: WITH THE OLD CODE PUT BACK INSIDE THE
+FORMATTER, `tools/clock-change-selftest.php` STAYED AT 40 OF 40.** The
+two agree on every ordinary day; they differ only inside the hour that
+does not exist, and PHP cannot be told that today is that morning.
+That is #549's own trap — "a test written in December passes in London
+whatever the code does" — arriving inside the test written to close
+it.
+
+So the formatter's BODY is pinned by
+`tools/audit-checks/check_clock_time_not_a_moment.py`, a hard gate
+that fails if it ever contains `strtotime`, `date(` or `DateTime`
+again. The TIME column names come out of `full_schema.sql`, never a
+list typed in the check (#706). **D-065's rule in the other
+direction: where no test running today can tell, pin the source — and
+say WHY, or the pin reads as belt and braces.**
+
+What remains of #777 is the bulk: **486 time-shaped columns and only
+123 with any comment**, so "does this column hold a moment or a clock
+reading" is answered NO for three quarters of them before any reading
+starts. Raised rather than bundled: **#782**, eighteen hard-coded
+`Europe/London` literals across nine files plus two columns that
+DEFAULT to it — #763's shape, except those columns ARE written by
+their own pages, so some rows really are choices.
+
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026 — D-017)
 
 Set when the owner decided #727's scope: *"all remaining features pointable as

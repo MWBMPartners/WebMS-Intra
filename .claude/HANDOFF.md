@@ -63,7 +63,8 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 IS DONE** (D-064, D-065) — **#781 is built** (the protected arm of D-051 —
+**#777 part one is built and awaiting its check.** #763 and #781 are DONE
+(D-064, D-065) (the protected arm of D-051 —
 it writes and deletes stored data, so rounds run until one is clean). Twelve
 findings, then seven, six, six, three, three, six — and **every one after the
 first round was in a previous round's fix, all of them in the GUARD rather than
@@ -78,8 +79,12 @@ with one measured fault) and is next. Everything else below is unstarted.
 
 ## Next, in this order
 
-1. **#777** — time zones, the reading half (a time on a clock read as a moment).
-   ~1 package. The arithmetic half shipped as `97af79c`.
+1. **#777 part TWO** — the bulk of the reading half. Part one shipped: four
+   display sites fixed, `I18n::formatClockTime()` as the one formatter, a hard
+   gate, and the verdict list for everything examined. **What remains is
+   measured: 486 time-shaped columns and only 123 with any comment**, so "does
+   this column hold a moment or a clock reading" is unanswered for three
+   quarters of them. ~2–3.
 2. **#775** — every scheduled job records that it ran. ~1. On a fresh install
    all eleven are inert, the personal-data sweep among them.
 3. **#778** — an outside service is permitted in three tiers, strictest wins
@@ -257,6 +262,7 @@ list names them; it never restates them. **63 on file.**
 |---|---|
 | #769 | Nothing exercises `api/livechat/prompt-publish`; no test drove two rotating actions in sequence |
 | #779 | No setting for which languages an installation offers (D-062) |
+| #782 | Eighteen hard-coded `Europe/London` literals, and two columns that default to it |
 | #780 | Saved reports filtering on a member's language changed answer at migration 251 |
 | #762 | The spend limit cannot bite on the LibreTranslate route (D-059 answers it) |
 | #764 | Three smaller findings from #485/#761 |

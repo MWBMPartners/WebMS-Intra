@@ -4,6 +4,40 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A meeting at half past one showed as half past two, one morning a year (#777)
+
+A time written on a clock — "the group meets at 19:30" — is not a point in
+history until something gives it a date **and** a place. Four pages gave it
+neither and asked PHP to work it out anyway, which quietly means "today, in
+whatever time zone this server happens to use".
+
+On the morning the clocks go forward, half past one does not exist. So a group
+whose meeting time is stored as `01:30` was displayed as **2:30 AM on 29 March
+2026** — and two different stored times, `01:00` and `01:30`, came out as the
+same words. Measured in three places before anything was changed. The stored
+data was always right; only the display was wrong, for one day a year.
+
+Three Small Groups pages and the Attendance list are fixed. They now put a clock
+reading into words from its digits, through one place —
+`I18n::formatClockTime()` — which never builds a moment at all, so there is no
+clock change for it to fall into. **The Rota pages already did it correctly**, by
+slicing the text, and that is the model the fix copied.
+
+**Nothing else changes.** Proved by comparing the new wording with the old on
+all 1,440 minutes of a day with no clock change: identical. The only days that
+look different are the two the old code got wrong.
+
+Guards: `tools/audit-checks/check_clock_time_not_a_moment.py`, a hard gate that
+takes the list of clock columns out of the database's own description so a new
+one is covered without anybody remembering, and section G of
+`tools/clock-change-selftest.php`.
+
+**And one honest limit, found by breaking it on purpose.** The behavioural test
+*cannot* catch this fault: with the old code put back it still passed, because it
+runs on an ordinary day and the two agree on every ordinary day. That is why the
+formatter's own body is pinned instead — and why this entry says so rather than
+claiming more than was proved.
+
 ### A member's chosen language is actually used now (#763, migration 251)
 
 A member could choose their interface language, the choice was stored, and

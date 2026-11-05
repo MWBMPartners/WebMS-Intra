@@ -28,6 +28,9 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
@@ -137,7 +140,7 @@ $dayNames = [1 => 'Mon', 2 => 'Tue', 3 => 'Wed', 4 => 'Thu', 5 => 'Fri', 6 => 'S
                 $meetsBits[] = $dayNames[(int) $g['meetingDay']] ?? '';
             }
             if ($g['meetingTime'] !== null && $g['meetingTime'] !== '') {
-                $meetsBits[] = date('g:i A', strtotime((string) $g['meetingTime']));
+                $meetsBits[] = I18n::formatClockTime((string) $g['meetingTime']);
             }
             $meets = count($meetsBits) > 0 ? implode(' ', $meetsBits) : 'Varies';
             $memberCount = (int) ($g['memberCount'] ?? 0);

@@ -677,6 +677,64 @@ class I18n
     }
 
     /**
+     * 🕐 A time on a CLOCK, put into words without ever becoming a moment.
+     *
+     * 🚨 THIS EXISTS BECAUSE `date('g:i A', strtotime($clock))` IS WRONG ONE
+     *    DAY A YEAR, and four pages did exactly that (#777, #549's "mistake
+     *    1"). `strtotime('01:30')` resolves a bare clock reading against
+     *    TODAY in PHP's default zone — and on the morning the clocks go
+     *    forward, 01:30 does not exist, so PHP moves it. Measured in
+     *    Europe/London on a stored `01:30`:
+     *
+     *        28 March 2026  ->  1:30 AM   (right)
+     *        29 March 2026  ->  2:30 AM   (WRONG, an hour out)
+     *        25 October 2026 -> 1:30 AM   (right)
+     *
+     *    The stored data was never wrong; the display was. And the round trip
+     *    was only ever correct because both halves used the same zone — PHP's
+     *    default, which has nothing to do with the organisation's.
+     *
+     *    **A time on a clock is not a point in history until something gives
+     *    it a date AND a zone.** This gives it neither, so there is no
+     *    transition for it to fall into. `web/_apps/rota/index.php` already
+     *    had the right idea by slicing the text; this does the same job while
+     *    keeping the twelve-hour wording those four pages showed.
+     *
+     * @param string|null $clock A stored clock reading: `19:30`, `19:30:00`,
+     *                           or anything else, which comes back trimmed and
+     *                           unchanged rather than guessed at.
+     *
+     * @return string Twelve-hour wording — `7:30 PM` — or '' for nothing.
+     */
+    public static function formatClockTime(?string $clock): string
+    {
+        $text = trim((string) $clock);
+        if ($text === '') {
+            return '';
+        }
+        if (preg_match('/^(\d{1,2}):(\d{2})(?::\d{2})?$/', $text, $parts) !== 1) {
+            // Not a clock reading. Hand it back rather than inventing a time:
+            // a wrong hour shown confidently is worse than text nobody styled.
+            return $text;
+        }
+        $hour   = (int) $parts[1];
+        $minute = (int) $parts[2];
+        if ($hour > 23 || $minute > 59) {
+            return $text;
+        }
+
+        // Twelve-hour, no leading zero, matching what these pages showed before
+        // — so this fixes the one wrong day without changing the other 364.
+        $suffix = $hour < 12 ? 'AM' : 'PM';
+        $shown  = $hour % 12;
+        if ($shown === 0) {
+            $shown = 12;
+        }
+
+        return $shown . ':' . str_pad((string) $minute, 2, '0', STR_PAD_LEFT) . ' ' . $suffix;
+    }
+
+    /**
      * Format a date according to the current locale.
      *
      * @param string $date   Date string (Y-m-d or datetime)

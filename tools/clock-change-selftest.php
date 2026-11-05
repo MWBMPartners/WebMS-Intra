@@ -15,6 +15,11 @@
  *     * `Giving::pledgeExpectedToDate()`.
  *   Each is checked against the OLD arithmetic as well, so the test is proved
  *   to distinguish them rather than merely to pass.
+ *   Section G covers #777's first fix: `I18n::formatClockTime()`, the one place
+ *   a time on a CLOCK is put into words — proved identical to the old
+ *   `date('g:i A', strtotime(…))` on all 1,440 minutes of a normal day, and
+ *   different only inside the hour that does not exist, where the old code was
+ *   an hour out.
  *
  * WHAT IT DOES NOT COVER, said plainly
  *   The other four fixes — a DBS expiry, a venue renewal, the rehire undo
@@ -47,8 +52,10 @@ define('PORTAL_ROOT', $root . $sep . 'web');
 define('PORTAL_CORE', PORTAL_ROOT . $sep . '_core');
 
 require PORTAL_CORE . $sep . 'Giving.php';
+require PORTAL_CORE . $sep . 'I18n.php';
 
 use Portal\Core\Giving;
+use Portal\Core\I18n;
 
 $passed = 0;
 $failed = 0;
@@ -179,8 +186,86 @@ check('F1 a one-off owes its full amount from day one',
 check('F2 monthly uses calendar months, so a change inside the window is irrelevant',
     Giving::pledgeExpectedToDate(2000, 'monthly', '2026-03-22', '2026-04-22'), 4000);
 
+echo "G. A time on a CLOCK is put into words without becoming a moment (#777)\n";
+// 🚨 THE FAULT THIS REPLACES WAS LIVE IN FOUR PAGES. `date('g:i A',
+//    strtotime($clock))` resolves a bare clock reading against TODAY in PHP's
+//    default zone — and on the morning the clocks go forward the reading does
+//    not exist, so PHP moves it an hour. Measured in Europe/London on a stored
+//    `01:30`: 1:30 AM on 28 March, **2:30 AM on 29 March**, 1:30 AM on
+//    25 October. Two different stored times, `01:00` and `01:30`, even came
+//    out as the same words that day.
+check('G1 an ordinary evening time reads as it always did',
+    I18n::formatClockTime('19:30:00'), '7:30 PM');
+check('G2 ...with or without the seconds', I18n::formatClockTime('19:30'), '7:30 PM');
+check('G3 midnight is 12 AM, not 0 AM', I18n::formatClockTime('00:00:00'), '12:00 AM');
+check('G4 noon is 12 PM, not 0 PM', I18n::formatClockTime('12:00:00'), '12:00 PM');
+check('G5 the minute keeps its leading zero', I18n::formatClockTime('09:05'), '9:05 AM');
+
+// ⚠️ THE ONE THAT MATTERS, AND IT MUST BE THE SAME IN EVERY ZONE AND ON EVERY
+//    DAY, because the whole point is that no date or zone is involved.
+foreach (['Europe/London', 'America/New_York', 'Australia/Sydney', 'UTC'] as $zone) {
+    date_default_timezone_set($zone);
+    check("G6 01:30 reads as 1:30 AM in {$zone}, change night or not",
+        I18n::formatClockTime('01:30:00'), '1:30 AM');
+}
+
+// And it must refuse to invent a time rather than show a confident wrong one.
+date_default_timezone_set('Europe/London');
+check('G7 nothing comes back as nothing', I18n::formatClockTime(null), '');
+check('G8 an empty string too', I18n::formatClockTime(''), '');
+check('G9 something that is not a clock reading is handed back unchanged',
+    I18n::formatClockTime('not a time'), 'not a time');
+check('G10 ...and so is an impossible one, rather than being wrapped round',
+    I18n::formatClockTime('25:61'), '25:61');
+
+// 🧪 PROVED AGAINST THE OLD CODE, which is what makes this a fix rather than a
+//    rewrite: identical on every minute of a day with no clock change, so the
+//    other 364 days look exactly as they did.
+date_default_timezone_set('Europe/London');
+$differences = 0;
+for ($hour = 0; $hour < 24; $hour++) {
+    for ($minute = 0; $minute < 60; $minute++) {
+        $clock = sprintf('%02d:%02d:00', $hour, $minute);
+        $wasShown = date('g:i A', (int) strtotime('2026-05-15 ' . $clock));
+        if (I18n::formatClockTime($clock) !== $wasShown) {
+            $differences += 1;
+        }
+    }
+}
+check('G11 all 1,440 minutes of a normal day read exactly as they used to',
+    $differences, 0);
+
+// 🚨 BE EXACT ABOUT WHAT SECTION G CANNOT PROVE, because planting it taught me
+//    this and it is the most useful thing here. With `formatClockTime()`'s
+//    arithmetic replaced by the old `date('g:i A', strtotime($text))`, **this
+//    whole section stayed at 40 of 40.** Of course it did: the two agree on
+//    every ordinary day, and this test runs on an ordinary day. They differ
+//    only inside the hour that does not exist, one morning a year, and PHP
+//    offers no way to tell a script that today is that morning.
+//
+//    That is #549's own recorded trap — "a test written in December passes in
+//    London whatever the code does" — and it means **no behavioural test can
+//    guard this one function.** So its BODY is pinned instead, by
+//    `tools/audit-checks/check_clock_time_not_a_moment.py`, which fails if it
+//    ever contains `strtotime`, `date(` or `DateTime` again. Planted, that goes
+//    red where this section does not.
+//
+//    What section G really proves is the arithmetic itself — midnight, noon,
+//    the leading zero, the refusals, and that 364 days look exactly as they
+//    did. That is worth having, and it is not the same as proving the fault is
+//    gone.
+
+// ...and different ONLY inside the skipped hour, where the old code was wrong.
+$oldWay = date('g:i A', (int) strtotime('2026-03-29 01:30:00'));
+check('G12 the old way really did move 01:30 on the change morning',
+    $oldWay, '2:30 AM');
+check('G13 ...and the new way does not', I18n::formatClockTime('01:30:00'), '1:30 AM');
+
 echo "\n";
 echo ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
-echo "This covers the ARITHMETIC of #549's mistake 3. It says nothing about\n";
-echo "mistake 1 — a time on a clock treated as a moment — which needs reading.\n";
+echo "Sections A-F cover the ARITHMETIC of #549's mistake 3. Section G covers\n";
+echo "ONE instance of mistake 1 — a time on a clock treated as a moment — the\n";
+echo "four display sites #777 fixed. The rest of mistake 1 still needs reading:\n";
+echo "a reading pulled into a variable and converted several lines later is\n";
+echo "invisible to both this and check_clock_time_not_a_moment.py.\n";
 exit($failed === 0 ? 0 : 1);

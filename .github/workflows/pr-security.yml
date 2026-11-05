@@ -1765,6 +1765,18 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_member_language_applied.py
 
+      # 🕐 #777. A column declared TIME holds a reading from a clock, and a time
+      #    on a clock is not a point in history until something gives it a date
+      #    AND a zone. `strtotime('01:30')` gives it today's date in PHP's own
+      #    default zone — and on the morning the clocks go forward that reading
+      #    does not exist, so PHP moves it an hour. Four pages did exactly that.
+      #    The column names come out of full_schema.sql, so a new TIME column is
+      #    covered without anybody remembering.
+      - name: 'A clock reading is never made a moment (hard gate, #777)'
+        id: clock_time_not_a_moment
+        if: always()
+        run: python3 -I tools/audit-checks/check_clock_time_not_a_moment.py
+
 
       # 🔑 ONE PLACE HASHES AND STORES A PASSWORD (#728).
       #

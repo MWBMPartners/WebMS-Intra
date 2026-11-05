@@ -17945,3 +17945,99 @@ reads the filesystem (#779); and a globe click made while signed OUT writes the
 session key, so for that one session a member's own stored language is never
 read -- no cross-member leak, because `Auth::logout()` empties and destroys the
 session.
+
+---
+
+## A time on a clock is not a moment (#777, part one)
+
+**5 November 2026.** Four pages displayed a stored clock reading with
+`date('g:i A', strtotime($clock))`. Measured in Europe/London on a stored
+`01:30`:
+
+    28 March 2026   ->  1:30 AM    right
+    29 March 2026   ->  2:30 AM    WRONG
+    25 October 2026 ->  1:30 AM    right
+
+`strtotime('01:30')` resolves a bare reading against **today**, in PHP's
+**default** zone. On the spring-forward morning that reading does not exist, so
+PHP moves it an hour — and `01:00` and `01:30` both came out as `2:00`/`2:30`,
+two different stored times reading as one.
+
+**The round trip was only ever correct because both halves used the same wrong
+zone.** `strtotime()` and `date()` both take PHP's default, which has nothing to
+do with the organisation's, so they cancelled out — on 364 days a year.
+
+`I18n::formatClockTime()` is now the one place a clock reading becomes words,
+and it builds no moment: hours and minutes come off the digits. `web/_apps/rota/`
+already did the right thing by slicing the text, and is the model.
+
+**THE MOST USEFUL THING HERE IS THAT THE TEST FOR IT CANNOT WORK.** With the old
+`date('g:i A', strtotime(...))` put back inside the formatter,
+`tools/clock-change-selftest.php` stayed at **40 of 40**. Of course it did: the
+two agree on every ordinary day, they differ only inside the hour that does not
+exist, and PHP offers no way to tell a script that today is that morning. **That
+is #549's own recorded trap — "a test written in December passes in London
+whatever the code does" — arriving one level up, in the test written to close
+it.**
+
+So the formatter's BODY is pinned by
+`tools/audit-checks/check_clock_time_not_a_moment.py`, which fails if it ever
+contains `strtotime`, `date(` or `DateTime` again. Planted, that goes red where
+the behavioural test does not. **The rule being applied is D-065's, in the other
+direction: where no test running today can tell, pin the source — and say why,
+or the pin reads as belt and braces.**
+
+The column names come out of `full_schema.sql` rather than a list typed in the
+check (#706's lesson), so a new `TIME` column is covered without anybody
+remembering. Eleven exist today.
+
+### The verdicts, including the ones already right
+
+#777 asks for every place checked, because a sweep that lists only faults cannot
+be told from a sweep that stopped early.
+
+| Place | Verdict |
+|---|---|
+| `small-groups/index.php`, `mine.php`, `group.php` | **WRONG** — fixed |
+| `attendance/index.php` | **WRONG** — fixed |
+| `rota/index.php` | **RIGHT** — slices the text, correct in every zone |
+| `rota/slot-save.php`, `small-groups/meeting-save.php` | **RIGHT** — store the posted text unchanged |
+| `_core/Venues.php:3658` | **RIGHT** — compares clock readings as TEXT, which is #435's own fix |
+| `_core/Livestream.php:95-104` | **RIGHT** — gives the reading a date AND a zone with `createFromFormat(…, $tzObj)` |
+| `_core/Events.php` `OLD_FORM_ZONE` | **RIGHT, leave alone** — a hard-coded zone that is looked FOR and never written |
+| date-plus-clock-time concatenation | **NONE anywhere** — neither the PHP form nor `CONCAT()` in SQL |
+| `kids/checkin.php:130` | **a moment, so converting is right** — but `checkedInAt` is `DATETIME DEFAULT CURRENT_TIMESTAMP` with **no comment saying whether it is UTC or the server's clock**, which is #777's question 1 unanswered |
+
+### The scale of what remains, measured rather than guessed
+
+    486 time-shaped columns in full_schema.sql (402 DATETIME, 66 DATE, 16 TIME, 2 TIMESTAMP)
+    123 of them carry ANY comment at all
+    338 strtotime( under web/_apps and web/_core
+     54 new DateTime(Immutable)?(
+    479 date( / gmdate(
+
+So "does the column comment say which kind of value it holds?" is answered **no**
+for three quarters of them before any reading starts. That is the bulk of #777
+and it is not done.
+
+### Raised rather than bundled
+
+**#782 — eighteen hard-coded `Europe/London` literals across nine files, and two
+columns that DEFAULT to it.** The standing rule is explicit ("never hard-code a
+zone… a customer in another country is the ordinary case"). The two defaults are
+#763's shape exactly — a default that cannot be told from a choice — with one
+real difference: unlike `tblUsers.locale`, those columns ARE written by their own
+pages, so some rows genuinely are choices, and the answer needs reading rather
+than D-060's one-liner. The measured cost: a livestream schedule with no zone set
+resolves to London, so "next: Saturday 11:00" is eleven hours out for a church in
+Sydney.
+
+### And a mistake of mine worth recording, because it was the second time
+
+Backing files up to `/tmp/$(basename $f)` **collided**: `small-groups/index.php`
+and `attendance/index.php` share a basename, so the second backup overwrote the
+first and the restore put the attendance page inside the Small Groups file. It
+was caught by `check_capability_registry.py` going red — the file had lost its
+`App::can(Capabilities::GROUPS_MANAGE)` gate — and `git checkout --` put it back.
+**This repository's memory already records that trap from earlier the same day.
+Use distinct backup names, or better, use git.**

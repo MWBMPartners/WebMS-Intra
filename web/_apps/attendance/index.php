@@ -21,6 +21,9 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\AttendanceAccess;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 use Portal\Core\Site;
 
 // 📌 Page metadata
@@ -324,7 +327,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="d-md-none fw-semibold">Date: </span>
                     <strong><?php echo htmlspecialchars($sessDate->format('D, j M Y'), ENT_QUOTES, 'UTF-8'); ?></strong>
                     <?php if ($sess['sessionTime'] !== null && $sess['sessionTime'] !== ''): ?>
-                        <br><small class="text-muted"><?php echo htmlspecialchars(date('g:i A', strtotime($sess['sessionTime'])), ENT_QUOTES, 'UTF-8'); ?></small>
+                        <?php
+                        // 🕐 A time on a CLOCK, never turned into a moment. This
+                        //    read `date('g:i A', strtotime(...))`, which is an
+                        //    hour out on the morning the clocks go forward:
+                        //    `strtotime('01:30')` resolves against TODAY, and
+                        //    01:30 does not exist that day, so PHP moved it to
+                        //    02:30 (#777, #549's mistake 1). Measured.
+                        ?>
+                        <br><small class="text-muted"><?php echo htmlspecialchars(I18n::formatClockTime((string) $sess['sessionTime']), ENT_QUOTES, 'UTF-8'); ?></small>
                     <?php endif; ?>
                     <?php if ($isToday === true): ?>
                         <span class="badge bg-success ms-1">Today</span>
