@@ -92,6 +92,71 @@ class I18n
     }
 
     /**
+     * Ask the question again, now that a session exists.
+     *
+     * 🚨 WITHOUT THIS, THE FIRST TWO SOURCES IN `resolveLocale()` COULD NEVER
+     *    BE REACHED, AND A MEMBER'S SAVED LANGUAGE WAS APPLIED NOWHERE (#763).
+     *
+     *    `init()` is called from `bootstrap.php`, and the session does not
+     *    start until `index.php` calls `Auth::ensureSession()` — AFTER
+     *    bootstrap has finished. index.php's own comment says so in terms:
+     *    "No session is active when start-up finishes, in any of the three
+     *    ways." So `session_status() === PHP_SESSION_ACTIVE` was false when
+     *    the question was asked, both early branches were skipped, and every
+     *    page was drawn in whatever `Accept-Language` said or the
+     *    installation's default. The block in bootstrap that reads
+     *    `tblUsers.locale` is behind the same test and could not run either.
+     *
+     *    Measured rather than reasoned, by driving this class:
+     *    `tools/i18n-member-language-selftest.php` sets up the real order —
+     *    `init()` with no session, then a session carrying a member whose
+     *    `tblUsers.locale` is `cy` — and with this method removed the answer
+     *    stays on whatever `Accept-Language` asked for. It has NOT been
+     *    measured over HTTP against a drawn page; that needs a seeded
+     *    installation and is said so in the test's own closing lines.
+     *
+     *    `init()` latches `$initialised` and returns early, so calling it
+     *    again does nothing — which is why this is a separate method rather
+     *    than a second `init()`. It is safe to call when there is still no
+     *    session: the answer is then the same one `init()` already reached.
+     *
+     * ⚠️ IT MUST NOT BE CALLED BEFORE `init()`. The default from settings is
+     *    read there, and resolving without it would fall back to the
+     *    hard-coded default rather than the installation's.
+     */
+    public static function reconsiderNowSessionExists(?\mysqli $db = null): void
+    {
+        if (self::$initialised !== true) {
+            self::init();
+            return;
+        }
+
+        // 📖 The member's own choice, read once per session. This block used to
+        //    live in `bootstrap.php` behind the same session test, so it could
+        //    not run either — #174 wrapped it in a try/catch and nobody noticed
+        //    it was unreachable. It is here so there is ONE place that answers
+        //    "what language does this person want", rather than two that can
+        //    disagree.
+        //
+        //    Every failure is swallowed on purpose: the `locale` column may be
+        //    missing on an old database and the connection may blip. Falling
+        //    back to the language already chosen is far better for somebody
+        //    reading a page than a 500.
+        if ($db !== null
+            && session_status() === PHP_SESSION_ACTIVE
+            && isset($_SESSION['user_id']) === true
+            && isset($_SESSION['user_locale']) === false
+        ) {
+            $stored = self::storedChoice((int) $_SESSION['user_id'], $db);
+            if ($stored !== null && self::isSupported($stored) === true) {
+                $_SESSION['user_locale'] = $stored;
+            }
+        }
+
+        self::setLocale(self::resolveLocale());
+    }
+
+    /**
      * Resolve the active locale from available sources.
      *
      * @return string Resolved locale code
@@ -411,30 +476,156 @@ class I18n
      */
     public static function switchLocale(string $locale): bool
     {
-        if (self::isSupported($locale) === false) {
+        return self::chooseLanguage($locale);
+    }
+
+    /**
+     * 🗣️ Read a member's stored language choice — the ONE place it is read.
+     *
+     * Both the resolver (`reconsiderNowSessionExists()`) and the control on the
+     * account page ask this, so neither can hold its own copy of the statement.
+     * `ContentTranslation::readerLanguage()` deliberately reads the column
+     * itself: it answers a different question — which language to TRANSLATE
+     * into — and its own docblock says why.
+     *
+     * 🚨 EVERY FAILURE IS SWALLOWED, AND ITS WORDS ARE NOT LOGGED. The `locale`
+     *    column may be missing on a database nobody has upgraded yet, and the
+     *    connection may blip. Falling back to the language already chosen is
+     *    far better for somebody reading a page than a 500 — and a mysqli
+     *    message can quote the value, which here is a person's own preference.
+     *
+     * @param int          $userId The account to ask about.
+     * @param mysqli|null  $db     The request's connection, or null to take
+     *                             `App::db()`.
+     *
+     * @return string|null The stored code, or null for "not chosen" — which is
+     *                     what an empty column means on this portal (D-060).
+     *                     Null is also the answer when it could not be read,
+     *                     and the two cases are deliberately not told apart:
+     *                     nothing a caller could do differs.
+     */
+    public static function storedChoice(int $userId, ?\mysqli $db = null): ?string
+    {
+        if ($userId <= 0) {
+            return null;
+        }
+        try {
+            $db   = $db ?? App::db();
+            $stmt = $db->prepare('SELECT `locale` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+            if ($stmt === false) {
+                return null;
+            }
+            $stmt->bind_param('i', $userId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] Could not read the stored language; '
+                . 'carrying on with the language already chosen.');
+            return null;
+        }
+        if ($row === null || $row['locale'] === null || $row['locale'] === '') {
+            return null;
+        }
+        return (string) $row['locale'];
+    }
+
+    /**
+     * 🗣️ Store a member's language choice — the ONE place it is stored, and
+     *    the ONE place it is cleared.
+     *
+     * `switchLocale()` is a thin caller of this, so the `?lang=` address in
+     * `index.php` and the control on the account page cannot disagree about
+     * what choosing a language means. Do not add a second writer of
+     * `tblUsers.locale`: for eight months there was exactly one, it sat where
+     * no session existed, and that is the whole of #763.
+     *
+     * @param string|null $locale A language code, or null / '' meaning
+     *                            "forget my choice and follow my browser".
+     *                            An empty stored value is what "not chosen"
+     *                            IS on this portal (#763, D-060), so clearing
+     *                            has to be expressible or a member can never
+     *                            undo a choice.
+     *
+     * @return bool False only when a language was asked for and the portal
+     *              does not know it. Clearing always answers true.
+     */
+    public static function chooseLanguage(?string $locale): bool
+    {
+        $clearing = $locale === null || $locale === '';
+
+        if ($clearing === false && self::isSupported((string) $locale) === false) {
             return false;
         }
+        $locale = $clearing === true ? null : (string) $locale;
 
-        // 📋 Store in session
+        // 📋 Store in session. Clearing UNSETS both keys rather than writing an
+        //    empty string: `resolveLocale()` reads them with `isset()`, so an
+        //    empty string left behind would be a stored "no language" that
+        //    still counted as a visit-long choice, and the member's next page
+        //    would not follow their browser as they just asked.
         if (session_status() === PHP_SESSION_ACTIVE) {
-            $_SESSION['portal_locale'] = $locale;
-            $_SESSION['user_locale']   = $locale;
-        }
-
-        // 📋 Persist to DB if user is logged in
-        if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['user_id']) === true) {
-            $db = App::db();
-            $stmt = $db->prepare('UPDATE tblUsers SET locale = ? WHERE userID = ?');
-            if ($stmt !== false) {
-                $userId = (int) $_SESSION['user_id'];
-                $stmt->bind_param('si', $locale, $userId);
-                $stmt->execute();
-                $stmt->close();
+            if ($locale === null) {
+                unset($_SESSION['portal_locale'], $_SESSION['user_locale']);
+            } else {
+                $_SESSION['portal_locale'] = $locale;
+                $_SESSION['user_locale']   = $locale;
             }
         }
 
-        // 📋 Apply immediately
-        self::setLocale($locale);
+        // 📋 Remember the choice on the account, so it follows the member to
+        //    their next device.
+        //
+        // 🚨 EVERY FAILURE IS SWALLOWED, AND THAT IS NOT TIDINESS. Until #763
+        //    this statement could never run — no session was active where this
+        //    method was called — so making it run made a new way to take a page
+        //    down. `DbServer::connect()` sets MYSQLI_REPORT_ERROR together with
+        //    MYSQLI_REPORT_STRICT, and it takes BOTH for mysqli to THROW rather
+        //    than return false, so `prepare()`, `bind_param()`, `execute()` and
+        //    `close()` can all throw: a missing `locale` column on an old
+        //    database, a lock wait on `tblUsers` (ERROR 1205), a blip.
+        //
+        //    Measured on MySQL 8.0.36 against a `tblUsers` with no `locale`
+        //    column: the bare version threw `mysqli_sql_exception: Unknown
+        //    column 'locale' in 'field list'` straight out of this method.
+        //
+        //    **And this block runs before the maintenance and membership gates**
+        //    (the `?lang=` caller in `index.php` is deliberately ahead of them),
+        //    so that was a 500 on a language click on EVERY address, open or
+        //    closed — word for word the harm the #509 comment beside that caller
+        //    says it exists to prevent.
+        //
+        //    So: the language is still applied and still kept for this visit,
+        //    which is what the member asked for. Only the remembering is lost,
+        //    and a page that draws beats a page that does not.
+        if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['user_id']) === true) {
+            try {
+                $db = App::db();
+                // Backticked because this is CHANGED SQL: it had never run before
+                // #763, so making it run brings it under the owner's rule of
+                // 2 November 2026.
+                $stmt = $db->prepare('UPDATE `tblUsers` SET `locale` = ? WHERE `userID` = ?');
+                if ($stmt !== false) {
+                    $userId = (int) $_SESSION['user_id'];
+                    // `bind_param` with 's' sends a PHP null as SQL NULL, which
+                    // is what "not chosen" is (#763, D-060).
+                    $stmt->bind_param('si', $locale, $userId);
+                    $stmt->execute();
+                    $stmt->close();
+                }
+            } catch (\Throwable $e) {
+                // ⚠️ The fault's own words are NOT logged: a mysqli message can
+                //    quote the value being written, and that value is a person's
+                //    language preference.
+                error_log('[WebMS-Intra] Could not remember the chosen language on '
+                    . 'the account; it still applies for this visit.');
+            }
+        }
+
+        // 📋 Apply immediately. When clearing, ask the whole chain again rather
+        //    than assuming the default: the member has just said "follow my
+        //    browser", so the browser's answer is the one to use.
+        self::setLocale($locale === null ? self::resolveLocale() : $locale);
         return true;
     }
 

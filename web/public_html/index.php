@@ -44,6 +44,9 @@ require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARA
 
 use Portal\Core\Auth;
 use Portal\Core\Gatekeeper;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and the
+//    line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 use Portal\Core\Maintenance;
 use Portal\Core\Router;
 use Portal\Core\SiteGate;
@@ -65,6 +68,53 @@ use Portal\Core\SiteGate;
 //    idempotent (no-ops if already active), so this can't double-start the
 //    session that app handlers start further down the line.
 Auth::ensureSession();
+
+// 🌍 ASK THE LANGUAGE QUESTION AGAIN, NOW THAT THERE IS A SESSION (#763).
+//    `I18n::init()` runs inside bootstrap, BEFORE the line above — and the
+//    first two things it consults are the member's own saved language and the
+//    language switcher's choice, both of which live in the session. Neither
+//    existed yet, so both were skipped and **a member's saved language was
+//    applied nowhere**: every page was drawn in whatever `Accept-Language`
+//    said, or the installation's default. Measured by driving the class
+//    (`tools/i18n-member-language-selftest.php`), not over HTTP against a
+//    drawn page — the test says so in its own closing lines.
+//
+//    It must come AFTER ensureSession() and BEFORE anything draws, which is
+//    why it is here rather than in bootstrap. `init()` latches, so this is a
+//    separate call rather than a second init.
+I18n::reconsiderNowSessionExists($mysqli ?? null);
+
+// 🌍 A LANGUAGE CHOSEN FROM AN ADDRESS, ?lang=cy (#763).
+//    This ran inside bootstrap until 5 November 2026, which meant
+//    `I18n::switchLocale()` found no session: it stored nothing and wrote
+//    nothing, so the choice lasted exactly as long as the request that made
+//    it and was gone by the time the redirect below landed. It is the ONLY
+//    thing that has ever written `tblUsers.locale`.
+//
+//    It must come after `ensureSession()` and before anything draws. It keeps
+//    its place ahead of the maintenance and membership gates, because
+//    choosing a language is not something anybody should have to get past a
+//    gate to do.
+//
+// #509 point 2: `switchLocale()` takes a `string`, so a request sent as a
+//    list — ?lang[]=x — used to arrive as an array and PHP's typed parameter
+//    refused it with a TypeError: a 500 and one error row, on every address,
+//    open or closed. Anything that is not text is ignored rather than
+//    crashing. Do not narrow that test back.
+if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true && $_GET['lang'] !== '') {
+    I18n::switchLocale($_GET['lang']);
+    // 🔀 Back to the same page without the lang parameter, so the address does
+    //    not carry it around for ever.
+    $currentUri = $_SERVER['REQUEST_URI'] ?? '/';
+    $parsed     = parse_url($currentUri);
+    $path       = $parsed['path'] ?? '/';
+    parse_str($parsed['query'] ?? '', $queryParams);
+    unset($queryParams['lang']);
+    $newQuery = http_build_query($queryParams);
+    $redirect = $path . ($newQuery !== '' ? '?' . $newQuery : '');
+    header('Location: ' . $redirect, true, 302);
+    exit();
+}
 
 // 🚧 Maintenance gate (#220).
 //    If portal.maintenance.active = '1', OR the installed_version is

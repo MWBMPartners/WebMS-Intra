@@ -292,7 +292,11 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `emailAddress` VARCHAR(255) COLLATE utf8mb4_general_ci NOT NULL,
     `phoneNumber`  VARCHAR(50)  COLLATE utf8mb4_general_ci DEFAULT NULL,
     `avatarPath`   VARCHAR(255) COLLATE utf8mb4_general_ci DEFAULT NULL,
-    `locale`       VARCHAR(10)  COLLATE utf8mb4_general_ci DEFAULT 'en',
+    -- Empty means the member has never chosen a language, so the browser's own
+    -- Accept-Language request decides (#763, D-060). It used to default to 'en',
+    -- which is indistinguishable from choosing English and would have pinned every
+    -- existing member to English the day the column started being obeyed.
+    `locale`       VARCHAR(10)  COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'The language this member chose. NULL means they have not chosen, so Accept-Language decides (#763).',
     `isActive`     TINYINT(1)   DEFAULT 1,
     `isAdmin`      TINYINT(1)   DEFAULT 0,
     `isRootAdmin`  TINYINT(1)   DEFAULT 0,
@@ -11126,6 +11130,14 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('249_portal_check_page.sql')
 -- The `siteID` column and its index are declared above, on the table itself.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('250_translation_spend_per_organisation.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 251_member_language_is_a_choice.sql (#763) ─────────────────────────
+-- `tblUsers.locale` is declared above with no default, which is the whole of
+-- what that migration changes for a FRESH install. Its other statement empties
+-- rows still holding the old `'en'` default, and a fresh install has none.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('251_member_language_is_a_choice.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

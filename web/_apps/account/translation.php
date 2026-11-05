@@ -12,6 +12,9 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\ContentTranslation;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -51,14 +54,20 @@ if ($stmt !== false) {
 }
 $on = $row !== null && (int) $row['autoTranslate'] === 1;
 
-$ui = null;
-$stmt = $db->prepare('SELECT locale FROM tblUsers WHERE userID = ? LIMIT 1');
-if ($stmt !== false) {
-    $stmt->bind_param('i', $userId);
-    $stmt->execute();
-    $ui = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-}
+// 🗣️ THE LANGUAGE THIS SENTENCE NAMES MUST BE THE ONE A TRANSLATION WOULD
+//    REALLY BE ASKED FOR, and it was not. This page used to read the
+//    `tblUsers.locale` column itself and print `?? 'en'` when it was empty —
+//    so after migration 251 emptied that column for every account (#763,
+//    D-060) it said "en" to everybody, while the real target is the member's
+//    browser language. That is the consent sentence on the one page whose job
+//    is informed permission to send text to an outside company, so a wrong
+//    language here is worse than a wrong language anywhere else on the portal.
+//
+//    `ContentTranslation::readerLanguage()` is the ONE place that decides, and
+//    it is what `translate-control.php` and the handler both ask. Never read
+//    the column here again: two readers can disagree, and this one only has to
+//    be wrong once.
+$readerLanguage = ContentTranslation::readerLanguage($db, $userId);
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';
@@ -99,7 +108,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p class="text-secondary">
         With this on, a <strong>Translate</strong> button appears on announcements,
         project descriptions and project updates, offering them in your own language
-        (<strong><?php echo htmlspecialchars((string) ($ui['locale'] ?? 'en'), ENT_QUOTES, 'UTF-8'); ?></strong>).
+        (<strong><?php echo htmlspecialchars($readerLanguage, ENT_QUOTES, 'UTF-8'); ?></strong>).
         The original always stays on the page, unchanged, above the translation.
     </p>
     <p class="text-secondary">

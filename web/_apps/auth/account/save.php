@@ -22,6 +22,9 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -164,6 +167,31 @@ $updateStmt->close();
 $_SESSION['user_name']  = $fullName;
 $_SESSION['user_email'] = $emailAddress;
 App::resetUser();
+
+// -----------------------------------------------------------------------------
+// 5a. 🌍 The language, if the control was on the form (#763, D-062)
+// -----------------------------------------------------------------------------
+// ⚠️ ASK WHETHER THE FIELD ARRIVED, NEVER WHAT IT CONTAINS. An empty value is
+//    a real instruction here — "forget my choice and follow my browser" — so
+//    `$_POST['locale'] ?? ''` would be indistinguishable from a form that
+//    never carried the control, and a post from anywhere else would silently
+//    wipe a member's language. #677 cost this project a cleared portal address
+//    the same way, and the shape is the same: a missing field read as a value.
+//
+// `I18n::chooseLanguage()` is the ONE place a choice is stored or cleared, so
+// this page and the `?lang=` address cannot disagree. It refuses a language
+// the portal does not know and answers false; the only way to see that is a
+// hand-made request, since the form offers a fixed list, so the refusal is
+// recorded rather than shown.
+if (array_key_exists('locale', $_POST) === true && is_string($_POST['locale']) === true) {
+    $wanted = trim($_POST['locale']);
+    if (I18n::chooseLanguage($wanted === '' ? null : $wanted) === false) {
+        Logger::activity(
+            'ProfileLanguageRefused',
+            'A language the portal does not offer was submitted and was not stored'
+        );
+    }
+}
 
 // 📝 Log the profile update
 Logger::activity('ProfileUpdate', 'User updated profile information');

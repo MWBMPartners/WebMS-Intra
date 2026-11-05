@@ -115,7 +115,11 @@ appended with its real date and a note that it was added later.
 | [D-057](057-public-content-is-opt-in-per-item.md) | 2026-11-05 | Public content is opt-in, one item at a time | in force |
 | [D-058](058-outside-services-are-permitted-in-three-tiers.md) | 2026-11-05 | An outside service is permitted in three tiers, and the strictest wins | in force |
 | [D-059](059-translation-counts-calls-as-well-as-money.md) | 2026-11-05 | Translation counts calls as well as money | in force |
+| [D-060](060-an-untouched-stored-language-counts-as-no-choice.md) | 2026-11-05 | An untouched stored language counts as no choice | in force |
+| [D-061](061-the-language-picker-is-its-own-piece-of-work.md) | 2026-11-05 | The language picker is its own piece of work | superseded by D-062 |
+| [D-062](062-the-language-menu-exists-and-the-account-page-needs-one-too.md) | 2026-11-05 | The language menu exists, and the account page needs one too | in force |
+| [D-063](063-translation-may-start-charging-on-upgrade-day.md) | 2026-11-05 | Translation may start charging on upgrade day, and the changelog says so | in force |
 
-*59 decisions. This index is checked against the folder by
+*63 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

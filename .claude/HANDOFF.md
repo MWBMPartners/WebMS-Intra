@@ -12,47 +12,73 @@ pull request until the Codex review is done (D-035, D-007).
 
 ## Just landed
 
-**#768 — one place writes the form token, and it writes every carrier (D-050).**
-FIVE copies of that rule existed and no two agreed how many carriers a page has.
-The shared one was the LEAST complete. Live cost: on the Host Console, publish a
-chat prompt then press "Send 'We're live'" — refused, press lost.
+**#763 — a member's saved interface language is applied now (migration 251,
+D-060, D-061).** It was applied NOWHERE, on every request, since March 2026 —
+and nothing was broken. `I18n::resolveLocale()`'s first two sources sit behind
+`session_status() === PHP_SESSION_ACTIVE`; `init()` runs inside bootstrap and
+the session starts in `index.php` AFTER it, so both were skipped every time and
+`init()` latches so nothing asked again. **No condition was wrong and nothing
+was unreachable in the ordinary sense: the question was asked too early.**
+`php -l` could not see it and no audit script could.
 
-**SIX independent check rounds: 6+4+5+4+6+4 findings, NONE in the original
-build** — every one in a previous round's fix. The detector took six versions;
-the first five each had a hole and each was "verified by planting" the shapes
-its author had thought of. Rounds 4-6 found almost nothing but untrue comments
-and gaps in the guard: **the code converged at round 3, the writing about it
-did not.**
+**The switcher half was worse.** `switchLocale()` stores only with a session
+active and its ONE caller sat in bootstrap, so `?lang=cy` died in its own
+redirect — and it is the only thing that has ever written `tblUsers.locale`.
 
-**Three MORE live faults of the same family, found by looking for the RULE
-rather than its instances** — #770 (a member cannot add a passkey at all),
-#774 (push subscription loses the notification preferences on Save), #771 (the
-worship console). The gate is right to pass all three and cannot see them.
+**Which made the fix dangerous.** The column was `DEFAULT 'en'`, so every row
+held `'en'` put there by the database. Obeying it would have pinned every
+signed-in member to English. **A default and a deliberate choice are
+indistinguishable once stored, and the moment a column starts being obeyed is
+when that stops being harmless.**
 
-`tools/csrf-carriers-selftest.mjs` drives a real browser, 22 checks, nothing
-installed. **It is NOT the first here** — `tools/layout-audit.mjs` has since
-`0186531` (30 October, #569) — but it IS the first wired into a workflow, and
-`pr-security.yml` IS registered, so it really runs.
+**The independent check found TWELVE problems, none in the fix, and the worst
+two were claims I had put to the owner.** I said there was no control for
+choosing a language anywhere in the portal; there is a globe menu in the top
+bar of EVERY page (`grep -rn languageSwitcher web tools`). The owner declined
+to build a picker on that sentence — D-061 — so **D-062 supersedes it** and the
+account page now has a control too, with "Follow my browser". And "nothing
+anybody sees changes" was untrue twice: the menu starts working, and the
+Translate button starts really translating and **charging**, because it reads
+the same column and falls back to the browser. The owner accepted that
+deliberately (D-063). **Three of the first five plants also got past the hard
+gate** — `if (false)`, the argument dropped (legal PHP, restores half the
+fault), and `&& false` on the condition. Thirteen plants now, all caught.
+
+**#768 (before it) — one place writes the form token, every carrier (D-050).**
+Five copies, no two agreeing how many carriers a page has, and the shared one
+was the least complete. Six check rounds, 6+4+5+4+6+4 findings, NONE in the
+original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-Nothing. The next item is unstarted.
+**#763 round 2 is built and awaiting its next check** (the protected arm of
+D-051 — it writes and deletes stored data, so rounds run until one is clean).
+All twelve round-1 findings are addressed. Everything else below is unstarted.
 
-## Next, in this order — FIVE decisions changed this on 5 November
+## Next, in this order
 
-1. **#477** — a "check my portal" page for administrators. ~2 packages.
-2. **#500** — no built-in web addresses. Partly done (`PortalAddress`). ~1–2.
-3. **#499** — the downloadable zip package. Mostly built. ~1–2.
-4. **#549** — the time-zone pass. **IN the release — D-053.** ~2–3.
-5. **#569** — page audit + pre-push browser check. Browser automation now
-   proved (see #768), which makes this far cheaper than it looked. ~3–4.
-6. **#493** — portal content on the public website. **IN the release, IN FULL —
-   D-052.** The largest item; a new surface reachable without signing in. ~4–6.
-7. **Medium (63), then low (52), then the 8 unlabelled.** **ALL of them —
-   D-055: the whole backlog is cleared before the release.** No triage. ~36–46.
-8. **#754** — **moved here from position 10, D-054**, because its only blocker
-   is the pull request.
+1. **#777** — time zones, the reading half (a time on a clock read as a moment).
+   ~1 package. The arithmetic half shipped as `97af79c`.
+2. **#775** — every scheduled job records that it ran. ~1. On a fresh install
+   all eleven are inert, the personal-data sweep among them.
+3. **#778** — an outside service is permitted in three tiers, strictest wins
+   (D-058). ~2. **The gravatar leak is still live**: an MD5 of an e-mail address
+   is not anonymous, and the portal sends one to a third party per avatar.
+4. **#762** — translation counts calls as well as money (D-059). ~1.
+5. **#493** — portal content on the public website, IN FULL (D-052, D-056,
+   D-057). ~4–6, the largest item, a new surface reachable without signing in.
+6. **#569** — the page findings left: `/api-docs` (a script error, no `<h1>`, no
+   description), `/help/admin` (391px overflow at 320px), `/assets/kiosk` (no
+   description). ~1–2.
+7. **The whole backlog — 62 medium, 52 low, 8 unlabelled. ALL of it (D-055).**
+   No triage. ~36–46.
+8. **#754** — the six workflows GitHub has never registered. **Last, D-054**,
+   because its only blocker is the pull request.
 9. The comprehensive Codex review (D-007), then the merge.
+
+**Done since the last handoff:** #477 (the check-my-portal page, migration 249),
+#500 and #499 (both closed as already built, with the 340/340 package self-test
+as the evidence), #549's arithmetic half, #767, #765, #768, #763.
 
 **#225 (mobile) is DEFERRED — D-053**, labelled, with the cost recorded on it.
 
@@ -84,19 +110,43 @@ Nothing. The next item is unstarted.
 
 ## The lesson this run earned, in one line
 
-**A published helper is a single source of truth only while it is the BEST
-copy.** `portal.js` had told callers for months to use its token helper rather
-than writing their own; it was the worst of the five, so four of them did, each
-copying the nearest neighbour rather than the shared one — and the gap
-travelled while the fix never did.
+**A claim that something does not exist ANYWHERE needs the search that
+establishes it — exactly as a claim about history needs its `git log`.** This
+repository already has that rule, written for the past tense ("a claim that
+something never worked must carry the command that proved it"), and I broke it
+in the present tense: "there is no control anywhere for choosing a language"
+went into a question to the owner, a decision record and seven documents, and
+one `grep -rn languageSwitcher web tools` disproved it. The owner then declined
+to build something on the strength of it.
+
+**The runner-up, which is also real:** a default value and a deliberate choice
+are indistinguishable once stored, and the moment a column starts being obeyed
+is the moment that stops being harmless. **And the corollary the check found:**
+ask of any column you are about to empty who ELSE reads it and what their
+fallback does — the Translate button's did, and it costs money. `tblUsers.locale` was `DEFAULT 'en'` and nothing could write it, so
+every row said English. Simply honouring the column — the obvious fix — would
+have taken a French portal away from everybody using one, with no page
+explaining why. The fix was safe only because `git log -S"switchLocale" -- web/`
+proved no choice could ever have been stored.
+
+**And the runner-up, from #768:** a published helper is a single source of truth
+only while it is the BEST copy.
 
 ## Decisions in force — POINTERS ONLY
 
 **Every decision lives once, in `docs/decisions/`, one file each** (D-027). This
-list names them; it never restates them. **55 on file.**
+list names them; it never restates them. **63 on file.**
 
 | | Decision |
 |---|---|
+| **D-063** | Translation may start charging on upgrade day, and the changelog says so |
+| **D-062** | The language menu exists, and the account page needs one too |
+| **D-061** | The language picker is its own piece of work — SUPERSEDED by D-062 |
+| **D-060** | An untouched stored language counts as no choice |
+| **D-059** | Translation counts calls as well as money |
+| **D-058** | An outside service is permitted in three tiers |
+| **D-057** | Public content is opt-in, one item at a time |
+| **D-056** | Portal content reaches a public website all three ways |
 | **D-055** | The whole backlog is cleared before the first release |
 | **D-054** | A blocked item moves to the end of the queue |
 | **D-053** | Time zones in the release; the mobile pass deferred |
@@ -125,8 +175,8 @@ list names them; it never restates them. **55 on file.**
 | Issue | What |
 |---|---|
 | #769 | Nothing exercises `api/livechat/prompt-publish`; no test drove two rotating actions in sequence |
-| #762 | The spend limit cannot bite on the LibreTranslate route |
-| #763 | A member's saved interface language is applied nowhere |
+| #779 | A member has nowhere to choose their language (D-061) |
+| #762 | The spend limit cannot bite on the LibreTranslate route (D-059 answers it) |
 | #764 | Three smaller findings from #485/#761 |
 | #765 | Translation spend is counted installation-wide |
 | #766 | No rate limit on a money-spending endpoint |

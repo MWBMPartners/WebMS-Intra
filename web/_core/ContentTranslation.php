@@ -355,27 +355,47 @@ class ContentTranslation
      *    decides it.
      *
      * **IT READS THE MEMBER'S OWN STORED CHOICE, `tblUsers.locale`, AND NOT
-     * `I18n::locale()`, AND THAT IS DELIBERATE.** `I18n::locale()` is the
-     * language the INTERFACE is being drawn in, and on this portal it does not
-     * follow a member's saved choice at all: `I18n::init()` runs at
-     * `web/_core/bootstrap.php:891`, where **no session is active** (the
-     * session starts at `web/public_html/index.php:67`, after bootstrap is
-     * required, and index.php's own comment says start-up leaves no session
-     * started). So `resolveLocale()` can never reach its first two sources —
-     * the member's row and the language switcher — and the block at
-     * bootstrap.php:924 that would read `tblUsers.locale` cannot run either.
-     * Nothing anywhere under `web/` calls `I18n::init()` a second time.
+     * `I18n::locale()`, AND THAT IS STILL DELIBERATE — but the reason has
+     * changed, and the old reason is worth keeping because it was true for
+     * eight months.** `I18n::locale()` is the language the INTERFACE is being
+     * drawn in, and until #763 was fixed on 5 November 2026 it did not follow
+     * a member's saved choice at all: `I18n::init()` runs inside
+     * `bootstrap.php`, where **no session is active**, because the session
+     * starts in `index.php` after bootstrap has been required. So
+     * `resolveLocale()` could never reach its first two sources — the
+     * member's row and the language switcher — and the block in bootstrap
+     * that would have read `tblUsers.locale` was behind the same test and
+     * could not run either.
      *
-     * Measured rather than reasoned: a member whose row says `cy` was served a
-     * control asking for `en`. **That is a fault in the INTERFACE language
-     * system, not in this one, and it is #763** — not fixed here, because
-     * re-resolving the locale after the session starts changes the language
-     * every page is drawn in, on every installation, which is the owner's
-     * decision and not a tidy-up.
+     * **#763 IS FIXED NOW**, by `I18n::reconsiderNowSessionExists()`, called
+     * from `index.php` straight after `Auth::ensureSession()`. So
+     * `I18n::locale()` DOES follow a member's saved choice today, and the
+     * sentence above is history rather than a live limitation. The owner's
+     * decision that came with it is D-060: an untouched `'en'` counts as "not
+     * chosen", because nothing could ever write that column and every row held
+     * the schema default.
      *
-     * Reading the member's own column is also simply the right source for this
-     * job: the translation is made FOR one person, so the language they chose
-     * is the question, whatever the interface happens to be doing.
+     * Reading the member's own column remains the right source for this job,
+     * which is why nothing here changed: the translation is made FOR one
+     * person, so the language they chose is the question, whatever the
+     * interface happens to be doing.
+     *
+     * ⚠️ A DRAFT OF THIS DOCBLOCK SAID THE TWO CAN DIFFER BECAUSE "an
+     *    organisation may have turned a language off for the interface", AND
+     *    NO SUCH CONTROL EXISTS. `isSupported()` is `array_key_exists()`
+     *    against a hard-coded list of thirteen, and `enabledLocales()` is
+     *    "which `web/_lang/*.php` files are readable" — a fact about what was
+     *    deployed, not a setting anybody can change. Nothing anywhere reads an
+     *    `i18n.enabledLocales` setting (`grep -rn enabledLocales web tools`
+     *    answers the definition, its one caller, and a test fixture). A
+     *    sentence that justifies a design with a mechanism that is not there is
+     *    the reassuring direction, which is the worse one.
+     *
+     * They CAN still differ, for a real reason: this column is read straight
+     * from the database, while `I18n::locale()` is the answer
+     * `reconsiderNowSessionExists()` reached for THIS request — so a member
+     * whose stored language has no translation file gets the interface in the
+     * fallback language and a translation in the language they asked for.
      *
      * `I18n::locale()` is still the fallback, for an account with no stored
      * choice.

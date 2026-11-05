@@ -17502,3 +17502,128 @@ that cannot work is its own kind of untrue. And `\v`/`\f` used as whitespace mad
 the pin go red over perfectly legal JavaScript, because Python's `splitlines()`
 splits on them; both are folded to spaces now. **Crying wolf gets a check
 switched off (#483), so the two directions have to be checked together.**
+
+---
+
+## A question asked too early (#763)
+
+**5 November 2026.** A member's saved interface language was applied nowhere.
+Not sometimes — nowhere, on every request, since the translation framework
+landed in March 2026.
+
+**Nothing was broken.** `I18n::resolveLocale()` consults four sources in order:
+the member's own saved language, the language switcher's choice, the browser's
+`Accept-Language` request, and the installation's default. The first two live in
+the session, and both are guarded by
+`session_status() === PHP_SESSION_ACTIVE`. `I18n::init()` is called from
+`bootstrap.php`; the session starts in `index.php`, with
+`Auth::ensureSession()`, **after** bootstrap has been required. So both guards
+were false every time, both sources were skipped, and the block in bootstrap
+that would have read `tblUsers.locale` was behind the same test and could not
+run either. `init()` latches `$initialised`, so nothing asked again.
+
+**The shape worth recognising: no condition was wrong and no statement was
+unreachable in the ordinary sense.** Each guard is correct, the code it guards
+is correct, and the whole thing is in the wrong order relative to one line in
+another file. `php -l` cannot see it, no audit script could see it, and the
+feature fails silently and completely. The one tell was in
+`ContentTranslation::readerLanguage()`, whose author had hit the same wall,
+written it down, and deliberately not fixed it.
+
+**The switcher half was worse than the applying half.** `I18n::switchLocale()`
+is the ONLY thing that has ever written `tblUsers.locale`, and it writes only
+when a session is active. Its one and only caller sat in `bootstrap.php` —
+established with `git log -S"switchLocale" -- web/`, which answers `fe2b3fb`
+(7 March 2026) and `bd1ef12`. So `?lang=cy` applied the language to the request
+that carried it and lost it in its own redirect, and the column was never
+written on any installation.
+
+**Which is what made the fix dangerous, and is the part to remember.** The
+column was declared `DEFAULT 'en'`, so every account row held `'en'` — put
+there by the database, not by anybody choosing. Obeying the column as it stood
+would have **pinned every signed-in member to English**: somebody whose browser
+asks for French and gets a French portal today would start getting an English
+one, with nothing on any page explaining why. (A draft added "and no control
+anywhere to change it", which is false and is finding 1 below.) `isSupported()` reads a built-in list of **thirteen** languages rather
+than a setting, so browser detection is live on every installation and that
+regression is real rather than theoretical. (Drafts of this said twelve. Count
+them from the code: en, cy, fr, de, es, pt, ar, he, fa, ur, zh, ja, ko.) **A default value and a deliberate choice are
+indistinguishable once stored, and the moment a column starts being obeyed is
+the moment that stops being harmless.** Migration 251 empties the rows still
+holding the default and changes the default to NULL; the measured ground for
+calling that safe is the `git log -S` above. D-060.
+
+**Two guards, and neither can prove the thing that matters.**
+`tools/i18n-member-language-selftest.php` drives the class over a real MySQL,
+reproducing the real order — `init()` with no session, then a session carrying
+a member whose row says `cy` — and with the fix removed the answer stays on
+`Accept-Language`. `check_member_language_applied.py` fails when either call
+goes missing, when either drifts back above `Auth::ensureSession()`, and when
+start-up makes either call again. Neither tells you whether a page RENDERS in
+Welsh; that needs HTTP and a seeded installation, and both say so in their own
+output.
+
+**Three smaller lessons from building it.**
+
+* **The probe must buffer its output**, or `session_start()` refuses and source
+  1 is skipped for the WRONG reason — the test then reports a false failure on
+  correct code, which is the hardest kind of red to diagnose.
+* **A check that masks string literals cannot look at an array key.** Masking
+  turned `$_GET['lang']` into `$_GET['xxxx']`, so the clause requiring the
+  `is_string()` gate could never match: a clause that cannot fail, dressed as
+  the strictest check in the file. It reads a comments-removed, strings-kept
+  view for that one question, and says why at the point of the call.
+* **The second fixture must differ in only one way.** Section F's "unknown
+  language is refused" check is only worth anything because the row already
+  holds `cy`: starting from an empty column, "nothing was written" passes
+  whether the refusal works or not.
+
+**And the first independent check found twelve problems, none in the fix
+itself.** The worst two are the lesson.
+
+**I told the owner there was no control for choosing a language anywhere in the
+portal, and there is one on every page.** `I18n::languageSwitcher()` renders a
+globe dropdown printed from `nav.php` twice -- once for a signed-in person,
+once for a visitor -- and `header.php` always requires `nav.php`. One
+`grep -rn languageSwitcher web tools` would have shown it. The owner declined
+to build a picker on the strength of my sentence (D-061), which D-062 now
+supersedes. **A claim that something does not exist anywhere needs the search
+that establishes it, exactly as a claim about history needs its `git log`** --
+this file already says so for history and the same rule was broken for the
+present tense.
+
+**And "nothing anybody sees changes on the day this ships" was untrue in two
+ways, one of which costs money.** The globe menu starts working. And
+`ContentTranslation::readLanguage()` reads the same column and falls back to the
+browser's language when it is empty -- so emptying it turns the Translate button
+from "asks for English, sees English, charges nothing" into a real, charged
+translation for anybody on a non-English browser. **Ask of any column you are
+about to empty: who else reads it, and what does their fallback do?** The owner
+accepted the change deliberately (D-063).
+
+**Five more were guards that passed on broken code**, three of them in the hard
+gate: the call wrapped in `if (false)`; the call with its argument dropped,
+which is legal PHP because the parameter defaults to null and which restores
+half of #763 in full; and `&& false` appended to the `?lang=` condition, which
+stops a language ever being chosen again. The remedies were this repository's
+usual ones -- compare brace depth against `Auth::ensureSession()`, require the
+argument, pin the whole condition as one string. **Three self-test clauses could
+not fail** because the browser header and the default locale were both `'en'`,
+so the right answer and the wrong answer were the same string.
+
+**The migration's own comment argued for the worse of its two orders.** It put
+the row-emptying first and claimed the reverse order would leave a row behind;
+walking both showed the opposite, and the window is now closed. Its "safe to
+run twice" was also MySQL-only: MariaDB reports `COLUMN_DEFAULT` as a literal
+expression, never SQL NULL, so the `ALTER` re-runs on every replay. Same end
+state, measured twice -- just not free.
+
+**Still open**, each recorded rather than guessed at: a restore from a snapshot
+taken before this migration puts `'en'` back in every row with the migration
+already marked as run, and the portal then reads it as a deliberate choice of
+English (noted in the migration header, on #763); `?lang=` is a state-changing
+GET with no form token, so a third-party page can set a member's language with
+an `<img>` tag -- nuisance rather than data loss, and the top-bar dropdown is a
+GET link by design; and there is still no setting for which languages an
+installation offers, because `isSupported()` reads a hard-coded list and
+`enabledLocales()` reads the filesystem (#779).

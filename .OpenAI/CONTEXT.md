@@ -630,10 +630,14 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     limit), enforced where the money is spent and not only at the save;
     a member must switch it on for their own account, and an API key is
     refused because a key cannot hold a person's permission. Two
-    measured limits, each with an issue: on the `libre` route nothing is
-    added to the spend so the limit cannot bite (#762), and a member's
-    saved INTERFACE language is applied nowhere because `I18n::init()`
-    runs before any session exists (#763). The provider's words are
+    measured limit, with an issue: on the `libre` route nothing is
+    added to the spend so the MONEY limit cannot bite (#762; the owner's
+    answer is D-059, count the translations as well). **#763 IS FIXED
+    (5 November 2026)** — a member's saved interface language is applied
+    now, so `readerLanguage()` reading `tblUsers.locale` rather than
+    `I18n::locale()` is the right source for a translation made FOR one
+    person rather than a work-around; the two can still differ. The
+    provider's words are
     written with `textContent`, never `innerHTML`. **THE FIRST
     INDEPENDENT CHECK FOUND FIVE REAL PROBLEMS and the worst was on a
     page that takes money: `Auth::csrfToken()` is ONE token per session,
@@ -2803,6 +2807,99 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     instead of an aside, and the owner then has to nudge for work that was already decided. The only reasons to end
     a turn remain a question only the owner can answer (ask it and carry on with everything not blocked), or
     something genuinely destructive needing approval first. Sharpens rule D-009 (never wait for a nudge).
+
+## A member's chosen language is applied now (#763, migration 251 — D-060, D-061)
+
+`I18n::reconsiderNowSessionExists()` is the ONE place the language
+question is asked once a session exists, called from `index.php`
+straight after `Auth::ensureSession()`. `I18n::switchLocale()` is the
+ONE writer of `tblUsers.locale`, and the `?lang=` block that calls it
+MOVED out of `bootstrap.php` into `index.php` for the same reason.
+
+**Nothing was broken and nothing was unreachable in the ordinary sense —
+the question was asked too early.** `resolveLocale()`'s first two
+sources sit behind `session_status() === PHP_SESSION_ACTIVE`,
+`I18n::init()` runs inside start-up, and the session starts in
+`index.php` AFTER bootstrap has been required. So both were skipped on
+every request since March 2026, `init()` latches so nothing asked
+again, and bootstrap's own `tblUsers.locale` block was behind the same
+test. `php -l` cannot see it and no audit script could.
+
+**The switcher half was worse.** `switchLocale()` stores only when a
+session is active, and its one and only caller sat in `bootstrap.php` —
+established with `git log -S"switchLocale" -- web/`, which answers
+`fe2b3fb` and `bd1ef12`. So `?lang=cy` applied to the request that
+carried it and died in its own redirect, and the column was never
+written on any installation.
+
+**Which is what made the fix dangerous, and is the part to remember.**
+The column was `DEFAULT 'en'`, so every row held `'en'` put there by
+the database rather than chosen. Obeying it would have pinned every
+signed-in member to English; `isSupported()` reads a built-in list of
+THIRTEEN languages rather than a setting, so browser detection is live
+on every installation. (A draft said twelve. Count from the code.)
+A draft also said "with no control anywhere to change it", and there
+is a language menu on every page -- see below. **A default value and a
+deliberate choice are indistinguishable once stored, and the moment a
+column starts being obeyed is the moment that stops being harmless.**
+Migration 251 empties the rows still holding `'en'` and the default is
+NULL.
+
+**"Nothing anybody sees changes" was UNTRUE in two ways, one of which
+costs money.** The globe language menu in the top bar, printed from
+`nav.php` on every page since March 2026, had never done anything and
+starts working. And `ContentTranslation::readLanguage()` reads the same
+column and falls back to the BROWSER's language when it is empty, so
+emptying it turns the Translate button from "asks for English, sees
+English, charges nothing" into a real, charged translation for anybody
+on a non-English browser — accepted deliberately (D-063). **Ask of any
+column you are about to empty: who else reads it, and what does their
+fallback do?**
+
+Three smaller lessons: a probe must BUFFER its output or
+`session_start()` refuses and source 1 is skipped for the WRONG reason,
+giving a false red on correct code; **a check that masks string
+literals cannot look at an array key** (masking turned `$_GET['lang']`
+into `$_GET['xxxx']`, so the clause requiring the `is_string()` gate
+could never match — a clause that cannot fail dressed as the strictest
+check in the file); and a "nothing was written" check needs a row that
+already holds something, or it passes either way.
+
+**THE WORST FINDING WAS A CLAIM PUT TO THE OWNER: that there was no
+control for choosing a language anywhere in the portal. There is one
+on every page.** `I18n::languageSwitcher()` is printed from `nav.php`
+twice — signed in and signed out — and `header.php` always requires
+`nav.php`; one `grep -rn languageSwitcher web tools` shows it. The
+owner declined to build a picker on the strength of that sentence
+(D-061), which **D-062 supersedes**: the menu IS the control, and a
+second one now sits on the account page with a "Follow my browser"
+option so a choice can be undone. **A claim that something does not
+exist ANYWHERE needs the search that establishes it, exactly as a
+claim about history needs its `git log`.**
+
+`I18n::chooseLanguage()` is the ONE place a choice is stored or
+cleared (`switchLocale()` is a thin caller) and `I18n::storedChoice()`
+the ONE place it is read. The account handler asks
+`array_key_exists('locale', $_POST)` and never `?? ''`, because an
+empty value is a real instruction here and #677 cost a cleared portal
+address to that exact shape. Still open on #779: no setting for which
+languages an installation offers, and `?lang=` is a state-changing GET
+with no form token (nuisance only; the dropdown is a GET link by
+design).
+
+Tests: `tools/i18n-member-language-selftest.php` (34 checks, real
+MySQL) and the hard gate
+`tools/audit-checks/check_member_language_applied.py`; thirteen plants
+over two rounds. **THREE of the first five got past the gate:** the
+call wrapped in `if (false)`, the call with its ARGUMENT DROPPED
+(legal PHP, the parameter defaults to null, and it restores half of
+#763 while reading as a tidy-up), and `&& false` appended to the
+`?lang=` condition. Brace depth is compared with
+`Auth::ensureSession()`'s, the argument is required, and the whole
+condition is pinned as one string. **Neither can
+tell whether a page RENDERS in the chosen language** — that needs HTTP
+and a seeded installation, and both say so in their own output. The
+technical record is DEV_NOTES.md, "A question asked too early (#763)".
 
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026 — D-017)
 

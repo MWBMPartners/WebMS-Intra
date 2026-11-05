@@ -352,6 +352,63 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                value="<?php echo htmlspecialchars($user['phoneNumber'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
                     </div>
 
+                    <?php
+                    // 🌍 LANGUAGE (#763, the owner's decision D-062).
+                    //    There is a language menu in the top bar of every page,
+                    //    and it works — but it only CHANGES the language. It is
+                    //    not a place a member can see what the portal has stored
+                    //    about them beside their name and telephone number, and
+                    //    it offers no way back to "follow my browser". Both are
+                    //    why this is here.
+                    //
+                    //    The list is `I18n::enabledLocales()`, the same list the
+                    //    top-bar menu uses, so the two can never offer different
+                    //    languages. That also keeps a right-to-left language with
+                    //    no translation file off the list, which would otherwise
+                    //    give a right-to-left page of English words.
+                    //
+                    //    An EMPTY value means "forget my choice". That is not a
+                    //    nicety: on this portal an empty stored language IS "not
+                    //    chosen" (D-060), so without it a member who once picked
+                    //    a language could never go back to being asked.
+                    //    `App::user()` does not select `locale`, and widening that
+                    //    shared, cached read for one control would reach every page.
+                    //    `I18n::storedChoice()` is the one place the stored choice is
+                    //    read, and the resolver asks the same method.
+                    $langChoices = \Portal\Core\I18n::enabledLocales();
+                    $langStored  = (string) (\Portal\Core\I18n::storedChoice($userId, $mysqli) ?? '');
+                    ?>
+                    <div class="mb-3">
+                        <label for="locale" class="form-label">Language</label>
+                        <select class="form-select" id="locale" name="locale">
+                            <option value=""<?php echo $langStored === '' ? ' selected' : ''; ?>>
+                                Follow my browser<?php
+                                    // What that actually means right now, so the
+                                    // choice is not an abstraction.
+                                    $langNowMeta = \Portal\Core\I18n::localeMeta(
+                                        \Portal\Core\I18n::locale()
+                                    );
+                                    echo ' (' . htmlspecialchars(
+                                        (string) ($langNowMeta['native']
+                                            ?? \Portal\Core\I18n::locale()),
+                                        ENT_QUOTES,
+                                        'UTF-8'
+                                    ) . ' today)';
+                                ?>
+                            </option>
+                            <?php foreach ($langChoices as $langCode => $langMeta): ?>
+                                <option value="<?php echo htmlspecialchars((string) $langCode, ENT_QUOTES, 'UTF-8'); ?>"
+                                    <?php echo $langStored === (string) $langCode ? ' selected' : ''; ?>>
+                                    <?php echo htmlspecialchars((string) $langMeta['native'], ENT_QUOTES, 'UTF-8'); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text">
+                            The language the portal is shown in. It follows you to
+                            any device you sign in on.
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-success w-100">
                         <i class="fa-solid fa-floppy-disk me-1"></i> Save Changes
                     </button>

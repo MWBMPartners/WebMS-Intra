@@ -52,9 +52,15 @@ $trId    = isset($trId) === true ? (int) $trId : 0;
 
 $trUserId   = (int) (App::user()['userID'] ?? 0);
 $trSettings = App::settings()['translation'] ?? [];
-// 🗣️ The member's OWN stored language, not the interface's. See
-//    `ContentTranslation::readerLanguage()` for why those are different on
-//    this portal today (#763).
+// 🗣️ The member's OWN stored language, not the interface's, and
+//    `ContentTranslation::readerLanguage()` is the ONE place that decides it.
+//    ⚠️ This comment used to say "for why those are different on this portal
+//    today (#763)" — the interface language did not follow a member's choice
+//    at all. #763 fixed that on 5 November 2026, so the reason is no longer
+//    that one. They can still differ for a real reason: this is read straight
+//    from the database, while the interface language is the answer the request
+//    reached, so a member whose stored language has no translation file gets a
+//    fallback interface and a translation in the language they asked for.
 $trLanguage = ContentTranslation::readerLanguage(App::db(), $trUserId);
 
 $trWhyNot = ContentTranslation::whyNotOffered([

@@ -1159,6 +1159,14 @@ jobs:
           SELFTEST_DB_NAME: selftest_pwwriter
         run: php -d memory_limit=512M tools/password-writer-selftest.php
 
+      # 🌍 #763. It makes its OWN scratch database and drops it afterwards, so
+      #    it never disturbs a real schema -- a real tblUsers has columns it
+      #    does not fill. It REFUSES rather than skipping when no server
+      #    answers, because a skipped section reads exactly like a passing one.
+      - name: "A member's saved language really is applied, self-test (#763)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        run: php tools/i18n-member-language-selftest.php
+
       # 🧹 The other half of #668, which the test above cannot reach: that the
       #    readers the nightly clear-out ACTUALLY USES apply the rule, against
       #    rows really in a database — including an organisation holding more

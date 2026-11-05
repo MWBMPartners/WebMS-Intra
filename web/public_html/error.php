@@ -63,6 +63,14 @@ if (is_readable($bootstrap) === true) {
             //    shared header. No database connection means no answer, and
             //    no answer means the plain page.
             \Portal\Core\Auth::ensureSession();
+            // 🌍 And ask the language question again, as index.php does. This
+            //    page reaches bootstrap WITHOUT going through index.php, so
+            //    without this line an error page is the one page in the portal
+            //    still drawn in whatever `Accept-Language` asked for while
+            //    every other page follows the member's own choice (#763).
+            //    Somebody meeting an error is the last person who should also
+            //    meet an unfamiliar language.
+            \Portal\Core\I18n::reconsiderNowSessionExists($mysqli ?? null);
             if (($mysqli ?? null) instanceof \mysqli && \Portal\Core\SiteGate::wouldStop($mysqli) === false) {
                 \Portal\Core\Router::renderError($code);
                 $rendered = true;

@@ -890,25 +890,20 @@ if (defined('PORTAL_LANG') === false) {
 
 \Portal\Core\I18n::init();
 
-// 📋 Handle ?lang= query parameter for language switching.
-// #509 point 2: I18n::switchLocale() takes a `string`, so a REQUEST sent as
-// a list — ?lang[]=x — used to arrive here as an array, and PHP's typed
-// parameter refused it with a TypeError: a 500 and one error row, on every
-// address, open or closed, because this runs before the maintenance gate.
-// Anything that is not text is now simply ignored rather than crashing.
-if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true && $_GET['lang'] !== '') {
-    \Portal\Core\I18n::switchLocale($_GET['lang']);
-    // 🔀 Redirect to same page without the lang parameter to avoid sticky URL
-    $currentUri = $_SERVER['REQUEST_URI'] ?? '/';
-    $parsed     = parse_url($currentUri);
-    $path       = $parsed['path'] ?? '/';
-    parse_str($parsed['query'] ?? '', $queryParams);
-    unset($queryParams['lang']);
-    $newQuery = http_build_query($queryParams);
-    $redirect = $path . ($newQuery !== '' ? '?' . $newQuery : '');
-    header('Location: ' . $redirect, true, 302);
-    exit();
-}
+// 🌍 ?lang= IS HANDLED AFTER THE SESSION STARTS, NOT HERE (#763).
+//    This block used to sit at this point, and `I18n::switchLocale()` stores
+//    the chosen language in the session and writes it to `tblUsers.locale` —
+//    **both only when a session is active, and none is at this point.** So a
+//    language chosen from an address was applied to the one request that
+//    carried it, then thrown away by the redirect on the next line, and
+//    `tblUsers.locale` was never written by anything. It is the only writer
+//    there has ever been (`git log -S"switchLocale" -- web/`), which is why
+//    every account row still held the column's own default.
+//
+//    It now runs in `index.php`, straight after `Auth::ensureSession()`, where
+//    a session exists. It stays BEFORE the maintenance and membership gates,
+//    exactly as it was, so switching language is not something a person has to
+//    get past a gate to do.
 
 // 📋 Load user locale from DB into session on login (if not already set)
 //
@@ -919,27 +914,17 @@ if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true && $_GET[
 //    transiently. In any of those cases we silently fall back to whatever
 //    locale I18n already picked from the session / Accept-Language header,
 //    which is far better UX than a 500.
-if (session_status() === PHP_SESSION_ACTIVE
-    && isset($_SESSION['user_id']) === true
-    && isset($_SESSION['user_locale']) === false
-) {
-    try {
-        $localeStmt = $mysqli->prepare('SELECT locale FROM tblUsers WHERE userID = ? LIMIT 1');
-        if ($localeStmt !== false) {
-            $localeUserId = (int) $_SESSION['user_id'];
-            $localeStmt->bind_param('i', $localeUserId);
-            $localeStmt->execute();
-            $localeRow = $localeStmt->get_result()->fetch_assoc();
-            $localeStmt->close();
-            if ($localeRow !== null && $localeRow['locale'] !== null && $localeRow['locale'] !== '') {
-                $_SESSION['user_locale'] = $localeRow['locale'];
-                \Portal\Core\I18n::setLocale($localeRow['locale']);
-            }
-        }
-    } catch (\mysqli_sql_exception $e) {
-        error_log('[WebMS-Intra] User locale lookup failed, continuing with default locale: ' . $e->getMessage());
-    }
-}
+// 🌍 THE MEMBER'S OWN LANGUAGE IS READ AFTER THE SESSION STARTS, NOT HERE.
+//    This block used to sit at this point, guarded by
+//    `session_status() === PHP_SESSION_ACTIVE` — and **no session is active
+//    when start-up finishes**, which index.php's own comment states in terms.
+//    So it could never run, #174 wrapped it in a try/catch, and nobody noticed
+//    it was unreachable. A member's saved language was applied nowhere (#763).
+//
+//    It now lives in `I18n::reconsiderNowSessionExists()`, called from
+//    index.php straight after `Auth::ensureSession()`, so there is ONE place
+//    that answers "what language does this person want" rather than two that
+//    can disagree.
 
 /**
  * Global translation helper function.

@@ -4,6 +4,61 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A member's chosen language is actually used now (#763, migration 251)
+
+A member could choose their interface language, the choice was stored, and
+**nothing applied it.** Every page came out in whatever language the browser
+asked for, or the installation's default.
+
+Nothing was broken. The question was simply asked too early. The portal works
+out "what language does this person want?" during start-up — and the member's
+session, which is where two of the four answers live, does not begin until
+after start-up has finished. So those two answers were skipped on every single
+request, for eight months.
+
+**The way to choose a language had the same fault, and it was worse.** Adding
+`?lang=cy` to an address is the only route there has ever been, and it also ran
+during start-up, so it stored nothing: the choice applied to the one page that
+carried it and was gone by the next. It is the only thing that has ever written
+the saved language, which is why **every account still held the word "en" that
+the database puts there when an account is made** — not because anybody chose
+English.
+
+So the saved language column now starts empty, and migration 251 empties the
+ones still holding that untouched default. An account with nothing stored keeps
+following the browser's own request, exactly as every page does today. Somebody
+who picks a language from now on gets it, on every device, until they change
+it. The owner chose this over letting the stored value win, which would have
+pinned every signed-in member to English with nothing on any page explaining
+why (D-060).
+
+**So the globe menu in the top bar starts working.** It has been on every
+page since March 2026, signed in and signed out, and it has never done
+anything: one click now sets a member's language for good, on every device they
+sign in on. A language control has also been added to the account page, beside
+their name and telephone number, with a "Follow my browser" option so a choice
+can be undone (D-062). Both offer the same languages, from the same list.
+
+**Two things DO change on the day this ships, and one of them costs money.** An
+earlier draft of this entry said nothing anybody sees changes, which was wrong
+twice over. The globe menu starts working, as above. And the **Translate**
+button reads the same stored language to decide what to translate *into*,
+falling back to the browser's language when nothing is stored — so for a member
+whose browser asks for something other than English it will now really
+translate, and really charge the organisation, where before it asked for
+English, saw English and charged nothing. The owner accepted that deliberately
+(D-063): it is what the feature is for. The exposure is bounded — translation
+ships switched off and each member must also switch it on for themselves — and
+the monthly money limit and translation count still apply.
+
+Guards: `tools/i18n-member-language-selftest.php` (34 checks, with a real
+MySQL, including the fault put back) and the hard gate
+`tools/audit-checks/check_member_language_applied.py`, which fails when either
+call goes missing, when either drifts back above the line that starts the
+session, and when start-up makes either call again. Neither can tell whether a
+page *renders* in the chosen language — that needs a seeded installation over
+HTTP — and both say so.
+
 ### A page that tells an administrator what is wrong with their own portal (#477, migration 249)
 
 Almost every fault the September 2026 audit found was invisible from inside the

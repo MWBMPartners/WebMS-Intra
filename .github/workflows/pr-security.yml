@@ -1752,6 +1752,19 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_decisions_recorded.py
 
+      # 🌍 #763. A member could choose their interface language, the choice was
+      #    stored, and nothing applied it: the question was asked during
+      #    start-up, before their session existed, so the two answers that
+      #    live in the session were skipped on every request. The switcher had
+      #    the same fault and it was worse, because it is the only thing that
+      #    has ever written tblUsers.locale. This gate fails when either call
+      #    goes missing, when either sits before Auth::ensureSession(), and
+      #    when start-up makes either call again.
+      - name: 'The language question is asked after the session starts (hard gate, #763)'
+        id: member_language_applied
+        if: always()
+        run: python3 -I tools/audit-checks/check_member_language_applied.py
+
 
       # 🔑 ONE PLACE HASHES AND STORES A PASSWORD (#728).
       #
