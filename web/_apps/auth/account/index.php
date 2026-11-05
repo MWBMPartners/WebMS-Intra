@@ -370,7 +370,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     //    nicety: on this portal an empty stored language IS "not
                     //    chosen" (D-060), so without it a member who once picked
                     //    a language could never go back to being asked.
-                    $langStored  = (string) (\Portal\Core\I18n::storedChoice($userId, $mysqli) ?? '');
+                    // 🚨 THREE ANSWERS, AND THE THIRD MUST NOT BE GUESSED AT.
+                    //    `storedChoice()` answers a code, or null for "has not
+                    //    chosen", or FALSE for "could not be read". A first
+                    //    version wrote `?? ''`, which folded false into "has
+                    //    not chosen" — so after a failed read the select drew
+                    //    "Follow my browser" as selected, and the member's next
+                    //    Save, for any unrelated reason, posted an empty
+                    //    language and wrote SQL NULL over the choice they still
+                    //    had. Silently. So when we do not know, the control is
+                    //    left out and the page says why: a member who cannot
+                    //    see their language is far better off than one whose
+                    //    language is quietly deleted.
+                    $langRead    = \Portal\Core\I18n::storedChoice($userId, $mysqli);
+                    $langUnknown = $langRead === false;
+                    $langStored  = is_string($langRead) === true ? $langRead : '';
                     $langChoices = \Portal\Core\I18n::enabledLocales();
 
                     // 🚨 THE STORED LANGUAGE IS ALWAYS AN OPTION, EVEN WHEN IT
@@ -420,6 +434,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         ? 'your browser asks for nothing this portal offers, so the default is used'
                         : ((string) ($langBrowserMeta['native'] ?? $langBrowser)) . ' today';
                     ?>
+                    <?php if ($langUnknown === true): ?>
+                    <?php
+                    // ⚠️ NO `name="locale"` FIELD AT ALL HERE, AND THAT IS THE
+                    //    POINT. The handler asks whether the field ARRIVED, so
+                    //    leaving it out means "do not touch the language" —
+                    //    whereas an empty value would mean "forget my choice".
+                    //    That distinction is the whole reason the handler is
+                    //    written the way it is (#677).
+                    ?>
+                    <div class="mb-3">
+                        <label class="form-label">Language</label>
+                        <div class="form-text">
+                            We could not read your language setting just now, so it
+                            is not shown and nothing here will change it. Your
+                            language is unaffected. Please try again in a moment,
+                            or use the globe menu at the top of the page.
+                        </div>
+                    </div>
+                    <?php else: ?>
                     <div class="mb-3">
                         <label for="locale" class="form-label">Language</label>
                         <select class="form-select" id="locale" name="locale">
@@ -427,9 +460,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 Follow my browser (<?php echo htmlspecialchars($langBrowserWords, ENT_QUOTES, 'UTF-8'); ?>)
                             </option>
                             <?php foreach ($langChoices as $langCode => $langMeta): ?>
+                                <?php
+                                // 🈳 HOW THOROUGHLY IT IS TRANSLATED, because the
+                                //    globe menu badges this and leaving it off
+                                //    here meant a member could pick Welsh — 30%
+                                //    translated, measured — and get a mostly
+                                //    English page with nothing saying so. Shown
+                                //    only below 95%, so a complete language is
+                                //    not labelled with a number nobody needs.
+                                $langPart = '';
+                                if ((string) $langCode !== ''
+                                    && isset($langMeta['native']) === true
+                                ) {
+                                    $langCover = \Portal\Core\I18n::coverage((string) $langCode);
+                                    if ($langCover < 0.95) {
+                                        $langPart = ' — ' . ((int) round($langCover * 100))
+                                            . '% translated, so some pages read in English';
+                                    }
+                                }
+                                ?>
                                 <option value="<?php echo htmlspecialchars((string) $langCode, ENT_QUOTES, 'UTF-8'); ?>"
                                     <?php echo $langStored === (string) $langCode ? ' selected' : ''; ?>>
-                                    <?php echo htmlspecialchars((string) $langMeta['native'], ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php echo htmlspecialchars((string) $langMeta['native'] . $langPart, ENT_QUOTES, 'UTF-8'); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
@@ -441,6 +493,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             hide the ones that are only part-translated.
                         </div>
                     </div>
+                    <?php endif; ?>
 
                     <button type="submit" class="btn btn-success w-100">
                         <i class="fa-solid fa-floppy-disk me-1"></i> Save Changes

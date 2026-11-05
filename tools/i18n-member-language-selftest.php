@@ -273,6 +273,18 @@ I18n::reconsiderNowSessionExists($db);
 check('E7 a missing table falls back rather than throwing',
     I18n::locale(), 'en');
 
+// 🚨 THE THREE ANSWERS, AND THE THIRD IS A DATA-LOSS FIX. `storedChoice()`
+//    used to answer null for BOTH "has not chosen" and "could not be read",
+//    under a docblock asserting that "nothing a caller could do differs". The
+//    account page could: after a failed read it drew "Follow my browser" as
+//    the selected option, and the member's next Save — for any unrelated
+//    reason — posted an empty language and wrote SQL NULL over the choice they
+//    still had. Silently. These two checks are what stop that coming back.
+check('E8 a read that FAILED answers false, never null',
+    I18n::storedChoice(7, $db), false);
+check('E8b ...so the account page leaves the control out rather than guessing',
+    I18n::storedChoice(7, $db) === false, true);
+
 echo "F. Choosing a language from an address really saves it now\n";
 // ⚠️ `switchLocale()` is the ONLY thing that has ever written
 //    `tblUsers.locale`, and until #763 its one caller was in `bootstrap.php`

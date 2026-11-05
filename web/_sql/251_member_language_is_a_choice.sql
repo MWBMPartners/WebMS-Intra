@@ -50,9 +50,17 @@
 -- reasoning is beside section A.
 --
 -- ⚠️ WHO ELSE READS THIS COLUMN, WHICH IS THE QUESTION TO ASK OF ANY COLUMN
---    YOU ARE ABOUT TO EMPTY. Exactly THREE places read it -- establish that
---    with `grep -rn "u\.locale\|\`locale\`" web/_apps web/_core`, not by
---    memory, because a first version of this header named two:
+--    YOU ARE ABOUT TO EMPTY. Exactly THREE places read it. Establish that
+--    with
+--
+--      grep -rnE "SELECT .locale.|'expr' => 'u\.locale'" web/_apps web/_core
+--
+--    which answers exactly those three lines. **A first version of this header
+--    cited `grep -rn "u\.locale\|\`locale\`"` instead and said it answered
+--    three: it answers ELEVEN** -- six comments, the WRITER, and the three
+--    reads. Citing a command that does not return what the sentence claims is
+--    worse than citing none, because the next reader runs it, counts eleven,
+--    and stops trusting the sentence. The three are:
 --
 --      1. `I18n::storedChoice()` -- the language the portal is shown in. This
 --         is the one the migration is FOR.

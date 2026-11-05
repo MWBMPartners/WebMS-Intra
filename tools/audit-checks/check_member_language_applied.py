@@ -36,38 +36,33 @@ WHAT IT CHECKS
   D. `bootstrap.php` calls NEITHER. Leaving a second call where the fault was
      would re-create it: the early one resolves to the browser's answer, and
      for the switcher it would silently drop the choice again.
-  E. The `?lang=` gate's WHOLE condition, matched as one string. Not the
-     `is_string()` test alone: appending `&& false` to the condition left an
-     earlier version green, and that stops any language being chosen and the
-     column being written ever again. Pinning the whole condition is this
-     repository's standing remedy for that.
-  F. Neither call is inside a conditional. Measured: wrapping the reconsider
-     call in `if (false) { ... }` left an earlier version green, which is
-     #709's recorded lesson word for word -- when you pin a call, pin the gate
-     that decides whether its block is entered at all. Brace depth is compared
-     with the depth of the `Auth::ensureSession()` call, so both must sit at
-     the same level of the file.
-  H. The account page offers the control, and its handler asks whether the
-     field ARRIVED rather than what it contains. D-062 made this control part
-     of #763 rather than a later package, so it needs a guard or it is pinned
-     by nothing. The "did it arrive" half is load-bearing: an empty value is a
-     real instruction here ("forget my choice"), so `$_POST['locale'] ?? ''`
-     cannot be told from a form that never carried the control, and a post from
-     anywhere else would silently wipe a member's language. #677 cost this
-     project a cleared portal address exactly that way.
-  G. The reconsider call, pinned WHOLE. Not "is there an argument": passing
-     the literal `null` satisfied that and does exactly what dropping the
-     argument does -- with no connection the member's `tblUsers.locale` is
-     never read, nothing sets `$_SESSION['user_locale']`, and
-     `resolveLocale()` falls through to `Accept-Language`. The self-test cannot
-     see it either, because it passes a connection explicitly. `reconsiderNowSessionExists()`
-     takes a nullable mysqli with a default of null, so `reconsiderNowSessionExists()` with no
-     argument is legal PHP, reads as a harmless tidy-up, and **restores the
-     member-locale half of #763 completely** -- with no connection the column
-     is never read, nothing sets `$_SESSION['user_locale']`, and
-     `resolveLocale()` falls through to `Accept-Language`. The self-test cannot
-     catch it either, because it passes a connection explicitly. Measured: an
-     earlier version of this check was green on it.
+  E. **Three WHOLE REGIONS, pinned as text** in `member-language.pinned.txt`:
+     the part of `index.php` from `Auth::ensureSession()` through the `?lang=`
+     block; the account page's language control; and the account handler's
+     language block. Any change to any statement in them fails, and `--repin`
+     regenerates the sidecar as a separate, visible act.
+
+     **This replaced four substring pins and a brace-depth test, and the reason
+     is the whole lesson of this file.** Three check rounds each got a one-edit
+     plant past a cleverer pattern: `if (false) { ... }` was answered with a
+     brace count, so `if (false)` with NO braces walked through; `false &&`
+     walked through; "is the argument missing" was answered, so the literal
+     `(null)` walked through; the gate conditions were pinned, so emptying the
+     block BODY walked through, and so did `chooseLanguage(null)` and
+     `$langStored === false` inside the option loop. Every one is the same
+     thing -- the statement is still there and does nothing -- and #485 took
+     FOUR rounds to learn that the answer is not a fifth pattern but to pin the
+     text.
+
+     What the four substring pins used to say is kept as the REASON in the
+     failure message, because a reason is what the next reader needs; they are
+     gone as code, because two guards over one fact drift apart and a pattern
+     left as dead code is one somebody will edit believing it works.
+
+  F. The account page offers a `<select name="locale">` that is neither
+     disabled nor hidden -- a disabled control is not submitted, so the handler
+     would see no field and store nothing while a presence check read it as
+     there (the GoCardless lesson, #569).
 
 Each check is read from a copy of the file with **comments removed and string
 literals masked**, because this repository has been bitten repeatedly by a
@@ -101,71 +96,80 @@ BOOTSTRAP = os.path.join("web", "_core", "bootstrap.php")
 ACCOUNT = os.path.join("web", "_apps", "auth", "account", "index.php")
 ACCOUNT_SAVE = os.path.join("web", "_apps", "auth", "account", "save.php")
 
-# 📌 The ?lang= condition, WHOLE, with runs of whitespace freed to one space.
-#    Pinned as one string rather than as its parts, because asking only for the
-#    is_string() test passed on `&& false` appended to it. A deliberate change
-#    here is a deliberate edit of this constant.
-PINNED_LANG_CONDITION = (
-    "if (isset($_GET['lang']) === true && is_string($_GET['lang']) === true "
-    "&& $_GET['lang'] !== '') {"
-)
-
-# 📌 The reconsider call, WHOLE.
+# 📌 The sidecar holding the three pinned regions, and the regions themselves,
+#    named by the code that starts and ends each one.
 #
-# ⚠️ AN EARLIER VERSION ASKED ONLY WHETHER SOMETHING SAT BETWEEN THE BRACKETS,
-#    so `reconsiderNowSessionExists(null)` passed it -- one word, the same harm
-#    as dropping the argument, and the check printed "the reconsider call is
-#    passed a connection" while it was not. Round 1 handed us the spelling
-#    "argument dropped" and we closed that spelling rather than the class,
-#    which is #485's lesson in four rounds, re-made in one.
-PINNED_RECONSIDER_CALL = "I18n::reconsiderNowSessionExists($mysqli ?? null);"
-
-# 📌 The account handler's gate, WHOLE, for the same reason: `false &&` in front
-#    of it left the member's language silently unsaved with the gate green --
-#    the member picks a language, presses Save, is told it worked, and nothing
-#    is stored, ever (#671's "a lie with a Save button").
-PINNED_LOCALE_GATE = (
-    "if (array_key_exists('locale', $_POST) === true "
-    "&& is_string($_POST['locale']) === true) {"
+# 🚨 WHY A WHOLE-REGION PIN AND NOT A BETTER PATTERN. Three check rounds, three
+#    one-edit bypasses, and each fix closed the spelling it had been handed:
+#    `if (false) { ... }` was answered with a brace count, so `if (false) ...`
+#    with NO braces walked through; "is the argument missing" was answered, so
+#    the literal `(null)` walked through; the gate conditions were pinned, so
+#    emptying the block BODY walked through, and so did `chooseLanguage(null)`.
+#    All of them are the same thing -- the statement is still there and does
+#    nothing -- and #485 took four rounds to learn that the answer is to pin the
+#    whole thing as TEXT rather than to guess the next spelling. `--repin` makes
+#    a deliberate change a separate, visible act.
+#
+# ⚠️ WHAT THE NORMALISATION THROWS AWAY, enumerated as #485 says it must be.
+#    Comments go, and runs of whitespace become one space. **PHP does not care
+#    about whitespace except inside a string literal or a heredoc**, so the
+#    only thing given up is telling `'a b'` from `'a  b'` -- immaterial in these
+#    three regions, where no logic reads a string's internal spacing, and
+#    `readable_code()` refuses a heredoc outright (see `NO_HEREDOC`). Freeing
+#    whitespace rather than keeping line breaks is deliberate: a rewrap must not
+#    turn this red, because a check that cries wolf gets switched off (#483).
+PINNED_REGIONS_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "member-language.pinned.txt"
 )
 
-# 📌 The account page's read of the stored choice, WHOLE. Leaving the call in
-#    place and throwing its value away (`$langStored = '';`) was green too, and
-#    the select then always reads "Follow my browser" -- which, with the stored
-#    language no longer an option, is how an unrelated Save came to delete it.
-# ⚠️ Written as the WHITESPACE-FREED form, because that is what it is compared
-#    against. The source has two spaces before the `=` for alignment, and a
-#    first version pinned it with them, so the check failed on correct code --
-#    crying wolf, which gets a check switched off (#483).
-PINNED_STORED_READ = (
-    "$langStored = (string) (\\Portal\\Core\\I18n::storedChoice($userId, $mysqli) ?? '');"
+# Each region: (label, file, the code it starts at, the `if` whose closing brace
+# ends it). The second anchor is walked to its matching `}`, so the region always
+# covers the WHOLE block however it is reformatted.
+PINNED_REGIONS = (
+    (
+        "index.php: the session starts, the language is resolved, ?lang= is handled",
+        INDEX,
+        "Auth::ensureSession();",
+        "if (isset($_GET['lang'])",
+    ),
+    (
+        "account page: the language control",
+        ACCOUNT,
+        "$langRead",
+        None,
+    ),
+    (
+        "account handler: storing or clearing the language",
+        ACCOUNT_SAVE,
+        "if (array_key_exists('locale', $_POST)",
+        "if (array_key_exists('locale', $_POST)",
+    ),
 )
-
 
 def whitespace_freed(text: str) -> str:
     """Runs of whitespace to one space, so indentation and wrapping are free."""
     return re.sub(r"\s+", " ", text)
 
 
-def brace_depth(code: str, offset: int) -> int:
+def block_end(code: str, start: int) -> int:
     """
-    How many unclosed `{` sit before `offset`.
+    The offset just past the `}` that closes the first `{` at or after `start`.
 
-    ⚠️ IT STEPS OVER STRING LITERALS, and without that one `{` in a message
-       would throw the count off for the rest of the file. The copy this is
-       given already has its literals masked to runs of `x`, so the step is
-       belt and braces -- but `check_table_name_comparisons.py` and the money
-       pages both learnt this the hard way, so it is written out rather than
-       assumed.
+    ⚠️ IT STEPS OVER STRING LITERALS. The money pages and
+       `check_table_name_comparisons.py` both record that a `{` inside a message
+       otherwise swallows the rest of a function, and a walk that cannot do this
+       passes on a removed gate.
     """
+    i = code.find("{", start)
+    if i == -1:
+        return -1
     depth = 0
-    i = 0
-    while i < offset and i < len(code):
+    while i < len(code):
         ch = code[i]
         if ch in "'\"":
             quote = ch
             i += 1
-            while i < offset and i < len(code):
+            while i < len(code):
                 if code[i] == "\\":
                     i += 2
                     continue
@@ -178,8 +182,85 @@ def brace_depth(code: str, offset: int) -> int:
             depth += 1
         elif ch == "}":
             depth -= 1
+            if depth == 0:
+                return i + 1
         i += 1
-    return depth
+    return -1
+
+
+def nothing_glued_in_front(raw: str, start_anchor: str) -> bool:
+    """
+    Whether the pinned region begins a fresh statement.
+
+    🚨 THE LAST HOLE THE THIRD CHECK ROUND FOUND, AND IT IS WORTH THE WHOLE
+       COMMENT. A whole-region pin cannot see something glued IN FRONT of its
+       first statement: `if (false)` on the line above, with no braces, makes
+       the entire region the body of a conditional that never runs, and the
+       region's own text is unchanged, so it matched. Measured on
+       `save.php` -- the gate was green while a member's language could never
+       be stored.
+
+       Moving the start anchor one statement earlier would have moved the hole
+       rather than closed it, so the rule is general: the last thing before the
+       region, ignoring whitespace, must be `;`, `{`, `}`, `:` or the `>` of a
+       `?>`. Anything else -- `)`, `&&`, `else`, a bare `if (false)` -- is
+       something reaching across into the region.
+    """
+    code = readable_code(raw, mask_strings=False)
+    at = code.find(start_anchor)
+    if at == -1:
+        return True          # a missing region is reported elsewhere
+    before = code[:at].rstrip()
+    if before == "":
+        return True
+    # An opening PHP tag is a fresh start too -- the account page's region is
+    # the first thing inside its own `<?php`, and a first version of this rule
+    # reported that as glue. Crying wolf gets a check switched off (#483), so
+    # both directions were checked before this was committed.
+    if before.endswith("<?php") is True or before.endswith("<?=") is True:
+        return True
+    return before[-1] in ";{}:>"
+
+
+def region_text(raw: str, start_anchor: str, block_anchor) -> str:
+    """
+    One pinned region, normalised: comments gone, whitespace freed.
+
+    `block_anchor` None means "to the end of the file's PHP region we were
+    given" -- used for the account page, whose control is markup rather than one
+    block, and whose own end marker is the `<?php endif; ?>` below it.
+    """
+    code = readable_code(raw, mask_strings=False)
+    start = code.find(start_anchor)
+    if start == -1:
+        return ""
+    if block_anchor is None:
+        end = code.find("endif;", start)
+        end = len(code) if end == -1 else end + len("endif;")
+    else:
+        at = code.find(block_anchor, start)
+        if at == -1:
+            return ""
+        end = block_end(code, at)
+        if end == -1:
+            return ""
+    return whitespace_freed(code[start:end]).strip()
+
+
+def read_pinned() -> dict:
+    """The sidecar, as {label: normalised text}."""
+    if os.path.isfile(PINNED_REGIONS_FILE) is False:
+        return {}
+    out = {}
+    label = None
+    for line in open(PINNED_REGIONS_FILE, "r", encoding="utf-8"):
+        if line.startswith("### "):
+            label = line[4:].rstrip("\n")
+            continue
+        if label is not None and line.strip() != "":
+            out[label] = line.rstrip("\n")
+            label = None
+    return out
 
 
 def repo_root() -> str:
@@ -315,83 +396,6 @@ def main() -> int:
                 f"default (D-060)."
             )
 
-    # E. The WHOLE ?lang= condition, pinned as one string.
-    #
-    # ⚠️ NOT THE is_string() TEST ALONE. An earlier version asked only for that
-    #    and was GREEN when `&& false` was appended to the condition -- which
-    #    means no language can be chosen and tblUsers.locale is never written
-    #    again. Pin the whole condition; this repository has learnt that at
-    #    least four times (#668, #674, #709, #485).
-    if PINNED_LANG_CONDITION not in whitespace_freed(index_keys):
-        problems.append(
-            f"{INDEX}: the ?lang= condition is not what it was pinned as.\n"
-            f"       pinned: {PINNED_LANG_CONDITION}\n"
-            f"       Two things it is guarding at once. The is_string() half: a "
-            f"request sent as a list -- ?lang[]=x -- otherwise reaches "
-            f"switchLocale(), whose typed parameter refuses it with a TypeError, "
-            f"which is a 500 on EVERY address, open or closed, because this runs "
-            f"ahead of the maintenance gate (#509 point 2). And the condition as "
-            f"a WHOLE: appending `&& false` to it stops any language being chosen "
-            f"and tblUsers.locale being written ever again, and that was green "
-            f"against a check that asked only for the is_string() test.\n"
-            f"       If the change is deliberate, update PINNED_LANG_CONDITION in "
-            f"{os.path.basename(__file__)} as a separate, visible act."
-        )
-
-    # F. Neither call may sit inside a conditional.
-    #
-    # ⚠️ `if (false) { I18n::reconsiderNowSessionExists(...); }` was GREEN
-    #    against an earlier version: the inner pin matched text that never ran.
-    #    #709: when you pin a call, pin the gate that decides whether its block
-    #    is entered at all, or you have pinned a label on a door nobody opens.
-    if ensure is not None:
-        base_depth = brace_depth(index_code, ensure.start())
-        for name, found in (("I18n::reconsiderNowSessionExists", reconsider),
-                            ("I18n::switchLocale", switcher)):
-            if found is None:
-                continue
-            depth = brace_depth(index_code, found.start())
-            # switchLocale() legitimately sits one level in, inside the ?lang=
-            # block whose whole condition check E pins. The reconsider call must
-            # be at the same level as ensureSession(), because nothing may
-            # decide whether it runs.
-            allowed = base_depth + 1 if name.endswith("switchLocale") else base_depth
-            if depth != allowed:
-                line = index_code[:found.start()].count("\n") + 1
-                problems.append(
-                    f"{INDEX} line {line}: {name}() is {depth - base_depth} brace "
-                    f"level(s) away from Auth::ensureSession(), where "
-                    f"{allowed - base_depth} is expected. Something now decides "
-                    f"whether it runs, and whatever that something is, a request "
-                    f"it says no to is a request where the member's language is "
-                    f"not applied -- the whole of #763, back again, with this "
-                    f"check green because the call is still in the file."
-                )
-
-    # G. The reconsider call, pinned WHOLE.
-    #
-    # ⚠️ AN EARLIER VERSION ASKED ONLY WHETHER THE BRACKETS HELD ANYTHING, and
-    #    `reconsiderNowSessionExists(null)` passed it. The parameter is a
-    #    nullable mysqli defaulting to null, so both that and dropping the
-    #    argument are legal PHP, read as a tidy-up, and restore the
-    #    member-locale half of #763 in full. Pinning the statement is the only
-    #    reading that does not need us to guess the next spelling.
-    if PINNED_RECONSIDER_CALL not in whitespace_freed(index_keys):
-        problems.append(
-            f"{INDEX}: the reconsiderNowSessionExists() call is not what it was "
-            f"pinned as.\n"
-            f"       pinned: {PINNED_RECONSIDER_CALL}\n"
-            f"       It must be passed THIS REQUEST's connection. Its parameter "
-            f"defaults to null, so both `()` and `(null)` are legal PHP and look "
-            f"like a tidy-up -- and with no connection the member's "
-            f"tblUsers.locale is never read, nothing sets "
-            f"$_SESSION['user_locale'], and resolveLocale() falls through to "
-            f"Accept-Language. That is the member-locale half of #763, whole, and "
-            f"no self-test can see it because they all pass a connection.\n"
-            f"       If the change is deliberate, update PINNED_RECONSIDER_CALL "
-            f"in {os.path.basename(__file__)} as a separate, visible act."
-        )
-
     # H. The account page's control, and its handler.
     with open(os.path.join(root, ACCOUNT), "r", encoding="utf-8") as handle:
         account_keys = readable_code(handle.read(), mask_strings=False)
@@ -422,40 +426,6 @@ def main() -> int:
             f"has a control that does nothing while this check reads it as "
             f"present."
         )
-    # ⚠️ PINNED WHOLE. Leaving the call in place and discarding its value
-    #    (`$langStored = '';`) was green against a presence-only check, and the
-    #    select then always reads "Follow my browser" -- which is how an
-    #    unrelated Save came to delete a stored choice.
-    if PINNED_STORED_READ not in whitespace_freed(account_keys):
-        problems.append(
-            f"{ACCOUNT}: the read of the stored language is not what it was "
-            f"pinned as.\n"
-            f"       pinned: {PINNED_STORED_READ}\n"
-            f"       It must ask I18n::storedChoice() -- reading the column here "
-            f"instead is a second reader of one fact, and two readers of a "
-            f"language can disagree, which is how this page came to tell every "
-            f"member their language was 'en' -- and its VALUE must reach the "
-            f"select, because a select that always shows 'Follow my browser' "
-            f"deletes the member's choice on the next Save.\n"
-            f"       If the change is deliberate, update PINNED_STORED_READ in "
-            f"{os.path.basename(__file__)} as a separate, visible act."
-        )
-
-    # The stored language must be offered even when it has no translation file,
-    # or it matches no option, nothing is `selected`, every browser pre-selects
-    # "Follow my browser", and an unrelated Save wipes it. Measured.
-    if "isset($langChoices[$langStored]) === false" not in whitespace_freed(account_keys):
-        problems.append(
-            f"{ACCOUNT} no longer offers the member's STORED language when it is "
-            f"absent from enabledLocales(). enabledLocales() lists readable "
-            f"web/_lang/*.php files -- two on a stock installation -- while "
-            f"isSupported() accepts any of the thirteen the code knows, so a "
-            f"stored 'ar' matches no option, nothing carries `selected`, every "
-            f"browser pre-selects value=\"\", and pressing Save to correct a "
-            f"TELEPHONE NUMBER deletes the member's language. The page also "
-            f"states something untrue about what the portal holds."
-        )
-
     # And "Follow my browser (X)" must name what the BROWSER asks for, never
     # I18n::locale() -- which, for anybody with a stored choice, IS that choice.
     if "I18n::browserLanguage" not in account_keys:
@@ -470,11 +440,22 @@ def main() -> int:
         )
     if "I18n::enabledLocales" not in account_keys:
         problems.append(
-            f"{ACCOUNT} does not build its list from I18n::enabledLocales(). "
-            f"That is the same list the top-bar menu uses, so the two can never "
-            f"offer different languages -- and it keeps a right-to-left language "
-            f"with no translation file off the list, which would otherwise give "
-            f"a right-to-left page of English words."
+            f"{ACCOUNT} does not build its list from I18n::enabledLocales(), "
+            f"which is the languages this installation has a translation file "
+            f"for.\n"
+            f"       Two things this message USED to say, both of which were "
+            f"untrue and are worth recording because they were untrue in the "
+            f"reassuring direction. It said the account page and the top-bar "
+            f"menu 'can never offer different languages': the menu ALSO hides "
+            f"anything below `portal.i18n.minimum_coverage_for_switcher`, a real "
+            f"seeded setting, and `coverage('cy')` measures 0.30 -- so at the "
+            f"0.95 that setting's own comment suggests, the menu disappears "
+            f"entirely while this page still offers Welsh. And it said the list "
+            f"'keeps a right-to-left language with no translation file off', "
+            f"which is the behaviour the next round deliberately REMOVED: the "
+            f"page must offer a stored language even with no translation file, "
+            f"or it matches no option, nothing is selected, and an unrelated "
+            f"Save deletes it."
         )
 
     if "I18n::chooseLanguage" not in save_code:
@@ -485,40 +466,88 @@ def main() -> int:
             f"also exactly one, in the wrong place, and that is the whole of "
             f"#763."
         )
-    # ⚠️ PINNED WHOLE, not matched for the array_key_exists() call alone: one
-    #    `false &&` in front of that condition left the member's language
-    #    silently unsaved with this check green. They pick a language, press
-    #    Save, are told it worked, and nothing is stored, ever.
-    if PINNED_LOCALE_GATE not in whitespace_freed(save_keys):
+    # ── E. The three WHOLE-REGION pins ────────────────────────────────────
+    # 🚨 This replaced four substring pins and a brace-depth test. Three check
+    #    rounds each got a one-edit plant past a cleverer pattern, and every one
+    #    was the same thing: the statement is still there and does nothing.
+    #    #485 took four rounds to learn that the answer is to pin the text.
+    pinned = read_pinned()
+    now = {}
+    glued: list[str] = []
+    for label, relative, start_anchor, block_anchor in PINNED_REGIONS:
+        with open(os.path.join(root, relative), "r", encoding="utf-8") as handle:
+            raw = handle.read()
+        now[label] = region_text(raw, start_anchor, block_anchor)
+        if nothing_glued_in_front(raw, start_anchor) is False:
+            glued.append(f"{relative} ({label})")
+
+    if "--repin" in sys.argv:
+        with open(PINNED_REGIONS_FILE, "w", encoding="utf-8") as handle:
+            handle.write(
+                "# The three pinned regions of #763, regenerated by\n"
+                "#   python3 tools/audit-checks/check_member_language_applied.py --repin\n"
+                "# Comments removed and runs of whitespace freed to one space. Do not\n"
+                "# hand-edit this file: change the code and repin, so the change is\n"
+                "# visible in one diff.\n"
+            )
+            for label, _, _, _ in PINNED_REGIONS:
+                handle.write(f"\n### {label}\n{now[label]}\n")
+        print(f"Repinned {len(PINNED_REGIONS)} region(s) to {PINNED_REGIONS_FILE}")
+        return 0
+
+    for where in glued:
         problems.append(
-            f"{ACCOUNT_SAVE}: the language gate is not what it was pinned as.\n"
-            f"       pinned: {PINNED_LOCALE_GATE}\n"
-            f"       Two things it holds at once. It must ask whether the field "
-            f"ARRIVED, because an empty value is a real instruction here -- "
-            f"forget my choice and follow my browser -- so $_POST['locale'] ?? "
-            f"'' cannot be told from a form that never carried the control, and "
-            f"any post to this handler from elsewhere would wipe the member's "
-            f"language (#677 cost a cleared portal address to that exact shape). "
-            f"And it is pinned as a WHOLE condition, because `false &&` in front "
-            f"of it is a control that reports success and saves nothing.\n"
-            f"       If the change is deliberate, update PINNED_LOCALE_GATE in "
-            f"{os.path.basename(__file__)} as a separate, visible act."
+            f"{where}: something is glued IN FRONT of this pinned region, so it "
+            f"no longer begins a fresh statement.\n"
+            f"       A whole-region pin cannot see this: `if (false)` on the line "
+            f"above, with no braces, makes the entire region the body of a "
+            f"conditional that never runs while the region's own text is "
+            f"untouched. Measured -- the gate was green while a member's language "
+            f"could never be stored.\n"
+            f"       The last thing before a pinned region must be `;`, `{{`, "
+            f"`}}`, `:` or the `>` of a `?>`."
         )
 
-    # And `chooseLanguage()` must sit inside that gate, one level in -- not
-    # above it, where it would run on every profile save, and not two levels in,
-    # where something else would be deciding.
-    gate_at = whitespace_freed(save_keys).find(PINNED_LOCALE_GATE)
-    choose_at = save_code.find("I18n::chooseLanguage")
-    if gate_at != -1 and choose_at != -1:
-        depth = brace_depth(save_code, choose_at)
-        gate_raw = save_code.find("array_key_exists")
-        if gate_raw != -1 and depth != brace_depth(save_code, gate_raw) + 1:
+    for label, relative, _, _ in PINNED_REGIONS:
+        if now[label] == "":
             problems.append(
-                f"{ACCOUNT_SAVE}: I18n::chooseLanguage() is not directly inside "
-                f"the pinned gate. Above it, it runs on every profile save and a "
-                f"post without the control wipes the language; deeper, something "
-                f"else is deciding whether a member's choice is stored."
+                f"{relative}: the pinned region '{label}' could not be found at "
+                f"all -- its anchors are gone, so there is nothing left to guard."
+            )
+            continue
+        if label not in pinned:
+            problems.append(
+                f"The region '{label}' is not in "
+                f"{os.path.basename(PINNED_REGIONS_FILE)}. Run this script with "
+                f"--repin, read the diff, and commit it."
+            )
+            continue
+        if now[label] != pinned[label]:
+            problems.append(
+                f"{relative}: the region '{label}' is not what it was pinned "
+                f"as.\n"
+                f"       This pin covers the WHOLE region, on purpose. Three "
+                f"check rounds each got a one-edit plant past a cleverer "
+                f"pattern -- `if (false) {{ }}`, then `if (false)` with no "
+                f"braces, then `false &&`, then an emptied block body, then "
+                f"`chooseLanguage(null)`, then `$langStored === false` inside "
+                f"the option loop -- and every one of them is the same thing: "
+                f"the statement is still there and does nothing.\n"
+                f"       ⚠️ A PURE REFORMAT FAILS THIS TOO, and that is "
+                f"deliberate rather than a fault. Comments and runs of "
+                f"whitespace are free, but PHP needs a space in places where "
+                f"there was none before, so re-wrapping a call across lines "
+                f"does change the normalised text. Taking whitespace out "
+                f"altogether is not an option -- `new Foo` would become "
+                f"`newFoo`. The precedent is `portal-translate.pinned.js` "
+                f"(#485), and the reason it is acceptable in both places is the "
+                f"same: nothing EXECUTES this code in any test, so a text pin is "
+                f"the only guard there is.\n"
+                f"       If the change is deliberate, run\n"
+                f"         python3 {os.path.basename(__file__)} --repin\n"
+                f"       read the diff to "
+                f"{os.path.basename(PINNED_REGIONS_FILE)}, and commit it as a "
+                f"separate, visible act."
             )
 
     print(
@@ -541,10 +570,10 @@ def main() -> int:
 
     print(
         "OK: the language question is asked after the session starts, start-up "
-        "asks it nowhere, neither call is behind a condition, the reconsider call "
-        "is pinned whole, the ?lang= condition is as pinned, and the account page "
-        "offers the control -- including a stored language with no translation "
-        "file -- through the one reader and the one writer."
+        "asks it nowhere, the account page offers a control that is neither "
+        "disabled nor hidden and asks browserLanguage(), all three pinned regions "
+        "match the sidecar byte for byte, and nothing is glued in front of any of "
+        "them."
     )
     print(
         "   It cannot tell whether a page RENDERS in that language -- that needs "

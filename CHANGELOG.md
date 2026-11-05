@@ -68,13 +68,18 @@ Locale prints blanks, and one filtering `Locale = en` — which used to match
 every member — now matches nobody, with nothing warning whoever saved it.
 Tracked separately rather than guessed at.
 
-Guards: `tools/i18n-member-language-selftest.php` (34 checks, with a real
+Guards: `tools/i18n-member-language-selftest.php` (41 checks, with a real
 MySQL, including the fault put back) and the hard gate
-`tools/audit-checks/check_member_language_applied.py`, which fails when either
-call goes missing, when either drifts back above the line that starts the
-session, and when start-up makes either call again. Neither can tell whether a
-page *renders* in the chosen language — that needs a seeded installation over
-HTTP — and both say so.
+`tools/audit-checks/check_member_language_applied.py`. That gate pins **three
+whole regions of code as text** — the part of `index.php` that starts the
+session and handles `?lang=`, the account page's control, and its handler — so
+any change to any statement in them fails and `--repin` makes a deliberate
+change a visible act. It got there the hard way: three rounds of checking each
+slipped a one-edit change past a cleverer pattern, and every one was the same
+thing, a statement still present that does nothing.
+
+Neither guard can tell whether a page *renders* in the chosen language — that
+needs a seeded installation over HTTP — and both say so.
 
 ### A page that tells an administrator what is wrong with their own portal (#477, migration 249)
 

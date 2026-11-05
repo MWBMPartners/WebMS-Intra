@@ -147,8 +147,13 @@ class I18n
             && isset($_SESSION['user_id']) === true
             && isset($_SESSION['user_locale']) === false
         ) {
+            // `false` means the column could not be read. Here that is treated
+            // exactly like "has not chosen", which is right: this method only
+            // decides which language to draw a page in, and the language
+            // already chosen is the safe answer. A caller that WRITES must not
+            // do this — see the account page.
             $stored = self::storedChoice((int) $_SESSION['user_id'], $db);
-            if ($stored !== null && self::isSupported($stored) === true) {
+            if (is_string($stored) === true && self::isSupported($stored) === true) {
                 $_SESSION['user_locale'] = $stored;
             }
         }
@@ -515,17 +520,31 @@ class I18n
      *    far better for somebody reading a page than a 500 — and a mysqli
      *    message can quote the value, which here is a person's own preference.
      *
+     * 🚨 THREE ANSWERS, NOT TWO, AND THE THIRD EXISTS BECAUSE CONFLATING IT
+     *    WITH THE SECOND DELETED PEOPLE'S CHOICES. A first version answered
+     *    null for both "has not chosen" and "could not be read", with a
+     *    docblock asserting that "nothing a caller could do differs". The
+     *    account page could, and the cost was real: after a failed read it drew
+     *    "Follow my browser" as the selected option, and the member's next Save
+     *    — for any unrelated reason, a telephone number — posted an empty
+     *    language and wrote SQL NULL over the choice they still had. Silently.
+     *
+     *    **A reassuring sentence in a docblock is how that survived review
+     *    twice.** Measured against a real `tblUsers` with no `locale` column:
+     *    both cases came back null and were indistinguishable.
+     *
      * @param int          $userId The account to ask about.
      * @param mysqli|null  $db     The request's connection, or null to take
      *                             `App::db()`.
      *
-     * @return string|null The stored code, or null for "not chosen" — which is
-     *                     what an empty column means on this portal (D-060).
-     *                     Null is also the answer when it could not be read,
-     *                     and the two cases are deliberately not told apart:
-     *                     nothing a caller could do differs.
+     * @return string|false|null The stored code; null for "has not chosen",
+     *                           which is what an empty column means on this
+     *                           portal (D-060); or **false for "could not be
+     *                           read"**. A caller that writes must treat false
+     *                           as "do not touch it", and a caller that only
+     *                           resolves a language may treat it like null.
      */
-    public static function storedChoice(int $userId, ?\mysqli $db = null): ?string
+    public static function storedChoice(int $userId, ?\mysqli $db = null)
     {
         if ($userId <= 0) {
             return null;
@@ -534,7 +553,9 @@ class I18n
             $db   = $db ?? App::db();
             $stmt = $db->prepare('SELECT `locale` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
             if ($stmt === false) {
-                return null;
+                // A refused prepare is "could not be read", never "has not
+                // chosen" — see the three answers in the docblock.
+                return false;
             }
             $stmt->bind_param('i', $userId);
             $stmt->execute();
@@ -543,9 +564,14 @@ class I18n
         } catch (\Throwable $e) {
             error_log('[WebMS-Intra] Could not read the stored language; '
                 . 'carrying on with the language already chosen.');
+            return false;
+        }
+        if ($row === null) {
+            // No such account. That is an answer, not a failure: there is
+            // nothing stored because there is nobody to store it for.
             return null;
         }
-        if ($row === null || $row['locale'] === null || $row['locale'] === '') {
+        if ($row['locale'] === null || $row['locale'] === '') {
             return null;
         }
         return (string) $row['locale'];

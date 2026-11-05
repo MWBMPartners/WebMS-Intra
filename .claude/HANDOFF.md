@@ -63,10 +63,10 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 round 3 is built and awaiting its check** (the protected arm of D-051 —
-it writes and deletes stored data, so rounds run until one is clean). Round 1
-found twelve, round 2 found seven, **six of the seven in round 1's own fixes**.
-Everything else below is unstarted.
+**#763 round 4 is built and awaiting its check** (the protected arm of D-051 —
+it writes and deletes stored data, so rounds run until one is clean). Twelve
+findings, then seven, then six — and **almost every one after the first round was
+in a previous round's fix**. Everything else below is unstarted.
 
 ## Next, in this order
 
@@ -123,7 +123,17 @@ as the evidence), #549's arithmetic half, #767, #765, #768, #763.
 
 ## The lesson this run earned, in one line
 
-**Closing the spelling you were handed is not closing the class**, and
+**When a guard has been bypassed three times, stop writing patterns and pin the
+text.** Round 1 handed me `if (false) { }`, so I answered with a brace count;
+round 2 handed me "the argument dropped", so I answered "are the brackets
+empty"; each answer closed one spelling of "the statement is still there and
+does nothing" and the next round found another. #485 had already learnt this and
+written it down. Three whole regions are pinned now, with `--repin` to change
+them deliberately — and the one hole a text pin has is worth carrying forward:
+**it cannot see something glued in front of its first statement**, so a pinned
+region must begin a fresh statement.
+
+**Runner-up:** closing the spelling you were handed is not closing the class, and
 **writing a correction is not the same as applying it to the thing you are
 writing** — D-060 was created in the commit that corrected its own two
 falsehoods everywhere else. Both are old lessons here (#485 took four rounds for
