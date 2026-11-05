@@ -27,6 +27,27 @@ rejected every session time between 01:00 and 01:59 that morning as invalid.
 All three are fixed, and all three were found by the independent review rather
 than by the first sweep.
 
+**And a fourth place, which my own fix brought into view.** Once the booking
+form stopped moving the hour on the way in, the three pages that SHOW a booking
+— "My bookings", the approvals list and the resource's own page — were reading
+it back the old way, so a booking made for half past one was displayed as half
+past two. Before the form was fixed the two mistakes cancelled out and nothing
+looked odd. Fixed, and now guarded: the two columns say in the database itself
+that they hold a time on a clock rather than a moment in history, and the
+automatic check reads that.
+
+Reading those declarations found **four more columns that have said the same
+thing since long before this work** — an event's start and end, and the two
+copies kept in an event snapshot — and **28 files that still treat them as
+moments.** Those are listed rather than fixed: an event's time zone need not be
+the organisation's, so each needs a person to look at it, and that is the next
+part of this work. Nothing new may join the list.
+
+One more was raised rather than fixed (#783): two queries decide which bookings
+are still to come by comparing them with the database server's own clock, which
+has nothing to do with the organisation's. That changes which bookings somebody
+sees, so it is a change in behaviour rather than a correction.
+
 Three Small Groups pages and the Attendance list are fixed. They now put a clock
 reading into words from its digits, through one place —
 `I18n::formatClockTime()` — which never builds a moment at all, so there is no

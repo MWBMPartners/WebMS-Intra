@@ -1,0 +1,59 @@
+# Wall-clock DATETIME columns still handed to a moment function (#777 part two)
+#
+# Four DATETIME columns in `full_schema.sql` already declared themselves
+# WALL-CLOCK readings before #777 began, and nothing read that declaration:
+#
+#     tblEvents.startDateTime   "Event start — wall-clock local (venue/site local); NOT UTC"
+#     tblEvents.endDateTime     "Event end — wall-clock local (venue/site local); NOT UTC"
+#     tblEventSnapshots.snapStart  "Wall-clock time copied from startDateTime, in snapTimezone. NOT a UTC moment"
+#     tblEventSnapshots.snapEnd    "Wall-clock time copied from endDateTime, in snapTimezone. NOT a UTC moment"
+#
+# The files below put one of them through `strtotime()` or a DateTime
+# constructor. An event's zone is `tblEvents.timezone`, which may not be the
+# organisation's at all, so these are suspect twice over: wrong zone for an
+# event in another country, and wrong hour on the morning the clocks go
+# forward even when the zone is right.
+#
+# ⚠️ EACH NEEDS A PERSON. Some of these may be correct -- a few pass a zone
+#    explicitly a line or two later, which this check cannot see (its own
+#    header says so). Fixing them is #777 part two, which is also where the
+#    other 363 uncommented time-shaped columns get their answer. They are
+#    listed here rather than fixed in part one because part one was about the
+#    `TIME` columns, and a sweep that quietly widened to 28 files would be a
+#    different package wearing part one's name.
+#
+# WHAT THIS LIST IS FOR: nothing NEW may join it. A file not on it that does
+# this fails the check, so the hole closes behind us while the backlog is
+# worked through. `--strict` fails while the list holds anything, and a listed
+# file that has stopped doing it also fails -- so the list cannot go stale in
+# either direction.
+#
+# One path per line. Count them with `grep -vc '^#' <this file>`.
+web/_apps/account/my-volunteering.php
+web/_apps/admin/calendar/moderation.php
+web/_apps/admin/calendar/reminders.php
+web/_apps/admin/discipleship/pathway-form.php
+web/_apps/admin/host-console/event.php
+web/_apps/admin/host-console/index.php
+web/_apps/admin/reports/denominational.php
+web/_apps/assets/item.php
+web/_apps/attendance/record.php
+web/_apps/calendar/anon-checkin.php
+web/_apps/calendar/event-attendance.php
+web/_apps/calendar/event-hub.php
+web/_apps/calendar/event-invites-send.php
+web/_apps/calendar/event.php
+web/_apps/calendar/manage/import.php
+web/_apps/calendar/manage/save.php
+web/_apps/calendar/my-events.php
+web/_apps/calendar/public-landing.php
+web/_apps/calendar/rsvp-by-link.php
+web/_apps/calendar/views/_day_columns.php
+web/_apps/calendar/views/list.php
+web/_apps/calendar/views/month.php
+web/_apps/calendar/views/photo.php
+web/_apps/calendar/views/year.php
+web/_apps/calendar/widget.php
+web/_apps/events/api/create.php
+web/_apps/venues/booking.php
+web/_apps/widget/countdown-json.php

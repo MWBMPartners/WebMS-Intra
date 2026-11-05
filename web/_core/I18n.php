@@ -690,9 +690,17 @@ class I18n
      *        29 March 2026  ->  2:30 AM   (WRONG, an hour out)
      *        25 October 2026 -> 1:30 AM   (right)
      *
-     *    The stored data was never wrong; the display was. And the round trip
-     *    was only ever correct because both halves used the same zone — PHP's
-     *    default, which has nothing to do with the organisation's.
+     *    The stored data was never wrong; the display was. The round trip was
+     *    correct on every other day because both halves used the same zone.
+     *
+     * ⚠️ AND THAT ZONE IS NOT THE FAULT. An earlier version of this docblock
+     *    said PHP's default zone "has nothing to do with the organisation's",
+     *    and it usually IS the organisation's: `bootstrap.php` runs
+     *    `date_default_timezone_set(Site::timezone())` during start-up. **The
+     *    fault is the DATE** that `strtotime()` supplies without being asked —
+     *    today's — because on one morning a year the hour the reading names
+     *    does not exist in that zone. Same fix, different reason, and the
+     *    reason is what the next reader checks the design against.
      *
      *    **A time on a clock is not a point in history until something gives
      *    it a date AND a zone.** This gives it neither, so there is no

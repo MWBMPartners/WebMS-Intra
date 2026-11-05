@@ -4189,8 +4189,14 @@ CREATE TABLE IF NOT EXISTS `tblResourceBooking` (
     `bookingID`     INT          NOT NULL AUTO_INCREMENT,
     `resourceID`    INT          NOT NULL,
     `bookedByID`    INT          DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
-    `startAt`       DATETIME     NOT NULL,
-    `endAt`         DATETIME     NOT NULL,
+    -- WALL-CLOCK local to the organisation, not a moment in history. The
+    -- booking form stores what the member typed, the conflict query compares
+    -- these as text, and the pages show them with I18n::formatClockDateTime().
+    -- Never put one through strtotime() or a DateTime constructor: on the
+    -- morning the clocks go forward the hour it names does not exist, so PHP
+    -- moves it an hour. See #777.
+    `startAt`       DATETIME     NOT NULL COMMENT 'WALL-CLOCK local to the organisation, not a moment. Never pass through strtotime() or a DateTime constructor (#777).',
+    `endAt`         DATETIME     NOT NULL COMMENT 'WALL-CLOCK local to the organisation, not a moment. Never pass through strtotime() or a DateTime constructor (#777).',
     `purpose`       VARCHAR(255) DEFAULT NULL,
     `status`        ENUM('pending','approved','declined','cancelled') NOT NULL DEFAULT 'pending',
     `approvedByID`  INT          DEFAULT NULL,
@@ -11138,6 +11144,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('250_translation_spend_per_orga
 -- rows still holding the old `'en'` default, and a fresh install has none.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('251_member_language_is_a_choice.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 252_wall_clock_columns_say_so.sql (#777) ───────────────────────────
+-- The two comments are declared above, on the columns themselves.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('252_wall_clock_columns_say_so.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

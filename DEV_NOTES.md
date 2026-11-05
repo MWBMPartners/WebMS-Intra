@@ -18043,6 +18043,9 @@ be told from a sweep that stopped early.
 | `resources/book.php:65-68` | **WRONG, and it WROTE the wrong hour** — fixed; see below |
 | `attendance/api/create.php`, `update.php` | **WRONG** — `createFromFormat('H:i', …)` with no date and no zone; fixed |
 | `CONCAT()` of a date and a time in SQL | **NONE** — established with `grep -rniE "CONCAT\([^)]*(Date\|date)[^)]*(Time\|time)" web/_apps web/_core` |
+| `resources/my-bookings.php`, `approvals.php`, `resource.php` | **WRONG, and my own fix made it visible** — fixed; see below |
+| `tblEvents.startDateTime`/`endDateTime`, `tblEventSnapshots.snapStart`/`snapEnd` | **28 files put a declared wall-clock column through a moment function** — listed, not fixed; #777 part two |
+| `my-bookings.php:30`, `resource.php:60` comparing a wall-clock column with `NOW()` | **WRONG, raised as #783** — not fixed here |
 | `kids/checkin.php:130` | **a moment, so converting is right** — but `checkedInAt` is `DATETIME DEFAULT CURRENT_TIMESTAMP` with **no comment saying whether it is UTC or the server's clock**, which is #777's question 1 unanswered |
 
 ### The scale of what remains, measured rather than guessed
@@ -18144,6 +18147,61 @@ refused, so nothing else changes.
 **The gate's own header says it cannot see "a reading pulled into a variable
 several lines earlier and converted there", and that is exactly where these
 were.** A stated blind spot is a place to go looking, not a place to stop.
+
+### The schema can say which kind of value a column holds, and then a check can read it
+
+The three reader pages above were fixed and **guarded by nothing.** Planted,
+putting `date('D j M, H:i', strtotime($r['startAt']))` back into
+`my-bookings.php` left all 65 audit scripts and the clock-change test GREEN:
+`tblResourceBooking.startAt` is a `DATETIME`, which the gate deliberately does
+not sweep because a `DATETIME` may legitimately hold a moment, and section H of
+the test drives `I18n` directly without touching a page.
+
+**The fix is not a list of two column names in the check.** That is the #706
+shape -- somebody's memory wearing a schema-driven check's clothes. Migration
+252 gives both columns a comment saying they hold a WALL-CLOCK reading, and the
+gate now sweeps every `DATETIME` whose own comment says so. A new such column
+is covered the day it is declared, the declaration is useful to anybody reading
+the SQL, and nothing has to be remembered.
+
+Proved by planting: the reverted `my-bookings.php` now fails the gate on the
+exact line, and the restore is byte-identical.
+
+**And reading the schema immediately found four columns nobody had been
+reading.** `tblEvents.startDateTime` and `endDateTime`, and
+`tblEventSnapshots.snapStart` and `snapEnd`, have said "wall-clock local
+(venue/site local); NOT UTC" since long before #777, and **28 files put one of
+them through `strtotime()` or a DateTime constructor.** An event's zone is
+`tblEvents.timezone`, which need not be the organisation's at all, so those are
+suspect twice over -- the wrong zone for an event in another country, and the
+wrong hour on the change morning even when the zone is right. Each needs a
+person, because a few pass a zone a line or two later where this check cannot
+see it.
+
+They are in `tools/audit-checks/clock_wall_clock_datetime_pending.txt`, **not
+fixed here**: part one was about the `TIME` columns, and a sweep that quietly
+widened to 28 files would be a different package wearing part one's name. The
+list fails BOTH ways -- nothing new may join it, and a listed file that has
+stopped doing it also fails -- and `--strict` fails while it holds anything.
+That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
+visible rather than permanent.
+
+### Comparing a wall-clock column with `NOW()` (#783)
+
+Two queries filter `tblResourceBooking` by `NOW()`:
+
+    my-bookings.php:30   AND b.endAt   > NOW()
+    resource.php:60      AND b.startAt >= NOW()
+
+`NOW()` is the **database server's** clock in the connection's time zone, which
+is `SYSTEM` by default -- the database host's own setting, which has nothing to
+do with the organisation's zone. The columns hold the organisation's wall clock.
+So "my upcoming bookings" is cut at a boundary that can be hours out for an
+organisation in another country, and an hour out on either change morning.
+
+Raised rather than fixed: the right answer is to pass the organisation's own
+wall-clock "now" as a parameter, and that changes which rows a member sees, so
+it is a behaviour change and not a tidy-up.
 
 ### Raised rather than bundled
 

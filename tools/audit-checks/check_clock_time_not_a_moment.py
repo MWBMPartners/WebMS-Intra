@@ -13,8 +13,22 @@ is a congregation arriving at a locked building.**
 
 A column declared `TIME` holds a reading from a clock -- "the group meets at
 19:30" -- and **a time on a clock is not a point in history until something
-gives it a date AND a zone.** `strtotime('01:30')` gives it both, badly: today's
-date, in PHP's default zone, which has nothing to do with the organisation's.
+gives it a date AND a zone.** `strtotime('01:30')` gives it both without being
+asked: today's date, in PHP's default zone.
+
+**AND THE ZONE IS NOT THE FAULT, which an earlier version of this header got
+wrong.** It said PHP's default zone "has nothing to do with the organisation's".
+It usually IS the organisation's: `web/_core/bootstrap.php` runs
+`date_default_timezone_set(Site::timezone())` during start-up, so on any page
+reached through the router the two are the same. **The fault is the DATE** --
+today's, silently -- because on the one morning a year when the hour the reading
+names does not exist in that zone, PHP moves it. The distinction matters: the
+reason given for a fix is what the next reader checks the design against, and
+"the zone is wrong" would send them to change the zone.
+
+(The claim IS true for a scheduled job walking organisations with
+`Site::forceContext()`, which does not reset PHP's zone -- but none of the sites
+this check was written for is such a job.)
 
 **IT WAS NOT HYPOTHETICAL.** Measured in Europe/London before this check was
 written, on a stored meeting time of `01:30`:
@@ -54,7 +68,15 @@ answers.
 WHAT IT DELIBERATELY DOES NOT CHECK, because a check that cries wolf gets
 switched off (#483)
 -------------------------------------------------------------------------
-  * **`DATETIME` and `DATE` columns.** A `DATETIME` may legitimately hold a
+  * **A `DATETIME` whose comment does NOT say which kind of value it holds.**
+    A `DATETIME` that declares itself a WALL-CLOCK reading in its own column
+    comment IS swept, exactly like a `TIME` column, because the schema has then
+    said the thing that makes the question answerable. Two do today
+    (`tblResourceBooking.startAt` and `endAt`, migration 252). Of the 486
+    time-shaped columns in the schema, 363 carry no comment at all, so for most
+    of them the question is still open -- that is the bulk of #777.
+
+  * **`DATETIME` and `DATE` columns that say nothing.** A `DATETIME` may hold a
     moment, and turning one into a `DateTimeImmutable` is the right thing to do
     with it. Only `TIME` is unambiguous: there is no such thing as a `TIME`
     column that holds a point in history.
@@ -210,6 +232,34 @@ def has_a_zone_argument(call: str) -> bool:
 #    describing the code is how the migration harness's exceptions went stale.
 ALLOWED: dict[str, str] = {}
 
+# ── The backlog, one path per line, in a file beside this one ──────────────
+# Four `DATETIME` columns declared themselves WALL-CLOCK readings long before
+# #777 began, and nothing read that declaration. 28 files put one of them
+# through a moment function. Fixing them is #777 part two; listing them here is
+# what stops a TWENTY-NINTH joining them in the meantime.
+#
+# It fails BOTH ways: a file not on the list that does this fails, and a listed
+# file that has stopped doing it fails too, so the list cannot go stale in
+# either direction. `--strict` fails while it holds anything at all, which is
+# how the backlog is made visible rather than permanent (the
+# `site_aware_addresses_pending.txt` pattern, #536).
+PENDING_FILE = os.path.join("tools", "audit-checks", "clock_wall_clock_datetime_pending.txt")
+
+
+def pending_list(root: str) -> list[str]:
+    """The paths still allowed to do this, read from the file beside this one."""
+    path = os.path.join(root, PENDING_FILE)
+    if os.path.isfile(path) is False:
+        return []
+    out = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line == "" or line.startswith("#"):
+                continue
+            out.append(line)
+    return out
+
 # 🕐 The one function whose BODY is pinned, and the three things it may not
 #    contain. See "WHAT IT CHECKS" for the measurement that argues for it: the
 #    behavioural test stays green with the fault put back, because it runs on an
@@ -238,6 +288,34 @@ def clock_columns(schema: str) -> list[str]:
     """
     found = []
     for match in re.finditer(r"`([A-Za-z0-9_]+)`\s+TIME\b", schema):
+        name = match.group(1)
+        if name not in found:
+            found.append(name)
+
+    # ── A `DATETIME` that SAYS it holds a wall-clock reading ────────────────
+    # `TIME` is unambiguous; `DATETIME` is not, which is why the paragraph
+    # above excludes it. But a `DATETIME` whose own comment declares it a
+    # WALL-CLOCK reading is as unambiguous as a `TIME` column -- the schema has
+    # said which kind of value it holds -- so it belongs here.
+    #
+    # ⚠️ THIS IS WHY IT IS READ FROM THE COMMENT AND NOT FROM A LIST. The three
+    #    pages that show a resource booking were fixed in `61eebfc` and guarded
+    #    by NOTHING: `tblResourceBooking.startAt` is a `DATETIME`, so the sweep
+    #    above never looked at it, and the behavioural test drives `I18n`
+    #    directly without touching a page. Planted, putting
+    #    `date('D j M, H:i', strtotime($r['startAt']))` back into
+    #    `my-bookings.php` left all 65 audit scripts and the clock test GREEN.
+    #
+    #    A list of two names typed here would have closed that hole and gone
+    #    stale the next time somebody declared such a column (#706's lesson).
+    #    Declaring it in the schema is the thing the next person does anyway,
+    #    and it is also the only place the fact is useful to a reader of the
+    #    SQL. Migration 252 declares the first two.
+    for match in re.finditer(
+        r"`([A-Za-z0-9_]+)`\s+DATETIME\b[^,\n]*?COMMENT\s+'([^']*)'", schema
+    ):
+        if "WALL-CLOCK" not in match.group(2).upper():
+            continue
         name = match.group(1)
         if name not in found:
             found.append(name)
@@ -350,6 +428,8 @@ def main() -> int:
 
     problems: list[str] = []
     seen_allowed: set[str] = set()
+    pending = pending_list(root)
+    seen_pending: set[str] = set()
     looked_at = 0
 
     for folder, _, files in os.walk(os.path.join(root, WEB)):
@@ -380,6 +460,9 @@ def main() -> int:
             if relative in ALLOWED:
                 seen_allowed.add(relative)
                 continue
+            if relative in pending:
+                seen_pending.add(relative)
+                continue
             problems.append(
                 f"{relative} hands a clock-reading column to a moment function "
                 f"on line(s) {', '.join(str(h) for h in hits)}.\n"
@@ -401,6 +484,28 @@ def main() -> int:
                 f"`createFromFormat('Y-m-d H:i:s', $date . ' ' . $time, $tz)`, "
                 f"and add this file to ALLOWED with the reason."
             )
+
+    for relative in sorted(pending):
+        if os.path.isfile(os.path.join(root, relative)) is False:
+            problems.append(
+                f"{PENDING_FILE} names {relative}, which is not there. Take the "
+                f"line out."
+            )
+            continue
+        if relative not in seen_pending:
+            problems.append(
+                f"{relative} is on the #777 part-two list but no longer hands a "
+                f"wall-clock column to a moment function. Take the line out -- "
+                f"a list that keeps names of work already done is how the "
+                f"migration harness's exception list went stale unnoticed, and "
+                f"it hides how much is really left."
+            )
+
+    if "--strict" in sys.argv and len(pending) > 0:
+        problems.append(
+            f"{len(pending)} file(s) are still on the #777 part-two list in "
+            f"{PENDING_FILE}. --strict is for the day that list is empty."
+        )
 
     for relative in sorted(ALLOWED):
         if os.path.isfile(os.path.join(root, relative)) is False:
@@ -466,8 +571,10 @@ def main() -> int:
 
     print(
         f"Clock readings not made moments: {looked_at} PHP file(s) read against "
-        f"{len(columns)} TIME column(s) taken from the schema; "
-        f"{len(ALLOWED)} allowed on purpose, {len(seen_allowed)} of them still doing it"
+        f"{len(columns)} clock-reading column(s) taken from the schema "
+        f"(every `TIME`, plus every `DATETIME` whose comment says WALL-CLOCK); "
+        f"{len(ALLOWED)} allowed on purpose ({len(seen_allowed)} still doing it), "
+        f"{len(pending)} waiting on #777 part two ({len(seen_pending)} still doing it)"
     )
 
     if len(problems) > 0:
@@ -486,8 +593,15 @@ def main() -> int:
         f"DateTime constructor, and {FORMATTER_NAME}() builds no moment of its own."
     )
     print(
-        "   It reads the column names OUT OF the schema, so a new TIME column is "
-        "covered without anybody remembering to add it. It canNOT see a reading "
+        "   It reads the column names OUT OF the schema -- every `TIME` column, "
+        "and every `DATETIME` whose own comment declares it a WALL-CLOCK "
+        "reading -- so a new one is covered the day it is declared, without "
+        "anybody remembering to add it here.\n"
+        "   It does NOT yet mean every wall-clock column is read correctly: 28 "
+        "files are listed in the file beside this one as #777 part two's "
+        "backlog, and this run accepted them. What it does mean is that no "
+        "TWENTY-NINTH can appear.\n"
+        "   It canNOT see a reading "
         "pulled into a variable several lines earlier and converted there -- that "
         "stays a question for a person."
     )
