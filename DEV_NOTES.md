@@ -17735,10 +17735,53 @@ wrapping spellings now go red, including five nobody handed me
 `do { } while (false);`, and the bare `return;`). **That is the test the lesson
 demanded: try the spellings nobody gave you.**
 
-**What it still cannot see, enumerated rather than implied:** the whole file
-being required conditionally, a `goto`, an exception thrown above it, or an
-`exit` inside a function called above it. A static check cannot prove
-reachability, and saying so is better than a check that implies it can.
+**AND THAT ENUMERATION WAS UNTRUE IN THE REASSURING DIRECTION, which the sixth
+round found.** It listed only things a static check genuinely cannot prove — a
+conditional `require` of the file, a `goto`, an exception above it — and read as
+though every remaining escape needed that excuse. It did not: five more PLAIN
+wrappings were still getting through, because **the hand-written reader was
+wrong about PHP**, which is a different thing from the rule being too narrow.
+The sixth round measured `$endif = 1;` cancelling the hand-rolled `endif`
+counter; a `}` inside a heredoc body cancelling the brace counter;
+`#[Deprecated]` read as a `#` comment and hiding a `{`; `'?>'` inside a string
+ending the PHP span early so a `/* } */` counted as code; and
+`<!-- <?php if (false) { ?> -->`, which **PHP executes** and the reader blanked.
+Plus one in the other direction: `$exit = false;` — a variable name this
+repository uses twelve times — counted as an exit, so the guard cried wolf on
+correct code.
+
+**SO THE SEVENTH VERSION STOPPED HAND-PARSING PHP AND ASKED PHP.**
+`tools/audit-checks/member-language-structure.php` reads the three regions with
+`token_get_all()` and reports their text, nesting, anchor count and the token
+before them; the Python check is a wrapper that refuses loudly when PHP is
+missing and has **no fallback to reading the PHP itself**, because six rounds
+proved there is no second-best reading to drop to. After that, `$endif` is a
+`T_VARIABLE` and `endif` is `T_ENDIF`; `#[` is an attribute; a brace in a
+heredoc is part of an encapsed string; a `'?>'` in a string is a string; and PHP
+in an HTML comment is PHP. **None of the six spellings is expressible any more,
+and neither are the ones nobody has thought of**, because the distinctions were
+never in the text — they are in the grammar. Fourteen wrapping spellings go red;
+all three cry-wolf cases stay green.
+
+**The transferable rule, and it is the lesson of the whole package:** when a
+guard has to understand a language, use that language's own parser. Six rounds
+of regular expressions lost to `$endif`, a heredoc, an attribute, a string and
+an HTML comment — and the author of the fix was the one being outwitted each
+time, not an attacker.
+
+**And writing that file broke it in the most fitting way available.** A comment
+explaining the HTML-comment case wrote the example out in a `//` comment — and
+**a closing PHP tag inside a single-line comment ENDS PHP MODE**, so everything
+below became markup and PHP reported an unclosed brace sixty lines later. The
+argument for the file is that PHP's grammar holds surprises a reader will not
+guess. It holds them for the author too.
+
+**What it STILL cannot see, now that the enumeration is honest:** it reports
+where a region SITS, not that the region RUNS. A conditional `require` of the
+whole file, a `goto` over it, an exception thrown above it, or an `exit` inside a
+function called above it all leave the numbers unchanged. **Proving reachability
+needs a test that drives the page**, which is owed and is its own issue — six
+rounds went into inferring statically what one HTTP request would have measured.
 
 **And the structure check nearly shipped inert.** It looked for the anchor in a
 copy whose string literals were masked — and the anchor contains `'locale'`, so

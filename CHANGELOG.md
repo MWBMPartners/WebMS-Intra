@@ -71,12 +71,18 @@ Tracked separately rather than guessed at.
 Guards: `tools/i18n-member-language-selftest.php` (43 checks, with a real
 MySQL, including the fault put back) and the hard gate
 `tools/audit-checks/check_member_language_applied.py`. That gate pins **three
-whole regions of code as text** — the part of `index.php` that starts the
-session and handles `?lang=`, the account page's control, and its handler — so
-any change to any statement in them fails and `--repin` makes a deliberate
-change a visible act. It got there the hard way: three rounds of checking each
-slipped a one-edit change past a cleverer pattern, and every one was the same
-thing, a statement still present that does nothing.
+whole regions of code** — the part of `index.php` that starts the session and
+handles `?lang=`, the account page's control, and its handler — along with how
+deeply each sits, so any change to any statement in them fails and `--repin`
+makes a deliberate change a visible act.
+
+It got there the hard way, and the way is worth recording: **six rounds of
+checking each slipped a one-edit change past a cleverer pattern**, and every one
+was the same thing — a statement still present that does nothing. The answer in
+the end was to stop reading PHP with patterns and ask PHP, through its own
+tokeniser (`tools/audit-checks/member-language-structure.php`), after which the
+spellings that had been getting through were no longer expressible. **Where a
+guard has to understand a language, use that language's own parser.**
 
 Neither guard can tell whether a page *renders* in the chosen language — that
 needs a seeded installation over HTTP — and both say so.

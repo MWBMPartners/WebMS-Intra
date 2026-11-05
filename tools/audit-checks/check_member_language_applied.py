@@ -87,8 +87,11 @@ Version: 1.0.0
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 
 INDEX = os.path.join("web", "public_html", "index.php")
@@ -140,7 +143,7 @@ PINNED_REGIONS = (
         "index.php: the session starts, the language is resolved, ?lang= is handled",
         INDEX,
         "Auth::ensureSession();",
-        "if (isset($_GET['lang'])",
+        "block",
     ),
     (
         "account page: the language control",
@@ -150,13 +153,13 @@ PINNED_REGIONS = (
         #    the "is it a string" test -- so the bare name was not unique and the
         #    uniqueness rule rejected it, correctly.
         "$langRead    = \\Portal\\Core\\I18n::storedChoice",
-        None,
+        "endif",
     ),
     (
         "account handler: storing or clearing the language",
         ACCOUNT_SAVE,
         "if (array_key_exists('locale', $_POST)",
-        "if (array_key_exists('locale', $_POST)",
+        "block",
     ),
 )
 
@@ -202,235 +205,94 @@ def block_end(code: str, start: int) -> int:
     return -1
 
 
-# The characters that may immediately precede a pinned region. **The failure
-# message is built from this constant**, because round 4 narrowed the set and
-# left the message naming the two characters it had just removed -- so the
-# sentence somebody acts on told them the thing that caused their failure was
-# allowed. One place, or it drifts again.
+# 🧰 The probe that does the actual PHP reading, and the only thing that knows
+#    what PHP is. See its header for the six rounds of hand-written parsing that
+#    argue for its existence.
+STRUCTURE_PROBE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "member-language-structure.php"
+)
+
+# A generous limit: the probe reads four files and takes well under a second.
+# It exists to stop a hang, not to race a slow machine.
+PROBE_TIMEOUT_SECONDS = 30
+
+# The characters that may immediately precede a pinned region, measured from
+# TOKENS rather than text, so a `;` inside a comment or a string cannot answer
+# for it. **The failure message is built from this constant**, because round 4
+# narrowed the set and left the message naming the two characters it had just
+# removed — so the sentence somebody acts on told them the cause was allowed.
 FRESH_START_CHARS = ";}"
 
-ALT_OPENERS = ("if", "while", "for", "foreach", "switch", "else", "elseif")
-ALT_CLOSERS = ("endif", "endwhile", "endfor", "endforeach", "endswitch")
+
+def repo_root() -> str:
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(here))
 
 
-def structure_at(raw: str, start_anchor: str) -> dict:
+def ask_php(root: str, regions) -> list:
     """
-    Where the region SITS, not what precedes it.
+    The structural facts, from PHP's own tokeniser.
 
-    🚨 THE ROUND-5 CHECKER DIAGNOSED THIS BETTER THAN THE FOUR FIXES BEFORE IT,
-       so its words are kept: "`;`/`}` is not a weaker allow-list than `;{}:>`,
-       it is the same KIND of rule. Nothing about the last character can
-       distinguish 'a fresh statement at the level the region belongs to' from
-       'a fresh statement inside a dead block'."
+    🚨 WHY THIS IS NOT DONE IN PYTHON, which is the whole lesson of this file.
+       Six check rounds got a one-edit change past a hand-written reader, and
+       every one of them was the reader being wrong about PHP rather than the
+       rule being too narrow:
 
-       Measured bypasses of the character rule, each `php -l` clean, each with
-       the gate green and the whole region dead:
+         `$endif = 1;`              matched `\bendif\b`, cancelling a wrapper
+         a `}` in a heredoc body    counted as a real brace
+         `#[Deprecated]`            read as a `#` comment, hiding a `{`
+         `'?>'` inside a string     ended the PHP span early
+         `<!-- <?php … ?> -->`      PHP RUNS this; the reader blanked it
+         `$exit = false;`           counted as an exit, so it cried wolf
 
-           if (false) { ;          switch (0) { case 1: {}
-           ...region...            ...region...
-           }                       }
+       **None of those distinctions is in the text; they are in the grammar.**
+       `token_get_all()` knows that `$endif` is `T_VARIABLE` and `endif` is
+       `T_ENDIF`, that `#[` is `T_ATTRIBUTE`, that a brace in a heredoc is part
+       of an encapsed string, and that PHP in an HTML comment is still PHP.
 
-       And combining one with a differently-spelled live copy also defeated
-       `anchor_is_unique()`: the anchor then matched only the dead copy.
-
-    So three structural facts are measured and pinned:
-
-      `braces`  how many `{` are open where the region starts. Any wrapping in
-                `{ ... }` -- a conditional, a function, a switch, a closure --
-                changes it.
-      `alt`     how many alternative-syntax blocks are open (`if (…):` with no
-                braces, closed by `endif;`). Those change no brace count, which
-                is why round 4's `:`-removal was not enough on its own.
-      `exits`   whether anything at the region's OWN brace level returns, exits
-                or dies before it. A `return;` above the region changes neither
-                count and makes it unreachable just the same.
-
-    ⚠️ WHAT THIS STILL CANNOT SEE, enumerated rather than implied: the whole
-       file being required conditionally, a `goto`, an exception thrown above
-       it, or `exit` inside a function called above it. A static check cannot
-       prove reachability, and saying so is better than a check that implies it
-       can. It catches every wrapping that has actually been tried here, which
-       is five rounds' worth.
+    ⚠️ IT MUST FAIL LOUDLY, never quietly. PHP missing, PHP crashing, a timeout
+       or output that will not parse all return None here and are reported as
+       findings by the caller — the `check_static_calls.py` precedent. A check
+       that cannot run and says nothing is worse than no check.
     """
-    # ⚠️ TWO VIEWS, AND THE REASON IS A FAULT THIS NEARLY SHIPPED. The anchor
-    #    contains a string (`'locale'`), so it cannot be FOUND in a copy whose
-    #    strings are masked -- a first version searched the masked copy, found
-    #    nothing, and returned a neutral sentinel. I pinned the sentinel: a
-    #    structure check that could never fail, dressed as the strongest guard
-    #    in the file. The negative counts in the sidecar were the only tell.
-    #
-    #    Masking preserves LENGTH exactly, one `x` per character, so the two
-    #    views share offsets: find the anchor in the strings-kept copy, count
-    #    braces in the masked one, where a `{` inside a message cannot be
-    #    mistaken for code.
-    code_keys = readable_code(raw, mask_strings=False)
-    code_mask = readable_code(raw, mask_strings=True)
-    if len(code_keys) != len(code_mask):
-        raise RuntimeError(
-            "the two views of the file are different lengths, so their offsets "
-            "cannot be shared -- readable_code() has stopped preserving length"
+    php = shutil.which("php")
+    if php is None:
+        return None
+    if os.path.isfile(STRUCTURE_PROBE) is False:
+        return None
+    request = json.dumps([
+        {"file": os.path.join(root, relative), "anchor": anchor, "mode": mode}
+        for _, relative, anchor, mode in regions
+    ])
+    try:
+        done = subprocess.run(
+            [php, STRUCTURE_PROBE, request],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT_SECONDS,
+            cwd=root,
         )
-    at = code_keys.find(start_anchor)
-    if at == -1:
-        # A missing region is reported by its own check. Answer with something
-        # that can never equal a real measurement, so pinning it is impossible.
-        return {"braces": "anchor-not-found", "alt": "", "exits": ""}
-
-    before = code_mask[:at]
-
-    braces = before.count("{") - before.count("}")
-
-    alt = 0
-    for m in re.finditer(r"\b([a-z]+)\b", before):
-        word = m.group(1)
-        if word in ALT_CLOSERS:
-            alt -= 1
-            continue
-        if word in ALT_OPENERS:
-            # An alternative-syntax opener is `keyword (...) :` -- a `:` after
-            # the closing bracket of its condition, rather than a `{`. `else:`
-            # and `endif;` have no bracket.
-            rest = before[m.end():]
-            if word in ("else",):
-                if re.match(r"\s*:", rest) is not None:
-                    alt += 1
-                continue
-            bracket = re.match(r"\s*\(", rest)
-            if bracket is None:
-                continue
-            depth = 0
-            j = m.end() + bracket.end() - 1
-            while j < len(before):
-                if before[j] == "(":
-                    depth += 1
-                elif before[j] == ")":
-                    depth -= 1
-                    if depth == 0:
-                        break
-                j += 1
-            if re.match(r"\s*:", before[j + 1:]) is not None:
-                alt += 1
-
-    exits = 0
-    level = 0
-    for m in re.finditer(r"[{}]|\b(?:return|exit|die)\b", before):
-        tok = m.group(0)
-        if tok == "{":
-            level += 1
-        elif tok == "}":
-            level -= 1
-        elif level == braces:
-            exits += 1
-
-    return {"braces": braces, "alt": alt, "exits": exits}
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if done.returncode != 0:
+        return None
+    try:
+        answers = json.loads(done.stdout.strip() or "null")
+    except ValueError:
+        return None
+    if isinstance(answers, list) is False or len(answers) != len(regions):
+        return None
+    return answers
 
 
-def nothing_glued_in_front(raw: str, start_anchor: str) -> bool:
-    """
-    Whether the pinned region begins a fresh statement.
-
-    🚨 A WHOLE-REGION PIN CANNOT SEE SOMETHING GLUED IN FRONT OF ITS FIRST
-       STATEMENT, and this is the rule that closes it. `if (false)` on the line
-       above, with no braces, makes the entire region the body of a conditional
-       that never runs while the region's own text is unchanged -- measured on
-       `save.php`, the gate green while a member's language could never be
-       stored.
-
-       Moving the start anchor one statement earlier only moves the hole, so
-       the last thing before the region, whitespace aside, must be `;`, `}` or
-       an opening `<?php` / `<?=`.
-
-    ⚠️ AND THIS CHARACTER RULE IS NOT GENERAL. Three versions of it called
-       itself general and three versions were defeated, because **nothing about
-       the character before a region can tell "a fresh statement at the level
-       the region belongs to" from "a fresh statement inside a dead block"** --
-       `if (false) { ;` and `switch (0) { case 1: {}` both end in an allowed
-       character and both wrap the whole region in code that never runs
-       (measured, `php -l` clean, gate green). What actually guards it is
-       `structure_at()`, which pins the region's NESTING. This rule stays as a
-       cheap first pass with a specific message; it is not the guarantee.
-
-    ⚠️ `:` AND `{` WERE ALLOWED AND BOTH LET SOMETHING REACH ACROSS. The fourth
-       check round measured two more spellings past the first version of this
-       rule, each wrapping a whole region in code that never runs, each with
-       `php -l` clean and the gate printing "nothing is glued in front of any of
-       them":
-
-         if (false):                      ...region...   endif;
-         function portalNeverCalled() {   ...region...   }
-
-       and `switch (0) { case 1:` has the same shape. So the allowed set is now
-       `;`, `}` and an opening tag, and nothing else. **The lesson is the one
-       this file keeps re-learning: an allow-list written from the spellings you
-       were handed is not a rule.** None of the three regions legitimately begins
-       inside a block, so nothing is lost; if one ever needs to, this message is
-       where to start.
-    """
-    code = readable_code(raw, mask_strings=False)
-    at = code.find(start_anchor)
-    if at == -1:
-        return True          # a missing region is reported elsewhere
-    before = code[:at].rstrip()
-    if before == "":
-        return True
-    # An opening PHP tag is a fresh start too -- the account page's region is
-    # the first thing inside its own `<?php`, and a first version of this rule
-    # reported that as glue. Crying wolf gets a check switched off (#483), so
-    # both directions were checked before this was committed.
-    if before.endswith("<?php") is True or before.endswith("<?=") is True:
-        return True
-    # ⚠️ `;` and `}` ONLY. `:` admitted `if (false):` and `case 1:`; `{` admitted
-    #    `function neverCalled() {`. Both were measured green against the first
-    #    version of this rule while a whole region sat in dead code.
-    return before[-1] in FRESH_START_CHARS
-
-
-def anchor_is_unique(raw: str, start_anchor: str) -> bool:
-    """
-    Whether the region's start anchor appears exactly once in the file.
-
-    🚨 WITHOUT THIS, A DEAD DUPLICATE SATISFIES THE PIN WHILE THE LIVE CODE IS
-       GUTTED. `region_text()` takes the FIRST match, so the fourth check round
-       planted `if (false) {` + an exact copy of the region + `}` ABOVE the real
-       one, replaced the live block with one that does nothing, and the gate
-       printed "all three pinned regions match the sidecar byte for byte".
-       `nothing_glued_in_front()` cannot help: it inspects the text before the
-       FIRST match, which is the dead copy's own `{`.
-
-       Measured on `save.php`: `php -l` clean, guard exit 0, and the only
-       surviving `chooseLanguage()` call was the one inside `if (false)`.
-    """
-    code = readable_code(raw, mask_strings=False)
-    return code.count(start_anchor) == 1
-
-
-def region_text(raw: str, start_anchor: str, block_anchor) -> str:
-    """
-    One pinned region, normalised: comments gone, whitespace freed.
-
-    `block_anchor` None means "to the end of the file's PHP region we were
-    given" -- used for the account page, whose control is markup rather than one
-    block, and whose own end marker is the `<?php endif; ?>` below it.
-    """
-    code = readable_code(raw, mask_strings=False)
-    start = code.find(start_anchor)
-    if start == -1:
-        return ""
-    if block_anchor is None:
-        end = code.find("endif;", start)
-        end = len(code) if end == -1 else end + len("endif;")
-    else:
-        at = code.find(block_anchor, start)
-        if at == -1:
-            return ""
-        end = block_end(code, at)
-        if end == -1:
-            return ""
-    return whitespace_freed(code[start:end]).strip()
+def whitespace_freed(text: str) -> str:
+    """Runs of whitespace to one space, so indentation and wrapping are free."""
+    return re.sub(r"\s+", " ", text)
 
 
 def read_pinned() -> dict:
-    """The sidecar, as {label: normalised text}."""
+    """The sidecar, as {label: one line of pinned text}."""
     if os.path.isfile(PINNED_REGIONS_FILE) is False:
         return {}
     out = {}
@@ -445,129 +307,6 @@ def read_pinned() -> dict:
     return out
 
 
-def repo_root() -> str:
-    here = os.path.dirname(os.path.abspath(__file__))
-    return os.path.dirname(os.path.dirname(here))
-
-
-def php_spans(text: str) -> list:
-    """
-    Where the PHP is: (start, end) offsets covering each `<?php ... ?>`.
-
-    🚨 THE READER'S COMMENT RULE IS NOT THE RULE THAT APPLIES WHERE IT IS BEING
-       APPLIED -- #485's U+2028 lesson, one level up. `readable_code()` used to
-       treat the WHOLE file as PHP, so a line of raw MARKUP beginning `#` or
-       `//` was blanked as a comment. **PHP does not: outside `<?php`, those are
-       ordinary text.**
-
-       Measured on the account page, whose pinned region is mostly inline HTML:
-       one added line, `# <?php $langStored = \'\'; ?>`, was blanked by the reader
-       together with the real PHP after it, so the pin matched byte for byte
-       while the select carried NO `selected` attribute at all. Every browser
-       then pre-selects "forget my choice", and the member's next Save deletes
-       their language -- the silent data loss round 2 fixed, back in one line,
-       with the gate green.
-    """
-    spans = []
-    i = 0
-    n = len(text)
-    while i < n:
-        start = text.find("<?php", i)
-        alt = text.find("<?=", i)
-        if start == -1 or (alt != -1 and alt < start):
-            start = alt
-        if start == -1:
-            break
-        end = text.find("?>", start)
-        end = n if end == -1 else end + 2
-        spans.append((start, end))
-        i = end
-    return spans
-
-
-def readable_code(text: str, mask_strings: bool = True) -> str:
-    """
-    Comments gone, string literals masked, length and line count preserved.
-
-    Pass `mask_strings=False` where the thing being looked for CONTAINS a
-    string -- an array key such as `$_GET['lang']`. Masking would turn that key
-    into `'xxxx'` and the search could then never match, which is a clause
-    that cannot fail dressed as a strict check. Comments are still removed in
-    that view, which is what the masking was mostly guarding against.
-
-    ⚠️ MASKED RATHER THAN DELETED. A `)` or the word `switchLocale` inside a
-       message would answer a search falsely either way, and deleting changes
-       every line number after it, so a reported line would point at the wrong
-       place. Replacing each literal with a run of `x` of the same length
-       keeps both honest.
-
-    ⚠️ AND PHP'S RULES APPLY ONLY INSIDE `<?php ... ?>` -- see `php_spans()`
-       for the one line of markup that proved why.
-    """
-    inside = php_spans(text)
-    cursor = 0
-
-    def in_php(at: int) -> bool:
-        nonlocal cursor
-        while cursor < len(inside) and inside[cursor][1] <= at:
-            cursor += 1
-        if cursor >= len(inside):
-            return False
-        return inside[cursor][0] <= at
-
-    out: list[str] = []
-    i = 0
-    n = len(text)
-    while i < n:
-        ch = text[i]
-        if in_php(i) is False:
-            # Raw markup. The only comment here is an HTML one; `#` and `//`
-            # are ordinary characters, which is the whole of finding 3.
-            if text.startswith("<!--", i) is True:
-                end = text.find("-->", i + 4)
-                end = n if end == -1 else end + 3
-                out.append("".join(c if c == "\n" else " " for c in text[i:end]))
-                i = end
-                continue
-            out.append(ch)
-            i += 1
-            continue
-        if ch in "'\"":
-            quote = ch
-            out.append(ch)
-            i += 1
-            while i < n:
-                if text[i] == "\\" and i + 1 < n:
-                    out.append("xx" if mask_strings is True else text[i:i + 2])
-                    i += 2
-                    continue
-                if text[i] == quote:
-                    out.append(quote)
-                    i += 1
-                    break
-                if mask_strings is True:
-                    out.append("\n" if text[i] == "\n" else "x")
-                else:
-                    out.append(text[i])
-                i += 1
-            continue
-        if text.startswith("//", i) or ch == "#":
-            began = i
-            while i < n and text[i] != "\n":
-                i += 1
-            out.append(" " * (i - began))
-            continue
-        if text.startswith("/*", i):
-            end = text.find("*/", i + 2)
-            end = n if end == -1 else end + 2
-            out.append("".join(c if c == "\n" else " " for c in text[i:end]))
-            i = end
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
-
-
 def main() -> int:
     root = repo_root()
     problems: list[str] = []
@@ -577,13 +316,33 @@ def main() -> int:
             print(f"FAIL: {relative} is not there. This check cannot run.")
             return 1
 
-    with open(os.path.join(root, INDEX), "r", encoding="utf-8") as handle:
-        index_raw = handle.read()
-    index_code = readable_code(index_raw)
-    # Comments removed, strings KEPT — for check E, which looks at an array key.
-    index_keys = readable_code(index_raw, mask_strings=False)
-    with open(os.path.join(root, BOOTSTRAP), "r", encoding="utf-8") as handle:
-        boot_code = readable_code(handle.read())
+    # 📄 Every view of a file comes from PHP, never from a reader of our own.
+    #    The plain-text checks below used a Python comment-stripper until round
+    #    6, and it was wrong about PHP six different ways; simplifying it so it
+    #    could not be wrong about `#[` left it not stripping `//` at all, so a
+    #    COMMENT mentioning `I18n::switchLocale` answered the check that looks
+    #    for the CALL. One source of truth.
+    views = ask_php(root, (
+        ("index code", INDEX, "", "file"),
+        ("index keys", INDEX, "", "file_keys"),
+        ("bootstrap code", BOOTSTRAP, "", "file"),
+        ("account keys", ACCOUNT, "", "file_keys"),
+        ("save code", ACCOUNT_SAVE, "", "file"),
+        ("save keys", ACCOUNT_SAVE, "", "file_keys"),
+    ))
+    if views is None:
+        print(
+            "FAIL: the structural probe could not run, so not one of this "
+            "check's questions can be answered. It needs PHP on PATH and "
+            f"{os.path.basename(STRUCTURE_PROBE)} beside this script.\n"
+            "       There is deliberately NO fallback to reading the PHP here: "
+            "six check rounds each got a one-edit change past a hand-written "
+            "reader, so there is no second-best reading to drop to."
+        )
+        return 1
+    index_code, index_keys, boot_code, account_keys, save_code, save_keys = (
+        str(v.get("text", "")) for v in views
+    )
 
     reconsider = re.search(r"I18n::reconsiderNowSessionExists\s*\(", index_code)
     switcher = re.search(r"I18n::switchLocale\s*\(", index_code)
@@ -639,13 +398,8 @@ def main() -> int:
                 f"default (D-060)."
             )
 
-    # H. The account page's control, and its handler.
-    with open(os.path.join(root, ACCOUNT), "r", encoding="utf-8") as handle:
-        account_keys = readable_code(handle.read(), mask_strings=False)
-    with open(os.path.join(root, ACCOUNT_SAVE), "r", encoding="utf-8") as handle:
-        save_raw = handle.read()
-    save_code = readable_code(save_raw)
-    save_keys = readable_code(save_raw, mask_strings=False)
+    # H. The account page's control, and its handler. Both views came from the
+    #    probe above, with every other file's.
 
     field = re.search(r"<select[^>]*name=.locale.[^>]*>", account_keys)
     if field is None:
@@ -716,37 +470,60 @@ def main() -> int:
     #    #485 took four rounds to learn that the answer is to pin the text.
     pinned = read_pinned()
     now = {}
+    # ── The three pinned regions, read by PHP ─────────────────────────────
+    answers = ask_php(root, PINNED_REGIONS)
+    if answers is None:
+        print(
+            "FAIL: the structural probe could not run. "
+            f"It needs PHP on PATH and {os.path.basename(STRUCTURE_PROBE)} beside "
+            f"this script, and it must finish within {PROBE_TIMEOUT_SECONDS}s and "
+            "print JSON.\n"
+            "       This check does NOT fall back to reading the PHP itself. Six "
+            "check rounds each got a one-edit change past a hand-written reader, "
+            "so there is no second-best reading to drop to -- a check that cannot "
+            "run must say so."
+        )
+        return 1
+
+    pinned = read_pinned()
+    now = {}
     glued: list[str] = []
     duplicated: list[str] = []
     heredoc: list[str] = []
-    for label, relative, start_anchor, block_anchor in PINNED_REGIONS:
-        with open(os.path.join(root, relative), "r", encoding="utf-8") as handle:
-            raw = handle.read()
-        now[label] = region_text(raw, start_anchor, block_anchor)
-        shape = structure_at(raw, start_anchor)
+    broken: list[str] = []
+
+    for (label, relative, anchor, _), answer in zip(PINNED_REGIONS, answers):
+        if "error" in answer:
+            broken.append(f"{relative} ({label}): {answer['error']}")
+            continue
+        now[label] = whitespace_freed(str(answer["text"])).strip()
         now[label + " :: structure"] = (
-            f"braces={shape['braces']} alt={shape['alt']} exits={shape['exits']}"
+            f"braces={answer['braces']} alt={answer['alt']} exits={answer['exits']}"
         )
-        if nothing_glued_in_front(raw, start_anchor) is False:
-            glued.append(f"{relative} ({label})")
-        if anchor_is_unique(raw, start_anchor) is False:
-            duplicated.append(f"{relative} ({label}): {start_anchor!r}")
-        if HEREDOC_MARK in now[label]:
+        if answer["count"] != 1:
+            duplicated.append(
+                f"{relative} ({label}): {anchor!r} appears {answer['count']} times"
+            )
+        if answer["heredoc"] is True:
             heredoc.append(f"{relative} ({label})")
+        before = str(answer["before"])
+        if before not in ("<?php", "html") and before not in FRESH_START_CHARS:
+            glued.append(f"{relative} ({label}): the token before it ends {before!r}")
 
     if "--repin" in sys.argv:
         # ⚠️ REFUSE TO REPIN OVER A STRUCTURAL PROBLEM. Repinning while a region
-        #    is glued, duplicated or holds a heredoc would write the fault into
-        #    the sidecar and print nothing but success -- the pin would then
-        #    follow the fault, which is the one way a text pin fails silently.
+        #    is glued, duplicated, holds a heredoc or has MOVED would write the
+        #    fault into the sidecar and print nothing but success -- the one way
+        #    a text pin fails silently.
         moved = [
             f"nesting changed: {relative} ({label})"
             for label, relative, _, _ in PINNED_REGIONS
             if (label + " :: structure") in pinned
-            and now[label + " :: structure"] != pinned[label + " :: structure"]
+            and now.get(label + " :: structure") != pinned[label + " :: structure"]
         ]
         blocking = (
-            moved
+            broken
+            + moved
             + [f"glued in front: {w}" for w in glued]
             + [f"anchor not unique: {w}" for w in duplicated]
             + [f"heredoc inside: {w}" for w in heredoc]
@@ -761,9 +538,9 @@ def main() -> int:
             handle.write(
                 "# The three pinned regions of #763, regenerated by\n"
                 "#   python3 tools/audit-checks/check_member_language_applied.py --repin\n"
-                "# Comments removed and runs of whitespace freed to one space. Do not\n"
-                "# hand-edit this file: change the code and repin, so the change is\n"
-                "# visible in one diff.\n"
+                "# Read by PHP's own tokeniser: comments dropped, runs of whitespace\n"
+                "# freed to one space. Do not hand-edit this file -- change the code\n"
+                "# and repin, so the change is visible in one diff.\n"
             )
             for label, _, _, _ in PINNED_REGIONS:
                 handle.write(f"\n### {label}\n{now[label]}\n")
@@ -774,68 +551,69 @@ def main() -> int:
         print(f"Repinned {len(PINNED_REGIONS)} region(s) to {PINNED_REGIONS_FILE}")
         return 0
 
+    for where in broken:
+        problems.append(
+            f"{where}. The probe could not read this region at all, so there is "
+            f"nothing left guarding it. Its anchor has moved or its block is not "
+            f"closed where the probe expects."
+        )
+
     for where in duplicated:
         problems.append(
-            f"{where} appears more than once, so this pin is worthless.\n"
+            f"{where}, so this pin is worthless.\n"
             f"       The region is found by its FIRST match, so a dead duplicate "
-            f"above the live code satisfies the pin while the live code is "
-            f"gutted -- measured: a copy inside `if (false) {{ }}` above the real "
-            f"block left the gate printing 'all three pinned regions match the "
-            f"sidecar byte for byte' while the only surviving chooseLanguage() "
-            f"call was the dead one.\n"
-            f"       Either remove the duplicate, or give this region a start "
-            f"anchor that is unique."
+            f"above the live code satisfies the pin while the live code is gutted "
+            f"-- measured: a copy inside `if (false) {{ }}` above the real block "
+            f"left the gate reporting a byte-for-byte match while the only "
+            f"surviving chooseLanguage() call was the dead one."
         )
 
     for where in heredoc:
         problems.append(
             f"{where} now contains a heredoc or nowdoc, which this pin refuses.\n"
             f"       A heredoc's internal whitespace is significant, and this pin "
-            f"frees runs of whitespace -- so two genuinely different regions "
-            f"would compare equal and the pin would pass on changed behaviour. "
-            f"Move the heredoc out of the pinned region, or teach the "
-            f"normalisation to leave heredocs alone."
+            f"frees runs of whitespace -- so two genuinely different regions would "
+            f"compare equal and the pin would pass on changed behaviour."
         )
 
     for where in glued:
         problems.append(
             f"{where}: something is glued IN FRONT of this pinned region, so it "
             f"no longer begins a fresh statement.\n"
-            f"       A whole-region pin cannot see this: `if (false)` on the line "
-            f"above, with no braces, makes the entire region the body of a "
+            f"       A text pin cannot see this on its own: `if (false)` on the "
+            f"line above, with no braces, makes the entire region the body of a "
             f"conditional that never runs while the region's own text is "
-            f"untouched. Measured -- the gate was green while a member's language "
-            f"could never be stored.\n"
-            f"       The last thing before a pinned region must be one of "
-            f"{' '.join('`' + c + '`' for c in FRESH_START_CHARS)}, or an "
-            f"opening `<?php` / `<?=`. **This sentence is built from the rule "
-            f"itself**: an earlier version listed `{{` and `:` as allowed, which "
-            f"were the two characters the round before had REMOVED for letting "
-            f"dead code wrap a region -- so the failure told the reader that "
-            f"what caused it was fine.\n"
-            f"       Note this character rule is a cheap first pass only. What "
-            f"really guards the region is its pinned NESTING (braces, "
-            f"alternative-syntax depth, and returns at its own level), because "
-            f"no rule about one character can tell a fresh statement at the "
-            f"right level from a fresh statement inside a dead block."
+            f"untouched.\n"
+            f"       The last TOKEN before a pinned region must end in one of "
+            f"{' '.join('`' + c + '`' for c in FRESH_START_CHARS)}, or be an "
+            f"opening `<?php` or inline markup. **This sentence is built from the "
+            f"rule itself**: an earlier version listed `{{` and `:` as allowed, "
+            f"which were the two characters the round before had REMOVED for "
+            f"letting dead code wrap a region.\n"
+            f"       It is measured from TOKENS, not text, so a `;` inside a "
+            f"comment or a string cannot answer for it -- and it is a cheap first "
+            f"pass only. What really guards the region is its pinned NESTING."
         )
 
     for label, relative, _, _ in PINNED_REGIONS:
+        if label not in now:
+            continue
         key = label + " :: structure"
         if key in pinned and now[key] != pinned[key]:
             problems.append(
-                f"{relative}: the region '{label}' has MOVED -- its nesting is "
-                f"not what it was pinned as.\n"
+                f"{relative}: the region '{label}' has MOVED -- its nesting is not "
+                f"what it was pinned as.\n"
                 f"       pinned: {pinned[key]}\n"
                 f"       now:    {now[key]}\n"
-                f"       `braces` is how many `{{` are open where it starts, "
-                f"`alt` how many `if (…):` blocks, `exits` how many `return` / "
-                f"`exit` / `die` sit at its own level before it. Any of them "
-                f"changing means something now decides whether the region runs "
-                f"-- and the region's own TEXT can be untouched while that is "
-                f"true, which is how five rounds of character rules were each "
-                f"defeated (`if (false) {{ ;`, `switch (0) {{ case 1: {{}}`, "
-                f"`if (false):` … `endif;`).\n"
+                f"       `braces` is how many `{{` are open where it starts, `alt` "
+                f"how many `if (…):` blocks, `exits` how many `return` / `exit` / "
+                f"`die` sit at its own level before it. Any of them changing means "
+                f"something now decides whether the region runs -- and the "
+                f"region's own TEXT can be untouched while that is true.\n"
+                f"       All three come from PHP's own tokeniser, so `$endif`, "
+                f"`$exit`, a brace in a heredoc, a `#[Attribute]` and a `'?>'` in "
+                f"a string are all read as what they are. Six rounds of "
+                f"hand-written parsing got that wrong six different ways.\n"
                 f"       If the move is deliberate, run\n"
                 f"         python3 {os.path.basename(__file__)} --repin\n"
                 f"       and commit the sidecar diff as a separate, visible act."
@@ -846,40 +624,26 @@ def main() -> int:
                 f"{os.path.basename(PINNED_REGIONS_FILE)}. Run --repin, read the "
                 f"diff, and commit it."
             )
-        if now[label] == "":
-            problems.append(
-                f"{relative}: the pinned region '{label}' could not be found at "
-                f"all -- its anchors are gone, so there is nothing left to guard."
-            )
-            continue
         if label not in pinned:
             problems.append(
                 f"The region '{label}' is not in "
-                f"{os.path.basename(PINNED_REGIONS_FILE)}. Run this script with "
-                f"--repin, read the diff, and commit it."
+                f"{os.path.basename(PINNED_REGIONS_FILE)}. Run --repin, read the "
+                f"diff, and commit it."
             )
             continue
         if now[label] != pinned[label]:
             problems.append(
-                f"{relative}: the region '{label}' is not what it was pinned "
-                f"as.\n"
-                f"       This pin covers the WHOLE region, on purpose. Three "
-                f"check rounds each got a one-edit plant past a cleverer "
-                f"pattern -- `if (false) {{ }}`, then `if (false)` with no "
-                f"braces, then `false &&`, then an emptied block body, then "
-                f"`chooseLanguage(null)`, then `$langStored === false` inside "
-                f"the option loop -- and every one of them is the same thing: "
-                f"the statement is still there and does nothing.\n"
-                f"       ⚠️ A PURE REFORMAT FAILS THIS TOO, and that is "
-                f"deliberate rather than a fault. Comments and runs of "
-                f"whitespace are free, but PHP needs a space in places where "
-                f"there was none before, so re-wrapping a call across lines "
-                f"does change the normalised text. Taking whitespace out "
-                f"altogether is not an option -- `new Foo` would become "
-                f"`newFoo`. The precedent is `portal-translate.pinned.js` "
-                f"(#485), and the reason it is acceptable in both places is the "
-                f"same: nothing EXECUTES this code in any test, so a text pin is "
-                f"the only guard there is.\n"
+                f"{relative}: the region '{label}' is not what it was pinned as.\n"
+                f"       This pin covers the WHOLE region, on purpose, and its text "
+                f"comes from PHP's tokeniser rather than from a reader of my own.\n"
+                f"       ⚠️ A PURE REFORMAT FAILS THIS TOO, deliberately. Comments "
+                f"and runs of whitespace are free, but PHP needs a space where a "
+                f"re-wrapped call previously had none. Taking whitespace out "
+                f"altogether is not an option -- `new Foo` would become `newFoo`. "
+                f"The precedent is `portal-translate.pinned.js` (#485), and the "
+                f"reason it is acceptable in both places is the same: nothing "
+                f"EXECUTES this code in any test, so a text pin is the only guard "
+                f"there is.\n"
                 f"       If the change is deliberate, run\n"
                 f"         python3 {os.path.basename(__file__)} --repin\n"
                 f"       read the diff to "

@@ -2914,8 +2914,41 @@ to reach: pin the whole region as TEXT.** Three regions, held in
 `--repin`. The four substring pins and the brace-depth test came out,
 because two guards over one fact drift apart.
 
-**A whole-region pin has THREE holes, not the "exactly one" a first
-version of this claimed -- the fourth round measured the other two.**
+**THE SEVENTH VERSION STOPPED HAND-PARSING PHP AND ASKED PHP, AND
+THAT IS THE LESSON OF THE WHOLE PACKAGE.** Six rounds of regular
+expressions were defeated by `$endif` (matched `\bendif\b`, cancelling
+a real `if (false):`), a `}` inside a heredoc body, `#[Deprecated]`
+read as a `#` comment, `'?>'` inside a string ending the PHP span so a
+`/* } */` counted as code, and an HTML comment with a PHP block inside
+it -- which **PHP executes** and the reader blanked. Plus one the other
+way: `$exit = false;` counted as an exit, so the guard cried WOLF on
+correct code.
+
+**None of those distinctions is in the TEXT; they are in the GRAMMAR.**
+`tools/audit-checks/member-language-structure.php` reads the regions
+with `token_get_all()`, and the Python check is a wrapper that refuses
+loudly with **no fallback** -- six rounds proved there is no
+second-best reading to drop to. The precedent for the wrapper is
+`check_static_calls.py`. Fourteen wrapping spellings go red; all three
+cry-wolf cases stay green.
+
+**When a guard has to understand a language, use that language's own
+parser.** And writing that file broke it in the most fitting way
+available: a comment explaining the HTML-comment case wrote the
+example out in a `//` comment, and **a closing PHP tag inside a
+single-line comment ENDS PHP MODE** -- so everything below became
+markup and PHP reported an unclosed brace sixty lines later. The
+grammar holds surprises for the author too.
+
+**What it still cannot see, stated honestly:** it reports where a
+region SITS, not that it RUNS. A conditional `require` of the file, a
+`goto`, a throw above it, or an `exit` inside a function called above
+it all leave the numbers unchanged. **Proving reachability needs a
+test that drives the page -- #781 -- and six rounds went into
+inferring statically what one HTTP request would have measured.**
+
+**The earlier whole-region pin had THREE holes, not the "exactly one"
+a first version claimed -- the fourth round measured the other two.**
 
 (a) It cannot see something glued IN FRONT of its first statement:
 `if (false)` on the line above, no braces, makes the whole region the

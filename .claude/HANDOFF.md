@@ -63,12 +63,14 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 round 6 is built and awaiting its check** (the protected arm of D-051 —
+**#763 round 7 is built and awaiting its check** (the protected arm of D-051 —
 it writes and deletes stored data, so rounds run until one is clean). Twelve
-findings, then seven, six, six, three — and **almost every one after the first
-round was in a previous round's fix**. #777's fact base is gathered (read-only,
-in `.claude-work/777/inventory-notes.md`) and is next. Everything else below is
-unstarted.
+findings, then seven, six, six, three, three — and **every one after the first
+round was in a previous round's fix, all of them in the GUARD rather than the
+fix.** Round 7 stopped hand-parsing PHP and asked PHP; #781 is the behavioural
+test that should have been built instead of inferring reachability statically.
+#777's fact base is gathered (read-only, `.claude-work/777/inventory-notes.md`,
+with one measured fault) and is next. Everything else below is unstarted.
 
 ## Next, in this order
 
@@ -125,7 +127,22 @@ as the evidence), #549's arithmetic half, #767, #765, #768, #763.
 
 ## The lesson this run earned, in one line
 
-**When a rule keeps being defeated, the rule is asking the wrong question.** Four
+**When a guard has to understand a language, use that language's own parser.**
+Six rounds of regular expressions over PHP were defeated by `$endif`, a `}`
+inside a heredoc, a `#[Attribute]`, a `'?>'` in a string, and PHP inside an HTML
+comment — plus one cry-wolf, `$exit` read as an exit. None of those distinctions
+is in the text; they are all in the grammar. `token_get_all()` ended the class
+in one change, and the file written to do it broke itself on the same quirk
+(a closing PHP tag inside a `//` comment ends PHP mode), which is the best
+argument for it there is.
+
+**And the bigger one, which cost the six rounds:** the property being guarded
+was "does this code RUN", and that is behavioural. A static pin can only infer
+it. #781 is the HTTP test that measures it. **Where the property is "it runs",
+drive it; where it is "it looks like this", pin it.**
+
+**Runner-up, from round 5:** when a rule keeps being defeated, the rule is
+asking the wrong question. Four
 versions asked about the CHARACTER before a pinned region; the fifth checker said
 why none could work — nothing about one character can tell "a fresh statement at
 the level this belongs to" from "a fresh statement inside a dead block". The
