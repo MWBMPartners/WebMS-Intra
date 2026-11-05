@@ -915,6 +915,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 body: 'action=register_options&csrf_token=' + encodeURIComponent(document.querySelector('[name=csrf_token]').value)
             });
             const optData = await optResp.json();
+            // 🔑 STEP 1 SPENT THE TOKEN, SO STEP 2 MUST NOT REUSE IT (#770).
+            //    `Auth::verifyCsrf()` rotates on acceptance, and both requests
+            //    read the token out of the same hidden field — so without this
+            //    the second one sent a spent token and a member could not add
+            //    a passkey AT ALL. `Portal.rememberCsrf()` writes the
+            //    replacement into every carrier the page has (#768), including
+            //    that field.
+            if (window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+                window.Portal.rememberCsrf(optData);
+            }
             if (!optData.success) {
                 throw new Error(optData.error || 'Failed to get registration options');
             }
@@ -964,6 +974,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 })
             });
             const verifyData = await verifyResp.json();
+            // The same again: this answer carries the next replacement, and a
+            // member who adds a second passkey without reloading needs it.
+            if (window.Portal && typeof window.Portal.rememberCsrf === 'function') {
+                window.Portal.rememberCsrf(verifyData);
+            }
 
             if (verifyData.success) {
                 const box = passkeyBox();

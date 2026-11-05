@@ -380,7 +380,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         //    allow) has already rotated the token and hands the new one back,
         //    so one mistaken press must not stop the console for the rest of
         //    the service.
-        if (s && typeof s.csrfToken === 'string' && s.csrfToken !== '') { csrf = s.csrfToken; }
+        if (s && typeof s.csrfToken === 'string' && s.csrfToken !== '') {
+            csrf = s.csrfToken;
+            // 🔑 AND THE REST OF THE PAGE, NOT JUST THIS VARIABLE (#771).
+            //    `api/worship/advance` rotates the token, and keeping the
+            //    replacement in this one variable left the page's own
+            //    <meta name="csrf-token"> holding a spent one. Two scripts
+            //    that load on EVERY page read it from there — `portal-tour.js`
+            //    and `push-subscribe.js` — so they began getting 403s silently
+            //    for the rest of the service. `Portal.writeCsrf()` is the one
+            //    place every carrier is written (#768).
+            if (window.Portal && typeof window.Portal.writeCsrf === 'function') {
+                window.Portal.writeCsrf(s.csrfToken);
+            }
+        }
         if (s && s.ok) { clearProblem(); renderCurrent(s); return; }
 
         // A stale token can still happen -- another tab or window driving the

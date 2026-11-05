@@ -62,6 +62,21 @@
     function updateCsrfToken(token) {
         if (typeof token === 'string' && token !== '') {
             cachedCsrfToken = token;
+            /* 🔑 HAND IT TO THE PAGE AS WELL, NOT JUST TO OURSELVES (#774).
+               `api/push/subscribe` goes through `Auth::verifyCsrf()`, which
+               ROTATES the token, and returns the replacement. Keeping it only
+               in this file's own variable left the page's hidden fields and
+               its meta tag holding a spent one — so on
+               `/account/notifications`, which carries the preferences form AND
+               loads this script, turning push on and then pressing Save was
+               REFUSED and the member's changes were lost.
+
+               `Portal.writeCsrf()` is the one place every carrier is written
+               (#768). The private cache stays, because this file posts again
+               and reads it at the moment of posting. */
+            if (window.Portal && typeof window.Portal.writeCsrf === 'function') {
+                window.Portal.writeCsrf(token);
+            }
         }
     }
 

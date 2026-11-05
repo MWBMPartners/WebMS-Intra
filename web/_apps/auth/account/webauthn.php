@@ -46,6 +46,25 @@ if (str_contains($contentType, 'application/json') === true) {
     $csrf   = $_POST['csrf_token'] ?? '';
 }
 
+// 🔑 EVERY ANSWER CARRIES THE REPLACEMENT TOKEN (#770).
+//
+//    `Auth::verifyCsrf()` ROTATES the token when it accepts one. Adding a
+//    passkey is TWO requests — `register_options` then `register_verify` —
+//    and both read the token out of the SAME hidden field on the page. So the
+//    first request spent the token, this handler returned no replacement, and
+//    the second request sent the spent one and was refused: a member could not
+//    add a passkey AT ALL, and the message they saw was "Invalid session
+//    token."
+//
+//    `csrfToken` is the spelling `Portal.rememberCsrf()` already accepts
+//    (#768), and since that fix it writes the replacement into every carrier
+//    the page has — including the hidden field the second request reads.
+//
+//    ⚠️ IT GOES ON THE REFUSALS TOO, not only the successes. A refusal reached
+//       AFTER `verifyCsrf()` has accepted the token has still spent it, so an
+//       answer without a replacement leaves the page unable to try again —
+//       which turns one failed attempt into a dead page.
+
 // 🛡️ CSRF check
 if (Auth::verifyCsrf($csrf) === false) {
     echo json_encode(['success' => false, 'error' => 'Invalid session token.']);
@@ -79,7 +98,7 @@ if ($action === 'register_options') {
 
     $options = WebAuthn::registrationOptions($userId, $userName, $userEmail, $rpName, $rpID, $excludeIDs);
 
-    echo json_encode(['success' => true, 'options' => $options]);
+    echo json_encode(['success' => true, 'options' => $options, 'csrfToken' => Auth::csrfToken()]);
     exit();
 }
 
@@ -91,7 +110,7 @@ if ($action === 'register_verify') {
     $friendlyName = trim($input['friendlyName'] ?? 'Passkey');
 
     if (empty($credential) === true) {
-        echo json_encode(['success' => false, 'error' => 'No credential data received.']);
+        echo json_encode(['success' => false, 'error' => 'No credential data received.', 'csrfToken' => Auth::csrfToken()]);
         exit();
     }
 
@@ -122,14 +141,14 @@ if ($action === 'register_verify') {
 
         Logger::activity('WebAuthnRegister', 'Registered passkey: ' . $friendlyName);
 
-        echo json_encode(['success' => true]);
+        echo json_encode(['success' => true, 'csrfToken' => Auth::csrfToken()]);
         exit();
     } catch (\Throwable $ex) {
         Logger::errorPlatform('WebAuthn', 'Error', 'REGISTER_FAIL', $ex->getMessage(), '');
-        echo json_encode(['success' => false, 'error' => 'Registration failed: ' . $ex->getMessage()]);
+        echo json_encode(['success' => false, 'error' => 'Registration failed: ' . $ex->getMessage(), 'csrfToken' => Auth::csrfToken()]);
         exit();
     }
 }
 
-echo json_encode(['success' => false, 'error' => 'Unknown action.']);
+echo json_encode(['success' => false, 'error' => 'Unknown action.', 'csrfToken' => Auth::csrfToken()]);
 exit();
