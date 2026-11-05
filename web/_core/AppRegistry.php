@@ -119,6 +119,13 @@ class AppRegistry
         // for administrators only and each has its own per-endpoint switch
         // (two of the three are seeded off).
         'users'           => null,
+        // Content translation belongs to the portal rather than to one app:
+        // the one endpoint translates an announcement, a project's description
+        // or an update posted against a project, and those are three different
+        // apps' content (#485, #761). Whether anything is translated at all is
+        // its own setting, `translation.enabled`, which ships '0' and is asked
+        // on every request — the same arrangement as `push` above.
+        'translation'     => null,
     ];
 
     /**

@@ -50,7 +50,9 @@ $canPledge = (string) $project['status'] === 'active';
 
 $updates = [];
 $stmt = $db->prepare(
-    'SELECT u.content, u.postedAt, p.fullName '
+    // 🌐 `updateID` is selected because the "Translate" control names the
+    //    row it is about (#485). It is not shown to anybody.
+    'SELECT u.updateID, u.content, u.postedAt, p.fullName '
     . 'FROM tblProjectUpdate u LEFT JOIN tblUsers p ON p.userID = u.postedByID '
     . 'WHERE u.projectID = ? ORDER BY u.postedAt DESC LIMIT 20'
 );
@@ -99,6 +101,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endif; ?>
         <div class="card mb-4"><div class="card-body">
             <?php echo Markdown::render((string) ($project['description'] ?? ''), ['allow_links' => true]); ?>
+            <?php
+            // 🌐 "Translate" (#485). This page is PUBLIC — a visitor who is not
+            //    signed in reaches it — and the partial prints nothing for
+            //    them, because translating spends the organisation's money
+            //    with an outside company and a passer-by must not be able to.
+            $trTable = 'tblProject';
+            $trId    = (int) $project['projectID'];
+            require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'translate-control.php';
+            ?>
         </div></div>
 
         <?php if (count($updates) > 0): ?>
@@ -110,6 +121,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php if (($u['fullName'] ?? '') !== ''): ?> · <?php echo htmlspecialchars((string) $u['fullName'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
                     </div>
                     <?php echo Markdown::render((string) $u['content'], ['allow_links' => true]); ?>
+                    <?php
+                    $trTable = 'tblProjectUpdate';
+                    $trId    = (int) $u['updateID'];
+                    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'translate-control.php';
+                    ?>
                 </div></div>
             <?php endforeach; ?>
         <?php endif; ?>

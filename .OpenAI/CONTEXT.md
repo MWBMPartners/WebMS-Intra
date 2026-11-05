@@ -581,6 +581,74 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     "the job ran in the last 15 minutes" and no more. Test: `tools/held-
     texts-selftest.php`, which reads the Notification preferences page.
 
+    **Content translation IS reachable now, and the allow-list is the
+    part to leave alone (#485, #761, migration 248; the owner, 4
+    November 2026 — D-049).** `Portal\Core\ContentTranslation` is the
+    ONE place that decides what may be translated and for whom:
+    `SOURCES` is the allow-list, `whyNotOffered()` takes FACTS so the
+    page and the handler cannot disagree, `readSourceText()` is the ONE
+    place the words are read, and `readerLanguage()` the one place the
+    reader's language is decided. `_apps/translation/api/content.php` is
+    the ONE caller of the engine, at `api/translation/content`;
+    `_core/templates/translate-control.php` is the ONE place the control
+    is drawn. THREE things may be translated, all of them the
+    ORGANISATION's own published words: an announcement's `body`, a
+    project's `description`, an update's `content`. **A PRAYER REQUEST
+    IS DELIBERATELY NOT TRANSLATABLE AND MUST NOT BE ADDED** — D-049
+    requires that the control never appear where it would send a third
+    party's words, a prayer request is the table this portal already
+    treats as a person's own words about themselves (D-016, #715), and
+    it is routinely about somebody else who can never agree; the
+    READER's opt-in cannot stand in for the WRITER's. The allow-list is
+    pinned WHOLE by the hard gate
+    `tools/audit-checks/check_translation_text_from_db.py`, so adding a
+    table fails on purpose. **IT WAS A REWRITE, NOT A RE-ROUTE, and that
+    is the lesson for #277/#658:** the old `_apps/api/translate.php`
+    took the text from `$_POST['text']`, so its allow-list constrained
+    the LABEL and not the words; `lookupCached()` asks nothing about who
+    is reading, so a posted row number read back any organisation's
+    words; and nothing checked the caller could see the row (#761).
+    Making an unreachable handler reachable is the act that makes its
+    faults live. `Translation::capPence()` holds the organisation to
+    what the installation allows (zeroIsLargest, because 0 means no
+    limit), enforced where the money is spent and not only at the save;
+    a member must switch it on for their own account, and an API key is
+    refused because a key cannot hold a person's permission. Two
+    measured limits, each with an issue: on the `libre` route nothing is
+    added to the spend so the limit cannot bite (#762), and a member's
+    saved INTERFACE language is applied nowhere because `I18n::init()`
+    runs before any session exists (#763). The provider's words are
+    written with `textContent`, never `innerHTML`. **THE FIRST
+    INDEPENDENT CHECK FOUND FIVE REAL PROBLEMS and the worst was on a
+    page that takes money: `Auth::csrfToken()` is ONE token per session,
+    so every control on a page AND every ordinary form share it and the
+    first accepted press kills the rest — measured, pressing Translate
+    on `/projects/view` then pledging gave a bare "Bad request" with the
+    member's typing gone, and SEVERAL refusals carry no
+    replacement (not signed in, a wrong method, an API key, a refused
+    form token, the endpoint switched off — measured; only the
+    form-token one is cured by reloading), so `shareToken()` keeps it
+    for the WHOLE
+    PAGE.** "Nothing has been charged" stood in three places and CANNOT
+    be known (a 200 with an unexpected shape, or a timeout after the
+    provider accepted, is still billed); an empty or non-numeric monthly
+    limit silently became "no limit", the most expensive outcome,
+    because `(float) ''` is 0 and 0 means no limit; the organisation
+    test and `isPublic` on the two project statements were **pinned by
+    nothing** (a condition no fixture can trip is not a condition); and
+    the gate's own "direct guard" read only `$body['…']`, so ONE planted
+    line reading a request HEADER put #761's fault 2 back live with
+    every check green. **TWO OF MY OWN FIXES THEN FAILED THE SAME WAY
+    WITHIN THE HOUR: a pattern spanning code and a STRING
+    (`$_SERVER['HTTP_`) can never match in a copy whose strings are
+    masked, and `shareToken(` was satisfied by `function shareToken(` —
+    A DEFINITION IS NOT A USE.** And the script was read by NOTHING:
+    deleting the token sharing and swapping `textContent` for
+    `innerHTML` left every check green, so check F now reads both rules
+    as text; no test here drives a browser. **A FOURTH ROUND FOUND TWO MORE AND THE PATTERN IS THE LESSON: four rounds, four times closing the SPELLINGS I was handed and calling it the class.** A reassignment (`shareToken = function () {...}`) killed the whole token fix with the gate green, because round 3 had closed the second-DECLARATION spelling; and `&&` → `||` in the reload guard, ONE CHARACTER, restored a fault round 2 found, because that narrowing was pinned as two string literals and not as a condition. **The remedy was not a fifth cleverer pattern but to pin the WHOLE FILE** — its code, comments stripped and whitespace normalised, must equal `tools/audit-checks/portal-translate.pinned.js`, so any change to a STATEMENT fails and `--repin` regenerates it as a separate visible act. **A FIFTH ROUND FOUND THE PIN'S OWN HOLE AND IT IS WHITESPACE: IN JAVASCRIPT A NEWLINE IS A SEMICOLON** (automatic semicolon insertion, after `return`, `throw`, `break`, `continue`, `++`/`--`). The first pin collapsed ALL whitespace, so one added newline after a `return` changed what the script does with the gate green — `outputBlock()` answered `undefined`, so a translation that had ARRIVED AND BEEN PAID FOR was thrown away while the member was told nothing came back, and it still PARSES, which is the dangerous kind. `normalised_code()` keeps line breaks and frees indentation, blank lines and comment text, and is used by the comparison AND by `--repin` so the generator and the checker cannot disagree. **The transferable rule: when you normalise before comparing, enumerate what the normalisation throws away and ask whether the language cares about any of it** — for JavaScript that is yes for line breaks and no for indentation; for Python the opposite; for SQL, case. **A SIXTH ROUND DEFEATED THE PIN WITH ONE LINE AND THE CHARACTER WAS INVISIBLE: JAVASCRIPT ENDS A `//` COMMENT AT FOUR CHARACTERS** — LF, CR, U+2028 LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR — and the blanker ended one at `\n`. Python's read folds a lone CR by accident; U+2028 came through, the blanker ran past it, blanked the real code after it, and `splitlines()` then dropped the line as blank — so ONE line put `innerHTML` live with the gate green and every audit check green (executed in node: the planted markup ran), defeating the pin AND the `innerHTML` rule at once. **The ACCIDENT is worse than the attack:** U+2028 is what text pasted from a PDF carries, and a comment containing one makes the WHOLE FILE fail to parse, so the control silently does nothing on every page while the gate says OK. **The rule, round 5's sharpened: when you blank or split on a delimiter, use the delimiter set THE LANGUAGE uses, not the one your own language's library offers.** Also: the stated residue was understated in the direction that bites — a tab and a non-breaking space collapse too, and `'CSRF check failed'` DOES depend on its single space (it is matched against `ApiAuth`'s exact words), so "no string depends on that" was a reassurance the check could not support; that one comparison is now checked un-normalised. **A SEVENTH ROUND FOUND THE SAME CLASS TWO MORE WAYS AND ONE IS AN ORDINARY ACCIDENT: an unterminated `/*` after the last statement** (Python blanks it to the end of file, JavaScript refuses the whole file, and the normalised code is unchanged so the pin matched) **and U+001F in a statement** (the one C0 control Python strips WITHOUT splitting, so U+0085/1C/1D/1E failed by accident and it did not). `js_will_not_parse()` now asks FIRST whether JavaScript would refuse the file at all. **The rule in its third form: of any normalise-then-compare guard ask not only "what does the language care about that I discard?" but "could the input be something the language REFUSES OUTRIGHT, which my reader accepts?"** — a file that does not run cannot be guarded by comparing its code. Also: `repin()` was the one read not folding U+2028, so generator and checker could disagree (it failed SAFE, but the failure message's advice could never work on that input); and `\v`/`\f` as whitespace made the pin go red over legal JavaScript, so both are folded to spaces — crying wolf gets a check switched off (#483), so both directions must be checked together. That is right here and nowhere else for one reason: NOTHING RUNS THIS SCRIPT. Every bypass from all four rounds now goes red, and so does a harmless rename, by design. **And the self-test was changing two settings it never named:** the save handler upserts six installation-wide keys from its own defaults when a field is absent, so section J's eleven presses reset the two provider MODEL rows and nothing put them back — round 3's `libre_base` finding one key over. **It is not enough to track what a test WRITES; track every setting anything it PRESSES can write** (`rememberSetting()`). **A SECOND ROUND FOUND FIVE MORE AND THREE WERE THE SAME FAULT ONE STEP ON. THE FORM TOKEN HAS THREE CARRIERS, NOT TWO:** `header.php` puts `<meta name="csrf-token">` on every page and five scripts read it from there, two of them loading everywhere — measured, after a press a guided-tour post answered 403 on the very page the pledge fault was measured on, and `event-hub-upload.js`'s `syncCsrf()` was already the right pattern, so this was a THIRD copy of one rule with a half missing. **THREE MORE VISIBILITY CONDITIONS WERE STILL PINNED BY NOTHING** (the project-UPDATE's `isPublic`, and the announcement's `isDeleted` and `publishAt`) while four documents said the class was closed — FIVE clauses, not two, and the enumeration is mechanical: every clause in every `SOURCES` statement needs a fixture that fails it. **THE MONEY FIX WAS PINNED BY NOTHING** — deleting the whole refusal left every check green, because nothing had ever posted to `/admin/translation/save`; a fix's own guard is part of the fix. **AND CHECK F PASSED ON CODE WHERE THE TOKEN FIX WAS GONE, TWO WAYS:** a call inside `if (false)` (#709: pin the gate that decides whether the block runs) and a write loop changed to `index < 0`. `shareToken()` is pinned WHOLE now, body and call line, as `check_table_name_comparisons.py` pins its helpers. **A new message was untrue the moment it was written:** "please reload" was shown for every 403 carrying no replacement, and `ApiRouter` refuses a switched-off endpoint before any rotation, so a member was told to reload for ever while the portal's accurate words were discarded. Test:
+    `tools/content-translation-selftest.php` (88 checks, real HTTP, a
+    stub provider so nothing reaches the internet).
+
     **The PHP version is judged in ONE place (#640).**
     `Portal\Core\PhpRuntime` is the ONE place that decides anything
     about the PHP version: whether the portal can run on it

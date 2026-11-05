@@ -180,8 +180,10 @@ NOT_API_PATHS = {"/health", "/expenses/api/export"}
 #    off and is documented as not reachable. Deleting them is that issue's
 #    decision, not this check's.
 UNREACHABLE_ON_PURPOSE = {
-    "_apps/api/ai-improve.php": "#485 — content translation is not reachable; unreachable since the #159 move.",
-    "_apps/api/translate.php": "#485 — content translation is not reachable; unreachable since the #159 move.",
+    # ⚠️ The reason used to cite #485 ("content translation is not
+    #    reachable"), which was the same shape and was fixed on 4 November
+    #    2026. The ENTRY is still right; only its reason had gone stale.
+    "_apps/api/ai-improve.php": "#277/#658 — AI Assist is not reachable: this handler sits at a path ApiRouter can never load, and no page or script calls it.",
 }
 
 # 🔌 Handlers with no `api.{app}.{action}.enabled` row, so ApiRouter answers

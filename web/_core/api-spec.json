@@ -106,6 +106,10 @@
       "description": "Whether the installation is answering. Needs no sign-in, and today it tests the database and nothing else."
     },
     {
+      "name": "Translation",
+      "description": "Machine translation of content the organisation has published. One endpoint, for a signed-in member only: translating sends the text to an outside company on that member's own permission, which an API key cannot give. Nothing a member has written about themselves is translatable — a prayer request in particular is not."
+    },
+    {
       "name": "Legacy Alias",
       "description": "Pre-v1 endpoint path (`/api/{app}/{action}`). Still fully supported and documented — the /api/v1/{resource} path for the same operation is a thin facade over the identical handler file and enablement flag."
     }
@@ -12316,6 +12320,158 @@
           },
           "401": {
             "description": "Not signed in."
+          }
+        }
+      }
+    },
+    "/api/translation/content": {
+      "post": {
+        "tags": [
+          "Translation"
+        ],
+        "summary": "Translate one published item into a language",
+        "description": "Translates one field of one published item and answers the translated words.\n\n**A SIGNED-IN MEMBER ONLY, and an API key is refused with 403 before anything is resolved.** Translating sends the text to an outside translation company on the reading member's own permission, and a key belongs to a system, which has no such permission to give.\n\n**The member must have switched translation on for their own account** (Account → Translation). Without that the request is refused with 403 and nothing is sent anywhere.\n\n**The text is NOT sent in the request.** Only the table and the row number are, and the portal reads the words itself through that row's own visibility rule. A row belonging to another organisation, an unpublished one, or one outside its own publish/expiry dates is answered 404 — the same answer as a row that does not exist, so a refusal never reveals whether it does.\n\n**Only three things are translatable**, all of them the organisation's own published words: an announcement's `body`, a project's `description`, and the `content` of an update posted against a project. **A prayer request is deliberately not translatable** and never will be through this endpoint: it is a member's own words, usually about a third person who has no way to agree to their circumstances being sent to another company.\n\n**The first translation of a piece into a language is paid for; after that it is served from the cache and costs nothing.** Once the organisation's monthly limit is reached, a piece that has not been translated before is refused with 503 while already-translated pieces keep being served. A 503 does NOT say which of the two happened when the outside company simply failed to answer — the message names the cause it can establish and asserts nothing it cannot.\n\nAnswers the portal's usual `{status, data, meta}` envelope, so the replacement form token arrives as `meta.csrfToken` — on most refusals as well as on success, because they are reached after the token was replaced. Several refusals are answered BEFORE the token is rotated and therefore carry no `meta.csrfToken`: not signed in (401), a wrong method (405), a request using an API key (403), a refused form token (403), and the endpoint being switched off (403). **Its absence therefore means the token you hold is unchanged, not that it is dead** — only the refused-form-token case means yours is no longer usable, and nothing in the answer distinguishes it, so a caller that cannot tell should fetch a page rather than discard a good token.",
+        "security": [
+          {
+            "sessionCookie": [],
+            "csrfToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "sourceTable",
+                  "sourceID",
+                  "targetLanguage"
+                ],
+                "properties": {
+                  "sourceTable": {
+                    "type": "string",
+                    "enum": [
+                      "tblAnnouncements",
+                      "tblProject",
+                      "tblProjectUpdate"
+                    ],
+                    "description": "Which kind of item. Anything else is refused with 403 and nothing is read. The field translated is fixed per kind and is not yours to choose: `body` for an announcement, `description` for a project, `content` for a project update."
+                  },
+                  "sourceID": {
+                    "type": "integer",
+                    "description": "The item's own number — `announcementID`, `projectID` or `updateID` to match `sourceTable`. A number belonging to another organisation is answered 404."
+                  },
+                  "targetLanguage": {
+                    "type": "string",
+                    "description": "The language wanted, as a two-letter code. A regional form such as `cy-GB` is accepted and reduced to `cy`, so `cy-GB` and `cy` share one cached translation. Asking for the language the text is already in answers 200 with `sameLanguage` true, and nothing is sent or charged."
+                  },
+                  "csrf_token": {
+                    "type": "string",
+                    "description": "The form token. May be sent in the `X-CSRF-TOKEN` header instead. Every answer carries its replacement in `meta.csrfToken`."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The translated words, or — with `sameLanguage` true — the original, because it was already in the language asked for.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok",
+                      "description": "Always `ok` here."
+                    },
+                    "data": {
+                      "type": "object",
+                      "description": "The translation and what it was made from.",
+                      "properties": {
+                        "translation": {
+                          "type": "string",
+                          "description": "The translated words, as plain text. **Treat them as text, never as markup** — they come from an outside company, and the portal's own page sets them with `textContent` for that reason."
+                        },
+                        "sameLanguage": {
+                          "type": "boolean",
+                          "description": "True when the text was already in the language asked for. `translation` is then the original, unchanged, and nothing was sent or charged."
+                        },
+                        "sourceLanguage": {
+                          "type": "string",
+                          "description": "The portal's own guess at the language the text is in, from a short list of common words and accented letters. **It is a cheap guess, not a detector**, and on a short piece it can be wrong."
+                        },
+                        "targetLanguage": {
+                          "type": "string",
+                          "description": "The language asked for, reduced to two letters. Absent when `sameLanguage` is true."
+                        },
+                        "message": {
+                          "type": "string",
+                          "description": "Present only when `sameLanguage` is true, saying so in words a member can read."
+                        }
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "description": "The usual envelope metadata, including `csrfToken` — the replacement form token. The one you sent is dead."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "An API key was used; or translation is switched off for this organisation; or this member has not switched it on for their own account; or `sourceTable` is not one of the three; or `targetLanguage` was empty or is not one of the thirteen languages the portal knows. The message says which, and none of them reveals whether any row exists. **A refused form token also answers 403.** Of the causes listed here, three carry no `meta.csrfToken` because they are answered before the token is rotated: an API key, a refused form token, and the endpoint being switched off. The other causes do carry it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such item for this organisation. **The same answer is given for a row that exists but is not published, has expired, or belongs to another organisation**, on purpose.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "Only POST is accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The organisation's monthly translation limit is reached, or the outside company did not answer. The message names whichever of the two the portal can establish and asserts nothing it cannot. **It does NOT say the attempt was free, because that cannot be known**: a provider call answering 200 with an unexpected shape, or timing out after the provider accepted it, arrives here and may still have been billed. What is certain is that nothing was added to the portal's own record of the month's spend.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         }
       }

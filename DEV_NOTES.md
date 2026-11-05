@@ -16805,3 +16805,408 @@ misleads the next reader about what is covered.
 
 The stale-count sentence now **names no number at all** and points at the
 registry, because re-numbering it would only reset the clock.
+
+## Making content translation reachable (#485, #761)
+
+*4 November 2026. The technical record; `CHANGELOG.md` says what shipped and
+`.claude/CLAUDE.md` holds the standing rule.*
+
+### The transferable lesson
+
+**Making an unreachable handler reachable is the act that makes its faults
+live.** `_apps/api/translate.php` had sat in the repository since #278 with three
+serious faults, and none of them was exploitable, because `ApiRouter` resolves
+`api/{app}/{action}` under `_apps/{app}/api/` and that address had two segments.
+Every audit check was green over it. The temptation when finishing such a feature
+is to move the file to the convention path and seed its switch — twenty minutes'
+work — and that single act would have published all three.
+
+So the order matters: **read the handler as though it were already live, before
+making it live.** The same applies to AI Assist (#277, #658), which is the same
+shape and still unreachable, and that is now recorded on #485 and in FEATURES.md.
+
+### The three faults, and why fault 2 catches no test by accident
+
+1. **`lookupCached()` asks nothing about who is reading.** It is keyed on
+   `(sourceTable, sourceID, sourceField, targetLanguage)` alone. The old handler
+   passed whatever row number was posted, so any signed-in person could read back
+   any organisation's translated words.
+2. **The text came from `$_POST['text']`.** The allow-list of tables therefore
+   constrained the *label*, not the words — and `persist()` then cached the result
+   against a real row's number. **This is the one that survives testing**, because
+   the feature keeps working: the button translates, something comes back, the
+   cache fills. Only a reader comparing the cached text with the row would notice.
+   Section C of the self-test posts a `text` field carrying something else and
+   requires the answer to be a translation of the *row*.
+3. **Nothing checked the caller could see the row.**
+
+**The cache key needed no change, and that is worth saying because adding a
+`siteID` column looks like the obvious fix.** `sourceID` is the primary key of a
+row in one of the source tables, and those keys are global, so a cache row already
+identifies exactly one source row in exactly one organisation. The key was never
+ambiguous; the gate in front of it was missing. A denormalised `siteID` on
+`tblContentTranslation` would have been a second copy of a fact that can
+disagree with the first.
+
+### What the fixture had to contain for section D to mean anything
+
+D02 asks whether a member of organisation A can read back organisation B's
+cached translation. **A world in which nothing had ever been translated would
+pass on the broken code**, because there would be nothing for the cache to hand
+over. So B's announcement is put into `tblContentTranslation` first, and D01
+asserts that it really is there before D02 runs. The row is inserted with SQL
+rather than earned by B's own member, because the harness serves one
+organisation; that is stated at the point it matters, and the state is one
+production reaches the moment B's member presses the button — a fixture in a
+state production can never reach tests nothing.
+
+### Three faults of mine, all found by running it rather than reading it
+
+**An HTML comment put the control's own attribute into every page the portal
+served.** `footer.php` explained the script in an HTML comment that named
+`data-portal-translate`. Two costs: a developer's note shipped to every visitor,
+and four checks became wrong, because searching a page for the attribute found
+the comment on pages that have no control. That is #647's shape — a check
+answered by a comment mentioning the thing — in a new place. Notes for developers
+belong in PHP comments, which are not served.
+
+**A clause that could not fail.** The gate's "no language was asked for" test
+read `Translation::normaliseLocale($facts['targetLanguage'])` and compared it
+with `''`. `normaliseLocale('')` answers `'en'`. So a press with no language was
+read as English, got as far as the database, and came back "already in that
+language" with HTTP 200. Caught by a check that asserted the refusal.
+
+**`Translation::detect()` read an English sentence as Welsh.** "We are raising
+money for a new boiler in the church hall" — `' a '` is one of its Welsh markers,
+the English markers scored the same 1, and a tie goes to whichever language the
+list reaches first, which is Welsh. The press then translated nothing. The
+detector is a cheap guess and `api-spec.json` says so; the fixture was reworded.
+
+### Two measured limits left behind, each with an issue
+
+**The monthly limit cannot bite on the `libre` route (#762).**
+`libreTranslate()` returns `costPence => 0` — honest for a self-hosted
+LibreTranslate, which is free — and `monthSpendPence()` sums that column. So
+nothing is ever added to the spend and the cap is inert for that provider. The
+four paid providers all report a figure. The self-test therefore makes spending
+happen by writing a row's `costPence` directly, and says so in its header.
+
+**A member's saved interface language is applied nowhere (#763).** Established
+with commands rather than reasoned: `I18n::init()` is called at
+`web/_core/bootstrap.php:891`; the session starts at
+`web/public_html/index.php:67`, after bootstrap is required, and index.php's own
+comment says start-up leaves no session started; and
+`grep -rn "I18n::init\|resolveLocale" web/` finds no second call anywhere. So
+`resolveLocale()` can never reach source 1 (the member's row) or source 2 (the
+language switcher), and the block at `bootstrap.php:924` that would read
+`tblUsers.locale` cannot run. Measured: a member whose row says `cy` was served a
+control asking for `en`. `ContentTranslation::readerLanguage()` therefore reads
+that column itself — which is also simply the right source, because the
+translation is made *for one person*. Fixing `I18n` changes the language every
+page is drawn in on every installation, so it is the owner's decision.
+
+### What the tests cannot do, said once here as well
+
+No outside company is called: the run starts a stub on its own port and points
+the `libre` provider at it. So nothing proves a paid provider's own cost figure
+is right. One worker means two members translating the same piece at once is
+untested, and such a test would pass on broken code. And **no request can tell
+the engine's internal order from the handler's gate** — both ask
+`translation.enabled` and the handler asks first — so the reorder of
+`Translation::translate()` (switch before cache) is defence in depth, exercised
+by nothing. That was found by planting the old order and watching the check stay
+green; an earlier label claimed it caught the reorder, which was a reassurance
+the check could not support.
+
+### What the first independent check found, and the three shapes worth keeping
+
+**ONE FORM TOKEN PER SESSION MEANS ONE PER PAGE, NOT ONE PER BUTTON.**
+`Auth::csrfToken()` returns the session's single token and `Auth::verifyCsrf()`
+replaces it on every acceptance. So a page carrying several controls — and
+`/projects/view` carries one per update, up to 21 — plus an ordinary form, has
+them all stamped with the same string, and the first accepted press invalidates
+the rest. Measured: press Translate, then pledge, and the pledge is refused with
+a bare "Bad request" with what the member typed gone. **A refused form token is
+the ONE refusal that carries no replacement**, because
+`ApiAuth::requireWrite()` answers it before recording the rotation — so a stale
+control could never recover and showed a member the words "CSRF check failed" on
+every press. The rule, which #625 states and this missed: *a page that writes
+more than once must be handed the replacement token and must keep it* — keep it
+for the PAGE. `shareToken()` writes every replacement into every control and
+every `input[name="csrf_token"]`.
+
+**"NOTHING HAS BEEN CHARGED" IS A CLAIM ABOUT SOMEBODY ELSE'S MONEY, AND THE
+PORTAL CANNOT MAKE IT.** A provider call answering HTTP 200 with an unexpected
+shape, or timing out after the provider has accepted the request, returns null
+and has still been billed. The sentence stood in three places — the member's
+refusal, api-spec.json and the help page — while the script's own comment said
+the opposite correctly. **Two halves of one package contradicting each other,
+and the half a customer reads was the reassuring one.** What is certain is that
+nothing was added to the portal's own record of the spend, so that is what the
+words now say.
+
+**A CONDITION NO FIXTURE CAN TRIP IS NOT A CONDITION — and it took TWO rounds to
+find all five, which is the lesson.** Round 1 found that the project statement's
+organisation test and its `isPublic` could both be deleted with all 66 checks and
+all 61 gates green, because the world held organisation B's ANNOUNCEMENT and no
+project of B, no update of B and no unpublished project. Three rows and four
+checks closed those two — **and the note written beside them claimed the class
+was closed.** Round 2 then found three more of exactly the same kind: the
+project-UPDATE's own `isPublic` (the only update in the world had a public
+parent), and the announcement statement's `isDeleted` and `publishAt` clauses
+(every announcement fixture had `isDeleted = 0` and `publishAt` NULL).
+
+**Five, not two.** The transferable part is not "add fixtures" — it is that a
+fix round which closes the instances it was handed will write a sentence saying
+the class is closed, and that sentence is wrong unless somebody enumerated the
+whole class first. Here the enumeration is mechanical: every clause in every
+`SOURCES` statement needs a fixture that fails it.
+
+**And "five" was itself a false completeness count, in the paragraph about false
+completeness counts** — round 3 found it. Five was the number of previously
+UNTRIPPABLE clauses, written as though it were the number of clauses. Beyond the
+three primary-key tests there are **nine**: the announcement's `siteID`,
+`isPublished`, `isDeleted`, `publishAt` and `expiresAt`; the project's `siteID`
+and `isPublic`; the update's `p.siteID` and `p.isPublic`. Round 3 planted all
+nine and every one turned at least one check red, so the class really is covered
+— but the sentence telling the next reader how to check that would have stopped
+them at five, and three of the four it omitted are organisation tests. **The
+honest form of such a sentence names the METHOD, not a total**, because the total
+is the part that goes stale.
+
+**AND TWO OF MY OWN FIXES FAILED FOR THE SAME REASON WITHIN AN HOUR OF EACH
+OTHER, which is the most useful thing here.** Both were checks that could not
+fire:
+
+* `"$_SERVER['HTTP_"` searched in a MASKED copy. Masking turns string contents
+  into `x`, and that name is half code and half string literal, so it could
+  never match — and the planted header reading the text went on passing. **A
+  pattern that spans the boundary between code and a string cannot be searched
+  for in a copy where one side has been blanked.** Ask for `$_SERVER`.
+* `"shareToken(" not in script` was satisfied by `function shareToken(payload)`.
+  **A definition is not a use.** Deleting the only call left the check green
+  while the whole fix was gone. The same shape as the QR guard's version 1,
+  which passed on a commented-out function, and #739's check that passed on a
+  renamed one. Pin the call, excluding the definition.
+
+**The script was read by nothing at all.** Deleting the token sharing and
+changing `textContent` to `innerHTML` left 61 audit checks and 66 self-test
+checks green — and the `innerHTML` rule is what stops an outside translation
+company putting markup into this portal's pages. Check F of the gate reads both
+rules as text now. **No test in this repository drives a browser**, so the
+toggle, the deadline and the abort path are exercised by nothing, and the
+self-test's header says that rather than implying coverage.
+
+**An empty box is a value somebody submitted.** `(float) ''` and `(float) 'abc'`
+are both `0.0`, and `0` means "no limit" for this setting — the LARGEST value.
+So an administrator clearing the monthly limit to start again, and pressing Save,
+switched the cap off with no refusal and no activity-log line. `min="0"` does not
+stop an empty field being submitted. An unreadable figure is refused now, which
+leaves a deliberate `0` as the only way to say "no limit" — and the comment that
+had claimed zero was "tested for separately" says where it is really handled
+(`SettingLimit`, through `$zeroIsLargest`).
+
+### Round 2: the same fault one step on, three times
+
+**THE TOKEN HAS THREE CARRIERS, NOT TWO.** Round 1's fix shared the replacement
+with every control and every `input[name="csrf_token"]`. `header.php` also puts
+`<meta name="csrf-token">` on **every** page, and five scripts read the token
+from there rather than from a form — `portal.js` (which `Portal.apiRequest`
+uses), `portal-tour.js`, `push-subscribe.js`, `report-builder.js`,
+`event-hub-upload.js`, the first two on every page. Measured: after a Translate
+press, a guided-tour post answered 403 "Invalid CSRF token" on the same page
+where the pledge fault had been measured. **And the portal already had the
+pattern** — `event-hub-upload.js`'s `syncCsrf()` writes the meta tag and every
+field, and `Portal.rememberCsrf()` does the meta half — so this was a third copy
+of one rule with a half missing. **When you find yourself writing a third copy of
+something, go and read the other two.**
+
+**PINNING A CALL IS NOT ENOUGH, TWICE OVER.** Check F went through three
+versions, each bypassed:
+
+* v1 asked whether `shareToken(` appeared — satisfied by `function shareToken(`.
+  A definition is not a use.
+* v2 asked for a call that is not the definition — satisfied by
+  `if (false) { shareToken(…); }`. **#709's round-2 lesson exactly: when you pin
+  a call, pin the gate that decides whether its block runs.**
+* v3 asked whether two selector strings appeared — satisfied by changing the
+  write loop to `index < 0`. The selector is still there and the fix is gone.
+
+The remedy is the one `check_table_name_comparisons.py` already uses: **pin the
+whole body and the call line**, so any edit fails on purpose and has to be read.
+That is deliberately annoying, and it is the only thing standing in front of a
+fault measured to break a payment form, on a script no test in this repository
+runs.
+
+**A FIX'S OWN GUARD IS PART OF THE FIX.** Round 1's money fix — refusing a
+monthly limit that cannot be read — was correct and was pinned by nothing:
+deleting the whole refusal block left 73 checks and 61 gates green, because
+nothing in `tools/` had ever posted to `/admin/translation/save`. The behaviour
+was right and the next edit would have taken it away silently.
+
+**A NEW MESSAGE CAN BE UNTRUE THE MOMENT IT IS WRITTEN.** "This page has been
+open a while, please reload" was shown for every 403 carrying no replacement —
+but `ApiRouter` answers 403 "This API endpoint is disabled" before any rotation,
+so with the endpoint switched off a member was told to reload for ever while the
+portal's own accurate words were thrown away. The same shape in the abort path:
+"press Translate again — if the first attempt did get through, the second is
+free" is a dead end precisely when the first attempt got through, because its
+token was spent. **Advice has to be checked against the states that really
+produce it, not the state it was written for.**
+
+### Round 4, and the only lesson that generalises: I kept closing instances
+
+Four independent check rounds, and **every one found a one-edit change that left
+the previous round's pin green while the script's token sharing was dead or
+partial:**
+
+| round | the bypass |
+|---|---|
+| 2 | the call deleted; the call inside `if (false)`; the form loop made `index < 0` |
+| 3 | the call wrapped but keeping its assignment; a `return` above it; the line moved into a dead function; a SECOND `function shareToken()` |
+| 4 | `shareToken = function () {…}` — a reassignment, the round-3 case written differently; `&&` → `||` in the reload guard, one character; three weaker ones |
+
+Each round I read the plants, closed those spellings, and wrote a comment saying
+the class was shut. **The comment was wrong four times.** Round 3's even named
+#709's lesson — *when you pin a call, pin the gate that decides whether its
+block runs* — while leaving the binding and the condition unpinned.
+
+**The remedy was not a fifth cleverer pattern.** It was to stop probing for
+spellings and pin the file: its code, comments stripped and whitespace
+normalised **with its line breaks kept**, must equal a committed copy. Any
+change to a statement fails, including a harmless rename, and `--repin`
+regenerates it as a deliberate separate act. That is a
+heavy instrument and it is right in exactly one circumstance, which holds here:
+**nothing runs the file**, so there is no behavioural test behind the pin, and
+the faults it stands in front of were measured — a pledge form refused with the
+member's typing lost, a guided-tour post answering 403, a member told to reload
+when reloading cannot help.
+
+**When to reach for a whole-file pin, then:** when the thing is small, nothing
+executes it, and a wrong edit is both invisible and costly. Otherwise write a
+test.
+
+### The same shape in the test harness, twice
+
+Round 3 found that section J posted no `libre_base`, so each save rewrote the
+provider's address to a real outside URL; the fix was to post that field. Round
+4 found `translation.anthropic.model` and `translation.openai.model` being reset
+to the handler's defaults by the same eleven presses, and never put back — with
+the run reporting 88 passed and its clean-up check green, because that check
+counts rows in the test's own number range and a settings row is not one.
+
+**The class: it is not enough to track the settings a test WRITES. Track every
+setting anything the test PRESSES can write.** A save handler that upserts from
+`??` defaults changes every key it knows about, whether or not the form carried
+it. `rememberSetting()` records a key without changing it, and the measurement
+that proves it is marker values in all six rows surviving a full run — not the
+absence of a complaint.
+
+### Round 5: the pin's own hole, and it was whitespace
+
+**IN JAVASCRIPT A NEWLINE IS A SEMICOLON.** Automatic semicolon insertion ends a
+statement after `return`, `throw`, `break`, `continue` and `++`/`--`. The first
+whole-file pin normalised *all* whitespace to single spaces, so
+
+    return
+        box.querySelector('[data-portal-translate-output]');
+
+normalised to the same text as `return box.querySelector(…);` — and that one
+added newline made `outputBlock()` answer `undefined`, so a translation that had
+arrived and been paid for was discarded while the member was told nothing came
+back. **It still parses**, which is what makes it the dangerous kind. Measured
+by executing the file in node against a stub DOM, not reasoned.
+
+So the fifth round found the same class of one-edit bypass as rounds 2, 3 and 4
+— reached through the NORMALISER rather than through a spelling. The lesson that
+generalises: **when you normalise before comparing, enumerate what the
+normalisation throws away and ask whether the language cares about any of it.**
+For JavaScript the answer is yes for line breaks and no for indentation; for
+Python it would be the opposite; for SQL, case.
+
+`normalised_code()` keeps line breaks, frees indentation, blank lines and
+comment text, and is used by both the comparison and `--repin` — one function,
+because two copies would let the generator and the checker disagree and the pin
+would then certify whatever the generator produced. Checked both ways: three
+newline plants go red, and re-indenting, a blank line and an edited comment all
+stay green. The residue is stated in the header, and round 6 showed the first
+statement of it was understated: it is ANY whitespace inside a string literal,
+in either direction, and one string did depend on it (see below).
+
+### Round 6: the invisible character, and a residue understated in the direction that bites
+
+**JAVASCRIPT ENDS A `//` COMMENT AT FOUR CHARACTERS**, not one: LF, CR, U+2028
+LINE SEPARATOR and U+2029 PARAGRAPH SEPARATOR. The comment blanker ended one at
+`\n`. Python's universal-newline read folds a lone CR, so that case was safe by
+accident; U+2028 and U+2029 came through untouched, the blanker ran past them to
+the end of the physical line, blanked the real code after them, and
+`splitlines()` then had nothing to split on, so the whole line was dropped as
+blank.
+
+One added line therefore put `output.innerHTML = String(data.translation || '')`
+live with the gate green and every audit check green — proved by executing the
+file in node, where the planted markup ran. **It defeated both guards at once**:
+the whole-file pin, and the `innerHTML` search which is the only security rule
+in that check.
+
+**The accident is worse than the attack.** U+2028 is what text pasted out of a
+PDF or a word processor carries. A `//` comment whose *text* contains one, with
+no code after it at all, makes the whole file fail to parse — so the control
+silently does nothing on every page, while the gate says OK. That is precisely
+the fault class the pin exists for.
+
+**The transferable rule, which is the one from round 5 sharpened:** when you
+blank or split on a delimiter, use the delimiter set THE LANGUAGE uses, not the
+one your own language's library offers. `str.find("\n")` is Python's idea of a
+line ending; JavaScript has four, SQL has its own comment forms, and a CSV has
+quoting. Enumerate them from the target language's specification.
+
+**And a residue I had written down was understated.** "A double space inside a
+string literal collapses to one" is true and incomplete: a tab and a
+non-breaking space do too, and the direction that bites is turning one space
+INTO two. `'CSRF check failed'` is matched against the exact words `ApiAuth`
+sends, so any of the three silently shows a member the raw words "CSRF check
+failed" on every press. Writing "no string in the pinned file depends on that"
+beside it made it a reassurance the check could not support — this repository's
+own named shape. That one comparison is checked separately and un-normalised
+now; the residue remains, honestly stated, for strings that do not have to match
+anything exactly.
+
+### Round 7: "it does not parse" is a third thing a pin cannot see
+
+The U+2028 fix closed one route to the worst outcome — the file fails to parse,
+so nothing in it runs, the Translate control silently does nothing on every
+page, and the gate says OK. Round 7 found two more, and the first is an accident
+rather than an attack:
+
+* **A `/*` that is never closed, after the last statement.** `blank_comments()`
+  treats an unterminated block comment as "comment to the end of the file" and
+  blanks it; JavaScript refuses the whole file with "Unterminated comment". With
+  no statement after it, the normalised code is unchanged, so the pin matched.
+  A comment begun and not finished, or a paste cut short at the end of a file,
+  does this.
+* **U+001F in a statement.** `str.split()` counts it as whitespace and removes
+  it; JavaScript rejects it as an illegal character. It is the ONE C0 control
+  Python strips without splitting — U+0085, U+001C, U+001D and U+001E all broke
+  the pin by accident, which is why only this one got through.
+
+**The lesson, and it is the third form of the same one.** A pin compares what it
+can see after normalising. Rounds 5, 6 and 7 were each a thing the normalisation
+threw away: a line break (semicolon insertion), a Unicode line terminator
+(comment ending), and now a control character and an unclosed delimiter. So the
+question to ask of any normalise-then-compare guard is not only *"what does the
+language care about that I discard?"* but also **"could the input be something
+the language refuses outright, which my reader accepts?"** `js_will_not_parse()`
+asks that first, before the comparison, because a file that does not run cannot
+be guarded by comparing its code.
+
+Two smaller things worth keeping. `repin()` was the one read that did not fold —
+so the generator and the checker could disagree about a U+2028-bearing file,
+which is precisely what sharing one function is meant to prevent. **It failed
+safe**, which is why it is a note rather than a fault: the gate stayed red and
+nothing was blessed. But the failure message said "run `--repin`", and on that
+input `--repin` could never make it green, with nothing explaining why — advice
+that cannot work is its own kind of untrue. And `\v`/`\f` used as whitespace made
+the pin go red over perfectly legal JavaScript, because Python's `splitlines()`
+splits on them; both are folded to spaces now. **Crying wolf gets a check
+switched off (#483), so the two directions have to be checked together.**

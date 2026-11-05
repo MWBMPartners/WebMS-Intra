@@ -31,6 +31,20 @@ namespace Portal\Core;
 class Translation
 {
     /**
+     * 💸 The monthly spend cap's built-in default and hard maximum, in pence.
+     *
+     * The default matches what `full_schema.sql` seeds (`5000`, i.e. £50) and
+     * is here as well because a reader must have an answer on an installation
+     * whose row is missing — which is the state between files reaching a
+     * server and somebody pressing "Run migrations".
+     *
+     * The hard maximum is £1,000 a month. Nothing may ever resolve above it,
+     * whichever level asked.
+     */
+    public const DEFAULT_CAP_PENCE = 5000;
+    public const MAX_CAP_PENCE     = 100000;
+
+    /**
      * Translate `text` from `sourceLang` to `targetLang`, persisting the
      * result in tblContentTranslation. Returns the translated string, or
      * null if the source is already in the target language, or false on
@@ -56,18 +70,38 @@ class Translation
             return null;
         }
 
-        $cached = self::lookupCached($sourceTable, $sourceID, $sourceField, $targetLang);
-        if ($cached !== null) {
-            return $cached;
-        }
-
+        // ⛔ IS THE FEATURE ON — ASKED BEFORE THE CACHE IS READ, and that order
+        //    changed on 4 November 2026 (#485). It used to serve a cached
+        //    translation whatever the setting said, so switching translation
+        //    off left every piece already translated still showing a
+        //    translation. An administrator switching it off means "stop", and
+        //    a cache that keeps answering is not stopping.
+        //
+        //    The CAP is different and stays BELOW the cache on purpose: it is
+        //    about spending money, and reading something already paid for
+        //    spends nothing. The class comment has always said so.
         $settings = App::settings()['translation'] ?? [];
         if ((string) ($settings['enabled'] ?? '0') !== '1') {
             return false;
         }
 
-        // Monthly cap — block new API calls once exceeded.
-        $cap = (int) ($settings['monthCapPence'] ?? 5000);
+        $cached = self::lookupCached($sourceTable, $sourceID, $sourceField, $targetLang);
+        if ($cached !== null) {
+            return $cached;
+        }
+
+        // 💰 The monthly cap, and this is the one place it is enforced: HERE,
+        //    where the money is about to be spent. D-049 made that a
+        //    requirement rather than a nicety, quoting #668 — a save-time cap
+        //    is not a cap, because a figure written by hand, restored from a
+        //    backup, or stored before any refusal existed is still obeyed
+        //    unless the SPENDER caps as well.
+        //
+        //    `capPence()` is what holds the organisation to what the
+        //    installation allows (D-013): the two administrators may be
+        //    different parties, so an organisation may hold itself to less and
+        //    may never allow itself more.
+        $cap = self::capPence();
         if ($cap > 0 && self::monthSpendPence() >= $cap) {
             return false;
         }
@@ -141,7 +175,58 @@ class Translation
     }
 
     /**
-     * Month-to-date spend in pence (across all sites; used for the cap).
+     * 💰 The most that may be spent on translation in a month, in pence — the
+     *    ONE answer to that question.
+     *
+     * **DO NOT CALL THIS "THIS ORGANISATION'S" LIMIT WITHOUT A QUALIFIER, which
+     * an earlier version of this docblock did.** The LIMIT can differ by
+     * organisation, because `SettingLimit` lets an organisation tighten the
+     * installation's figure. The SPEND it is compared against cannot:
+     * `monthSpendPence()` sums `tblContentTranslation.costPence` across the
+     * whole installation, because that table has no organisation column. So on
+     * an installation serving several organisations, **one organisation's
+     * spending counts against every organisation's limit** — recorded as #765
+     * rather than fixed here, because fixing it needs a column and a migration
+     * and the owner's decision about what to do with rows already there. The
+     * class header's "a per-site monthly cost cap" has always had the same
+     * problem.
+     *
+     * THREE TIERS, each able to tighten the one above it and none to loosen it
+     * (D-013): the hard maximum below, then the installation, then the
+     * organisation. `SettingLimit` does the arithmetic in one place; do not do
+     * it here and do not compare the two layers by hand.
+     *
+     * **ZERO MEANS "NO LIMIT", SO ZERO IS THE LARGEST VALUE AND NOT THE
+     * SMALLEST.** That is #668's trap, and getting it wrong is costly in both
+     * directions: read as the smallest, an installation that chose "no limit"
+     * would refuse every organisation including a tighter one; read as a plain
+     * number, an organisation could store 0 under an installation's £50 and
+     * spend without end. `$zeroIsLargest` is how it is expressed rather than
+     * converted by hand, because the rule — *"no limit is allowed only when the
+     * installation itself allows no limit"* — cannot be written as arithmetic.
+     *
+     * `MAX_CAP_PENCE` is the hard maximum. It is not a judgement about what a
+     * customer should spend; it is there so that a mistyped figure cannot
+     * become a bill, and so that "no limit" is a decision somebody takes
+     * rather than a number they typed badly.
+     *
+     * @return int Pence per calendar month, or 0 for no limit.
+     */
+    public static function capPence(): int
+    {
+        return SettingLimit::effective('translation.monthCapPence', self::DEFAULT_CAP_PENCE, self::MAX_CAP_PENCE, true);
+    }
+
+    /**
+     * Month-to-date spend in pence — **across EVERY organisation on this
+     * installation**, because `tblContentTranslation` has no organisation
+     * column to filter on.
+     *
+     * That is fine on a single-organisation installation and wrong on a shared
+     * one, where it lets one organisation's spending exhaust another's limit
+     * (#765). It is stated here as well as on `capPence()` because this is the
+     * figure the admin page shows as "This month spend", which a customer will
+     * read as their own.
      */
     public static function monthSpendPence(): int
     {

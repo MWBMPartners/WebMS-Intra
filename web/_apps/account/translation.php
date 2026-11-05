@@ -79,14 +79,43 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <form method="post" class="card"><div class="card-body">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php
+    // 🔒 THIS IS A CONSENT BOX, AND THE WORDS HAVE TO SAY SO (#485, D-049).
+    //    It used to read "Auto-translate posts written in other languages into
+    //    your UI locale", which described something the portal never did — the
+    //    tick-box was saved and read by nothing at all until 4 November 2026 —
+    //    and, worse, it did not say where the text GOES. Translating sends what
+    //    you are reading to an outside company (whichever one your
+    //    organisation has chosen), and the owner's decision of 4 November makes
+    //    your own permission the thing that allows that. So the box has to
+    //    explain it, or the permission is not informed.
+    //
+    //    Three facts a member needs and cannot get anywhere else, which is why
+    //    all three are here rather than in the help pages:
+    //      • nothing is sent until you press Translate yourself;
+    //      • it only ever applies to what the organisation has published;
+    //      • a prayer request is never translated, whatever this says.
+    ?>
     <p class="text-secondary">
-        Auto-translate posts written in other languages into your UI locale
+        With this on, a <strong>Translate</strong> button appears on announcements,
+        project descriptions and project updates, offering them in your own language
         (<strong><?php echo htmlspecialchars((string) ($ui['locale'] ?? 'en'), ENT_QUOTES, 'UTF-8'); ?></strong>).
-        The original is always available beneath each translation.
+        The original always stays on the page, unchanged, above the translation.
+    </p>
+    <p class="text-secondary">
+        <strong>Why we ask first.</strong> Translating sends the text to an outside
+        translation company, so nothing is sent until you press the button, and nothing
+        at all is sent while this is switched off. Your own messages are not affected,
+        and <strong>prayer requests are never translated</strong> &mdash; a prayer request
+        is somebody&rsquo;s own words, often about another person who has no way to agree
+        to that.
     </p>
     <div class="form-check">
         <input type="checkbox" class="form-check-input" id="auto" name="autoTranslate" value="1" <?php echo $on === true ? 'checked' : ''; ?>>
-        <label class="form-check-label" for="auto">Always translate</label>
+        <label class="form-check-label" for="auto">
+            Offer to translate things I am reading, and allow the text to be sent to the
+            translation company for that
+        </label>
     </div>
     <button class="btn btn-primary btn-sm mt-3" type="submit">Save</button>
 </div></form>

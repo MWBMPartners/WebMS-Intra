@@ -50,6 +50,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <h6 class="card-title mb-2"><i class="fa-solid fa-list me-1" aria-hidden="true"></i>On this page</h6>
         <div class="d-flex flex-wrap gap-2">
             <a href="#change-language" class="badge text-bg-secondary text-decoration-none">Changing Your Language</a>
+            <a href="#translate-content" class="badge text-bg-secondary text-decoration-none">Translating Something You Are Reading</a>
             <a href="#how-it-works" class="badge text-bg-secondary text-decoration-none">How It Works</a>
             <a href="#supported-languages" class="badge text-bg-secondary text-decoration-none">Supported Languages</a>
             <a href="#add-language" class="badge text-bg-secondary text-decoration-none">Adding a New Language</a>
@@ -60,6 +61,94 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#admin-settings" class="badge text-bg-secondary text-decoration-none">Admin Settings</a>
         </div>
     </div>
+</div>
+
+
+<?php
+// 🌐 CONTENT TRANSLATION (#485, #761) — a different thing from the rest of
+//    this page, and the section below says so in its first line. Everything
+//    else here is about the portal's own words (buttons, labels, menus), which
+//    are translated by people and shipped in `web/_lang/*.php`. This section is
+//    about what members and administrators have WRITTEN, which is translated by
+//    an outside company when somebody asks.
+//
+//    ⚠️ IF `Portal\Core\ContentTranslation::SOURCES` CHANGES, CHANGE THIS
+//    SECTION IN THE SAME EDIT. It names the three things that carry the button
+//    and says a prayer request never will, and a help page describing a list it
+//    no longer matches is worse than one that says nothing. This is the one
+//    page a member reads before deciding whether to switch it on.
+?>
+<!-- ================================================================== -->
+<!-- Section 1b: Translating something you are reading -->
+<!-- ================================================================== -->
+<div class="portal-card p-4 mb-4" id="translate-content">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-comment-dots me-2 text-primary" aria-hidden="true"></i>Translating Something You Are Reading</h2>
+
+    <p>
+        This is <strong>different</strong> from everything else on this page. The rest of this
+        guide is about the portal's own words &mdash; buttons, menus and labels &mdash; which
+        are translated by people. This section is about the things your organisation has
+        <em>written</em>: an announcement, a project&rsquo;s description, or an update posted
+        about a project.
+    </p>
+
+    <p>
+        If your organisation has switched it on, you can ask for one of those to be put into
+        your own language. A <strong>Translate</strong> button appears underneath it. Press it
+        and the translation appears below the original, which stays exactly where it was.
+    </p>
+
+    <div class="alert alert-info">
+        <strong>You have to switch it on for yourself first</strong>, under
+        <em>My Account &rarr; Translation</em>. We ask because translating means sending the
+        text to an outside translation company. Nothing is sent while the setting is off, and
+        nothing is sent until you press the button.
+    </div>
+
+    <h3 class="h6 mt-4">Things worth knowing</h3>
+    <ul>
+        <li>
+            <strong>Prayer requests are never translated.</strong> A prayer request is
+            somebody&rsquo;s own words, and often about another person &mdash; a relative in
+            hospital, say &mdash; who has no way to agree to their circumstances being sent to
+            another company. So the button does not appear on them, and that is deliberate.
+        </li>
+        <li>
+            <strong>It costs your organisation money.</strong> The first time a piece is put
+            into a particular language it is paid for. After that everyone who asks for the
+            same piece in the same language gets the stored copy, which costs nothing. Your
+            organisation sets a monthly limit; once that is reached, nothing new is translated
+            until the next month, and anything already translated keeps working.
+        </li>
+        <li>
+            <strong>It is a machine translation.</strong> It is usually good enough to follow,
+            and it is not checked by a person. The original is always on the page, so you can
+            compare them.
+        </li>
+        <?php
+        // ⚠️ THIS BULLET USED TO NAME A STATE A MEMBER CANNOT BE IN. It said the
+        //    message beside the button would "most often" say that the
+        //    organisation had not switched translation on — but when it is
+        //    switched off the BUTTON IS NOT DRAWN AT ALL (the partial prints
+        //    nothing, which check G04 of the self-test proves), so there is no
+        //    message beside anything. It also promised "nothing is charged for a
+        //    failed attempt", which the portal cannot know. Both corrected: this
+        //    is the one page a member reads when confused.
+        ?>
+        <li>
+            <strong>If there is no Translate button at all</strong>, either your organisation
+            has not switched translation on, or you have not switched it on for your own
+            account under <em>My Account &rarr; Translation</em>.
+        </li>
+        <li>
+            <strong>If you press it and nothing appears</strong>, the message beside the
+            button says why. The usual ones are that the text is already in your language,
+            that your organisation has reached its limit for this month, or that the
+            translation company did not answer. In that last case nothing was translated;
+            we cannot tell you whether the attempt was charged for, but it is not counted
+            against your organisation&rsquo;s monthly total.
+        </li>
+    </ul>
 </div>
 
 

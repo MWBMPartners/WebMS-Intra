@@ -121,6 +121,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         ?>
     </div>
 
+    <?php
+    // 🌐 "Translate" (#485). The partial decides for itself whether to print
+    //    anything at all — it asks `ContentTranslation::whyNotOffered()`, the
+    //    same rule the handler asks, so this page cannot offer a press the
+    //    handler would refuse. It prints nothing for a member who has not
+    //    opted in, which is the ordinary case.
+    $trTable = 'tblAnnouncements';
+    $trId    = (int) $announcement['announcementID'];
+    require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'translate-control.php';
+    ?>
+
     <hr>
 
     <a href="<?php echo htmlspecialchars(Site::url('announcements'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">

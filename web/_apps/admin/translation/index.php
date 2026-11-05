@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Translation;
@@ -22,11 +23,30 @@ if (App::isAdmin() === false) {
     return;
 }
 
-$db       = App::db();
-$settings = App::settings()['translation'] ?? [];
+$db = App::db();
+
+// 🏢 THE BOXES ARE FILLED FROM THE INSTALLATION'S OWN ROWS, NOT FROM THE
+//    MERGED SETTINGS (#674). `save.php` beside this file writes every one of
+//    these with `siteID IS NULL`, so it writes the INSTALLATION's value — and
+//    `$SETTINGS` has already let an organisation's own row win by the time any
+//    page runs. Fill a box from the merged array and a global administrator
+//    who happens to be in an organisation with its own row sees THAT value,
+//    presses Save without touching anything, and it becomes everybody's. No
+//    mistake is required.
+//
+//    In practice no organisation can hold a `translation.*` row today, because
+//    `_apps/settings/save.php` refuses to add a per-organisation row for a key
+//    the installation already has, and all of these are seeded
+//    installation-wide. Said plainly rather than relied on: a row written by
+//    hand or restored from a backup would still be there, and "the portal
+//    cannot reach this state" is the sentence that stops the next reader
+//    looking (#687).
+$installationLayer = InstallationSettings::layer();
+$settings = $installationLayer['translation'] ?? [];
+
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
 $provider = (string) ($settings['provider'] ?? 'anthropic');
-$cap      = (int) ($settings['monthCapPence'] ?? 5000);
+$cap      = (int) ($settings['monthCapPence'] ?? Translation::DEFAULT_CAP_PENCE);
 
 $hasAnth = ((string) ($settings['anthropic']['apiKey'] ?? '')) !== '';
 $hasOa   = ((string) ($settings['openai']['apiKey']    ?? '')) !== '';
@@ -62,32 +82,45 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <h1 class="mb-3"><i class="fa-solid fa-language me-2"></i>Translation</h1>
 
 <?php
-// 📣 Say plainly, at the top, that this does not do anything yet (#485).
-//    Everything below is real and works: the engine translates, the cache
-//    fills, the spend is counted. What does NOT exist is anything that ASKS
-//    it to. No page in the portal sends a prayer request, an announcement or
-//    any other piece of members' writing for translation, so on a normal
-//    installation these figures stay at zero for ever.
+// 📣 WHAT THIS DOES AND DOES NOT COVER, said at the top (#485, #761).
+//    This block REPLACES the standing warning that used to say "nothing is
+//    being translated yet", which was true from the day this page was built
+//    until 4 November 2026: the engine, these settings and the member's opt-in
+//    all existed and no address a member could reach called any of them.
 //
-//    This notice is here because the page is otherwise indistinguishable
-//    from a finished feature: it has settings, a spend cap and statistics,
-//    and an administrator who filled in an API key would reasonably expect
-//    members to start seeing translations. They will not.
+//    It is still NOT dismissible and still NOT behind the flash-message block,
+//    for the same reason as before — it must be true every time the page is
+//    opened — but what it now says is a LIMIT rather than a warning that the
+//    feature is inert. Three things an administrator cannot see from the
+//    settings below:
 //
-//    It is NOT hidden behind the flash-message block above, and not a
-//    dismissible alert, because it must be true every time the page is
-//    opened. When the member-facing half ships, delete this block — and the
-//    note in .claude/CLAUDE.md and FEATURES.md that says the same thing.
+//      • which content carries the control (three fields, not everything);
+//      • that a prayer request deliberately does not, and why;
+//      • that each member must permit it for their own account first.
+//
+//    If the allow-list in `Portal\Core\ContentTranslation` changes, change
+//    this sentence in the same edit. A page that describes a list it no longer
+//    matches is worse than one that says nothing.
 ?>
-<div class="alert alert-warning d-flex align-items-start" role="alert">
-    <i class="fa-solid fa-triangle-exclamation me-2 mt-1"></i>
+<div class="alert alert-info d-flex align-items-start" role="alert">
+    <i class="fa-solid fa-circle-info me-2 mt-1"></i>
     <div>
-        <strong>Nothing is being translated yet.</strong>
-        The translation engine and these settings work, but no part of the portal
-        currently sends members&rsquo; writing to it &mdash; so the figures below will
-        stay at zero, and members will not see translated content, however this page
-        is set up. Filling in a provider key here is safe and costs nothing; it simply
-        has no effect until the rest of the feature is finished.
+        <strong>What members can translate.</strong>
+        A &ldquo;Translate&rdquo; button appears on an <strong>announcement</strong>, a
+        <strong>project&rsquo;s description</strong> and an <strong>update posted against a
+        project</strong> &mdash; the things your organisation has published. Each member has
+        to switch it on for their own account first, under Account &rarr; Translation,
+        because translating sends the text to the outside company chosen below.
+        <br>
+        <strong>Prayer requests are not translatable, on purpose.</strong> A prayer request
+        is somebody&rsquo;s own words, and often about a third person &mdash; a relative in
+        hospital, say &mdash; who has no way to agree to their circumstances being sent to
+        another company. One member pressing a button must not do that to another.
+        <br>
+        <strong>Every translation costs money.</strong> The first time a piece is
+        translated into a language it is paid for; after that it is served from the cache
+        below and costs nothing. The monthly limit stops new charges once reached &mdash;
+        already-translated pieces keep working.
     </div>
 </div>
 
@@ -127,7 +160,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-md-3">
                 <label class="form-label">Monthly cap (£)</label>
-                <input type="number" min="0" step="0.01" class="form-control" name="monthCap" value="<?php echo number_format($cap / 100, 2, '.', ''); ?>">
+                <?php
+                // 💸 `max` is the hard maximum in code, in pounds. It is a courtesy
+                //    to whoever is filling the form in; `save.php` is the boundary and
+                //    REFUSES a larger figure with the reason rather than quietly
+                //    reducing it (#668). Never prefill a value this `max` forbids — the
+                //    browser then refuses to submit the whole form, which is how the
+                //    only way to use a page becomes shortening the figure.
+                ?>
+                <input type="number" min="0" max="<?php echo (int) (Translation::MAX_CAP_PENCE / 100); ?>" step="0.01" class="form-control" name="monthCap" value="<?php echo number_format(min($cap, Translation::MAX_CAP_PENCE) / 100, 2, '.', ''); ?>">
+                <div class="form-text">0 means no limit. The most that can be set here is &pound;<?php echo number_format(Translation::MAX_CAP_PENCE / 100, 2); ?> a month.</div>
             </div>
             <div class="col-md-3 d-flex align-items-end">
                 <div class="form-check">

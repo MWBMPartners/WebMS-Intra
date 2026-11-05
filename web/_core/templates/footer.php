@@ -90,6 +90,25 @@ $productName   = Site::productName();
 <script defer src="/assets/js/portal-actions.js"></script>
 
 <?php
+// 🌐 The "Translate" control (#485, #761). Does nothing at all unless the
+//    page carries the control's own attribute, which only
+//    `_core/templates/translate-control.php` writes, and only where
+//    `ContentTranslation::whyNotOffered()` allows it. A file rather than a
+//    script in the page, for the nonce reason given in its own header.
+//
+//    ⚠️ A PHP COMMENT, NOT AN HTML ONE, AND THAT IS THE POINT. The first
+//    version was an HTML comment naming the attribute, so EVERY page the
+//    portal served carried that name in its source — which both shipped an
+//    implementation note to every visitor and made four checks in
+//    `tools/content-translation-selftest.php` wrong, because searching a page
+//    for the attribute then found the comment on pages that have no control
+//    at all. The repo's own #647 lesson, in a new place: a check that looks
+//    for a name in a page can be answered by a comment mentioning it. Keep
+//    notes for developers out of what is served.
+?>
+<script defer src="/assets/js/portal-translate.js"></script>
+
+<?php
 // 🐛 Debug panel (only renders for admins with ?debug=true)
 echo Debug::renderPanel();
 

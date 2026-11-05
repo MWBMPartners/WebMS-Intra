@@ -1381,6 +1381,22 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_api_spec_schema.py
 
+      # The words sent to an outside translation company come from the DATABASE,
+      # never from a request (#761). The handler this replaced took the text out
+      # of $_POST and looked nothing up, so its allow-list of tables constrained
+      # the LABEL and not the words: a member could have spent the customer's
+      # money translating anything, and the answer was then cached against a
+      # real row's number, so the next reader of announcement 42 would be shown
+      # text that was never in announcement 42. That fault catches no test by
+      # accident, because the feature goes on working - the button translates,
+      # something comes back, the cache fills. It also pins the allow-list
+      # WHOLE, so adding a table fails on purpose and whoever adds one reads the
+      # comment saying why a prayer request is not on it (D-049).
+      - name: 'Translation reads its text from the database (hard gate, #761)'
+        id: translation_text_from_db
+        if: always()
+        run: python3 -I tools/audit-checks/check_translation_text_from_db.py
+
       # The test OF both checks above (#641, #646). Adding `and False` to any of
       # their conditions leaves the check itself green - measured on eight
       # separate conditions, not supposed. This plants 26 faults into the real

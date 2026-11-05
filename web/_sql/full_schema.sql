@@ -5574,7 +5574,11 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'api.prayer-requests.create.enabled',   'true', 'true', 0),
     (NULL, 'api.prayer-requests.moderate.enabled', 'true', 'true', 0),
     (NULL, 'api.leadership.assign.enabled',        'true', 'true', 0),
-    (NULL, 'api.leadership.unassign.enabled',      'true', 'true', 0)
+    (NULL, 'api.leadership.unassign.enabled',      'true', 'true', 0),
+    -- 🌐 Content translation's one endpoint (#485, #761, migration 248). This
+    --    row only says the address exists. Whether anything is translated is
+    --    `translation.enabled`, which ships '0' and is asked on every request.
+    (NULL, 'api.translation.content.enabled',      'true', 'true', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 -- =============================================================================
@@ -11079,6 +11083,24 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('246_registration_subject.sql')
 -- targets.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('247_self_service_password.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 248_translation_reachable.sql (#485, #761) ─────────────────────────
+-- One settings row, declared above in the `api.*.enabled` block:
+-- `api.translation.content.enabled`. No table, no column, nothing dropped.
+--
+-- WHY IT MATTERS. Content translation was built and connected to nothing: the
+-- engine, the admin page and the member's opt-in all existed, and no address a
+-- user could reach called any of them (#485). `ApiRouter` refuses an `api/…`
+-- address whose switch row is missing, so that row is what gives the feature a
+-- way in at all. The owner decided to finish it on 4 November 2026 (D-049).
+--
+-- The migration's own insert is a no-op on a database built from this script,
+-- which is what makes the installer's replay of it safe: the value is restated
+-- as itself rather than forced to 'true', so an administrator who switched the
+-- endpoint off stays switched off.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('248_translation_reachable.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
