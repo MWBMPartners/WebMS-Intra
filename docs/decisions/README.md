@@ -111,7 +111,9 @@ appended with its real date and a note that it was added later.
 | [D-053](053-time-zones-in-mobile-pass-deferred.md) | 2026-11-05 | The time-zone pass is in the first release; the mobile pass is not | in force |
 | [D-054](054-a-blocked-item-moves-to-the-end-of-the-queue.md) | 2026-11-05 | A blocked item moves to the end of the queue | in force |
 | [D-055](055-the-whole-backlog-is-cleared-before-the-release.md) | 2026-11-05 | The whole backlog is cleared before the first release | in force |
+| [D-056](056-portal-content-reaches-a-public-website-three-ways.md) | 2026-11-05 | Portal content reaches a public website all three ways | in force |
+| [D-057](057-public-content-is-opt-in-per-item.md) | 2026-11-05 | Public content is opt-in, one item at a time | in force |
 
-*55 decisions. This index is checked against the folder by
+*57 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
