@@ -146,7 +146,24 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
 
     function record(decision) {
         var fd = new FormData();
-        fd.append('csrf_token', csrf);
+        // 🔑 READ THE TOKEN AT THE MOMENT OF POSTING, NEVER THE ONE CAPTURED AT
+        //    RENDER (#767). `Auth::verifyCsrf()` REPLACES the token every time
+        //    it accepts one, so anything else on the page that posts — a
+        //    Translate press, a guided-tour step, a push subscription — leaves
+        //    the copy baked into this script dead. The member then presses
+        //    Accept or Reject, nothing is recorded, and **the banner comes
+        //    back on the next page as though they had never answered**: their
+        //    choice about cookies is silently lost, which is the one kind of
+        //    answer a portal must not mislay.
+        //
+        //    `Portal.csrf()` reads whichever carrier the page has (#768) and
+        //    is always current, because `Portal.writeCsrf()` keeps every
+        //    carrier in step. The captured value stays as the fallback for a
+        //    page where portal.js somehow did not load.
+        var live = (window.Portal && typeof window.Portal.csrf === 'function')
+            ? window.Portal.csrf()
+            : null;
+        fd.append('csrf_token', live || csrf);
         fd.append('type', 'cookies');
         fd.append('decision', decision);
 <?php
@@ -159,8 +176,35 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
 //    would no longer be byte for byte what it was.
 ?>
         fetch('<?php echo Router::urlForScript('privacy/consent'); ?>', { method: 'POST', body: fd, credentials: 'same-origin' })
-            .finally(function () {
-                banner.parentNode && banner.parentNode.removeChild(banner);
+            .then(function (answer) {
+                // 🔑 This request was accepted, so the token has rotated again.
+                //    Hand the answer to the one helper that keeps every carrier
+                //    in step (#768), or the next thing on this page to post
+                //    inherits the problem this banner just had.
+                return answer.json().catch(function () { return null; }).then(function (body) {
+                    if (body !== null && window.Portal
+                        && typeof window.Portal.rememberCsrf === 'function') {
+                        window.Portal.rememberCsrf(body);
+                    }
+                    return answer.ok;
+                });
+            })
+            .then(function (worked) {
+                // ⚠️ ONLY TAKE THE BANNER AWAY IF THE CHOICE WAS ACTUALLY
+                //    RECORDED. This used to be `.finally()`, which removed it
+                //    whatever happened — so a refused post left the member
+                //    believing they had answered while nothing was stored, and
+                //    the banner returned on the next page with no explanation.
+                //    Leaving it up is not a nice outcome, but it is an honest
+                //    one: the member can press again, and pressing again now
+                //    works, because the token is read at the moment of posting.
+                if (worked === true && banner.parentNode) {
+                    banner.parentNode.removeChild(banner);
+                }
+            })
+            .catch(function () {
+                // The request never arrived. Same reasoning: say nothing and
+                // leave the choice unanswered rather than pretend.
             });
     }
     banner.querySelectorAll('[data-portal-consent]').forEach(function (btn) {
