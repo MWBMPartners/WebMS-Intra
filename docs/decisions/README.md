@@ -113,7 +113,9 @@ appended with its real date and a note that it was added later.
 | [D-055](055-the-whole-backlog-is-cleared-before-the-release.md) | 2026-11-05 | The whole backlog is cleared before the first release | in force |
 | [D-056](056-portal-content-reaches-a-public-website-three-ways.md) | 2026-11-05 | Portal content reaches a public website all three ways | in force |
 | [D-057](057-public-content-is-opt-in-per-item.md) | 2026-11-05 | Public content is opt-in, one item at a time | in force |
+| [D-058](058-outside-services-are-permitted-in-three-tiers.md) | 2026-11-05 | An outside service is permitted in three tiers, and the strictest wins | in force |
+| [D-059](059-translation-counts-calls-as-well-as-money.md) | 2026-11-05 | Translation counts calls as well as money | in force |
 
-*57 decisions. This index is checked against the folder by
+*59 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
