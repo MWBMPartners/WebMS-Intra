@@ -63,28 +63,52 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one is built and awaiting its check.** #763 and #781 are DONE
-(D-064, D-065) (the protected arm of D-051 —
-it writes and deletes stored data, so rounds run until one is clean). Twelve
+**#777 part one: round 3 is committed (`ca19f73`) and round 4's check is
+running.** The three rounds so far found, in order: a display fault in four
+pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
+faults refusing valid input (round 2); three READER faults my own write fix made
+visible, and the fact that those three readers were guarded by nothing (round
+3). **The pattern this repository keeps recording held again — every round after
+the first found its faults in the PREVIOUS round's fix, not in the build.**
+
+Round 3's answer was to stop listing column names in the check and make the
+SCHEMA say which kind of value a column holds (migration 252), so the check
+reads the declaration. Doing that immediately found **four columns that had
+declared themselves wall-clock since before this work, and 28 files treating
+them as moments** — listed in
+`tools/audit-checks/clock_wall_clock_datetime_pending.txt`, failing both ways,
+and the bulk of part two. #783 was raised rather than fixed: two queries compare
+a wall-clock column with `NOW()`, the database server's own clock.
+
+**Round 3 reported nine findings and six were lost to a context break** before
+reaching a file. Round 4 is running on the current state instead of guessing at
+them; that is what an independent check is for.
+
+#763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
+write and delete stored data, so rounds ran until one was clean. Twelve
 findings, then seven, six, six, three, three, six — and **every one after the
 first round was in a previous round's fix, all of them in the GUARD rather than
-the fix.** Round 7 stopped hand-parsing PHP and asked PHP, which ended the
-whole bypass class; round 8's six were the probe's own remaining faults, three
-of them CRY-WOLF on ordinary edits. **#781 is the behavioural test that should
-have been built instead of inferring reachability statically**, and the one
-remaining hole (`while (true) { }` above a region) is the halting problem, so it
-is #781's to close, not a parser's.
-#777's fact base is gathered (read-only, `.claude-work/777/inventory-notes.md`,
-with one measured fault) and is next. Everything else below is unstarted.
+the fix.** Round 7 stopped hand-parsing PHP and asked PHP, which ended the whole
+bypass class; round 8's six were the probe's own remaining faults, three of them
+CRY-WOLF on ordinary edits. **#781 is the behavioural test that should have been
+built instead of inferring reachability statically**, and the one remaining hole
+(`while (true) { }` above a region) is the halting problem, so it is #781's to
+close, not a parser's.
 
 ## Next, in this order
 
-1. **#777 part TWO** — the bulk of the reading half. Part one shipped: four
-   display sites fixed, `I18n::formatClockTime()` as the one formatter, a hard
-   gate, and the verdict list for everything examined. **What remains is
+1. **#777 part TWO** — the bulk of the reading half, and round 3 handed it a
+   starting point it did not have before. Part one shipped: four display sites
+   fixed, a write path that stored the wrong hour, two API validators,
+   three readers, `I18n::formatClockTime()` and `formatClockDateTime()` as the
+   two formatters, and a hard gate that reads the schema. **What remains is
    measured: 486 time-shaped columns and only 123 with any comment**, so "does
    this column hold a moment or a clock reading" is unanswered for three
-   quarters of them. ~2–3.
+   quarters of them — and **28 named files are already waiting**, in
+   `tools/audit-checks/clock_wall_clock_datetime_pending.txt`, for four columns
+   that DO say. Start there: the list is concrete, each entry needs a person
+   (an event's zone is `tblEvents.timezone`, not the organisation's), and
+   emptying it is what lets `--strict` go green. #783 belongs with it. ~2–3.
 2. **#775** — every scheduled job records that it ran. ~1. On a fresh install
    all eleven are inert, the personal-data sweep among them.
 3. **#778** — an outside service is permitted in three tiers, strictest wins
