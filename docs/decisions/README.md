@@ -119,7 +119,9 @@ appended with its real date and a note that it was added later.
 | [D-061](061-the-language-picker-is-its-own-piece-of-work.md) | 2026-11-05 | The language picker is its own piece of work | superseded by D-062 |
 | [D-062](062-the-language-menu-exists-and-the-account-page-needs-one-too.md) | 2026-11-05 | The language menu exists, and the account page needs one too | in force |
 | [D-063](063-translation-may-start-charging-on-upgrade-day.md) | 2026-11-05 | Translation may start charging on upgrade day, and the changelog says so | in force |
+| [D-064](064-review-rounds-on-tooling-count-towards-the-cap.md) | 2026-11-05 | A review round that finds faults only in tooling counts towards the cap | in force |
+| [D-065](065-measure-reachability-dont-infer-it.md) | 2026-11-05 | Measure whether code runs; do not infer it from the source | in force |
 
-*63 decisions. This index is checked against the folder by
+*65 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

@@ -2932,7 +2932,48 @@ second-best reading to drop to. The precedent for the wrapper is
 `check_static_calls.py`. Fourteen wrapping spellings go red; all three
 cry-wolf cases stay green.
 
-**A SEVENTH ROUND FOUND SIX MORE, ALL IN THE GUARD, AND THREE WERE
+**AND THEN MOST OF THE GUARD WAS DELETED (the owner, 5 November
+2026 -- D-065), WHICH IS THE LESSON OF THE WHOLE PACKAGE.** Eight
+review rounds: 12, 7, 6, 6, 3, 3, 6, 9 -- **52 findings, every one
+after the first in the GUARD and not one in the fix.** Six rounds each
+found a new way to wrap a region in dead code, each answered with a
+sharper pattern; the eighth found it still REFUSING correct work (a
+passing comment mentioning the guarded call reported the pin
+"worthless"; an ordinary helper above the region reported it had
+"moved") -- and **a check that cries wolf gets switched off (#483)**,
+so those rounds bought nothing.
+
+**The INSTRUMENT was the mistake, not the sharpening.** "Is this code
+reached" is BEHAVIOURAL, and the forms no source-reading check can see
+(`while (true) { }` above it, `trigger_error` at `E_USER_ERROR`, a
+conditional `require` of the file) are the same question, not edge
+cases. The guard went from about 1,235 lines to 521 -- presence and
+ORDER only, which produced no finding in eight rounds and cannot cry
+wolf -- and `tools/i18n-member-language-http-selftest.php` (24 checks,
+real HTTP) now MEASURES it: sign in, load the real account page,
+choose a language, save, read the column back. **Every wrapping the
+pin caught also fails it, and so do the four classes it could not
+see.**
+
+**THE RULE: where the property is "this code RUNS", drive it; where it
+is "this code LOOKS like this", pin it.** (#485's pinned script STAYS
+-- its justification is the opposite case, that nothing executes that
+file.)
+
+Two of the new checks are driven by nothing else, both shapes already
+paid for here: a post carrying NO `locale` field must leave the
+language alone (#677), and exactly ONE option must carry `selected`,
+because a `<select>` with none is a vote for option one -- here
+"forget my choice". Section F plants the fault and proves the test
+goes red.
+
+**And the review rule changed (D-064):** a round whose findings are
+ALL in checks, tests or tooling counts towards the three-round cap;
+the protected arm stays open for money, personal details,
+authentication, erasure, backups and stored data. **Judge each ROUND
+by where its findings landed, never the package by where it started.**
+
+**A SEVENTH ROUND HAD FOUND SIX MORE, ALL IN THE GUARD, AND THREE WERE
 CRY-WOLF** -- which under #483 is what gets a check switched off. The
 anchor was found and counted in the RAW source, the one path left that
 did not ask PHP: a COMMENT quoting it reported "appears 2 times, so

@@ -1,7 +1,13 @@
 # D-051 · Check rounds cap at three, except where money, privacy or data loss is at stake
 
 **Date:** 2026-11-05  
-**Status:** in force
+**Status:** in force (superseded in part)  
+**Superseded in part by:** [D-064](064-review-rounds-on-tooling-count-towards-the-cap.md)
+
+> D-064 narrows the protected arm below: a round whose findings are ALL in
+> checks, tests or tooling counts towards the three-round cap. Everything this
+> file says about money, personal details, authentication, erasure, backups and
+> stored data stands unchanged.
 
 **Question:** #485/#761 took **seven** independent check rounds against a
 guideline of three. Findings per round were 5, 5, 3, 2, 1, 2, 1 — and **rounds 2

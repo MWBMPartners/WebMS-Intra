@@ -20,7 +20,7 @@ could not run either.
 
 **The switcher had the same fault and it was worse.** `I18n::switchLocale()`
 stores the chosen language in the session and writes it to `tblUsers.locale`,
-both only when a session is active — and its one and only caller sat in
+both only when a session is active -- and its one and only caller sat in
 `bootstrap.php`, before the session started. So `?lang=cy` applied to the one
 request that carried it and was thrown away by its own redirect, and
 `tblUsers.locale` was never written by anything, on any installation. That is
@@ -28,61 +28,82 @@ why every account row still held the column's own default (D-060).
 
 WHAT IT CHECKS
 --------------
-  A. `index.php` calls `I18n::reconsiderNowSessionExists(`.
+  A. `index.php` calls `I18n::reconsiderNowSessionExists(`, and is passed the
+     request's connection.
   B. `index.php` calls `I18n::switchLocale(`.
   C. Both come AFTER `Auth::ensureSession()` in `index.php`. **This is the
-     whole point** — a call in the right file in the wrong place is the fault
+     whole point** -- a call in the right file in the wrong place is the fault
      that was just fixed, and it looks completely correct.
-  D. `bootstrap.php` calls NEITHER. Leaving a second call where the fault was
-     would re-create it: the early one resolves to the browser's answer, and
-     for the switcher it would silently drop the choice again.
-  E. **Three WHOLE REGIONS, pinned as text** in `member-language.pinned.txt`:
-     the part of `index.php` from `Auth::ensureSession()` through the `?lang=`
-     block; the account page's language control; and the account handler's
-     language block. Any change to any statement in them fails, and `--repin`
-     regenerates the sidecar as a separate, visible act.
-
-     **This replaced four substring pins and a brace-depth test, and the reason
-     is the whole lesson of this file.** Three check rounds each got a one-edit
-     plant past a cleverer pattern: `if (false) { ... }` was answered with a
-     brace count, so `if (false)` with NO braces walked through; `false &&`
-     walked through; "is the argument missing" was answered, so the literal
-     `(null)` walked through; the gate conditions were pinned, so emptying the
-     block BODY walked through, and so did `chooseLanguage(null)` and
-     `$langStored === false` inside the option loop. Every one is the same
-     thing -- the statement is still there and does nothing -- and #485 took
-     FOUR rounds to learn that the answer is not a fifth pattern but to pin the
-     text.
-
-     What the four substring pins used to say is kept as the REASON in the
-     failure message, because a reason is what the next reader needs; they are
-     gone as code, because two guards over one fact drift apart and a pattern
-     left as dead code is one somebody will edit believing it works.
-
+  D. `bootstrap.php` calls NEITHER. Leaving a call where the fault was would
+     re-create it: the early one resolves to the browser's answer, and for the
+     switcher it would silently drop the choice again.
+  E. The `?lang=` gate refuses a value that is not text. Without it,
+     `?lang[]=x` is a TypeError and a 500 on every address, open or closed,
+     because this runs ahead of the maintenance gate (#509 point 2).
   F. The account page offers a `<select name="locale">` that is neither
-     disabled nor hidden -- a disabled control is not submitted, so the handler
-     would see no field and store nothing while a presence check read it as
-     there (the GoCardless lesson, #569).
+     disabled nor hidden, asks `I18n::storedChoice()` and `I18n::browserLanguage()`,
+     builds its list from `I18n::enabledLocales()`, and offers a stored language
+     even when there is no translation file for it. A disabled control is not
+     submitted, so the handler would see no field and store nothing while a
+     presence check read it as there (the GoCardless lesson, #569).
+  G. The handler stores through `I18n::chooseLanguage()` -- the one writer --
+     and asks whether the `locale` field ARRIVED rather than what it contains.
+     An empty value is a real instruction here ("forget my choice"), so
+     `$_POST['locale'] ?? ''` cannot be told from a form that never carried the
+     control, and any post from elsewhere would wipe the member's language.
+     #677 cost this project a cleared portal address to that exact shape.
 
-Each check is read from a copy of the file with **comments removed and string
-literals masked**, because this repository has been bitten repeatedly by a
-check that a comment mentioning the call was enough to satisfy, and by a `}`
-or a keyword inside a message answering a walk falsely.
+WHAT IT DELIBERATELY DOES NOT CHECK, AND THE EIGHT ROUNDS THAT SETTLED IT
+-------------------------------------------------------------------------
+**It does not try to prove the code is REACHED.** It used to. An earlier
+version pinned the three regions' text and their nesting, read with PHP's own
+tokeniser, so that nobody could wrap them in something that never runs. That
+machinery reached roughly 1,100 lines guarding about sixty, and it was removed
+on the owner's decision (**D-065**) after **eight independent review rounds and
+52 findings -- every one after the first round in the GUARD, and not one in the
+fix**, which every round confirmed was correct.
 
-WHAT IT CANNOT DO, said plainly
--------------------------------
-  * It cannot tell whether a page RENDERS in the member's language. That needs
-    HTTP and a seeded installation. `tools/i18n-member-language-selftest.php`
-    drives the class and says the same thing in its own closing lines.
+The rounds went 12, 7, 6, 6, 3, 3, 6, 9. Six of those rounds found a new way to
+wrap a region in dead code, each answered with a sharper pattern:
+`if (false) { }`, then the brace-less `if (false)`, then `if (false): endif;`,
+then `if (false) { ;`, then `$endif = 1;` cancelling a hand-rolled counter, then
+`if (true) { exit; }`. The eighth round found the guard still **refusing correct
+work**: a passing comment that merely mentioned the guarded call made it report
+the pin "worthless", and an ordinary helper added above the region made it
+report that the region had "moved". **A check that cries wolf gets switched off
+(#483)**, so by then the rounds were not even buying protection.
+
+**The instrument was the mistake, not the sharpening.** "Is this code reached"
+is behavioural, and the things a source-reading check can never see --
+`while (true) { }` above the region, `trigger_error` at `E_USER_ERROR`, a
+conditional `require` of the whole file -- are not edge cases but the same
+question. So that job moved to where it can be measured:
+`tools/i18n-member-language-http-selftest.php` signs in, loads the account
+page, chooses a language, saves, and reads the column back. **Every wrapping the
+pin caught also fails that test, and so do the four classes it could not see.**
+
+**The transferable rule, which is why this is written out at length: where the
+property is "this code RUNS", drive it; where it is "this code LOOKS like
+this", pin it.** (#485's pinned script is the closest relative and stays,
+because its own justification is the opposite situation -- nothing executes that
+file, so there is nothing to drive.)
+
+What remains here is presence and ORDER, which in eight rounds produced no
+finding at all and cannot cry wolf.
+
+Other limits, stated rather than implied:
   * It cannot see a call made through a variable class name, an alias, or a
-    helper function in another file.
-  * It does not read the ORDER of the two calls relative to each other. They
-    are independent: one resolves, the other stores.
+    helper in another file.
+  * It reads a comment-stripped, string-masked view produced by PHP itself
+    (`member-language-structure.php`, `file` and `file_keys` modes), so a
+    comment or a string mentioning a call cannot answer for the call -- but a
+    string containing `<select name="locale">` would satisfy check F, which is
+    why F is a courtesy and the HTTP test is the guarantee.
 
 Package: WebMS-Intra / audit checks
 Author: Claude Opus 5 (for MWBM Partners Ltd, t/a MWservices)
 Copyright: All Rights Reserved -- MWBM Partners Ltd
-Version: 1.0.0
+Version: 3.0.0
 """
 
 from __future__ import annotations
@@ -99,39 +120,11 @@ BOOTSTRAP = os.path.join("web", "_core", "bootstrap.php")
 ACCOUNT = os.path.join("web", "_apps", "auth", "account", "index.php")
 ACCOUNT_SAVE = os.path.join("web", "_apps", "auth", "account", "save.php")
 
-# 📌 The sidecar holding the three pinned regions, and the regions themselves,
-#    named by the code that starts and ends each one.
-#
-# 🚨 WHY A WHOLE-REGION PIN AND NOT A BETTER PATTERN. Three check rounds, three
-#    one-edit bypasses, and each fix closed the spelling it had been handed:
-#    `if (false) { ... }` was answered with a brace count, so `if (false) ...`
-#    with NO braces walked through; "is the argument missing" was answered, so
-#    the literal `(null)` walked through; the gate conditions were pinned, so
-#    emptying the block BODY walked through, and so did `chooseLanguage(null)`.
-#    All of them are the same thing -- the statement is still there and does
-#    nothing -- and #485 took four rounds to learn that the answer is to pin the
-#    whole thing as TEXT rather than to guess the next spelling. `--repin` makes
-#    a deliberate change a separate, visible act.
-#
-# ⚠️ WHAT THE NORMALISATION THROWS AWAY, enumerated as #485 says it must be.
-#    Comments go, and runs of whitespace become one space. **PHP does not care
-#    about whitespace except inside a string literal or a heredoc**, so the
-#    only thing given up is telling `'a b'` from `'a  b'` -- immaterial in these
-#    three regions, where no logic reads a string's internal spacing, and a
-#    heredoc inside a pinned region is REFUSED outright (`HEREDOC_MARK`), because
-#    a heredoc's internal whitespace IS significant and freeing it would make two
-#    genuinely different regions compare equal. An earlier version of this
-#    comment cited a `NO_HEREDOC` that had never been written -- so the
-#    enumeration #485 asks for was itself unsupported, which is the worse kind of
-#    wrong. Freeing
-#    whitespace rather than keeping line breaks is deliberate: a rewrap must not
-#    turn this red, because a check that cries wolf gets switched off (#483).
-# A heredoc or nowdoc opener. Refused inside a pinned region: its internal
-# whitespace is significant, so freeing whitespace would make two different
-# regions compare equal, and the pin would pass on changed behaviour.
-# 🧰 The probe that does the actual PHP reading, and the only thing here that
-#    knows what PHP is. Its header records the seven rounds of hand-written
-#    parsing that argue for its existence.
+# 🧰 PHP reads the PHP. Six rounds were lost to a hand-written reader being
+#    wrong about `$endif`, a `}` inside a heredoc, a `#[Attribute]`, a `'?>'`
+#    inside a string, and PHP written inside an HTML comment -- which PHP
+#    executes. None of those distinctions is in the text; they are in the
+#    grammar. This file asks for two whole-file views and nothing more.
 STRUCTURE_PROBE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "member-language-structure.php"
 )
@@ -140,94 +133,22 @@ STRUCTURE_PROBE = os.path.join(
 # It exists to stop a hang, not to race a slow machine.
 PROBE_TIMEOUT_SECONDS = 30
 
-# The characters that may immediately precede a pinned region, measured from
-# TOKENS rather than text, so a `;` inside a comment or a string cannot answer
-# for it. **The failure message is built from this constant**, because round 4
-# narrowed the set and left the message naming the two characters it had just
-# removed — so the sentence somebody acts on told them the cause was allowed.
-FRESH_START_CHARS = ";}"
-
-PINNED_REGIONS_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "member-language.pinned.txt"
-)
-
-# Each region: (label, file, the code it starts at, the MODE that ends it).
-#   "block"  run to the `}` that closes the first `{` at or after the anchor
-#   "endif"  run to the `endif;` that closes the block the anchor sits in
-# Both are walked by the probe with PHP's own tokeniser, so the region covers
-# the WHOLE block however it is reformatted.
-#
-# ⚠️ An earlier version of this comment called the fourth element "the `if` whose
-#    closing brace ends it" and said it was "walked to its matching `}`". It is
-#    the mode string, and for the account page no `}` walk happens at all. A
-#    comment describing the wrong mechanism is how the next reader passes the
-#    wrong thing — and this file has corrected two of those already.
-#
-# ⚠️ An earlier version of this comment called the fourth element "the `if`
-#    whose closing brace ends it" and said it was "walked to its matching `}`".
-#    It is the mode string, and for the account page no `}` walk happens at all.
-#    A comment describing the wrong mechanism is how the next reader passes the
-#    wrong thing.
-PINNED_REGIONS = (
-    (
-        "index.php: the session starts, the language is resolved, ?lang= is handled",
-        INDEX,
-        "Auth::ensureSession();",
-        "block",
-    ),
-    (
-        "account page: the language control",
-        ACCOUNT,
-        # ⚠️ THE WHOLE ASSIGNMENT, not just `$langRead`. That name appears three
-        #    times in as many lines -- the read, the "could not read" test and
-        #    the "is it a string" test -- so the bare name was not unique and the
-        #    uniqueness rule rejected it, correctly.
-        "$langRead    = \\Portal\\Core\\I18n::storedChoice",
-        "endif",
-    ),
-    (
-        "account handler: storing or clearing the language",
-        ACCOUNT_SAVE,
-        "if (array_key_exists('locale', $_POST)",
-        "block",
-    ),
-)
-
-def whitespace_freed(text: str) -> str:
-    """Runs of whitespace to one space, so indentation and wrapping are free."""
-    return re.sub(r"\s+", " ", text)
-
 
 def repo_root() -> str:
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.dirname(os.path.dirname(here))
 
 
-def ask_php(root: str, regions) -> list:
+def ask_php(root: str, wants) -> list:
     """
-    The structural facts, from PHP's own tokeniser.
-
-    🚨 WHY THIS IS NOT DONE IN PYTHON, which is the whole lesson of this file.
-       Six check rounds got a one-edit change past a hand-written reader, and
-       every one of them was the reader being wrong about PHP rather than the
-       rule being too narrow:
-
-         `$endif = 1;`              matched `\bendif\b`, cancelling a wrapper
-         a `}` in a heredoc body    counted as a real brace
-         `#[Deprecated]`            read as a `#` comment, hiding a `{`
-         `'?>'` inside a string     ended the PHP span early
-         `<!-- <?php … ?> -->`      PHP RUNS this; the reader blanked it
-         `$exit = false;`           counted as an exit, so it cried wolf
-
-       **None of those distinctions is in the text; they are in the grammar.**
-       `token_get_all()` knows that `$endif` is `T_VARIABLE` and `endif` is
-       `T_ENDIF`, that `#[` is `T_ATTRIBUTE`, that a brace in a heredoc is part
-       of an encapsed string, and that PHP in an HTML comment is still PHP.
+    Whole-file views, from PHP's own tokeniser: comments dropped, strings
+    masked (`file`) or kept (`file_keys`).
 
     ⚠️ IT MUST FAIL LOUDLY, never quietly. PHP missing, PHP crashing, a timeout
-       or output that will not parse all return None here and are reported as
-       findings by the caller — the `check_static_calls.py` precedent. A check
-       that cannot run and says nothing is worse than no check.
+       or output that will not parse all return None here and are reported as a
+       finding by the caller -- the `check_static_calls.py` precedent. **There
+       is deliberately no fallback to reading the PHP in Python**: six rounds
+       proved there is no second-best reading to drop to.
     """
     php = shutil.which("php")
     if php is None:
@@ -235,8 +156,8 @@ def ask_php(root: str, regions) -> list:
     if os.path.isfile(STRUCTURE_PROBE) is False:
         return None
     request = json.dumps([
-        {"file": os.path.join(root, relative), "anchor": anchor, "mode": mode}
-        for _, relative, anchor, mode in regions
+        {"file": os.path.join(root, relative), "anchor": "", "mode": mode}
+        for relative, mode in wants
     ])
     try:
         done = subprocess.run(
@@ -255,30 +176,9 @@ def ask_php(root: str, regions) -> list:
         answers = json.loads(done.stdout.strip() or "null")
     except ValueError:
         return None
-    if isinstance(answers, list) is False or len(answers) != len(regions):
+    if isinstance(answers, list) is False or len(answers) != len(wants):
         return None
     return answers
-
-
-def whitespace_freed(text: str) -> str:
-    """Runs of whitespace to one space, so indentation and wrapping are free."""
-    return re.sub(r"\s+", " ", text)
-
-
-def read_pinned() -> dict:
-    """The sidecar, as {label: one line of pinned text}."""
-    if os.path.isfile(PINNED_REGIONS_FILE) is False:
-        return {}
-    out = {}
-    label = None
-    for line in open(PINNED_REGIONS_FILE, "r", encoding="utf-8"):
-        if line.startswith("### "):
-            label = line[4:].rstrip("\n")
-            continue
-        if label is not None and line.strip() != "":
-            out[label] = line.rstrip("\n")
-            label = None
-    return out
 
 
 def main() -> int:
@@ -290,45 +190,40 @@ def main() -> int:
             print(f"FAIL: {relative} is not there. This check cannot run.")
             return 1
 
-    # 📄 Every view of a file comes from PHP, never from a reader of our own.
-    #    The plain-text checks below used a Python comment-stripper until round
-    #    6, and it was wrong about PHP six different ways; simplifying it so it
-    #    could not be wrong about `#[` left it not stripping `//` at all, so a
-    #    COMMENT mentioning `I18n::switchLocale` answered the check that looks
-    #    for the CALL. One source of truth.
     views = ask_php(root, (
-        ("index code", INDEX, "", "file"),
-        ("index keys", INDEX, "", "file_keys"),
-        ("bootstrap code", BOOTSTRAP, "", "file"),
-        ("account keys", ACCOUNT, "", "file_keys"),
-        ("save code", ACCOUNT_SAVE, "", "file"),
-        ("save keys", ACCOUNT_SAVE, "", "file_keys"),
+        (INDEX, "file"),
+        (INDEX, "file_keys"),
+        (BOOTSTRAP, "file"),
+        (ACCOUNT, "file_keys"),
+        (ACCOUNT_SAVE, "file"),
+        (ACCOUNT_SAVE, "file_keys"),
     ))
     if views is None:
         print(
-            "FAIL: the structural probe could not run, so not one of this "
+            "FAIL: the file-reading probe could not run, so not one of this "
             "check's questions can be answered. It needs PHP on PATH and "
-            f"{os.path.basename(STRUCTURE_PROBE)} beside this script.\n"
-            "       There is deliberately NO fallback to reading the PHP here: "
-            "six check rounds each got a one-edit change past a hand-written "
-            "reader, so there is no second-best reading to drop to."
+            f"{os.path.basename(STRUCTURE_PROBE)} beside this script, and it "
+            f"must finish within {PROBE_TIMEOUT_SECONDS}s and print JSON.\n"
+            "       There is deliberately NO fallback to reading the PHP in "
+            "Python: six check rounds each got a one-edit change past a "
+            "hand-written reader, so there is no second-best reading to drop to."
         )
         return 1
     index_code, index_keys, boot_code, account_keys, save_code, save_keys = (
         str(v.get("text", "")) for v in views
     )
 
-    reconsider = re.search(r"I18n::reconsiderNowSessionExists\s*\(", index_code)
+    reconsider = re.search(r"I18n::reconsiderNowSessionExists\s*\(([^)]*)\)", index_code)
     switcher = re.search(r"I18n::switchLocale\s*\(", index_code)
     ensure = re.search(r"Auth::ensureSession\s*\(", index_code)
 
+    # ── A to D: the calls, and their order ────────────────────────────────
     if ensure is None:
         problems.append(
             f"{INDEX} no longer calls Auth::ensureSession(), so there is no "
             f"moment to measure 'after the session starts' against. If the "
             f"session now starts somewhere else, teach this check where."
         )
-
     if reconsider is None:
         problems.append(
             f"{INDEX} does not call I18n::reconsiderNowSessionExists(). Without "
@@ -336,6 +231,17 @@ def main() -> int:
             f"choice are BOTH unreachable, because I18n::init() runs during "
             f"start-up where no session exists -- and it latches, so it will "
             f"not look again. That is #763, and it was live for eight months."
+        )
+    elif reconsider.group(1).strip() in ("", "null"):
+        problems.append(
+            f"{INDEX}: reconsiderNowSessionExists() is passed no connection "
+            f"(`{reconsider.group(1).strip() or 'nothing'}`). Its parameter "
+            f"defaults to null, so this is legal PHP and reads as a tidy-up -- "
+            f"and with no connection the member's tblUsers.locale is never "
+            f"read, nothing sets $_SESSION['user_locale'], and resolveLocale() "
+            f"falls through to Accept-Language. That is the member-locale half "
+            f"of #763, whole, and no self-test can see it because they all pass "
+            f"a connection. Pass the request's connection."
         )
     if switcher is None:
         problems.append(
@@ -372,9 +278,17 @@ def main() -> int:
                 f"default (D-060)."
             )
 
-    # H. The account page's control, and its handler. Both views came from the
-    #    probe above, with every other file's.
+    # ── E: the ?lang= gate must refuse a non-string ───────────────────────
+    if re.search(r"is_string\s*\(\s*\$_GET\s*\[\s*'lang'\s*\]\s*\)", index_keys) is None:
+        problems.append(
+            f"{INDEX}: the ?lang= gate no longer tests is_string($_GET['lang']). "
+            f"A request sent as a list -- ?lang[]=x -- then reaches "
+            f"switchLocale(), whose typed parameter refuses it with a TypeError: "
+            f"a 500 and one error row, on EVERY address, open or closed, because "
+            f"this runs ahead of the maintenance gate (#509 point 2)."
+        )
 
+    # ── F: the account page's control ─────────────────────────────────────
     field = re.search(r"<select[^>]*name=.locale.[^>]*>", account_keys)
     if field is None:
         problems.append(
@@ -385,50 +299,48 @@ def main() -> int:
             f"browser."
         )
     elif re.search(r"\bdisabled\b|\btype=.hidden.", field.group(0)) is not None:
-        # ⚠️ A `disabled` control IS NOT SUBMITTED, so the handler sees no
-        #    field, decides nothing, and the member's choice is never stored --
-        #    while this check stays green over a control that looks present.
-        #    That is the GoCardless lesson (#569): disabling the option would
-        #    have made Save switch the payment provider silently.
         problems.append(
             f"{ACCOUNT}: the language control is disabled or hidden. A disabled "
             f"control is NOT submitted, so the handler sees no field and stores "
-            f"nothing, and a hidden one cannot be used -- either way the member "
-            f"has a control that does nothing while this check reads it as "
-            f"present."
+            f"nothing, while a presence check reads it as there -- the "
+            f"GoCardless lesson (#569)."
         )
-    # And "Follow my browser (X)" must name what the BROWSER asks for, never
-    # I18n::locale() -- which, for anybody with a stored choice, IS that choice.
+    if "I18n::storedChoice" not in account_keys:
+        problems.append(
+            f"{ACCOUNT} does not ask I18n::storedChoice(). Reading the column "
+            f"here instead is a second reader of one fact, and two readers of a "
+            f"language can disagree -- which is how this page came to tell every "
+            f"member their language was 'en'."
+        )
     if "I18n::browserLanguage" not in account_keys:
         problems.append(
             f"{ACCOUNT}: the 'Follow my browser' label does not ask "
             f"I18n::browserLanguage(). Built from I18n::locale() it names the "
             f"language the page is being DRAWN in, which for anybody who has a "
-            f"stored choice is that choice -- so the label was wrong for every "
-            f"single person who would ever read it, the option existing only to "
-            f"undo a choice. Measured: stored cy, Accept-Language fr, label said "
-            f"Cymraeg, answer would be Fran\u00e7ais."
+            f"stored choice IS that choice -- so the label was wrong for every "
+            f"person who would ever read it, the option existing only to undo a "
+            f"choice. Measured: stored cy, Accept-Language fr, label said "
+            f"Cymraeg, answer would be Français."
         )
     if "I18n::enabledLocales" not in account_keys:
         problems.append(
             f"{ACCOUNT} does not build its list from I18n::enabledLocales(), "
             f"which is the languages this installation has a translation file "
-            f"for.\n"
-            f"       Two things this message USED to say, both of which were "
-            f"untrue and are worth recording because they were untrue in the "
-            f"reassuring direction. It said the account page and the top-bar "
-            f"menu 'can never offer different languages': the menu ALSO hides "
-            f"anything below `portal.i18n.minimum_coverage_for_switcher`, a real "
-            f"seeded setting, and `coverage('cy')` measures 0.30 -- so at the "
-            f"0.95 that setting's own comment suggests, the menu disappears "
-            f"entirely while this page still offers Welsh. And it said the list "
-            f"'keeps a right-to-left language with no translation file off', "
-            f"which is the behaviour the next round deliberately REMOVED: the "
-            f"page must offer a stored language even with no translation file, "
-            f"or it matches no option, nothing is selected, and an unrelated "
-            f"Save deletes it."
+            f"for."
+        )
+    if "isset($langChoices[$langStored]) === false" not in re.sub(r"\s+", " ", account_keys):
+        problems.append(
+            f"{ACCOUNT} no longer offers the member's STORED language when it is "
+            f"absent from enabledLocales(). That list is readable "
+            f"web/_lang/*.php files -- two on a stock installation -- while "
+            f"isSupported() accepts any of the thirteen the code knows, so a "
+            f"stored 'ar' matches no option, nothing carries `selected`, every "
+            f"browser pre-selects value=\"\", and pressing Save to correct a "
+            f"TELEPHONE NUMBER deletes the member's language. The page also "
+            f"states something untrue about what the portal holds."
         )
 
+    # ── G: the handler ────────────────────────────────────────────────────
     if "I18n::chooseLanguage" not in save_code:
         problems.append(
             f"{ACCOUNT_SAVE} does not call I18n::chooseLanguage(), so either the "
@@ -437,209 +349,22 @@ def main() -> int:
             f"also exactly one, in the wrong place, and that is the whole of "
             f"#763."
         )
-    # ── E. The three WHOLE-REGION pins ────────────────────────────────────
-    # 🚨 This replaced four substring pins and a brace-depth test. Three check
-    #    rounds each got a one-edit plant past a cleverer pattern, and every one
-    #    was the same thing: the statement is still there and does nothing.
-    #    #485 took four rounds to learn that the answer is to pin the text.
-    pinned = read_pinned()
-    now = {}
-    # ── The three pinned regions, read by PHP ─────────────────────────────
-    answers = ask_php(root, PINNED_REGIONS)
-    if answers is None:
-        print(
-            "FAIL: the structural probe could not run. "
-            f"It needs PHP on PATH and {os.path.basename(STRUCTURE_PROBE)} beside "
-            f"this script, and it must finish within {PROBE_TIMEOUT_SECONDS}s and "
-            "print JSON.\n"
-            "       This check does NOT fall back to reading the PHP itself. Six "
-            "check rounds each got a one-edit change past a hand-written reader, "
-            "so there is no second-best reading to drop to -- a check that cannot "
-            "run must say so."
-        )
-        return 1
-
-    pinned = read_pinned()
-    now = {}
-    glued: list[str] = []
-    duplicated: list[str] = []
-    heredoc: list[str] = []
-    broken: list[str] = []
-
-    for (label, relative, anchor, _), answer in zip(PINNED_REGIONS, answers):
-        if "error" in answer:
-            broken.append(f"{relative} ({label}): {answer['error']}")
-            continue
-        now[label] = whitespace_freed(str(answer["text"])).strip()
-        now[label + " :: structure"] = (
-            f"braces={answer['braces']} alt={answer['alt']} "
-            f"exits={answer['exits']} anyexit={answer.get('anyexit', '?')}"
-        )
-        if answer["count"] != 1:
-            duplicated.append(
-                f"{relative} ({label}): {anchor!r} appears {answer['count']} times"
-            )
-        if answer["heredoc"] is True:
-            heredoc.append(f"{relative} ({label})")
-        before = str(answer["before"])
-        if before not in ("<?php", "html") and before not in FRESH_START_CHARS:
-            glued.append(f"{relative} ({label}): the token before it ends {before!r}")
-
-    if "--repin" in sys.argv:
-        # ⚠️ REFUSE TO REPIN OVER A STRUCTURAL PROBLEM. Repinning while a region
-        #    is glued, duplicated, holds a heredoc or has MOVED would write the
-        #    fault into the sidecar and print nothing but success -- the one way
-        #    a text pin fails silently.
-        moved = [
-            f"nesting changed: {relative} ({label})"
-            for label, relative, _, _ in PINNED_REGIONS
-            if (label + " :: structure") in pinned
-            and now.get(label + " :: structure") != pinned[label + " :: structure"]
-        ]
-        blocking = (
-            broken
-            + moved
-            + [f"glued in front: {w}" for w in glued]
-            + [f"anchor not unique: {w}" for w in duplicated]
-            + [f"heredoc inside: {w}" for w in heredoc]
-        )
-        if len(blocking) > 0:
-            print("REFUSED to repin: the regions are not in a state worth pinning.")
-            for line in blocking:
-                print(f"  - {line}")
-            print("Fix those first, then repin.")
-            return 1
-        with open(PINNED_REGIONS_FILE, "w", encoding="utf-8") as handle:
-            handle.write(
-                "# The three pinned regions of #763, regenerated by\n"
-                "#   python3 tools/audit-checks/check_member_language_applied.py --repin\n"
-                "# Read by PHP's own tokeniser: comments dropped, runs of whitespace\n"
-                "# freed to one space. Do not hand-edit this file -- change the code\n"
-                "# and repin, so the change is visible in one diff.\n"
-            )
-            for label, _, _, _ in PINNED_REGIONS:
-                handle.write(f"\n### {label}\n{now[label]}\n")
-                handle.write(
-                    f"\n### {label} :: structure\n"
-                    f"{now[label + ' :: structure']}\n"
-                )
-        print(f"Repinned {len(PINNED_REGIONS)} region(s) to {PINNED_REGIONS_FILE}")
-        return 0
-
-    for where in broken:
+    if re.search(r"array_key_exists\s*\(\s*'locale'\s*,\s*\$_POST\s*\)", save_keys) is None:
         problems.append(
-            f"{where}. The probe could not read this region at all, so there is "
-            f"nothing left guarding it. Its anchor has moved or its block is not "
-            f"closed where the probe expects."
+            f"{ACCOUNT_SAVE} does not ask whether the 'locale' field ARRIVED "
+            f"(array_key_exists('locale', $_POST)). An empty value is a real "
+            f"instruction here -- forget my choice and follow my browser -- so "
+            f"reading it as $_POST['locale'] ?? '' cannot be told from a form "
+            f"that never carried the control, and any post to this handler from "
+            f"elsewhere would silently wipe the member's language. #677 cost "
+            f"this project a cleared portal address the same way."
         )
-
-    for where in duplicated:
-        problems.append(
-            f"{where}, so this pin is worthless.\n"
-            f"       The region is found by its FIRST match, so a dead duplicate "
-            f"above the live code satisfies the pin while the live code is gutted "
-            f"-- measured: a copy inside `if (false) {{ }}` above the real block "
-            f"left the gate reporting a byte-for-byte match while the only "
-            f"surviving chooseLanguage() call was the dead one."
-        )
-
-    for where in heredoc:
-        problems.append(
-            f"{where} now contains a heredoc or nowdoc, which this pin refuses.\n"
-            f"       A heredoc's internal whitespace is significant, and this pin "
-            f"frees runs of whitespace -- so two genuinely different regions would "
-            f"compare equal and the pin would pass on changed behaviour."
-        )
-
-    for where in glued:
-        problems.append(
-            f"{where}: something is glued IN FRONT of this pinned region, so it "
-            f"no longer begins a fresh statement.\n"
-            f"       A text pin cannot see this on its own: `if (false)` on the "
-            f"line above, with no braces, makes the entire region the body of a "
-            f"conditional that never runs while the region's own text is "
-            f"untouched.\n"
-            f"       The last TOKEN before a pinned region must end in one of "
-            f"{' '.join('`' + c + '`' for c in FRESH_START_CHARS)}, or be an "
-            f"opening `<?php` or inline markup. **This sentence is built from the "
-            f"rule itself**: an earlier version listed `{{` and `:` as allowed, "
-            f"which were the two characters the round before had REMOVED for "
-            f"letting dead code wrap a region.\n"
-            f"       It is measured from TOKENS, not text, so a `;` inside a "
-            f"comment or a string cannot answer for it -- and it is a cheap first "
-            f"pass only. What really guards the region is its pinned NESTING."
-        )
-
-    for label, relative, _, _ in PINNED_REGIONS:
-        if label not in now:
-            continue
-        key = label + " :: structure"
-        if key in pinned and now[key] != pinned[key]:
-            problems.append(
-                f"{relative}: the region '{label}' has MOVED -- its nesting is not "
-                f"what it was pinned as.\n"
-                f"       pinned: {pinned[key]}\n"
-                f"       now:    {now[key]}\n"
-                f"       `braces` is how many `{{` are open where it starts, `alt` "
-                f"how many `if (…):` blocks, `exits` how many `return` / `exit` / "
-                f"`die` sit at its own LEVEL before it, and `anyexit` how many "
-                f"sit before it at ANY depth.\n"
-                f"       `anyexit` exists because `if (true) {{ exit; }}` and a "
-                f"bare `{{ exit; }}` both put the exit one level deeper than the "
-                f"region, so `exits` skipped them while the region was dead -- "
-                f"measured, with this check green. Its cost is that adding a new "
-                f"guard above the region needs a `--repin`, which is deliberate: "
-                f"an exit newly placed above the code that stores somebody's "
-                f"language is worth having to acknowledge.\n"
-                f"       Any of them changing means "
-                f"something now decides whether the region runs -- and the "
-                f"region's own TEXT can be untouched while that is true.\n"
-                f"       All three come from PHP's own tokeniser, so `$endif`, "
-                f"`$exit`, a brace in a heredoc, a `#[Attribute]` and a `'?>'` in "
-                f"a string are all read as what they are. Six rounds of "
-                f"hand-written parsing got that wrong six different ways.\n"
-                f"       If the move is deliberate, run\n"
-                f"         python3 {os.path.basename(__file__)} --repin\n"
-                f"       and commit the sidecar diff as a separate, visible act."
-            )
-        elif key not in pinned:
-            problems.append(
-                f"The structure of '{label}' is not in "
-                f"{os.path.basename(PINNED_REGIONS_FILE)}. Run --repin, read the "
-                f"diff, and commit it."
-            )
-        if label not in pinned:
-            problems.append(
-                f"The region '{label}' is not in "
-                f"{os.path.basename(PINNED_REGIONS_FILE)}. Run --repin, read the "
-                f"diff, and commit it."
-            )
-            continue
-        if now[label] != pinned[label]:
-            problems.append(
-                f"{relative}: the region '{label}' is not what it was pinned as.\n"
-                f"       This pin covers the WHOLE region, on purpose, and its text "
-                f"comes from PHP's tokeniser rather than from a reader of my own.\n"
-                f"       ⚠️ A PURE REFORMAT FAILS THIS TOO, deliberately. Comments "
-                f"and runs of whitespace are free, but PHP needs a space where a "
-                f"re-wrapped call previously had none. Taking whitespace out "
-                f"altogether is not an option -- `new Foo` would become `newFoo`. "
-                f"The precedent is `portal-translate.pinned.js` (#485), and the "
-                f"reason it is acceptable in both places is the same: nothing "
-                f"EXECUTES this code in any test, so a text pin is the only guard "
-                f"there is.\n"
-                f"       If the change is deliberate, run\n"
-                f"         python3 {os.path.basename(__file__)} --repin\n"
-                f"       read the diff to "
-                f"{os.path.basename(PINNED_REGIONS_FILE)}, and commit it as a "
-                f"separate, visible act."
-            )
 
     print(
         "Member language applied: index.php read "
         f"({'reconsider ok' if reconsider is not None else 'reconsider MISSING'}, "
         f"{'switcher ok' if switcher is not None else 'switcher MISSING'}), "
-        "bootstrap.php read for either call"
+        "bootstrap.php, the account page and its handler read"
     )
 
     if len(problems) > 0:
@@ -654,17 +379,15 @@ def main() -> int:
         return 1
 
     print(
-        "OK: the language question is asked after the session starts, start-up "
-        "asks it nowhere, the account page offers a control that is neither "
-        "disabled nor hidden and asks browserLanguage(), all three pinned regions "
-        "match the sidecar byte for byte, each region's anchor is unique and holds "
-        "no heredoc, each sits at the nesting it was pinned at, and nothing is "
-        "glued in front of any of them."
+        "OK: the calls are present, in the right order, start-up makes neither, "
+        "the ?lang= gate refuses a non-string, and the account page and its "
+        "handler use the one reader and the one writer."
     )
     print(
-        "   It cannot tell whether a page RENDERS in that language -- that needs "
-        "HTTP and a seeded installation, and tools/i18n-member-language-selftest.php "
-        "says the same of itself."
+        "   It does NOT prove any of that code is REACHED -- that is behavioural, "
+        "and eight review rounds of trying to infer it from the source are "
+        "recorded in this file's header and in D-065. "
+        "tools/i18n-member-language-http-selftest.php measures it."
     )
     return 0
 

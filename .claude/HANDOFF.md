@@ -63,7 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#763 round 8 is built and awaiting its check** (the protected arm of D-051 —
+**#763 IS DONE** (D-064, D-065) — **#781 is built** (the protected arm of D-051 —
 it writes and deletes stored data, so rounds run until one is clean). Twelve
 findings, then seven, six, six, three, three, six — and **every one after the
 first round was in a previous round's fix, all of them in the GUARD rather than
@@ -131,7 +131,19 @@ as the evidence), #549's arithmetic half, #767, #765, #768, #763.
 
 ## The lesson this run earned, in one line
 
-**When a guard has to understand a language, use that language's own parser.**
+**Where the property is "this code RUNS", drive it; where it is "this code LOOKS
+like this", pin it.** #763's fix was correct from its first review. Its guard
+then took **eight review rounds and 52 findings, every one in the guard and none
+in the fix**, because I had chosen a source-reading check to answer a question
+about behaviour and then spent six rounds making the wrong instrument sharper.
+The owner's call (D-065) cut it from ~1,235 lines to 521 and built the HTTP test
+that measures the thing directly — 24 checks, two of them driven by nothing else,
+one of them a plant that proves the test can fail. **Protection went up and the
+line count went down.**
+
+**And the runner-up, which is how to notice it sooner (D-064):** judge each
+review round by where its findings landed. Eight rounds on scaffolding is a
+signal about the instrument, not a reason to sharpen it again.
 Six rounds of regular expressions over PHP were defeated by `$endif`, a `}`
 inside a heredoc, a `#[Attribute]`, a `'?>'` in a string, and PHP inside an HTML
 comment — plus one cry-wolf, `$exit` read as an exit. None of those distinctions

@@ -17809,7 +17809,49 @@ not.**
 
 Fourteen wrapping spellings go red, and the three cry-wolf cases stay green.
 
-**The transferable rule, and it is the lesson of the whole package:** when a
+**AND THEN MOST OF THE GUARD WAS DELETED, WHICH IS THE REAL LESSON OF THE WHOLE
+PACKAGE.** Eight independent review rounds went into it: 12, 7, 6, 6, 3, 3, 6, 9
+findings — **52 in all, every one after the first round in the GUARD and not one
+in the fix**, which every round confirmed correct. Six rounds each found a new
+way to wrap a region in dead code, each answered with a sharper pattern; the
+eighth found the guard still REFUSING correct work — a passing comment that
+merely mentioned the guarded call made it report the pin "worthless", and an
+ordinary helper above the region made it report that the region had "moved".
+**A check that cries wolf gets switched off (#483)**, so by then the rounds were
+not buying protection at all.
+
+**The instrument was the mistake, not the sharpening.** "Is this code reached"
+is behavioural, and the forms no source-reading check can ever see —
+`while (true) { }` above it, `trigger_error` at `E_USER_ERROR`, a conditional
+`require` of the file — are not edge cases but the same question asked again.
+On the owner's decision (**D-065**) the guard was cut from roughly 1,235 lines
+to 521: what stays is presence and ORDER, which in eight rounds produced no
+finding and cannot cry wolf. What replaced the rest is
+`tools/i18n-member-language-http-selftest.php` — 24 checks that sign a member
+in, load the real account page, choose a language, save, and read the column
+back. **Every wrapping the pin caught also fails it, and so do the four classes
+it could not see.**
+
+**The transferable rule: where the property is "this code RUNS", drive it; where
+it is "this code LOOKS like this", pin it.** (#485's pinned script is the
+closest relative and stays, because its justification is the opposite situation
+— nothing executes that file, so there is nothing to drive.)
+
+**Two checks in the new test are driven by nothing else**, and both are shapes
+this repository has paid for before: a post carrying NO `locale` field must
+leave the stored language alone (#677's cleared-portal-address shape), and
+exactly ONE option must carry `selected`, because a `<select>` with none is a
+vote for option one — which here means "forget my choice". Section F plants the
+fault and proves the test goes red, which is the thing the static pin could not
+do for the forms it could not see.
+
+**And the review rule itself changed** (**D-064**): a round whose findings are
+all in checks, tests or tooling now counts towards the three-round cap, while
+the protected arm stays open for anything touching money, personal details,
+authentication, erasure, backups or stored data. Judge each ROUND by where its
+findings landed, never the package by where it started.
+
+**The rule that got us to the tokeniser, still true as far as it goes:** when a
 guard has to understand a language, use that language's own parser. Six rounds
 of regular expressions lost to `$endif`, a heredoc, an attribute, a string and
 an HTML comment — and the author of the fix was the one being outwitted each

@@ -76,13 +76,25 @@ handles `?lang=`, the account page's control, and its handler — along with how
 deeply each sits, so any change to any statement in them fails and `--repin`
 makes a deliberate change a visible act.
 
-It got there the hard way, and the way is worth recording: **six rounds of
-checking each slipped a one-edit change past a cleverer pattern**, and every one
-was the same thing — a statement still present that does nothing. The answer in
-the end was to stop reading PHP with patterns and ask PHP, through its own
-tokeniser (`tools/audit-checks/member-language-structure.php`), after which the
-spellings that had been getting through were no longer expressible. **Where a
-guard has to understand a language, use that language's own parser.**
+**And then most of that guard was deleted**, which is the part worth recording.
+Eight independent review rounds went into it and found 52 problems — every one
+after the first round in the guard rather than in the fix, which every round
+confirmed was correct. By the eighth it still refused ordinary work: a passing
+comment that merely mentioned the guarded code made it complain, and so did
+adding a helper above it. A check that refuses good work is one people switch
+off, and then it guards nothing.
+
+So on the owner's decision (D-065) it was cut back to what it can do honestly —
+that the calls exist, in the right order, and that start-up makes neither — and
+the job it was really doing moved to a test that **measures** rather than infers:
+`tools/i18n-member-language-http-selftest.php` signs a member in, loads the real
+account page, chooses a language, saves, and reads the column back. Twenty-four
+checks over real HTTP, including two that nothing else drove and one that plants
+the fault and proves the test goes red.
+
+**Where the property is "this code runs", drive it; where it is "this code looks
+like this", pin it.** That judgement, and the eight rounds that produced it, are
+recorded in D-065 and in the check's own header.
 
 Neither guard can tell whether a page *renders* in the chosen language — that
 needs a seeded installation over HTTP — and both say so.
