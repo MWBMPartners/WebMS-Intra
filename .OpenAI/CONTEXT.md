@@ -3273,12 +3273,83 @@ it is written.** Four rounds of "be careful with numbers" produced
 four wrong numbers.
 
 What remains of #777 is the bulk: **486 time-shaped columns and only
-123 with any comment**, so "does this column hold a moment or a clock
+**125** with any comment (so 361 carry none; this said 123 and 363 in six
+places, the fifth wrong count in the package)**, so "does this column hold a moment or a clock
 reading" is answered NO for three quarters of them before any reading
 starts. Raised rather than bundled: **#782**, eighteen hard-coded
 `Europe/London` literals across nine files plus two columns that
 DEFAULT to it — #763's shape, except those columns ARE written by
 their own pages, so some rows really are choices.
+
+### Rounds 3 and 4: two guards that passed on broken code
+
+Round 3 found the three reader pages round 2 had fixed were **guarded by
+nothing**. Planted — the old `date('D j M, H:i', strtotime($r['startAt']))` back
+in `my-bookings.php` — all 65 audit scripts and all 51 clock checks stayed
+GREEN, because `tblResourceBooking.startAt` is a `DATETIME`, which the gate
+rightly ignores when it says nothing, and the behavioural test drives `I18n`
+directly without touching a page.
+
+**The answer was not a list of two column names in the check** (#706's shape).
+Migration 252 makes the SCHEMA say the columns hold a wall-clock reading, and
+the gate sweeps every `DATETIME` whose comment says so.
+`I18n::formatClockDateTime()` is the ONE place a wall-clock DATE AND TIME
+becomes words; it builds its moment in **UTC on purpose, because UTC has no
+transitions**.
+
+Reading those declarations found **four columns that had said the same thing
+since long before this work** — `tblEvents.startDateTime`/`endDateTime` and
+`tblEventSnapshots.snapStart`/`snapEnd` — and files still treating them as
+moments. They are in `tools/audit-checks/clock_wall_clock_datetime_pending.txt`
+and are the bulk of part two. **#783** was raised rather than fixed:
+`my-bookings.php` and `resource.php` decide which bookings are still to come by
+comparing a wall-clock column with `NOW()` — the DATABASE SERVER's clock, in a
+session zone that is `SYSTEM` by default — so an organisation abroad gets its
+list cut hours from its own clock. `cron/event-reminders.php` does the same
+against `UTC_TIMESTAMP()` on `tblEvents`, harmless there because it is a
+±3-day prefilter.
+
+**Round 4 then found EIGHT, every one in a previous round's fix, and two of them
+guards that passed on broken code.**
+
+1. **The backlog exempted the FILE, not the column**, so part one's own rule was
+   switched off in 28 of 912 files. Planted: a brand-new
+   `date('g:i A', strtotime($event['meetingTime']))` in `calendar/event.php`
+   left the gate green with its output unchanged, and two listed files already
+   handle `TIME` columns (`venues/booking.php` is a booking form with four of
+   them). It forgives a COLUMN now. **The pending file's own header had
+   promised "the hole closes behind us", written in the same commit by the same
+   hand — the #645 shape.**
+2. **Nothing pinned WHICH columns say WALL-CLOCK.** Rewording two comments took
+   the set from six to four, with the reader fault live and every check green.
+   The set is pinned in `clock_wall_clock_columns.pinned.txt`, regenerated only
+   by `--repin` — #485's and #763's settled remedy, reached there after four and
+   six rounds of cleverer patterns.
+3. **The gate REFUSED the constructor form of the correct construction.**
+   `new DateTimeImmutable($date . ' ' . $time, $tz)` gives a reading a date and
+   a zone in one call, exactly as `createFromFormat` does, and only the latter
+   was recognised — so three live files were reported as faults and two went
+   into the backlog as work to do. **Crying wolf and miscounting its own backlog
+   in one breath** (#483).
+4. **"28 files" was the count of nothing.** Two pass a zone in the same call;
+   one reads `$_POST['startDateTime']` and takes date parts only, which a moved
+   hour cannot change (now `ALLOWED` with that reason). And **two that DO do it
+   are missing**, because they pull the column into a variable first — which the
+   gate's own header says it cannot see: `calendar/zoom-create.php`, whose value
+   is what is sent to Zoom as `start_time`, and `_core/Newsletter.php`. **A
+   stated blind spot is a place to go looking, not a place to stop** — the
+   second time that lesson was needed in this package.
+5. A `<?=` block FOLLOWING a `<?php` block was **invisible** to the gate, which
+   looked for `<?php` first and `<?=` only as a fallback. No live instance, but
+   `<?=` is ordinary PHP and nothing forbids it.
+6. The gate's own header said **"two do today"** where six do — the wrong answer
+   in the one place that defines the rule.
+
+**Do not read the length of the backlog as the size of the work, and count every
+figure here from the command.** The comment split was stated as 123 of 486 in
+six places and is **125**, so 361 carry none — the fifth wrong count in this
+package, in the paragraph whose own rule is "run the command, read its answer,
+paste its answer, in that order".
 
 ## Gating a feature is a CAPABILITY, never a hard-coded role (the owner, 3 November 2026 — D-017)
 

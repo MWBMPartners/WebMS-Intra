@@ -71,9 +71,16 @@ switched off (#483)
   * **A `DATETIME` whose comment does NOT say which kind of value it holds.**
     A `DATETIME` that declares itself a WALL-CLOCK reading in its own column
     comment IS swept, exactly like a `TIME` column, because the schema has then
-    said the thing that makes the question answerable. Two do today
-    (`tblResourceBooking.startAt` and `endAt`, migration 252). Of the 486
-    time-shaped columns in the schema, 363 carry no comment at all, so for most
+    said the thing that makes the question answerable. **SIX do today**, and
+    an earlier version of this paragraph said two -- naming only the pair
+    migration 252 declared and omitting the four the package's own backlog is
+    about, which is the wrong answer in the one place that defines the rule.
+    They are `tblResourceBooking.startAt` and `endAt` (migration 252),
+    `tblEvents.startDateTime` and `endDateTime`, and `tblEventSnapshots`'
+    `snapStart` and `snapEnd`. The authoritative list is
+    `clock_wall_clock_columns.pinned.txt`, which is pinned for the reason given
+    beside `PIN_FILE`; do not count them from this prose. Of the 486
+    time-shaped columns in the schema, 361 carry no comment at all, so for most
     of them the question is still open -- that is the bulk of #777.
 
   * **`DATETIME` and `DATE` columns that say nothing.** A `DATETIME` may hold a
@@ -192,12 +199,30 @@ CORRECT_WITH_DATE_AND_ZONE = re.compile(
 )
 
 
-def has_a_zone_argument(call: str) -> bool:
+# ⚠️ THE CONSTRUCTOR FORM IS EQUALLY CORRECT, AND THIS CHECK USED TO REFUSE
+#    IT. `new DateTimeImmutable($date . ' ' . $time, $tz)` gives the reading a
+#    date and a zone in one call, exactly as the `createFromFormat` form does,
+#    and only the latter was recognised -- so the gate reported CORRECT code
+#    and told its author to rewrite it or add the file to ALLOWED. Three live
+#    files use that spelling (`calendar/event-attendance.php`,
+#    `calendar/event.php`, `_core/Venues.php`), and two of them went into the
+#    part-two backlog as work to do because of it, which is also what made the
+#    "28 files" count wrong. **A check that cries wolf gets switched off
+#    (#483)**, and this one was crying wolf and miscounting its own backlog in
+#    one breath.
+CONSTRUCTOR_CALL = re.compile(r"new\s+\\?DateTime(?:Immutable)?\s*\(")
+
+
+def has_a_zone_argument(call: str, wanted: int = 2) -> bool:
     """
     Whether a `createFromFormat(` call hands over a third argument.
 
     Counted at the call's own bracket depth: a comma inside the format string
     or inside the date expression's own brackets is not an argument separator.
+
+    `wanted` is how many commas mean the zone is handed over:
+      * 2 for `createFromFormat(format, value, zone)`
+      * 1 for `new DateTimeImmutable(value, zone)` -- no format string in front
     """
     depth = 0
     commas = 0
@@ -225,12 +250,28 @@ def has_a_zone_argument(call: str) -> bool:
         elif ch == "," and depth == 1:
             commas += 1
         i += 1
-    return commas >= 2
+    return commas >= wanted
 
 # 📁 Places where this is RIGHT, each with its reason. Fails both ways: an entry
 #    that no longer does it fails too, because an allow-list that has stopped
 #    describing the code is how the migration harness's exceptions went stale.
-ALLOWED: dict[str, str] = {}
+ALLOWED: dict[str, str] = {
+    # ⚠️ A LOCAL VARIABLE MAY SHARE A COLUMN'S NAME, and this check matches a
+    #    NAME. `$startDateTime` here is `trim($_POST['startDateTime'] ?? '')`
+    #    (line 93) -- a value somebody typed into the form, never read from
+    #    `tblEvents` -- so the rule about wall-clock columns does not apply to
+    #    it at all.
+    #
+    #    And all four conversions extract only a DATE PART (`'Y-m-d'`, `'j'`,
+    #    `'n'`), which a moved hour cannot change: on 29 March 2026 a posted
+    #    `01:30` becomes `02:30`, the same day, month and year. So there is
+    #    nothing to fix, which is why this is ALLOWED rather than on the
+    #    part-two list. It was ON that list until round 4 of #777 pointed out
+    #    that a backlog entry asserts there is work to do.
+    os.path.join("web", "_apps", "calendar", "manage", "save.php"):
+        "$startDateTime is $_POST['startDateTime'], not a column read, and every "
+        "conversion of it takes a date part only, which a moved hour cannot change.",
+}
 
 # ── The backlog, one path per line, in a file beside this one ──────────────
 # Four `DATETIME` columns declared themselves WALL-CLOCK readings long before
@@ -243,7 +284,72 @@ ALLOWED: dict[str, str] = {}
 # either direction. `--strict` fails while it holds anything at all, which is
 # how the backlog is made visible rather than permanent (the
 # `site_aware_addresses_pending.txt` pattern, #536).
+#
+# ⚠️ AND NOTHING RUNS `--strict`, which is as designed but must not be assumed
+#    otherwise. `pr-security.yml` runs this check with no arguments, and
+#    `.githooks/pre-push` globs the folder with no arguments, so the
+#    backlog-is-empty mode never fires by itself. It is there for the person
+#    who finishes part two to run once, as the proof that it IS finished.
 PENDING_FILE = os.path.join("tools", "audit-checks", "clock_wall_clock_datetime_pending.txt")
+
+
+# ── The wall-clock `DATETIME` columns, and why the SET is pinned ───────────
+# ⚠️ WITHOUT THE PIN, ROUND 3's WHOLE FIX RESTS ON AN ENGLISH WORD IN A COMMENT
+#    THAT NOTHING WATCHES. Planted: rewording ONLY
+#    `tblResourceBooking.startAt`/`endAt`'s comment from "WALL-CLOCK local to
+#    the organisation" to "Local clock reading for the organisation" -- a
+#    plausible documentation tidy -- AND putting the old fault back into
+#    `my-bookings.php` left EVERY check green, this one included, while the
+#    column count silently fell from 17 to 15 and the three reader pages lost
+#    their only guard.
+#
+#    The remedy is the one this repository settled on in #485 and #763 after
+#    four and six rounds of cleverer patterns: PIN THE SET, and regenerate the
+#    pin with an explicit `--repin` so a change is a visible act rather than a
+#    side effect. Changing a column's comment is fine; doing it without
+#    noticing that a guard reads it is not.
+#
+#    What the pin does NOT do, said plainly: it pins the NAMES, not the
+#    comments. A renamed column fails here, and a column whose comment stops
+#    saying WALL-CLOCK fails here. A column whose comment is reworded but still
+#    says WALL-CLOCK passes, which is right -- the word is the contract.
+PIN_FILE = os.path.join("tools", "audit-checks", "clock_wall_clock_columns.pinned.txt")
+
+
+def wall_clock_datetime_columns(schema: str) -> list[str]:
+    """
+    Every `DATETIME` whose own column comment declares it a WALL-CLOCK reading.
+
+    `TIME` is unambiguous -- there is no such thing as a `TIME` column holding
+    a moment -- which is why the sweep ignores a `DATETIME` that says nothing.
+    A `DATETIME` that SAYS it holds a reading from a clock is as unambiguous as
+    a `TIME` column, so it belongs in the sweep.
+    """
+    found = []
+    for match in re.finditer(
+        r"`([A-Za-z0-9_]+)`\s+DATETIME\b[^,\n]*?COMMENT\s+'([^']*)'", schema
+    ):
+        if "WALL-CLOCK" not in match.group(2).upper():
+            continue
+        name = match.group(1)
+        if name not in found:
+            found.append(name)
+    return found
+
+
+def pinned_wall_clock(root: str) -> list[str] | None:
+    """The recorded set, or None when the file is not there."""
+    path = os.path.join(root, PIN_FILE)
+    if os.path.isfile(path) is False:
+        return None
+    out = []
+    with open(path, "r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if line == "" or line.startswith("#"):
+                continue
+            out.append(line)
+    return out
 
 
 def pending_list(root: str) -> list[str]:
@@ -292,45 +398,36 @@ def clock_columns(schema: str) -> list[str]:
         if name not in found:
             found.append(name)
 
-    # ── A `DATETIME` that SAYS it holds a wall-clock reading ────────────────
-    # `TIME` is unambiguous; `DATETIME` is not, which is why the paragraph
-    # above excludes it. But a `DATETIME` whose own comment declares it a
-    # WALL-CLOCK reading is as unambiguous as a `TIME` column -- the schema has
-    # said which kind of value it holds -- so it belongs here.
-    #
-    # ⚠️ THIS IS WHY IT IS READ FROM THE COMMENT AND NOT FROM A LIST. The three
-    #    pages that show a resource booking were fixed in `61eebfc` and guarded
-    #    by NOTHING: `tblResourceBooking.startAt` is a `DATETIME`, so the sweep
-    #    above never looked at it, and the behavioural test drives `I18n`
-    #    directly without touching a page. Planted, putting
-    #    `date('D j M, H:i', strtotime($r['startAt']))` back into
-    #    `my-bookings.php` left all 65 audit scripts and the clock test GREEN.
-    #
-    #    A list of two names typed here would have closed that hole and gone
-    #    stale the next time somebody declared such a column (#706's lesson).
-    #    Declaring it in the schema is the thing the next person does anyway,
-    #    and it is also the only place the fact is useful to a reader of the
-    #    SQL. Migration 252 declares the first two.
-    for match in re.finditer(
-        r"`([A-Za-z0-9_]+)`\s+DATETIME\b[^,\n]*?COMMENT\s+'([^']*)'", schema
-    ):
-        if "WALL-CLOCK" not in match.group(2).upper():
-            continue
-        name = match.group(1)
+    # The wall-clock `DATETIME` columns are read by their own function above,
+    # so the SET can be named and pinned -- see PIN_FILE and finding 2 of
+    # round 4.
+    for name in wall_clock_datetime_columns(schema):
         if name not in found:
             found.append(name)
     return found
 
 
 def php_only(text: str) -> str:
-    """Everything inside `<?php ... ?>`, with the rest blanked."""
+    """Everything inside `<?php ... ?>` or `<?= ... ?>`, with the rest blanked."""
     out = []
     i = 0
     n = len(text)
     while i < n:
-        start = text.find("<?php", i)
-        if start == -1:
-            start = text.find("<?=", i)
+        # ⚠️ THE EARLIEST OF THE TWO, NEVER `<?php` FIRST AND `<?=` AS A
+        #    FALLBACK. The old code looked for `<?php` and only tried `<?=`
+        #    when no `<?php` remained, so EVERY short-echo block followed
+        #    anywhere later in the file by a `<?php` block was blanked.
+        #    Planted and measured: a `<?= date('H:i', strtotime(
+        #    $r['sessionTime'])) ?>` line between two `<?php` blocks left this
+        #    check green, with `'strtotime' in php_only(raw)` False.
+        #
+        #    No live instance today -- `grep -rl '<?=' web/_apps web/_core`
+        #    answers one file and that one is inside a docblock -- so this was
+        #    a hole in the guard rather than a fault on a page. But `<?=` is
+        #    ordinary PHP and nothing in the house rules forbids it, so the
+        #    first page written that way would have been unguarded.
+        candidates = [p for p in (text.find("<?php", i), text.find("<?=", i)) if p != -1]
+        start = min(candidates) if len(candidates) > 0 else -1
         if start == -1:
             out.append("".join(c if c == "\n" else " " for c in text[i:]))
             break
@@ -396,7 +493,8 @@ def main() -> int:
         print(f"FAIL: {SCHEMA} is not there. This check cannot run.")
         return 1
     with open(schema_path, "r", encoding="utf-8", errors="replace") as handle:
-        columns = clock_columns(handle.read())
+        schema_text = handle.read()
+    columns = clock_columns(schema_text)
     if len(columns) == 0:
         print(
             "FAIL: the schema declares no TIME column at all, which cannot be "
@@ -408,6 +506,9 @@ def main() -> int:
     # A column name, then a moment function within the same expression, in
     # either order: `strtotime($x['sessionTime'])` and
     # `$sess['sessionTime']` passed to `new DateTime(...)`.
+    wall_clock = set(wall_clock_datetime_columns(schema_text))
+    # The matched column name is CAPTURED, because the backlog is forgiven per
+    # COLUMN and not per file -- see finding 1 of round 4 below.
     names = "|".join(re.escape(c) for c in columns)
     # ⚠️ NO NEWLINE, AND THAT IS THE WHOLE OF FINDING 3. `[^;]` blocks a
     #    semicolon but not a line break, so the search walked out of the call
@@ -422,7 +523,7 @@ def main() -> int:
     #    A call is also not 200 characters of anything: it stops at the line it
     #    is on, and at the closing bracket or a comma that ends its argument.
     pattern = re.compile(
-        MOMENT_FUNCTIONS + r"\s*\([^;\n]{0,200}?\b(?:" + names + r")\b",
+        MOMENT_FUNCTIONS + r"\s*\([^;\n]{0,200}?\b(" + names + r")\b",
         re.IGNORECASE,
     )
 
@@ -450,22 +551,54 @@ def main() -> int:
                 # Exempt only when BOTH are true: the format string carries a
                 # date part AND a zone is handed over. The whole call is needed
                 # to see the third argument, not just the matched prefix.
+                whole = code[found.start():found.start() + 400]
                 if CORRECT_WITH_DATE_AND_ZONE.search(found.group(0)) is not None:
-                    whole = code[found.start():found.start() + 400]
-                    if has_a_zone_argument(whole) is True:
+                    if has_a_zone_argument(whole, 2) is True:
                         continue
-                hits.append(code[:found.start()].count("\n") + 1)
+                # The constructor form is correct on the same terms: a value
+                # and a zone in one call. ONE comma, because there is no format
+                # string in front of it.
+                if CONSTRUCTOR_CALL.match(found.group(0)) is not None:
+                    if has_a_zone_argument(whole, 1) is True:
+                        continue
+                hits.append((code[:found.start()].count("\n") + 1, found.group(1)))
             if len(hits) == 0:
                 continue
             if relative in ALLOWED:
                 seen_allowed.add(relative)
                 continue
+            # ── The backlog forgives a COLUMN, never a FILE ────────────────
+            # ⚠️ IT USED TO FORGIVE THE FILE, WHICH SWITCHED PART ONE'S OWN
+            #    RULE OFF IN 28 OF 912 FILES. Planted: one extra line in
+            #    `calendar/event.php`, a listed file --
+            #    `date('g:i A', strtotime($event['meetingTime']))`, a brand-new
+            #    part-ONE fault on a `TIME` column -- left this check GREEN
+            #    with its output unchanged. Two of the 28 already handle `TIME`
+            #    columns (`attendance/record.php`, and `venues/booking.php`,
+            #    which is a booking form with four of them); both are correct
+            #    today, so nobody was shown a wrong hour, but they had left the
+            #    guard entirely.
+            #
+            #    The pending file's own header promised "a file not on it that
+            #    does this fails the check, so the hole closes behind us" --
+            #    the #645 shape, a note stating the guarantee the code had
+            #    forgotten to implement, written in the same commit by the same
+            #    hand.
+            #
+            #    So a hit is forgiven only when the COLUMN it matched is one of
+            #    the wall-clock `DATETIME` columns the backlog is about. A
+            #    `TIME`-column hit in a listed file still fails.
             if relative in pending:
-                seen_pending.add(relative)
-                continue
+                forgiven = [h for h in hits if h[1] in wall_clock]
+                hits = [h for h in hits if h[1] not in wall_clock]
+                if len(forgiven) > 0:
+                    seen_pending.add(relative)
+                if len(hits) == 0:
+                    continue
             problems.append(
                 f"{relative} hands a clock-reading column to a moment function "
-                f"on line(s) {', '.join(str(h) for h in hits)}.\n"
+                f"on line(s) "
+                f"{', '.join(str(h[0]) + ' (' + h[1] + ')' for h in hits)}.\n"
                 f"       A `TIME` column holds a reading from a clock, and a "
                 f"time on a clock is not a point in history until something "
                 f"gives it a date AND a zone. `strtotime('01:30')` gives it "
@@ -501,6 +634,52 @@ def main() -> int:
                 f"it hides how much is really left."
             )
 
+    # ── The pinned set of wall-clock columns (finding 2 of round 4) ───────
+    pin_path = os.path.join(root, PIN_FILE)
+    found_wall = sorted(wall_clock)
+    if "--repin" in sys.argv:
+        with open(pin_path, "w", encoding="utf-8") as handle:
+            handle.write(
+                "# The `DATETIME` columns whose own comment in full_schema.sql\n"
+                "# declares them WALL-CLOCK readings, as\n"
+                "# check_clock_time_not_a_moment.py reads them.\n"
+                "#\n"
+                "# Regenerated ONLY by `--repin`, deliberately, so that changing\n"
+                "# which columns a guard covers is a visible act and not a side\n"
+                "# effect of rewording a comment. Round 4 of #777 measured the\n"
+                "# alternative: rewording two comments took the set from 6 to 4\n"
+                "# and every check stayed green with a real fault live.\n"
+                "#\n"
+                "# One name per line.\n"
+            )
+            for name in found_wall:
+                handle.write(name + "\n")
+        print(f"Repinned {len(found_wall)} wall-clock column(s) into {PIN_FILE}.")
+        return 0
+
+    pinned = pinned_wall_clock(root)
+    if pinned is None:
+        problems.append(
+            f"{PIN_FILE} is not there, so nothing pins WHICH `DATETIME` columns "
+            f"this check sweeps -- and that set is read from an English word in "
+            f"a schema comment. Run this check with --repin to record it."
+        )
+    elif sorted(pinned) != found_wall:
+        gone = [c for c in sorted(pinned) if c not in found_wall]
+        extra = [c for c in found_wall if c not in pinned]
+        problems.append(
+            f"the wall-clock `DATETIME` columns have changed.\n"
+            f"       pinned:  {', '.join(sorted(pinned)) or '(none)'}\n"
+            f"       schema:  {', '.join(found_wall) or '(none)'}\n"
+            + (f"       no longer declared WALL-CLOCK: {', '.join(gone)}\n" if gone else "")
+            + (f"       newly declared WALL-CLOCK: {', '.join(extra)}\n" if extra else "")
+            + f"       A column dropping OUT of this set silently removes this "
+              f"check's only guard over every page that reads it -- measured in "
+              f"round 4 of #777, where rewording two comments left every check "
+              f"green with a real fault live. If the change is intended, run "
+              f"this check with --repin, which is meant to show up in a diff."
+        )
+
     if "--strict" in sys.argv and len(pending) > 0:
         problems.append(
             f"{len(pending)} file(s) are still on the #777 part-two list in "
@@ -526,7 +705,12 @@ def main() -> int:
     else:
         with open(formatter_path, "r", encoding="utf-8", errors="replace") as handle:
             body = blank_comments(handle.read())
-        at = body.find("function " + FORMATTER_NAME)
+        # ⚠️ THE BRACKET IS NOT COSMETIC. Without it, a function added above
+        #    this one whose name merely STARTS with the same text -- say
+        #    `formatClockTimeRange()` -- would be found first and this check
+        #    would pin the WRONG body, reporting a clean result about a
+        #    function it had not read.
+        at = body.find("function " + FORMATTER_NAME + "(")
         if at == -1:
             problems.append(
                 f"{FORMATTER_FILE} no longer defines {FORMATTER_NAME}(). It is "
@@ -597,10 +781,12 @@ def main() -> int:
         "and every `DATETIME` whose own comment declares it a WALL-CLOCK "
         "reading -- so a new one is covered the day it is declared, without "
         "anybody remembering to add it here.\n"
-        "   It does NOT yet mean every wall-clock column is read correctly: 28 "
-        "files are listed in the file beside this one as #777 part two's "
-        "backlog, and this run accepted them. What it does mean is that no "
-        "TWENTY-NINTH can appear.\n"
+        f"   It does NOT yet mean every wall-clock column is read correctly: "
+        f"{len(pending)} file(s) are listed in {PENDING_FILE} as #777 part "
+        f"two's backlog, and this run accepted those four columns in those "
+        f"files -- nothing else. The number is printed rather than written "
+        f"down, because the first version of this sentence said 28 and would "
+        f"have become untrue the day part two fixed one file.\n"
         "   It canNOT see a reading "
         "pulled into a variable several lines earlier and converted there -- that "
         "stays a question for a person."

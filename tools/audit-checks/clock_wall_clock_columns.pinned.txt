@@ -1,0 +1,17 @@
+# The `DATETIME` columns whose own comment in full_schema.sql
+# declares them WALL-CLOCK readings, as
+# check_clock_time_not_a_moment.py reads them.
+#
+# Regenerated ONLY by `--repin`, deliberately, so that changing
+# which columns a guard covers is a visible act and not a side
+# effect of rewording a comment. Round 4 of #777 measured the
+# alternative: rewording two comments took the set from 6 to 4
+# and every check stayed green with a real fault live.
+#
+# One name per line.
+endAt
+endDateTime
+snapEnd
+snapStart
+startAt
+startDateTime

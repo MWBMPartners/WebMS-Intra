@@ -772,10 +772,38 @@ class I18n
      *    zone at all. The same reasoning is written out beside
      *    `shiftWallClock()` in `_apps/resources/book.php`.
      *
+     * ⚠️ AND `FeedAdmin::showWallClock()` GOT HERE FIRST, which round 4 of
+     *    #777 pointed out and this docblock did not mention. It does the same
+     *    UTC trick -- `createFromFormat('!Y-m-d H:i:s', $wall, UTC)` -- and
+     *    has seven live callers. It is NOT a duplicate to delete: it also
+     *    names the event's own zone when that differs from the
+     *    organisation's, and handles an all-day event, so it is a richer thing
+     *    that ought to be built ON this rather than beside it. Two helpers for
+     *    one rule is #768's shape -- five copies of one rule, no two agreeing,
+     *    each new page copying the nearest -- so "which is the one place?"
+     *    must have ONE answer before part two converts 27 files and somebody
+     *    writes a third. Tracked as #784. Until it is settled: use
+     *    `showWallClock()` where an event's own zone matters, and this where
+     *    it does not.
+     *
+     * ⚠️ DO NOT PASS A ZONE-BEARING FORMAT CHARACTER. Because the moment is
+     *    built in UTC, `'c'`, `'r'`, `'T'`, `'P'`, `'O'` and `'U'` would each
+     *    assert that this organisation's wall-clock reading IS UTC -- the very
+     *    untruth this method exists to avoid, stated more confidently than the
+     *    code it replaced ever did. Nothing does it today (every caller uses
+     *    `'D j M, H:i'`, `'H:i'` or `'D j M Y, H:i'`), but #777 part two's
+     *    backlog includes `_apps/widget/countdown-json.php`, which emits
+     *    `date('c', strtotime($nextEvent['startDateTime']))` into a PUBLIC
+     *    JSON feed. Converting that one to this method is the obvious move and
+     *    the wrong one: a value that needs an offset needs a real zone, which
+     *    for an event is `tblEvents.timezone`.
+     *
      * @param string|null $wallClock `Y-m-d H:i:s`, or anything else, which
      *                               comes back trimmed and unchanged rather
      *                               than guessed at.
      * @param string      $format    A `date()` format, applied to the reading.
+     *                               Date and clock characters only -- see the
+     *                               warning above.
      *
      * @return string The words, or '' for nothing.
      */

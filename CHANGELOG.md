@@ -38,10 +38,20 @@ automatic check reads that.
 
 Reading those declarations found **four more columns that have said the same
 thing since long before this work** — an event's start and end, and the two
-copies kept in an event snapshot — and **28 files that still treat them as
-moments.** Those are listed rather than fixed: an event's time zone need not be
-the organisation's, so each needs a person to look at it, and that is the next
-part of this work. Nothing new may join the list.
+copies kept in an event snapshot — and **25 files that still treat them as
+moments, with at least two more doing it in a form the automatic check cannot
+see.** Those are listed rather than fixed: an event's time zone need not be the
+organisation's, so each needs a person to look at it, and that is the next part
+of this work. Nothing new may join the list.
+
+**The first count given for that was 28, and it was the count of nothing.** The
+fourth review of this work re-derived it: two of the 28 were already correct
+(they hand over a time zone in the same breath, which the check had not been
+taught to recognise — so it was reporting correct code as a fault), and one does
+not read the column at all. Two files that really do it were missing, because
+they copy the value into a variable first, which the check says plainly it
+cannot follow. Both are now named in the list's own notes. The length of that
+list is not the size of the work, and it says so.
 
 One more was raised rather than fixed (#783): two queries decide which bookings
 are still to come by comparing them with the database server's own clock, which

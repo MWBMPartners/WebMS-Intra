@@ -3,32 +3,69 @@
 # Four DATETIME columns in `full_schema.sql` already declared themselves
 # WALL-CLOCK readings before #777 began, and nothing read that declaration:
 #
-#     tblEvents.startDateTime   "Event start — wall-clock local (venue/site local); NOT UTC"
-#     tblEvents.endDateTime     "Event end — wall-clock local (venue/site local); NOT UTC"
-#     tblEventSnapshots.snapStart  "Wall-clock time copied from startDateTime, in snapTimezone. NOT a UTC moment"
-#     tblEventSnapshots.snapEnd    "Wall-clock time copied from endDateTime, in snapTimezone. NOT a UTC moment"
+#     tblEvents.startDateTime      "Event start - wall-clock local (venue/site local); NOT UTC"
+#     tblEvents.endDateTime        "Event end - wall-clock local (venue/site local); NOT UTC"
+#     tblEventSnapshots.snapStart  "Wall-clock time copied from startDateTime, in snapTimezone. NOT a UTC moment."
+#     tblEventSnapshots.snapEnd    "Wall-clock time copied from endDateTime, in snapTimezone. NOT a UTC moment."
 #
-# The files below put one of them through `strtotime()` or a DateTime
-# constructor. An event's zone is `tblEvents.timezone`, which may not be the
-# organisation's at all, so these are suspect twice over: wrong zone for an
-# event in another country, and wrong hour on the morning the clocks go
-# forward even when the zone is right.
+# Each file below hands one of them to `strtotime()` or a DateTime constructor
+# with no zone. An event's zone is `tblEvents.timezone`, which need not be the
+# organisation's at all, so these are suspect twice over: the wrong zone for an
+# event in another country, and the wrong hour on the morning the clocks go
+# forward even where the zone is right.
 #
-# ⚠️ EACH NEEDS A PERSON. Some of these may be correct -- a few pass a zone
-#    explicitly a line or two later, which this check cannot see (its own
-#    header says so). Fixing them is #777 part two, which is also where the
-#    other 363 uncommented time-shaped columns get their answer. They are
+# ⚠️ EACH NEEDS A PERSON. Fixing them is #777 part two, which is also where the
+#    other 361 uncommented time-shaped columns get their answer. They are
 #    listed here rather than fixed in part one because part one was about the
-#    `TIME` columns, and a sweep that quietly widened to 28 files would be a
+#    `TIME` columns, and a sweep that quietly widened to 25 files would be a
 #    different package wearing part one's name.
 #
-# WHAT THIS LIST IS FOR: nothing NEW may join it. A file not on it that does
-# this fails the check, so the hole closes behind us while the backlog is
-# worked through. `--strict` fails while the list holds anything, and a listed
-# file that has stopped doing it also fails -- so the list cannot go stale in
-# either direction.
+# WHAT THIS LIST IS FOR, AND WHAT IT IS NOT: nothing NEW may join it. A file
+# not on it that does this fails the check. `--strict` fails while the list
+# holds anything, and a listed file that has stopped doing it also fails -- so
+# it cannot go stale in either direction.
 #
-# One path per line. Count them with `grep -vc '^#' <this file>`.
+# ⚠️ IT FORGIVES THESE FOUR COLUMNS IN THESE FILES, AND NOTHING ELSE. Being on
+#    this list does NOT exempt a file from part one's rule: a `TIME`-column
+#    fault in a listed file still fails the check. It used to exempt the whole
+#    FILE, which switched part one's guard off in 28 of 912 files -- planted, a
+#    brand-new `date('g:i A', strtotime($event['meetingTime']))` in
+#    `calendar/event.php` left the check green. Round 4 of #777 found that, and
+#    this very paragraph used to promise the opposite.
+#
+# ── THE COUNT, AND WHY IT IS NOT 28 ───────────────────────────────────────
+# The first version of this list said 28, in six documents. Round 4 re-derived
+# it by printing the matched line for each entry, and 28 was not the count of
+# anything:
+#
+#   * `calendar/event-attendance.php` and `events/api/create.php` pass a zone
+#     IN THE SAME CALL, via `new DateTimeImmutable($value, $zone)` -- the
+#     correct construction. The check recognised only the `createFromFormat`
+#     spelling of it, so it reported them as faults AND listed them as work.
+#     That is fixed; both are gone from this list.
+#   * `calendar/manage/save.php` reads `$_POST['startDateTime']`, not a column,
+#     and takes only date parts from it. It is in the check's ALLOWED list now,
+#     with that reason, because a line here asserts there is work to do.
+#
+# ── AND TWO THAT ARE MISSING, because the check cannot see them ───────────
+# The check's own header says it cannot see a reading pulled into a variable
+# several lines earlier and converted there. Round 4 went looking in exactly
+# that blind spot and found two:
+#
+#     web/_apps/calendar/zoom-create.php  -- $start = (string) $event['startDateTime']; (86)
+#                                            then strtotime($start) at 94, 95 and 104,
+#                                            no zone, and the result is what is sent to
+#                                            Zoom as `start_time`.
+#     web/_core/Newsletter.php            -- $when = (string) $it['startDateTime']; (682)
+#                                            then date('D j M, H:i', strtotime($when)) (683),
+#                                            in a newsletter's "Upcoming events" block.
+#
+# They are NAMED HERE RATHER THAN LISTED, because a listed file with no match
+# fails the stale-entry rule. Part two must fix them too; do not read the
+# length of this list as the size of the work.
+#
+# One path per line. Count them with `grep -vc '^#' <this file>` -- never from
+# a number written in prose, which has been wrong once already.
 web/_apps/account/my-volunteering.php
 web/_apps/admin/calendar/moderation.php
 web/_apps/admin/calendar/reminders.php
@@ -39,12 +76,10 @@ web/_apps/admin/reports/denominational.php
 web/_apps/assets/item.php
 web/_apps/attendance/record.php
 web/_apps/calendar/anon-checkin.php
-web/_apps/calendar/event-attendance.php
 web/_apps/calendar/event-hub.php
 web/_apps/calendar/event-invites-send.php
 web/_apps/calendar/event.php
 web/_apps/calendar/manage/import.php
-web/_apps/calendar/manage/save.php
 web/_apps/calendar/my-events.php
 web/_apps/calendar/public-landing.php
 web/_apps/calendar/rsvp-by-link.php
@@ -54,6 +89,5 @@ web/_apps/calendar/views/month.php
 web/_apps/calendar/views/photo.php
 web/_apps/calendar/views/year.php
 web/_apps/calendar/widget.php
-web/_apps/events/api/create.php
 web/_apps/venues/booking.php
 web/_apps/widget/countdown-json.php

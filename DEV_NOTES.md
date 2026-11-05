@@ -18044,14 +18044,17 @@ be told from a sweep that stopped early.
 | `attendance/api/create.php`, `update.php` | **WRONG** — `createFromFormat('H:i', …)` with no date and no zone; fixed |
 | `CONCAT()` of a date and a time in SQL | **NONE** — established with `grep -rniE "CONCAT\([^)]*(Date\|date)[^)]*(Time\|time)" web/_apps web/_core` |
 | `resources/my-bookings.php`, `approvals.php`, `resource.php` | **WRONG, and my own fix made it visible** — fixed; see below |
-| `tblEvents.startDateTime`/`endDateTime`, `tblEventSnapshots.snapStart`/`snapEnd` | **28 files put a declared wall-clock column through a moment function** — listed, not fixed; #777 part two |
+| `tblEvents.startDateTime`/`endDateTime`, `tblEventSnapshots.snapStart`/`snapEnd` | **25 files put a declared wall-clock column through a moment function, and at least 2 more do it where the check cannot see** — listed, not fixed; #777 part two |
+| `calendar/manage/save.php` | **RIGHT** — `$startDateTime` is `$_POST['startDateTime']`, not a column, and only date parts are taken from it |
+| `calendar/event-attendance.php`, `events/api/create.php` | **RIGHT** — a value and a zone in one `new DateTimeImmutable(…, $zone)` call |
+| `cron/event-reminders.php` comparing `e.startDateTime` with `UTC_TIMESTAMP()` | **the #783 class, harmless here** — a ±3-day prefilter |
 | `my-bookings.php:30`, `resource.php:60` comparing a wall-clock column with `NOW()` | **WRONG, raised as #783** — not fixed here |
 | `kids/checkin.php:130` | **a moment, so converting is right** — but `checkedInAt` is `DATETIME DEFAULT CURRENT_TIMESTAMP` with **no comment saying whether it is UTC or the server's clock**, which is #777's question 1 unanswered |
 
 ### The scale of what remains, measured rather than guessed
 
     486 time-shaped columns in full_schema.sql (402 DATETIME, 66 DATE, 16 TIME, 2 TIMESTAMP)
-    123 of them carry ANY comment at all
+    125 of them carry ANY comment at all
 
 Established with
 `grep -cE '\`[A-Za-z0-9_]+\` +(DATETIME|TIMESTAMP|DATE|TIME)\b' web/_sql/full_schema.sql`
@@ -18185,6 +18188,144 @@ list fails BOTH ways -- nothing new may join it, and a listed file that has
 stopped doing it also fails -- and `--strict` fails while it holds anything.
 That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
 visible rather than permanent.
+
+### Round 4: eight findings, and two were guards that passed on broken code
+
+Every one of the eight landed in a previous round's fix rather than in the
+build. Two mattered.
+
+**(a) The backlog exempted the FILE, not the column, so part one's own rule was
+switched off in 28 of 912 files.** The pending list skipped a file by path:
+
+    if relative in pending:
+        seen_pending.add(relative)
+        continue
+
+So a file listed for part TWO stopped being checked for part ONE. Planted: one
+extra line in `calendar/event.php`, a listed file —
+`date('g:i A', strtotime($event['meetingTime']))`, a brand-new fault on a `TIME`
+column — left the gate **green with its output unchanged.** Two of the listed
+files already handle `TIME` columns (`attendance/record.php`, and
+`venues/booking.php`, which is a booking form with four of them); both are
+correct today, so nobody was shown a wrong hour, but they had left the guard
+entirely.
+
+**The pending file's own header promised the opposite** — "a file not on it that
+does this fails the check, so the hole closes behind us" — written in the same
+commit, by the same hand, as the code that did not do it. That is the #645
+shape: a note stating the guarantee the code had forgotten to implement. It
+forgives a COLUMN now, so a `TIME`-column fault in a listed file still fails,
+and the matched column name is printed beside each line number.
+
+**(b) Nothing pinned WHICH columns say WALL-CLOCK, so the whole of round 3's fix
+rested on an English word in a comment.** Planted: reword only
+`tblResourceBooking.startAt`/`endAt`'s comment from "WALL-CLOCK local to the
+organisation" to "Local clock reading for the organisation" — a plausible
+documentation tidy — and put the reader fault back into `my-bookings.php`. Every
+check stayed green, this one included, while the column count silently fell from
+17 to 15.
+
+The remedy is the one this repository settled on in #485 and #763 after four and
+six rounds of cleverer patterns respectively: **pin the set**, in
+`clock_wall_clock_columns.pinned.txt`, regenerated only by an explicit
+`--repin`. Changing a column's comment is fine; doing it without noticing that a
+guard reads it is not. The pin covers the NAMES, not the wording — a column
+whose comment is reworded but still says WALL-CLOCK passes, because the word is
+the contract.
+
+Worth recording: the MECHANISM was accidentally pinned all along. Changing the
+gate's own matcher from `"WALL-CLOCK"` to `"WALL CLOCK"` does go red, because
+the 25 listed files then stop tripping and the stale-entry rule fires. **That
+accidental protection disappears the day the backlog is emptied**, which is
+precisely when somebody will be editing these comments.
+
+### The gate refused the correct construction, and that is what made its own count wrong
+
+`CORRECT_WITH_DATE_AND_ZONE` matched `createFromFormat` only. A constructor
+given a date **and** a zone is equally correct by the gate's own stated rule:
+
+    new \DateTimeImmutable($row['sessionDate'] . ' ' . $row['sessionTime'], $tz)
+
+That was reported as a fault, with a message telling its author to rewrite it or
+add the file to `ALLOWED`. Three live files use that spelling
+(`calendar/event-attendance.php`, `calendar/event.php`, `_core/Venues.php`) —
+and **two of them went into the part-two backlog as work to do because of it.**
+So the check was crying wolf and miscounting its own backlog in one breath, and
+under #483 crying wolf is the direction that gets a check switched off.
+
+Both forms are recognised now, by the same `has_a_zone_argument()` with a
+`wanted` comma count — two for `createFromFormat(format, value, zone)`, one for
+`new DateTimeImmutable(value, zone)`.
+
+### "28 files" was the count of nothing, and two real ones were missing
+
+Stated as a measured fact in a commit message, `CHANGELOG.md`, `DEV_NOTES.md`,
+the pending file's header and the handoff. Re-derived by printing the matched
+line for every entry:
+
+  * `calendar/event-attendance.php` and `events/api/create.php` pass a zone in
+    the same call — the correct construction (above). Gone from the list.
+  * `calendar/manage/save.php` reads `$_POST['startDateTime']`, not a column
+    (line 93), and takes only date parts from it (`'Y-m-d'`, `'j'`, `'n'`),
+    which a moved hour cannot change: on 29 March 2026 a posted `01:30` becomes
+    `02:30`, the same day. It is `ALLOWED` now, with that reason, because **a
+    backlog entry asserts there is work to do.** The lesson underneath it:
+    **this check matches a NAME, and a local variable may share a column's
+    name.**
+
+And **two files that really do it were missing**, because they pull the column
+into a variable first — the blind spot the gate's own header describes:
+
+    web/_apps/calendar/zoom-create.php   $start = (string) $event['startDateTime'];  (86)
+                                         strtotime($start) at 94, 95, 104 — no zone,
+                                         and the result is sent to Zoom as `start_time`
+    web/_core/Newsletter.php             $when = (string) $it['startDateTime'];      (682)
+                                         date('D j M, H:i', strtotime($when))        (683)
+
+They are NAMED in the pending file's header rather than listed, because a listed
+file with no match fails the stale-entry rule. **A stated blind spot is a place
+to go looking, not a place to stop** — the second time that exact lesson was
+needed in this one package.
+
+### Two smaller holes in the gate, and a fifth wrong count
+
+`php_only()` looked for `<?php` and tried `<?=` only when no `<?php` remained,
+so **every short-echo block followed anywhere later in the file by a `<?php`
+block was blanked.** Planted and measured: a
+`<?= date('H:i', strtotime($r['sessionTime'])) ?>` line between two `<?php`
+blocks left the check green, with `'strtotime' in php_only(raw)` False. No live
+instance — `grep -rl '<?=' web/_apps web/_core` answers one file and that is
+inside a docblock — so it was a hole in the guard rather than a fault on a page,
+but `<?=` is ordinary PHP. It takes the earliest of the two openers now.
+
+The gate's header said **"two do today"** where six do, naming only the pair
+migration 252 declared and omitting the four its own backlog is about — the
+wrong answer in the one place that defines the rule.
+
+And the comment split was stated as **123 of 486** in six places. The commands:
+
+    grep -cE '`[A-Za-z0-9_]+` +(DATETIME|TIMESTAMP|DATE|TIME)\b' web/_sql/full_schema.sql           # 486
+    grep -cE '`[A-Za-z0-9_]+` +(DATETIME|TIMESTAMP|DATE|TIME)\b.*COMMENT' web/_sql/full_schema.sql  # 125
+
+**125, so 361 carry none.** The fifth wrong count in this package, and it sat in
+the paragraph whose own closing line is "run the command, read its answer, paste
+its answer — in that order". The ordering is the fix; a figure written before
+the command is run is a guess however carefully it is phrased.
+
+### And round 3's correction was not applied to the two standing instruction files
+
+`ca19f73` touched `CHANGELOG.md`, `DEV_NOTES.md`, the gate, the pending file,
+`I18n.php` and two SQL files — and **neither `.claude/CLAUDE.md` nor
+`.OpenAI/CONTEXT.md`**, which both still said the round trip "was only ever
+right because both halves used the same **wrong** zone". That is the untruth
+round 3 corrected everywhere else, left standing in the two files that ARE the
+standing rules. `.claude/CLAUDE.md` was worse: it stated the withdrawn "87
+against 79" figure **and its own correction**, in the same bullet.
+
+**This is the third time in two months that a correction was recorded in one
+place and not applied to the others** (#694 round 3, #485 round 4). Writing the
+correction is not the same as applying it, and the two instruction files are the
+ones most likely to be read by somebody who will not read the commit.
 
 ### Comparing a wall-clock column with `NOW()` (#783)
 

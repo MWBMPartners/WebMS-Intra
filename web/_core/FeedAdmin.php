@@ -2569,6 +2569,10 @@ final class FeedAdmin
      * times rule of 23 September 2026). The event's own zone is named
      * alongside it only when it differs from the organisation's.
      */
+    // ⚠️ `I18n::formatClockDateTime()` (#777) now does the simple half of this
+    //    -- the same UTC build, for a reading with no zone to name. This one
+    //    came first and does more. Two helpers for one rule is #768's shape,
+    //    so the relationship is #784's to settle; do not add a third.
     public static function showWallClock(string $wall, ?string $zone, bool $allDay, \DateTimeZone $orgZone): string
     {
         $moment = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $wall, new \DateTimeZone('UTC'));

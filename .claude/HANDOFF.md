@@ -63,8 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one: round 3 is committed (`ca19f73`) and round 4's check is
-running.** The three rounds so far found, in order: a display fault in four
+**#777 part one: rounds 3 and 4 are done; round 5's check is next.** The three rounds so far found, in order: a display fault in four
 pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
 faults refusing valid input (round 2); three READER faults my own write fix made
 visible, and the fact that those three readers were guarded by nothing (round
@@ -81,8 +80,17 @@ and the bulk of part two. #783 was raised rather than fixed: two queries compare
 a wall-clock column with `NOW()`, the database server's own clock.
 
 **Round 3 reported nine findings and six were lost to a context break** before
-reaching a file. Round 4 is running on the current state instead of guessing at
-them; that is what an independent check is for.
+reaching a file. Round 4 ran on the current state instead of guessing at them,
+and found **eight — every one in a previous round's fix, and two of them guards
+that passed on broken code.** The backlog list exempted the FILE rather than the
+column, so part one's own rule was switched off in 28 of 912 files; and nothing
+pinned WHICH columns declare themselves wall-clock, so rewording two comments
+took the set from six to four with a real fault live and every check green. Both
+are fixed and both plants now go red. The gate was also REFUSING the constructor
+spelling of the correct construction, which is what made its own "28 files"
+count wrong — it is 25, with two more the check cannot see, named in the list's
+header. #784 raised: two helpers now turn a wall-clock reading into words and
+part two needs one answer before it converts 27 files.
 
 #763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
 write and delete stored data, so rounds ran until one was clean. Twelve
@@ -102,7 +110,7 @@ close, not a parser's.
    fixed, a write path that stored the wrong hour, two API validators,
    three readers, `I18n::formatClockTime()` and `formatClockDateTime()` as the
    two formatters, and a hard gate that reads the schema. **What remains is
-   measured: 486 time-shaped columns and only 123 with any comment**, so "does
+   measured: 486 time-shaped columns and only 125 with any comment**, so "does
    this column hold a moment or a clock reading" is unanswered for three
    quarters of them — and **28 named files are already waiting**, in
    `tools/audit-checks/clock_wall_clock_datetime_pending.txt`, for four columns

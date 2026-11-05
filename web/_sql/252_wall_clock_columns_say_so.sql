@@ -26,7 +26,7 @@
 -- says WALL-CLOCK, so a new one is covered the day it is declared.
 --
 -- #777's first question of every stored time is "is this a moment or a time on
--- a clock, and does the column say which?" For 363 of the 486 time-shaped
+-- a clock, and does the column say which?" For 361 of the 486 time-shaped
 -- columns the answer is still no. These two are the first to answer it.
 --
 -- Safe to run twice: `MODIFY COLUMN` sets the comment to the same text, and the
