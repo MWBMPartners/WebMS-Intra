@@ -1397,6 +1397,103 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_translation_text_from_db.py
 
+      # ONE place writes the replacement anti-forgery token into the page, and
+      # it writes every carrier (#768). FIVE separate copies of that rule
+      # existed and no two agreed about how many places a page holds the token:
+      # portal.js wrote the meta tag alone, event-hub-upload.js and
+      # report-builder.js wrote the tag and the form fields, api-docs wrote the
+      # tag, portal-translate.js wrote all three. Each new one had copied the
+      # NEAREST existing version rather than a shared one, so the incomplete
+      # rule spread and the complete one never did - the comments in
+      # report-builder.js and api-docs both name event-hub-upload.js as their
+      # source. The measured cost: on the Host Console, publishing a chat
+      # prompt rotates the token, so pressing "Send 'We're live'" (#612)
+      # afterwards was refused and the press was lost.
+      #
+      # This fails BOTH ways - an unlisted file that writes a carrier, AND a
+      # listed exception that no longer needs to be one. api-docs/index.php is
+      # the single exception because it loads no portal.js, and the check
+      # re-tests the condition that makes that safe rather than trusting the
+      # note beside it.
+      - name: 'One place writes the form token, and writes every carrier (hard gate, #768)'
+        id: one_csrf_writer
+        if: always()
+        run: python3 -I tools/audit-checks/check_one_csrf_writer.py
+
+      # The BEHAVIOURAL half of #768. It is NOT the first test here to drive a
+      # real browser - `tools/layout-audit.mjs` has done so since 30 October
+      # (#569) - but it IS the first wired into a workflow; that one is in
+      # none.
+      #
+      # ⚠️ CHECKING THAT LAST CLAIM NEARLY TURNED IT INTO A FALSE ONE, in a way
+      #    worth knowing. `grep -rln layout-audit .github/workflows/` answers
+      #    THIS FILE - because of the comment you are reading. A search for a
+      #    NAME is answered by any comment mentioning it (#647's shape), and
+      #    the comment had been written minutes earlier.
+      #
+      #    ⚠️ AND THE REMEDY FIRST WRITTEN HERE HAD THE IDENTICAL HOLE, in the
+      #       same breath as describing it: it prescribed
+      #       `... | grep "run:"`, and THIS comment line contains both
+      #       `layout-audit` and `run:`, so it answers one hit - the opposite
+      #       of the claim it was written to support. Drop the comments
+      #       instead, which really does answer nothing:
+      #         grep -rn "layout-audit" .github/workflows/ | grep -v "#"
+      #
+      # The check above reads source; this one loads the real
+      # portal.js, portal-translate.js, event-hub-upload.js and
+      # report-builder.js into Chrome and
+      # asks what they actually do to a page. That distinction is the whole
+      # point: #768's fault was invisible to every HTTP self-test, because the
+      # page SOURCE was correct and only what JavaScript did to it afterwards
+      # was wrong. It is also why #485 ended up pinning a whole script as TEXT
+      # after four rounds of one-edit bypasses - with no way to run the thing,
+      # comparing characters was the only guard left.
+      #
+      # It needs nothing installed beyond node: GitHub's Linux runners carry
+      # Chrome, and node provides a global WebSocket, so the DevTools protocol
+      # needs no package. It serves its own fixture over node's http module, so
+      # it does not need PHP either. If no Chromium-family browser is found it
+      # REFUSES loudly rather than skipping - a browser-only fault guarded by a
+      # test that silently did not run is the #646 shape.
+      # ⚠️ NOTHING HERE HAD EVER PINNED A NODE VERSION - which is NOT the same
+      #    as "the first step that runs node", as an earlier version of this
+      #    comment claimed. `portal-selftests.yml` already runs
+      #    `node --version`, and three self-tests there run a page's script in
+      #    Node. The command quoted for it (`grep -rn setup-node`) proves the
+      #    pinning claim, not the running claim: measuring one thing and
+      #    writing the conclusion about another is the shape #694 round 6
+      #    records.
+      #
+      #    ⚠️ AND THE SENTENCE SAYING SO CITED A LINE NUMBER, two sentences
+      #       before denying that it did - and the number was off by one (573
+      #       is the `if command -v node` guard; `node --version` is on 574).
+      #       Cite by file, which is what the rule actually asks for: line
+      #       numbers move, issue numbers and commit hashes do not.
+      #
+      #    The consequence worth knowing: those self-tests still take the
+      #    runner's default node, so pinning here does not cover them.
+      #
+      #    The test needs a global `WebSocket`. On a runner defaulting to an
+      #    older node it would throw `WebSocket is not defined` and this step
+      #    would be RED on every pull request - a new check that fails for its
+      #    own reasons gets ignored or switched off (#483). `22` is chosen as
+      #    the oldest line that provides it. `tools/layout-audit.mjs`, which
+      #    has driven a browser the same way since 30 October, already records
+      #    node 22 as where that global arrived - so this is not an invention,
+      #    though it was not re-measured here (only v26.11.1 was). If the
+      #    resolved 22.x somehow lacks it, the test refuses loudly and names
+      #    the reason rather than dying obscurely.
+      - name: 'Node for the browser test (#768)'
+        if: always()
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 'The form token really reaches every carrier, in a browser (#768)'
+        id: csrf_carriers_browser
+        if: always()
+        run: node tools/csrf-carriers-selftest.mjs
+
       # The test OF both checks above (#641, #646). Adding `and False` to any of
       # their conditions leaves the check itself green - measured on eight
       # separate conditions, not supposed. This plants 26 faults into the real
@@ -1695,6 +1792,8 @@ jobs:
             echo "- The free text a person decides about is the agreed seven: ${{ steps.erasure_review_items.outcome }} (hard gate, #724)"
             echo "- bind_param() tells the database the right number of values: ${{ steps.bind_param_arity.outcome }} (hard gate, #730)"
             echo "- Every key a fresh install declares, an upgrade also gets: ${{ steps.fk_references_unique_key.outcome }} (hard gate, #747)"
+            echo "- One place writes the form token, and writes every carrier: ${{ steps.one_csrf_writer.outcome }} (hard gate, #768)"
+            echo "- The form token really reaches every carrier, in a browser: ${{ steps.csrf_carriers_browser.outcome }} (#768)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

@@ -206,6 +206,27 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
         return meta !== null ? (meta.getAttribute('content') || '') : '';
     }
 
+    /* ⚠️ A STATED EXCEPTION TO "ONE PLACE WRITES THE TOKEN" (#768), NOT AN
+          OVERSIGHT, AND NOT A COPY LEFT BEHIND.
+
+          Everywhere else on the portal, `Portal.writeCsrf()` in portal.js is
+          the one place the token's carriers are written. This page cannot ask
+          it: `api-docs/index.php` is one of the three addresses the web server
+          answers directly, it draws its own <head>, and it loads NO portal.js.
+          Loading portal.js here only to reach one function would pull the
+          whole portal script stack onto a page that is otherwise just Swagger
+          UI.
+
+          It is safe because this page has exactly ONE carrier — checked, not
+          assumed: it holds no `csrf_token` form field and no `[data-csrf]`
+          element, so the meta tag is the whole of it, and the one-line write
+          below is complete FOR THIS PAGE.
+
+          **If this page ever grows a form or a [data-csrf] element, this
+          function becomes wrong and silently so.** `check_one_csrf_writer.py`
+          names this file as the single exception and re-checks that condition
+          on every run, so growing one fails the gate rather than passing
+          quietly. */
     function storeToken(token) {
         if (!token) { return; }
         var meta = document.querySelector('meta[name="csrf-token"]');

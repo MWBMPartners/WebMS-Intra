@@ -105,46 +105,52 @@
         return (given !== null && given !== '') ? given : fallback;
     }
 
-    /* Hand the replacement token to the WHOLE PAGE: every control, and every
-       ordinary form on it. See the file comment for the measured cost of not
-       doing this. Returns true when a replacement really arrived, so the
-       caller can tell "refused, and we have no new token" apart from
-       "refused, and we are still in step". */
+    /* Hand the replacement token to the WHOLE PAGE. Returns true when a
+       replacement really arrived, so the caller can tell "refused, and we have
+       no new token" apart from "refused, and we are still in step".
+
+       ⚠️ THE WRITING IS NOT DONE HERE ANY MORE (#768). This file used to write
+          all three carriers itself, and that was the THIRD copy of the rule —
+          after `portal.js`'s `rememberCsrf()`, which wrote only the meta tag,
+          and `event-hub-upload.js`'s `syncCsrf()`, which wrote the tag and the
+          form fields but not `[data-csrf]`. Three copies, three different
+          ideas of how many carriers a page has. `Portal.writeCsrf()` is the
+          one place now; it writes every `[data-csrf]` element generically, so
+          the control's own attribute is covered without this file knowing.
+          **If a carrier is ever missed again, fix it THERE, not here.**
+
+       What stays here is reading the token out of THIS endpoint's answer
+       shape, because that is this file's business and not portal.js's.
+
+       ⚠️ THE GUARD'S STATED REASON WAS WRONG AND THE CORRECT ONE IS STRONGER.
+          It said "a page with no `window.Portal` has no meta tag either, since
+          `header.php` writes both". `header.php` writes the meta tag (line
+          229); **portal.js comes from `footer.php`**, through
+          `Asset::portalJs()` (footer.php:79) — `grep -rn "assets/js/portal.js"
+          web/_core/templates/` finds nothing. The mechanism cited did not
+          exist.
+
+          The true reason: `footer.php` emits portal.js at line 79 and THIS
+          script at line 109, both `defer`red, and deferred scripts run in
+          document order. So wherever this script is on a page at all,
+          portal.js has already run. The guard stays as belt and braces, but it
+          is not load-bearing.
+
+          Why it matters rather than being pedantry: the early `return false`
+          below is what makes `handedBack` false, and that sends the member
+          "This page has been open a while. Please reload it and try again."
+          on a 403 that DID carry a replacement. A guard whose reason is wrong
+          is one somebody may widen. */
     function shareToken(payload) {
         if (payload === null || typeof payload !== 'object'
             || payload.meta === null || typeof payload.meta !== 'object'
             || typeof payload.meta.csrfToken !== 'string' || payload.meta.csrfToken === '') {
             return false;
         }
-        var fresh = payload.meta.csrfToken;
-        var boxes = document.querySelectorAll('[data-portal-translate]');
-        var fields = document.querySelectorAll('input[name="csrf_token"]');
-        var meta = document.querySelector('meta[name="csrf-token"]');
-        var index;
-        for (index = 0; index < boxes.length; index += 1) {
-            boxes[index].setAttribute('data-csrf', fresh);
+        if (window.Portal === undefined || typeof window.Portal.writeCsrf !== 'function') {
+            return false;
         }
-        /* The ordinary forms matter as much as the controls: `/projects/view`
-           carries a pledge form, and leaving it holding a spent token is how
-           pressing Translate came to break a payment. */
-        for (index = 0; index < fields.length; index += 1) {
-            fields[index].value = fresh;
-        }
-        /* ⚠️ THE THIRD CARRIER, AND LEAVING IT OUT WAS THE SAME FAULT AGAIN.
-           `header.php` puts <meta name="csrf-token"> on EVERY page, and five
-           scripts read the token out of it rather than out of a form —
-           `portal.js` (which `Portal.apiRequest` uses), `portal-tour.js`,
-           `push-subscribe.js`, `report-builder.js` and
-           `event-hub-upload.js`. The first two load on every page, so on the
-           very page where the pledge fault was measured a Translate press left
-           a guided-tour post answering 403 "Invalid CSRF token" — measured
-           by an independent check AFTER the first fix. The portal already had
-           the right pattern in `event-hub-upload.js`'s `syncCsrf()`, which
-           writes the meta tag AND every field; this was a third copy of that
-           rule with a half missing. */
-        if (meta !== null) {
-            meta.setAttribute('content', fresh);
-        }
+        window.Portal.writeCsrf(payload.meta.csrfToken);
         return true;
     }
 

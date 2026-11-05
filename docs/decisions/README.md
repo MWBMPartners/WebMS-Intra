@@ -107,7 +107,11 @@ appended with its real date and a note that it was added later.
 | [D-049](049-content-translation-is-finished-for-the-first-release.md) | 2026-11-04 | Content translation is finished for the first release | in force |
 | [D-050](050-one-shared-helper-for-the-rotated-form-token.md) | 2026-11-05 | One shared helper for keeping the rotated form token, built next | in force |
 | [D-051](051-check-rounds-cap-at-three-except-money-and-privacy.md) | 2026-11-05 | Check rounds cap at three, except where money, privacy or data loss is at stake | in force |
+| [D-052](052-portal-content-on-the-public-website-is-in-the-first-release.md) | 2026-11-05 | Portal content on the public website is in the first release | in force |
+| [D-053](053-time-zones-in-mobile-pass-deferred.md) | 2026-11-05 | The time-zone pass is in the first release; the mobile pass is not | in force |
+| [D-054](054-a-blocked-item-moves-to-the-end-of-the-queue.md) | 2026-11-05 | A blocked item moves to the end of the queue | in force |
+| [D-055](055-the-whole-backlog-is-cleared-before-the-release.md) | 2026-11-05 | The whole backlog is cleared before the first release | in force |
 
-*51 decisions. This index is checked against the folder by
+*55 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

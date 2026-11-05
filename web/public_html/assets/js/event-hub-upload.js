@@ -26,9 +26,14 @@
  * EVERY successful check (see _core/Auth.php). Because this widget makes
  * several CSRF-protected POSTs in a row without a full page reload (mint,
  * then repeated status polls), every response includes the freshly
- * rotated `csrfToken` — syncCsrf() below writes it back into BOTH the
- * <meta name="csrf-token"> tag and every `input[name="csrf_token"]` on the
- * page, so the OTHER plain HTML forms on this page (add/edit/reorder/
+ * rotated `csrfToken` — syncCsrf() below hands it to `Portal.writeCsrf()`,
+ * the ONE place that writes it into every carrier the page has (#768): the
+ * <meta name="csrf-token"> tag, every `input[name="csrf_token"]`, and every
+ * `[data-csrf]` element. (This header used to say "BOTH" and name two of the
+ * three, and used to say syncCsrf did the writing itself. Teaching the
+ * two-carrier rule in the place the next reader starts is exactly the
+ * chain-of-comments fault #768 exists to break.) So the OTHER plain HTML
+ * forms on this page (add/edit/reorder/
  * remove resource or video, Stream-settings) keep working even if the
  * coordinator submits one of them mid-poll without reloading first.
  *
@@ -60,17 +65,33 @@
         return meta !== null ? (meta.getAttribute('content') || '') : '';
     }
 
+    /* 🔄 ONE PLACE WRITES THE TOKEN, AND IT IS NOT THIS FILE (#768).
+       This used to write the meta tag and every form field itself, missing the
+       third carrier, `[data-csrf]`.
+
+       ⚠️ BE EXACT ABOUT WHAT THAT GAP COST, WHICH IS NOTHING. A first version
+          of this comment said a page carrying both an upload and a Translate
+          control had one of them left holding a spent token. **No such page
+          exists** — this file is served only by `calendar/event-hub.php`, and
+          `translate-control.php` is required only by `projects/view.php` and
+          `announcements/view.php`. The real fault here was the pair it DID
+          write going out of step with the other copies, not a missed carrier.
+          Overstating harm to justify a change is the same class of fault as
+          understating it, and the independent check caught this one.
+
+       `Portal.writeCsrf()` is now the one place all three are written; extend
+       THAT, never this.
+
+       The guard is belt and braces rather than a known need: on THIS page
+       `footer.php` (which emits portal.js) is required at `event-hub.php:690`
+       and this file's own tag is at 692, so portal.js really does run first.
+       (The same comment in `report-builder.js` is the other way round and
+       correct there — its tag is at `edit.php:556`, the footer at 560.) Every
+       call below happens on a user action long after both have run in any
+       case. */
     function syncCsrf(token) {
-        if (!token) {
-            return;
-        }
-        var meta = document.querySelector('meta[name="csrf-token"]');
-        if (meta !== null) {
-            meta.setAttribute('content', token);
-        }
-        var inputs = document.querySelectorAll('input[name="csrf_token"]');
-        for (var i = 0; i < inputs.length; i++) {
-            inputs[i].value = token;
+        if (window.Portal && typeof window.Portal.writeCsrf === 'function') {
+            window.Portal.writeCsrf(token);
         }
     }
 

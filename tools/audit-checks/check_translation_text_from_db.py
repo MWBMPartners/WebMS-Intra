@@ -56,8 +56,11 @@ WHAT IT CHECKS
      `innerHTML`, which must hold however the pin changes (the translated words
      come from an outside company, so writing them as markup would hand a third
      party this portal's pages).
-     **Why a whole-file pin, which is unusual and deliberate:** no test in
-     this repository drives a browser, so nothing executes this script, and
+     **Why a whole-file pin, which is unusual and deliberate:** nothing
+     executes THIS script. `tools/csrf-carriers-selftest.mjs` (#768) does now
+     drive a real browser, and it LOADS this file, but only far enough to show
+     it does not throw and that the shared token helper writes its carrier —
+     it exercises none of the translate flow. And
      FIVE independent check rounds each found a one-edit change that left a
      narrower guard green while the script's token sharing was dead or its
      answers were thrown away. The comment at check F lists all of them. Any
@@ -77,9 +80,12 @@ none
     and the superglobals by name. (A direct `$_SERVER['HTTP_…']` read WAS
     invisible to the first version, which is how a planted header reached the
     provider with every check green; that one is closed.)
-  * **It cannot run the script.** Check F reads the two rules as text. No test
-    in this repository drives a browser, so the toggle, the deadline and the
-    abort path are exercised by nothing at all.
+   * **It cannot run the script.** Check F reads the two rules as text. The
+     browser test added for #768 loads this file but drives only `portal.js`,
+     so the toggle, the deadline and the abort path are still exercised by
+     nothing at all. **A browser test existing is not the same as THIS script
+     being tested**, and recording it loosely would be the reassurance shape
+     this file is otherwise full of warnings about.
   * It says nothing about whether a translation is correct, nor about money.
     The monthly limit is enforced in `Translation::translate()`, and no static
     check can prove a limit is obeyed.
@@ -616,8 +622,11 @@ def main() -> int:
     #    space, so that is a real residue and not a theoretical one.
     #
     #    That is proportionate here and nowhere else in this repository, for
-    #    one reason: **nothing runs this script.** No test in this project
-    #    drives a browser, so there is no behavioural guard behind the pin, and
+    #    one reason: **nothing exercises THIS script's own behaviour.** A
+    #    browser test exists (`tools/csrf-carriers-selftest.mjs`, #768) and
+    #    `tools/layout-audit.mjs` has driven one since 30 October, but
+    #    neither runs this file's own logic, so there is no behavioural guard
+    #    behind the pin, and
     #    the faults it is standing in front of were measured — a pledge form
     #    refused with the member's typing lost, a guided-tour post answering
     #    403, and a member told to reload for ever when reloading cannot help.
@@ -743,10 +752,11 @@ def repin() -> int:
         handle.write(normalised)
     print(
         f"Re-pinned {PINNED_SCRIPT} from {SCRIPT}: {len(normalised)} characters of code.\n"
-        f"Say in the commit message WHAT changed in the script and why. **No test in this "
-        f"repository drives a browser**, so nothing here executes this script and this pin "
-        f"— plus your reading of it — are the only guards on it. (It does run in "
-        f"production: `footer.php` serves it to every page.)"
+        f"Say in the commit message WHAT changed in the script and why. **Nothing "
+        f"exercises this script's own behaviour**, so this pin — plus your reading of "
+        f"it — are the only guards on it. (`tools/csrf-carriers-selftest.mjs` does drive "
+        f"a real browser and loads this file, but only far enough to show it does not "
+        f"throw.) It DOES run in production: `footer.php` serves it to every page."
     )
     return 0
 

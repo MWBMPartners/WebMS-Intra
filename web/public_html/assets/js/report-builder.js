@@ -76,12 +76,30 @@
         var meta = document.querySelector('meta[name="csrf-token"]');
         return meta !== null ? (meta.getAttribute('content') || '') : '';
     }
+    /* 🔄 ONE PLACE WRITES THE TOKEN, AND IT IS NOT THIS FILE (#768).
+       This was a copy of `event-hub-upload.js`'s `syncCsrf()` — its own
+       comment above says so — and it inherited that copy's gap: it wrote the
+       meta tag and every form field, but not `[data-csrf]`. That is how an
+       incomplete rule spread: each new page copied the nearest existing
+       version rather than a shared one. `Portal.writeCsrf()` is the one place
+       now. Extend THAT; never add a carrier here.
+
+       ⚠️ BE EXACT ABOUT `defer`: deferred scripts DO run in document order.
+          An earlier version of this comment said order was not guaranteed,
+          which is false about the platform. Here the order genuinely runs the
+          wrong way — this file's tag is at `edit.php:556` and `footer.php`
+          (which emits portal.js) at 560 — so portal.js runs SECOND. The guard
+          is therefore real rather than decorative, which is the opposite of
+          the reason first given for it.
+
+          It only matters at load time: every call below happens on a user
+          action, long after both have run. Note `runPreview()` a few lines on
+          calls `window.Portal.url(...)` with no guard at all, so this file
+          already depends on Portal existing by then. */
     function syncCsrf(token) {
-        if (!token) { return; }
-        var meta = document.querySelector('meta[name="csrf-token"]');
-        if (meta !== null) { meta.setAttribute('content', token); }
-        var inputs = document.querySelectorAll('input[name="csrf_token"]');
-        for (var i = 0; i < inputs.length; i++) { inputs[i].value = token; }
+        if (window.Portal && typeof window.Portal.writeCsrf === 'function') {
+            window.Portal.writeCsrf(token);
+        }
     }
 
     function esc(s) {

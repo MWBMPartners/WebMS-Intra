@@ -20,20 +20,10 @@ if (payload === null || typeof payload !== 'object'
 || typeof payload.meta.csrfToken !== 'string' || payload.meta.csrfToken === '') {
 return false;
 }
-var fresh = payload.meta.csrfToken;
-var boxes = document.querySelectorAll('[data-portal-translate]');
-var fields = document.querySelectorAll('input[name="csrf_token"]');
-var meta = document.querySelector('meta[name="csrf-token"]');
-var index;
-for (index = 0; index < boxes.length; index += 1) {
-boxes[index].setAttribute('data-csrf', fresh);
+if (window.Portal === undefined || typeof window.Portal.writeCsrf !== 'function') {
+return false;
 }
-for (index = 0; index < fields.length; index += 1) {
-fields[index].value = fresh;
-}
-if (meta !== null) {
-meta.setAttribute('content', fresh);
-}
+window.Portal.writeCsrf(payload.meta.csrfToken);
 return true;
 }
 function wireOne(box) {

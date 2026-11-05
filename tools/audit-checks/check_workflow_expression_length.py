@@ -360,9 +360,23 @@ def main() -> int:
         )
 
     print(f"Workflow files read: {len(names)}; run: scripts measured: {scripts_measured}")
+    # ⚠️ SAY THAT THE LONGEST SCRIPT IS NOT NECESSARILY A MEASURED ONE.
+    #    This used to print "Longest script: 24,569 characters; ceiling 21,000"
+    #    and then "OK" on the next line, which reads as a contradiction — and a
+    #    summary that looks like a failure while saying OK is one somebody
+    #    learns to skip past. It is NOT a contradiction: only a script carrying
+    #    a `${{ ... }}` counts against the ceiling, and the longest one here
+    #    carries none (that is the #745 fix — the expression was moved to
+    #    `env:`). The length is printed because it is worth watching: adding one
+    #    expression to that script would break the whole file again.
     print(
-        f"Longest script: {longest[0]:,} characters "
-        f"({longest[1]}, \"{longest[2]}\"); ceiling {MAX_EXPRESSION_LENGTH:,}"
+        f"Longest script of any kind: {longest[0]:,} characters "
+        f"({longest[1]}, \"{longest[2]}\")"
+    )
+    print(
+        f"The ceiling of {MAX_EXPRESSION_LENGTH:,} applies ONLY to a script carrying a "
+        f"`${{{{ ... }}}}`, so a longer script with none is fine — and adding one "
+        f"expression to it would not be."
     )
 
     if len(problems) > 0:

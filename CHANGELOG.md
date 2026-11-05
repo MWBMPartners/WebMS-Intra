@@ -4,6 +4,63 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### One place writes the form token, and it writes every carrier (#768, D-050)
+
+The portal replaces the anti-forgery token every time it accepts one, and there
+is only one token per signed-in session. So the moment any background request
+is accepted, every copy of that token the open page is holding goes out of date
+together — and a page holds it in three places: a tag in the page's head, the
+hidden field inside every ordinary form, and an attribute on each Translate
+control.
+
+**Five different pieces of JavaScript each wrote the replacement back, and no
+two agreed about how many of those three places exist.** The shared one, in
+`portal.js`, was the least complete: it wrote the tag in the head and nothing
+else, and it reported "no token stored" whenever a page had no such tag, even
+when it had just been handed one.
+
+**What that did to somebody, measured rather than reasoned.** On the Host
+Console an administrator can publish a message to the live chat, and the same
+page carries the "Send 'We're live'" button. Publishing a chat message is
+accepted in the background, which replaces the token — so pressing the button
+afterwards was refused, and the press was simply lost. The existing test for
+that button never saw it, because it presses the button without publishing a
+message first.
+
+**How the incomplete version spread, which is the part worth keeping.** Each
+new page copied the nearest existing version rather than a shared one, and said
+so in its own comment: the report builder's copy says "(event-hub-upload.js
+precedent)", and the API documentation page says it follows "the event hub
+upload widget". So the gap travelled and the complete version never did. The
+shared helper had existed the whole time and its own comment told people to use
+it instead of writing their own — it was simply the worst of the five. **A
+shared helper is only a single source of truth while it is the best copy; the
+moment it is the worst, its own documentation becomes an instruction nobody can
+follow.**
+
+`Portal.writeCsrf()` is now the one place all three are written. The four other
+copies call it. The API documentation page is a stated exception, because it is
+served directly by the web server, draws its own page head and loads none of
+the portal's JavaScript; its single carrier is re-tested on every run rather
+than taken on trust, so the day that page grows a form the check fails instead
+of passing quietly.
+
+**Three more faults of the same family were found while fixing this, and each
+is its own issue.** Adding a passkey from the account page cannot work at all,
+because the second of its two requests reuses the token the first one spent
+(#770). Turning on push notifications spends the page's token and keeps the
+replacement in a private variable, so pressing Save on the notification
+preferences afterwards loses the member's changes (#774). And the worship
+console refreshes its token only after a request has already been refused
+(#771). None is caused by this change; all three were found by looking for the
+shape rather than the instance.
+
+**Guarded two ways.** A hard gate checks that one helper writes every carrier
+and that nobody else writes one, and a new test drives a real browser to prove
+what the files actually do to a page — because this fault was invisible to
+every existing test: the page's own source was correct, and only what
+JavaScript did to it afterwards was wrong.
+
 ### Content translation has a way in, and the handler was rewritten rather than re-routed (#485, #761, migration 248)
 
 Automatic translation of what the organisation has published was built and
@@ -193,9 +250,19 @@ whole code — comments stripped, whitespace normalised — must equal
 `tools/audit-checks/portal-translate.pinned.js`, so any change to a statement
 fails the gate and has to be read by a person. `--repin` regenerates it as a
 separate, visible act. That is proportionate here and nowhere else in this
-repository for one reason: **no test in this repository drives a browser**, so
-nothing here executes the script and there is no behavioural guard behind the
-pin. (It runs in production, of course — `footer.php` serves it to every page.)
+repository for one reason: **nothing exercises that script's own behaviour**,
+so there is no behavioural guard behind the pin. (It runs in production, of
+course — `footer.php` serves it to every page.)
+
+> **Corrected 5 November 2026 (#768).** This paragraph said "no test in this
+> repository drives a browser". That was already untrue when written:
+> `tools/layout-audit.mjs` has driven Edge over the DevTools protocol since
+> `0186531` (30 October 2026), for #569. Establish it with
+> `grep -rln "remote-debugging-port" tools/`. The reason for the whole-file pin
+> is unchanged and still sound — nothing runs *that* script — but the sentence
+> given for it was wrong, and a reader who believed there was no browser
+> machinery would write a third copy of the DevTools client, which is #768's
+> own fault shape.
 
 **A FIFTH ROUND FOUND THE PIN'S OWN HOLE, AND IT IS WHITESPACE.** The first
 version collapsed all whitespace, and **in JavaScript a newline is a

@@ -5,6 +5,126 @@
 
 ---
 
+### One place writes the form token, and the copies were made from each other (#768)
+
+**The rule.** `Auth::verifyCsrf()` replaces the token on every acceptance and
+`Auth::csrfToken()` is ONE token per session, so after any accepted post every
+carrier on the open page is stale TOGETHER. A page carries it in three places:
+`<meta name="csrf-token">` (written by `header.php` on every page), every
+`input[name="csrf_token"]`, and every `[data-csrf]` element (the Translate
+control). `Portal.writeCsrf()` in `portal.js` is the ONE place all three are
+written. Extend that; never write a carrier anywhere else.
+
+**FIVE copies existed and no two agreed how many carriers there are:**
+`rememberCsrf()` (meta only), `syncCsrf()` in `event-hub-upload.js` and again
+in `report-builder.js` (meta + fields), `storeToken()` in `api-docs/index.php`
+(meta only), and `shareToken()` in `portal-translate.js` (all three).
+
+**THE CAUSE IS READABLE IN THE COMMENTS, AND THAT IS THE TRANSFERABLE PART.**
+`report-builder.js` says "(event-hub-upload.js precedent)"; `api-docs` says it
+follows "the event hub upload widget". **Each new page copied the NEAREST
+existing version rather than a shared one**, so the INCOMPLETE rule propagated
+and the complete one never did. The shared helper existed throughout and its
+own comment said callers should use it "without writing their own copy of
+this". **A published helper is a single source of truth only while it is the
+BEST copy; the moment it is the worst, its own documentation is an instruction
+nobody can follow.**
+
+**The measured cost.** Host Console: publishing a chat prompt rotates the
+token; "Send 'We're live'" (#612) sits on the same page in an ordinary form.
+Publish, then press — refused, press lost. `go-live-button-selftest.php` could
+not see it because it presses the button without publishing a prompt first.
+**A test that exercises one control at a time cannot find a fault that needs
+two controls in sequence** (#769).
+
+**THE SHAPE IS WIDER THAN THE FIVE COPIES, AND THAT IS WHERE THE LIVE BUGS
+WERE.** Looking for "writes some carriers but not all" found five files.
+Looking for "spends the page's token and does not hand the replacement back"
+found three more, every one of them live: **#770**, adding a passkey — the
+handler rotates and returns no replacement, so step 2 reuses a spent token and
+the feature cannot work at all; **#774**, push subscription — the script keeps
+the fresh token in a private variable, so Save on the notification preferences
+page is refused and the member's changes are lost; **#771**, the worship
+console — refreshes only after a refusal. **The gate written for this package
+is right to pass all three and structurally cannot see them.** Enumerate the
+RULE, not the instances of it.
+
+**The return value changed, deliberately — and the first attempt was wrong.**
+`rememberCsrf()` used to answer false whenever the page had no meta tag, even
+when it had found a token. The first fix made it answer true whenever a token
+was found, which made `admin/host-console/event.php`'s own fallback
+unreachable: it takes `csrf = Portal.csrf() || csrf; return;`, `Portal.csrf()`
+read only the meta tag and answered empty, so it kept the SPENT token where the
+old code had kept a fresh one. Two changes fix it together — the answer is now
+`writeCsrf()`'s own (was it really stored), and `Portal.csrf()` reads every
+carrier, meta first so that no page which has one can behave differently.
+**The trap is LATENT, not live:** both pages that branch on it require
+`header.php`, which writes the meta tag unconditionally.
+
+**THE GUARD TOOK FOUR ROUNDS AND EVERY ROUND FOUND THE PREVIOUS ROUND'S FIX.**
+Findings per round: 6, 4, 5, 4 — none in the original build. Worth keeping:
+
+* **The delegating callers were guarded by nothing**, and three one-edit
+  changes killed them with every check green. A call-site pin cannot catch an
+  inserted `return;` (#709). Each function's body is pinned — and then round 2
+  defeated THAT twice, with a second `function syncCsrf` declaration (the later
+  one wins in JavaScript) and a reassignment. **#485 records both spellings and
+  says the remedy is to pin the whole file**; I wrote #709's lesson into the
+  comment and shipped #485's beaten pattern underneath it. Exactly one
+  declaration and no reassignment are now required. The whole-file pin is still
+  not used here, because these are large feature files that change for
+  unrelated reasons and a pin that goes red constantly gets switched off
+  (#483). That trade is recorded, and #773 is the stronger answer.
+* **"Has a carrier" and "writes a carrier" are different questions.** Conflating
+  them cried wolf on EIGHTEEN correct pages. And "selects a csrf field" plus
+  "has a `.value =` somewhere" is not "writes a csrf field" — two true facts
+  about one file joined into a false one.
+* **FOUR versions of the write detector, three with holes, each "verified by
+  planting".** Each planted the forms its author had thought of. v3's own
+  comment said *planting one form of a pattern does not test the pattern*, and
+  v3 then did it: 48 of 152 lookup × write combinations missed, including
+  `for (const f of Array.from(...))`, which is house idiom here
+  (`livechat-widget.js`, 12 uses under `web/`). **v4 stopped enumerating
+  syntax**: find the statement a lookup sits in, collect every name it binds,
+  ask whether any is written. Wrappers, spreads, destructures, `for…of` and
+  callbacks are covered without being named. 152/152 and 21/21, no false
+  positives.
+* **A `//` in raw HTML is not a comment.** The blanker had to become a
+  three-state machine (HTML / PHP / script): applying JavaScript rules
+  everywhere blanked real code after a URL, and applying HTML rules outside
+  `<?php` cried wolf on a `/* */` inside a `<script>`. Both directions wrong;
+  model the file.
+
+**AND THE DOCUMENTATION FAILED IN WAYS THE CODE DID NOT.** Rounds 3 and 4 found
+almost nothing but untrue comments — several written by earlier rounds to
+explain their own fixes. Three worth naming:
+
+* **"The first browser test here" was false.** `tools/layout-audit.mjs` has
+  driven Edge over the DevTools protocol since `0186531` (30 October 2026), for
+  #569 — the identical technique, six days earlier. Established by
+  `grep -rln "remote-debugging-port" tools/`, a command that was not run before
+  the claim was written. It even records the node-22 fact that had been called
+  unmeasured.
+* **A correction applied to one docblock and not its twin 120 lines away** in
+  the same file. The instance fixed, the class left open.
+* **Verifying a correction with a line-based `grep` that could not see it.**
+  The phrase spanned two lines of an f-string, so `grep -c` answered 0 and the
+  corrections were reported as applied when three of four had never been
+  written — the script had raised `SystemExit` before saving. **A tool
+  structurally incapable of finding the thing is not a verification.**
+
+And once, checking whether `layout-audit.mjs` ran in CI, `grep` answered with
+**the comment about it written minutes earlier** — #647's shape, nearly turning
+a true statement into a false one. Ask for the `run:` line, not the name.
+
+Guards: `tools/audit-checks/check_one_csrf_writer.py` (a hard gate; checks A-F,
+failing both ways) and `tools/csrf-carriers-selftest.mjs` (18 checks in a real
+browser, nothing installed — it serves its own fixture from node's `http`
+module, so it needs neither PHP nor a driver). The browser test proves the
+helper; it cannot prove that any given page calls it, which is #773.
+
+---
+
 ### The volunteer photo tier is a real gate now, and that takes photos away (#756, D-047)
 
 **A behaviour change, decided by the owner on 4 November 2026 — D-047 — and not
@@ -16993,9 +17113,18 @@ fire:
 changing `textContent` to `innerHTML` left 61 audit checks and 66 self-test
 checks green — and the `innerHTML` rule is what stops an outside translation
 company putting markup into this portal's pages. Check F of the gate reads both
-rules as text now. **No test in this repository drives a browser**, so the
+rules as text now. **Nothing exercises that script's own behaviour**, so the
 toggle, the deadline and the abort path are exercised by nothing, and the
 self-test's header says that rather than implying coverage.
+
+> **Corrected 5 November 2026 (#768).** This said "No test in this repository
+> drives a browser", which was already untrue: `tools/layout-audit.mjs` has
+> driven Edge over the DevTools protocol since `0186531` (30 October 2026), and
+> `tools/csrf-carriers-selftest.mjs` does now too. Neither runs *that* script,
+> so the conclusion stands; the reason given for it did not. Established with
+> `grep -rln "remote-debugging-port" tools/` — a command nobody ran before
+> writing the claim, which is the habit the rule about "never worked" exists to
+> enforce.
 
 **An empty box is a value somebody submitted.** `(float) ''` and `(float) 'abc'`
 are both `0.0`, and `0` means "no limit" for this setting — the LARGEST value.

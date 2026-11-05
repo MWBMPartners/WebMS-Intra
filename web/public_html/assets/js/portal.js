@@ -303,16 +303,137 @@
     }
 
     /**
-     * Read the CSRF token from the page's meta tag.
+     * Read the page's current anti-forgery token, from whichever carrier it has.
      *
-     * @returns {string|null} The CSRF token, or null if not found
+     * ⚠️ IT ASKS ALL THREE CARRIERS, AND READING ONLY THE META TAG WAS A REAL
+     *    FAULT (#768, found by the independent check). The three carriers are
+     *    the ones writeCsrf() writes, and a page need not have all of them.
+     *
+     *    What went wrong when this read the meta tag alone: ONE page —
+     *    `admin/host-console/event.php` — takes the shape
+     *    `if (rememberCsrf(answer) === true) { csrf = Portal.csrf() || csrf;
+     *    return; }` with a fallback below that reads the token straight out of
+     *    the answer. On a page with form fields but NO meta tag,
+     *    rememberCsrf() reported success (rightly — it had written the fields),
+     *    this function then answered empty, `|| csrf` kept the SPENT token, and
+     *    the `return` meant the fallback that would have got it right was never
+     *    reached. Measured in a real browser on a no-meta fixture: SPENT where
+     *    the older code gave FRESH.
+     *
+     *    ⚠️ BE EXACT ABOUT HOW LIVE THAT IS — a first version of this comment
+     *       was not, and overstating harm to justify a change is a fault this
+     *       same package corrected once already. **Neither of the two pages
+     *       that branch on this answer can actually be in that state**: both
+     *       `require` header.php (event.php:97, chat.php:92) and header.php
+     *       writes `<meta name="csrf-token">` unconditionally. So the trap is
+     *       LATENT, not a live fault — it bites the first page that posts
+     *       without that template. And `admin/live/chat.php` is NOT the second
+     *       example: it has no `return` and no fallback, it simply carries on
+     *       and reloads on a refusal, so an unconditional true could not have
+     *       had this effect there at all.
+     *
+     * ⚠️ THE ORDER IS DELIBERATE, AND IT IS WHAT MAKES THIS WIDENING UNABLE TO
+     *    REGRESS ANYTHING. The meta tag is asked FIRST, so **every page that
+     *    has one gets exactly the answer it got before**; only pages that used
+     *    to get `null` can behave differently. A widening that cannot change
+     *    an existing reader is a widening nobody has to audit.
+     *
+     *    If the carriers ever DISAGREE, the meta tag wins (measured in a
+     *    browser). They cannot diverge through this file — writeCsrf() sets
+     *    all three in one call — and `check_one_csrf_writer.py` forbids anyone
+     *    else writing one, so a disagreement means something outside the rule
+     *    wrote a carrier. Preferring the meta tag is then the conservative
+     *    answer: it keeps the old behaviour rather than guessing which copy is
+     *    fresher, and guessing wrong would hand out a spent token.
+     *
+     * @returns {string|null} The current token, or null if the page carries none
      */
     function getMetaCsrf() {
         var meta = document.querySelector('meta[name="csrf-token"]');
-        if (meta) {
+        if (meta && meta.getAttribute('content')) {
             return meta.getAttribute('content');
         }
+        var field = document.querySelector('input[name="csrf_token"]');
+        if (field && field.value) {
+            return field.value;
+        }
+        var carrier = document.querySelector('[data-csrf]');
+        if (carrier && carrier.getAttribute('data-csrf')) {
+            return carrier.getAttribute('data-csrf');
+        }
         return null;
+    }
+
+    /**
+     * Write a replacement anti-forgery token into EVERY carrier on the page.
+     *
+     * ⚠️ THE PAGE CARRIES THE TOKEN IN THREE PLACES, AND WRITING ONLY ONE OF
+     *    THEM IS THE FAULT THIS FUNCTION EXISTS TO END (#768).
+     *
+     *    1. `<meta name="csrf-token">`, written by `header.php` on every page.
+     *       `Portal.apiRequest`, `portal-tour.js`, `push-subscribe.js`,
+     *       `report-builder.js` and `event-hub-upload.js` all read it.
+     *    2. Every `input[name="csrf_token"]` — the hidden field in each
+     *       ordinary `<form>`. This is the one a person actually loses work
+     *       through: the form looks fine and Save is refused.
+     *    3. Every `[data-csrf]` element — at present the Translate control
+     *       drawn by `_core/templates/translate-control.php`, which keeps its
+     *       own copy on the element because one page may carry many controls.
+     *
+     *    `Auth::verifyCsrf()` REPLACES the token on every acceptance and
+     *    `Auth::csrfToken()` is ONE token per session, so after any accepted
+     *    post every carrier on the page is stale together. Updating the meta
+     *    tag alone left the forms holding a spent token, and the measured cost
+     *    was real: on the Host Console, publishing a chat prompt (which goes
+     *    through `ApiAuth::requireWrite()` and rotates) then pressing "Send
+     *    'We're live'" (#612) was refused and the press was lost.
+     *
+     *    **FIVE copies of this rule used to exist, not two** — and a first
+     *    version of this docblock said two, naming only `event-hub-upload.js`
+     *    and `portal-translate.js` while the check eight files away correctly
+     *    listed five. A list named after a number is the shape that goes
+     *    stale, in the package whose whole subject is copies drifting apart.
+     *    The five: `rememberCsrf()` here (the meta tag only), `syncCsrf()` in
+     *    `event-hub-upload.js` and again in `report-builder.js` (tag and
+     *    fields), `storeToken()` in `api-docs/index.php` (the tag), and
+     *    `shareToken()` in `portal-translate.js` (all three, one answer shape).
+     *    Each was written because this function was incomplete rather than
+     *    because sharing was wrong. **Do not write a sixth: extend this one.**
+     *
+     * Nothing is written when there is no token. An answer carrying none must
+     * never blank a carrier, or the next post would send nothing at all; a
+     * token is only ever replaced by another token.
+     *
+     * @param {string} token - The replacement token
+     * @returns {boolean} True when a token was written somewhere
+     */
+    function writeCsrf(token) {
+        if (typeof token !== 'string' || token === '') {
+            return false;
+        }
+
+        var written = false;
+        var index;
+
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        if (meta) {
+            meta.setAttribute('content', token);
+            written = true;
+        }
+
+        var fields = document.querySelectorAll('input[name="csrf_token"]');
+        for (index = 0; index < fields.length; index += 1) {
+            fields[index].value = token;
+            written = true;
+        }
+
+        var carriers = document.querySelectorAll('[data-csrf]');
+        for (index = 0; index < carriers.length; index += 1) {
+            carriers[index].setAttribute('data-csrf', token);
+            written = true;
+        }
+
+        return written;
     }
 
     /**
@@ -324,12 +445,41 @@
      * `csrf_token`, the older spelling, which is what the two push handlers
      * (push/api/subscribe.php and unsubscribe.php) send. The third was missed
      * at first and those two handlers' replacement tokens were being thrown
-     * away. Anything else is left alone — in particular, an answer with NO
-     * token must never blank the tag, or the next post would send nothing at
-     * all. A token is only ever replaced by another token.
+     * away. Anything else is left alone.
+     *
+     * ⚠️ THE ANSWER MEANS "A TOKEN WAS FOUND **AND WRITTEN SOMEWHERE**", AND
+     *    BOTH HALVES MATTER. It used to answer false whenever the page had no
+     *    meta tag, even though a token had been found — so a page carrying only
+     *    forms stored nothing and reported nothing to store. It now hands back
+     *    writeCsrf()'s own answer, so a page with NO carrier at all still gets
+     *    false, which is the truth and is what the two callers below need.
+     *
+     *    **A first version of this returned true unconditionally once a token
+     *    was found, and that was wrong in a way worth recording.** ONE page —
+     *    `admin/host-console/event.php` — takes the shape
+     *    `if (rememberCsrf(answer) === true) { csrf = Portal.csrf() || csrf;
+     *    return; }` with a fallback beneath that reads the token out of the
+     *    answer itself. An unconditional true sent it down the first branch on
+     *    a page that had stored nothing, so it kept a SPENT token and the
+     *    `return` stopped the fallback ever running. **The trap is LATENT, not
+     *    live** — that page requires header.php, which writes the meta tag
+     *    unconditionally, so it cannot reach the state; it would bite the
+     *    first page that posts without that template. And `admin/live/chat.php`
+     *    is NOT a second example: it has no `return` and no fallback, it
+     *    carries on and reloads on a refusal.
+     *
+     *    (All of that was corrected in `getMetaCsrf()`'s docblock a round
+     *    earlier and left wrong HERE, 120 lines away — the instance fixed, the
+     *    class left open. A document asserting a fix while still stating the
+     *    thing it fixed is worse than one that says nothing, because the next
+     *    reader stops looking.) The comment beside it
+     *    claimed the wider answer was "strictly better"; measured in a real
+     *    browser it was strictly worse on exactly the edge the change created.
+     *    Two things fix it together: this honest answer, and `Portal.csrf()`
+     *    now reading every carrier rather than the meta tag alone.
      *
      * @param {Object} response - Parsed JSON answer from the portal
-     * @returns {boolean} True when a token was found and stored
+     * @returns {boolean} True when a token was found AND written to a carrier
      */
     function rememberCsrf(response) {
         if (!response || typeof response !== 'object') {
@@ -351,17 +501,14 @@
         }
 
         // An empty string is not a token. Treat it as nothing rather than
-        // writing it into the tag.
+        // writing it into a carrier.
         if (!token) {
             return false;
         }
 
-        var meta = document.querySelector('meta[name="csrf-token"]');
-        if (!meta) {
-            return false;
-        }
-        meta.setAttribute('content', token);
-        return true;
+        // Hand back whether it was really stored, not merely whether it was
+        // found. See the warning above for what an unconditional true cost.
+        return writeCsrf(token);
     }
 
     /* ========================================================================
@@ -648,6 +795,14 @@
     //    current without writing its own copy of this. Read the token with
     //    Portal.csrf() AT THE MOMENT OF POSTING, never once at page load, and
     //    hand every answer to Portal.rememberCsrf(). See #634.
+    //
+    //    Portal.writeCsrf(token) is for the caller that has already pulled the
+    //    token out of an answer shape this file does not know. It is the ONE
+    //    place the three carriers are written (#768) — the meta tag, every
+    //    form's hidden field, and every [data-csrf] element. A caller that
+    //    writes a carrier itself is a fourth copy waiting to go stale; extend
+    //    writeCsrf instead.
     window.Portal.csrf = getMetaCsrf;
     window.Portal.rememberCsrf = rememberCsrf;
+    window.Portal.writeCsrf = writeCsrf;
 })();
