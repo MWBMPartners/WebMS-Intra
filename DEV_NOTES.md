@@ -18059,10 +18059,26 @@ the parts add up to the whole.
 
 **And then the commit that corrected that one said "`php -l` clean on all six
 changed PHP files" where five changed** — a wrong count inside the section
-headed FIGURES CORRECTED. Three wrong numbers in three consecutive commits, each
-one cheap to check (`git show --name-only --pretty= <sha> | grep -c '\.php$'`).
-**The habit that fixes this is not care, it is running the command and pasting
-its answer.**
+headed FIGURES CORRECTED.
+
+**AND THE COMMIT THAT CORRECTED *THAT* SAID FIVE WHERE SIX CHANGED.** Four
+consecutive commits, four wrong counts of the same kind, the last one inside a
+paragraph whose heading is "THREE WRONG NUMBERS IN THREE CONSECUTIVE COMMITS"
+and whose closing line is "the habit that fixes this is not care — it is running
+the command and pasting its answer". I wrote that line and then did not do it.
+
+    $ git show --name-only --pretty= 61eebfc | grep -c '\.php$'
+    6
+
+The sixth is `tools/clock-change-selftest.php`, which I had been counting as a
+test rather than as a PHP file — so each time the number was not guessed, it was
+derived from a category in my head instead of from the command.
+
+**The transferable rule, stated as a sequence rather than an intention: run the
+command, read its answer, paste its answer — in that order, before the sentence
+around it is written.** Four rounds of "be careful about numbers" produced four
+wrong numbers; the ordering is what fixes it, because a figure written before the
+command is run is a guess however carefully it is phrased.
     338 strtotime( under web/_apps and web/_core
      54 new DateTime(Immutable)?(
     479 date( / gmdate(

@@ -3257,8 +3257,20 @@ FIGURES CORRECTED; and "`new \DateTimeImmutable` is the MAJORITY
 style, 87 against 79" — those counts had no word boundary and counted
 `DateTimeZone`. The class itself is 51 against 55, so the backslashed
 form is the MINORITY. **A word boundary is not a detail when you are
-counting, and the habit that fixes this is not care — it is running
-the command and pasting its answer.**
+counting.**
+
+**And then I did it a FOURTH time, in the commit correcting the
+third:** it said "all five changed PHP files" where
+`git show --name-only --pretty= 61eebfc | grep -c '\.php$'` answers
+**6** — the sixth being `tools/clock-change-selftest.php`, which I was
+counting as a test rather than as a PHP file. So each wrong figure was
+not a guess but a number derived from a CATEGORY IN MY HEAD instead of
+from the command.
+
+**THE RULE IS A SEQUENCE, NOT AN INTENTION: run the command, read its
+answer, paste its answer — in that order, BEFORE the sentence around
+it is written.** Four rounds of "be careful with numbers" produced
+four wrong numbers.
 
 What remains of #777 is the bulk: **486 time-shaped columns and only
 123 with any comment**, so "does this column hold a moment or a clock
