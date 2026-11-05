@@ -49,6 +49,45 @@ $prefillEnd   = '';
 $prefillPurpose = '';
 $prefillNotes = '';
 
+/**
+ * 🕐 Move a wall-clock value by a number of MINUTES, staying on the wall clock.
+ *
+ * ⚠️ NO ZONE AND NO MOMENT, deliberately. `tblResourceBooking` holds wall-clock
+ *    values local to the organisation and the conflict query compares them as
+ *    text, so the buffer either side of a booking has to be added the same way.
+ *    Building a moment to add the minutes and formatting it back would move the
+ *    window an hour on the morning the clocks go forward — away from the very
+ *    bookings it exists to overlap.
+ *
+ *    Minutes are an EXACT length, so adding them to a reading is arithmetic, not
+ *    a calendar question. Crossing midnight is handled by letting the date carry,
+ *    which `mktime()` does without consulting a zone for this purpose: the value
+ *    goes in and comes out in the same frame.
+ *
+ * @param string $wallClock `Y-m-d H:i:s`, assumed well formed by the caller.
+ * @param int    $minutes   Positive or negative.
+ *
+ * @return string The same shape, moved.
+ */
+function shiftWallClock(string $wallClock, int $minutes): string
+{
+    $year  = (int) substr($wallClock, 0, 4);
+    $month = (int) substr($wallClock, 5, 2);
+    $day   = (int) substr($wallClock, 8, 2);
+    $hour  = (int) substr($wallClock, 11, 2);
+    $min   = (int) substr($wallClock, 14, 2);
+
+    // UTC on purpose: it has no transitions, so the arithmetic is pure and the
+    // answer is the wall-clock reading moved by exactly that many minutes.
+    $moved = new DateTimeImmutable(
+        sprintf('%04d-%02d-%02dT%02d:%02d:00', $year, $month, $day, $hour, $min),
+        new DateTimeZone('UTC')
+    );
+
+    return $moved->modify(($minutes >= 0 ? '+' : '-') . abs($minutes) . ' minutes')
+        ->format('Y-m-d H:i:s');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token'] ?? '') === true) {
     $date    = (string) ($_POST['date'] ?? '');
     $start   = (string) ($_POST['startTime'] ?? '');
@@ -62,25 +101,78 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
     $prefillPurpose = $purpose;
     $prefillNotes   = $notes;
 
+    // 🕐 A BOOKING IS A TIME ON A CLOCK, AND IT STAYS ONE (#777).
+    //
+    // 🚨 THIS STORED THE WRONG HOUR, one morning a year. It used to build
+    //    `$date . ' ' . $start . ':00'` and then hand it to `strtotime()`,
+    //    which resolves a wall-clock reading in PHP's DEFAULT zone — not the
+    //    organisation's. On the morning the clocks go forward that reading
+    //    does not exist, so PHP moved it, and the moved value was formatted
+    //    back into the INSERT. Measured in Europe/London on 2026-03-29:
+    //
+    //        asked 01:00-01:30  ->  STORED 02:00-02:30
+    //        asked 00:30-01:30  ->  STORED 00:30-02:30   (one hour became two)
+    //        asked 01:30-02:00  ->  REFUSED, "End time must be after start
+    //                               time" — because the start had moved past
+    //                               the end
+    //
+    //    So a member booked a room for an hour they did not ask for, or was
+    //    turned away for a reason that was not true. `tblResourceBooking`
+    //    holds wall-clock values local to the organisation, the conflict query
+    //    compares them as text, and the pages read them back as text — so the
+    //    posted reading was already in exactly the form to store. Turning it
+    //    into a moment and back was the whole fault.
     $startAt = $date . ' ' . $start . ':00';
     $endAt   = $date . ' ' . $end . ':00';
-    $startTs = strtotime($startAt);
-    $endTs   = strtotime($endAt);
 
-    if ($date === '' || $start === '' || $end === '' || $startTs === false || $endTs === false) {
+    // Shaped like a date and a time? Asked of the TEXT, because that is what
+    // these values are. `strtotime()` used to answer this and also moved them.
+    $wellFormed = preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/', $startAt) === 1
+        && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/', $endAt) === 1
+        && checkdate((int) substr($date, 5, 2), (int) substr($date, 8, 2), (int) substr($date, 0, 4)) === true;
+
+    // ⏱️ "Is the start in the past" is the ONE question here that genuinely
+    //    needs a moment, so it is the one place a zone appears — the
+    //    organisation's own, through `Site::timezone()`, never PHP's default.
+    //
+    //    A reading inside the hour that does not exist has no moment at all.
+    //    PHP resolves it FORWARD, which is what `IcsReader` already decided a
+    //    repeat should do (#645), so the two agree rather than each guessing.
+    $startMoment = null;
+    if ($wellFormed === true) {
+        try {
+            $zone = new DateTimeZone(Site::timezone());
+        } catch (Throwable $e) {
+            $zone = new DateTimeZone('UTC');
+        }
+        $built = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $startAt, $zone);
+        $startMoment = $built === false ? null : $built;
+    }
+
+    if ($date === '' || $start === '' || $end === '' || $wellFormed === false) {
         $flash = 'Please supply a valid date and time range.';
         $flashType = 'danger';
-    } elseif ($endTs <= $startTs) {
+    } elseif ($endAt <= $startAt) {
+        // Wall-clock text compares correctly as TEXT, which is #435's own fix
+        // and the reason this no longer refuses a valid booking: nothing has
+        // been moved, so the end really is after the start.
         $flash = 'End time must be after start time.';
         $flashType = 'danger';
-    } elseif ($startTs < time()) {
+    } elseif ($startMoment !== null && $startMoment->getTimestamp() < time()) {
         $flash = 'Start time is in the past.';
         $flashType = 'danger';
     } else {
         // Conflict detection — include the buffer either side.
+        //
+        // ⚠️ THE BUFFER IS ADDED TO THE WALL CLOCK, not to a moment, because
+        //    the stored values are wall-clock text and the query below compares
+        //    them as text. Building a moment to add minutes and formatting it
+        //    back would reintroduce exactly the shift this file just lost: on
+        //    the change morning the window would move an hour away from the
+        //    bookings it is meant to overlap.
         $buffer = (int) $r['bufferMinutes'];
-        $windowStart = date('Y-m-d H:i:s', $startTs - $buffer * 60);
-        $windowEnd   = date('Y-m-d H:i:s', $endTs + $buffer * 60);
+        $windowStart = shiftWallClock($startAt, -$buffer);
+        $windowEnd   = shiftWallClock($endAt, $buffer);
 
         $conflict = false;
         $stmt = $db->prepare(
@@ -113,9 +205,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && Auth::verifyCsrf($_POST['csrf_token
                 . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             if ($stmt !== false) {
-                $startDt = date('Y-m-d H:i:s', $startTs);
-                $endDt   = date('Y-m-d H:i:s', $endTs);
-                $stmt->bind_param('iissssiss', $id, $userId, $startDt, $endDt, $purposeVal, $status, $approvedBy, $approvedAt, $notesVal);
+                // The posted reading, stored exactly as it was asked for. It
+                // used to be a timestamp formatted back, which is where the
+                // moved hour entered the database.
+                $stmt->bind_param('iissssiss', $id, $userId, $startAt, $endAt, $purposeVal, $status, $approvedBy, $approvedAt, $notesVal);
                 $stmt->execute();
                 $stmt->close();
                 $_SESSION['flash_msg']  = $autoApprove === true

@@ -3202,6 +3202,34 @@ list typed in the check (#706). **D-065's rule in the other
 direction: where no test running today can tell, pin the source — and
 say WHY, or the pin reads as belt and braces.**
 
+**The independent check found four more, two of them real faults and
+one a WRITE path.** I wrote "NONE anywhere" for date-plus-clock-time
+concatenation, and `resources/book.php` does exactly that — storing
+the wrong hour, not merely showing it. Measured on 2026-03-29 in
+London: a room asked for 01:00-01:30 was saved as **02:00-02:30**, a
+half-hour from 00:30 became two hours, and 01:30-02:00 was REFUSED
+with "End time must be after start time", which was untrue. It keeps
+everything on the WALL CLOCK now; the buffer is added arithmetically
+in UTC *because UTC has no transitions*; and the one question needing
+a moment uses the organisation's zone via `Site::timezone()`.
+**A row reading "NONE anywhere" over a case that exists is worse than
+no row — it tells the next reader to stop looking. Write what the
+command returned, and quote the command.**
+
+Two more were exactly where the gate's header says it is blind:
+`attendance/api/create.php` and `update.php` used
+`createFromFormat('H:i', $raw)` with no date and no zone, so on the
+change morning every valid session time from 01:00 to 01:59 answered
+400 "sessionTime must be a valid H:i time". **A stated blind spot is a
+place to go looking, not a place to stop.**
+
+**And the gate was wrong BOTH ways:** `[^;]{0,200}` blocks a semicolon
+but not a NEWLINE, so it crossed a multi-line statement and reported
+correct code; and `new\s+DateTime` disallowed a LEADING BACKSLASH,
+which is the MAJORITY style under `web/` (87 against 79). It also
+skipped every `createFromFormat` where the header claimed only the
+date-and-zone form was. Eight cases measured each way now.
+
 What remains of #777 is the bulk: **486 time-shaped columns and only
 123 with any comment**, so "does this column hold a moment or a clock
 reading" is answered NO for three quarters of them before any reading

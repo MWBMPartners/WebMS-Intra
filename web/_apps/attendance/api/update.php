@@ -128,11 +128,17 @@ if (array_key_exists('sessionTime', $body) === true) {
     $sessionTime = null;
     if ($body['sessionTime'] !== null && trim((string) $body['sessionTime']) !== '') {
         $timeRaw = trim((string) $body['sessionTime']);
-        $timeObj = \DateTimeImmutable::createFromFormat('H:i', $timeRaw);
-        if ($timeObj === false || $timeObj->format('H:i') !== $timeRaw) {
+        // 🕐 VALIDATED AS TEXT — see `create.php` for the measurement. This
+        //    used `createFromFormat('H:i', $timeRaw)` with no date and no
+        //    zone, which means "today, in whatever zone this server uses", and
+        //    on the morning the clocks go forward PHP moves a reading in the
+        //    hour that does not exist — so the comparison with what was posted
+        //    failed and every session time from 01:00 to 01:59 was refused as
+        //    invalid, for one morning a year (#777).
+        if (preg_match('/^([01][0-9]|2[0-3]):([0-5][0-9])$/', $timeRaw) !== 1) {
             ApiResponse::error('sessionTime must be a valid H:i time', 400);
         }
-        $sessionTime = $timeObj->format('H:i:s');
+        $sessionTime = $timeRaw . ':00';
     }
     $set[]    = 'sessionTime = ?';
     $types   .= 's';

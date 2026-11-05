@@ -17989,7 +17989,29 @@ or the pin reads as belt and braces.**
 
 The column names come out of `full_schema.sql` rather than a list typed in the
 check (#706's lesson), so a new `TIME` column is covered without anybody
-remembering. Eleven exist today.
+remembering. Sixteen are declared; eleven distinct names.
+
+**AND THE GATE ITSELF WAS WRONG BOTH WAYS, which the independent check
+measured.** It cried wolf because `[^;]{0,200}` blocks a semicolon but **not a
+newline**, so the search walked out of the call and across the rest of a
+multi-line statement: a date and a time side by side in one array literal —
+ordinary, and already the shape of `calendar/feed.php` and
+`venues/schedule-pdf.php` — was reported as a fault. And it passed on broken
+code because `new\s+DateTime` did not allow a **leading backslash**, and
+`new \DateTimeImmutable` is the MAJORITY style under `web/`: 87 occurrences
+against 79, including in `attendance/api/create.php`, one of the files this
+package fixed.
+
+It also skipped **every** `createFromFormat`, where the header claimed only the
+date-AND-zone form was skipped — so the no-date-no-zone form was invisible, and
+that form was live in the two files above. The right construction is now
+recognised by its format string carrying a date part, which `'H:i'` does not.
+
+Eight cases are measured each way now: four real faults red (`strtotime`, both
+`new DateTime` spellings, `createFromFormat('H:i', …)`) and four correct
+constructions green (a date and a time in one array literal, `createFromFormat`
+with a date and a zone, slicing the text, a column name appearing only inside a
+SQL string).
 
 ### The verdicts, including the ones already right
 
@@ -18005,13 +18027,22 @@ be told from a sweep that stopped early.
 | `_core/Venues.php:3658` | **RIGHT** — compares clock readings as TEXT, which is #435's own fix |
 | `_core/Livestream.php:95-104` | **RIGHT** — gives the reading a date AND a zone with `createFromFormat(…, $tzObj)` |
 | `_core/Events.php` `OLD_FORM_ZONE` | **RIGHT, leave alone** — a hard-coded zone that is looked FOR and never written |
-| date-plus-clock-time concatenation | **NONE anywhere** — neither the PHP form nor `CONCAT()` in SQL |
+| `resources/book.php:65-68` | **WRONG, and it WROTE the wrong hour** — fixed; see below |
+| `attendance/api/create.php`, `update.php` | **WRONG** — `createFromFormat('H:i', …)` with no date and no zone; fixed |
+| `CONCAT()` of a date and a time in SQL | **NONE** — established with `grep -rniE "CONCAT\([^)]*(Date\|date)[^)]*(Time\|time)" web/_apps web/_core` |
 | `kids/checkin.php:130` | **a moment, so converting is right** — but `checkedInAt` is `DATETIME DEFAULT CURRENT_TIMESTAMP` with **no comment saying whether it is UTC or the server's clock**, which is #777's question 1 unanswered |
 
 ### The scale of what remains, measured rather than guessed
 
     486 time-shaped columns in full_schema.sql (402 DATETIME, 66 DATE, 16 TIME, 2 TIMESTAMP)
     123 of them carry ANY comment at all
+
+Established with
+`grep -cE '\`[A-Za-z0-9_]+\` +(DATETIME|TIMESTAMP|DATE|TIME)\b' web/_sql/full_schema.sql`
+and the same per type. **The commit message for part one printed the breakdown
+as "402 DATETIME, 66 DATE, 16 TIME", which sums to 484 under the 486 two lines
+above** — it dropped the two `TIMESTAMP` columns. Quote the command, and make
+the parts add up to the whole.
     338 strtotime( under web/_apps and web/_core
      54 new DateTime(Immutable)?(
     479 date( / gmdate(
@@ -18020,10 +18051,77 @@ So "does the column comment say which kind of value it holds?" is answered **no*
 for three quarters of them before any reading starts. That is the bulk of #777
 and it is not done.
 
+### I WROTE "NONE ANYWHERE" OVER A LIVE FAULT, AND IT WAS A WRITE PATH
+
+The first version of the table above said **"NONE anywhere — neither the PHP
+form nor `CONCAT()` in SQL"** for date-plus-clock-time concatenation. The
+independent check found `web/_apps/resources/book.php` doing exactly that, and
+it is the worst instance in the package because it does not merely DISPLAY the
+wrong hour — **it stores it.**
+
+    $startAt = $date . ' ' . $start . ':00';   // $start came from the form
+    $startTs = strtotime($startAt);            // resolved in PHP's DEFAULT zone
+
+Measured in Europe/London on 2026-03-29, before the fix:
+
+    asked 01:00-01:30  ->  STORED 02:00-02:30
+    asked 00:30-01:30  ->  STORED 00:30-02:30   (a one-hour booking became two)
+    asked 01:30-02:00  ->  REFUSED, "End time must be after start time"
+
+So a member booked a room for an hour they had not asked for, or was turned away
+for a reason that was not true — and the conflict check then used the moved
+values, so the booking could also collide with something it should not.
+
+**The fix keeps everything on the wall clock**, which is what the column holds
+and what the conflict query compares. The posted reading is stored exactly as
+given; start-before-end is compared as TEXT (#435's own fix); the buffer either
+side is added arithmetically through `shiftWallClock()`, in UTC precisely
+*because* UTC has no transitions; and the one question that genuinely needs a
+moment — "is the start in the past" — is the one place a zone appears, and it is
+the organisation's, through `Site::timezone()`.
+
+**The transferable part is about the record, not the code.** The table exists
+because "a sweep that lists only faults cannot be told from a sweep that stopped
+early". A row reading **NONE anywhere** over a case that exists is worse than no
+row at all: it tells the next reader to stop looking, in an append-only
+technical note. **Write what the command returned, and quote the command** —
+`grep -rniE "CONCAT\(...\)"` really does return nothing, and that is the claim
+that was safe to make; the PHP form was never searched for with a pattern that
+could find a differently-named variable.
+
+### And two more of the same class, found by looking where the gate admits it is blind
+
+`attendance/api/create.php` and `update.php` validated a posted session time
+with `\DateTimeImmutable::createFromFormat('H:i', $timeRaw)` and then compared
+`format('H:i')` with what was posted. With no date and no zone that means
+"today, in whatever zone this server uses" — measured,
+`createFromFormat('H:i','01:30')` really does answer today's date — so on the
+spring-forward morning the reading is moved, the comparison fails, and the API
+answers **400 "sessionTime must be a valid H:i time" for every valid time from
+01:00 to 01:59.** Whether a session time was accepted depended on today's date
+and the server's zone, neither of which has anything to do with the session.
+
+Both validate the TEXT now, with a pattern that accepts all 1,440 real times and
+refuses `24:00`, `23:60`, `1:30`, `01:3` and the rest — the same set the old code
+refused, so nothing else changes.
+
+**The gate's own header says it cannot see "a reading pulled into a variable
+several lines earlier and converted there", and that is exactly where these
+were.** A stated blind spot is a place to go looking, not a place to stop.
+
 ### Raised rather than bundled
 
-**#782 — eighteen hard-coded `Europe/London` literals across nine files, and two
-columns that DEFAULT to it.** The standing rule is explicit ("never hard-code a
+**#782 — eighteen hard-coded `Europe/London` literals across ten files, and two
+columns that DEFAULT to it.** The exact command matters, because the independent
+check re-counted and got a different figure from a wider search:
+
+    grep -rnE "'(Europe|America|Asia|Africa|Australia|Pacific)/[A-Za-z_]+'" \
+      web/_apps web/_core | grep -v WindowsTimeZones | grep -v giving-retention
+
+answers **18 lines across 10 files**. `WindowsTimeZones.php` is excluded because
+every literal in it is a mapping entry, and the giving-retention JSON because it
+is data. A search across all of `web/`, or one that counts comments, answers
+more — so the issue now carries the command rather than only the number. The standing rule is explicit ("never hard-code a
 zone… a customer in another country is the ordinary case"). The two defaults are
 #763's shape exactly — a default that cannot be told from a choice — with one
 real difference: unlike `tblUsers.locale`, those columns ARE written by their own

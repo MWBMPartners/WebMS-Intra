@@ -3655,6 +3655,15 @@ class Venues
             $confirmedCovering = array_values(array_filter($rows, static function (array $r) use ($ls, $le): bool {
                 return (int) $r['countsAsConfirmed'] === 1 && (int) $r['isBookable'] === 1
                     && $r['startTime'] !== null && $r['endTime'] !== null
+                    // 🕐 COMPARED AS TEXT, AND THAT IS THE FIX, NOT AN
+                    //    OVERSIGHT (#435, #777). These are readings from a
+                    //    clock — "19:00 to 21:00" — and a reading is not a
+                    //    point in history until something gives it a date AND
+                    //    a zone. Comparing them as moments broke on the
+                    //    clock-change weekend, which is what #435 was; as
+                    //    text, `'19:00' <= '21:00'` is right on every day of
+                    //    the year in every zone. Do not "improve" this into a
+                    //    `strtotime()` or a `DateTimeImmutable`.
                     && (string) $r['startTime'] <= $ls && (string) $r['endTime'] >= $le;
             }));
             $anyConfirmedBookable = array_values(array_filter($rows, static fn (array $r): bool => (int) $r['countsAsConfirmed'] === 1 && (int) $r['isBookable'] === 1));

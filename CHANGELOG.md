@@ -14,8 +14,19 @@ whatever time zone this server happens to use".
 On the morning the clocks go forward, half past one does not exist. So a group
 whose meeting time is stored as `01:30` was displayed as **2:30 AM on 29 March
 2026** — and two different stored times, `01:00` and `01:30`, came out as the
-same words. Measured in three places before anything was changed. The stored
-data was always right; only the display was wrong, for one day a year.
+same words. Measured on three dates before anything was changed. The stored
+data was right in those four places; only the display was wrong, for one day a
+year.
+
+**And in a fifth place the stored data was wrong too.** Booking a resource
+built the same kind of value and then put it through the same conversion, so on
+that morning a room asked for from 01:00 to 01:30 was **saved as 02:00 to
+02:30**, a half-hour booking from 00:30 could be saved as two hours, and a
+booking from 01:30 was refused with "End time must be after start time" — which
+was not true. Two places in the data-entry interface for attendance also
+rejected every session time between 01:00 and 01:59 that morning as invalid.
+All three are fixed, and all three were found by the independent review rather
+than by the first sweep.
 
 Three Small Groups pages and the Attendance list are fixed. They now put a clock
 reading into words from its digits, through one place —

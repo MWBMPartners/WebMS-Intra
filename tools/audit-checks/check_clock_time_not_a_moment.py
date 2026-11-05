@@ -61,7 +61,16 @@ switched off (#483)
   * **A clock reading given a date AND a zone together**, as
     `web/_core/Livestream.php` does with
     `createFromFormat('Y-m-d H:i:s', $date . ' ' . $time, $tzObj)`. That is the
-    correct construction, and it is not what this looks for.
+    correct construction, and it is recognised by the format string carrying a
+    date part.
+
+    **An earlier version of this sentence was untrue in the reassuring
+    direction:** the code skipped EVERY `createFromFormat`, not only that form,
+    so `createFromFormat('H:i', $clock)` -- which has neither a date nor a zone
+    and quietly means "today, in whatever zone this server uses" -- was
+    invisible. It was live in `attendance/api/create.php` and `update.php`,
+    where it refused every valid session time from 01:00 to 01:59 on the
+    spring-forward morning.
   * **Slicing the text**, as `web/_apps/rota/index.php` does with
     `substr((string) $slot['startTime'], 0, 5)`. Correct on every day of the
     year in every zone, and the model the fix copied.
@@ -95,7 +104,31 @@ WEB = "web"
 SCHEMA = os.path.join("web", "_sql", "full_schema.sql")
 
 # A clock reading handed straight to something that wants a moment.
-MOMENT_FUNCTIONS = r"(?:strtotime|new\s+DateTime(?:Immutable)?)"
+#
+# ⚠️ THE LEADING BACKSLASH IS NOT OPTIONAL, and leaving it out meant this check
+#    missed the MAJORITY spelling of the thing it exists to catch. Measured
+#    under `web/`: `new \DateTime*` appears 87 times against 79 for the bare
+#    form, and `attendance/api/create.php` -- one of the files this package
+#    fixed -- writes `\DateTimeImmutable`. Planted,
+#    `new \DateTimeImmutable((string) $row['meetingTime'])` passed.
+#
+# ⚠️ AND `createFromFormat` IS INCLUDED, with one exception below. The header
+#    used to say this skipped "a clock reading given a date AND a zone
+#    together", which is the correct construction -- but the code skipped EVERY
+#    `createFromFormat`, including `createFromFormat('H:i', $clock)`, which has
+#    neither a date nor a zone and quietly means "today, in whatever zone this
+#    server uses". That form was live in two files and invisible here.
+MOMENT_FUNCTIONS = (
+    r"(?:strtotime|new\s+\\?DateTime(?:Immutable)?|"
+    r"\\?DateTime(?:Immutable)?::createFromFormat)"
+)
+
+# The one construction that is RIGHT: a reading given a date AND a zone in the
+# same call, as `web/_core/Livestream.php` does. Recognised by the format string
+# carrying a date part, which `'H:i'` does not.
+CORRECT_WITH_DATE_AND_ZONE = re.compile(
+    r"createFromFormat\s*\(\s*['\"][^'\"]*[Yy][^'\"]*['\"]"
+)
 
 # 📁 Places where this is RIGHT, each with its reason. Fails both ways: an entry
 #    that no longer does it fails too, because an allow-list that has stopped
@@ -223,8 +256,20 @@ def main() -> int:
     # either order: `strtotime($x['sessionTime'])` and
     # `$sess['sessionTime']` passed to `new DateTime(...)`.
     names = "|".join(re.escape(c) for c in columns)
+    # ⚠️ NO NEWLINE, AND THAT IS THE WHOLE OF FINDING 3. `[^;]` blocks a
+    #    semicolon but not a line break, so the search walked out of the call
+    #    and across the rest of a multi-line statement -- reporting a date and
+    #    a time side by side in one array literal, which is ordinary and is
+    #    already the shape of `calendar/feed.php` and
+    #    `venues/schedule-pdf.php`. Measured: a probe with
+    #    `strtotime($r['sessionDate'])` on one line and
+    #    `substr($r['sessionTime'], 0, 5)` on the next was reported as a fault.
+    #    A check that cries wolf gets switched off (#483).
+    #
+    #    A call is also not 200 characters of anything: it stops at the line it
+    #    is on, and at the closing bracket or a comma that ends its argument.
     pattern = re.compile(
-        MOMENT_FUNCTIONS + r"\s*\([^;]{0,200}?\b(?:" + names + r")\b",
+        MOMENT_FUNCTIONS + r"\s*\([^;\n]{0,200}?\b(?:" + names + r")\b",
         re.IGNORECASE,
     )
 
@@ -243,7 +288,13 @@ def main() -> int:
                 raw = handle.read()
             looked_at += 1
             code = blank_comments(php_only(raw))
-            hits = [code[:m.start()].count("\n") + 1 for m in pattern.finditer(code)]
+            hits = []
+            for found in pattern.finditer(code):
+                # A reading given a date AND a zone together is the correct
+                # construction, not a fault -- see CORRECT_WITH_DATE_AND_ZONE.
+                if CORRECT_WITH_DATE_AND_ZONE.search(found.group(0)) is not None:
+                    continue
+                hits.append(code[:found.start()].count("\n") + 1)
             if len(hits) == 0:
                 continue
             if relative in ALLOWED:

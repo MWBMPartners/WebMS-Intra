@@ -84,11 +84,27 @@ if ($typeExists === false) {
 $sessionTime = null;
 if (isset($body['sessionTime']) === true && trim((string) $body['sessionTime']) !== '') {
     $timeRaw = trim((string) $body['sessionTime']);
-    $timeObj = \DateTimeImmutable::createFromFormat('H:i', $timeRaw);
-    if ($timeObj === false || $timeObj->format('H:i') !== $timeRaw) {
+    // 🕐 VALIDATED AS TEXT, because a session time is a reading from a clock
+    //    and nothing here needs it to be a moment (#777).
+    //
+    // 🚨 THIS USED `createFromFormat('H:i', $timeRaw)` WITH NO DATE AND NO
+    //    ZONE, which quietly means "today, in whatever zone this server
+    //    happens to use" — measured, `createFromFormat('H:i', '01:30')`
+    //    answers today's date. It then compared `format('H:i')` with what was
+    //    posted, so on the morning the clocks go forward, where 01:30 does not
+    //    exist and PHP moves it to 02:30, the two differ and the request is
+    //    refused with "sessionTime must be a valid H:i time". Measured: the
+    //    same reading resolves to 02:30 on 2026-03-29 in Europe/London and to
+    //    01:30 on 2026-03-28.
+    //
+    //    So whether a valid session time was accepted depended on today's date
+    //    and the server's zone, neither of which has anything to do with the
+    //    session being recorded. Every reading from 01:00 to 01:59 was refused
+    //    on that one morning.
+    if (preg_match('/^([01][0-9]|2[0-3]):([0-5][0-9])$/', $timeRaw) !== 1) {
         ApiResponse::error('sessionTime must be a valid H:i time', 400);
     }
-    $sessionTime = $timeObj->format('H:i:s');
+    $sessionTime = $timeRaw . ':00';
 }
 
 $eventId = null;

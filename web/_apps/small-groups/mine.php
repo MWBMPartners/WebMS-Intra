@@ -21,10 +21,10 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\Auth;
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
 //    the line only fails when it RUNS — `php -l` is happy without it (#536).
 use Portal\Core\I18n;
-use Portal\Core\Auth;
 use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
