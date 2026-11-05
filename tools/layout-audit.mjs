@@ -341,10 +341,36 @@ async function main() {
       await new Promise(r => setTimeout(r, 250));   // let late styles settle
 
       // The browser's own complaints about THIS page.
-      const failedReqs = events
+      // ⚠️ A FAILED REQUEST TO AN OUTSIDE HOST IS NOT THE SAME NEWS AS A
+      //    FAILED REQUEST TO THIS PORTAL, and counting them together drowned
+      //    the real findings. Measured: an offline run reported 5,536
+      //    "problems" across 445 pages, of which 1,980 were one condition —
+      //    `www.gravatar.com` being unreachable. A reader seeing that number
+      //    learns nothing and stops reading, which is #483 at scale.
+      //
+      //    They are separated rather than filtered, because the outside ones
+      //    are worth knowing in their own right: a page that asks an outside
+      //    company for a picture tells that company who is looking at it. That
+      //    is how #778 was found.
+      const failedAll = events
         .filter(e => e.method === 'Network.loadingFailed')
-        .filter(e => !(e.params && e.params.canceled))
-        .length;
+        .filter(e => !(e.params && e.params.canceled));
+      const requestUrl = id => {
+        const sent = events.find(e => e.method === 'Network.requestWillBeSent'
+          && e.params && e.params.requestId === id);
+        return (sent && sent.params && sent.params.request && sent.params.request.url) || '';
+      };
+      const isOutside = url => url !== '' && !url.startsWith(BASE);
+      const outsideHosts = new Set();
+      let failedReqs = 0;
+      for (const e of failedAll) {
+        const url = requestUrl(e.params && e.params.requestId);
+        if (isOutside(url)) {
+          try { outsideHosts.add(new URL(url).host); } catch { outsideHosts.add(url); }
+          continue;
+        }
+        failedReqs += 1;
+      }
       // Keep the TEXT, not just a count: "1 JavaScript error" tells nobody
       // what to fix, and the point of this check is that the page looks
       // finished while something on it does nothing.
@@ -389,7 +415,14 @@ async function main() {
           + `\n      ${[...new Set(errorTexts)].slice(0, 3).join('\n      ')}`);
       }
       if (failedReqs > 0) {
-        problems.push(`${page} @${asked}: ${failedReqs} request(s) failed to load`);
+        problems.push(`${page} @${asked}: ${failedReqs} request(s) to this portal failed to load`);
+      }
+      if (outsideHosts.size > 0) {
+        // A WARNING, not a problem: it may simply mean this machine is offline.
+        // What it always means is that the page asked an outside host for
+        // something, which is worth seeing whether or not it answered.
+        warnings.push(`${page} @${asked}: asked ${outsideHosts.size} outside host(s)`
+          + ` that did not answer — ${[...outsideHosts].join(', ')}`);
       }
 
       if (asked === WIDTHS[0]) {

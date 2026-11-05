@@ -343,6 +343,170 @@ if ($up === false) {
         . 'Its log is in the temporary folder, which is about to be removed');
 }
 
+// 🔐 SIGN AN ADMINISTRATOR IN, so the pages behind a sign-in can be looked at
+//    too. The owner's checklist covers them (their decision of 4 October
+//    2026), and until now this audit could not reach a single one — it said so
+//    in its own output, which is the only reason that was honest rather than
+//    misleading.
+//
+//    ⚠️ THE PASSWORD IS HASHED HERE WITH `password_hash()` AND THAT IS ALLOWED
+//       ONLY BECAUSE THIS IS `tools/`. `Auth::setPassword()` is the ONE place a
+//       sign-in password is hashed and written under `web/` (#728), and
+//       `check_one_password_writer.py` enforces it — its own header records
+//       that it deliberately does not look outside `web/`, because a test
+//       harness must be able to make an account. **Never copy this into a
+//       page.**
+//
+//    It signs in the way a person does: fetch `/login`, take the form's token
+//    out of the HTML, post the two fields, keep the cookie. Nothing here
+//    reaches past the front door, so if the sign-in page itself breaks, this
+//    fails rather than quietly auditing a signed-out portal and calling it
+//    signed-in.
+$cookie = null;
+$signedInPages = [];
+$password = bin2hex(random_bytes(12));
+// ⚠️ A NAME OF THIS RUN'S OWN, so nothing has to be deleted first. Deleting a
+//    previous run's account threw: once that account has looked at a page it
+//    has rows in `tblActivityLogs`, which point at it, and the delete is
+//    refused by the foreign key — correctly. The database is throwaway, so
+//    leaving the old accounts costs nothing and removes a whole class of
+//    failure from the setup.
+$who = 'visual-audit-' . bin2hex(random_bytes(4));
+
+$stmt = $db->prepare(
+    'INSERT INTO `tblUsers` (`fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) '
+    . 'VALUES (?, ?, 1, 1, 1)'
+);
+$name  = 'Visual Audit';
+$email = $who . '@example.invalid';
+$stmt->bind_param('ss', $name, $email);
+$stmt->execute();
+$userId = (int) $db->insert_id;
+$stmt->close();
+
+$stmt = $db->prepare(
+    'INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) '
+    . 'VALUES (?, ?, ?, 1)'
+);
+$hash = password_hash($password, PASSWORD_DEFAULT);
+$stmt->bind_param('iss', $userId, $who, $hash);
+$stmt->execute();
+$stmt->close();
+
+// Membership of every organisation there is, so no page is skipped for the
+// wrong reason.
+$sites = $db->query('SELECT `siteID` FROM `tblSites`');
+while (($site = $sites->fetch_assoc()) !== null) {
+    $stmt = $db->prepare(
+        'INSERT INTO `tblUserSites` (`userID`, `siteID`, `isSiteAdmin`, `isSiteRootAdmin`, `isActive`) '
+        . 'VALUES (?, ?, 1, 1, 1)'
+    );
+    $siteId = (int) $site['siteID'];
+    $stmt->bind_param('ii', $userId, $siteId);
+    $stmt->execute();
+    $stmt->close();
+}
+$sites->free();
+
+$jar = tempnam(sys_get_temp_dir(), 'va-cookie-');
+$curlWithJar = static function (string $path, ?array $post = null, bool $wantHeaders = false) use ($port, $jar): array {
+    $ch = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_COOKIEJAR      => $jar,
+        CURLOPT_COOKIEFILE     => $jar,
+    ]);
+    if ($post !== null) {
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+    }
+    if ($wantHeaders === true) {
+        curl_setopt($ch, CURLOPT_HEADER, true);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+    }
+    $body   = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $text   = is_string($body) === true ? $body : '';
+    $head   = '';
+    if ($wantHeaders === true) {
+        $size = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
+        $head = substr($text, 0, $size);
+        $text = substr($text, $size);
+    }
+    return [$status, $text, $head];
+};
+
+// ⚠️ SAY WHY IT FAILED, not just that it did. The first version printed
+//    "COULD NOT SIGN IN" and nothing else, which made the failure
+//    undiagnosable — and a signed-in audit that silently becomes a signed-out
+//    one is the quiet pass this whole script exists to stop.
+$whyNot = '';
+[$loginStatus, $loginHtml] = $curlWithJar('/login');
+$token = '';
+if (preg_match('/name="csrf_token"\s+value="([0-9a-f]{32,})"/', $loginHtml, $m) === 1) {
+    $token = $m[1];
+}
+if ($loginStatus !== 200) {
+    $whyNot = "the sign-in page itself answered {$loginStatus}";
+} elseif ($token === '') {
+    $whyNot = 'no form token could be found on the sign-in page';
+}
+if ($whyNot === '') {
+    // ⚠️ POST ONCE. An earlier version posted twice — once for the body and
+    //    once again with headers on to read the cookie — and the SECOND post
+    //    was always refused, because `Auth::verifyCsrf()` spends the token on
+    //    the first. So it set no cookie and the audit reported that it could
+    //    not sign in. That is #768's own fault, committed here while fixing
+    //    #768: a token is good for one acceptance, and asking twice is asking
+    //    with a spent one.
+    //
+    //    Headers are on, and redirects are NOT followed for this one request:
+    //    the session cookie is on the 302 itself, and following it throws the
+    //    headers away.
+    [$postStatus, $postBody, $signInHead] = $curlWithJar('/login', [
+        'csrf_token' => $token, 'username' => $who, 'password' => $password,
+    ], true);
+    // Did it actually work? Asking a page that needs a sign-in is the only
+    // honest test — a cookie file with something in it proves nothing.
+    [$checkStatus] = $curlWithJar('/account');
+    if ($checkStatus !== 200) {
+        $whyNot = "the sign-in post answered {$postStatus} and /account then answered "
+            . "{$checkStatus}; the account may not have been created as this portal expects";
+    }
+    if ($checkStatus === 200) {
+        // ⚠️ READ IT FROM THE ANSWER'S OWN HEADERS, NOT FROM CURL'S JAR FILE.
+        //    curl writes the jar when the handle is CLOSED, and PHP 8 frees a
+        //    handle whenever it chooses — so the file was reliably empty at
+        //    the moment it was read, and the audit reported "the session
+        //    cookie could not be read" while the sign-in had actually worked.
+        //    The header is there in the answer itself and needs nothing to be
+        //    flushed.
+        if (preg_match('/^Set-Cookie:\s*([^=]+)=([^;\r\n]+)/mi', $signInHead, $c) === 1) {
+            $cookie = trim($c[1]) . '=' . trim($c[2]);
+        } elseif (preg_match('/^Set-Cookie:\s*([^=]+)=([^;\r\n]+)/mi', $postBody, $c) === 1) {
+            $cookie = trim($c[1]) . '=' . trim($c[2]);
+        }
+        if ($cookie === null) {
+            // The session is already established in the jar, so no new header
+            // is sent. Ask curl for what it is holding, which it will tell us
+            // without writing a file.
+            $raw = $curlWithJar('/account', null, true)[2];
+            if (preg_match('/Cookie:\s*(PHPSESSID|[A-Za-z0-9_]+)=([^;\r\n]+)/i', $raw, $c) === 1) {
+                $cookie = trim($c[1]) . '=' . trim($c[2]);
+            }
+        }
+    }
+}
+@unlink($jar);
+if ($cookie !== null) {
+    echo "Signed in as an administrator; pages behind the sign-in will be looked at too\n";
+} else {
+    echo "⚠️  COULD NOT SIGN IN, so only signed-out pages are covered by this run.\n"
+        . "    Reason: " . ($whyNot !== '' ? $whyNot : 'the session cookie could not be read') . "\n";
+}
+
 // 📄 The pages a signed-OUT visitor can reach, TAKEN FROM THE ROUTES TABLE
 //    RATHER THAN TYPED OUT (#569).
 //
@@ -389,6 +553,25 @@ while (($row = $rows->fetch_assoc()) !== null) {
 }
 $rows->free();
 
+// 🔐 And the pages behind the sign-in, when there is a session to see them
+//    with. Same filtering, plus the admin pages' own sub-handlers: a `/save`
+//    or an `/api/` address is not a page whichever side of the door it is on.
+if ($cookie !== null) {
+    $rows = $db->query('SELECT `routeKey` FROM `tblRoutes` WHERE `isProtected` = 1 ORDER BY `routeKey`');
+    while (($row = $rows->fetch_assoc()) !== null) {
+        $key = (string) $row['routeKey'];
+        if (preg_match($notAPage, $key) === 1) {
+            continue;
+        }
+        // A page that acts rather than shows: deleting, running, exporting.
+        if (preg_match('~/(delete|run|export|download|toggle|send|cancel|approve|reject|print)(/|$)~', $key) === 1) {
+            continue;
+        }
+        $candidates['/' . $key] = 'a page behind the sign-in';
+    }
+    $rows->free();
+}
+
 // 📌 THE HIGH-WATER MARK, TAKEN BEFORE ANY PAGE IS FETCHED.
 //
 //    🚨 THIS USED TO COUNT EVERY ROW IN `tblErrors`, so ONE row left by an
@@ -426,6 +609,22 @@ if (count($pages) === 0) {
         . 'This is a failure, not a clean run');
 }
 
+// 🔢 A QUICK PASS, for when the point is to check the audit rather than the
+//    portal. The full run is 445 pages at five widths — over 2,200 renders and
+//    the best part of half an hour — which is right for a release gate and
+//    wrong for "does my change to this script work".
+//
+//    ⚠️ IT SAYS SO IN THE OUTPUT, EVERY TIME. A shortened run that reads like
+//       a full one is the quiet pass this whole script exists to stop, and a
+//       reader coming to the log later has no way to tell otherwise.
+$limit = (int) (getenv('VISUAL_AUDIT_LIMIT') !== false ? getenv('VISUAL_AUDIT_LIMIT') : 0);
+if ($limit > 0 && count($pages) > $limit) {
+    $allPages = count($pages);
+    $pages = array_slice($pages, 0, $limit);
+    echo "⚠️  QUICK PASS: {$limit} of {$allPages} pages, because VISUAL_AUDIT_LIMIT is set.\n"
+        . "    This is NOT the release audit and must not be reported as one.\n";
+}
+
 $out = getenv('VISUAL_AUDIT_OUT') !== false
     ? (string) getenv('VISUAL_AUDIT_OUT')
     : $child . $sep . 'screenshots';
@@ -434,15 +633,31 @@ echo "\nLooking at " . count($pages) . " page(s) in Edge, at five widths\n";
 echo str_repeat('-', 72) . "\n";
 
 $cmd = sprintf(
-    'node %s --base=%s --pages=%s --out=%s --port=%d --keep-screenshots 2>&1',
+    'node %s --base=%s --pages=%s --out=%s --port=%d%s --keep-screenshots 2>&1',
     escapeshellarg($harness),
     escapeshellarg('http://127.0.0.1:' . $port),
     escapeshellarg(implode(',', $pages)),
     escapeshellarg($out),
     // A port of this run's own, so two audits can run side by side and a
     // leftover browser from an earlier run is never attached to by mistake.
-    9400 + (getmypid() % 150)
+    9400 + (getmypid() % 150),
+    // The session, when there is one. `escapeshellarg` because the value is a
+    // session id the portal minted, not something typed here — and a shell
+    // argument built by concatenation is how a value with a quote in it stops
+    // being one argument.
+    $cookie !== null ? ' --cookie=' . escapeshellarg($cookie) : ''
 );
+
+// ⏱️ A DEADLINE THAT SCALES WITH THE WORK, because a fixed one stopped being
+//    honest the moment the page list grew. `layout-audit.mjs` defaults to 600
+//    seconds, which was ample for FOUR pages; with the sign-in it is 445, each
+//    rendered at five widths, and the run was CUT OFF at roughly 284 — the
+//    report then said nothing about the rest, and a reader could easily have
+//    taken "no findings" for the pages it never reached.
+//
+//    Four seconds a page is generous against the measured rate and still bounds
+//    a run that has genuinely hung, which is what a deadline is for.
+$cmd .= ' --deadline=' . (count($pages) * 4000 + 60000);
 $lines = [];
 $code  = 0;
 exec($cmd, $lines, $code);
@@ -512,8 +727,20 @@ if (getenv('VISUAL_AUDIT_OUT') === false) {
     echo "  ⚠️  That folder is inside the temporary copy and is about to be DELETED.\n"
         . "      Set VISUAL_AUDIT_OUT to a real path to keep them.\n";
 }
-echo "\nThis pass covered SIGNED-OUT pages only. The owner's checklist covers\n"
-    . "pages behind a sign-in as well; that needs a session and is not done yet.\n";
+// ⚠️ SAY WHAT THIS RUN ACTUALLY DID. The line here used to read "this pass
+//    covered SIGNED-OUT pages only" unconditionally — true before the sign-in
+//    was built and FALSE the moment it worked, on a script whose whole purpose
+//    is catching pages that quietly do the wrong thing.
+if ($cookie !== null) {
+    echo "\nThis pass covered BOTH signed-out pages and pages behind the sign-in,\n"
+        . "as an administrator. An ordinary member sees fewer pages, and a page\n"
+        . "that looks right to an administrator may not to them — that is not\n"
+        . "covered here.\n";
+} else {
+    echo "\nThis pass covered SIGNED-OUT pages only, because it could not sign in.\n"
+        . "The owner's checklist covers pages behind a sign-in as well, so this\n"
+        . "run does NOT meet it.\n";
+}
 
 // 🔎 Anything the portal itself logged is a finding in its own right.
 //
