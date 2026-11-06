@@ -958,5 +958,73 @@ expect('J11', 'the same in Chicago, on its own change date', starts(
     '2028-04-02 02:30:00',
 ]);
 
+// J12-J14 — `readingPastTheGap()`, the SHARPER question (#777 round 13).
+//
+// J06-J09 pin `readingIsReal()`, and round 12 built `save.php`'s branch choice
+// on it. **That was the wrong question and it was wrong in BOTH directions**,
+// because what has to be explained is the difference between what was TYPED
+// and what was STORED, and `readingIsReal()` only knows about the typed value:
+//
+//   • London, typed `2026-03-29 01:30` (inside the gap) with MONDAY ticked →
+//     stored `2026-03-30 01:30`. The gap sentence fired, and every clause of
+//     it was untrue: 01:30 exists on 30 March, the date moved because Monday
+//     was ticked, and the time never changed.
+//   • London, typed `2026-03-28 01:30` (a real Saturday) with SUNDAY ticked →
+//     stored `2026-03-29 02:30`. The pattern sentence fired and said nothing
+//     about the hour, which is the half that makes somebody arrive an hour
+//     late.
+//
+// The sharp test is "is what was stored exactly what the gap would make of
+// what was typed", and that needs this method rather than a bool.
+expect('J12', 'the gap moves a reading inside it, and leaves a real one alone', [
+    'in the gap, Nuuk'     => EventRecurrence::readingPastTheGap('2026-03-28 23:30:00', 'America/Nuuk'),
+    'in the gap, London'   => EventRecurrence::readingPastTheGap('2026-03-29 01:30:00', 'Europe/London'),
+    'real, London'         => EventRecurrence::readingPastTheGap('2026-03-28 01:30:00', 'Europe/London'),
+    'real, midsummer'      => EventRecurrence::readingPastTheGap('2026-06-01 12:00:00', 'Europe/London'),
+], [
+    'in the gap, Nuuk'     => '2026-03-29 00:30:00',
+    'in the gap, London'   => '2026-03-29 02:30:00',
+    'real, London'         => '2026-03-28 01:30:00',
+    'real, midsummer'      => '2026-06-01 12:00:00',
+]);
+
+// J13 — AN UNREADABLE ZONE RETURNS THE READING UNCHANGED, so a caller cannot
+//       be told a gap moved something when we could not tell.
+expect('J13', 'an unreadable zone moves nothing rather than guessing', [
+    'rubbish' => EventRecurrence::readingPastTheGap('2026-03-28 23:30:00', 'Not/AZone'),
+    'empty'   => EventRecurrence::readingPastTheGap('2026-03-28 23:30:00', ''),
+], [
+    'rubbish' => '2026-03-28 23:30:00',
+    'empty'   => '2026-03-28 23:30:00',
+]);
+
+// J14 — THE DISCRIMINATOR ITSELF, over the four cases `save.php` must tell
+//       apart. This is the arithmetic the page does; doing it here means a
+//       wrong branch is caught without a database or a web server.
+//
+//       `gap alone` is true only when the stored value IS what the gap would
+//       have produced. Round 12's version asked a different question and
+//       answered true for case 2 and false for case 3.
+$j14 = [];
+foreach ([
+    ['America/Nuuk',  '2026-03-28 23:30:00', '2026-03-29 00:30:00', 'gap alone'],
+    ['Europe/London', '2026-03-29 01:30:00', '2026-03-30 01:30:00', 'pattern'],
+    ['Europe/London', '2026-03-28 01:30:00', '2026-03-29 02:30:00', 'pattern and time'],
+    ['Europe/London', '2028-10-04 19:00:00', '2028-10-05 19:00:00', 'pattern'],
+] as [$zone, $typed, $stored, $wanted]) {
+    $gapWouldGive = EventRecurrence::readingPastTheGap($typed, $zone);
+    $gapAlone     = $gapWouldGive !== $typed && $stored === $gapWouldGive;
+    $timeAlso     = substr($stored, 11) !== substr($typed, 11);
+    $j14[$typed . ' -> ' . $stored] = $gapAlone === true
+        ? 'gap alone'
+        : ($timeAlso === true ? 'pattern and time' : 'pattern');
+}
+expect('J14', 'the branch the page must pick, over all four cases', $j14, [
+    '2026-03-28 23:30:00 -> 2026-03-29 00:30:00' => 'gap alone',
+    '2026-03-29 01:30:00 -> 2026-03-30 01:30:00' => 'pattern',
+    '2026-03-28 01:30:00 -> 2026-03-29 02:30:00' => 'pattern and time',
+    '2028-10-04 19:00:00 -> 2028-10-05 19:00:00' => 'pattern',
+]);
+
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

@@ -18349,10 +18349,17 @@ fault touched. Section I is about an OCCURRENCE landing in the gap, a different
 question, and it is correct. **Ask what the fixture puts in the faulty position,
 not whether the zone is a realistic one.** J10 and J11 are London and Chicago
 for exactly that reason; without them the 128-zone half was pinned by Nuuk
-alone. Section J is six checks in the two zones
-that do, with the premise asserted first (J00) and the over-reach direction
-held down (J04); four of the six go red on the old anchor, and J00 and J04 stay
-green, which is what they are for.
+alone. Section J is **fifteen** checks (J00-J14), with the premise asserted
+first (J00) and the over-reach direction held down (J04); **six** go red on the
+old anchor — J01, J02, J03 and J05 in the two 23:00 zones, and **J10 and J11 in
+Europe/London and America/Chicago**, which go forward at 01:00 and 02:00.
+
+⚠️ **This paragraph said "six checks in the two zones that do … four of the
+six" for a round**, two lines above its own correction naming London and
+Chicago, so it contradicted itself inside one paragraph. **Count from
+`php tools/event-recurrence-selftest.php | grep -c "— J"`, never from the
+number you remember writing.** That is the sixth wrong count this package has
+produced, and every one was cheap to check.
 
 **It has since JOINED the write-path list (round 12).** This paragraph used to
 say it could not, because one live `strtotime` remained — formatting a date-only

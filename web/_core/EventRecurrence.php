@@ -875,28 +875,6 @@ final class EventRecurrence
     }
 
     /**
-     * 🕳️ Move a reading forward out of the hour that does not exist.
-     *
-     * On the night the clocks go forward there is no 01:30 (in most of Europe)
-     * or no 02:30 (in much of North America). PHP will happily hold such a
-     * reading and then report a different wall clock when asked, which is how
-     * a date can look right in the database and wrong on screen.
-     *
-     * The test is to build the reading in its own zone and ask what wall clock
-     * it really is. If it comes back as something else, the reading was inside
-     * the gap, and the moment PHP gave is the right place to be: it is the
-     * same instant, expressed as the clock that really existed. So the moved
-     * reading is simply what PHP reports.
-     *
-     * It still counts as ONE occurrence, which matches `IcsReader` and every
-     * other calendar.
-     *
-     * WHAT THIS DOES NOT TOUCH: the hour that happens twice. A reading of
-     * 01:30 on that night is a real wall clock, written down as 01:30; which
-     * of the two it means is only a question when something turns it into an
-     * instant, and that is `Site::zoneFor()`'s job, not this file's.
-     */
-    /**
      * 🕳️ Is this reading a time that really exists in that zone?
      *
      * Public because a CALLER has to tell two quite different reasons apart
@@ -925,6 +903,47 @@ final class EventRecurrence
      * @param string $reading  A wall-clock reading, `Y-m-d H:i:s`.
      * @param string $zoneName The zone it is a reading on.
      */
+    /**
+     * 🕳️ What the missing-hour step would make of this reading.
+     *
+     * Public for the same reason as `readingIsReal()`, and it is the SHARPER
+     * question (#777 round 13). A caller explaining why a repeating event's
+     * first date moved has to tell two causes apart, and asking only whether
+     * the TYPED reading was real gets it wrong in BOTH directions:
+     *
+     *   • Europe/London, typed `2026-03-29 01:30` (inside London's missing
+     *     hour) with MONDAY ticked. The pattern moves it to 30 March, where
+     *     01:30 exists perfectly well. Asking about the typed reading said
+     *     "the clocks went forward", which is not why the date moved and
+     *     points at a control that cannot fix it.
+     *   • Europe/London, typed `2026-03-28 01:30` (a real Saturday reading)
+     *     with SUNDAY ticked. The pattern moves it to 29 March, and THERE
+     *     01:30 does not exist, so the stored time became 02:30. Asking
+     *     about the typed reading said only "to match the repeat you chose"
+     *     and never mentioned the hour — the half that makes somebody arrive
+     *     an hour late.
+     *
+     * So the test is not "was the typed reading real" but "is what was STORED
+     * exactly what the gap would have made of what was typed". If it is, the
+     * gap is the whole story; if it is not, the pattern chose the date and the
+     * gap may also have shifted the time.
+     *
+     * Returns the reading unchanged when there is no gap, and when the zone
+     * cannot be read — the honest fallback is to claim nothing.
+     *
+     * @param string $reading  A wall-clock reading, `Y-m-d H:i:s`.
+     * @param string $zoneName The zone it is a reading on.
+     */
+    public static function readingPastTheGap(string $reading, string $zoneName): string
+    {
+        $zone = self::zoneOrNull($zoneName);
+        if ($zone === null) {
+            return $reading;
+        }
+
+        return self::pastTheHourThatIsMissing($reading, $zone);
+    }
+
     public static function readingIsReal(string $reading, string $zoneName): bool
     {
         $zone = self::zoneOrNull($zoneName);
@@ -935,6 +954,36 @@ final class EventRecurrence
         return self::pastTheHourThatIsMissing($reading, $zone) === $reading;
     }
 
+    /**
+     * 🕳️ Move a reading forward out of the hour that does not exist.
+     *
+     * On the night the clocks go forward there is no 01:30 (in most of Europe)
+     * or no 02:30 (in much of North America). PHP will happily hold such a
+     * reading and then report a different wall clock when asked, which is how
+     * a date can look right in the database and wrong on screen.
+     *
+     * The test is to build the reading in its own zone and ask what wall clock
+     * it really is. If it comes back as something else, the reading was inside
+     * the gap, and the moment PHP gave is the right place to be: it is the
+     * same instant, expressed as the clock that really existed. So the moved
+     * reading is simply what PHP reports.
+     *
+     * It still counts as ONE occurrence, which matches `IcsReader` and every
+     * other calendar.
+     *
+     * WHAT THIS DOES NOT TOUCH: the hour that happens twice. A reading of
+     * 01:30 on that night is a real wall clock, written down as 01:30; which
+     * of the two it means is only a question when something turns it into an
+     * instant, and that is `Site::zoneFor()`'s job, not this file's.
+     */
+    // ⚠️ THIS DOCBLOCK BELONGS TO THE METHOD BELOW IT, and for one round it
+    //    did not. #777 round 12 inserted two PUBLIC methods between this
+    //    block and its own signature, so the file carried two consecutive
+    //    docblocks: every IDE and doc reader attached "Move a reading
+    //    forward out of the hour that does not exist" to a method that
+    //    returns a bool and moves nothing, and this one was left with no
+    //    documentation at all. Insert a new method ABOVE a docblock or
+    //    BELOW its method, never between the two.
     private static function pastTheHourThatIsMissing(string $wallClock, DateTimeZone $zone): string
     {
         $built = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $wallClock, $zone);

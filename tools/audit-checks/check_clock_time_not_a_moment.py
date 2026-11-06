@@ -678,6 +678,61 @@ SLICED_RULE_FORBIDDEN = re.compile(
 )
 
 
+# 📌 TWO FIXES THAT WERE PINNED BY NOTHING FOR A WHOLE ROUND (#777 round 13).
+#
+#    Round 12 fixed the moved-date message and the CSV import's silent rolling
+#    of an impossible date. Round 13 reverted BOTH and found every gate and
+#    every test green: 65 audit scripts, clock-change 100/100, recurrence
+#    72/72, time-zones 148/148 and event-repeat-pages 251/251, while
+#    `2026-02-31 10:00` imported as 3 March again. **That is the fourth round
+#    running to find a headline fix unguarded.**
+#
+# ⚠️ THESE ARE TEXT PINS, AND D-065 SAYS THAT IS THE SECOND-BEST ANSWER HERE.
+#    The property is behavioural -- "does this page say a true thing" and "does
+#    this import refuse this cell" -- so the right guard drives the page. No
+#    test does: nothing anywhere posts a CSV carrying an impossible date or an
+#    offset-bearing cell, and no test drives the create form in a zone whose
+#    clocks go forward, so the gap sentence has never been produced by a real
+#    request. Raised as its own issue rather than claimed as covered. Until
+#    then these at least mean a revert cannot be silent.
+#
+#    Each is a DISTINGUISHING clause, not the whole sentence, so ordinary
+#    rewording stays green and deleting a branch does not.
+FLASH_BRANCH_FILE = os.path.join("web", "_apps", "calendar", "manage", "save.php")
+FLASH_BRANCHES = (
+    # The gap-alone branch must name the TIME as well as the date, because the
+    # hour changing is the half that makes somebody arrive late.
+    ("readingPastTheGap",
+     "the sharp test -- is what was STORED what the gap would make of what was "
+     "TYPED. Asking `readingIsReal()` about the typed value instead was wrong "
+     "in BOTH directions (round 13)."),
+    ("Any later dates keep the time you typed",
+     "the gap-alone sentence."),
+    ("and its time became",
+     "the pattern-moved-it-AND-the-gap-shifted-the-time sentence. Round 12 had "
+     "no third branch, so this case was told only 'to match the repeat you "
+     "chose' and never heard that the hour moved."),
+    ("to match the repeat you chose",
+     "the pattern-alone sentence, whose wording is also pinned by "
+     "`event-repeat-pages-selftest.php`."),
+)
+
+IMPORT_GUARD_FILE = os.path.join("web", "_apps", "calendar", "manage", "import.php")
+IMPORT_GUARDS = (
+    ("I18n::instantFromInput",
+     "an offset-bearing cell is an INSTANT and must be converted, not refused. "
+     "Round 12 refused five shapes that had always imported correctly, "
+     "`toISOString()` output among them, under a comment of mine claiming "
+     "nothing else was narrowed."),
+    ("date_parse(",
+     "an impossible calendar date must be refused in EVERY spelling. Round "
+     "12 guarded it with `checkdate()` on a zero-padded ISO prefix, so "
+     "`2026-2-31`, `02/31/2026` and `Feb 31 2026` all still rolled forward "
+     "and imported as a success. Asking PHP what it parsed is a rule; a "
+     "prefix pattern is a spelling list."),
+)
+
+
 class ProbeUnavailable(Exception):
     """The PHP probe could not run. NOT a finding about the file."""
 
@@ -1297,6 +1352,25 @@ def main() -> int:
                 f"Round 10 introduced the variable, which is how its own fix "
                 f"came to sit behind this check's own stated blind spot."
             )
+
+    # ── Two fixes round 13 found unguarded ────────────────────────────────
+    for rel, wanted in ((FLASH_BRANCH_FILE, FLASH_BRANCHES), (IMPORT_GUARD_FILE, IMPORT_GUARDS)):
+        full = os.path.join(root, rel)
+        if os.path.isfile(full) is False:
+            problems.append(f"{rel} is not there, so its guards cannot be checked.")
+            continue
+        with open(full, "r", encoding="utf-8", errors="replace") as handle:
+            code = blank_comments(handle.read())
+        for needle, why in wanted:
+            if needle not in code:
+                problems.append(
+                    f"{rel} no longer contains `{needle}` in live code.\n"
+                    f"       That is {why}\n"
+                    f"       This is a TEXT pin, and the property is really "
+                    f"behavioural -- nothing drives it, which is why the pin "
+                    f"exists. If the change is deliberate, update the constant "
+                    f"in the same edit and say why."
+                )
 
     # ── The one display helper nothing drives ─────────────────────────────
     # ⚠️ ROUND 7's FIX FOR `series-repattern.php` WAS PINNED BY NOTHING.

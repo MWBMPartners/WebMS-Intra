@@ -1258,19 +1258,52 @@ if ($action === 'create') {
         //    sentence names the new TIME as well as the new date.
         if ($movedFirst !== '') {
             $typedReading = $toReading($startDateTime);
-            $movedByTheGap = $typedReading !== ''
-                && EventRecurrence::readingIsReal($typedReading, $timezone) === false;
 
-            $repeatNote .= $movedByTheGap === true
-                ? ' The first date was moved to '
-                    . I18n::formatClockDateTime($movedFirst, 'j F Y')
-                    . ' at ' . I18n::formatClockDateTime($movedFirst, 'H:i')
+            // 🚨 THE QUESTION IS ABOUT WHAT WAS STORED, NOT WHAT WAS TYPED
+            //    (#777 round 13). Round 12 chose the branch from
+            //    `readingIsReal($typedReading)`, and that is the wrong
+            //    question -- it got BOTH cases wrong, each measured:
+            //
+            //      London, typed 2026-03-29 01:30 (inside the missing hour),
+            //      MONDAY ticked -> stored 2026-03-30 01:30. The gap sentence
+            //      fired and every clause of it was untrue: 01:30 exists on
+            //      30 March, the date moved because Monday was ticked, and
+            //      the time did not change at all.
+            //
+            //      London, typed 2026-03-28 01:30 (a real Saturday), SUNDAY
+            //      ticked -> stored 2026-03-29 02:30. The pattern sentence
+            //      fired and said nothing about the hour moving, which is
+            //      the half that makes somebody arrive an hour late.
+            //
+            //    The sharp test is whether what was STORED is exactly what
+            //    the gap would make of what was TYPED. If it is, the gap is
+            //    the whole story. If it is not, the pattern chose the date --
+            //    and the gap may ALSO have shifted the time, on the day the
+            //    pattern chose, which is the third sentence below.
+            $gapWouldGive = EventRecurrence::readingPastTheGap($typedReading, $timezone);
+            $movedByGapAlone = $typedReading !== ''
+                && $gapWouldGive !== $typedReading
+                && $movedFirst === $gapWouldGive;
+            $timeAlsoMoved = substr($movedFirst, 11) !== substr($typedReading, 11);
+
+            $movedOn = I18n::formatClockDateTime($movedFirst, 'j F Y');
+            $movedAt = I18n::formatClockDateTime($movedFirst, 'H:i');
+
+            if ($movedByGapAlone === true) {
+                $repeatNote .= ' The first date was moved to ' . $movedOn
+                    . ' at ' . $movedAt
                     . ', because the clocks go forward through the time you typed'
-                    . ' and it does not exist on that date in this organisation\'s'
-                    . ' time zone. Later dates in the series keep the time you typed.'
-                : ' The first date was moved to '
-                    . I18n::formatClockDateTime($movedFirst, 'j F Y')
+                    . ' and it does not exist on that date in the time zone this'
+                    . ' event uses. Any later dates keep the time you typed.';
+            } elseif ($timeAlsoMoved === true) {
+                $repeatNote .= ' The first date was moved to ' . $movedOn
+                    . ' to match the repeat you chose, and its time became '
+                    . $movedAt . ' because the clocks go forward through the'
+                    . ' time you typed on that date.';
+            } else {
+                $repeatNote .= ' The first date was moved to ' . $movedOn
                     . ' to match the repeat you chose.';
+            }
         }
 
         if ($worked['why'] !== '') {
