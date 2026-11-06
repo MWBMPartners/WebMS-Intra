@@ -510,7 +510,55 @@ def pending_list(root: str) -> list[str]:
 FORMATTER_FILE = os.path.join("web", "_core", "I18n.php")
 FORMATTER_NAME = "formatClockTime"
 
-# 📁 The one display helper nothing drives, pinned below.
+# 📁 The files that WRITE a wall-clock column from something posted. Each must
+#    build no moment at all: #777 rounds 2, 5, 6 and 8 each found one of them
+#    doing it, and round 9 found the newest fix unguarded. Measured when this
+#    was written: all three contain zero live moment constructions.
+WRITE_PATHS_WITHOUT_MOMENTS = (
+    os.path.join("web", "_apps", "events", "api", "create.php"),
+    os.path.join("web", "_apps", "events", "api", "update.php"),
+    os.path.join("web", "_apps", "calendar", "submit-save.php"),
+)
+
+# ⚠️ ASK PHP, DO NOT PATTERN-MATCH THE TEXT. Each of those files EXPLAINS the
+#    old code in a comment -- `create.php` quotes
+#    `(new \DateTimeImmutable($startDateTime, $zone))` verbatim -- so a text
+#    search reports the comment that records the fix as the fault. The
+#    tokeniser is the only reading that can tell them apart, and this
+#    repository has paid for that lesson repeatedly (#763 ended six rounds of
+#    regular expressions by asking PHP).
+MOMENT_BUILDERS = re.compile(
+    r"strtotime|createFromFormat|new\s+\\?DateTimeImmutable\b|new\s+\\?DateTime\b"
+)
+
+
+def live_moment_builders(path: str) -> list[str]:
+    """Every moment construction in a file's CODE, comments excluded."""
+    import subprocess
+    probe = (
+        '$t = token_get_all(file_get_contents($argv[1])); $o = "";'
+        'foreach ($t as $x) { if (is_array($x)) {'
+        '  if (in_array($x[0], [T_COMMENT, T_DOC_COMMENT], true)) { continue; }'
+        '  $o .= $x[1]; } else { $o .= $x; } } echo $o;'
+    )
+    try:
+        out = subprocess.run(
+            ["php", "-r", probe, path],
+            capture_output=True, text=True, timeout=30,
+        )
+    except Exception:
+        # ⚠️ REFUSE RATHER THAN PASS. A check that answers "nothing wrong"
+        #    because it could not look is worse than no check (#763's rule).
+        return ["(php could not be run, so this file was not read)"]
+    if out.returncode != 0:
+        return ["(php refused the file, so it was not read)"]
+    return MOMENT_BUILDERS.findall(out.stdout)
+
+
+# 📁 The one display helper nothing drives, pinned below. The NAME is a
+#    constant because the failure message names it, and round 9 found that
+#    message citing a `REPATTERN_HELPER` that did not exist.
+REPATTERN_HELPER = "$showReading"
 REPATTERN_FILE = os.path.join("web", "_apps", "calendar", "manage", "series-repattern.php")
 FORMATTER_FORBIDS = ("strtotime", "date(", "DateTime")
 
@@ -898,6 +946,55 @@ def main() -> int:
                 f"think it is allowed."
             )
 
+    # ── The write paths: NO moment may be built in them at all ────────────
+    # ⚠️ EVERY ONE OF THESE FIXES WAS REVERTIBLE WITH EVERY GUARD GREEN, round
+    #    after round. Round 7 found three write paths pinned by nothing and
+    #    closed them with endpoint checks; round 8 found the fourth; round 9
+    #    found that round 8's own headline fix -- the one that stopped a date
+    #    being stored SIX MONTHS WRONG -- was pinned by nothing either, because
+    #    the endpoint checks send well-formed values where the old code and the
+    #    new agree. Planted, the pre-round-8 constructor back in `create.php`'s
+    #    offset branch left 65 audit scripts, 89 clock checks AND all 143
+    #    endpoint checks green while `01/06/2026 10:00 +0100` stored 6 January.
+    #
+    #    So this stops asking what the code DOES and asks what it CONTAINS,
+    #    which for these three files is exact rather than approximate: each one
+    #    now routes every reading through `I18n`, so a LIVE moment
+    #    construction in any of them is the fault, full stop. Measured before
+    #    writing it -- all three contain zero today (comments stripped with
+    #    PHP's own tokeniser, because each file EXPLAINS the old code in a
+    #    comment and a text search would report those).
+    #
+    #    It cannot cry wolf on a legitimate change: if one of these handlers
+    #    ever genuinely needs a moment, that is a decision worth making
+    #    deliberately, and the file comes off this list in the same edit.
+    for relative in WRITE_PATHS_WITHOUT_MOMENTS:
+        full = os.path.join(root, relative)
+        if os.path.isfile(full) is False:
+            problems.append(
+                f"WRITE_PATHS_WITHOUT_MOMENTS names {relative}, which is not "
+                f"there. If it moved, change the entry in the same edit."
+            )
+            continue
+        built = live_moment_builders(full)
+        if len(built) > 0:
+            problems.append(
+                f"{relative} builds a moment in live code: "
+                f"{', '.join(sorted(set(built)))}.\n"
+                f"       This file WRITES a wall-clock column, and for a value "
+                f"stored as a reading, building a moment is the fault even "
+                f"with the correct zone -- on the morning the clocks go forward "
+                f"the hour it names does not exist in ANY zone, so PHP moves "
+                f"it.\n"
+                f"       Every reading here goes through "
+                f"`I18n::wallClockFromInput()` (no offset) or "
+                f"`I18n::instantFromInput()` (an offset, which really is a "
+                f"moment, and which checks the SAME shapes). Use those.\n"
+                f"       If this handler genuinely needs a moment of its own, "
+                f"take it off WRITE_PATHS_WITHOUT_MOMENTS in the same edit and "
+                f"say why -- do not leave the entry and work around it."
+            )
+
     # ── The one display helper nothing drives ─────────────────────────────
     # ⚠️ ROUND 7's FIX FOR `series-repattern.php` WAS PINNED BY NOTHING.
     #    Planting the pre-round-7 body back -- `createFromFormat('Y-m-d
@@ -919,14 +1016,44 @@ def main() -> int:
     else:
         with open(repattern, "r", encoding="utf-8", errors="replace") as handle:
             body = blank_comments(handle.read())
-        at = body.find("$showReading = ")
-        if at == -1:
+        # ⚠️ EXACTLY ONE DEFINITION, AND WHITESPACE IS FREE. Round 9 broke the
+        #    first version of this pin two ways, both of them lessons already
+        #    written down here:
+        #
+        #      * `body.find()` takes the FIRST match, so a DEAD BUT CORRECT
+        #        copy placed ABOVE the live helper satisfied the pin while the
+        #        live one was gutted -- gate exit 0, `php -l` clean, and the
+        #        preview screen back to showing 01:30 as 02:30. #485 round 2
+        #        and #763 both record this: "the start anchor must appear
+        #        exactly ONCE".
+        #      * it matched the literal `"$showReading = "`, so ONE EXTRA
+        #        SPACE -- the aligned-assignment style this codebase uses
+        #        elsewhere -- turned a behaviour-neutral edit into a RED hard
+        #        gate, and a check that cries wolf gets switched off (#483).
+        #
+        #    And its failure message named `REPATTERN_HELPER`, a constant that
+        #    did not exist, so the one sentence somebody acts on sent them
+        #    looking for nothing. It exists now.
+        definitions = re.findall(
+            re.escape(REPATTERN_HELPER) + r"\s*=\s*static\s+function", body
+        )
+        if len(definitions) != 1:
             problems.append(
-                f"{REPATTERN_FILE} no longer defines $showReading. If it was "
-                f"renamed, change REPATTERN_HELPER here in the same edit; if "
-                f"the helper went, this pin has to go with it."
+                f"{REPATTERN_FILE} defines {REPATTERN_HELPER} "
+                f"{len(definitions)} time(s); it must define it exactly ONCE.\n"
+                f"       At zero: it was renamed or removed -- change "
+                f"REPATTERN_HELPER here in the same edit, or take this pin out "
+                f"with the helper.\n"
+                f"       At two or more: a pin that finds its anchor by the "
+                f"FIRST match is satisfied by a dead copy above a gutted live "
+                f"one, which is how this pin was defeated in round 9 of #777 "
+                f"(and #485 and #763 before it)."
             )
         else:
+            found = re.search(
+                re.escape(REPATTERN_HELPER) + r"\s*=\s*static\s+function", body
+            )
+            at = found.start() if found is not None else -1
             end = body.find("};", at)
             helper = body[at:end if end != -1 else at + 600]
             if "I18n::formatClockDateTime" not in helper:

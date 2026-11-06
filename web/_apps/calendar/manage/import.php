@@ -53,7 +53,82 @@ $error    = '';
 $imported = false;
 
 /** Parse + validate CSV. Returns array{rows:list<array>, errors:list<string>} */
-$parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
+// 🕐 ONE PLACE PUTS A CELL INTO THE COLUMN'S SHAPE, used by the row CHECK and
+//    by the row STORE (#777 round 9).
+//
+// ⚠️ IT USED TO BE DEFINED DOWN IN THE CONFIRM BLOCK, so the check compared
+//    something ELSE. Round 8 made the check compare readings as text where
+//    BOTH cells parsed and fall back to moments otherwise -- and the fallback
+//    fires when EITHER cell is loose, so a clean ISO cell was dragged into a
+//    moment comparison with its loose neighbour. Measured in Europe/London:
+//
+//      start "2026-03-29 01:30", end "29 March 2026 2:15am"
+//          -> REFUSED "endDateTime is before startDateTime"
+//          -> but the readings it would STORE are 01:30 and 02:15: a
+//             legitimate 45-minute event, refused. The exact harm round 8's
+//             own finding 3 describes, surviving in the looser half.
+//
+//      start "29 March 2026 2:15am", end "2026-03-29 01:30"
+//          -> ACCEPTED, and stored 02:15 -> 01:30, an end before its start.
+//
+//    So the check compares THE VALUES THAT WILL ACTUALLY BE STORED. That is
+//    the one comparison that cannot disagree with storage, in either format,
+//    and it needs no branch at all -- which is also why the "kept FOR THOSE
+//    ONLY" claim that used to sit here has gone rather than been reworded.
+$fmtClock = static function (string $text): ?string {
+    // 📌 `I18n::wallClockFromInput()` is the ONE place
+    //    the rule lives; this closure adds only the
+    //    spreadsheet fallback below.
+    $clock = I18n::wallClockFromInput($text);
+    if ($clock !== null) {
+        return $clock;
+    }
+    // ⚠️ ANYTHING ELSE FALLS BACK TO THE OLD ROUND
+    //    TRIP, deliberately. A spreadsheet holds
+    //    whatever somebody typed -- "1/3/26 7pm",
+    //    "March 3 2026" -- and the upstream check only
+    //    asks whether `strtotime()` can read it, so
+    //    refusing here would turn imports that work
+    //    today into failures. Such a value is still
+    //    exposed to the moved hour; it is the narrower
+    //    harm, and an import file is reviewed on a
+    //    preview screen before it is confirmed.
+    //    Normalising the file's own formats is #777
+    //    part two's to settle, not a change to make
+    //    inside a fix round.
+    //
+    // 🚨 THE RAW TEXT, NEVER A `str_replace('T', ' ')`
+    //    OF IT. The first version of this fallback
+    //    replaced EVERY capital `T`, not just the ISO
+    //    separator, and fed the result to
+    //    `strtotime()` -- which the old code never
+    //    did, because it passed the cell untouched.
+    //    Measured in Europe/London, old against that
+    //    version:
+    //
+    //      "Tuesday, 3 March 2026 19:00"  ->  REFUSED
+    //      "Tue, 3 Mar 2026 19:00"        ->  REFUSED
+    //      "2026-03-03 19:00:00 GMT"      ->  REFUSED
+    //      "2026-03-29 01:30 UTC"         ->  10:30
+    //
+    //    `"Tue,"` became `" ue,"` and `"UTC"` became
+    //    `"U C"`, which `strtotime()` read as half past
+    //    TEN -- eight hours out, a value the old code
+    //    could not produce. Excel's own long date
+    //    format starts with a weekday name, so the
+    //    commonest spreadsheet in the world stopped
+    //    importing, under a comment promising nothing
+    //    had changed.
+    //
+    //    `wallClockFromInput()` above already handles
+    //    the `T` form, so by the time the fallback is
+    //    reached the text is something it must not
+    //    touch at all.
+    $moment = strtotime(trim($text));
+    return $moment === false ? null : date('Y-m-d H:i:s', $moment);
+};
+
+$parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock): array {
     $handle = fopen($tmpFile, 'r');
     if ($handle === false) {
         return ['rows' => [], 'errors' => ['Could not open uploaded file.']];
@@ -94,6 +169,8 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
     if ($stmt !== false) {
         $stmt->bind_param('i', $siteId);
         $stmt->execute();
+
+
         foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $r) {
             $typeMap[$r['n']] = (int) $r['typeID'];
         }
@@ -132,45 +209,27 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
         $rowErr = [];
         if ($name === '')  { $rowErr[] = 'eventName required'; }
         if ($start === '') { $rowErr[] = 'startDateTime required'; }
-        // 🕐 START BEFORE END IS COMPARED AS TEXT, NOT AS TWO MOMENTS (#777
-        //    round 8). This used `strtotime($end) < strtotime($start)`, and
-        //    the storage became reading-based in rounds 6 and 7 while this
-        //    check was left on moments. Measured in Europe/London:
+        // 🕐 THE CHECK COMPARES WHAT WILL ACTUALLY BE STORED (#777 round 9).
+        //    `$fmtClock()` is the one thing that decides a cell's stored value,
+        //    so asking IT both questions is the only comparison that cannot
+        //    disagree with storage. See its definition above for the two
+        //    measured faults that got us here.
         //
-        //        start 2026-03-29 01:30  ->  moment 02:30
-        //        end   2026-03-29 02:15  ->  moment 02:15
-        //
-        //    -- so an ordinary 45-minute event was REFUSED with "endDateTime
-        //    not parseable / before start", which was untrue of the readings
-        //    the file holds AND of what the row now stores. The identical
-        //    shape was fixed in `resources/book.php` (round 2) and
-        //    `submit-save.php` (round 5); this file was missed, and round 7
-        //    wrote twenty lines about end-time refusal directly beneath it
-        //    without noticing.
-        //
-        //    `Y-m-d H:i:s` sorts the way a clock does, which is #435's own
-        //    fix. Where a cell is in a looser format the readings cannot be
-        //    compared as text, so the moment comparison is kept FOR THOSE
-        //    ONLY -- better than refusing them, and such a cell is exposed to
-        //    the moved hour anyway (see `$fmtClock` below).
+        //    `Y-m-d H:i:s` sorts the way a clock does, which is #435's own fix,
+        //    so once both cells are in that shape the comparison is text and
+        //    nothing is resolved into a moment.
         $startTs = $start !== '' ? strtotime($start) : false;
         if ($start !== '' && $startTs === false) { $rowErr[] = 'startDateTime not parseable'; }
-        $endTs = null;
         if ($end !== '') {
-            $endTs = strtotime($end);
-            if ($endTs === false) {
+            $startStored = $start !== '' ? $fmtClock($start) : null;
+            $endStored   = $fmtClock($end);
+            if ($endStored === null) {
                 $rowErr[] = 'endDateTime not parseable';
-            } else {
-                $startShaped = I18n::wallClockFromInput($start);
-                $endShaped   = I18n::wallClockFromInput($end);
-                $endIsEarlier = $startShaped !== null && $endShaped !== null
-                    ? $endShaped < $startShaped
-                    : ($startTs !== false && $endTs < $startTs);
-                if ($endIsEarlier === true) {
-                    $rowErr[] = 'endDateTime is before startDateTime';
-                }
+            } elseif ($startStored !== null && $endStored < $startStored) {
+                $rowErr[] = 'endDateTime is before startDateTime';
             }
         }
+
         // ⚠️ Exactly `tblEvents.status`'s ENUM — see #676. `archived` was
         //    accepted here and the column has never had it, so a CSV row
         //    carrying it passed validation and then failed on the insert.
@@ -196,8 +255,12 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
             'isPublic'      => in_array($isPubStr,  ['', '1', 'true', 'yes', 'y'], true) ? 1 : 0,
             'isFeatured'    => in_array($isFeatStr, ['1', 'true', 'yes', 'y'], true) ? 1 : 0,
             'errors'        => $rowErr,
-            '_startTs'      => $startTs,
-            '_endTs'        => $endTs,
+            // 🧹 `_startTs` and `_endTs` were carried here and `unset()` on
+            //    confirm without ever being read -- `grep -n "_startTs"` found
+            //    only the write and the unset. They were the only readers of
+            //    `$endTs`, which #777 round 9 removed when the row check
+            //    stopped comparing moments, so keeping them would have left an
+            //    undefined variable in a session payload.
         ];
     }
     fclose($handle);
@@ -229,7 +292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // 🧊 Stash parsed rows in the session so the confirm step
                 //    doesn't need a second upload. Trim to JSON-safe shape.
                 $_SESSION['eventsImportPreview'] = array_map(static function ($r) {
-                    unset($r['_startTs'], $r['_endTs']);
+                    // (`_startTs`/`_endTs` are gone -- see the parse loop.)
                     return $r;
                 }, $preview);
             }
@@ -297,58 +360,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         //    text into the column's shape without resolving
                         //    anything; a row whose value cannot be read at all
                         //    was already refused upstream (line 133).
-                        $fmtClock = static function (string $text): ?string {
-                            // 📌 `I18n::wallClockFromInput()` is the ONE place
-                            //    the rule lives; this closure adds only the
-                            //    spreadsheet fallback below.
-                            $clock = I18n::wallClockFromInput($text);
-                            if ($clock !== null) {
-                                return $clock;
-                            }
-                            // ⚠️ ANYTHING ELSE FALLS BACK TO THE OLD ROUND
-                            //    TRIP, deliberately. A spreadsheet holds
-                            //    whatever somebody typed -- "1/3/26 7pm",
-                            //    "March 3 2026" -- and the upstream check only
-                            //    asks whether `strtotime()` can read it, so
-                            //    refusing here would turn imports that work
-                            //    today into failures. Such a value is still
-                            //    exposed to the moved hour; it is the narrower
-                            //    harm, and an import file is reviewed on a
-                            //    preview screen before it is confirmed.
-                            //    Normalising the file's own formats is #777
-                            //    part two's to settle, not a change to make
-                            //    inside a fix round.
-                            //
-                            // 🚨 THE RAW TEXT, NEVER A `str_replace('T', ' ')`
-                            //    OF IT. The first version of this fallback
-                            //    replaced EVERY capital `T`, not just the ISO
-                            //    separator, and fed the result to
-                            //    `strtotime()` -- which the old code never
-                            //    did, because it passed the cell untouched.
-                            //    Measured in Europe/London, old against that
-                            //    version:
-                            //
-                            //      "Tuesday, 3 March 2026 19:00"  ->  REFUSED
-                            //      "Tue, 3 Mar 2026 19:00"        ->  REFUSED
-                            //      "2026-03-03 19:00:00 GMT"      ->  REFUSED
-                            //      "2026-03-29 01:30 UTC"         ->  10:30
-                            //
-                            //    `"Tue,"` became `" ue,"` and `"UTC"` became
-                            //    `"U C"`, which `strtotime()` read as half past
-                            //    TEN -- eight hours out, a value the old code
-                            //    could not produce. Excel's own long date
-                            //    format starts with a weekday name, so the
-                            //    commonest spreadsheet in the world stopped
-                            //    importing, under a comment promising nothing
-                            //    had changed.
-                            //
-                            //    `wallClockFromInput()` above already handles
-                            //    the `T` form, so by the time the fallback is
-                            //    reached the text is something it must not
-                            //    touch at all.
-                            $moment = strtotime(trim($text));
-                            return $moment === false ? null : date('Y-m-d H:i:s', $moment);
-                        };
+                        // 📌 `$fmtClock` is defined ONCE near the top of this file, so
+                        //    the row CHECK and the row STORE cannot disagree (#777 round 9).
+
                         $startSql = $fmtClock((string) $r['startDateTime']);
                         $hasEnd   = $r['endDateTime'] !== null && $r['endDateTime'] !== '';
                         $endSql   = $hasEnd === true ? $fmtClock((string) $r['endDateTime']) : null;

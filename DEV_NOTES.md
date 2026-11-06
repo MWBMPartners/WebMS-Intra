@@ -18201,6 +18201,91 @@ stopped doing it also fails -- and `--strict` fails while it holds anything.
 That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
 visible rather than permanent.
 
+### Round 9: round 8's own headline fix was pinned by nothing, and the guard that closes it stops asking what the code DOES
+
+**Seven findings, six in round 8's work. Round 8's diagnosis applied to round 8.**
+
+**(1) The "six months wrong" fix was revertible with every guard green.**
+`instantFromInput()` is well pinned as a METHOD — I31–I38 go red the moment its
+shape check is removed — but **nothing proved the handler calls it.** Planting
+the pre-round-8 constructor back into `create.php`'s offset branch left 65 audit
+scripts, 89 clock checks and all 143 endpoint checks green, with
+`01/06/2026 10:00 +0100` storing 6 January and a bare `Z` storing the current
+moment. The endpoint checks send WELL-FORMED values, where the old constructor
+and the new helper agree, so they cannot see the revert — round 7's finding 1,
+one level up again.
+
+**The guard that closes it stops asking what the code DOES and asks what it
+CONTAINS**, which for these three handlers is exact rather than approximate:
+each now routes every reading through `I18n`, so a LIVE moment construction in
+any of them is the fault, full stop. Measured before writing it — all three
+contain zero. And it asks **PHP's tokeniser**, not a text search, because every
+one of those files QUOTES the old code in a comment, so a text search would
+report the comment that records the fix. Both reverts now go red.
+
+**(2) The import's comparison was still wrong, in the half round 8 did not
+test.** Its new comment said the moment fallback was "kept FOR THOSE ONLY" —
+loose formats — but the ternary fell back whenever EITHER cell was loose, so a
+clean ISO cell was dragged into a moment comparison with its loose neighbour.
+Measured in Europe/London:
+
+    start "2026-03-29 01:30", end "29 March 2026 2:15am"
+        -> REFUSED "endDateTime is before startDateTime"
+        -> the readings it would STORE are 01:30 and 02:15: a legitimate
+           45-minute event, refused. **The exact harm round 8's own finding 3
+           describes, surviving in the looser half.**
+
+    start "29 March 2026 2:15am", end "2026-03-29 01:30"
+        -> ACCEPTED, and stored 02:15 -> 01:30, an end before its start.
+
+**The fix removes the branch rather than rewording the claim:** the check asks
+`$fmtClock()` for both values — the one thing that decides what is stored — so
+it cannot disagree with storage in either format. That meant lifting `$fmtClock`
+out of the confirm block (where it was defined 180 lines AFTER the check that
+needed it) to above `$parseCsv`, and adding it to that closure's `use` list.
+All four format combinations measured; `_startTs`/`_endTs` went with it, being
+set and `unset()` without ever being read.
+
+**(3) The loose-format fallback was covered by nothing** — `: false;` in one
+word left all 143 endpoint checks green while a backwards loose pair imported.
+W07d exists to stop exactly that and its fixture is two clean ISO values, so it
+only ever exercised the text branch. **A fixture that cannot reach a branch is
+not testing it.** W07e and W07f are the two mixed-format cases, and both go red
+on round 8's code.
+
+**(4) The `$showReading` pin was defeated by a dead duplicate ABOVE the live
+helper.** `body.find()` takes the FIRST match, so a correct copy above a gutted
+one left the gate at exit 0 — **a lesson already written down twice here**
+(#485 round 2 and #763: "the start anchor must appear exactly ONCE"). It
+requires exactly one definition now.
+
+**(5) The same pin cried wolf on one extra space** — the aligned-assignment
+style this codebase uses elsewhere — turning a behaviour-neutral edit into a
+red hard gate. And **its failure message named `REPATTERN_HELPER`, a constant
+that did not exist**, so the one sentence somebody acts on sent them looking
+for nothing. Whitespace is free now and the constant is real.
+
+**(6) Round 8 newly refused ISO 8601 BASIC form, which is this portal's own
+calendar format.** `20260601T100000Z`, `20260601T100000+0200` and
+`2026-06-01T10Z` are genuine, unambiguous instants that worked until round 8.
+`Ical.php`, `calendar/export.php` and `IcsReader.php` all write and read
+`Ymd\THis`, so **a script reading this portal's own `.ics` feed and pushing the
+events back through the API worked and then got a 400.** By this package's own
+standard that is wrong rather than stricter — `inputCarriesOffset()`'s round-7
+comment says so in as many words about the lower-case `z`. And round 8's claim
+that "every genuine instant still converts" was true only of the four forms it
+happened to test.
+
+Normalised rather than accepted separately, so there is still ONE shape rule;
+a bare eight-digit number is deliberately NOT normalised. I38a–I38f pin it, and
+the spec records the accepted shapes.
+
+**(7) Pre-existing, raised as #786:** `events/api/update.php` never compares end
+with start — there is no comparison in the file — while `api-spec.json`
+documents the update body as a subset of create's and create's description
+promises the rule. Now a three-line fix, because both sides are readings on one
+clock.
+
 ### Round 8: round 7 closed the three write paths it was handed and left the two it introduced
 
 **Six findings. Five were in round 7's own work, and its diagnosis is the one to

@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 143;  // 134 + six W09d-W09h (round 7) + three W07b-W07d (round 8)
+const EXPECTED_CHECKS = 145;  // 134 + six W09d-W09h (r7) + three W07b-W07d (r8) + two W07e-W07f (r9)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -1324,6 +1324,44 @@ $withoutConsumingIds(static function () use ($adminJar, $newest): void {
         'preview ' . said($preview4) . '; made ' . $newest('Selftest zones import backwards')
     );
     @unlink($csvBack);
+
+    // 🚨 W07d's FIXTURE IS TWO CLEAN ISO VALUES, so it only ever exercised one
+    //    reading of the comparison. Round 9 measured the cost: with the loose
+    //    half of the old two-branch check disabled in one word, all 143 checks
+    //    here stayed green while a backwards loose pair imported. **A fixture
+    //    that cannot reach a branch is not testing it.**
+    //
+    //    The branch is gone now -- the check asks `$fmtClock()` for both
+    //    values, which is what storage uses -- so these two cases are what
+    //    prove the single comparison works in BOTH formats. They were real
+    //    faults until round 9: the first was REFUSED although it is a
+    //    legitimate 45-minute event, and the second was ACCEPTED and stored
+    //    with its end before its start.
+    $csvMixed = tempnam(sys_get_temp_dir(), 'tzmixed') . '.csv';
+    file_put_contents($csvMixed, "eventName,startDateTime,endDateTime,status\n\"Selftest zones import mixed\",2028-09-24 02:30:00,\"24 September 2028 3:15am\",published\n");
+    $importPage5 = req($adminJar, 'GET', '/calendar/manage/import')['body'];
+    $preview5    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($importPage5), 'action' => 'preview'], ['files' => ['csv_file' => $csvMixed]]);
+    $confirm5    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($preview5['body']) !== '' ? token($preview5['body']) : token($importPage5), 'action' => 'confirm']);
+    $mixedId     = $newest('Selftest zones import mixed');
+    $mixedRow    = one('SELECT startDateTime, endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$mixedId]);
+    ok(
+        'W07e one ISO cell and one LOOSE cell, forward: imported, not refused as "end before start"',
+        $mixedId > 0 && $mixedRow === ['startDateTime' => '2028-09-24 02:30:00', 'endDateTime' => '2028-09-24 03:15:00'],
+        'preview ' . said($preview5) . ', confirm ' . said($confirm5) . '; stored ' . json_encode($mixedRow)
+    );
+    q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$mixedId]);
+    @unlink($csvMixed);
+
+    $csvMixedBack = tempnam(sys_get_temp_dir(), 'tzmixedback') . '.csv';
+    file_put_contents($csvMixedBack, "eventName,startDateTime,endDateTime,status\n\"Selftest zones import mixed backwards\",\"24 September 2028 3:15am\",2028-09-24 02:30:00,published\n");
+    $importPage6 = req($adminJar, 'GET', '/calendar/manage/import')['body'];
+    $preview6    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($importPage6), 'action' => 'preview'], ['files' => ['csv_file' => $csvMixedBack]]);
+    ok(
+        'W07f one LOOSE cell and one ISO cell, BACKWARDS: refused, where it used to import and store an end before its start',
+        $newest('Selftest zones import mixed backwards') === 0 && str_contains($preview6['body'], 'before startDateTime') === true,
+        'preview ' . said($preview6) . '; made ' . $newest('Selftest zones import mixed backwards')
+    );
+    @unlink($csvMixedBack);
 });
 
 // ---- the events API ---------------------------------------------------------------

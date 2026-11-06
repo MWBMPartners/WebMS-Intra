@@ -396,6 +396,25 @@ check('I36 an impossible date is refused on the OFFSET side too, not rolled forw
 // integration that sends one.
 check('I37 a real instant with Z converts onto the given clock',
     I18n::instantFromInput('2027-06-01T10:00:00Z', $londonZone), '2027-06-01 11:00:00');
+// ── ISO 8601 BASIC form, which is this portal's OWN calendar format ──────
+// 🚨 ROUND 8 REFUSED THESE, and the commit claimed "every genuine instant
+//    still converts" — which was true only of the four forms it happened to
+//    test. `Ical.php`, `calendar/export.php` and `IcsReader.php` all write and
+//    read `Ymd\THis`, so a script reading this portal's own `.ics` feed and
+//    pushing the events back through the API worked and then got a 400.
+check('I38a ISO basic form with Z converts',
+    I18n::instantFromInput('20270601T100000Z', $londonZone), '2027-06-01 11:00:00');
+check('I38b ISO basic form with an offset converts',
+    I18n::instantFromInput('20270601T100000+0200', $londonZone), '2027-06-01 09:00:00');
+check('I38c ISO basic form without seconds converts',
+    I18n::instantFromInput('20270601T1000Z', $londonZone), '2027-06-01 11:00:00');
+check('I38d an hour with no minutes converts',
+    I18n::instantFromInput('2027-06-01T10Z', $londonZone), '2027-06-01 11:00:00');
+check('I38e a basic-form reading with NO offset is a reading, stored as it stands',
+    I18n::wallClockFromInput('20280312T023000'), '2028-03-12 02:30:00');
+check('I38f but a BARE eight-digit number is NOT normalised — it is as likely to be something else',
+    I18n::wallClockFromInput('20280312'), null);
+
 check('I38 lower-case z, fractional seconds and a two-digit offset all convert',
     [
         I18n::instantFromInput('2027-06-01T10:00:00z', $londonZone),

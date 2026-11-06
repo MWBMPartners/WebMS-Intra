@@ -716,6 +716,30 @@ class I18n
     public static function wallClockFromInput(string $posted): ?string
     {
         $clock = trim($posted);
+        // 📆 ISO 8601 *BASIC* FORM FIRST: `20260601T100000`, no separators.
+        //    **This is this portal's OWN iCalendar wire format** -- `Ical.php`,
+        //    `calendar/export.php` and `IcsReader.php` all write and read
+        //    `Ymd\THis` -- so a script that reads our own `.ics` feed and
+        //    pushes the events back through `/api/events/create` worked until
+        //    round 8 and then got a 400. Round 8 required the same shape on
+        //    the offset side, which was right, and tightened more than it
+        //    recorded: `20260601T100000Z` and `20260601T100000+0200` are
+        //    genuine, unambiguous instants, and by this package's own standard
+        //    (see `inputCarriesOffset()` on the lower-case `z`) refusing them
+        //    was wrong rather than merely stricter. Found in round 9 of #777.
+        //
+        //    Normalised rather than accepted separately, so there is still ONE
+        //    shape rule below. `\d{8}T\d{6}` and `\d{8}T\d{4}` only; a bare
+        //    `20260601` is NOT normalised, because an eight-digit number is
+        //    just as likely to be something else and nothing here sends one.
+        $clock = (string) preg_replace_callback(
+            '/^(\d{4})(\d{2})(\d{2})[Tt](\d{2})(\d{2})(\d{2})?$/',
+            static function (array $m): string {
+                return $m[1] . '-' . $m[2] . '-' . $m[3] . ' '
+                    . $m[4] . ':' . $m[5] . ':' . (($m[6] ?? '') !== '' ? $m[6] : '00');
+            },
+            $clock
+        );
         // 🔤 THE SEPARATOR IS CASE-INSENSITIVE, because RFC 3339's own ABNF
         //    note allows a lower-case `t` and `z`. The first version matched
         //    only a capital `T`, so a standards-conforming client sending
@@ -735,6 +759,11 @@ class I18n
         }
         if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]$/', $clock) === 1) {
             $clock .= ':00';
+        }
+        // 🕐 AN HOUR WITH NO MINUTES is a legal ISO 8601 time, and
+        //    `2026-06-01T10Z` was a working instant until round 8.
+        if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3])$/', $clock) === 1) {
+            $clock .= ':00:00';
         }
         if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/', $clock) !== 1) {
             return null;

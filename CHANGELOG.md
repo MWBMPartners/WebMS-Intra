@@ -44,6 +44,21 @@ see.** Those are listed rather than fixed: an event's time zone need not be the
 organisation's, so each needs a person to look at it, and that is the next part
 of this work. Nothing new may join the list.
 
+**The events API can read this portal's own calendar format again.** Tightening
+the check a few hours earlier had started refusing `20260601T100000Z` — the form
+this portal itself writes into every `.ics` calendar file — so a script that read
+our own feed and pushed the events back worked one day and was refused the next.
+That form, and two other standard ways of writing the same moment, are accepted
+again. Genuinely ambiguous text is still refused, and the published description
+now lists exactly which shapes work.
+
+**And the spreadsheet import no longer refuses an event because one of its two
+times is written differently from the other.** An event from `2026-03-29 01:30`
+to `29 March 2026 2:15am` was refused as "end before start", which was not true;
+the reverse pair was accepted and stored with its end before its start. The
+check now compares the two values it will actually store, so it cannot disagree
+with what goes into the database whichever way the dates are typed.
+
 **The events API stored a date six months wrong for one plausible way of
 writing it.** A value that names its own time zone — `01/06/2026 10:00 +0100` —
 was converted without any check on its shape, and PHP reads a slash date

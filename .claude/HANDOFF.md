@@ -63,7 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one: rounds 3 to 8 are done; round 9's check is next.** The rounds so far found, in order: a display fault in four
+**#777 part one: rounds 3 to 9 are done; round 10's check is next.** The rounds so far found, in order: a display fault in four
 pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
 faults refusing valid input (round 2); three READER faults my own write fix made
 visible, and the fact that those three readers were guarded by nothing (round
@@ -170,6 +170,26 @@ spots" after round 7 found a third, in the sentence every green run prints.
 **And adding three checks broke `time-zones-selftest.php` outright** — it
 depends on auto-increment landing on particular IDs and nothing said so;
 `$withoutConsumingIds()` makes a new block ID-neutral.
+
+**Round 9 found SEVEN, six in round 8's work, and round 8's own diagnosis
+applies to round 8: its headline fix — the one that stopped a date being stored
+SIX MONTHS WRONG — was pinned by nothing at the HANDLER.** The method is well
+pinned; nothing proved the handler calls it, and the endpoint checks send
+well-formed values where old and new agree. **The guard that closes it stops
+asking what the code DOES and asks what it CONTAINS**: no live moment
+construction in the three write handlers, read with PHP's TOKENISER because each
+file quotes the old code in a comment. Also: the import's comparison was still
+wrong in the half round 8 did not test (the moment fallback fired when EITHER
+cell was loose, so a legitimate 45-minute event was refused and its mirror was
+accepted backwards — the fix removes the branch and compares what will be
+STORED, which meant lifting `$fmtClock` 180 lines up to where the check could
+see it); W07d's fixture could not reach the branch it existed to guard;
+**round 8's new pin was defeated by a dead duplicate ABOVE the live helper**
+(#485 and #763 both record that) and cried wolf on one extra space while naming
+a constant that did not exist; and **round 8 had newly refused ISO 8601 BASIC
+form, which is this portal's OWN `.ics` format** — so a script reading our own
+feed and pushing it back got a 400. #786 raised: `events/api/update.php` never
+compares end with start, which the spec implies it does.
 
 #763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
 write and delete stored data, so rounds ran until one was clean. Twelve
