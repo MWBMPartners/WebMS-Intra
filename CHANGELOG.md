@@ -29,8 +29,14 @@ finished**, and the "Check this portal" page reads it. It tells you:
 - a task that started and did not finish, which is a different problem and
   usually means it ran out of time or hit an error;
 - a task that ran and reported that it could not do its work;
-- a task that is being called but is switched off by a setting — not a fault,
-  but worth knowing, because the work is not being done;
+- a task that was part-way through when the page was drawn — usually it is
+  running at that moment, and if it is still listed later it becomes a problem;
+- a task that was called and deliberately did nothing. That is not a fault, and
+  there are three ordinary reasons: a setting switches it off, another run of it
+  was already in progress, or its work was not due yet. **A nightly backup on a
+  weekly schedule reports this on six nights out of seven, which is correct** —
+  so the page says what it knows and lists the three reasons rather than
+  guessing which;
 - and, straight after an update, that **nothing is known yet** about a task.
 
 **How late is too late differs by task**, because they do not run on the same
@@ -39,12 +45,20 @@ giving statements weekly. One figure for all fifteen would either let the mail
 task sit dead for a week, or complain about the nightly backup every single
 day.
 
-**Straight after this update every task will say "nothing is known yet", and
-that is expected.** Each one starts being watched the first time it runs, with
-nothing for anybody to do. It deliberately does not warn, because that would
-show every portal a page of warnings about tasks that are working perfectly
-well. It also does not pretend everything is fine — "nothing is known yet"
-says exactly what it means.
+**Straight after this update almost every task will say "nothing is known yet",
+and that is expected.** Each one starts being watched the first time it runs,
+with nothing for anybody to do. It deliberately does not warn, because that
+would show every portal a page of warnings about tasks that are working
+perfectly well. It also does not pretend everything is fine — "nothing is known
+yet" says exactly what it means.
+
+**One task is an exception, and only when there is something real to say.** The
+mail task has kept its own record of when it last ran since long before this
+change, and that record survives the update. So if it has run before and has now
+stopped, the page says so straight away rather than waiting — the information is
+already there, and hiding it would be the opposite of the point. On a portal
+where it has never run there is nothing to read, and the page says "nothing is
+known yet" like the rest.
 
 A task that was never set up at all is still reported as a problem, as before,
 because that can be seen directly.

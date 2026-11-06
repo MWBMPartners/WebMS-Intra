@@ -357,7 +357,10 @@ final class ScheduledJobs
      *    that wrong was a real fault in the first version of #775's wiring.
      *    Nine of the fifteen pages exit early when a setting switches them
      *    off, when another run holds the lock, or when nothing is due. Those
-     *    twelve paths recorded a START and no finish — so a job somebody had
+     *    twelve paths recorded a START and no finish — TEN of them are
+     *    refusals, across EIGHT pages, and two are genuine failures (a third
+     *    failure lives in `health.php`'s handled catch, which is not an
+     *    early-exit path) — so a job somebody had
      *    deliberately switched off read as "started and never finished" on the
      *    check page, for ever, as a PROBLEM. **A job working exactly as
      *    configured must never be reported as broken**, and a check that cries

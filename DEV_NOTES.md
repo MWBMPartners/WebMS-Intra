@@ -90,6 +90,69 @@ turns F4 red. The ones in `began()`/`finished()` still cannot be — both return
 throwing and catching on every call before the migration runs, and to keep "not
 there yet" from being answered like "something is wrong".
 
+#### Round 2: the contradiction moved rather than went, and it is PERMANENT
+
+**The all-clear said "Every scheduled job has run recently enough" directly
+under a PROBLEM saying seven of them can never run.** Round 1 excluded
+token-less jobs from the later findings and subtracted them from the count — and
+left the HEADLINE alone, so fault 4's contradiction moved into the all-clear
+instead of going.
+
+**And it is the steady state of an ordinary portal, not an upgrade-day
+transient.** There are eleven separate tokens, `full_schema.sql` seeds every one
+EMPTY, nothing in the installer sets any, and a customer who does not use the
+noticeboard push, discipleship or venue agreements leaves those empty for ever.
+So the false all-clear was permanent — sitting beneath the sentence that says
+"If the clearing-out of personal data is among them, this portal is keeping
+records it told people it would delete." That is the reassurance that stops
+somebody acting on the problem above it.
+
+**NO FIXTURE COULD REACH THAT STATE, and closing one blind spot had opened it.**
+Round 1's own fix for section G's vacuity set EVERY token; H0h/H0i clear one but
+leave ten jobs with no record, so `count($notKnown) > 0` suppressed the
+all-clear. **The state that was never tested is "some tokens missing AND every
+token-bearing job healthy" — which is what a normal portal looks like.**
+
+**Round 2 also found the mail fallback reporting a PROBLEM on a brand-new
+portal**, having silently escalated the WARNING it was restoring — and
+asserting "the mail job has not run in the last 15 minutes" from a table it
+could not read, which is COULD_NOT_READ's own shape one source over.
+`MailRoutes::state()` answers `jobLastRanAt` as null both when there is no row
+and when the read fails, so "never recorded" and "recorded a while ago" are now
+told apart and only the second is said — as a WARNING, with the old page's own
+"likeliest reason" sentence restored.
+
+**The customer-facing CHANGELOG still described `refused` as "switched off by a
+setting"** — the untruth round 1 had corrected on the page — in the list a
+customer reads to decide whether to worry. A document asserting a fix while
+restating the thing it fixed is worse than one that says nothing.
+
+**Two of round 1's fixes were pinned by nothing**: the `- count($noToken)`
+subtraction (dropping it printed "15 of the 15 recorded a FINISH" where eight
+did) and the condition that makes the mail fallback truthful (dropping it gave
+every correctly-running portal a PROBLEM on upgrade day, which is what D-071
+exists to prevent). Both are pinned now, and the number itself is asserted
+rather than only the wording.
+
+**And `gate_refuses()` accepted an `exit` that refuses nothing** — one inside a
+closure merely DEFINED in the gate block left the hard gate at exit 0 while an
+unauthenticated request wrote the record. The self-test caught it (I1-I6), which
+is the right division of labour, except that the gate runs in `pr-security.yml`
+(registered) and the self-test in `portal-selftests.yml`, which GitHub has never
+registered (#754) — so on GitHub it was guarded by nothing. It requires the exit
+at the block's OWN depth now, and the block must belong to the gate rather than
+being the next one `find()` happens upon. **Three documents had said of round
+1's two bypasses "Both closed and planted". One was.**
+
+**And a third missing dependency.** `PortalCheck` gained `ScheduledJobs` in
+round 1 and `MailRoutes` in round 2, and both tests that load it require every
+class BY HAND. `run()`'s `catch (Throwable)` turns "class not found" into a tidy
+"could not run" finding, so the whole check vanishes while the suite looks
+healthy. `portal-check-selftest.php`'s section J — "no check reports itself as
+unable to run" — is the only thing that notices, and it has now earned its place
+three times. **Whoever adds a dependency to a check must add the require in the
+same change.**
+
 #### Two guards, and what each cannot see
 
 `tools/audit-checks/check_scheduled_jobs_recorded.py` (a hard gate in
@@ -212,8 +275,8 @@ only `INSERT INTO tblRoutes` is read, and a `DELETE` takes an address away.
 file) covers what the
 source cannot: section H drives two real pages over HTTP, including a
 **switched-off** one, and reads the row back; section I proves a wrong token
-records NOTHING. Eight portal faults were planted and each turned a named check
-red — including the blind spot, one threshold for all fifteen, and
+records NOTHING. Portal faults were planted and each turned a named check
+red — **count them from `tools/scheduled-jobs-selftest.php`'s plant suite, which prints its own total; the figure here was stale within one round** — including the blind spot, one threshold for all fifteen, and
 "nothing is known" reported as a warning.
 
 **It drives two of fifteen. The other thirteen are #789**, and that is said in

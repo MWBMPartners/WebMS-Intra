@@ -472,6 +472,7 @@ ScheduledJobs::forgetTableCheck();
 //    autoloader — the portal does, so this is a requirement of the TEST and
 //    not of the page. Without it the section died with "Class MailQueue not
 //    found" rather than reporting anything.
+require $repo . $sep . 'web' . $sep . '_core' . $sep . 'MailRoutes.php';
 require $repo . $sep . 'web' . $sep . '_core' . $sep . 'MailQueue.php';
 require $repo . $sep . 'web' . $sep . '_core' . $sep . 'PortalCheck.php';
 
@@ -898,8 +899,14 @@ check(
     false
 );
 check(
-    'H0c the number it DOES give excludes the mid-run job',
-    str_contains($text, (string) (count(ScheduledJobs::JOBS) - 1) . ' of them recorded a FINISH'),
+    'H0c the number it DOES give excludes the mid-run job, and says what it is out of',
+    str_contains($text, (string) (count(ScheduledJobs::JOBS) - 1) . ' of the '
+        . count(ScheduledJobs::JOBS) . ' recorded a FINISH'),
+    true
+);
+check(
+    'H0c2 and names WHY that job is not counted, rather than leaving an unexplained number',
+    str_contains($text, 'part-way through, which have not recorded a finish'),
     true
 );
 
@@ -974,13 +981,13 @@ $found = $pageSays();
 $text  = $allText($found);
 check(
     'H0j with NO new record and a mail job that last ran 30 days ago, the page '
-    . 'still reports it as overdue — not as "nothing is known yet"',
-    $severityOf($found, 'have not run for longer'),
-    \Portal\Core\PortalCheck::PROBLEM
+    . 'still reports it — not as "nothing is known yet"',
+    $severityOf($found, 'mail job has not run'),
+    \Portal\Core\PortalCheck::WARNING
 );
 check(
-    'H0k and names the mail job in it',
-    str_contains($text, 'has not run in the last 15 minutes'),
+    'H0k and says what stops without it',
+    str_contains($text, 'mail that could not go out at once'),
     true
 );
 
@@ -995,6 +1002,144 @@ check(
     . 'no longer used — so one page never gives two answers about one job',
     str_contains($text, 'has not run in the last 15 minutes'),
     false
+);
+
+// ── Some tokens missing AND every token-bearing job healthy ──────────────
+// ⚠️ THIS IS THE STEADY STATE OF AN ORDINARY PORTAL, AND NO FIXTURE REACHED
+//    IT. There are eleven separate tokens, `full_schema.sql` seeds every one
+//    EMPTY, nothing in the installer sets any, and a customer who does not use
+//    the noticeboard push, discipleship or venue agreements leaves those empty
+//    for ever.
+//
+//    Section G sets EVERY token (round 1's own fix for its vacuity) and H0h/H0i
+//    clear one but leave ten jobs with no record, so `count($notKnown) > 0`
+//    suppressed the all-clear. **Closing one blind spot opened another at the
+//    far end**, and what lived in it was a permanent falsehood: "Every
+//    scheduled job has run recently enough" printed directly under a PROBLEM
+//    saying seven of them can never run — under the sentence warning that
+//    personal data may not be being deleted.
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, '');
+}
+// The four an administrator following the guide really does set.
+foreach (['maintenance.cronToken', 'reminders.cron_token',
+          'feeds.cron_token', 'giving.cron_token'] as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
+    if (in_array($facts['token'], ['maintenance.cronToken', 'reminders.cron_token',
+                                   'feeds.cron_token', 'giving.cron_token'], true) === true) {
+        ScheduledJobs::began($db, $jobKey);
+        ScheduledJobs::finished($db, $jobKey);
+    }
+}
+MailQueue::forget();
+$found = $pageSays();
+$text  = $allText($found);
+check(
+    'H0m the no-token PROBLEM is reported',
+    $severityOf($found, 'can never run, because no token has been set'),
+    \Portal\Core\PortalCheck::PROBLEM
+);
+check(
+    'H0n and the all-clear does NOT claim EVERY job has run, which it did while the '
+    . 'problem above said seven of them can never run at all',
+    str_contains($text, 'Every scheduled job has run recently enough'),
+    false
+);
+check(
+    'H0o it says what it CAN speak for instead',
+    str_contains($text, 'Every scheduled job this page can speak for has run recently enough'),
+    true
+);
+check(
+    'H0p and says where its number came from, rather than an unexplained count',
+    str_contains($text, 'with no token, which cannot run at all'),
+    true
+);
+// ⚠️ AND THE NUMBER ITSELF, which nothing asserted. Dropping
+//    `- count($noToken)` from `$finishedWell` left every check green, because
+//    no fixture had BOTH a token-less job and a number to get wrong — the
+//    mid-run fixture has no token-less jobs, and the token-less fixtures had
+//    no healthy ones. The all-clear then said "15 of the 15 recorded a FINISH"
+//    where eight did.
+//
+//    Counted from JOBS rather than typed, so adding a sixteenth job cannot
+//    make this stale while still passing.
+$withTokens = 0;
+foreach (ScheduledJobs::JOBS as $facts) {
+    if (in_array($facts['token'], ['maintenance.cronToken', 'reminders.cron_token',
+                                   'feeds.cron_token', 'giving.cron_token'], true) === true) {
+        $withTokens++;
+    }
+}
+check(
+    'H0p2 the count is the number of jobs that CAN run (' . $withTokens . ' of '
+    . count(ScheduledJobs::JOBS) . '), not all of them',
+    str_contains($text, $withTokens . ' of the ' . count(ScheduledJobs::JOBS)
+        . ' recorded a FINISH'),
+    true
+);
+
+// ── The mail fallback must fire ONLY on a real, stale record ─────────────
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+$db->query('DELETE FROM `tblScheduledJobRun`');
+
+// (i) no route-state row at all — a portal installed ten minutes ago.
+$db->query("DELETE FROM `tblMailRouteState`");
+MailQueue::forget();
+$found = $pageSays();
+check(
+    'H0q a brand-new portal with no mail record at all is NOT warned about — it used to '
+    . 'be reported as a PROBLEM asserting a misconfiguration that was not there',
+    $severityOf($found, 'mail job has not run'),
+    null
+);
+check(
+    'H0r it says nothing is known yet, which is what D-071 asks for',
+    $severityOf($found, 'Nothing is known yet'),
+    \Portal\Core\PortalCheck::NOTE
+);
+
+// (ii) a record saying it ran a moment ago — nothing to say.
+$db->query(
+    "INSERT INTO `tblMailRouteState` (`routeKey`, `jobLastRanAt`) "
+    . "VALUES ('installation', UTC_TIMESTAMP()) "
+    . "ON DUPLICATE KEY UPDATE `jobLastRanAt` = UTC_TIMESTAMP()"
+);
+MailQueue::forget();
+check(
+    'H0s a mail job that ran a moment ago is not warned about either — this pins the '
+    . 'condition that makes the fallback truthful, which nothing exercised',
+    $severityOf($pageSays(), 'mail job has not run'),
+    null
+);
+
+// (iii) a record saying it last ran an hour ago — the case the fix is for.
+$db->query(
+    "UPDATE `tblMailRouteState` SET `jobLastRanAt` = UTC_TIMESTAMP() - INTERVAL 1 HOUR "
+    . "WHERE `routeKey` = 'installation'"
+);
+MailQueue::forget();
+$found = $pageSays();
+check(
+    'H0t a mail job that HAS run before and has now stopped is reported',
+    $severityOf($found, 'mail job has not run'),
+    \Portal\Core\PortalCheck::WARNING
+);
+check(
+    'H0u as a WARNING and NOT a problem — the fix silently escalated the very warning '
+    . 'it was restoring, which the release note had promised would not happen',
+    $severityOf($found, 'mail job has not run') === \Portal\Core\PortalCheck::PROBLEM,
+    false
+);
+check(
+    'H0v and it names the likeliest cause rather than asserting a misconfiguration',
+    str_contains($allText($found), 'likeliest reason'),
+    true
 );
 
 echo "\n=== Summary ===\n";

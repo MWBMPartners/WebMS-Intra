@@ -310,19 +310,52 @@ def gate_refuses(code: str, gate_at: int) -> bool:
     failure rather than a silent pass; the second is behavioural, and section I
     of the self-test is what drives it.
     """
+    # ⚠️ THE EXIT MUST BE AT THE BLOCK'S OWN LEVEL. A first version asked
+    #    whether `exit` appeared ANYWHERE inside the block, and this passed it
+    #    with exit 0 while an unauthenticated request ran straight on:
+    #
+    #        if ($expected === '' || hash_equals($expected, $incoming) === false) {
+    #            $stop = static function (): void { exit('Forbidden'); };
+    #        }
+    #
+    #    `php -l` clean, the gate green, and the self-test went to 90 passed /
+    #    6 failed (I1-I6) — so the behaviour WAS caught, but by a test in
+    #    `portal-selftests.yml`, which GitHub has never registered (#754),
+    #    while this gate runs for real in `pr-security.yml`. On GitHub today
+    #    that made it guarded by nothing.
+    #
+    #    Three documents said of the two bypasses "Both closed and planted".
+    #    One was; this one was not.
+    #
+    #    Requiring depth 1 means the exit is a statement of the refusal block
+    #    itself, not of something merely defined inside it.
     opened = code.find("{", gate_at)
     if opened == -1:
+        return False
+    # A braceless gate refuses nothing this can see, and `find` would then
+    # pick up some LATER block's braces — so the brace must belong to the
+    # gate: nothing but whitespace between the condition's end and it.
+    between = code[gate_at:opened]
+    if between.count(")") == 0 or between.rstrip().endswith(")") is False:
         return False
     depth = 0
     for i in range(opened, len(code)):
         ch = code[i]
         if ch == "{":
             depth += 1
-        elif ch == "}":
+            continue
+        if ch == "}":
             depth -= 1
             if depth == 0:
-                block = code[opened:i]
-                return re.search(r"\b(?:exit|die)\b", block) is not None
+                return False
+            continue
+        if depth == 1 and (code.startswith("exit", i) or code.startswith("die", i)):
+            before = code[i - 1] if i > 0 else " "
+            after = code[i + (4 if code.startswith("exit", i) else 3):i
+                         + (5 if code.startswith("exit", i) else 4)]
+            if before.isalnum() is False and before not in "_$" and after[:1] != "_" \
+                    and (after[:1].isalnum() is False):
+                return True
     return False
 
 def main() -> int:

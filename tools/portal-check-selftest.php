@@ -59,11 +59,29 @@ mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 //    reporting four healthy apps as broken on every installation.** The guard
 //    against it is section J below, which refuses to let ANY check report
 //    itself as unable to run against a healthy database.
+//
+// 🚨 AND IT HAPPENED AGAIN, WHICH IS WHY SECTION J EARNS ITS PLACE TWICE.
+//    #775 gave `scheduledJobs()` a new dependency — `ScheduledJobs`, the one
+//    place a job's run is recorded and read — and did not add it here. The
+//    same `catch (Throwable)` turned "class not found" into a tidy warning,
+//    and FIVE checks went red: section J by name, plus O3, O4, O6 and O7,
+//    which read a finding that was no longer being produced at all.
+//
+//    **The lesson is for whoever ADDS a dependency, not for this file: a class
+//    reached by a check must be required here in the same change.** Section J
+//    is what makes the omission loud instead of silent — without it the run
+//    would have been 50 of 50 with the whole scheduled-jobs check absent.
+//
+//    It is also why #695 matters: this test is in no workflow that has ever
+//    run on GitHub (#754), and nothing runs the whole set locally, so #775's
+//    own green run said nothing about it.
 require PORTAL_CORE . $sep . 'App.php';
 require PORTAL_CORE . $sep . 'DbServer.php';
 require PORTAL_CORE . $sep . 'Maintenance.php';
 require PORTAL_CORE . $sep . 'AppRegistry.php';
+require PORTAL_CORE . $sep . 'MailRoutes.php';
 require PORTAL_CORE . $sep . 'MailQueue.php';
+require PORTAL_CORE . $sep . 'ScheduledJobs.php';
 require PORTAL_CORE . $sep . 'PortalCheck.php';
 
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and

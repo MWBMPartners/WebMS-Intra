@@ -763,6 +763,7 @@ final class PortalCheck
         $refused   = [];
         $broke     = [];
         $unreadable = [];
+        $mailStopped = '';
         $running   = [];
         foreach ($state as $jobKey => $facts) {
             if (array_key_exists($jobKey, $noToken) === true) {
@@ -807,9 +808,34 @@ final class PortalCheck
                 //    once. D-071 decides what to say about a job with NO
                 //    record; it does not say an existing record should be
                 //    ignored.
-                if ($jobKey === 'cron/mail-queue' && MailQueue::jobIsRunning($db) === false) {
-                    $overdue[] = $words . ' — the mail job has not run in the last 15 minutes';
-                    continue;
+                //    ⚠️ ONLY WHERE THERE IS A RECORD TO READ, AND ONLY AS A
+                //       WARNING. A first version routed this into $overdue,
+                //       which is a PROBLEM — the top severity — with the words
+                //       "Each of these has a token set, so it CAN run … may
+                //       have been switched off, moved, or given the wrong
+                //       address." Measured, that fired on a portal installed
+                //       ten minutes ago, which has no `tblMailRouteState` row
+                //       at all: it asserted a misconfiguration that was not
+                //       there, contradicted the release note promising this
+                //       page "deliberately does not warn" straight after an
+                //       update, and silently ESCALATED the very warning it was
+                //       restoring. It also turned an unreadable table into the
+                //       assertion "the mail job has not run in the last 15
+                //       minutes", which is the COULD_NOT_READ shape one source
+                //       over.
+                //
+                //       `MailRoutes::state()` answers `jobLastRanAt` as null
+                //       when there is no row and when the table cannot be
+                //       read, so "never recorded" and "recorded a while ago"
+                //       are told apart. Only the second is worth saying, and
+                //       the first stays "nothing is known yet" — which is both
+                //       true and what D-071 asks for.
+                if ($jobKey === 'cron/mail-queue') {
+                    $everRan = (string) (MailRoutes::state($db)['jobLastRanAt'] ?? '');
+                    if ($everRan !== '' && MailQueue::jobIsRunning($db) === false) {
+                        $mailStopped = $words;
+                        continue;
+                    }
                 }
                 $notKnown[] = $words;
                 continue;
@@ -915,6 +941,23 @@ final class PortalCheck
             ];
         }
 
+        if ($mailStopped !== '') {
+            // A WARNING, not a PROBLEM, and the "likeliest reason" sentence is
+            // the old page's own — it is the one that names the real cause.
+            $findings[] = [
+                'severity' => self::WARNING,
+                'what'     => 'The mail job has not run in the last 15 minutes.',
+                'why'      => 'It has run before, so it is set up — it simply has not run '
+                    . 'lately. Anything waiting in the mail queue is not being sent. If '
+                    . 'whoever runs the scheduled tasks for this portal has changed '
+                    . 'recently, that is the likeliest reason.',
+                'todo'     => 'Check with whoever set this portal up that the scheduled jobs '
+                    . 'are still running.',
+                'count'    => 1,
+                'examples' => [$mailStopped],
+            ];
+        }
+
         if (count($unreadable) > 0) {
             // ⚠️ A WARNING, NOT THE "nothing is known yet" NOTE. The record is
             //    THERE and could not be read, so telling an administrator to
@@ -983,17 +1026,46 @@ final class PortalCheck
         $finishedWell = count($state) - count($running) - count($noToken);
         if (count($overdue) === 0 && count($diedPart) === 0 && count($notKnown) === 0
             && count($broke) === 0 && count($unreadable) === 0 && $finishedWell > 0) {
+            // ⚠️ "EVERY" MUST MEAN EVERY, AND THE FIRST FIX MOVED A
+            //    CONTRADICTION IN HERE RATHER THAN REMOVING IT. Token-less
+            //    jobs were taken out of the findings above and subtracted from
+            //    the count — but the HEADLINE still said "Every scheduled job
+            //    has run recently enough", directly under a PROBLEM saying
+            //    seven of them can never run.
+            //
+            //    That is the STEADY STATE of an ordinary portal, not an
+            //    upgrade-day transient: there are eleven separate tokens, the
+            //    install script seeds every one of them EMPTY, nothing in the
+            //    installer sets any, and a customer who does not use the
+            //    noticeboard push, discipleship or venue agreements leaves
+            //    those empty for ever. So the false all-clear was permanent —
+            //    sitting under the sentence that says "If the clearing-out of
+            //    personal data is among them, this portal is keeping records
+            //    it told people it would delete."
+            //
+            //    The headline now names what it covers, and the reason says
+            //    where its number comes from. An unexplained "8 of them" on a
+            //    portal with fifteen jobs is its own small untruth.
+            $setAside = [];
+            if (count($noToken) > 0) {
+                $setAside[] = 'the ' . count($noToken) . ' with no token, which cannot run at all';
+            }
+            if (count($running) > 0) {
+                $setAside[] = 'the ' . count($running) . ' part-way through, which have not '
+                    . 'recorded a finish';
+            }
             $findings[] = [
                 'severity' => self::NOTE,
-                'what'     => count($running) > 0
-                    ? 'Every scheduled job that is not mid-run has run recently enough.'
+                'what'     => count($setAside) > 0
+                    ? 'Every scheduled job this page can speak for has run recently enough.'
                     : 'Every scheduled job has run recently enough.',
-                'why'      => $finishedWell . ' of them recorded a FINISH inside the time expected '
-                    . 'for that job, which differs by job: the mail queue is expected every few '
-                    . 'minutes, the nightly jobs daily, and giving statements weekly.'
-                    . (count($running) > 0
-                        ? ' The ones listed above as part-way through are not counted here, '
-                            . 'because they have not recorded a finish.'
+                'why'      => $finishedWell . ' of the ' . count($state) . ' recorded a FINISH '
+                    . 'inside the time expected for that job, which differs by job: the mail '
+                    . 'queue is expected every few minutes, the nightly jobs daily, and giving '
+                    . 'statements weekly.'
+                    . (count($setAside) > 0
+                        ? ' Not counted here: ' . implode(', and ', $setAside)
+                            . ' — each is reported above.'
                         : ''),
                 'todo'     => 'Nothing.',
                 'examples' => [],

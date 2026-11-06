@@ -237,9 +237,20 @@ if ($mailStopped === true) {
     //    its work, which is a real problem and the check page reports it as
     //    one — never as "switched off".
     //
-    // 🚨 DO NOT "CORRECT" THIS TO OUTCOME_REFUSED. The twelve other early
-    //    paths in these pages ARE refusals — switched off, locked, nothing due
-    //    — and carry a comment saying so. This path is not one of them, and an
+    // 🚨 DO NOT "CORRECT" THIS TO OUTCOME_REFUSED. TEN early paths in these
+    //    pages ARE refusals — switched off, locked, nothing due — and carry a
+    //    comment saying so. THREE are failures: this one, its twin in the
+    //    other page, and `health.php`'s handled catch.
+    //
+    //    (An earlier version of this very comment said "the twelve other early
+    //    paths ARE refusals", which counted the two other FAILURES among them —
+    //    so the sentence written to stop a reader misclassifying this path
+    //    pointed them at two more paths as refusals when they are not.
+    //    Measured: `grep -hoE "ScheduledJobs::finished\([^;]*OUTCOME_REFUSED"
+    //    web/_apps/cron/*.php | wc -l` answers 10, across 8 pages, and the
+    //    same for OUTCOME_FAILED answers 3, across 3.)
+    //
+    //    This path is not one of them, and an
     //    earlier version of this comment was that boilerplate, pasted: it said
     //    "the job doing what it was told, not failing to run". A reader acting
     //    on it would have changed the word and re-created #775's own worst
