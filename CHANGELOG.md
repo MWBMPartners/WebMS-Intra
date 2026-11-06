@@ -155,8 +155,19 @@ minute, where the time it means is not the time it would be read as.
 Nothing else was narrowed, and this time the list is checked on every run:
 `10:00 PM`, `7pm`, `March 3 2026`, `Tue, 3 Mar 2026 19:00`, an unpadded
 `2026-6-1`, a dotted `01.06.2026`, an e-mail-style date with a time zone, a
-day-first `01/06/2026`, and fractions of a second in six shapes — **40 formats
-that must import, and 42 cells that must be refused.**
+day-first `01/06/2026`, and fractions of a second in eight shapes — **47
+formats that must import, and 48 cells that must be refused**, both counts
+pinned so the list cannot quietly shrink.
+
+⚠️ **AND THE FIRST ATTEMPT AT THAT REFUSAL ALSO TURNED AWAY THE ORDINARY WAY A
+BRITISH SPREADSHEET WRITES A TIME.** A cell reading `19.30` meaning half past
+seven was refused, in every way of writing the date — including
+`Tue, 3 Mar 2026 19.30`, which is Excel's own long date format. They import
+again. What is refused is only a **single** digit after the point, such as
+`10.5`, where the file genuinely does not say whether five past ten or half past
+ten was meant. Two digits are unambiguous and are stored as written. (An
+earlier version of this note also said "six shapes" and "40 formats" where the
+numbers were eight and 47.)
 
 **And a refused cell now says which it is.** It used to say "startDateTime not
 parseable" for every refusal, which was untrue of all of them: a date that does

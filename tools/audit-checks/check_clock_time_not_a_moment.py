@@ -698,6 +698,20 @@ SLICED_RULE_FORBIDDEN = re.compile(
 #
 #    Each is a DISTINGUISHING clause, not the whole sentence, so ordinary
 #    rewording stays green and deleting a branch does not.
+#
+# ⚠️ THAT IS NO LONGER TRUE OF THE LAST TWO ENTRIES, and round 17 measured it.
+#    They are WHOLE CONDITIONS rather than distinguishing clauses, because a
+#    substring pin was defeated by `&& false`. So they do what they are for —
+#    `&& false`, `|| true` and `&& 1 === 2` each go red — and they ALSO go red
+#    on a behaviour-neutral reformat: one extra space inside the brackets, or
+#    this repository's own Yoda style (`'gap' === $why`).
+#
+#    That cost is accepted deliberately, and it is the same trade #485 and
+#    #763 settled on after four and six rounds respectively: nothing drives
+#    these branches (#787), so a text pin is all there is. The failure message
+#    says to update the constant in the same edit. **But a check that goes red
+#    on a reformat is one step from being switched off (#483), so if #787 ever
+#    lands, these two should become behavioural and these pins should go.**
 FLASH_BRANCH_FILE = os.path.join("web", "_apps", "calendar", "manage", "save.php")
 FLASH_BRANCHES = (
     ("EventRecurrence::whyFirstDateMoved",

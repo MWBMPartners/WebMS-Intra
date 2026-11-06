@@ -125,7 +125,9 @@ appended with its real date and a note that it was added later.
 | [D-067](067-the-owner-removes-the-two-leftover-volumes.md) | 2026-11-06 | The owner removes the two leftover Docker volumes | in force |
 | [D-068](068-signula-id-gets-the-one-password-writer-fix.md) | 2026-11-06 | SIGNula.id gets the one-password-writer fix | in force |
 | [D-069](069-the-schema-archive-goes-in-an-ordinary-commit.md) | 2026-11-06 | SIGNula.id's committed archive goes in an ordinary commit, not a rewrite | in force |
+| [D-070](070-overdue-is-set-per-job.md) | 2026-11-06 | "Overdue" is set per job, from what each job is for | in force |
+| [D-071](071-a-job-with-no-record-is-nothing-known.md) | 2026-11-06 | A job with no record says "nothing is known yet", not a warning | in force |
 
-*69 decisions. This index is checked against the folder by
+*71 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

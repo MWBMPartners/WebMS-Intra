@@ -17963,9 +17963,32 @@ session.
 PHP moves it an hour — and `01:00` and `01:30` both came out as `2:00`/`2:30`,
 two different stored times reading as one.
 
-**The round trip was only ever correct because both halves used the same wrong
-zone.** `strtotime()` and `date()` both take PHP's default, which has nothing to
-do with the organisation's, so they cancelled out — on 364 days a year.
+**The round trip was correct on every other day because both halves used the
+same zone.** `strtotime()` and `date()` both take PHP's default, so they
+cancelled out.
+
+⚠️ **AND THAT ZONE IS NOT THE FAULT. This paragraph said "the same WRONG zone"
+and "which has nothing to do with the organisation's", and both were withdrawn
+in round 3 of the check — in `web/_core/I18n.php`'s own docblock, in
+`.claude/CLAUDE.md`, and in `.OpenAI/CONTEXT.md` (that one only in round 16).
+It survived HERE for fourteen rounds**, in the file `.claude/CLAUDE.md` names as
+the technical record for this package, which is the worst place of the four for
+it to survive. `web/_core/bootstrap.php` runs
+`date_default_timezone_set(Site::timezone())` during start-up, so on any page
+reached through the router PHP's default zone IS the organisation's. **The fault
+is the DATE that `strtotime()` supplies without being asked** — today's —
+because on one morning a year the hour the reading names does not exist. Same
+fix, different reason, and a wrong reason sends the next reader to change the
+zone.
+
+**The transferable part is how it survived.** Round 16's finding 5 was this
+exact pattern and its stated lesson was "when a finding says 'both files', DIFF
+THE TWO AGAINST EACH OTHER afterwards" — and **two files was not the set.** The
+claim lived in four places; fixing the two that were named left the
+authoritative one standing. Round 16 is also the only round in this package to
+change no line of DEV_NOTES (rounds 12 to 15 changed 45, 15, 71 and 13), which
+is how a file stops being checked at all. **Enumerate every place a claim
+lives, by searching for it, before calling a correction done.**
 
 `I18n::formatClockTime()` is now the one place a clock reading becomes words,
 and it builds no moment: hours and minutes come off the digits. `web/_apps/rota/`
@@ -19324,6 +19347,91 @@ naming the MOVED-TO date — and in the two Greenland zones this branch exists
 for, it exists perfectly well on that date: 23:30 on 29 March 2026 in
 America/Nuuk is a real reading; it is the 28th that has no 23:30. The sentence
 names the typed date and time now, where the claim holds.
+
+### Rounds 15 to 17: the import reader, and what finally closed it
+
+Three more rounds on one closure, `$fmtClock` in `calendar/manage/import.php`.
+It has to be strict about machine-written ISO values and forgiving about
+whatever somebody typed into a spreadsheet, and **every attempt from round 12
+to round 16 broke something legitimate.** What closed it was not a cleverer
+pattern.
+
+**Round 15 — the impossible-date rule stepped over a zero.** Round 14's test
+required the day to be 1-31, the month 1-12 and the year to be a number, so any
+cell whose broken component was a ZERO, or which had no year, fell to
+`strtotime()` and was rolled silently: `2026-06-00` to 31 May, `2026-00-10` to
+December 2025, `Feb 31 10:00` to 3 March. **And `0000-00-00` — the zero date a
+legacy MySQL dump exports — rolled to `-0001-11-30`, which a DATETIME column
+refuses**, so the insert threw and the whole import stopped part-way with
+earlier rows already written. The range test now covers anything a day or month
+COULD be, zero included, with the year `strtotime()` itself assumes.
+
+**Round 16 — "measured" meant the two cases I picked.** Round 15's fraction
+rule refused **189 machine formats** that had imported since the page was
+written: fractional SECONDS with anything after them, such as
+`2026-06-01 10:00:00.000 UTC`, which is what a database or log export contains.
+The comment above it said "Legitimate fractional SECONDS are unaffected,
+measured rather than assumed" — and the measurement had covered the only two
+shapes where the claim held, which were then added to the test as if they proved
+the general case. **Writing "measured" over a set you chose yourself is worse
+than writing nothing**, because it removes the next reader's reason to look.
+Third occurrence in this package.
+
+**Round 17 — the premise itself was wrong, and PHP settled it.** For four
+rounds the rule rested on "`10.5` means 10:30 and `strtotime()` reads it as five
+past". True — for ONE digit. **`strtotime()` does not read a decimal hour at
+all: it reads the dot as a MINUTE SEPARATOR**, and the proof is that it refuses
+minutes above 59:
+
+    10.5  -> 10:05        10.59 -> 10:59
+    10.30 -> 10:30        10.60 -> FALSE       10.75 -> FALSE
+
+So for two digits PHP's reading and the writer's intention are the SAME.
+`19.30` is half past seven to both. Round 16 had generalised the one-digit case
+to `\.\d+` and so **refused all 1,440 `HH.MM` readings** — the ordinary way a
+British spreadsheet writes a time — and pushed that refusal into every date
+spelling, so `Tue, 3 Mar 2026 19.30`, **Excel's long date format**, stopped
+importing. It was internally inconsistent too: `19.30` refused while
+`19.30:00` stored.
+
+The rule is now one digit, non-zero, on the hour or the minute — the only case
+where the two readings genuinely differ and the cell is therefore ambiguous.
+
+**And that dissolved the OTHER fault in the same breath.** Round 16's rule
+needed a trailing set to decide what counted as a zone, and it allowed letters,
+`/` and `_` but not digits, `+` or `-` — so **89 zone spellings** (`GMT+1`,
+`Etc/GMT+1`, `America/Port-au-Prince`, `Asia/Ust-Nera`) fell through and stored
+the wrong hour, under a comment saying a fraction "followed only by a zone or an
+offset" was refused. **A date-spelling list had been replaced by a zone-spelling
+list.** Narrowing the rule to one digit removed the need for any trailing set,
+so there is nothing left to be missing from.
+
+**THE LESSON ACROSS ALL THREE, which is the only part worth carrying.** Every
+one of these faults was found by a checker building a MATRIX, and missed by me
+probing the cases I had thought of. The remedy was not a sharper pattern each
+time; it was:
+
+1. **Measure what the library actually does** before writing a rule about it.
+   One `strtotime()` sweep would have settled the premise in round 12.
+2. **Commit the matrix.** Section K of `clock-change-selftest.php` is 47 cells
+   that must store and 48 that must be refused, each annotated with the round
+   that broke it, lifting the real closure out of the page so it needs no
+   database. **Both counts are pinned** (K04/K04b), because round 17 measured
+   that deleting ten entries left 104 of 104 green.
+3. **Name the rule after the thing it is about.** Every version that mentioned
+   a DATE spelling was defeated by a date spelling; every version that
+   enumerated a ZONE was defeated by a zone. The rule is about the TIME and now
+   says nothing else.
+
+**One more shape, from round 17's finding 7.** The withdrawn "same wrong zone"
+explanation lived in FOUR places. Round 16 fixed the two that its finding named
+and recorded the lesson "when a finding says 'both files', diff the two against
+each other" — **and two files was not the set.** It survived here, in the file
+named as this package's technical record, for fourteen rounds, and round 16 is
+the only round in the package to change no DEV_NOTES line at all. **Enumerate
+every place a claim lives, by searching for it, before calling a correction
+done.**
+
 
 ### Raised rather than bundled
 

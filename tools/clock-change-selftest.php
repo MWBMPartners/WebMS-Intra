@@ -584,7 +584,24 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         ['2026-6-1 10:00:00.000',         '2026-06-01 10:00:00', 'round 15 refused it'],
         ['2026-6-1 10:00:00.000+01:00',   '2026-06-01 10:00:00', 'round 15 refused it'],
         ['2028-02-29 10:00:00.123456 GMT', '2028-02-29 10:00:00', 'round 15 refused it'],
-        ['2026-06-01T10:00:00.000Z',      '2026-06-01 11:00:00', ''],
+        // ⚠️ A TWO-DIGIT `HH.MM` TIME — the ordinary way a British spreadsheet
+        //    writes one, and NOT ONE OF THESE WAS HERE for four rounds. That
+        //    is why round 16 could refuse all 1,440 of them and stay green:
+        //    every fraction case in this list used ONE digit, where PHP's
+        //    reading and the writer's really do differ. **The generalisation
+        //    from one digit to `\d+` was tested by nothing.**
+        //
+        //    `strtotime()` reads the dot as a MINUTE SEPARATOR, proved by its
+        //    refusing minutes above 59 (`10.60` and `10.75` answer false), so
+        //    for two digits it agrees with whoever typed the cell.
+        ['2026-06-01 19.30',              '2026-06-01 19:30:00', 'round 16 refused it'],
+        ['2026-06-01 00.01',              '2026-06-01 00:01:00', 'round 16 refused it'],
+        ['2026-06-01 23.59',              '2026-06-01 23:59:00', 'round 16 refused it'],
+        ['Tue, 3 Mar 2026 19.30',         '2026-03-03 19:30:00', "round 16 refused it — Excel's long date format"],
+        ['March 3 2026 19.30',            '2026-03-03 19:30:00', 'round 16 refused it'],
+        ['1 June 2026 19.30',             '2026-06-01 19:30:00', 'round 16 refused it'],
+        ['2026-06-01 10.0',               '2026-06-01 10:00:00', 'a zero fraction means the same either way'],
+        ['2026-06-01 19.30:00',           '2026-06-01 19:30:00', 'round 16 stored this while refusing 19.30 — inconsistent'],
         // dotted European dates, which must not be mistaken for a fraction
         ['01.06.2026 10:00',              '2026-06-01 10:00:00', ''],
         ['31.12.2026',                    '2026-12-31 00:00:00', ''],
@@ -641,6 +658,15 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         '1 June 2026 10.5', 'June 1 2026 10.5', 'Mon, 01 Jun 2026 10.5',
         '01/06/2026 10.5', '2026/06/01 10.5', '2026-152 10.5', '2026-W23-1 10.5',
         '2026-152 10:00.5', '2026-06-01 10.5 UTC', '2026-06 10.5',
+        // ⚠️ AND WHATEVER TRAILS IT. Round 16's rule had a trailing set that
+        //    allowed letters, `/` and `_` but NOT digits, `+` or `-`, so 89
+        //    zone spellings fell through and stored the wrong hour — under a
+        //    comment saying a fraction "followed only by a zone or an offset"
+        //    was refused. A date-spelling list had been replaced by a
+        //    zone-spelling list. Nothing trails the pattern now.
+        '2026-06-01 10.5 GMT+1', '2026-06-01 10.5 UTC+1',
+        '2026-06-01 10.5 Etc/GMT+1', '2026-06-01 10.5 America/Port-au-Prince',
+        '2026-06-01 10.5 Asia/Ust-Nera', '2026-06-01 10.5.',
         'rubbish',
     ];
     $refuseBad = [];
@@ -652,6 +678,63 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     }
     check('K02 all ' . count($mustRefuse) . ' impossible or misreadable cells are refused',
         $refuseBad === [] ? 'all refused' : implode(' | ', $refuseBad), 'all refused');
+
+    // K04 — THE LISTS MAY NOT SHRINK UNNOTICED. Both are iterated and both
+    //       labels are computed with `count()`, so **deleting rows changes the
+    //       printed number and fails nothing** — measured by round 17, which
+    //       removed ten of K02's entries and still got 104 of 104. That is the
+    //       shape this repository fixed once before with an explicit
+    //       `array_keys(...) === [...]` pin (#697, #709).
+    //
+    //       These two numbers are the pin. Raise them in the same edit that
+    //       adds a case, and never lower them without saying why in the
+    //       commit — a smaller list is a smaller guard, and section K is the
+    //       ONLY thing guarding the import reader.
+    check('K04 the must-store list has not shrunk', count($mustStore), 47);
+    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 48);
+
+    // K05 — WHICH REFUSAL IT IS. The closure reports a reason through its
+    //       second argument, and the import shows it to the administrator.
+    //
+    // ⚠️ PINNED BY NOTHING UNTIL NOW. Round 17 reverted the whole of that fix
+    //    — the `&$why` parameter, all four assignments and both call sites,
+    //    back to "not parseable" — and got 65 audit scripts green, 104 clock
+    //    checks green with K01, K02 and K03 all ticked, and 75 recurrence
+    //    checks. **The fourth round running to find a headline fix
+    //    unguarded.** Section K called the closure with ONE argument and
+    //    never looked at the reason.
+    //
+    //    It matters because "not parseable" was untrue of every value these
+    //    rules refuse: `strtotime('2026-06-01 10.5')` and
+    //    `strtotime('0000-00-00 10:00')` both answer real moments. The
+    //    administrator was told their file could not be read when the portal
+    //    had decided not to accept it, which hides the one thing that would
+    //    let them fix the row.
+    $reasonFor = [
+        '2026-02-31 10:00'  => 'is a date that does not exist',
+        '0000-00-00 10:00'  => 'is a date that does not exist',
+        'Feb 31 10:00'      => 'is a date that does not exist',
+        '2026-06-01 10.5'   => 'writes the time with a single digit after a decimal point, which could '
+                             . 'mean either minutes or part of an hour',
+        '1 June 2026 10.5'  => 'writes the time with a single digit after a decimal point, which could '
+                             . 'mean either minutes or part of an hour',
+        'rubbish'           => 'cannot be read',
+        'not a date at all' => 'cannot be read',
+    ];
+    $reasonsWrong = [];
+    foreach ($reasonFor as $cell => $wantReason) {
+        $gotReason = null;
+        $stored    = $fmtClock($cell, $gotReason);
+        if ($stored !== null) {
+            $reasonsWrong[] = $cell . ' was stored (' . $stored . ') rather than refused';
+            continue;
+        }
+        if ($gotReason !== $wantReason) {
+            $reasonsWrong[] = $cell . ' gave "' . (string) $gotReason . '"';
+        }
+    }
+    check('K05 each refusal says WHICH refusal it is, not "not parseable"',
+        $reasonsWrong === [] ? 'all correct' : implode(' | ', $reasonsWrong), 'all correct');
 
     // K03 — THE PREMISE, so K02 cannot pass by refusing everything. If the
     //       closure simply returned null the checks above would both be

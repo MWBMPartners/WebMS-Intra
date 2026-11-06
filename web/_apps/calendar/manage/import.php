@@ -154,61 +154,69 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //    commonest spreadsheet in the world stopped importing, under a comment
     //    promising nothing had changed.
 
-    // (a) A FRACTION ON ANYTHING BUT THE SECONDS. In ISO 8601 a fractional
-    //     part belongs to the lowest component written, so `10.5` means 10:30
-    //     and `10:00.5` means 10:00:30 — and `strtotime()` reads them as five
-    //     past and five seconds past. Step 2 refuses both on purpose (#777
-    //     round 10, where truncating to 10:00 lost up to 59 minutes
-    //     silently), so this must not let `strtotime()` guess at them.
+    // (a) A FRACTION PHP WILL READ AS A DIFFERENT TIME FROM THE ONE MEANT.
     //
-    // 🚨 THIS RULE MENTIONED THE DATE FOR THREE ROUNDS, AND WAS WRONG BOTH
-    //    WAYS BECAUSE OF IT. Rounds 12 to 15 each matched a date pattern and
-    //    each was defeated by a date spelling:
+    // 🚨 THE PREMISE WAS WRONG FOR FOUR ROUNDS, AND MEASURING PHP IS WHAT
+    //    SETTLED IT. The comment used to say `10.5` means 10:30 and
+    //    `strtotime()` reads it as five past — true — and then generalised
+    //    that to any fraction. **`strtotime()` does not read a decimal hour
+    //    at all: it reads the dot as a MINUTE SEPARATOR**, and the proof is
+    //    that it REFUSES minutes above 59:
     //
-    //      round 14 padded dates only, so `2026-6-1T10.5` stored 10:05
-    //      round 15 added a space separator and `\d{1,2}` — and then
-    //               **refused 189 machine formats that had imported in EVERY
-    //               previous version, including the original**, because a
-    //               fraction on the SECONDS with anything after it
-    //               (`2026-06-01 10:00:00.000 UTC`, a database export with
-    //               microseconds and a zone name) does not reach step 2:
-    //               step 2 strips a fraction only at the END of the string.
-    //               Round 15 ALSO still missed `1 June 2026 10.5`,
-    //               `01/06/2026 10.5`, `2026-152 10.5` and
-    //               `2026-W23-1 10.5` — two of which it ADDED to the
-    //               supported list in the same commit.
+    //      10.5  -> 10:05     10.59 -> 10:59
+    //      10.30 -> 10:30     10.60 -> FALSE      10.75 -> FALSE
     //
-    //    **The rule is about the TIME, so it now says nothing about the
-    //    date.** A fraction is legitimate exactly when it follows `HH:MM:SS`;
-    //    otherwise, if it ends the value or is followed only by a zone or an
-    //    offset, it is on the wrong component and is refused. No date
-    //    spelling appears in either pattern, so no date spelling can defeat
-    //    it.
+    //    So for TWO digits PHP's reading and the writer's intention are the
+    //    SAME: `19.30` is half past seven to PHP and to whoever typed it.
+    //    **Round 16 refused all 1,440 `HH.MM` readings** — the ordinary way a
+    //    British spreadsheet writes a time — and pushed the refusal into every
+    //    date spelling, so `Tue, 3 Mar 2026 19.30`, **Excel's long date
+    //    format**, stopped importing where all five earlier versions stored it
+    //    correctly. That is the harm the note below this closure warns about,
+    //    in the round written to repair an over-narrowing.
     //
-    //    The lookbehind is what keeps a dotted European date out of it:
-    //    `31.12.2026` and `01.06.2026 10:00` have `\d.\d` in them and are
-    //    perfectly readable, and the digits before a date's dot are
-    //    themselves preceded by a dot.
+    //    It was also internally inconsistent: `2026-06-01 19.30` was refused
+    //    while `2026-06-01 19.30:00` stored 19:30:00, and the administrator's
+    //    message ("the time it means is not the time it would be read as") was
+    //    untrue of every one of them.
     //
-    //    What it still cannot see, stated rather than implied: a fraction
-    //    followed by something that is neither a zone nor an offset, and a
-    //    time written in a way `strtotime()` reads but no standard describes.
-    //    43 cases are measured both ways in section K's own matrix.
+    // 🧮 SO THE RULE IS ONE DIGIT, NON-ZERO, ON THE HOUR OR THE MINUTE — the
+    //    only case where the two readings genuinely differ and the cell is
+    //    therefore ambiguous. `10.5` could be five past ten or half past ten
+    //    and nothing in the file says which. Two digits agree; three or more
+    //    PHP refuses anyway; `.0` means the same either way.
+    //
+    //    AND IT NEEDS NO LIST OF ZONE SPELLINGS, which is what the previous
+    //    version got wrong a second way: its trailing set allowed letters,
+    //    `/` and `_` but not digits, `+` or `-`, so **89 zone spellings** —
+    //    `GMT+1`, `UTC+1`, `Etc/GMT+1`, `America/Port-au-Prince`,
+    //    `Asia/Ust-Nera` — fell through and stored the wrong hour, under a
+    //    comment saying a fraction "followed only by a zone or an offset" was
+    //    refused. A date-spelling list had been replaced by a zone-spelling
+    //    list. **An allow-list written from the spellings you were handed is
+    //    not a rule.** Nothing trails the pattern now, so nothing can be
+    //    missing from it.
+    //
+    //    The lookbehind and lookahead keep a dotted date out: in `31.12.2026`
+    //    and `1.6.2026` the digits are preceded or followed by more date.
+    //    BE CLEAR WHICH MEASUREMENT IS WHICH, because the previous version
+    //    of this paragraph was not and round 17 caught it: it said "43 cases
+    //    are measured both ways in section K's own matrix", and section K
+    //    holds no such set — its cells are each measured ONE way, store or
+    //    refuse. Two different things:
+    //
+    //      • A DEVELOPMENT SWEEP, run while writing this and not committed:
+    //        1,881 cases — all 1,440 `HH.MM` readings, the long-date forms,
+    //        every one of 428 zone spellings after a one-digit fraction, and
+    //        nine legitimate values. It is what established the rule.
+    //      • SECTION K of `clock-change-selftest.php`, which IS committed and
+    //        runs every time: 47 cells that must store and 48 that must be
+    //        refused, each one way, with both counts pinned so the lists
+    //        cannot shrink unnoticed.
     if (preg_match('/:\d{2}:\d{2}\.\d/', $trimmed) !== 1
-        && preg_match(
-            '/(?<![\d.])\d{1,2}(?::\d{2})?\.\d+'
-            . '(?=\s*(?:[A-Za-z][A-Za-z\/_]*|[+-]\d{2}:?\d{2}|[+-]\d{2})?\s*$)/',
-            $trimmed
-        ) === 1) {
-        // 🗣️ SAY WHICH REFUSAL THIS IS. "not parseable" was shown for every
-        //    value these rules refuse, and every one of them IS parseable —
-        //    `strtotime('2026-06-01 10.5')` answers a real moment. The
-        //    administrator was told their file could not be read when the
-        //    portal had decided not to accept it, which hides the one thing
-        //    that would let them fix the row. The same untruth is recorded as
-        //    a REPAIRED fault thirty lines above this closure.
-        $why = 'has a decimal point on the hour or the minute, so the time it '
-             . 'means is not the time it would be read as';
+        && preg_match('/(?<![\d.])\d{1,2}\.[1-9](?!\d|\.\d)/', $trimmed) === 1) {
+        $why = 'writes the time with a single digit after a decimal point, which could '
+             . 'mean either minutes or part of an hour';
         return null;
     }
 
