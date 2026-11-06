@@ -1844,6 +1844,21 @@ function fi_runJob(string $token = 'p6-selftest-token', bool $standInForPass = f
         // was on this list while the pass held people in their quiet hours.
         // It holds nothing now, and no longer reaches for that class.)
         . "'AppRegistry.php','ExternalAudience.php','FeedAdmin.php','PortalAddress.php','WebPush.php',"
+        // ⚠️ `ScheduledJobs.php` IS NOT OPTIONAL, AND LEAVING IT OFF KILLED THE
+        //    WHOLE JOB. #775 made every cron page record that it ran, so
+        //    `cron/import-feeds.php` now calls `ScheduledJobs::began()` right
+        //    after its token gate. This runner has no autoloader, so the job
+        //    died with "class not found" at its FIRST statement and section K
+        //    went to TEN failures — every one of them a check about something
+        //    else, which is exactly what the comment above warns about.
+        //
+        //    The real portal autoloads, so this was a fault in the TEST world
+        //    and not in the page. It was found by `tools/run-all-selftests.sh`
+        //    and by nothing else: the #775 package's own gate and self-test do
+        //    not drive this page, and a search for which tests request a
+        //    `cron/` address missed this one because the address is never
+        //    written out — the job is `require`d by path.
+        . "'ScheduledJobs.php',"
         . "'MailQueue.php','MailRoutes.php','Mailer.php'] as \$f)"
         . " { require_once \$c['core'] . \$f; }\n"
         // The pass itself: the real class, or the stand-in that only writes
