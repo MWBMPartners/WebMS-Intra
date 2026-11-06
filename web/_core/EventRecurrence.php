@@ -896,6 +896,45 @@ final class EventRecurrence
      * of the two it means is only a question when something turns it into an
      * instant, and that is `Site::zoneFor()`'s job, not this file's.
      */
+    /**
+     * 🕳️ Is this reading a time that really exists in that zone?
+     *
+     * Public because a CALLER has to tell two quite different reasons apart
+     * when it explains itself to somebody (#777 round 12). A repeating event's
+     * first date can move for two reasons:
+     *
+     *   • the pattern puts it elsewhere -- ticking Thursday on a Wednesday --
+     *     which is the organiser's own choice working as asked; or
+     *   • the time they typed does not exist on that date in that zone,
+     *     because the clocks go forward through it.
+     *
+     * `calendar/manage/save.php` showed ONE sentence for both, blaming "the
+     * repeat you chose" in a case where the repeat was satisfied by the typed
+     * date -- so it pointed the administrator at a control that could not fix
+     * anything, and said nothing about the time having changed as well.
+     *
+     * ⚠️ IT ASKS `pastTheHourThatIsMissing()` RATHER THAN REPEATING IT, so
+     *    there is still ONE rule for what a missing hour is. Do not write a
+     *    second round trip in a page (#647): a page and a class that disagree
+     *    about this would explain a move by the wrong cause.
+     *
+     * An unreadable zone answers TRUE -- "no gap" -- because the honest
+     * fallback is to claim nothing. Saying "the clocks went forward" when we
+     * could not tell would be worse than the general sentence.
+     *
+     * @param string $reading  A wall-clock reading, `Y-m-d H:i:s`.
+     * @param string $zoneName The zone it is a reading on.
+     */
+    public static function readingIsReal(string $reading, string $zoneName): bool
+    {
+        $zone = self::zoneOrNull($zoneName);
+        if ($zone === null) {
+            return true;
+        }
+
+        return self::pastTheHourThatIsMissing($reading, $zone) === $reading;
+    }
+
     private static function pastTheHourThatIsMissing(string $wallClock, DateTimeZone $zone): string
     {
         $built = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $wallClock, $zone);

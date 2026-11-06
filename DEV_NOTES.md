@@ -18330,19 +18330,46 @@ readers; round 11 learned it across a handler and the class it calls. **Follow
 the value to the thing that finally produces it**, and check there.
 
 It was pinned by nothing: all 60 checks of `event-recurrence-selftest.php`
-passed before and after, because **every clock-change fixture in it is
-Europe/London or America/New_York**, where the clocks go forward at 01:00 and
-02:00 — the same day, the same weekday, the same day of the month. Only a
-transition at 23:00 moves the DATE. Section J is six checks in the two zones
+passed before and after.
+
+⚠️ **AND MY FIRST EXPLANATION OF WHY WAS INCOMPLETE IN A WAY THAT MISLEADS.** I
+wrote that every clock-change fixture is Europe/London or America/New_York,
+where the clocks go forward at 01:00 and 02:00, so only a 23:00 transition moves
+the DATE. That is true, and it explains the DATE half only — which made the
+whole thing read as a two-zone curiosity. **Measured across all 419 zones, the
+fix changed generated dates in 130 of them: 2 in the date and 130 in the time of
+day**, Europe/London, America/Chicago and America/New_York included. A London
+fixture WOULD have shown the time half.
+
+**The real reason no fixture caught it is sharper: every clock-change fixture in
+that file starts the series a week BEFORE the transition** — `2027-03-21 01:30`,
+`2026-03-22 01:30`, `2027-03-07 02:30` in New York, `2027-03-20 23:00` — so the
+ANCHOR itself was never inside a gap, and the anchor is the only thing this
+fault touched. Section I is about an OCCURRENCE landing in the gap, a different
+question, and it is correct. **Ask what the fixture puts in the faulty position,
+not whether the zone is a realistic one.** J10 and J11 are London and Chicago
+for exactly that reason; without them the 128-zone half was pinned by Nuuk
+alone. Section J is six checks in the two zones
 that do, with the premise asserted first (J00) and the over-reach direction
 held down (J04); four of the six go red on the old anchor, and J00 and J04 stay
 green, which is what they are for.
 
-It cannot join the write-path list, because one live `strtotime` remains at
-`save.php:1210` formatting a DATE-ONLY value. That was swept the same way: **a
-date with no time moves in ZERO zones**, so it is safe and is left alone rather
-than changed for the sake of a clean list. The exception and both sweeps are
-recorded beside the constant.
+**It has since JOINED the write-path list (round 12).** This paragraph used to
+say it could not, because one live `strtotime` remained — formatting a date-only
+value inside the "the first date was moved" sentence. Wording that sentence
+truthfully (round 12, finding 1) replaced it with `I18n::formatClockDateTime()`,
+and the file now contains **zero** moment constructions, measured with the
+tokeniser. So `save.php` is guarded by the strongest check in that file rather
+than by three text pins, and the date-only exception is retired rather than
+merely swept.
+
+⚠️ **The old wording also cited `save.php:1210`, and this project's own rule is
+never to cite another document by line number.** It had gone stale by LINE
+before it went stale by FACT: round 11 added 31 lines above it, so 1210 had
+become `$dropRule = $mysqli->prepare('DELETE FROM tblRecurrenceRules …')` — in
+the same commit that carried the citation. Both mirror instruction files held it
+identically, so diffing them against each other could not catch it; only reading
+the code at that line could.
 
 **(7) The published contract promised a rule `update.php` did not enforce** —
 there was no comparison in the file at all — while `api-spec.json` documents its

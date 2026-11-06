@@ -65,9 +65,16 @@ deliberate. A monthly series lost one of its months outright. The event form and
 the part that works out the repeat dates were both doing it, and **fixing only
 the form made the monthly case worse**, which is why this is being described
 again: an earlier note in this file said the form was the whole of it. Both are
-fixed now, and every date after the first keeps the time that was typed. Swept
-across every time zone to 2041: two are affected, and a date with no time is
-affected in none.
+fixed now, and every date after the first keeps the time that was typed.
+
+**And this affected far more than two time zones, which an earlier note in this
+file got wrong.** Swept across all 419 time zones: **130 are affected**. Two of
+them — both in Greenland — had the wrong *date*, which is the case described
+above. In the other 128, including the United Kingdom and the United States,
+the date was right and **every occurrence after the first carried the wrong
+hour, permanently**. So a customer in London or Chicago reading the earlier
+sentence would have concluded this did not reach them, and it did. A date with
+no time is affected in no zone at all.
 
 **The events API can read this portal's own calendar format again.** Tightening
 the check a few hours earlier had started refusing `20260601T100000Z` — the form

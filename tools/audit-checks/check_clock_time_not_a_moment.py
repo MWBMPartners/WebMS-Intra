@@ -524,16 +524,38 @@ FORMATTER_NAME = "formatClockTime"
 #    the first date had moved. Every occurrence of that series fell a day late,
 #    permanently, and it read as deliberate. All four now slice the text.
 #
-#    It cannot join the list because ONE live `strtotime` remains, at
-#    `save.php:1210`, formatting a DATE-ONLY value for display. That one was
-#    swept the same way: **a date with no time moves in ZERO zones** between
-#    2026 and 2041, so it is safe, and it is left alone rather than changed for
-#    the sake of a clean list. If that line ever grows a time, it stops being
-#    safe.
+#    ✅ IT HAS JOINED THE LIST (#777 round 12). This note used to say it could
+#    not, because one live `strtotime` remained, formatting a DATE-ONLY value
+#    for display. That call was inside the "the first date was moved" sentence,
+#    and wording that sentence truthfully replaced it with
+#    `I18n::formatClockDateTime()`. Measured with the tokeniser: ZERO moment
+#    constructions remain in the file, so the write-path guard applies and is
+#    stronger than the three text slices below.
+#
+#    The old note also CITED A LINE NUMBER, which this repository's own rule
+#    forbids, and it had gone stale by line before it went stale by fact.
 WRITE_PATHS_WITHOUT_MOMENTS = (
     os.path.join("web", "_apps", "events", "api", "create.php"),
     os.path.join("web", "_apps", "events", "api", "update.php"),
     os.path.join("web", "_apps", "calendar", "submit-save.php"),
+    # 🆕 Joined on 6 November 2026 (#777 round 12), and it is the STRONGEST
+    #    guard this file has for that page -- it asks PHP whether any moment is
+    #    built at all, rather than pinning three expressions as text.
+    #
+    #    It became eligible as a side effect of wording the moved-date message
+    #    truthfully: the last live `strtotime` in the file was inside that
+    #    sentence, formatting a date-only value, and it is now
+    #    `I18n::formatClockDateTime()`. Measured with the tokeniser, comments
+    #    and string literals excluded: ZERO moment constructions remain.
+    #
+    #    That also retires a "stated exception" three documents carried -- "the
+    #    one live `strtotime` left (`save.php:1210`, a DATE-ONLY display
+    #    value)". It had ALREADY gone stale by line number before it went
+    #    stale by fact: round 11 added 31 lines above it, so 1210 had become
+    #    `$dropRule = $mysqli->prepare('DELETE FROM tblRecurrenceRules …')`.
+    #    **This repository's own rule is never to cite by line number, and the
+    #    commit that moved the line was the one carrying the citation.**
+    os.path.join("web", "_apps", "calendar", "manage", "save.php"),
 )
 
 # ⚠️ ASK PHP, DO NOT PATTERN-MATCH THE TEXT. Each of those files EXPLAINS the
@@ -618,8 +640,40 @@ SLICED_RULE_PARTS = (
 # enough to be its argument. Kept to one line and one statement on purpose:
 # `[^;\n]` is what stopped an earlier version of this check walking across a
 # multi-line statement and crying wolf.
+# ⚠️ DERIVED FROM `MOMENT_BUILDERS`, NEVER WRITTEN OUT AGAIN (#777 round 12).
+#    The first version of this was a fresh five-spelling list sitting forty
+#    lines below the list that exists BECAUSE hand-written spelling lists do
+#    not work -- and it was defeated by the two spellings that caused this
+#    package's round-7 and round-11 portal faults. Planted into `save.php`:
+#
+#        $startMoment = DateTimeImmutable::createFromFormat(
+#            'Y-m-d H:i:s', $startReading, new DateTimeZone($timezone));
+#
+#    `php -l` clean, **gate exit 0**, while the constant's own comment above
+#    promised "$startReading may never reach a moment builder".
+#    `date_create_from_format` walked through as well.
+#
+#    **"An allow-list written from the spellings you were handed is not a
+#    rule" is this repository's own sentence, written in round 10 about this
+#    very file -- and round 11 then wrote a new allow-list in it.** Deriving
+#    the pattern is the only version that cannot drift from the one list.
+#
+# ⚠️ AND THE LOOKBEHIND IS NOT A DETAIL. The first version's alternation held
+#    a bare `date` with no word boundary, so ANY identifier ending in `date(`
+#    matched: `validate($startReading)` and `candidate($startReading)` each
+#    made this hard gate FAIL on code that builds no moment, and the failure
+#    message quoted a `date($startReading` call that was not on the line.
+#    That is the direction that gets a check switched off (#483), and it is
+#    live-plausible in a file that already defines `$looksLikeDateTime`.
+#    `MOMENT_BUILDERS` does not carry bare `date` at all, because `date()`
+#    FORMATS a moment rather than building one -- deriving inherits that
+#    judgement instead of second-guessing it.
+#
+#    Kept to one line and one statement on purpose: `[^;\n]` is what stopped
+#    an earlier version of this check walking across a multi-line statement
+#    and crying wolf.
 SLICED_RULE_FORBIDDEN = re.compile(
-    r"(?:strtotime|date|mktime|date_create(?:_immutable)?|new\s+\\?DateTime(?:Immutable)?)"
+    r"(?<![A-Za-z0-9_])(?:" + MOMENT_BUILDERS.pattern + r")"
     r"\s*\([^;\n]{0,160}\$startReading"
 )
 

@@ -861,5 +861,102 @@ $timesAfterTheFirst = array_values(array_unique(array_map(
 )));
 expect('J05', 'every occurrence after the moved one carries the typed time of day', $timesAfterTheFirst, ['23:30:00']);
 
+// J06-J09 — `readingIsReal()`, which exists so a CALLER can tell two causes
+//           apart when it explains a moved date to somebody (#777 round 12).
+//
+// `calendar/manage/save.php` showed one sentence for both: "the first date was
+// moved to X to match the repeat you chose". In the Nuuk case above that reason
+// is FALSE -- the rule asks for the 28th and every generated date IS on the
+// 28th; the move came from the missing hour. So the administrator was sent to
+// a repeat setting that was doing exactly what they asked, and was not told
+// the TIME had changed too, which is the half that makes somebody arrive an
+// hour late.
+//
+// Round 11 fixed the DATE this message names (29 March rather than 28 April)
+// and asserted in its commit message that the sentence "is now TRUE where it
+// was false". Only the date became true. **Round 11 did not look at the
+// reason**, and section J's own header above still quotes the sentence as part
+// of the old fault, which reads as a fix that was not made.
+expect('J06', 'a reading inside the missing hour is not real, in both 23:00 zones', [
+    'Nuuk'         => EventRecurrence::readingIsReal('2026-03-28 23:30:00', 'America/Nuuk'),
+    'Scoresbysund' => EventRecurrence::readingIsReal('2026-03-28 23:30:00', 'America/Scoresbysund'),
+], ['Nuuk' => false, 'Scoresbysund' => false]);
+
+// J07 — THE OVER-REACH DIRECTION, and it is the one that matters most here:
+//       answering false too readily would blame the clocks for every ordinary
+//       pattern move, which is the opposite untruth.
+expect('J07', 'ordinary readings ARE real, including the London 01:30 gap case on a day it does not apply', [
+    'same reading, London'   => EventRecurrence::readingIsReal('2026-03-28 23:30:00', 'Europe/London'),
+    'midsummer, Nuuk'        => EventRecurrence::readingIsReal('2026-06-01 12:00:00', 'America/Nuuk'),
+    'the Thursday fixture'   => EventRecurrence::readingIsReal('2028-10-04 19:00:00', 'Europe/London'),
+], ['same reading, London' => true, 'midsummer, Nuuk' => true, 'the Thursday fixture' => true]);
+
+// J08 — the 01:00-transition zones, so this is not a 23:00-only test. London's
+//       own missing hour must be seen as missing.
+expect('J08', 'the ordinary 01:00 gap is seen too, in two zones that change on different dates', [
+    'London 2027-03-28 01:30' => EventRecurrence::readingIsReal('2027-03-28 01:30:00', 'Europe/London'),
+    'New York 2027-03-14 02:30' => EventRecurrence::readingIsReal('2027-03-14 02:30:00', 'America/New_York'),
+], ['London 2027-03-28 01:30' => false, 'New York 2027-03-14 02:30' => false]);
+
+// J09 — AN UNREADABLE ZONE ANSWERS TRUE, "no gap", because the honest fallback
+//       is to claim nothing. Telling somebody the clocks went forward when we
+//       could not tell would be worse than the general sentence.
+expect('J09', 'an unreadable zone claims no gap rather than guessing one', [
+    'rubbish zone' => EventRecurrence::readingIsReal('2026-03-28 23:30:00', 'Not/AZone'),
+    'empty zone'   => EventRecurrence::readingIsReal('2026-03-28 23:30:00', ''),
+], ['rubbish zone' => true, 'empty zone' => true]);
+
+// J10-J11 — THE TIME-OF-DAY HALF, IN ZONES PEOPLE ACTUALLY USE (#777 round 12).
+//
+// J01-J05 are all in the two zones that go forward at 23:00, because those are
+// the only two where the DATE moves. **That left the bigger half of the fault
+// pinned nowhere anybody lives.** Measured across all 419 IANA zones, the fix
+// changed generated dates in **130** of them: 2 in the date and 130 in the
+// time of day — Europe/London, America/Chicago and America/New_York included.
+//
+// So the old code did not merely misplace a series in Greenland. In EVERY one
+// of those 130 zones, a repeating event whose start was typed inside the
+// missing hour carried the WRONG HOUR on every occurrence after the first, for
+// ever. A release note saying "two zones are affected" described the date half
+// and read as the whole thing.
+//
+// WHY NO EXISTING FIXTURE CAUGHT IT, which is sharper than the zone's
+// transition hour: **every clock-change fixture in this file starts the series
+// a week BEFORE the transition** (`2027-03-21 01:30`, `2026-03-22 01:30`,
+// `2027-03-07 02:30` New York, `2027-03-20 23:00`), so the ANCHOR itself was
+// never inside a gap — and the anchor is the only thing the fault touched.
+// Section I is about an OCCURRENCE landing in the gap, which is a different
+// question and is correct. **Ask what the fixture puts in the faulty position,
+// not whether the zone is a realistic one.**
+expect('J10', 'in London, only the gap occurrence moves and the rest keep the typed hour', starts(
+    EventRecurrence::datesFor(
+        rule(['startDate' => '2026-03-29', 'maxOccurrences' => 4]),
+        '2026-03-29 01:30:00',
+        null,
+        'Europe/London'
+    )
+), [
+    '2026-03-29 02:30:00',
+    '2026-04-05 01:30:00',
+    '2026-04-12 01:30:00',
+    '2026-04-19 01:30:00',
+]);
+
+// J11 — and in a zone that changes on a DIFFERENT date, so a London-shaped
+//       assumption cannot carry this either. America/Chicago, 2028.
+expect('J11', 'the same in Chicago, on its own change date', starts(
+    EventRecurrence::datesFor(
+        rule(['startDate' => '2028-03-12', 'maxOccurrences' => 4]),
+        '2028-03-12 02:30:00',
+        null,
+        'America/Chicago'
+    )
+), [
+    '2028-03-12 03:30:00',
+    '2028-03-19 02:30:00',
+    '2028-03-26 02:30:00',
+    '2028-04-02 02:30:00',
+]);
+
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

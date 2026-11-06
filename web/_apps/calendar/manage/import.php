@@ -124,7 +124,55 @@ $fmtClock = static function (string $text): ?string {
     //    the `T` form, so by the time the fallback is
     //    reached the text is something it must not
     //    touch at all.
-    $moment = strtotime(trim($text));
+    //
+    // 🚨 TWO THINGS THE FALLBACK MUST NOT TAKE (#777 round 12). Both were
+    //    measured, and the first was being imported as a SUCCESS.
+    //
+    //    (a) AN IMPOSSIBLE CALENDAR DATE. `strtotime()` rolls one forward
+    //        without complaining, so a cell reading `2026-02-31 10:00` was
+    //        stored as **2026-03-03 10:00:00** -- three days out -- and the
+    //        row reported `ok => true`, "Imported as event #N". The preview
+    //        screen prints the cell RAW, so the administrator reviewing the
+    //        file saw `2026-02-31` and nothing warned them. `2026-06-31`
+    //        became 1 July and `2026-02-30` became 2 March.
+    //
+    //        That is not a format difference, which is what this fallback
+    //        exists for: it is a wrong value. `api-spec.json` promises the
+    //        events API refuses `2026-02-31` rather than rolling it, and an
+    //        import must not be the one door where it does not.
+    //
+    //        ⚠️ A ROUND-11 COMMENT HERE CLAIMED `$fmtClock` ALREADY REFUSED
+    //           IT and that the row "was then refused further down under a
+    //           different message". BOTH HALVES WERE FALSE, and the claim is
+    //           what stopped anybody looking -- the store step refuses only
+    //           on null, and this returned a value.
+    //
+    //    (b) AN ISO `T`-FORM VALUE. The comment above already states the
+    //        rule -- `wallClockFromInput()` handles every legitimate `T`
+    //        form, so by the time the fallback is reached such a text is
+    //        something it must not touch. It was touching it:
+    //        `2026-06-01T10.5` is a legal ISO decimal time meaning 10:30,
+    //        which the main reader REFUSES on purpose (#777 round 10, where
+    //        truncating it to 10:00 lost up to 59 minutes silently) -- and
+    //        `strtotime()` read the `.5` as five MINUTES and stored
+    //        **10:05:00**. Neither the old truncation nor the ISO meaning.
+    //
+    //    NOTHING ELSE IS NARROWED, which was measured rather than assumed
+    //    before writing this. These all still import, and all of them need
+    //    the fallback: `2026-06-01 10:00 PM` (22:00), `2026-06-01 7pm`
+    //    (19:00), `2026-06-01  10:00` with a double space, `2026-6-1 10:00`
+    //    unpadded, `March 3 2026 19:00`, `Tue, 3 Mar 2026 19:00`, and
+    //    `2026-06-01 10:00:00 GMT`.
+    $trimmed = trim($text);
+    if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $trimmed, $parts) === 1
+        && checkdate((int) $parts[2], (int) $parts[3], (int) $parts[1]) === false) {
+        return null;
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2}[Tt]/', $trimmed) === 1) {
+        return null;
+    }
+
+    $moment = strtotime($trimmed);
     return $moment === false ? null : date('Y-m-d H:i:s', $moment);
 };
 
@@ -230,11 +278,19 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock):
         //                            the START column as "not parseable",
         //                            which was untrue, while the identical
         //                            text in the END column was accepted.
-        //         `2026-02-31 10:00` strtotime ACCEPTS it (PHP rolls an
-        //                            impossible date forward into March) and
-        //                            `$fmtClock` refuses it, so the row passed
-        //                            this check and was then refused further
-        //                            down under a different message.
+        //         `2026-02-31 10:00` strtotime ACCEPTS it, rolling an
+        //                            impossible date three days forward.
+        //
+        //       ⚠️ THE SECOND EXAMPLE'S CONCLUSION WAS WRONG WHEN I WROTE IT,
+        //          and round 12 measured it. I said `$fmtClock` refused
+        //          `2026-02-31` and the row "was then refused further down
+        //          under a different message". It did NOT refuse it: the
+        //          fallback rolled the date forward too, so the row was
+        //          IMPORTED as a success with the start three days out. The
+        //          claim is exactly the kind that stops the next reader
+        //          looking, in the comment written to record a fault of the
+        //          same shape. `$fmtClock` refuses it NOW -- see the two
+        //          narrowings at the end of that closure.
         //
         //       Nothing was ever stored wrongly, because the store step guards
         //       both cells. What was wrong was WHICH rows were refused and

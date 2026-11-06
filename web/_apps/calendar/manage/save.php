@@ -1236,10 +1236,41 @@ if ($action === 'create') {
         // 📍 Say it when the first date moved. The pattern wins over the date
         //    typed above it (ticking Thursday means Thursdays), but a date
         //    changing by itself has to be stated or it looks like a fault.
+        //
+        // 🚨 TWO CAUSES, TWO SENTENCES (#777 round 12). This showed ONE
+        //    sentence -- "to match the repeat you chose" -- for both, and in
+        //    the case round 11 had just fixed that reason was FALSE.
+        //
+        //    Measured, typed `2026-03-28T23:30` monthly in `America/Nuuk`:
+        //    every generated date is on the 28th, the rule asks for the 28th,
+        //    and the first date still moved -- to 29 March 00:30, by the
+        //    missing-hour step and NOT by the pattern. So the administrator
+        //    was told to look at a repeat setting that was doing exactly what
+        //    they asked, and was not told the TIME had changed too, which is
+        //    the part that makes somebody arrive an hour late.
+        //
+        //    `EventRecurrence::readingIsReal()` is the ONE test of whether the
+        //    typed reading exists in the zone, and it asks the same rule the
+        //    generator uses -- never a second round trip here (#647).
+        //
+        //    The gap takes precedence when both could apply, because it is
+        //    the cause an administrator cannot otherwise work out, and the
+        //    sentence names the new TIME as well as the new date.
         if ($movedFirst !== '') {
-            $repeatNote .= ' The first date was moved to '
-                . date('j F Y', (int) strtotime(substr($movedFirst, 0, 10)))
-                . ' to match the repeat you chose.';
+            $typedReading = $toReading($startDateTime);
+            $movedByTheGap = $typedReading !== ''
+                && EventRecurrence::readingIsReal($typedReading, $timezone) === false;
+
+            $repeatNote .= $movedByTheGap === true
+                ? ' The first date was moved to '
+                    . I18n::formatClockDateTime($movedFirst, 'j F Y')
+                    . ' at ' . I18n::formatClockDateTime($movedFirst, 'H:i')
+                    . ', because the clocks go forward through the time you typed'
+                    . ' and it does not exist on that date in this organisation\'s'
+                    . ' time zone. Later dates in the series keep the time you typed.'
+                : ' The first date was moved to '
+                    . I18n::formatClockDateTime($movedFirst, 'j F Y')
+                    . ' to match the repeat you chose.';
         }
 
         if ($worked['why'] !== '') {
