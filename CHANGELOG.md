@@ -165,9 +165,17 @@ seven was refused, in every way of writing the date — including
 `Tue, 3 Mar 2026 19.30`, which is Excel's own long date format. They import
 again. What is refused is only a **single** digit after the point, such as
 `10.5`, where the file genuinely does not say whether five past ten or half past
-ten was meant. Two digits are unambiguous and are stored as written. (An
-earlier version of this note also said "six shapes" and "40 formats" where the
-numbers were eight and 47.)
+ten was meant. **Two digits are stored as written** — `19.30` is kept as half
+past seven, which is what somebody typing it into a spreadsheet means.
+
+(Two corrections to earlier versions of this note. It said "six shapes" and "40
+formats" where the numbers were eight and 47. And it said two digits are
+"unambiguous", which is not quite the reason: strictly, `19.30` read as a
+decimal hour would be 19:18, so the two readings differ there too. They are
+stored because the portal follows what a spreadsheet writer means, and nobody
+typing `19.30` means 19:18. A **single** digit is refused because there the
+intention genuinely is unclear — `10.5` reads as naturally as five past ten as
+it does as half past.)
 
 **And a refused cell now says which it is.** It used to say "startDateTime not
 parseable" for every refusal, which was untrue of all of them: a date that does

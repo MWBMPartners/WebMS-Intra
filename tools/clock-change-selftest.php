@@ -594,12 +594,39 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         //    `strtotime()` reads the dot as a MINUTE SEPARATOR, proved by its
         //    refusing minutes above 59 (`10.60` and `10.75` answer false), so
         //    for two digits it agrees with whoever typed the cell.
-        ['2026-06-01 19.30',              '2026-06-01 19:30:00', 'round 16 refused it'],
-        ['2026-06-01 00.01',              '2026-06-01 00:01:00', 'round 16 refused it'],
-        ['2026-06-01 23.59',              '2026-06-01 23:59:00', 'round 16 refused it'],
+        // ⚠️ THE ROUND NAMED HERE IS THE PRECEDENT, so it has to be the right
+        //    one. These said "round 16" and round 18 measured otherwise by
+        //    running every committed closure over the same cells:
+        //
+        //      2026-06-01T19.30        first refused by ROUND 12
+        //      2026-06-01 19.30        first refused by ROUND 15
+        //      2026-6-1 19.30          first refused by ROUND 15
+        //      Tue, 3 Mar 2026 19.30   first refused by ROUND 16
+        //
+        //    So round 16's contribution was widening an existing refusal to
+        //    the other date spellings, not introducing it. "All five earlier
+        //    versions stored it" is true of the Excel form alone.
+        ['2026-06-01 19.30',              '2026-06-01 19:30:00', 'round 15 refused it'],
+        ['2026-06-01 00.01',              '2026-06-01 00:01:00', 'round 15 refused it'],
+        ['2026-06-01 23.59',              '2026-06-01 23:59:00', 'round 15 refused it'],
+        ['2026-6-1 19.30',                '2026-06-01 19:30:00', 'round 15 refused it'],
+        ['2026-06-01T19.30',              '2026-06-01 19:30:00', 'round 12 refused it — the oldest of these'],
         ['Tue, 3 Mar 2026 19.30',         '2026-03-03 19:30:00', "round 16 refused it — Excel's long date format"],
         ['March 3 2026 19.30',            '2026-03-03 19:30:00', 'round 16 refused it'],
         ['1 June 2026 19.30',             '2026-06-01 19:30:00', 'round 16 refused it'],
+        // ⚠️ F4: A ONE-DIGIT FRACTIONAL SECOND. Every fractional-second row
+        //    here used three or six digits, and step 2 handles the
+        //    zero-padded-date form on its own — so the `:SS.` exemption only
+        //    bites on an unpadded date or something trailing, which is
+        //    exactly what was missing. Round 18 deleted that whole clause and
+        //    got 65 audit scripts and 107 clock checks green while these six
+        //    were refused: the "189 machine formats" class, back again.
+        ['2026-6-1 10:00:00.5',           '2026-06-01 10:00:00', 'the :SS. exemption, one digit'],
+        ['2026-06-01 10:00:00.5 UTC',     '2026-06-01 11:00:00', 'the :SS. exemption, one digit'],
+        ['2026-06-01 10:00:00.9 GMT',     '2026-06-01 11:00:00', 'the :SS. exemption, one digit'],
+        ['2026-6-1 10:00:00.5+01:00',     '2026-06-01 10:00:00', 'the :SS. exemption, one digit'],
+        ['2026-06-01 10:00:00.5 Europe/London', '2026-06-01 10:00:00', 'the :SS. exemption, one digit'],
+        ['2028-02-29 10:00:00.3 GMT',     '2028-02-29 10:00:00', 'the :SS. exemption, one digit'],
         ['2026-06-01 10.0',               '2026-06-01 10:00:00', 'a zero fraction means the same either way'],
         ['2026-06-01 19.30:00',           '2026-06-01 19:30:00', 'round 16 stored this while refusing 19.30 — inconsistent'],
         // dotted European dates, which must not be mistaken for a fraction
@@ -664,6 +691,15 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         //    comment saying a fraction "followed only by a zone or an offset"
         //    was refused. A date-spelling list had been replaced by a
         //    zone-spelling list. Nothing trails the pattern now.
+        // ⚠️ F3: A SINGLE-DIGIT HOUR. Every one-digit-fraction cell here used a
+        //    TWO-digit hour, so narrowing the rule's `\d{1,2}` to `\d{2}` —
+        //    ONE CHARACTER, and a named already-committed fault of round 14's
+        //    — left 65 audit scripts and 107 clock checks green while
+        //    `2026-06-01 9.5` stored 09:05 and `Tue, 3 Mar 2026 9.5` stored
+        //    09:05. Up to 25 minutes wrong, with `ok => true`.
+        '2026-06-01 9.5', '2026-06-01 8.5', '2026-06-01 1.5', '2026-06-01 9.3',
+        '1 June 2026 9.5', 'Tue, 3 Mar 2026 9.5', '01.06.2026 9.5',
+        '2026-06-01 9:00.5',
         '2026-06-01 10.5 GMT+1', '2026-06-01 10.5 UTC+1',
         '2026-06-01 10.5 Etc/GMT+1', '2026-06-01 10.5 America/Port-au-Prince',
         '2026-06-01 10.5 Asia/Ust-Nera', '2026-06-01 10.5.',
@@ -690,8 +726,8 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     //       adds a case, and never lower them without saying why in the
     //       commit — a smaller list is a smaller guard, and section K is the
     //       ONLY thing guarding the import reader.
-    check('K04 the must-store list has not shrunk', count($mustStore), 47);
-    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 48);
+    check('K04 the must-store list has not shrunk', count($mustStore), 55);
+    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 56);
 
     // K05 — WHICH REFUSAL IT IS. The closure reports a reason through its
     //       second argument, and the import shows it to the administrator.
@@ -714,10 +750,20 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         '2026-02-31 10:00'  => 'is a date that does not exist',
         '0000-00-00 10:00'  => 'is a date that does not exist',
         'Feb 31 10:00'      => 'is a date that does not exist',
-        '2026-06-01 10.5'   => 'writes the time with a single digit after a decimal point, which could '
-                             . 'mean either minutes or part of an hour',
-        '1 June 2026 10.5'  => 'writes the time with a single digit after a decimal point, which could '
-                             . 'mean either minutes or part of an hour',
+        // ⚠️ BOTH COMPONENTS, because the old single sentence was untrue of
+        //    the minute case: there the choice is seconds against part of a
+        //    MINUTE, not minutes against part of an hour. K05 pinned only
+        //    hour examples, so that wording was pinned by nothing.
+        '2026-06-01 10.5'   => 'writes the hour with a single digit after a decimal point, which could '
+                             . 'mean either minutes past the hour or part of an hour',
+        '1 June 2026 10.5'  => 'writes the hour with a single digit after a decimal point, which could '
+                             . 'mean either minutes past the hour or part of an hour',
+        '2026-06-01 9.5'    => 'writes the hour with a single digit after a decimal point, which could '
+                             . 'mean either minutes past the hour or part of an hour',
+        '2026-06-01 10:00.5' => 'writes the minute with a single digit after a decimal point, which could '
+                             . 'mean either seconds or part of a minute',
+        '2026-152 10:00.5'  => 'writes the minute with a single digit after a decimal point, which could '
+                             . 'mean either seconds or part of a minute',
         'rubbish'           => 'cannot be read',
         'not a date at all' => 'cannot be read',
     ];

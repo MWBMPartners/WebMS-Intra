@@ -166,10 +166,14 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //      10.5  -> 10:05     10.59 -> 10:59
     //      10.30 -> 10:30     10.60 -> FALSE      10.75 -> FALSE
     //
-    //    So for TWO digits PHP's reading and the writer's intention are the
-    //    SAME: `19.30` is half past seven to PHP and to whoever typed it.
-    //    **Round 16 refused all 1,440 `HH.MM` readings** — the ordinary way a
-    //    British spreadsheet writes a time — and pushed the refusal into every
+    //    So for TWO digits PHP's reading matches what somebody writing a
+    //    spreadsheet INTENDS: `19.30` is half past seven to PHP and to
+    //    whoever typed it. (It does NOT match the decimal-hour reading —
+    //    that would be 19:18 — see the measurement below.)
+    //
+    //    **ROUND 15 first refused the `HH.MM` readings written with an ISO
+    //    date, and round 12 the `T`-form before it; round 16 pushed the
+    //    refusal into every** 
     //    date spelling, so `Tue, 3 Mar 2026 19.30`, **Excel's long date
     //    format**, stopped importing where all five earlier versions stored it
     //    correctly. That is the harm the note below this closure warns about,
@@ -180,11 +184,38 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //    message ("the time it means is not the time it would be read as") was
     //    untrue of every one of them.
     //
-    // 🧮 SO THE RULE IS ONE DIGIT, NON-ZERO, ON THE HOUR OR THE MINUTE — the
-    //    only case where the two readings genuinely differ and the cell is
-    //    therefore ambiguous. `10.5` could be five past ten or half past ten
-    //    and nothing in the file says which. Two digits agree; three or more
-    //    PHP refuses anyway; `.0` means the same either way.
+    // 🧮 SO THE RULE IS ONE DIGIT, NON-ZERO, ON THE HOUR OR THE MINUTE.
+    //    `10.5` could be five past ten or half past ten, and nothing in the
+    //    file says which — BOTH are plausible things somebody meant, which is
+    //    what makes that cell ambiguous rather than merely non-standard.
+    //
+    // ⚠️ AND THE REASON FOR STORING TWO DIGITS IS NOT THAT THE TWO READINGS
+    //    AGREE. An earlier version of this paragraph said "Two digits agree"
+    //    and called one digit "the only case where the two readings genuinely
+    //    differ", and round 18 measured both false. Over all 100 two-digit
+    //    fractions, 60 are parseable and the two readings agree in just TWO
+    //    of them (`.00`, and `.01` only through rounding):
+    //
+    //      10.30  PHP 10:30   decimal hour 10:18   differ by 12 minutes
+    //      10.50  PHP 10:50   decimal hour 10:30   differ by 20
+    //      10.25  PHP 10:25   decimal hour 10:15
+    //
+    //    **The honest ground is intent, not arithmetic**, and it is a product
+    //    judgement rather than a measurement: somebody typing `19.30` into a
+    //    spreadsheet means half past seven, and PHP's reading is the one that
+    //    matches that. The one-digit case is refused precisely because intent
+    //    does NOT settle it there — `10.5` reads naturally as either.
+    //
+    //    Presenting that judgement as a measurement was the fault: a reader
+    //    who applied the stated rule literally ("refuse where the readings
+    //    differ") would refuse all 58, **which is round 16's fault
+    //    restored**.
+    //
+    //    Three digits or more PHP refuses anyway, and `.0` means the same
+    //    either way — both measured and both still true. A COMMA decimal
+    //    separator, which ISO 8601 also permits, is not reached by this rule
+    //    at all: `strtotime('10,5')` is false, so such a cell is refused as
+    //    "cannot be read" in this and every earlier version.
     //
     //    AND IT NEEDS NO LIST OF ZONE SPELLINGS, which is what the previous
     //    version got wrong a second way: its trailing set allowed letters,
@@ -214,9 +245,23 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //        refused, each one way, with both counts pinned so the lists
     //        cannot shrink unnoticed.
     if (preg_match('/:\d{2}:\d{2}\.\d/', $trimmed) !== 1
-        && preg_match('/(?<![\d.])\d{1,2}\.[1-9](?!\d|\.\d)/', $trimmed) === 1) {
-        $why = 'writes the time with a single digit after a decimal point, which could '
-             . 'mean either minutes or part of an hour';
+        && preg_match('/(?<![\d.])(\d{1,2})(:\d{2})?\.[1-9](?!\d|\.\d)/', $trimmed, $which) === 1) {
+        // 🗣️ WHICH COMPONENT, because the two ambiguities are different and a
+        //    single sentence was untrue of one of them. The old wording said
+        //    "minutes or part of an hour" for BOTH, and for the minute case
+        //    the choice is seconds against part of a MINUTE:
+        //
+        //      10.5     PHP 10:05:00    decimal hour   10:30:00
+        //      10:00.5  PHP 10:00:05    decimal minute 10:00:30
+        //
+        //    Round 16's finding 3 was "the message was untrue of every one of
+        //    them"; saying it of one component while the rule covers two is
+        //    that shape one level down.
+        $why = ($which[2] ?? '') !== ''
+            ? 'writes the minute with a single digit after a decimal point, which could '
+                . 'mean either seconds or part of a minute'
+            : 'writes the hour with a single digit after a decimal point, which could '
+                . 'mean either minutes past the hour or part of an hour';
         return null;
     }
 

@@ -19386,9 +19386,26 @@ minutes above 59:
     10.5  -> 10:05        10.59 -> 10:59
     10.30 -> 10:30        10.60 -> FALSE       10.75 -> FALSE
 
-So for two digits PHP's reading and the writer's intention are the SAME.
-`19.30` is half past seven to both. Round 16 had generalised the one-digit case
-to `\.\d+` and so **refused all 1,440 `HH.MM` readings** — the ordinary way a
+So for two digits PHP's reading matches what a spreadsheet writer INTENDS:
+`19.30` is half past seven to PHP and to whoever typed it.
+
+⚠️ **IT DOES NOT MATCH THE DECIMAL-HOUR READING, and saying it did was round
+18's finding 2.** Measured over all 100 two-digit fractions, 60 are parseable
+and the two readings agree in just TWO of them (`.00`, and `.01` by rounding):
+`10.30` is 10:30 to PHP and 10:18 as a decimal hour, twelve minutes apart.
+**The honest ground for storing them is intent, which is a product judgement,
+not arithmetic** — and presenting it as arithmetic matters, because a reader
+applying the stated rule literally ("refuse where the readings differ") would
+refuse all 58, which is round 16's fault restored.
+
+**And the round attribution was wrong, which round 18 established by running
+every committed closure over the same cells.** `2026-06-01T19.30` was first
+refused by ROUND 12; `2026-06-01 19.30` and `2026-6-1 19.30` by ROUND 15; only
+`Tue, 3 Mar 2026 19.30`, the Excel form, by round 16. So round 16 widened an
+existing refusal rather than introducing it, and "all five earlier versions
+stored it" is true of the Excel form alone. Section K's precedent labels said
+"round 16" for all of them — **the field whose whole purpose is naming the
+round that broke a format, giving the wrong one.** Round 15 had — the ordinary way a
 British spreadsheet writes a time — and pushed that refusal into every date
 spelling, so `Tue, 3 Mar 2026 19.30`, **Excel's long date format**, stopped
 importing. It was internally inconsistent too: `19.30` refused while
