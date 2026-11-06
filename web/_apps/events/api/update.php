@@ -133,11 +133,12 @@ foreach ($columnMap as $col => $type) {
             }
             $value = $clock;
         } else {
-            try {
-                $value = (new \DateTimeImmutable((string) $value, $eventZone))->setTimezone($eventZone)->format('Y-m-d H:i:s');
-            } catch (\Throwable $e) {
+            // 📌 Same ONE place, same shape rule — see `create.php`.
+            $converted = I18n::instantFromInput((string) $value, $eventZone);
+            if ($converted === null) {
                 ApiResponse::error("$col is not a valid timestamp", 400);
             }
+            $value = $converted;
         }
     }
     if (in_array($col, ['isAllDay', 'isPublic', 'isFeatured'], true) === true) {

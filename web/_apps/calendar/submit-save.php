@@ -147,21 +147,35 @@ if ($eventName === '' || $startRaw === '') {
 //    becomes a space and the seconds are supplied when the browser left them
 //    out.
 //
-//    ⚠️ IT IS STRICTER THAN WHAT IT REPLACED, in three ways, said plainly
-//       rather than left to be discovered. Measured old against new:
+//    ⚠️ IT IS STRICTER THAN WHAT IT REPLACED, in two ways, said plainly
+//       rather than left to be discovered. Measured old against the code as it
+//       stands:
 //
 //        "2026-03-29T01:30"  old 02:30:00     new 01:30:00   <- the fix
-//        "2026-03-29"        old 00:00:00     new REFUSED
 //        "2026-02-31T10:00"  old 3 March!     new REFUSED
 //        "tomorrow"          old tomorrow     new REFUSED
+//        "2026-03-29"        old 00:00:00     new 00:00:00   <- unchanged
 //
-//       Only the bare date is a real loss, and this form cannot produce one:
-//       the input is `type="datetime-local"` and `required`, and `isAllDay` is
-//       a literal `0` in the INSERT below, so there is no all-day path that
-//       would legitimately send a date with no time. A crafted post that sends
-//       one now gets `?err=date` instead of a silent midnight. The other two
-//       were faults: `2026-02-31` rolled forward to 3 March without a word,
-//       and any English `strtotime()` happened to understand was accepted.
+//       Both refusals were faults: `2026-02-31` rolled forward to 3 March
+//       without a word, and any English `strtotime()` happened to understand
+//       was accepted.
+//
+//    ⚠️ AND AN EARLIER VERSION OF THIS NOTE SAID "three ways" AND LISTED A
+//       BARE DATE AS REFUSED, which stopped being true a few hours later.
+//       Round 7 loosened `wallClockFromInput()` to accept a date with no time,
+//       because the events API needs it for an all-day event -- and all four
+//       callers share that helper, so this form inherited it while the note
+//       here still said `?err=date`. Round 8 of #777 found it.
+//
+//       It is left ACCEPTED rather than refused again. This form's input is
+//       `type="datetime-local"` and `required`, so only a crafted post can
+//       send a bare date; what it then stores is midnight on that day, with
+//       `isAllDay` a literal `0` in the INSERT below, in a submission a
+//       moderator reviews before anybody sees it. Refusing it here would need
+//       a second helper or a flag, and a flag on the ONE place a rule lives is
+//       how two rules start (#768's shape). **The cost of the sharing is
+//       stated rather than hidden: a change made for one caller reaches all
+//       four, so loosening that helper means checking all four.**
 // 📌 `I18n::wallClockFromInput()` is the ONE place this rule lives (#768's
 //    shape caught early): this handler, the two events API handlers and the
 //    CSV import all had their own copy for about an hour.

@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 140;  // 134 + the six W09d-W09h clock-change checks (#777 round 7)
+const EXPECTED_CHECKS = 143;  // 134 + six W09d-W09h (round 7) + three W07b-W07d (round 8)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -1228,6 +1228,31 @@ ok(
 
 // ---- the file import ------------------------------------------------------------
 $csv = $child . $sep . 'events.csv';
+// 🔢 ⚠️ THIS FILE DEPENDS ON AUTO-INCREMENT LANDING ON PARTICULAR IDs, and
+//    that is not obvious anywhere else in it. Later blocks INSERT with explicit
+//    `eventID` values (960470 upwards), while the blocks above let MySQL choose
+//    — so every row an earlier check creates shifts what comes next, and when
+//    the two meet the run dies with "Duplicate entry '960470' for key
+//    'tblEvents.PRIMARY'".
+//
+//    Round 7's six checks happened to consume the last two spare slots.
+//    Round 8's three took one more and the file stopped running — a real fault
+//    in the test, found by adding to it rather than by reading it.
+//
+//    `withoutConsumingIds()` runs a block and puts the counter back, so a
+//    check that creates and deletes its own rows is ID-NEUTRAL. Use it for any
+//    new block that makes events, or the next person hits the same wall.
+$withoutConsumingIds = static function (callable $block): void {
+    $was = (int) (one(
+        "SELECT AUTO_INCREMENT AS n FROM information_schema.tables "
+        . "WHERE table_schema = DATABASE() AND table_name = 'tblEvents'"
+    )['n'] ?? 0);
+    $block();
+    if ($was > 0) {
+        q('ALTER TABLE tblEvents AUTO_INCREMENT = ' . $was);
+    }
+};
+
 file_put_contents($csv, "eventName,startDateTime,endDateTime,status\n\"Selftest zones file import\"," . clockIn(25, '19:00:00') . ',' . clockIn(25, '20:30:00') . ",published\n");
 $importPage = req($adminJar, 'GET', '/calendar/manage/import')['body'];
 $preview    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($importPage), 'action' => 'preview'], ['files' => ['csv_file' => $csv]]);
@@ -1238,6 +1263,68 @@ ok(
     $made['the file import'] > 0 && zoneOfEvent($made['the file import']) === ORG_ZONE,
     'preview ' . said($preview) . ', confirm ' . said($confirm) . '; stored ' . json_encode(zoneOfEvent($made['the file import']))
 );
+
+// ══════════════════════════════════════════════════════════════════════════
+// W07b-W07d — THE CSV IMPORT IS THE FOURTH WRITE PATH (#777 round 8)
+// ══════════════════════════════════════════════════════════════════════════
+// 🚨 W07 ABOVE ASSERTS ONLY THE ZONE, so the whole of the import's #777 fix
+//    could be reverted in ONE LINE with every guard green -- measured in round
+//    8: `$clock = null;` inside `$fmtClock` restores the pre-round-6 round trip
+//    and leaves 65 audit scripts, 81 clock checks AND this file's 140 all
+//    green. **Round 7 closed the three write paths it was handed and left the
+//    fourth**, which is the same shape as its own finding 1.
+//
+//    This import stores the ORGANISATION's zone, so the skipped hour is
+//    Pacific/Auckland's — 2028-09-24 02:30, the same one W09h0 proves below.
+$withoutConsumingIds(static function () use ($adminJar, $newest): void {
+    $csvSkipStart = '2028-09-24 02:30:00';
+    $csvSkipEnd   = '2028-09-24 03:45:00';
+    $csvSkip      = tempnam(sys_get_temp_dir(), 'tzskip') . '.csv';
+    file_put_contents($csvSkip, "eventName,startDateTime,endDateTime,status\n\"Selftest zones import skipped\"," . $csvSkipStart . ',' . $csvSkipEnd . ",published\n");
+    $importPage2 = req($adminJar, 'GET', '/calendar/manage/import')['body'];
+    $preview2    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($importPage2), 'action' => 'preview'], ['files' => ['csv_file' => $csvSkip]]);
+    $confirm2    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($preview2['body']) !== '' ? token($preview2['body']) : token($importPage2), 'action' => 'confirm']);
+    $skipImportId = $newest('Selftest zones import skipped');
+    $skipImported = one('SELECT startDateTime, endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$skipImportId]);
+    ok(
+        'W07b the CSV import stores a reading inside the hour that does not exist AS IT STANDS',
+        $skipImportId > 0 && $skipImported === ['startDateTime' => $csvSkipStart, 'endDateTime' => $csvSkipEnd],
+        'preview ' . said($preview2) . ', confirm ' . said($confirm2) . '; stored ' . json_encode($skipImported) . ', looked for ' . $csvSkipStart
+    );
+    q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$skipImportId]);
+    @unlink($csvSkip);
+
+    // An ordinary 45-minute event ACROSS the change, which the row validation used
+    // to refuse because it compared two moments: the start's moment is 03:30 and
+    // the end's is 03:15, so the end looked earlier than the start.
+    $csvAcross = tempnam(sys_get_temp_dir(), 'tzacross') . '.csv';
+    file_put_contents($csvAcross, "eventName,startDateTime,endDateTime,status\n\"Selftest zones import across\",2028-09-24 02:30:00,2028-09-24 03:15:00,published\n");
+    $importPage3 = req($adminJar, 'GET', '/calendar/manage/import')['body'];
+    $preview3    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($importPage3), 'action' => 'preview'], ['files' => ['csv_file' => $csvAcross]]);
+    $confirm3    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($preview3['body']) !== '' ? token($preview3['body']) : token($importPage3), 'action' => 'confirm']);
+    $acrossId    = $newest('Selftest zones import across');
+    $acrossRow   = one('SELECT startDateTime, endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$acrossId]);
+    ok(
+        'W07c an ordinary event spanning the change is IMPORTED, not refused as "end before start" — the validation compares readings as text now, not two moments',
+        $acrossId > 0 && $acrossRow === ['startDateTime' => '2028-09-24 02:30:00', 'endDateTime' => '2028-09-24 03:15:00'],
+        'preview ' . said($preview3) . ', confirm ' . said($confirm3) . '; stored ' . json_encode($acrossRow)
+    );
+    q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$acrossId]);
+    @unlink($csvAcross);
+
+    // And a genuinely backwards pair must STILL be refused, or W07c has simply
+    // switched the check off.
+    $csvBack = tempnam(sys_get_temp_dir(), 'tzback') . '.csv';
+    file_put_contents($csvBack, "eventName,startDateTime,endDateTime,status\n\"Selftest zones import backwards\",2028-06-01 19:00:00,2028-06-01 18:00:00,published\n");
+    $importPage4 = req($adminJar, 'GET', '/calendar/manage/import')['body'];
+    $preview4    = req($adminJar, 'POST', '/calendar/manage/import', ['csrf_token' => token($importPage4), 'action' => 'preview'], ['files' => ['csv_file' => $csvBack]]);
+    ok(
+        'W07d a genuinely backwards pair is still REFUSED, so W07c did not just switch the check off',
+        $newest('Selftest zones import backwards') === 0 && str_contains($preview4['body'], 'before startDateTime') === true,
+        'preview ' . said($preview4) . '; made ' . $newest('Selftest zones import backwards')
+    );
+    @unlink($csvBack);
+});
 
 // ---- the events API ---------------------------------------------------------------
 $api = static fn (array $body): array => req('', 'POST', '/api/events/create', (string) json_encode($body), ['bearer' => $apiKey, 'json' => true]);

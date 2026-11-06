@@ -44,6 +44,20 @@ see.** Those are listed rather than fixed: an event's time zone need not be the
 organisation's, so each needs a person to look at it, and that is the next part
 of this work. Nothing new may join the list.
 
+**The events API stored a date six months wrong for one plausible way of
+writing it.** A value that names its own time zone — `01/06/2026 10:00 +0100` —
+was converted without any check on its shape, and PHP reads a slash date
+month-first, so a client sending 1 June 2026 got an event on **6 January
+2026**, with no error. A bare time-zone marker on its own created an event at
+the current moment, and an impossible date such as 31 February was rolled
+silently forward. All three are refused now, and the published API description
+says so instead of listing them as refused while they were accepted.
+
+**The spreadsheet import also refused a perfectly ordinary event** spanning the
+morning the clocks go forward — a 45-minute event from 01:30 to 02:15 — telling
+the administrator the end was before the start, which was not true. It compared
+the two times as moments in history while storing them as readings on a clock.
+
 **The spreadsheet import briefly stopped accepting ordinary date formats, and
 that is fixed too.** A fix made a few hours earlier mangled any cell containing
 a capital `T` — so `Tue, 3 Mar 2026 19:00` was refused outright and
@@ -53,11 +67,14 @@ format stopped importing. A row whose end time could not be read also imported
 successfully with **no end time at all**; it now refuses the row and says so,
 because a refused row can be corrected and a silently emptied column cannot.
 
-**The events API accepts three shapes it had started refusing.** A time zone
+**Three shapes that had started being refused are accepted again.** A time zone
 written in lower case (`...10:00:00z`, which the standard allows), fractional
 seconds (which every JavaScript client sends), and a date with no time (which
 an all-day event needs). None of those needs the conversion that caused the
-original fault. Genuinely loose text — `June 1 2026 10:00`, a day-first date —
+original fault. **This covers the public submission form and the spreadsheet
+import as well as the API**, because all four share one rule — so a date with
+no time submitted through the form now stores midnight on that day rather than
+being refused. Genuinely loose text — `June 1 2026 10:00`, a day-first date —
 is still refused, and **the published API description now says exactly which
 shapes are accepted** instead of promising that anything readable is.
 

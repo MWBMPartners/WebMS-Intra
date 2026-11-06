@@ -372,6 +372,39 @@ check('I28 loose English is still refused', I18n::wallClockFromInput('June 1 202
 check('I29 an unpadded month or day is still refused', I18n::wallClockFromInput('2027-6-1T10:00:00'), null);
 check('I30 a day-first date is still refused', I18n::wallClockFromInput('01-06-2027 10:00'), null);
 
+// ── The OFFSET half, which I28-I30 read as pinning and did NOT ────────────
+// 🚨 I28-I30 above cover a value with NO offset. The handler asks
+//    `inputCarriesOffset()` FIRST, so until round 8 anything ending in
+//    something offset-shaped went straight to the constructor with no shape
+//    check at all -- and the API description listed these as refused while
+//    every one was accepted. The worst stored a date SIX MONTHS WRONG with
+//    HTTP 200: a day-first slash date is read month-first by PHP.
+$londonZone = new DateTimeZone('Europe/London');
+check('I31 a day-first SLASH date with an offset is REFUSED, not read month-first',
+    I18n::instantFromInput('01/06/2027 10:00 +0100', $londonZone), null);
+check('I32 loose English with an offset is refused',
+    I18n::instantFromInput('June 1 2027 10:00 +01:00', $londonZone), null);
+check('I33 an unpadded month with an offset is refused',
+    I18n::instantFromInput('2027-6-1T10:00:00+01:00', $londonZone), null);
+check('I34 a bare Z means nothing, not NOW',
+    I18n::instantFromInput('Z', $londonZone), null);
+check('I35 a bare offset means nothing either',
+    I18n::instantFromInput('-05', $londonZone), null);
+check('I36 an impossible date is refused on the OFFSET side too, not rolled forward',
+    I18n::instantFromInput('2027-02-30T10:00:00Z', $londonZone), null);
+// And the genuine instants must still convert, or the fix breaks every
+// integration that sends one.
+check('I37 a real instant with Z converts onto the given clock',
+    I18n::instantFromInput('2027-06-01T10:00:00Z', $londonZone), '2027-06-01 11:00:00');
+check('I38 lower-case z, fractional seconds and a two-digit offset all convert',
+    [
+        I18n::instantFromInput('2027-06-01T10:00:00z', $londonZone),
+        I18n::instantFromInput('2027-06-01T10:00:00.000Z', $londonZone),
+        I18n::instantFromInput('2027-06-01T10:00:00-05', $londonZone),
+        I18n::instantFromInput('2027-06-01T10:00:00+0530', $londonZone),
+    ],
+    ['2027-06-01 11:00:00', '2027-06-01 11:00:00', '2027-06-01 16:00:00', '2027-06-01 05:30:00']);
+
 // 🌎 THE OTHER DIRECTION OF #653's LESSON: a zone that resolves the other way.
 //    London was the only zone in the fixtures that found #653 three times, so
 //    one American transition is pinned here as well.

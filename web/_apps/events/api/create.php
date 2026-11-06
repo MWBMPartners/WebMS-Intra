@@ -118,47 +118,41 @@ $zone     = new \DateTimeZone($zoneName);
 // 📌 Both rules live in `I18n` -- the ONE place for each -- because this
 //    handler, `update.php`, `calendar/submit-save.php` and the CSV import all
 //    had their own copy for about an hour (#768's shape, caught early).
-$startSqlEarly = null;
-if (I18n::inputCarriesOffset($startDateTime) === false) {
-    $startSqlEarly = I18n::wallClockFromInput($startDateTime);
-    if ($startSqlEarly === null) {
-        ApiResponse::error('startDateTime is not a valid timestamp', 400);
-    }
-    $startAt = null;
-} else {
-    try {
-        $startAt = (new \DateTimeImmutable($startDateTime, $zone))->setTimezone($zone);
-    } catch (\Throwable $e) {
-        ApiResponse::error('startDateTime is not a valid timestamp', 400);
-    }
+// 📌 ONE READING EACH, AND NO `DateTimeImmutable` LEFT IN THIS FILE.
+//    `I18n::instantFromInput()` is the ONE place an offset-bearing value
+//    becomes a stored reading, and it requires the SAME SHAPE as the other
+//    half. Without that, anything ending in something offset-shaped went
+//    straight to the constructor: `01/06/2026 10:00 +0100` stored 6 JANUARY
+//    for 1 June, and a bare `Z` created an event at the current moment
+//    (#777 round 8).
+//
+// ⚠️ `$startAt` AND `$endAt` ARE GONE ON PURPOSE. Round 8's fix made both of
+//    them always null, so the `$startAt->format(...)` arms below became dead
+//    code -- harmless while the guard in front of them held, and a fatal error
+//    under `strict_types` the moment anybody simplified that guard. Two
+//    variables for one value is how that trap gets set; there is now one.
+$readingFor = static function (string $raw, \DateTimeZone $zone): ?string {
+    return I18n::inputCarriesOffset($raw) === false
+        ? I18n::wallClockFromInput($raw)
+        : I18n::instantFromInput($raw, $zone);
+};
+
+$startSql = $readingFor($startDateTime, $zone);
+if ($startSql === null) {
+    ApiResponse::error('startDateTime is not a valid timestamp', 400);
 }
+
 $endDateTime = isset($body['endDateTime']) === true && $body['endDateTime'] !== ''
     ? trim((string) $body['endDateTime'])
     : null;
-$endAt = null;
-$endSqlEarly = null;
+$endSql = null;
 if ($endDateTime !== null) {
-    if (I18n::inputCarriesOffset($endDateTime) === false) {
-        $endSqlEarly = I18n::wallClockFromInput($endDateTime);
-    } else {
-        try {
-            $endAt = (new \DateTimeImmutable($endDateTime, $zone))->setTimezone($zone);
-        } catch (\Throwable $e) {
-            $endAt = null;
-        }
-    }
+    $endSql = $readingFor($endDateTime, $zone);
     // ⏱️ Two readings on the SAME clock compare correctly as TEXT (#435's own
-    //    fix); `Y-m-d H:i:s` sorts the way the clock does. Where one side is a
-    //    real instant and the other a reading, the reading is put onto the
-    //    event's clock FOR THE COMPARISON ONLY -- never for storage, which is
-    //    the whole point above.
-    $startForCompare = $startSqlEarly !== null
-        ? $startSqlEarly
-        : $startAt->format('Y-m-d H:i:s');
-    $endForCompare = $endSqlEarly !== null
-        ? $endSqlEarly
-        : ($endAt !== null ? $endAt->format('Y-m-d H:i:s') : null);
-    if ($endForCompare === null || $endForCompare < $startForCompare) {
+    //    fix); `Y-m-d H:i:s` sorts the way the clock does. Both sides are
+    //    readings on the event's clock by this point -- an offset-bearing value
+    //    has already been put onto it -- so there is nothing left to convert.
+    if ($endSql === null || $endSql < $startSql) {
         ApiResponse::error('endDateTime must be a valid timestamp and ≥ startDateTime', 400);
     }
 }
@@ -221,13 +215,9 @@ $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
 $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
 
 $siteId    = Site::id();
-// 🕐 A reading with no offset is stored EXACTLY as it was sent (#777); only a
-//    value that carried an offset went through a moment, and that one really
-//    was an instant.
-$startSql  = $startSqlEarly !== null ? $startSqlEarly : $startAt->format('Y-m-d H:i:s');
-$endSql    = $endSqlEarly !== null
-    ? $endSqlEarly
-    : ($endAt !== null ? $endAt->format('Y-m-d H:i:s') : null);
+// 🕐 `$startSql` and `$endSql` were settled above: a reading with no offset is
+//    stored EXACTLY as it was sent (#777), and only a value that carried an
+//    offset went through a moment, because that one really was an instant.
 $creatorId = ApiAuth::actorUserId();
 
 $db = App::db();

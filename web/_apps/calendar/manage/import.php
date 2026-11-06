@@ -132,13 +132,43 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli): array {
         $rowErr = [];
         if ($name === '')  { $rowErr[] = 'eventName required'; }
         if ($start === '') { $rowErr[] = 'startDateTime required'; }
+        // 🕐 START BEFORE END IS COMPARED AS TEXT, NOT AS TWO MOMENTS (#777
+        //    round 8). This used `strtotime($end) < strtotime($start)`, and
+        //    the storage became reading-based in rounds 6 and 7 while this
+        //    check was left on moments. Measured in Europe/London:
+        //
+        //        start 2026-03-29 01:30  ->  moment 02:30
+        //        end   2026-03-29 02:15  ->  moment 02:15
+        //
+        //    -- so an ordinary 45-minute event was REFUSED with "endDateTime
+        //    not parseable / before start", which was untrue of the readings
+        //    the file holds AND of what the row now stores. The identical
+        //    shape was fixed in `resources/book.php` (round 2) and
+        //    `submit-save.php` (round 5); this file was missed, and round 7
+        //    wrote twenty lines about end-time refusal directly beneath it
+        //    without noticing.
+        //
+        //    `Y-m-d H:i:s` sorts the way a clock does, which is #435's own
+        //    fix. Where a cell is in a looser format the readings cannot be
+        //    compared as text, so the moment comparison is kept FOR THOSE
+        //    ONLY -- better than refusing them, and such a cell is exposed to
+        //    the moved hour anyway (see `$fmtClock` below).
         $startTs = $start !== '' ? strtotime($start) : false;
         if ($start !== '' && $startTs === false) { $rowErr[] = 'startDateTime not parseable'; }
         $endTs = null;
         if ($end !== '') {
             $endTs = strtotime($end);
-            if ($endTs === false || ($startTs !== false && $endTs < $startTs)) {
-                $rowErr[] = 'endDateTime not parseable / before start';
+            if ($endTs === false) {
+                $rowErr[] = 'endDateTime not parseable';
+            } else {
+                $startShaped = I18n::wallClockFromInput($start);
+                $endShaped   = I18n::wallClockFromInput($end);
+                $endIsEarlier = $startShaped !== null && $endShaped !== null
+                    ? $endShaped < $startShaped
+                    : ($startTs !== false && $endTs < $startTs);
+                if ($endIsEarlier === true) {
+                    $rowErr[] = 'endDateTime is before startDateTime';
+                }
             }
         }
         // ⚠️ Exactly `tblEvents.status`'s ENUM — see #676. `archived` was

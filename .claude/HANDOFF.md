@@ -63,7 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one: rounds 3 to 7 are done; round 8's check is next.** The rounds so far found, in order: a display fault in four
+**#777 part one: rounds 3 to 8 are done; round 9's check is next.** The rounds so far found, in order: a display fault in four
 pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
 faults refusing valid input (round 2); three READER faults my own write fix made
 visible, and the fact that those three readers were guarded by nothing (round
@@ -149,6 +149,27 @@ promised "any date text PHP can read is accepted"; a THIRD blind spot found
 (a reading reaching a conversion through a function PARAMETER —
 `series-repattern.php` showed 01:30 as 02:30); and two comments round 6 quoted
 as part of the fault were still saying it.
+
+**Round 8 found SIX, five of them in round 7's own work, and its diagnosis is
+the one to keep: a round that closes what it was HANDED is not a round that
+closes the CLASS.** Round 7 closed three write paths and left the FOURTH (the
+CSV import, revertible in one line with all 143 endpoint checks green) and its
+own two new fixes (`series-repattern.php`, pinned by nothing — reverting it left
+`event-repeat-pages-selftest.php` at 251 of 251, because that test drives the
+page and never reads the displayed time). **And the events API stored a date SIX
+MONTHS WRONG:** the offset branch checked no shape at all, so
+`01/06/2026 10:00 +0100` was read month-first and stored 6 January for 1 June,
+HTTP 200, while `api-spec.json` listed exactly that as refused —
+`I18n::instantFromInput()` is the ONE place now and requires the same shape as
+the other half. Also: the import refused an ordinary event spanning the change
+with an untrue message (validation on moments, storage on readings — the shape
+rounds 2 and 5 had already fixed twice elsewhere); `submit-save.php`'s own note
+claimed the form refuses a bare date, which stopped being true hours later when
+the SHARED helper was loosened for the API; and the gate still said "two blind
+spots" after round 7 found a third, in the sentence every green run prints.
+**And adding three checks broke `time-zones-selftest.php` outright** — it
+depends on auto-increment landing on particular IDs and nothing said so;
+`$withoutConsumingIds()` makes a new block ID-neutral.
 
 #763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
 write and delete stored data, so rounds ran until one was clean. Twelve

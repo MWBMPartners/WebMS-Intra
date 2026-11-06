@@ -18201,6 +18201,104 @@ stopped doing it also fails -- and `--strict` fails while it holds anything.
 That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
 visible rather than permanent.
 
+### Round 8: round 7 closed the three write paths it was handed and left the two it introduced
+
+**Six findings. Five were in round 7's own work, and its diagnosis is the one to
+keep: a round that closes what it was handed is not the same as a round that
+closes the class.**
+
+**(1) The CSV import was the FOURTH write path and nothing guarded it.** Round
+7's finding 1 was that three write paths were revertible with every guard green,
+and it closed those three. One line in `import.php` — `$clock = null;` inside
+`$fmtClock` — restores the whole pre-round-6 round trip, and left 65 audit
+scripts, 81 clock checks **and all 143 of `time-zones-selftest.php`** green.
+W07 drives that import and asserts only the ZONE, never the stored start or end.
+
+W07b–W07d now assert the stored readings over the organisation's own skipped
+hour, plus the two cases that make them non-vacuous. Measured with the plant:
+W07b and W07c go red, W07d correctly stays green.
+
+**(2) `submit-save.php`'s own note said the opposite of what the code does.**
+Round 7 loosened the shared `wallClockFromInput()` to accept a date with no
+time, because the events API needs one for an all-day event. **All four callers
+share that helper**, so the public form inherited it while the handler's comment
+still said a bare date "now gets `?err=date` instead of a silent midnight" — and
+`DEV_NOTES` said the same, and the CHANGELOG scoped the loosening to "the events
+API" alone. Measured at `5ca7742` the helper answered null for `2026-03-29`; at
+`f94d419` it answers `2026-03-29 00:00:00`.
+
+Left accepted, with the reason written down: only a crafted post can send a bare
+date to that form, what it stores is midnight in a submission a moderator
+reviews, and refusing it there would need a second helper or a flag — and a flag
+on the ONE place a rule lives is how two rules start. **The cost of sharing is
+now stated where the rule lives: a change made for one caller reaches all four.**
+
+**(3) The published contract was untrue whenever the value carried an offset,
+and one plausible shape stored a date SIX MONTHS WRONG.** `create.php` asks
+`inputCarriesOffset()` first and the offset branch checked no shape at all, so
+anything ending in something offset-shaped went straight to the constructor.
+Measured in Europe/London:
+
+    "01/06/2026 10:00 +0100"    ->  stored 2026-01-06 09:00:00
+    "1 June 2026 10:00 +01:00"  ->  stored 2026-06-01 10:00:00
+    "Z"                         ->  stored the CURRENT moment
+    "-05"                       ->  stored the CURRENT moment
+    "2026-02-31T10:00:00Z"      ->  stored 2026-03-03 (rolled forward)
+
+A day-first slash date is read month-first by PHP, so a client sending 1 June
+2026 got an event on **6 January 2026**, HTTP 200, no warning. Every one of
+those was named in `api-spec.json` as refused with 400.
+
+**And I28–I30 read as pinning that sentence while covering only the half that
+was true**, because they test offset-FREE values. `I18n::instantFromInput()` is
+the ONE place an offset-bearing value becomes a stored reading now, and it
+requires the SAME shape as the other half — which is where `checkdate()` lives,
+so an impossible date is refused on both sides. I31–I38 pin both directions.
+
+**(4) Round 7's own `series-repattern.php` fix was pinned by nothing.** Planting
+the pre-round-7 body back left 65 audit scripts, 81 clock checks and
+`event-repeat-pages-selftest.php` at 251 of 251 — that test drives the page but
+never looks at the displayed time. The fault itself is invisible to the gate
+(the reading arrives as a function parameter), so the HELPER's body is pinned
+instead: it must call `I18n::formatClockDateTime()` and contain no moment being
+built. D-065's rule, the "looks like this" half.
+
+**The first version of that pin cried wolf immediately**, because
+`formatClockDateTime` CONTAINS the word `DateTime`, so the banned-word loop
+reported the correct code — crying wolf inside the check written to stop crying
+wolf (#483). The allowed call is removed before the loop runs.
+
+**(5) The gate still said "Two blind spots" after round 7 found a third**, and
+the sentence every green run PRINTS named only the first. That is the line
+somebody acts on. All three are named now, in the docstring and in the printed
+summary, with the fault count each has hidden.
+
+**(6) The CSV import refused a legitimate row with an untrue message.** Storage
+became reading-based in rounds 6 and 7; the row validation still compared two
+MOMENTS. Measured in Europe/London: start `2026-03-29 01:30` has moment 02:30
+and end `02:15` has moment 02:15, so an ordinary 45-minute event was refused as
+"endDateTime not parseable / before start" — untrue of the readings the file
+holds and of what the row now stores. **The identical shape was fixed in
+`resources/book.php` (round 2) and `submit-save.php` (round 5); this file was
+left on moments, and round 7 wrote twenty lines about end-time refusal directly
+beneath it without noticing.** It compares readings as text now, keeping the
+moment comparison only for loose formats that cannot be compared as text, and
+the message distinguishes "not parseable" from "before start".
+
+### The test depends on auto-increment landing on particular IDs, which nothing said
+
+Adding three checks broke the file outright: `Duplicate entry '960470' for key
+'tblEvents.PRIMARY'`. Later blocks INSERT with explicit `eventID` values from
+960470 up, while earlier ones let MySQL choose — so **every row an earlier check
+creates shifts what comes next**, and round 7's six checks had consumed the last
+two spare slots.
+
+`$withoutConsumingIds()` puts the counter back, so a check that creates and
+deletes its own rows is ID-neutral. **A real fault in the test, found by adding
+to it rather than by reading it** — and the sort that would have cost the next
+person an afternoon, because the error names a line 600 lines away from the
+cause.
+
 ### Round 7: the write-path fixes were pinned by nothing, and the test that posts to them used an ordinary day
 
 **Five findings. The first is round 6's own finding 4 one level up, and the fix
@@ -18539,11 +18637,17 @@ the value on the wall clock, validate the TEXT for shape AND range, store the
 text, build no moment at all.
 
 It is stricter than what it replaced, which is worth stating rather than
-leaving to be discovered: a bare date with no time is now refused (the form
-cannot send one — the input is `required` and `isAllDay` is a literal `0` in
-the INSERT), `2026-02-31` is refused where it used to roll silently forward to
-3 March, and arbitrary English that `strtotime()` happened to understand is
-refused.
+leaving to be discovered: `2026-02-31` is refused where it used to roll silently
+forward to 3 March, and arbitrary English that `strtotime()` happened to
+understand is refused.
+
+**This paragraph also said a bare date was refused, and that stopped being true
+within hours.** Round 7 loosened the shared helper to accept a date with no
+time, because the events API needs one for an all-day event — and all four
+callers share it, so the public form inherited the change while both this note
+and the handler's own comment still said `?err=date`. Round 8 found it. The
+cost of sharing one rule is now stated where the rule lives: **a change made
+for one caller reaches all four.**
 
 ### Why nothing could see it, and the sweep that should have
 

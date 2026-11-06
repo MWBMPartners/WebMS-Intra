@@ -106,7 +106,9 @@ switched off (#483)
 
 So a green run means no PHP under `web/` hands a clock-reading column to a
 moment function **by name, on one line**. It does NOT mean the portal is correct
-across a clock change. Two blind spots, both stated rather than implied:
+across a clock change. THREE blind spots, each stated rather than implied --
+and the third was found in round 7 of #777, after this header had said "two"
+for three rounds:
 
   * **A reading pulled into a variable several lines earlier** and converted
     there. **A stated blind spot is a place to go looking, not a place to
@@ -507,6 +509,9 @@ def pending_list(root: str) -> list[str]:
 #    ordinary day.
 FORMATTER_FILE = os.path.join("web", "_core", "I18n.php")
 FORMATTER_NAME = "formatClockTime"
+
+# 📁 The one display helper nothing drives, pinned below.
+REPATTERN_FILE = os.path.join("web", "_apps", "calendar", "manage", "series-repattern.php")
 FORMATTER_FORBIDS = ("strtotime", "date(", "DateTime")
 
 SUFFIXES = (".php",)
@@ -893,6 +898,62 @@ def main() -> int:
                 f"think it is allowed."
             )
 
+    # ── The one display helper nothing drives ─────────────────────────────
+    # ⚠️ ROUND 7's FIX FOR `series-repattern.php` WAS PINNED BY NOTHING.
+    #    Planting the pre-round-7 body back -- `createFromFormat('Y-m-d
+    #    H:i:s', trim($reading))` with no zone, which really did show a stored
+    #    01:30 as 02:30 -- left all 65 audit scripts green, 81 clock checks
+    #    green AND `event-repeat-pages-selftest.php` at 251 of 251, because
+    #    that test drives the page but never looks at the displayed time
+    #    (measured in round 8 of #777).
+    #
+    #    This check cannot see the fault itself: the reading arrives as a
+    #    FUNCTION PARAMETER, which is the third blind spot above. So the
+    #    HELPER's body is pinned instead -- D-065's rule, where the property is
+    #    "this code looks like this", pin it -- and the one thing it must not
+    #    contain is a moment being built. A behavioural check would be better
+    #    and belongs with #785; this is what can be done today.
+    repattern = os.path.join(root, REPATTERN_FILE)
+    if os.path.isfile(repattern) is False:
+        problems.append(f"{REPATTERN_FILE} is not there, so $showReading cannot be checked.")
+    else:
+        with open(repattern, "r", encoding="utf-8", errors="replace") as handle:
+            body = blank_comments(handle.read())
+        at = body.find("$showReading = ")
+        if at == -1:
+            problems.append(
+                f"{REPATTERN_FILE} no longer defines $showReading. If it was "
+                f"renamed, change REPATTERN_HELPER here in the same edit; if "
+                f"the helper went, this pin has to go with it."
+            )
+        else:
+            end = body.find("};", at)
+            helper = body[at:end if end != -1 else at + 600]
+            if "I18n::formatClockDateTime" not in helper:
+                problems.append(
+                    f"{REPATTERN_FILE}'s $showReading no longer calls "
+                    f"I18n::formatClockDateTime(). That helper shows a stored "
+                    f"reading on the pattern-change preview -- the one screen "
+                    f"whose purpose is comparing a date's current time with "
+                    f"its new one -- and any other way of turning the reading "
+                    f"into words builds a moment, which moves it on the "
+                    f"clock-change morning (#777 round 7)."
+                )
+            # ⚠️ TAKE THE ALLOWED CALL OUT FIRST. `formatClockDateTime`
+            #    CONTAINS the word `DateTime`, so the first version of this
+            #    loop reported the correct code as a fault -- crying wolf in
+            #    the check written to stop crying wolf (#483).
+            rest = helper.replace("I18n::formatClockDateTime", "")
+            for banned in ("strtotime", "createFromFormat", "DateTime"):
+                if banned in rest:
+                    problems.append(
+                        f"{REPATTERN_FILE}'s $showReading contains "
+                        f"`{banned}`. It must build no moment at all: a stored "
+                        f"01:30 was shown as 02:30 that way (#777 round 7), "
+                        f"and nothing drives this cell's content, so this pin "
+                        f"is the only guard there is."
+                    )
+
     # ── The formatter's own body ──────────────────────────────────────────
     formatter_path = os.path.join(root, FORMATTER_FILE)
     if os.path.isfile(formatter_path) is False:
@@ -984,9 +1045,18 @@ def main() -> int:
         f"wall-clock columns until round 5. The number is printed rather than written "
         f"down, because the first version of this sentence said 28 and would "
         f"have become untrue the day part two fixed one file.\n"
-        "   It canNOT see a reading "
-        "pulled into a variable several lines earlier and converted there -- that "
-        "stays a question for a person."
+        "   THREE things it canNOT see, and every one has hidden a real "
+        "fault:\n"
+        "     * a reading pulled into a VARIABLE several lines earlier and "
+        "converted there -- two faults, in the attendance API;\n"
+        "     * a WRITE path, which reads no column at all, so the whole class "
+        "of 'store the moved hour' is invisible here -- FOUR faults, every one "
+        "found by eye (#785);\n"
+        "     * a reading reaching a conversion through a function PARAMETER, "
+        "which defeats this check and the one-hop sweep in DEV_NOTES alike.\n"
+        "   Each stays a question for a person, and a stated blind spot is a "
+        "place to go looking rather than a place to stop. (This line named only "
+        "the first for three rounds after the other two were found.)"
     )
     return 0
 

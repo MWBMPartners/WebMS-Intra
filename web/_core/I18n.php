@@ -746,6 +746,71 @@ class I18n
     }
 
     /**
+     * 🕰️ THE ONE PLACE A VALUE CARRYING ITS OWN OFFSET BECOMES A STORED READING.
+     *
+     * A value with an offset in it (`+02:00`, `-0500`, a trailing `Z` or `z`)
+     * really IS a moment in history, so it must be converted onto the clock of
+     * the zone the reading will be stored against. That half of the rule has
+     * been right since #777 round 6. **What was missing is that it checked no
+     * SHAPE at all**, and `inputCarriesOffset()` is asked FIRST, so anything
+     * ending in something offset-shaped went straight to the constructor.
+     *
+     * ⚠️ THAT STORED A DATE SIX MONTHS WRONG, WITH HTTP 200 AND NO WARNING.
+     *    Measured in Europe/London through the real code:
+     *
+     *        "01/06/2026 10:00 +0100"    ->  stored 2026-01-06 09:00:00
+     *        "1 June 2026 10:00 +01:00"  ->  stored 2026-06-01 10:00:00
+     *        "Z"                         ->  stored the CURRENT moment
+     *        "-05"                       ->  stored the CURRENT moment
+     *        "2026-02-31T10:00:00Z"      ->  stored 2026-03-03 (rolled)
+     *
+     *    A day-first SLASH date is read month-first by PHP, so a client
+     *    sending 1 June 2026 got an event on **6 January 2026**. And the
+     *    published API description listed every one of those first four as
+     *    refused with 400 — the contract was untrue for exactly the half that
+     *    carried an offset, while `clock-change-selftest.php`'s I28-I30 pinned
+     *    the sentence for the offset-FREE half only, so they read as pinning
+     *    the whole of it (#777 round 8).
+     *
+     * So the shape is required on BOTH sides now: the offset is split off, what
+     * remains must be a shape `wallClockFromInput()` accepts — which is where
+     * `checkdate()` lives, so an impossible date is refused here too — and only
+     * then is the moment built.
+     *
+     * @param  string        $posted What arrived, carrying its own offset.
+     * @param  \DateTimeZone $zone   The clock the reading will be stored on.
+     *
+     * @return string|null `Y-m-d H:i:s` on that clock, or null to refuse.
+     *                     Null means refuse: never fall back to a loose parse.
+     */
+    public static function instantFromInput(string $posted, \DateTimeZone $zone): ?string
+    {
+        $text = trim($posted);
+        // Split the offset off the end. The date's own hyphens cannot be
+        // reached, because the pattern is anchored to the end of the string and
+        // a bare date is not offset-bearing (see `inputCarriesOffset()`).
+        if (preg_match('/^(.*?)\s*(Z|[+-]\d{2}(?::?\d{2})?)$/i', $text, $parts) !== 1) {
+            return null;
+        }
+        $reading = $parts[1];
+        $offset  = $parts[2];
+        // ⚠️ THE SAME SHAPE RULE AS THE OTHER HALF, which is the whole fix. A
+        //    date with no time is allowed here too (`2026-06-01Z` is odd but
+        //    unambiguous), because `wallClockFromInput()` decides that, not
+        //    this method -- one rule, one place.
+        $shaped = self::wallClockFromInput($reading);
+        if ($shaped === null) {
+            return null;
+        }
+        try {
+            $moment = new \DateTimeImmutable($shaped . ' ' . (strtoupper($offset) === 'Z' ? '+00:00' : $offset));
+        } catch (\Throwable $e) {
+            return null;
+        }
+        return $moment->setTimezone($zone)->format('Y-m-d H:i:s');
+    }
+
+    /**
      * 🕰️ Whether a posted time carries a time zone OF ITS OWN.
      *
      * An offset -- `Z`, `+02:00`, `-0500`, `+02` -- is a zone written into the
