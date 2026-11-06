@@ -70,8 +70,22 @@
 # old-form migration). Sweep it rather than reading it; the command is in
 # DEV_NOTES.
 #
-# ⚠️ AND ROUND 5 FOUND A THIRD BLIND SPOT THAT MATTERS MORE: a WRITE path reads
-#    no column at all, so nothing here can see one. `calendar/submit-save.php`
+# ⚠️ THERE ARE THREE BLIND SPOTS, NOT ONE, AND THE LIST'S PROMISE IS WEAKER
+#    THAN IT READS. This header used to say "a file not on it that does this
+#    fails the check" without qualification. It does not, and cannot:
+#
+#      1. a reading pulled into a VARIABLE and converted later (named above);
+#      2. a WRITE path, which reads no column at all, so nothing here can see
+#         one -- round 5;
+#      3. a reading reaching a conversion through a FUNCTION PARAMETER, which
+#         neither the check nor the one-hop sweep can follow -- round 7 found
+#         `calendar/manage/series-repattern.php:1140` that way, showing a
+#         stored 01:30 as 02:30 on the one screen whose purpose is comparing a
+#         date's current time with its new one. Fixed there; the point is that
+#         nothing would ever have reported it.
+#
+#    So the promise is: **nothing new may join this list in the shapes the
+#    check CAN see.** That is worth having and it is not the same sentence. `calendar/submit-save.php`
 #    -- the PUBLIC event submission form -- stored 01:30 as 02:30 for ever, and
 #    FOUR review rounds missed it. Fixed in round 5; a guard for the class is
 #    #785.

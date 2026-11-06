@@ -18201,6 +18201,139 @@ stopped doing it also fails -- and `--strict` fails while it holds anything.
 That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
 visible rather than permanent.
 
+### Round 7: the write-path fixes were pinned by nothing, and the test that posts to them used an ordinary day
+
+**Five findings. The first is round 6's own finding 4 one level up, and the fix
+is the most useful thing in the package.**
+
+Reverting all three write paths at once — the events API's create and update,
+and the public submission form — left `php -l` clean, **all 65 audit scripts
+green, `clock-change-selftest.php` at 71 of 71, and `time-zones-selftest.php`
+entirely green.** Round 6 had recorded exactly this hole and not closed it: its
+section I pins `I18n`, and nothing pinned the CALLERS.
+
+**Why the behavioural test could not see it.** `time-zones-selftest.php` DOES
+post to `/api/events/create`, `/api/events/update` and `/calendar/submit-save`
+— W08, W09, W09b, W09c, W06. Every fixture is `clockIn(25..30, '19:00:00')`:
+an ordinary evening, 25 to 30 days from whenever the test runs. **On an
+ordinary day the old round trip and the new code agree exactly**, so those
+checks passed on the broken code. #549's own trap — a test written on an
+ordinary day passes whatever the code does — reappearing inside the file
+written to close it.
+
+**The fix drives the real endpoints over an hour that does not exist** (D-065's
+rule: where the property is "this code RUNS", drive it). Six new checks,
+W09d–W09h:
+
+  * `2028-03-12 02:30` is skipped in `America/New_York`, the test's event zone.
+    A FIXED date, so it cannot rot, and far enough ahead to stay a future event.
+  * **W09d asserts the hour really is skipped before anything else is checked**,
+    or every check below it would be vacuous and would pass on anything.
+  * **The submission form needed a DIFFERENT hour, and getting that wrong would
+    have made its check vacuous.** That form stores the ORGANISATION's zone and
+    the old code read the posted value through PHP's default, which start-up
+    sets to the same one — so the skipped hour has to be `Pacific/Auckland`'s,
+    not New York's. `2028-03-12 02:30` is an ordinary time in Auckland.
+    `2028-09-24 02:30` is the one that does not exist there, and W09h0 pins that
+    too.
+  * **W09g is the opposite direction**: a value carrying its own offset must
+    STILL be converted, or the fix breaks every integration sending an instant.
+
+Measured with all three write paths reverted: W09e, W09f and W09h go red;
+W09d, W09g and W09h0 correctly stay green. Restored: 140 of 140.
+
+### And my own round 6 fix was new data loss
+
+`import.php`'s fallback was `str_replace('T', ' ', trim($text))` before
+`strtotime()`. **It replaces every capital `T`, not just the ISO separator**,
+and the old code passed the cell untouched. Measured in Europe/London, old
+against what round 6 shipped:
+
+    "Tuesday, 3 March 2026 19:00"  ->  REFUSED   (was 2026-03-03 19:00:00)
+    "Tue, 3 Mar 2026 19:00"        ->  REFUSED   (was 2026-03-03 19:00:00)
+    "2026-03-03 19:00:00 GMT"      ->  REFUSED   (was 2026-03-03 19:00:00)
+    "2026-03-29 01:30 UTC"         ->  10:30     (was 02:30)
+
+`"Tue,"` became `" ue,"`; `"UTC"` became `"U C"`, which `strtotime()` read as
+half past TEN — **eight hours out, a value the old code could not produce.**
+Excel's default long date format begins with a weekday name, so the commonest
+spreadsheet in the world stopped importing — under a comment promising "the old
+round trip, deliberately" and a commit message saying "measured unchanged".
+
+**And only the START was guarded.** A row whose start was plain and whose end
+was `"Tue, 3 Mar 2026 20:30"` imported with `ok => true` and the message
+"Imported as event #N" **with no end time at all**, bound as SQL NULL. Of the
+three harms, that was the one nobody could see afterwards: the preview screen
+prints the cell raw, so the administrator reviewing the file sees exactly what
+they typed and nothing warns them. The old code could not reach this state,
+because the upstream check guaranteed `strtotime($end) !== false`.
+
+Fixed: the fallback takes the raw text (`wallClockFromInput()` already handles
+the `T` form, so by then the text is something it must not touch), and an
+unreadable end refuses the row. **A refused row is visible and recoverable; a
+silently emptied column is neither.**
+
+### The API's published contract said the opposite of what the code did
+
+`api-spec.json` promised *"Any date text PHP can read is accepted, not only ISO
+8601"*. After round 6 a value with no offset had to match a strict shape or the
+request was a 400 — and the CHANGELOG said "an integration in another country is
+unaffected", which was not true. Three of the refusals were wrong rather than
+merely stricter:
+
+  * **A lower-case `z`.** RFC 3339's own ABNF note allows `t` and `z` in lower
+    case, so a standards-conforming client was rejected — and it sat in the
+    branch round 6 called identical, because the offset pattern had no `i` flag.
+    The value is a genuine instant; refusing it is a fault.
+  * **Fractional seconds.** JavaScript's `toISOString()` sends `.000` as a
+    matter of course. The column holds whole seconds, so the fraction is simply
+    not expressible — dropping it is right, refusing it is not.
+  * **A date with no time.** The API has an `isAllDay` field and a bare date
+    used to store `00:00:00`, so every all-day integration broke with a 400.
+
+All three accepted now, none of which needs a moment to be built. The loosening
+**stops there**: `June 1 2026 10:00`, `2026-6-1T10:00`, a day-first date and a
+double space still need `strtotime()` to read them, which is the very thing that
+moves the hour — so they stay refused and **the description now states the
+accepted shapes exactly** instead of promising the opposite. Ten checks
+(I21–I30) pin both halves.
+
+### A third blind spot: a reading reaching a conversion through a function parameter
+
+`calendar/manage/series-repattern.php:1140` did
+`createFromFormat('Y-m-d H:i:s', $reading)` with no zone, where `$reading` is a
+`tblEvents.startDateTime` value passed in as a parameter. Measured: a stored
+`2026-03-29 01:30:00` was shown as `Sun 29 Mar 2026, 02:30` — **on the one
+screen whose entire purpose is comparing a date's current time with the time the
+new pattern would give it.** Display only.
+
+**Nothing could have reported it.** The gate needs a column name within 200
+characters on the same line; the published one-hop sweep looks for
+`$x = $row['<column>']`. A hop through a parameter defeats both. So the
+backlog's header now names three blind spots, and admits that its promise —
+"a file not on it that does this fails the check" — holds only **for the shapes
+the check can see.** That is worth having and it is not the same sentence.
+
+The em-dash the old helper printed for an empty cell is deliberately kept:
+`formatClockDateTime()` answers `''`, and dropping it would have blanked the
+table's empty cells — a change to the page made by accident inside a fix for
+something else.
+
+### Two comments round 6 blamed, still saying the thing it fixed
+
+`import.php:213` still read *"Each row's start and end are read below with
+strtotime() and written with date()"* — **quoted in round 6's own commit message
+as part of the fault, fixed in code, and left standing in the comment.** And
+`submit-save.php:222` still read *"The start and end were read just above on
+PHP's clock"*, a read round 5 had deleted.
+
+Both conclusions (`Site::timezone()` is the right zone to store) were correct
+throughout. The stated REASON was gone — and in this repository the reason is
+what the next reader checks the design against, so a reader asking "why is the
+organisation's zone right here?" was sent to a mechanism that no longer exists.
+Both now give the real reason: the form, and the spreadsheet, belong to that
+organisation.
+
 ### Round 6: the SAME fault in the events API, with my own gate declaring it correct
 
 **Nine findings. The first is the one to remember, because it inverts the rule

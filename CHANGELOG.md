@@ -44,6 +44,27 @@ see.** Those are listed rather than fixed: an event's time zone need not be the
 organisation's, so each needs a person to look at it, and that is the next part
 of this work. Nothing new may join the list.
 
+**The spreadsheet import briefly stopped accepting ordinary date formats, and
+that is fixed too.** A fix made a few hours earlier mangled any cell containing
+a capital `T` — so `Tue, 3 Mar 2026 19:00` was refused outright and
+`2026-03-29 01:30 UTC` was read as half past ten, eight hours out. Excel's own
+long date format begins with a weekday name, so the commonest spreadsheet
+format stopped importing. A row whose end time could not be read also imported
+successfully with **no end time at all**; it now refuses the row and says so,
+because a refused row can be corrected and a silently emptied column cannot.
+
+**The events API accepts three shapes it had started refusing.** A time zone
+written in lower case (`...10:00:00z`, which the standard allows), fractional
+seconds (which every JavaScript client sends), and a date with no time (which
+an all-day event needs). None of those needs the conversion that caused the
+original fault. Genuinely loose text — `June 1 2026 10:00`, a day-first date —
+is still refused, and **the published API description now says exactly which
+shapes are accepted** instead of promising that anything readable is.
+
+**And the preview screen for changing a repeating series showed an hour late**
+on the clock-change morning — on the one screen whose purpose is comparing a
+date's current time with its new one.
+
 **And the same mistake was in the events API, where passing the *correct* time
 zone did not help.** Creating or updating an event through the API turned the
 time given into a moment in history before storing it. That looks right —

@@ -62,6 +62,9 @@ use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\SeriesRepattern;
 use Portal\Core\Site;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 
 // 📌 Page metadata. Set before `header.php`, which requires `head-meta.php` —
 //    the one place the title, description and sharing tags are written (#569).
@@ -1132,16 +1135,40 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/** 🗓️ One stored reading, shown the way a person reads it. */
+/**
+ * 🗓️ One stored reading, shown the way a person reads it.
+ *
+ * 🕐 IT SHOWED AN HOUR LATE ON THE CLOCK-CHANGE MORNING (#777 round 7). This
+ *    was `DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $reading)` with
+ *    NO ZONE, which resolves the reading in PHP's default zone and so moves
+ *    it when the hour it names does not exist there. Measured in
+ *    Europe/London: a stored `2026-03-29 01:30:00` was shown as
+ *    `Sun 29 Mar 2026, 02:30`.
+ *
+ *    **On the one screen whose entire purpose is comparing a date's current
+ *    time with the time the new pattern would give it.** Display only -- the
+ *    stored value was never touched by this page.
+ *
+ * ⚠️ AND NO GUARD COULD SEE IT, which is the part worth keeping. This check
+ *    (`check_clock_time_not_a_moment.py`) needs a column name within 200
+ *    characters on the same line, and `$reading` arrives as a FUNCTION
+ *    PARAMETER -- the values are `tblEvents.startDateTime` readings, set at
+ *    line 267. Round 5's published one-hop sweep looks for
+ *    `$x = $row['<column>']` followed by a conversion, so a hop through a
+ *    parameter misses it too. **That is a THIRD blind spot, alongside the
+ *    one-hop variable and the write path**, and it is now written down in the
+ *    backlog's header.
+ */
 $showReading = static function (?string $reading): string {
-    if ($reading === null || trim($reading) === '') {
+    // 📌 THE EM DASH IS KEPT. `formatClockDateTime()` answers '' for nothing,
+    //    and this helper has always shown '—' in the table's empty cells, so
+    //    dropping it would leave them blank — a change to the page, made by
+    //    accident, inside a fix for something else.
+    $words = I18n::formatClockDateTime($reading, 'D j M Y, H:i');
+    if ($words === '') {
         return '—';
     }
-    $when = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', trim($reading));
-    if ($when === false) {
-        return htmlspecialchars(trim($reading), ENT_QUOTES, 'UTF-8');
-    }
-    return htmlspecialchars($when->format('D j M Y, H:i'), ENT_QUOTES, 'UTF-8');
+    return htmlspecialchars($words, ENT_QUOTES, 'UTF-8');
 };
 ?>
 

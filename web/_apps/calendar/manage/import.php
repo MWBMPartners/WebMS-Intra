@@ -210,11 +210,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (count($rows) === 0) {
                 $error = 'No preview data — re-upload the file.';
             } else {
-                // 🕰️ THE ZONE (#604). Each row's start and end are read below
-                //    with strtotime() and written with date(), both on PHP's
-                //    clock, which start-up sets to this organisation's zone.
-                //    So that is the zone stored beside them: Site::timezone(),
-                //    the answer start-up itself used. WHAT WAS WRONG: this
+                // 🕰️ THE ZONE (#604, reworded by #777 round 7). Each row's
+                //    start and end are stored as the reading they already are,
+                //    and `Site::timezone()` is the zone recorded beside them
+                //    because **the spreadsheet belongs to this organisation**
+                //    — somebody here typed those times on this
+                //    organisation's clock.
+                //
+                // ⚠️ THAT REASON USED TO BE "they are read with strtotime()
+                //    and written with date(), both on PHP's clock, which
+                //    start-up sets to this organisation's zone". That
+                //    mechanism was REMOVED in round 6 for the plain shapes,
+                //    and the comment was left saying it — in the very commit
+                //    whose finding 2 quoted this comment as part of the
+                //    fault. The conclusion was right throughout; the stated
+                //    reason now sends the next reader to a mechanism that is
+                //    only the fallback. WHAT WAS WRONG: this
                 //    statement named no zone at all, so every imported event
                 //    took the column's default, "Europe/London", wherever the
                 //    organisation was. WHAT IT CANNOT DO: take a zone per row.
@@ -264,7 +275,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if ($clock !== null) {
                                 return $clock;
                             }
-                            $clock = str_replace('T', ' ', trim($text));
                             // ⚠️ ANYTHING ELSE FALLS BACK TO THE OLD ROUND
                             //    TRIP, deliberately. A spreadsheet holds
                             //    whatever somebody typed -- "1/3/26 7pm",
@@ -278,15 +288,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             //    Normalising the file's own formats is #777
                             //    part two's to settle, not a change to make
                             //    inside a fix round.
-                            $moment = strtotime($clock);
+                            //
+                            // 🚨 THE RAW TEXT, NEVER A `str_replace('T', ' ')`
+                            //    OF IT. The first version of this fallback
+                            //    replaced EVERY capital `T`, not just the ISO
+                            //    separator, and fed the result to
+                            //    `strtotime()` -- which the old code never
+                            //    did, because it passed the cell untouched.
+                            //    Measured in Europe/London, old against that
+                            //    version:
+                            //
+                            //      "Tuesday, 3 March 2026 19:00"  ->  REFUSED
+                            //      "Tue, 3 Mar 2026 19:00"        ->  REFUSED
+                            //      "2026-03-03 19:00:00 GMT"      ->  REFUSED
+                            //      "2026-03-29 01:30 UTC"         ->  10:30
+                            //
+                            //    `"Tue,"` became `" ue,"` and `"UTC"` became
+                            //    `"U C"`, which `strtotime()` read as half past
+                            //    TEN -- eight hours out, a value the old code
+                            //    could not produce. Excel's own long date
+                            //    format starts with a weekday name, so the
+                            //    commonest spreadsheet in the world stopped
+                            //    importing, under a comment promising nothing
+                            //    had changed.
+                            //
+                            //    `wallClockFromInput()` above already handles
+                            //    the `T` form, so by the time the fallback is
+                            //    reached the text is something it must not
+                            //    touch at all.
+                            $moment = strtotime(trim($text));
                             return $moment === false ? null : date('Y-m-d H:i:s', $moment);
                         };
                         $startSql = $fmtClock((string) $r['startDateTime']);
-                        $endSql   = $r['endDateTime'] !== null && $r['endDateTime'] !== ''
-                                  ? $fmtClock((string) $r['endDateTime'])
-                                  : null;
+                        $hasEnd   = $r['endDateTime'] !== null && $r['endDateTime'] !== '';
+                        $endSql   = $hasEnd === true ? $fmtClock((string) $r['endDateTime']) : null;
                         if ($startSql === null) {
                             $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'startDateTime could not be read'];
+                            continue;
+                        }
+                        // 🚨 AN END TIME THAT CANNOT BE READ REFUSES THE ROW.
+                        //    It used to be impossible to reach: the row check
+                        //    upstream guaranteed `strtotime($end) !== false`.
+                        //    The first version of this closure could answer
+                        //    null for a value that check had passed, and only
+                        //    the START was guarded -- so the row imported with
+                        //    `ok => true` and the message "Imported as event
+                        //    #N", **with no end time at all**, bound as SQL
+                        //    NULL. Of the three harms that version caused, this
+                        //    was the one nobody could see afterwards: the
+                        //    preview screen prints the cell raw, so the
+                        //    administrator reviewing the file sees exactly what
+                        //    they typed and nothing warns them.
+                        //
+                        //    A refused row is visible and recoverable. A
+                        //    silently emptied column is neither.
+                        if ($hasEnd === true && $endSql === null) {
+                            $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'endDateTime could not be read'];
                             continue;
                         }
 

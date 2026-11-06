@@ -345,6 +345,33 @@ check('I10 and strtotime really did roll it, so I9 is not vacuous',
 check('I11 an hour out of range is refused', I18n::wallClockFromInput('2027-06-01T25:00'), null);
 check('I12 arbitrary English is refused', I18n::wallClockFromInput('tomorrow'), null);
 
+// ── The shapes a real client sends, which round 7 found were REFUSED ──────
+// 🚨 EACH OF THESE WAS A 400 ON A LIVE ENDPOINT, and the commit that caused it
+//    said "every offset-bearing value behaves identically" and left the API
+//    description promising "any date text PHP can read is accepted". Refusing
+//    a standards-conforming client is wrong, not merely stricter.
+check('I21 a LOWER-CASE t separator is accepted (RFC 3339 allows it)',
+    I18n::wallClockFromInput('2027-06-01t19:00:00'), '2027-06-01 19:00:00');
+check('I22 a LOWER-CASE z is read as an offset, not as a reading',
+    I18n::inputCarriesOffset('2027-06-01T19:00:00z'), true);
+check('I23 fractional seconds are DROPPED, not refused — toISOString() sends them',
+    I18n::wallClockFromInput('2027-06-01T19:00:00.000'), '2027-06-01 19:00:00');
+check('I24 fractional seconds with a Z are still an offset',
+    I18n::inputCarriesOffset('2027-06-01T19:00:00.000Z'), true);
+check('I25 a date with NO time means midnight on it — the API has an isAllDay field',
+    I18n::wallClockFromInput('2027-06-01'), '2027-06-01 00:00:00');
+check('I26 and a bare date is still not read as carrying an offset',
+    I18n::inputCarriesOffset('2027-06-01'), false);
+check('I27 a date with no time inside the skipped hour is not a special case',
+    I18n::wallClockFromInput('2028-03-12'), '2028-03-12 00:00:00');
+// ⚠️ AND THE LOOSENING STOPS HERE, deliberately. These need `strtotime()` to
+//    read them, which is the very thing that moves the hour, so they stay
+//    refused and the API description now SAYS they are refused rather than
+//    promising the opposite.
+check('I28 loose English is still refused', I18n::wallClockFromInput('June 1 2027 10:00'), null);
+check('I29 an unpadded month or day is still refused', I18n::wallClockFromInput('2027-6-1T10:00:00'), null);
+check('I30 a day-first date is still refused', I18n::wallClockFromInput('01-06-2027 10:00'), null);
+
 // 🌎 THE OTHER DIRECTION OF #653's LESSON: a zone that resolves the other way.
 //    London was the only zone in the fixtures that found #653 three times, so
 //    one American transition is pinned here as well.

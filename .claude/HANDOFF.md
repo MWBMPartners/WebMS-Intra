@@ -63,7 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one: rounds 3 to 6 are done; round 7's check is next.** The rounds so far found, in order: a display fault in four
+**#777 part one: rounds 3 to 7 are done; round 8's check is next.** The rounds so far found, in order: a display fault in four
 pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
 faults refusing valid input (round 2); three READER faults my own write fix made
 visible, and the fact that those three readers were guarded by nothing (round
@@ -125,6 +125,30 @@ never shown to anybody; and `submit-save.php` stored every submitted venue as
 specification was wrong in all three parts and is re-measured on the issue.
 **Part two is NOT cosmetic: 24 listed files now disagree visibly with correct
 data, the moderation screen among them.**
+
+**Round 7 found FIVE, and the first is the most useful fix in the package: all
+three write-path fixes were pinned by NOTHING.** Reverting them left 65 audit
+scripts, 71 clock checks AND the whole of `time-zones-selftest.php` green —
+because every fixture there is `clockIn(25..30, '19:00:00')`, an ordinary
+evening, and on an ordinary day the old and new code agree exactly. #549's trap
+inside the file written to close it; round 6 recorded the hole and did not shut
+it. **Six new checks (W09d-W09h) drive the REAL endpoints over an hour that
+does not exist**, with the "is this hour really skipped" premise asserted first
+so none can be vacuous — and the submission form needed a DIFFERENT hour
+(Auckland's, not New York's) or its check would have passed on broken code.
+Measured: the three reverts go red, the two premise checks and the
+offset-still-converts check stay green. 140 of 140 restored.
+
+**And round 6's own fix was new data loss:** `str_replace('T', ' ')` in the CSV
+fallback mangled every cell with a capital `T` — `"Tue,"` → `" ue,"`, `"UTC"` →
+`"U C"` read as 10:30, eight hours out — and only the START was guarded, so a
+row with an unreadable end imported successfully with NO end time. Also: the API
+had started refusing a lower-case `z` (RFC 3339 allows it), fractional seconds
+(every JS client) and a bare date (needed for all-day), while `api-spec.json`
+promised "any date text PHP can read is accepted"; a THIRD blind spot found
+(a reading reaching a conversion through a function PARAMETER —
+`series-repattern.php` showed 01:30 as 02:30); and two comments round 6 quoted
+as part of the fault were still saying it.
 
 #763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
 write and delete stored data, so rounds ran until one was clean. Twelve

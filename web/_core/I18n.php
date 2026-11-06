@@ -715,7 +715,24 @@ class I18n
      */
     public static function wallClockFromInput(string $posted): ?string
     {
-        $clock = str_replace('T', ' ', trim($posted));
+        $clock = trim($posted);
+        // 🔤 THE SEPARATOR IS CASE-INSENSITIVE, because RFC 3339's own ABNF
+        //    note allows a lower-case `t` and `z`. The first version matched
+        //    only a capital `T`, so a standards-conforming client sending
+        //    `2026-06-01t10:00:00` was refused with a 400 (round 7 of #777).
+        $clock = (string) preg_replace('/^(\d{4}-\d{2}-\d{2})[Tt]/', '$1 ', $clock);
+        // ⏱️ FRACTIONAL SECONDS ARE DROPPED, not refused. A JavaScript client
+        //    sends `...10:00:00.000` as a matter of course (`toISOString()`),
+        //    and this column holds whole seconds, so the fraction is simply
+        //    not expressible. Refusing it rejected an ordinary integration.
+        $clock = (string) preg_replace('/\.\d+$/', '', $clock);
+        // 📅 A DATE WITH NO TIME MEANS MIDNIGHT ON IT. The API has an
+        //    `isAllDay` field and a bare date used to store `00:00:00`, so
+        //    refusing one broke every all-day integration. Midnight is a
+        //    reading like any other and needs no moment to be built.
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $clock) === 1) {
+            $clock .= ' 00:00:00';
+        }
         if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]$/', $clock) === 1) {
             $clock .= ':00';
         }
@@ -751,8 +768,15 @@ class I18n
      */
     public static function inputCarriesOffset(string $posted): bool
     {
-        $timePart = (string) preg_replace('/^\d{4}-\d{2}-\d{2}[T ]?/', '', trim($posted));
-        return preg_match('/(?:Z|[+-]\d{2}(?::?\d{2})?)$/', $timePart) === 1;
+        $timePart = (string) preg_replace('/^\d{4}-\d{2}-\d{2}[Tt ]?/', '', trim($posted));
+        // 🔤 CASE-INSENSITIVE on the `Z`, because RFC 3339's own ABNF note
+        //    allows it in lower case. Without the `i` a conforming client
+        //    sending `...10:00:00z` fell into the no-offset branch, where the
+        //    shape check then refused it with a 400 -- and that value is a
+        //    genuine instant, so refusing it was wrong, not merely stricter.
+        //    Round 7 of #777; it sat inside the half the round 6 commit called
+        //    identical to before.
+        return preg_match('/(?:Z|[+-]\d{2}(?::?\d{2})?)$/i', $timePart) === 1;
     }
     /**
      * 🕐 A time on a CLOCK, put into words without ever becoming a moment.

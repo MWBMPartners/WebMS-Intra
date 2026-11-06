@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 134;
+const EXPECTED_CHECKS = 140;  // 134 + the six W09d-W09h clock-change checks (#777 round 7)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -1277,6 +1277,108 @@ ok(
     said($answer) . ' ' . substr($answer['body'], 0, 200) . '; stored ' . json_encode($nowAt) . ', looked for ' . clockIn(27, '21:15:00')
 );
 q('UPDATE tblEvents SET startDateTime = ? WHERE eventID = ?', 'si', [clockIn(27, '19:00:00'), $made['the events API, with a zone chosen']]); // back, for the readers below
+// ══════════════════════════════════════════════════════════════════════════
+// W09d-W09h — THE HOUR THAT DOES NOT EXIST, over the real endpoints (#777)
+// ══════════════════════════════════════════════════════════════════════════
+// 🚨 WHY THESE EXIST: EVERY CHECK ABOVE PASSES ON THE BROKEN CODE. They are
+//    all built from `clockIn(25..30, '19:00:00')` -- an ordinary evening, 25
+//    to 30 days from whenever the test is run -- and on an ordinary day the
+//    old round trip and the new one agree exactly. Measured in round 7 of
+//    #777: reverting all three write paths at once left `php -l` clean, all 65
+//    audit scripts green, `clock-change-selftest.php` at 71 of 71 AND this
+//    whole file green.
+//
+//    **#549's own trap, which this file was written to close, reappearing
+//    inside it:** a test written on an ordinary day passes whatever the code
+//    does. Round 6 recorded the same shape one level down (its section I pins
+//    `I18n`, and nothing pinned the CALLERS) and did not close it.
+//
+//    So these drive the real endpoints with a reading inside an hour that does
+//    not exist. 2028-03-12 02:30 is skipped in America/New_York (EVENT_ZONE);
+//    a FIXED date, so this cannot rot, and far enough ahead to stay a future
+//    event for years. The organisation's zone is Pacific/Auckland, whose own
+//    transition is in September, so the two cannot mask each other.
+$skippedClock = '2028-03-12 02:30:00';
+$skippedEnd   = '2028-03-12 03:45:00';
+$skippedPost  = str_replace(' ', 'T', $skippedClock);
+
+// First, prove the hour really is skipped in that zone — or every check below
+// is vacuous and would pass on anything.
+$movedTo  = (new DateTimeImmutable($skippedClock, new DateTimeZone(EVENT_ZONE)))->format('Y-m-d H:i:s');
+ok(
+    'W09d the hour these checks use really does NOT exist in ' . EVENT_ZONE . ', so they are not vacuous',
+    $movedTo === '2028-03-12 03:30:00',
+    'building ' . $skippedClock . ' as a moment in ' . EVENT_ZONE . ' gives ' . $movedTo . ', looked for 2028-03-12 03:30:00'
+);
+
+$answer  = $api(['eventName' => 'Selftest zones API skipped', 'startDateTime' => $skippedPost, 'endDateTime' => str_replace(' ', 'T', $skippedEnd), 'timezone' => EVENT_ZONE, 'status' => 'published']);
+$skipId  = $newest('Selftest zones API skipped');
+$storedS = one('SELECT startDateTime, endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$skipId]);
+ok(
+    'W09e the events API stores a reading inside the hour that does not exist AS IT STANDS — passing the correct zone does not save it, because building a moment at all is the fault',
+    $skipId > 0 && $storedS === ['startDateTime' => $skippedClock, 'endDateTime' => $skippedEnd],
+    said($answer) . ' ' . substr($answer['body'], 0, 200) . '; stored ' . json_encode($storedS) . ', looked for ' . $skippedClock
+);
+
+// The UPDATE handler, same question. A plain reading with no offset.
+$answer  = req('', 'POST', '/api/events/update?id=' . $skipId, (string) json_encode(['id' => $skipId, 'eventID' => $skipId, 'startDateTime' => str_replace(' ', 'T', '2028-03-12 02:15:00')]), ['bearer' => $apiKey, 'json' => true]);
+$nowAt   = (string) (one('SELECT startDateTime FROM tblEvents WHERE eventID = ?', 'i', [$skipId])['startDateTime'] ?? '');
+ok(
+    'W09f the events API\'s UPDATE stores a reading inside that hour as it stands too',
+    $nowAt === '2028-03-12 02:15:00',
+    said($answer) . ' ' . substr($answer['body'], 0, 200) . '; stored ' . json_encode($nowAt) . ', looked for 2028-03-12 02:15:00'
+);
+
+// An OFFSET in the value IS a zone, so such a value really is a moment and
+// must still be converted. Getting this wrong in the safe-looking direction
+// would break every integration that sends an instant.
+$instant = gmdate('Y-m-d\TH:i:s\Z', (new DateTimeImmutable('2028-07-01 12:00:00', new DateTimeZone('UTC')))->getTimestamp());
+$answer  = req('', 'POST', '/api/events/update?id=' . $skipId, (string) json_encode(['id' => $skipId, 'eventID' => $skipId, 'startDateTime' => $instant]), ['bearer' => $apiKey, 'json' => true]);
+$nowAt   = (string) (one('SELECT startDateTime FROM tblEvents WHERE eventID = ?', 'i', [$skipId])['startDateTime'] ?? '');
+$wantAt  = (new DateTimeImmutable('2028-07-01 12:00:00', new DateTimeZone('UTC')))->setTimezone(new DateTimeZone(EVENT_ZONE))->format('Y-m-d H:i:s');
+ok(
+    'W09g a value carrying its OWN offset is still converted onto the event\'s clock — the #777 fix must not break an integration sending an instant',
+    $nowAt === $wantAt,
+    said($answer) . ' ' . substr($answer['body'], 0, 200) . '; stored ' . json_encode($nowAt) . ', looked for ' . $wantAt
+);
+q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$skipId]);
+
+// And the PUBLIC submission form, which is the third write path.
+//
+// ⚠️ IT NEEDS A DIFFERENT HOUR, AND GETTING THIS WRONG WOULD HAVE MADE THE
+//    CHECK VACUOUS. This form stores the ORGANISATION's zone (W06 above), and
+//    the old code read the posted value through PHP's default zone, which
+//    start-up sets to that same organisation's. So the skipped hour has to be
+//    Pacific/Auckland's, not America/New_York's -- and 2028-03-12 02:30 is an
+//    ordinary time in Auckland, so using it here would have passed on the
+//    broken code. Auckland's own transition is in late September:
+//    2028-09-24 02:30 local does not exist there (it becomes 03:30), measured
+//    below before anything else is asserted.
+$orgSkipped     = '2028-09-24 02:30:00';
+$orgSkippedEnd  = '2028-09-24 03:45:00';
+$orgMovedTo     = (new DateTimeImmutable($orgSkipped, new DateTimeZone(ORG_ZONE)))->format('Y-m-d H:i:s');
+ok(
+    'W09h0 the hour the submission check uses really does NOT exist in ' . ORG_ZONE . ' either',
+    $orgMovedTo === '2028-09-24 03:30:00',
+    'building ' . $orgSkipped . ' as a moment in ' . ORG_ZONE . ' gives ' . $orgMovedTo
+);
+// 📌 `post()` fetches the form for its token first, as W06 above does -- a
+//    hand-built request would be refused by `Auth::verifyCsrf()`.
+$answer = post($memberJar, '/calendar/submit', '/calendar/submit-save', [
+    'eventName' => 'Selftest zones submit skipped',
+    'startDateTime' => str_replace(' ', 'T', $orgSkipped),
+    'endDateTime' => str_replace(' ', 'T', $orgSkippedEnd),
+    'locationName' => 'Selftest Hall', 'description' => '',
+]);
+$subId  = $newest('Selftest zones submit skipped');
+$subRow = one('SELECT startDateTime, locationName FROM tblEvents WHERE eventID = ?', 'i', [$subId]);
+ok(
+    'W09h the public submission form stores a reading inside that hour as it stands, and keeps the location (the bind_param fault of round 6)',
+    $subId > 0 && $subRow === ['startDateTime' => $orgSkipped, 'locationName' => 'Selftest Hall'],
+    said($answer) . '; stored ' . json_encode($subRow) . ', looked for ' . $orgSkipped . ' / Selftest Hall'
+);
+q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$subId]);
+
 $answer = $api(['eventName' => 'Selftest zones API refused', 'startDateTime' => str_replace(' ', 'T', clockIn(28, '19:00:00')), 'timezone' => 'GMT+1']);
 ok(
     'W10 the events API REFUSES a zone that is not a zone name (422), in words that name the field, and creates nothing',

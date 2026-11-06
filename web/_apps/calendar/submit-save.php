@@ -219,7 +219,19 @@ $base  = trim((string) $base, '-');
 $base  = $base === '' ? 'event' : mb_substr($base, 0, 180);
 $slug  = $base . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
 
-// 🕰️ THE ZONE (#604). The start and end were read just above on PHP's clock,
+// 🕰️ THE ZONE (#604, reworded by #777 round 7). `Site::timezone()` is the zone
+//    recorded beside the start and end because **this form belongs to this
+//    organisation** — the visitor typed those times on its clock.
+//
+// ⚠️ THAT REASON USED TO BE "they were read just above on PHP's clock, which
+//    start-up sets to this organisation's zone". Round 5 DELETED that read:
+//    the values are now stored exactly as sent and no zone is applied to them
+//    at all. The conclusion is unchanged and still right; the mechanism it
+//    cited is gone, and in this repository the reason is what the next reader
+//    checks the design against.
+//
+//    The old wording, for anyone tracing it: the start and end were read on
+//    PHP's clock,
 //    which start-up sets to this organisation's zone, so that is the zone
 //    stored beside them: Site::timezone(), the same answer start-up used.
 //    WHAT WAS WRONG: this statement had "Europe/London" written into it, so a
