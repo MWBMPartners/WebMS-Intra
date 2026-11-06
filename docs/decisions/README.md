@@ -121,7 +121,10 @@ appended with its real date and a note that it was added later.
 | [D-063](063-translation-may-start-charging-on-upgrade-day.md) | 2026-11-05 | Translation may start charging on upgrade day, and the changelog says so | in force |
 | [D-064](064-review-rounds-on-tooling-count-towards-the-cap.md) | 2026-11-05 | A review round that finds faults only in tooling counts towards the cap | in force |
 | [D-065](065-measure-reachability-dont-infer-it.md) | 2026-11-05 | Measure whether code runs; do not infer it from the source | in force |
+| [D-066](066-review-rounds-stop-on-a-tooling-only-round.md) | 2026-11-06 | Review rounds stop on the first round whose findings are all in tooling | in force |
+| [D-067](067-the-owner-removes-the-two-leftover-volumes.md) | 2026-11-06 | The owner removes the two leftover Docker volumes | in force |
+| [D-068](068-signula-id-gets-the-one-password-writer-fix.md) | 2026-11-06 | SIGNula.id gets the one-password-writer fix | in force |
 
-*65 decisions. This index is checked against the folder by
+*68 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
