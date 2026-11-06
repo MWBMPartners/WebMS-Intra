@@ -83,9 +83,24 @@
 -- NO APOSTROPHES IN ANY COMMENT TEXT below. Each sits inside a quoted string,
 -- so a word like "organisation's" would need doubling, and getting that wrong
 -- gives ERROR 1064 on every installation. Migration 250 nearly shipped with it.
+--
+-- AND NO ` -- ` INSIDE A COMMENT STRING EITHER, which this migration DID ship
+-- with and which broke a check. `jobKey`'s comment read "... under cron/ -- the
+-- name already registered ...". MySQL stores that happily: inside a quoted
+-- string `--` is just two characters. But `check_schema_seed_parity.py` blanks
+-- `--` to end of line BEFORE it splits on semicolons, and it does not track
+-- string literals -- so it removed the closing quote, read the rest of the file
+-- as one unterminated string, and reported 37 migrations as missing their mark
+-- while going blind to real drift in all of them. Measured: 249 marks seen
+-- before this migration, 213 after.
+--
+-- Eight comments already in `full_schema.sql` contain ` -- ` and the check
+-- survives them only because their damage pairs up. That weakness is #788; the
+-- rule here is simply to write a full stop instead, because a ` -- ` reads as a
+-- comment to every tool that does not parse strings properly.
 
 CREATE TABLE IF NOT EXISTS `tblScheduledJobRun` (
-    `jobKey`        VARCHAR(40) NOT NULL COMMENT 'Which scheduled job the row is about, as its own address under cron/ -- the name already registered in tblRoutes and already given to whoever runs the scheduled tasks. Portal\\Core\\ScheduledJobs::JOBS is the one list',
+    `jobKey`        VARCHAR(40) NOT NULL COMMENT 'Which scheduled job the row is about, as its own address under cron/. That name is already registered in tblRoutes and already given to whoever runs the scheduled tasks. Portal\\Core\\ScheduledJobs::JOBS is the one list',
     `startedAtUtc`  DATETIME    NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when this job last BEGAN, recorded only after its token was accepted. A request with the wrong token writes nothing, or anybody on the internet could make a dead job look alive',
     `finishedAtUtc` DATETIME        NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC: when this job last finished its work. EMPTY means the newest run began and never reached the end, which is what distinguishes a job dying part-way from one that is not being called at all',
     `lastOutcome`   VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'How the last finished run ended, as one word: ok or refused. NEVER the words of a fault, which can quote the value that caused it. Empty while a run is in flight',
