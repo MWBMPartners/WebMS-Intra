@@ -117,8 +117,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>It costs your organisation money.</strong> The first time a piece is put
             into a particular language it is paid for. After that everyone who asks for the
             same piece in the same language gets the stored copy, which costs nothing. Your
-            organisation sets a monthly limit; once that is reached, nothing new is translated
-            until the next month, and anything already translated keeps working.
+            organisation has monthly limits &mdash; on the money spent and on the number of
+            translations; once either is reached, nothing new is translated until the next
+            month, and anything already translated keeps working.
         </li>
         <li>
             <strong>It is a machine translation.</strong> It is usually good enough to follow,
@@ -145,8 +146,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             button says why. The usual ones are that the text is already in your language,
             that your organisation has reached its limit for this month, or that the
             translation company did not answer. In that last case nothing was translated;
-            we cannot tell you whether the attempt was charged for, but it is not counted
-            against your organisation&rsquo;s monthly total.
+            we cannot tell you whether the attempt was charged for. It is not added to the
+            money your organisation has spent this month, but it does count as one of the
+            month&rsquo;s translations, because the portal cannot tell whether the request
+            reached the company, and it may have been charged for. If the message says translation has not been fully set up, nothing
+            was sent at all and nothing was counted.
         </li>
     </ul>
 </div>

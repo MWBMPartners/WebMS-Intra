@@ -41,13 +41,23 @@
  * WHAT THIS CANNOT SHOW, said plainly because an overstated guarantee is worse
  * than none
  * ---------------------------------------------------------------------------
- *   • **It cannot prove the cap is obeyed by a PAID provider.** The stub is
- *     reached through the `libre` route, and `libreTranslate()` reports
- *     `costPence` 0 by design (a self-hosted LibreTranslate is free). So
- *     spending is made to happen by writing a row's `costPence` directly, and
- *     section F proves the LIMIT is obeyed, not that any provider's own figure
- *     is right. **On the `libre` route the limit can never bite**, because
- *     nothing ever adds to the spend — that is a real gap and it is #762.
+ *   • **It cannot prove the money limit is obeyed by a PAID provider.** The
+ *     stub is reached through the `libre` route, and `libreTranslate()`
+ *     reports `costPence` 0 by design. So spending is made to happen by
+ *     writing the month's usage record directly, and section F proves the
+ *     LIMIT is obeyed, not that any provider's own figure is right. That a
+ *     reported cost is ADDED to the record is proved by F3-04, which drives
+ *     the real `Translation::settle()` through a probe page in the scratch
+ *     copy, and F3-05 requires the hard gate
+ *     `tools/audit-checks/check_translation_engine_pinned.py` to pass — it pins
+ *     the WHOLE engine file as code, because no request here can reach a
+ *     provider that reports more than 0. **The
+ *     `libre` route adds nothing to the money figure**, which is why the
+ *     number limit exists (#762, D-059); section F2 proves THAT one bites on
+ *     this route with the money limit left untouched.
+ *   • **It cannot race two presses**, so the claim that the number limit holds
+ *     under concurrency (one conditional UPDATE in `reserveCall()`) is read,
+ *     not measured: one worker never overlaps two requests.
  *   • **It cannot drive a real browser**, so the control's behaviour after the
  *     press — the toggle, the deadline, the abort path, and the sharing of the
  *     replacement form token across the page — is not exercised here at all.
@@ -237,7 +247,8 @@ function portAnswers(int $port): bool
 }
 
 $state = ['started' => false, 'cleaned' => false, 'proc' => null, 'stub' => null, 'child' => '',
-          'token' => bin2hex(random_bytes(16)), 'left' => -1, 'settings' => []];
+          'token' => bin2hex(random_bytes(16)), 'left' => -1, 'settings' => [],
+          'usageRows' => null, 'usageRenamed' => false, 'usageTrigger' => false];
 
 /**
  * Put back everything this run changed, ONCE. Also a shutdown function.
@@ -283,6 +294,31 @@ function cleanup(): void
         }
     }
     try {
+        // 🧾 #762: if section F2 was killed while the usage record was renamed
+        //    out of the way, put it back FIRST, or every later run (and the
+        //    portal itself) finds no record and refuses every translation.
+        if ($state['usageTrigger'] === true) {
+            $db->query('DROP TRIGGER IF EXISTS `ct_selftest_usage_refuses`');
+            $state['usageTrigger'] = false;
+        }
+        if ($state['usageRenamed'] === true) {
+            q('RENAME TABLE `tblTranslationUsage_ct_hidden` TO `tblTranslationUsage`');
+            $state['usageRenamed'] = false;
+        }
+        // 🧾 THE WHOLE USAGE RECORD IS PUT BACK EXACTLY AS IT WAS. Organisation
+        //    A is a real row, outside this test's number range, so
+        //    `removeWorld()` cannot reach its usage — and a planted fault can
+        //    write a row for an organisation nobody named (planting "every
+        //    organisation shares row 0" left one behind when only A's rows
+        //    were restored). The table is small and this database is a
+        //    throwaway, so the whole of it is written down and put back.
+        if (is_array($state['usageRows']) === true) {
+            q('DELETE FROM `tblTranslationUsage`');
+            foreach ($state['usageRows'] as $row) {
+                q('INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, ?, ?)',
+                    'isii', [(int) $row['siteID'], (string) $row['monthStartUtc'], (int) $row['calls'], (int) $row['costPence']]);
+            }
+        }
         foreach ($state['settings'] as $key => $was) {
             if ($was === null) {
                 q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]);
@@ -482,6 +518,9 @@ if ($siteA <= 0) {
     refuse('the database has no organisation: load web/_sql/full_schema.sql first');
 }
 $siteB = CT_LOW + 11;
+// 🧾 The usage record, written down before anything presses Translate, so
+//    the clean-up can put it back exactly (#762).
+$state['usageRows'] = q('SELECT `siteID`, `monthStartUtc`, `calls`, `costPence` FROM `tblTranslationUsage`');
 // ⚠️ THE COLUMN IS `siteKey`, NOT `siteSlug`. A first draft guessed
 //    `siteSlug` and the run died on its first line with "Unknown column" —
 //    CLAUDE.md's "name things by the right identifier" trap, which says to
@@ -651,6 +690,35 @@ file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'auth_cre
     "<?php\n// Written by tools/content-translation-selftest.php for one run; deleted with its folder.\nreturn " . var_export($creds, true) . ";\n");
 file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', bin2hex(random_bytes(32)));
 
+// 🔬 A PROBE PAGE, in the SCRATCH COPY only and answering only this run's
+//    token, so section F3 can drive `Translation::settle()` with a cost above
+//    0 (#762, independent check). The one route a test can reach, `libre`,
+//    reports 0 pence, so without this nothing proved a REPORTED cost ever
+//    reaches the month's record — deleting that write left every check green
+//    while the money limit stopped moving on every paid provider. It boots the
+//    real portal and calls the real private method; it holds no copy of the
+//    rule. Its output is buffered, because anything printed before a header
+//    would make start-up's own headers fail.
+$probe = <<<'PROBE'
+<?php
+// Written by tools/content-translation-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+ob_start();
+require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
+ob_end_clean();
+header('Content-Type: application/json');
+if (($_SERVER['HTTP_X_CT_PROBE'] ?? '') !== '__TOKEN__') {
+    http_response_code(403);
+    exit('{}');
+}
+$settle = new ReflectionMethod(\Portal\Core\Translation::class, 'settle');
+$words  = $settle->invoke(null, (int) $_GET['site'], (string) $_GET['month'],
+    ['text' => 'probe words', 'costPence' => (int) $_GET['cost']],
+    'tblAnnouncements', (int) $_GET['source'], 'body', 'en', 'fr', 'probe');
+echo json_encode(['words' => $words]);
+PROBE;
+file_put_contents($child . $sep . 'web' . $sep . 'public_html' . $sep . 'ct-probe.php', str_replace('__TOKEN__', $state['token'], $probe));
+
 // ── the stub translation service ─────────────────────────────────────────────
 // Answers in LibreTranslate's shape and writes down what it was asked. It is a
 // SEPARATE process on its own port, because the portal's own server runs one
@@ -668,6 +736,15 @@ file_put_contents(
     json_encode(['q' => $ask, 'source' => is_array($in) ? ($in['source'] ?? '') : '', 'target' => is_array($in) ? ($in['target'] ?? '') : '']) . "\n",
     FILE_APPEND
 );
+// 🔢 PORTUGUESE ALWAYS FAILS, on purpose (#762). Section F2 needs a request
+//    the provider REFUSES, to prove such a request still counts against the
+//    month's number limit. The call is logged above first, so the test can see
+//    it really was made.
+if (is_array($in) === true && (string) ($in['target'] ?? '') === 'pt') {
+    http_response_code(500);
+    echo 'stub refuses Portuguese';
+    exit;
+}
 header('Content-Type: application/json');
 // A marker rather than a translation: the test only needs to know WHICH words
 // reached the provider, and a marker makes that unmistakable.
@@ -694,6 +771,7 @@ setSetting('translation.provider', 'libre');
 setSetting('translation.libre.baseUrl', 'http://127.0.0.1:' . $stubPort);
 setSetting('translation.libre.apiKey', '');
 setSetting('translation.monthCapPence', '5000');
+setSetting('translation.monthCallCap', '1000');
 setSetting('api.translation.content.enabled', 'true');
 
 // ── the portal's own server ──────────────────────────────────────────────────
@@ -705,7 +783,7 @@ header('X-Content-Translation-Selftest: __TOKEN__');
 $root = (string) realpath(__DIR__ . '/web/public_html');
 $uri  = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
 if (preg_match('#(^|/)\.(?!well-known)#', $uri) === 1) { http_response_code(403); exit('403'); }
-if (preg_match('#\.(php\d?|phtml|phar)$#i', $uri) === 1 && in_array($uri, ['/index.php', '/api-docs/index.php', '/error.php'], true) === false) { http_response_code(404); exit('404'); }
+if (preg_match('#\.(php\d?|phtml|phar)$#i', $uri) === 1 && in_array($uri, ['/index.php', '/api-docs/index.php', '/error.php', '/ct-probe.php'], true) === false) { http_response_code(404); exit('404'); }
 $target = $root . '/index.php';
 $real   = ($uri === '/' || preg_match('#^/assets/?$#', $uri) === 1) ? false : realpath($root . $uri);
 if ($real !== false && str_starts_with($real, $root . DIRECTORY_SEPARATOR) === true && is_file($real) === true) {
@@ -1068,10 +1146,33 @@ setSetting('translation.enabled', '1');
 // =============================================================================
 head('F. The monthly limit is obeyed where the money is spent');
 
-// Spending is made to happen by writing a cache row's own cost, because the
+/**
+ * 🧾 Set one organisation's usage record for THIS month, as whole figures
+ *    (#762). Since migration 254 both limits read `tblTranslationUsage`, not
+ *    the cache, so this is how spending is made to happen on a route whose
+ *    provider reports no cost. The month is worked out exactly as
+ *    `Translation::usageMonth()` does, on the same machine.
+ */
+function setUsage(int $site, int $calls, int $pence): void
+{
+    q('INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, ?, ?) '
+      . 'ON DUPLICATE KEY UPDATE `calls` = VALUES(`calls`), `costPence` = VALUES(`costPence`)',
+        'isii', [$site, gmdate('Y-m-01'), $calls, $pence]);
+}
+
+/** @return array{calls:int, pence:int}|null One organisation's usage this month, or null when it has no row. */
+function usageOf(int $site): ?array
+{
+    $row = one('SELECT `calls`, `costPence` FROM `tblTranslationUsage` WHERE `siteID` = ? AND `monthStartUtc` = ?',
+        'is', [$site, gmdate('Y-m-01')]);
+    return $row === null ? null : ['calls' => (int) $row['calls'], 'pence' => (int) $row['costPence']];
+}
+
+// Spending is made to happen by writing the month's usage record, because the
 // stub is reached through the `libre` route and that route reports 0 pence by
 // design. See "WHAT THIS CANNOT SHOW" at the top, and #762.
-q('UPDATE `tblContentTranslation` SET `costPence` = 9999 WHERE `sourceID` = ?', 'i', [$annA]);
+$usageBeforeF = usageOf($siteA) ?? ['calls' => 0, 'pence' => 0];
+setUsage($siteA, $usageBeforeF['calls'], 9999);
 setSetting('translation.monthCapPence', '100');
 
 $before = count(stubCalls());
@@ -1085,6 +1186,11 @@ ok('F01b and nothing was sent to the provider', count(stubCalls()) === $before,
 ok('F01c the refusal says the limit is reached, not that the service failed',
     str_contains(strtolower((string) ($answer['json']['message'] ?? '')), 'limit') === true,
     'said: ' . (string) ($answer['json']['message'] ?? '(nothing)'));
+// ⚠️ A refusal on MONEY must not use up a request slot: money is asked
+//    first precisely so it does not (see the order in `translate()`).
+ok('F01d and a refusal on money took no slot from the number limit',
+    (usageOf($siteA)['calls'] ?? -1) === $usageBeforeF['calls'],
+    'requests counted before ' . $usageBeforeF['calls'] . ', after ' . (usageOf($siteA)['calls'] ?? -1));
 
 $tokA   = freshToken($jarA);
 $answer = press($jarA, 'tblAnnouncements', $annA, 'cy', $tokA);
@@ -1109,8 +1215,396 @@ ok('F03 an organisation row ABOVE the installation\'s limit does not raise it',
     . ' — the installation\'s figure must win, whatever the organisation\'s row says');
 q('DELETE FROM `tblSettings` WHERE `siteID` = ? AND `settingKey` = ?', 'is', [$siteA, 'translation.monthCapPence']);
 
+// 🎯 THE BOUNDARY: spend EXACTLY equal to the limit must refuse. F01 is far
+//    past it (9,999p against 100p), so `>=` turned into `>` left every check
+//    green while a press at exactly the limit still sent (#762 check). A limit
+//    of £1 is reached AT £1.
+setUsage($siteA, $usageBeforeF['calls'], 100);
+setSetting('translation.monthCapPence', '100');
+$before = count(stubCalls());
+$answer = press($jarA, 'tblProjectUpdate', $updA, 'fr', freshToken($jarA));
+ok('F01e spend EXACTLY equal to the money limit is refused, and nothing is sent',
+    $answer['status'] === 503 && count(stubCalls()) === $before,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+
 // Put the money back so the page sections are not refused.
-q('UPDATE `tblContentTranslation` SET `costPence` = 0 WHERE `sourceID` = ?', 'i', [$annA]);
+setUsage($siteA, $usageBeforeF['calls'], 0);
+setSetting('translation.monthCapPence', '5000');
+
+// =============================================================================
+// F2. THE LIMIT ON THE NUMBER OF REQUESTS (#762, D-059)
+// =============================================================================
+// 🔢 THE POINT OF THIS SECTION IS THAT THE MONEY LIMIT CANNOT HELP. Every press
+//    goes through the `libre` route, whose provider reports 0 pence, and the
+//    money limit is set to ONE PENNY throughout: if the number limit did not
+//    exist, nothing here would ever be refused. That is the gap #762 is.
+head('F2. The limit on the NUMBER of requests bites where money cannot');
+
+/** The administrator's page, and which limit it says is stopping translation. */
+$adminSays = static function () use ($jarAdmin): array {
+    $page = req($jarAdmin, 'GET', '/admin/translation');
+    $which = preg_match('/data-limit-reached="([a-z]+)"/', $page['body'], $m) === 1 ? $m[1] : '';
+    return ['page' => $page, 'which' => $which,
+            'words' => strtolower((string) preg_replace('/\s+/u', ' ',
+                html_entity_decode(strip_tags($page['body']), ENT_QUOTES | ENT_HTML5, 'UTF-8')))];
+};
+
+setUsage($siteA, 0, 0);
+setSetting('translation.monthCapPence', '1');
+setSetting('translation.monthCallCap', '2');
+
+$before = count(stubCalls());
+$first  = press($jarA, 'tblProjectUpdate', $updA, 'de', freshToken($jarA));
+$second = press($jarA, 'tblProject', $projA, 'de', freshToken($jarA));
+$used   = usageOf($siteA) ?? ['calls' => -1, 'pence' => -1];
+ok('F2-01 two requests under a limit of two are both translated',
+    $first['status'] === 200 && $second['status'] === 200 && count(stubCalls()) === $before + 2,
+    'HTTP ' . $first['status'] . ' and ' . $second['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+ok('F2-01b both are COUNTED, and the money recorded is still nothing — the route reports no cost',
+    $used['calls'] === 2 && $used['pence'] === 0,
+    'record says ' . $used['calls'] . ' request(s) and ' . $used['pence'] . ' pence');
+
+$before = count(stubCalls());
+$answer = press($jarA, 'tblAnnouncements', $annA, 'zh', freshToken($jarA));
+ok('F2-02 the third request is refused with 503 although the money limit is nowhere near',
+    $answer['status'] === 503, 'got HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 300));
+ok('F2-02b and nothing was sent to the provider', count(stubCalls()) === $before,
+    'calls before ' . $before . ', after ' . count(stubCalls()));
+// The MEMBER is told the organisation's limit is reached, in the same words
+// as for money, and never which: see the note in `api/translation/content`.
+$said = strtolower((string) ($answer['json']['message'] ?? ''));
+ok('F2-02c the member is told the limit is reached, and nothing about money',
+    str_contains($said, 'limit') === true && str_contains($said, 'money') === false
+    && str_contains($said, 'pence') === false && str_contains($said, '£') === false,
+    'said: ' . $said);
+ok('F2-02d and a refused request is not counted', (usageOf($siteA)['calls'] ?? -1) === 2,
+    'record says ' . (usageOf($siteA)['calls'] ?? -1));
+
+$answer = press($jarA, 'tblAnnouncements', $annA, 'cy', freshToken($jarA));
+ok('F2-03 past the number limit, a piece ALREADY translated is still served',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $bodyA,
+    'HTTP ' . $answer['status']);
+
+$admin = $adminSays();
+ok('F2-04 the administrator\'s page opens and finishes',
+    $admin['page']['status'] === 200 && str_contains($admin['page']['body'], '</html>') === true,
+    'HTTP ' . $admin['page']['status']);
+ok('F2-04b it says the NUMBER limit is what is stopping translation — not money',
+    $admin['which'] === 'calls' && str_contains($admin['words'], 'number of translations is reached') === true,
+    'marked "' . $admin['which'] . '"');
+ok('F2-04c and it says raising the money limit will not change that',
+    str_contains($admin['words'], 'raising the money limit will not change this') === true,
+    'without this, an administrator raises the budget and nothing changes — the cost D-059 named');
+// F2-04e: the "not fully set up" warning must be ABSENT on a complete set-up
+// — LibreTranslate pointed at the stub, translation on. F3-03 proves it
+// appears when it should; without this, a condition that showed it on EVERY
+// portal would pass (#762 round 2 measured that), telling every working
+// installation that nothing is being sent.
+ok('F2-04e on a complete set-up the admin page does NOT say translation is not set up',
+    str_contains($admin['page']['body'], 'data-provider-not-ready') === false
+    && str_contains($admin['words'], 'not fully set up') === false,
+    'a working portal must not be told nothing is being sent');
+ok('F2-04d it says LibreTranslate tells the portal nothing about cost',
+    str_contains($admin['page']['body'], 'data-libre-reports-no-cost') === true
+    && str_contains($admin['words'], 'libretranslate does not tell the portal what it charges') === true
+    && str_contains($admin['words'], 'add nothing to the money spent this month') === true,
+    'the honest sentence D-059 welcomed as an addition');
+
+// An organisation row ABOVE the installation's figure does not raise it, and
+// one of 0 — "no limit" — does not either, because 0 is the LARGEST value and
+// is allowed only where the installation itself allows no limit (#668).
+foreach ([['F2-05', '999999', 'a figure above the installation\'s'],
+          ['F2-05b', '0', '"no limit" (0), which is the LARGEST figure, not the smallest']] as [$label, $orgFigure, $what]) {
+    q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, 0)',
+        'isss', [$siteA, 'translation.monthCallCap', $orgFigure, '1000']);
+    $before = count(stubCalls());
+    $answer = press($jarA, 'tblAnnouncements', $annA, 'es', freshToken($jarA));
+    ok($label . ' an organisation row of ' . $what . ' does not lift the installation\'s number limit',
+        $answer['status'] === 503 && count(stubCalls()) === $before,
+        'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+    q('DELETE FROM `tblSettings` WHERE `siteID` = ? AND `settingKey` = ?', 'is', [$siteA, 'translation.monthCallCap']);
+}
+
+// ...and one BELOW it is obeyed: an organisation may hold itself to less.
+setSetting('translation.monthCallCap', '50');
+q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, 0)',
+    'isss', [$siteA, 'translation.monthCallCap', '2', '1000']);
+$before = count(stubCalls());
+$answer = press($jarA, 'tblAnnouncements', $annA, 'es', freshToken($jarA));
+ok('F2-05c an organisation holding itself to LESS than the installation is held to it',
+    $answer['status'] === 503 && count(stubCalls()) === $before,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+// #674: the box on the admin page is filled from the INSTALLATION's row,
+// because that is what Save writes — never from the organisation's.
+$admin = $adminSays();
+ok('F2-05d the admin page\'s box shows the installation\'s figure, not the organisation\'s',
+    preg_match('/name="monthCalls" value="50"/', $admin['page']['body']) === 1,
+    'a box showing the organisation\'s 2 would make one untouched Save everybody\'s limit');
+q('DELETE FROM `tblSettings` WHERE `siteID` = ? AND `settingKey` = ?', 'is', [$siteA, 'translation.monthCallCap']);
+setSetting('translation.monthCallCap', '2');
+
+// 🏢 ONE ORGANISATION'S USE DOES NOT COUNT AGAINST ANOTHER'S. Organisation B
+//    is far over the limit; A has used nothing. Nobody can be SERVED as B in
+//    this harness (see the world's notes), so B's use is written directly — a
+//    state production reaches the ordinary way, by B's members pressing.
+//    B is over the MONEY limit too (99,999 pence against one penny), so a
+//    money figure summed across organisations would also stop A here.
+setUsage($siteB, 50, 99999);
+setUsage($siteA, 0, 0);
+$before = count(stubCalls());
+$answer = press($jarA, 'tblAnnouncements', $annA, 'es', freshToken($jarA));
+ok('F2-06 organisation B being far over BOTH limits does not stop organisation A',
+    $answer['status'] === 200 && count(stubCalls()) === $before + 1,
+    'HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 200));
+ok('F2-06b and A\'s request was counted on A\'s record only — B\'s is untouched',
+    (usageOf($siteA)['calls'] ?? -1) === 1 && (usageOf($siteB)['calls'] ?? -1) === 50,
+    'A ' . (usageOf($siteA)['calls'] ?? -1) . ', B ' . (usageOf($siteB)['calls'] ?? -1));
+
+// 📞 A REQUEST THE PROVIDER REFUSES STILL COUNTS (the stub fails Portuguese).
+//    Deliberate: such a call may have been billed, and a provider failing
+//    every time would otherwise be called without end. See `translate()`.
+setSetting('translation.monthCallCap', '10');
+$before = count(stubCalls());
+$answer = press($jarA, 'tblAnnouncements', $annA, 'pt', freshToken($jarA));
+$said   = strtolower((string) ($answer['json']['message'] ?? ''));
+ok('F2-07 a request the provider refuses really reached the provider, and is answered 503',
+    $answer['status'] === 503 && count(stubCalls()) === $before + 1,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before));
+ok('F2-07b the member is told the service did not answer — NOT that a limit is reached',
+    str_contains($said, 'did not answer') === true && str_contains($said, 'limit') === false,
+    'said: ' . $said . ' — "the limit is reached" when the service merely failed is untrue');
+ok('F2-07c and the failed request IS counted against the number limit',
+    (usageOf($siteA)['calls'] ?? -1) === 2,
+    'record says ' . (usageOf($siteA)['calls'] ?? -1) . ' (1 before the failed request)');
+$admin = $adminSays();
+ok('F2-07d with neither limit reached, the admin page says no limit is stopping translation',
+    $admin['which'] === '', 'marked "' . $admin['which'] . '"');
+
+// 💷 AND THE OTHER WAY ROUND: money reached, number not.
+setUsage($siteA, 0, 1);
+$admin = $adminSays();
+ok('F2-08 with the MONEY limit reached, the admin page says money — not the number',
+    $admin['which'] === 'money' && str_contains($admin['words'], 'monthly money limit is reached') === true
+    && str_contains($admin['words'], 'raising the limit on the number of translations will not change this') === true,
+    'marked "' . $admin['which'] . '"');
+// ⚠️ F2-08c: THE LibreTranslate NOTE IN THE STATE IT WAS WRONG IN (#762
+//    check). The month's record is per organisation, not per provider, so
+//    money spent earlier on a paid company stays in it after switching to
+//    LibreTranslate. The first note said the figure "stays at £0.00" and the
+//    money limit "can never stop a translation" — directly under a banner
+//    saying the money limit WAS stopping them. This is that state: provider
+//    libre, money reached.
+ok('F2-08c with money reached on LibreTranslate, its note never says money cannot stop translation',
+    str_contains($admin['page']['body'], 'data-libre-reports-no-cost') === true
+    && str_contains($admin['words'], 'add nothing to the money spent this month') === true
+    && str_contains($admin['words'], 'stays at £0.00') === false
+    && str_contains($admin['words'], 'can never stop') === false
+    && str_contains($admin['words'], 'is what stops them here') === false,
+    'the note must not contradict the money banner above it');
+setUsage($siteA, 10, 1);
+$admin = $adminSays();
+ok('F2-08b with BOTH reached it says both',
+    $admin['which'] === 'both' && str_contains($admin['words'], 'both monthly limits are reached') === true,
+    'marked "' . $admin['which'] . '"');
+
+// ⛔ "COULD NOT READ" REFUSES — it never means "nothing used, go ahead". The
+//    record is moved out of the way for a moment (put back in `finally`, and
+//    by `cleanup()` if this run is killed in between), which is the state of a
+//    server whose files arrived before anybody pressed "Run migrations".
+setUsage($siteA, 0, 0);
+$before = count(stubCalls());
+q('RENAME TABLE `tblTranslationUsage` TO `tblTranslationUsage_ct_hidden`');
+$state['usageRenamed'] = true;
+try {
+    $answer = press($jarA, 'tblAnnouncements', $annA, 'ko', freshToken($jarA));
+    $admin  = $adminSays();
+} finally {
+    q('RENAME TABLE `tblTranslationUsage_ct_hidden` TO `tblTranslationUsage`');
+    $state['usageRenamed'] = false;
+}
+$said = strtolower((string) ($answer['json']['message'] ?? ''));
+ok('F2-09 when this month\'s use cannot be read, nothing is sent',
+    $answer['status'] === 503 && count(stubCalls()) === $before,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before)
+    . ' — an unreadable record must never become "nothing used yet"');
+ok('F2-09b and the member is told the limit could not be checked, not that it is reached',
+    str_contains($said, 'could not check') === true && str_contains($said, 'reached') === false,
+    'said: ' . $said);
+ok('F2-09c the admin page still opens, and says the record could not be read',
+    $admin['page']['status'] === 200 && str_contains($admin['page']['body'], '</html>') === true
+    && $admin['which'] === 'unreadable',
+    'HTTP ' . $admin['page']['status'] . ', marked "' . $admin['which'] . '"');
+
+// ⛔ AND THE RESERVATION'S OWN FAILURE (#762 check). F2-09 is refused by
+//    `monthUsage()`, so `reserveCall()`'s failure path was never reached, and
+//    changing its catch to "reserved" left every check green — an uncounted
+//    call sent whenever the WRITE failed (a lock-wait timeout, a database user
+//    that may read but not write). Here the read SUCCEEDS and the write is
+//    refused by a trigger, the technique of password-writer-selftest.php
+//    section H. The row exists first, so the reservation's insert takes its
+//    "already there" branch, which is an UPDATE and fires the trigger.
+setUsage($siteA, 0, 0);
+$before = count(stubCalls());
+// `query()`, not `q()`: a trigger cannot be created through a prepared
+// statement ("not supported in the prepared statement protocol").
+$db->query("CREATE TRIGGER `ct_selftest_usage_refuses` BEFORE UPDATE ON `tblTranslationUsage` FOR EACH ROW "
+  . "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'content-translation-selftest refuses this write'");
+$state['usageTrigger'] = true;
+try {
+    $answer = press($jarA, 'tblAnnouncements', $annA, 'ko', freshToken($jarA));
+} finally {
+    $db->query('DROP TRIGGER IF EXISTS `ct_selftest_usage_refuses`');
+    $state['usageTrigger'] = false;
+}
+$said = strtolower((string) ($answer['json']['message'] ?? ''));
+ok('F2-10 when the month\'s use can be READ but the request cannot be COUNTED, nothing is sent',
+    $answer['status'] === 503 && count(stubCalls()) === $before && str_contains($said, 'could not check') === true,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before) . '; said: ' . $said);
+
+// =============================================================================
+// F3. NOTHING IS COUNTED FOR A REQUEST THAT IS NEVER SENT, AND A REPORTED
+//     COST REACHES THE RECORD (#762 independent check)
+// =============================================================================
+head('F3. A request never sent is not counted; a reported cost is recorded');
+
+// 🔌 No key: `anthropicTranslate()` answers null without contacting anybody.
+//    Asked after the reservation, that used a slot and the admin page called
+//    it "sent" — measured by the independent check: two presses, nothing sent,
+//    the month's limit of two exhausted. The key is set to empty by name so
+//    the run never depends on what this database happens to hold.
+setUsage($siteA, 0, 0);
+setSetting('translation.monthCallCap', '2');
+setSetting('translation.anthropic.apiKey', '');
+foreach ([['F3-01', 'anthropic', 'a paid company with NO KEY'],
+          ['F3-02', 'no-such-company', 'a provider name the portal does not know']] as [$label, $chosen, $what]) {
+    setSetting('translation.provider', $chosen);
+    $before = count(stubCalls());
+    $answer = press($jarA, 'tblAnnouncements', $annA, 'ja', freshToken($jarA));
+    $said   = strtolower((string) ($answer['json']['message'] ?? ''));
+    ok($label . ' with ' . $what . ', nothing is sent, nothing is COUNTED, and the member is told why',
+        $answer['status'] === 503 && count(stubCalls()) === $before
+        && (usageOf($siteA)['calls'] ?? 0) === 0 && str_contains($said, 'not been fully set up') === true,
+        'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $before)
+        . '; counted ' . (usageOf($siteA)['calls'] ?? 0) . '; said: ' . $said);
+}
+setSetting('translation.provider', 'anthropic');
+$admin = $adminSays();
+ok('F3-03 the admin page says the chosen company has no key, and calls nothing "sent"',
+    str_contains($admin['page']['body'], 'data-provider-not-ready') === true && $admin['which'] === '',
+    'marked "' . $admin['which'] . '"');
+setSetting('translation.provider', 'libre');
+
+// 💷 A REPORTED COST REACHES THE MONTH'S RECORD. Driven through the probe page,
+//    which calls the real `Translation::settle()` with 37 pence.
+$before = usageOf($siteA) ?? ['calls' => 0, 'pence' => 0];
+$probeAnswer = (static function () use ($port, $state, $siteA): array {
+    $handle = curl_init('http://127.0.0.1:' . $port . '/ct-probe.php?site=' . $siteA . '&month=' . gmdate('Y-m-01')
+        . '&cost=37&source=' . (CT_LOW + 90));
+    curl_setopt_array($handle, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 30, CURLOPT_PROXY => '',
+        CURLOPT_NOPROXY => '*', CURLOPT_HTTPHEADER => ['X-CT-Probe: ' . $state['token']]]);
+    $raw = curl_exec($handle);
+    return ['status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE), 'body' => (string) $raw];
+})();
+$after = usageOf($siteA) ?? ['calls' => 0, 'pence' => 0];
+ok('F3-04 a cost the provider REPORTS is added to this month\'s money figure',
+    $probeAnswer['status'] === 200 && $after['pence'] === $before['pence'] + 37,
+    'HTTP ' . $probeAnswer['status'] . ' ' . substr($probeAnswer['body'], 0, 200)
+    . '; pence ' . $before['pence'] . ' → ' . $after['pence']);
+ok('F3-04b and it is not counted as a second request — the slot was taken before the call',
+    $after['calls'] === $before['calls'], 'requests ' . $before['calls'] . ' → ' . $after['calls']);
+
+// 📌 THE WHOLE ENGINE FILE IS PINNED, by a hard gate this check runs. No
+//    request here can reach a provider that reports more than 0, so nothing
+//    that RUNS can see a paid translation skip a limit or record a wrong cost.
+//
+//    ⚠️ FIVE REVIEW ROUNDS, EACH DEFEATED BY ONE LINE JUST OUTSIDE WHAT WAS
+//       PINNED: two substrings; then from the provider call (a `$month`
+//       reassignment above it); then from the provider choice (a paid-provider
+//       shortcut above it); then the whole of `translate()` (the same shortcut
+//       moved into `lookupCached()`, `capPence()`, `callCap()` or `settle()`,
+//       and a second `translate()` whose name differed only in CAPITALS, which
+//       PHP treats as the same name). The #485/#763 ending: pin the unit PHP
+//       loads. `check_translation_engine_pinned.py` pins all of
+//       `web/_core/Translation.php` as one token per line, read by PHP's own
+//       tokeniser, so comments and spacing (`if(` or `if (`) are free and any
+//       change to the code is red until it is repinned on purpose. It runs
+//       before every push and on every pull request; this check runs it too,
+//       so the self-test cannot pass with the engine changed.
+//
+//    ROUND 6 then found a pinned line could still change MEANING: inside
+//    `namespace Portal\Core` an unqualified `ceil()` is looked up in that
+//    namespace first, so one `function ceil()` in ANY other `Portal\Core`
+//    file zeroed every paid cost with all of this green. Every built-in in the
+//    engine is now written with a leading `\`, and the gate refuses one that
+//    is not.
+//
+//    WHAT NEITHER CAN SEE: the code of the classes the engine calls by design
+//    — `SettingLimit`, `App`, `Site`, `ContentTranslation` — and the endpoint
+//    that calls the engine. Any could be edited to treat paid providers
+//    differently, and nothing here reaches a paid provider; review of a change
+//    to them is what covers it.
+$engineGate = (static function () use ($repo): array {
+    $out = [];
+    $code = 1;
+    // From the repository root: the gate's paths are relative to it, and this
+    // test has changed directory by now.
+    exec('cd ' . escapeshellarg($repo) . ' && python3 tools/audit-checks/check_translation_engine_pinned.py 2>&1',
+        $out, $code);
+    return [$code, implode("\n", $out)];
+})();
+ok('F3-05 the whole translation engine (`Translation.php`) matches its pinned code',
+    $engineGate[0] === 0, $engineGate[1]);
+
+// 🔌 `providerReady()` AS A TABLE, BOTH DIRECTIONS (#762 round 2). It is
+//    public and needs no database, so every case is cheap — and round 2 found
+//    half of it pinned by nothing: LibreTranslate's case could answer `true`
+//    for an empty address (counting a request never sent), and `case
+//    'google':` could be deleted (refusing a paying customer's working set-up),
+//    each with every other check green. The REAL class is loaded from the
+//    repository; nothing here copies its rule.
+require_once $webSrc . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Translation.php';
+$readyCases = [];
+foreach (['anthropic', 'openai', 'google', 'deepl'] as $paid) {
+    $readyCases[] = [$paid . ' with a key', $paid, [$paid => ['apiKey' => 'k-123']], true];
+    $readyCases[] = [$paid . ' with an EMPTY key', $paid, [$paid => ['apiKey' => '']], false];
+    $readyCases[] = [$paid . ' with NO key setting at all', $paid, [], false];
+    $readyCases[] = [$paid . ' with somebody ELSE\'s key only', $paid, ['libre' => ['apiKey' => 'k-123', 'baseUrl' => 'http://x']], false];
+}
+$readyCases[] = ['libre with an address', 'libre', ['libre' => ['baseUrl' => 'http://127.0.0.1:1']], true];
+$readyCases[] = ['libre with an address and no key (its key is optional)', 'libre', ['libre' => ['baseUrl' => 'https://lt.example', 'apiKey' => '']], true];
+$readyCases[] = ['libre with an EMPTY address', 'libre', ['libre' => ['baseUrl' => '']], false];
+$readyCases[] = ['libre with an address of only "/"', 'libre', ['libre' => ['baseUrl' => '/']], false];
+$readyCases[] = ['libre with no address setting (the built-in one applies)', 'libre', [], true];
+$readyCases[] = ['an unknown provider name, even with a key', 'no-such-company', ['no-such-company' => ['apiKey' => 'k']], false];
+$readyCases[] = ['an empty provider name', '', [], false];
+$readyWrong = [];
+foreach ($readyCases as [$what, $name, $settingsCase, $expected]) {
+    if (\Portal\Core\Translation::providerReady($name, $settingsCase) !== $expected) {
+        $readyWrong[] = $what . ' should be ' . ($expected === true ? 'READY' : 'NOT ready');
+    }
+}
+ok('F3-07 `providerReady()` answers every case in its table, both ways (' . count($readyCases) . ' cases)',
+    $readyWrong === [] && count($readyCases) === 23,
+    implode('; ', $readyWrong) . ' (cases: ' . count($readyCases) . ', pinned at 23 so a deleted case is seen)');
+
+// 🗂️ THE CACHED-TRANSLATIONS CARD COUNTS THIS ORGANISATION, and counts at all
+//    (#800 item 2): it printed a key its query never produced, so it showed 0
+//    on every installation, and it counted the whole installation. One row of
+//    organisation B is put in the cache so a whole-installation count differs.
+q('INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, `sourceLanguage`, `targetLanguage`, '
+  . '`translatedContent`, `provider`, `costPence`, `siteID`) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
+    'sisssssi', ['tblAnnouncements', CT_LOW + 91, 'body', 'en', 'fr', 'B words', 'libre', $siteB]);
+$ownCount = (int) (one('SELECT COUNT(*) AS n FROM `tblContentTranslation` WHERE `siteID` = ?', 'i', [$siteA])['n'] ?? -1);
+$allCount = (int) (one('SELECT COUNT(*) AS n FROM `tblContentTranslation`')['n'] ?? -1);
+$admin = $adminSays();
+$shown = preg_match('/data-cached-count="(\d+)"/', $admin['page']['body'], $m) === 1 ? (int) $m[1] : -1;
+ok('F3-06 the "Cached translations" card shows this organisation\'s count, which is not nought',
+    $ownCount > 0 && $shown === $ownCount && $shown !== $allCount,
+    'card ' . $shown . '; this organisation ' . $ownCount . '; whole installation ' . $allCount);
+
+setUsage($siteA, 0, 0);
+setUsage($siteB, 0, 0);
+setSetting('translation.monthCallCap', '1000');
 setSetting('translation.monthCapPence', '5000');
 
 // =============================================================================
@@ -1291,7 +1785,7 @@ head('J. The monthly limit\'s save handler refuses what it cannot read');
 //    its field arrives non-empty, and this section sends none — stated rather
 //    than assumed, having read the handler.
 foreach (['translation.enabled', 'translation.provider', 'translation.monthCapPence',
-          'translation.anthropic.model', 'translation.openai.model',
+          'translation.monthCallCap', 'translation.anthropic.model', 'translation.openai.model',
           'translation.libre.baseUrl'] as $pressable) {
     rememberSetting($pressable);
 }
@@ -1314,15 +1808,19 @@ $capNow = static function (): int {
  *    safety depends on where it sits in the file is one reordering away from
  *    posting a member's words to a company nobody chose.
  */
-$saveCap = static function (string $typed) use ($jarAdmin, $stubPort): array {
+$saveCap = static function (string $typed, mixed $calls = '1000') use ($jarAdmin, $stubPort): array {
     $page = req($jarAdmin, 'GET', '/admin/translation');
     $tok  = token($page['body']);
+    // `monthCalls` is sent too (#762): the handler refuses a save without it,
+    // exactly as it refuses one without a money figure, so leaving it out would
+    // make every money case below fail for the wrong reason.
     $answer = req($jarAdmin, 'POST', '/admin/translation/save', [
         'csrf_token' => $tok,
         'provider'   => 'libre',
         'enabled'    => '1',
         'libre_base' => 'http://127.0.0.1:' . $stubPort,
         'monthCap'   => $typed,
+        'monthCalls' => $calls,
     ]);
     return $answer;
 };
@@ -1341,7 +1839,13 @@ $capCases = [
     ['J08', ' 50 ',    5000,   true,  'spaces round a figure are trimmed, not refused'],
     ['J09', '50.00',   5000,   true,  'pence are accepted'],
     ['J10', '1000',    100000, true,  'the hard maximum exactly is accepted'],
-    ['J11', '2000',    100000, false, 'above the hard maximum is refused'],
+    // ⚠️ J10b EXISTS SO J11 CAN FAIL (#762). Without a smaller figure between
+    //    them, J11's "stays at 100000" is satisfied equally by a refusal and
+    //    by a CLAMP to the maximum — the silent reduction #668 forbids. Found
+    //    by planting a clamp in the number limit's twin of this check, which
+    //    stayed green for exactly this reason.
+    ['J10b', '12',     1200,   true,  'and the page still works afterwards'],
+    ['J11', '2000',    1200,   false, 'above the hard maximum is refused, not reduced to it'],
 ];
 foreach ($capCases as [$label, $typed, $expected, $shouldStore, $what]) {
     $before = $capNow();
@@ -1369,6 +1873,71 @@ ok('J12 every refusal is recorded in the activity log',
     . ' figure(s) were refused. A refusal nobody can see is not a refusal that helps anybody');
 
 setSetting('translation.monthCapPence', '5000');
+
+// =============================================================================
+// J2. THE NUMBER LIMIT'S OWN SAVE (#762)
+// =============================================================================
+// The same discipline as J: a good value before each bad one, so "unchanged"
+// cannot be mistaken for "the bad value was stored", and every refusal must
+// be recorded under its OWN activity type, so the log says which of the two
+// limits somebody tried to set wrongly.
+head('J2. The number limit\'s save refuses what it cannot read, and never clamps');
+
+/** What the installation's stored number limit is. */
+$callsNow = static function (): int {
+    $row = one('SELECT `settingValue` AS v FROM `tblSettings` '
+        . 'WHERE `settingKey` = ? AND `siteID` IS NULL LIMIT 1', 's', ['translation.monthCallCap']);
+    return $row === null ? -1 : (int) $row['v'];
+};
+$callRefusalsBefore = (int) (one('SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `activityType` = ?',
+    's', ['TranslationCallCapRefused'])['n'] ?? 0);
+
+$callCases = [
+    ['J2-01', '7',       7,      true,  'an ordinary number is stored'],
+    ['J2-02', '',        7,      false, 'an EMPTY box is refused — (int) would make it 0, which is NO LIMIT'],
+    ['J2-03', '8',       8,      true,  'and the page still works afterwards'],
+    ['J2-04', '-3',      8,      false, 'a negative number is refused, not clamped to 0'],
+    ['J2-05', '9',       9,      true,  'and the page still works afterwards'],
+    ['J2-06', '12.5',    9,      false, 'a fraction is refused, not rounded to a figure nobody typed'],
+    ['J2-07', 'abc',     9,      false, 'text that is not a number is refused'],
+    ['J2-08', ['5'],     9,      false, 'an ARRAY posted as the value is refused'],
+    ['J2-09', '0',       0,      true,  'a deliberate 0 IS accepted — it is how "no limit" is said'],
+    ['J2-10', ' 40 ',    40,     true,  'spaces round a number are trimmed, not refused'],
+    ['J2-11', '100000',  100000, true,  'the hard maximum exactly is accepted'],
+    // J2-11b: a smaller number first, or a CLAMP to the maximum would leave
+    // J2-12 reading "unchanged" — see J10b.
+    ['J2-11b', '11',     11,     true,  'and the page still works afterwards'],
+    ['J2-12', '100001',  11,     false, 'one above the hard maximum is refused, not reduced to it'],
+];
+foreach ($callCases as [$label, $typed, $expected, $shouldStore, $what]) {
+    $before = $callsNow();
+    $answer = $saveCap('50', $typed);
+    $after  = $callsNow();
+    ok(
+        $label . ' typed ' . json_encode($typed) . ': ' . $what,
+        $answer['status'] === 302 && ($shouldStore === true ? $after === $expected : $after === $before),
+        'HTTP ' . $answer['status'] . ', stored ' . $before . ' → ' . $after
+        . ', expected ' . ($shouldStore === true ? 'to become ' . $expected : 'to stay ' . $before)
+    );
+}
+$callRefusalsAfter = (int) (one('SELECT COUNT(*) AS n FROM `tblActivityLogs` WHERE `activityType` = ?',
+    's', ['TranslationCallCapRefused'])['n'] ?? 0);
+$shouldRefuseCalls = count(array_filter($callCases, static fn (array $row): bool => $row[3] === false));
+ok('J2-13 every refusal of a number limit is recorded, under its own type',
+    $callRefusalsAfter - $callRefusalsBefore === $shouldRefuseCalls,
+    'recorded ' . ($callRefusalsAfter - $callRefusalsBefore) . '; ' . $shouldRefuseCalls . ' were refused');
+
+// A bad number must not take the money figure (or anything else) down with
+// it: both are judged BEFORE anything is written.
+$saveCap('50', '100');
+$moneyBefore = $capNow();
+$answer = $saveCap('33', 'abc');
+ok('J2-14 a refused number limit saves NOTHING — the money figure typed beside it is not stored either',
+    $answer['status'] === 302 && $capNow() === $moneyBefore && $callsNow() === 100,
+    'money ' . $moneyBefore . ' → ' . $capNow() . ', number ' . $callsNow());
+
+setSetting('translation.monthCapPence', '5000');
+setSetting('translation.monthCallCap', '1000');
 
 // =============================================================================
 // The verdict

@@ -291,8 +291,26 @@ class ContentTranslation
             case 'already-that-language':
                 return 'This is already in that language.';
             case 'cap-reached':
+                // Said for EITHER monthly limit, money or number (#762). See
+                // the note in `_apps/translation/api/content.php` for why a
+                // member is not told which.
                 return 'This organisation has reached its translation limit for '
                      . 'this month. Ask an administrator.';
+            case 'limit-unknown':
+                // #762: the record of this month's use could not be read or
+                // written, so nothing was sent. On a money path "we could not
+                // tell" must never become "go ahead". Not "the limit is
+                // reached", which nobody knows.
+                return 'Translation is not available just now, because the portal '
+                     . 'could not check this month\'s translation limit. Nothing was '
+                     . 'sent. Ask an administrator.';
+            case 'not-set-up':
+                // #762: the translation company chosen has no key, or is not
+                // one the portal knows, so the request was never sent and
+                // nothing was counted or charged — which, unlike a failure
+                // after sending, the portal DOES know.
+                return 'Translation has not been fully set up for this organisation, '
+                     . 'so nothing was sent. Ask an administrator.';
             case 'provider-failed':
                 // ⚠️ DO NOT SAY "NOTHING HAS BEEN CHARGED". It was said here, in
                 //    api-spec.json and on the help page, and the portal CANNOT

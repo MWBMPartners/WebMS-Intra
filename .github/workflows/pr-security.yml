@@ -1427,6 +1427,18 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_translation_text_from_db.py
 
+      # The translation ENGINE's code is pinned whole (#762, D-059, D-065). It
+      # decides whether a PAID translation is checked against the money and
+      # number limits and what cost is recorded, and no test can reach a paid
+      # provider - so five review rounds each switched the limits off for paid
+      # providers with ONE line that every behavioural test passed, each just
+      # outside whatever region had been pinned. Comments and spacing are free;
+      # any change to the code fails until it is repinned on purpose.
+      - name: 'Translation engine matches its pinned code (hard gate, #762)'
+        id: translation_engine_pinned
+        if: always()
+        run: python3 -I tools/audit-checks/check_translation_engine_pinned.py
+
       # ONE place writes the replacement anti-forgery token into the page, and
       # it writes every carrier (#768). FIVE separate copies of that rule
       # existed and no two agreed about how many places a page holds the token:

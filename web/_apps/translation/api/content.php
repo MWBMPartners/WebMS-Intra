@@ -135,16 +135,45 @@ if ($out === null) {
     ]);
 }
 
-// ⛔ false covers three different things and the engine does not say which:
-//    switched off, the month's limit reached, or the outside company did not
-//    answer. The first cannot happen here (the gate above tested it), so the
-//    message names the two that can and does not assert either. Saying "the
-//    limit is reached" when the service was merely down would be a false
-//    statement about the customer's money.
+// ⛔ false covers several different things, and since #762 the engine SAYS
+//    which through `Translation::lastRefusal()`. This handler used to work it
+//    out again by re-reading the spend against the money limit afterwards —
+//    which could not tell "the provider failed on the call that used the last
+//    of the month" from "the month was already used up", and saying "the limit
+//    is reached" when the service was merely down is a false statement about
+//    the customer's money.
+//
+//    🔢 THE TWO LIMITS GET THE SAME WORDS, ON PURPOSE (D-059 left the member's
+//    message to the build). A member cannot see either figure, cannot change
+//    either, and the action open to them is the same — ask an administrator —
+//    so naming money would tell them about a budget they cannot see, and
+//    naming a count would invite them to wonder whether they had pressed too
+//    often. The ADMIN page is where WHICH limit is reached is said, because
+//    that is the person who raises one, and raising the wrong one changes
+//    nothing.
 if ($out === false) {
-    $cap = Translation::capPence();
-    $spent = Translation::monthSpendPence();
-    $reason = ($cap > 0 && $spent >= $cap) ? 'cap-reached' : 'provider-failed';
+    $why = Translation::lastRefusal();
+    if ($why === 'money' || $why === 'calls') {
+        $reason = 'cap-reached';
+    } elseif ($why === 'unreadable') {
+        $reason = 'limit-unknown';
+    } elseif ($why === 'not-set-up') {
+        // #762: no key, or a provider the engine does not know, so nothing
+        // was sent and nothing was counted. Not "did not answer": nobody was
+        // asked.
+        $reason = 'not-set-up';
+    } elseif ($why === 'off') {
+        // A BACKSTOP THAT CANNOT BE REACHED TODAY. The gate above and the
+        // engine's own test both read `App::settings()`, which is loaded once
+        // per request and never re-read, so the two cannot disagree within
+        // one request. Kept so that if the engine ever reads the setting
+        // afresh, the answer is still the true one rather than "the service
+        // did not answer". (An earlier comment called this "a moment's race";
+        // there is no race.)
+        $reason = 'switched-off';
+    } else {
+        $reason = 'provider-failed';
+    }
     ApiResponse::error(ContentTranslation::refusalWords($reason), 503);
 }
 

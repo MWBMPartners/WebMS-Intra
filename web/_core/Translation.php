@@ -16,8 +16,16 @@
  * (sourceTable, sourceID, sourceField, targetLanguage). Translating the
  * same prayer request into Welsh twice hits cache the second time.
  *
- * A per-site monthly cost cap (translation.monthCapPence) blocks new API
- * calls once exceeded; cached lookups still serve.
+ * TWO monthly limits, per organisation, stop new provider calls once either
+ * is reached; cached lookups still serve (#762, D-059):
+ *
+ *   translation.monthCapPence  money, as each provider REPORTS it;
+ *   translation.monthCallCap   the NUMBER of requests sent to the provider,
+ *                              which works whatever a provider reports.
+ *
+ * Both are counted in `tblTranslationUsage`, one row per organisation per
+ * calendar month in UTC, written at the moment a provider call is made — not
+ * read back out of the cache (see `monthUsage()` for why).
  *
  * @package   Portal\Core
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/278
@@ -27,6 +35,18 @@
 declare(strict_types=1);
 
 namespace Portal\Core;
+
+// ⚠️ EVERY BUILT-IN FUNCTION AND CONSTANT IN THIS FILE IS WRITTEN WITH A
+//    LEADING `\` (`\ceil()`, `\curl_exec()`, `\CURLOPT_POST`), AND THAT IS
+//    LOAD-BEARING, NOT STYLE (#762 round 6). Inside a namespace PHP looks an
+//    unqualified function or constant up in THIS namespace first, so one line
+//    in ANY other `Portal\Core` file — `function ceil(...)` returning 0 — would
+//    have zeroed every paid provider's recorded cost while this file, its
+//    pin and every test stayed green; measured, 2400 pence became 0. With the
+//    `\` written, the name can only mean PHP's own, and the token pin
+//    (`tools/audit-checks/check_translation_engine_pinned.py`) protects the
+//    `\` itself; that gate also refuses an unqualified built-in, so a new
+//    call cannot quietly reopen this.
 
 class Translation
 {
@@ -45,6 +65,81 @@ class Translation
     public const MAX_CAP_PENCE     = 100000;
 
     /**
+     * 🔢 The monthly limit on the NUMBER of requests sent to the provider —
+     *    its built-in default and its hard maximum (#762, D-059).
+     *
+     * WHY THERE IS A SECOND LIMIT AT ALL. The money limit compares what each
+     * provider REPORTS. LibreTranslate reports nothing (`libreTranslate()`
+     * answers a cost of 0, always), so on that route the money limit could
+     * never stop anything — an organisation on a limit of £1 could translate
+     * without end — and `translation.libre.baseUrl` ships pointing at
+     * libretranslate.com, which charges. The owner chose to count the calls as
+     * well (D-059) rather than invent a price per call: a budget measured in
+     * money that is not the real money is a budget somebody will plan against.
+     *
+     * WHY 1,000 — roughly TEN TIMES ORDINARY USE, AND A STOP ON RUNAWAY USE.
+     * A provider call happens only the FIRST time a piece is put into a
+     * language — after that the cache answers and nothing is sent — so
+     * ordinary use is bounded by "pieces published this month" times
+     * "languages members read in". A congregation publishing a few
+     * announcements a week, read in two or three languages, makes tens of
+     * calls a month, not hundreds.
+     *
+     * WHICH LIMIT BITES FIRST DEPENDS ON THE PROVIDER, measured with this
+     * file's own price formulas for an announcement of about 1,000 characters
+     * (about 300 tokens in and 250 out). An earlier version of this comment
+     * said the money limit "stays the one that normally bites" and that 1,000
+     * calls cost "of the order of £10" everywhere; both were wrong, and an
+     * independent check measured it:
+     *
+     *   Google, DeepL      ~1p a call   1,000 calls ~£10   → the COUNT bites
+     *                                                         first, long
+     *                                                         before the £50
+     *                                                         money default
+     *                                                         (which would
+     *                                                         allow ~5,000)
+     *   Anthropic          ~13p a call  £50 ≈ 385 calls    → MONEY bites first
+     *   OpenAI             ~20p a call  £50 ≈ 250 calls    → MONEY bites first
+     *   LibreTranslate     reports 0p                      → only the COUNT
+     *                                                         can bite
+     *
+     * So on Google and DeepL this default is the binding limit, and a customer
+     * there gets about a fifth of what the money default alone would have
+     * allowed. That is accepted on purpose: 1,000 is still ten times ordinary
+     * use, an administrator who needs more raises it on the same page, and no
+     * customer installation exists yet, so nobody loses anything they had.
+     *
+     * WHY 100,000 AS THE HARD MAXIMUM. Not a judgement about use; it is there so
+     * a mistyped figure cannot become an unbounded bill, exactly as
+     * `MAX_CAP_PENCE` is for money. "No limit" is 0, deliberately chosen, and is
+     * the LARGEST value (#668's zero trap) — so it is allowed only where the
+     * installation itself allows no limit, which `SettingLimit` decides.
+     */
+    public const DEFAULT_CALL_CAP = 1000;
+    public const MAX_CALL_CAP     = 100000;
+
+    /**
+     * Why the last `translate()` in this request answered false, as one word,
+     * so a caller can say WHICH limit stopped it (D-059) without working it out
+     * again from a fresh read — a fresh read cannot tell "the provider failed on
+     * the call that used the last slot" from "the slot was already gone", and
+     * saying "the limit is reached" when the service merely failed is a false
+     * statement about the customer's money.
+     *
+     *   ''           nothing refused (or translate() has not run)
+     *   'off'        translation is switched off
+     *   'not-set-up' the provider is unknown or has no key, so nothing could
+     *                be sent and nothing was counted
+     *   'money'      the month's money limit is reached
+     *   'calls'      the month's limit on the number of requests is reached
+     *   'unreadable' this month's use could not be read or recorded, so
+     *                nothing was sent: on a money path, "we could not tell"
+     *                must never become "go ahead"
+     *   'provider'   the provider was asked and did not give a usable answer
+     */
+    private static string $lastRefusal = '';
+
+    /**
      * Translate `text` from `sourceLang` to `targetLang`, persisting the
      * result in tblContentTranslation. Returns the translated string, or
      * null if the source is already in the target language, or false on
@@ -61,12 +156,13 @@ class Translation
         string $targetLang,
         string $text
     ): string|false|null {
+        self::$lastRefusal = '';
         $sourceLang = self::normaliseLocale($sourceLang);
         $targetLang = self::normaliseLocale($targetLang);
         if ($sourceLang === $targetLang) {
             return null;
         }
-        if (trim($text) === '') {
+        if (\trim($text) === '') {
             return null;
         }
 
@@ -82,6 +178,7 @@ class Translation
         //    spends nothing. The class comment has always said so.
         $settings = App::settings()['translation'] ?? [];
         if ((string) ($settings['enabled'] ?? '0') !== '1') {
+            self::$lastRefusal = 'off';
             return false;
         }
 
@@ -101,19 +198,162 @@ class Translation
         //    installation allows (D-013): the two administrators may be
         //    different parties, so an organisation may hold itself to less and
         //    may never allow itself more.
-        $cap = self::capPence();
-        if ($cap > 0 && self::monthSpendPence() >= $cap) {
+        //
+        //    🔢 AND THE COUNT (#762, D-059), asked SECOND and by a different
+        //    mechanism, for two reasons that are both load-bearing:
+        //
+        //    • Money can only be checked before the call and added after it,
+        //      because nobody knows the cost until the provider answers. The
+        //      count CAN be taken before the call, as one atomic statement
+        //      (`reserveCall()`), so two presses at the same moment cannot both
+        //      slip under it. That is why the count is the one that holds under
+        //      concurrency and the money is the one that may overshoot by one
+        //      call's cost per simultaneous press.
+        //    • Money goes first so a refusal on money uses up no slot.
+        //
+        //    🧾 BOTH ARE READ FROM `tblTranslationUsage`, NOT FROM THE CACHE.
+        //    See `monthUsage()`: counting cache rows would count PIECES, not
+        //    CALLS, and the difference is real today and would grow the day
+        //    anybody makes an edited announcement translate afresh.
+        //
+        //    ⛔ AND "COULD NOT READ" REFUSES. `monthSpendPence()` used to answer
+        //    0 when its statement could not be prepared — on a money path that
+        //    is "we could not tell" becoming "nothing spent, go ahead". Under
+        //    this portal's strict mysqli reporting the branch was unreachable
+        //    in a web request (the prepare throws, so the request died with a
+        //    bare 500 before any call), so it failed CLOSED by accident; it is
+        //    closed on purpose now, with a reason the member is told.
+        // 🔌 IS THERE ANYBODY TO SEND IT TO — asked BEFORE anything is
+        //    counted (#762, independent check). With no key, or a provider name
+        //    this class does not know, the provider methods answer null WITHOUT
+        //    contacting anybody. Asked after the reservation, that used a slot
+        //    and the admin page called it "sent", so a portal switched on
+        //    before its key was typed in exhausted its month's limit on
+        //    requests that never left the server. Nothing is counted here,
+        //    because nothing was sent.
+        $provider = (string) ($settings['provider'] ?? 'anthropic');
+        if (self::providerReady($provider, $settings) === false) {
+            self::$lastRefusal = 'not-set-up';
             return false;
         }
 
-        $provider = (string) ($settings['provider'] ?? 'anthropic');
+        $siteId = Site::id();
+        $month  = self::usageMonth();
+        $usage  = self::monthUsage($siteId, $month);
+        if ($usage === null) {
+            self::$lastRefusal = 'unreadable';
+            return false;
+        }
+        if (self::moneyReached($usage['pence']) === true) {
+            self::$lastRefusal = 'money';
+            return false;
+        }
+        $reserved = self::reserveCall($siteId, $month, self::callCap());
+        if ($reserved !== 'reserved') {
+            self::$lastRefusal = $reserved === 'full' ? 'calls' : 'unreadable';
+            return false;
+        }
+
+        // 📞 FROM HERE A REQUEST IS SENT, AND IT IS COUNTED WHETHER OR NOT IT
+        //    SUCCEEDS, on purpose. `providerReady()` above means the request
+        //    really goes out (a key is there, a provider is known), so a failure
+        //    from here is the company refusing, timing out, or answering
+        //    something unusable — and a request that reached it may be billed.
+        //    A provider that fails every time (a wrong key, a server that
+        //    refuses) would otherwise be called without end on a limit that
+        //    never moves. Allowing less is recoverable; allowing more is not.
+        //    The cost, said plainly: a provider broken for a while uses up
+        //    slots, and an administrator may have to raise the figure for the
+        //    rest of the month once it is fixed — the admin page says which
+        //    limit is reached so they know which to raise. (A connection that
+        //    fails before reaching the company at all — a mistyped address —
+        //    also counts: the portal cannot tell that apart from a timeout
+        //    after the company accepted the request.)
         $result = self::providerTranslate($provider, $settings, $text, $sourceLang, $targetLang);
         if ($result === null) {
+            self::$lastRefusal = 'provider';
             return false;
         }
 
-        self::persist($sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, $result['text'], $provider, $result['costPence']);
-        return $result['text'];
+        // 💷 The text is RETURNED by `settle()`, which is also what records the
+        //    cost, so the two cannot come apart: removing the call removes the
+        //    translation as well, and every test that translates anything fails.
+        return self::settle($siteId, $month, $result, $sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, $provider);
+    }
+
+    /**
+     * 💷 What happens after a provider ANSWERED: add its reported cost to this
+     *    month's record, keep the translation in the cache, and hand the words
+     *    back.
+     *
+     * One method on purpose (#762, independent check): when recording the
+     * cost was a separate line in `translate()`, deleting it left every test
+     * green — the only route a test can drive reports a cost of 0 — and the
+     * money limit then never moved on any paid provider. Now the words come
+     * back THROUGH this method, so the translation path cannot skip it, and
+     * the self-test drives this method directly with a cost above 0.
+     *
+     * @param array{text:string, costPence:int} $result What the provider answered.
+     */
+    private static function settle(int $siteId, string $month, array $result, string $sourceTable, int $sourceID,
+                                   string $sourceField, string $sourceLang, string $targetLang, string $provider): string
+    {
+        self::recordSpend($siteId, $month, (int) $result['costPence']);
+        self::persist($sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, (string) $result['text'], $provider, (int) $result['costPence']);
+        return (string) $result['text'];
+    }
+
+    /**
+     * 🔌 Would a request to this provider actually be SENT? (#762)
+     *
+     * True when the provider is one this class knows AND what it needs to make
+     * a request is there: an API key for the four paid companies, an address
+     * for LibreTranslate (whose key is optional). False means the provider
+     * method would answer null without contacting anybody, so nothing may be
+     * counted. **These conditions must match the provider methods below** —
+     * each of them still tests its own key first, as defence in depth, and if
+     * one ever needs something new before it can send, add it here too.
+     *
+     * @param string               $provider The provider name from the settings.
+     * @param array<string, mixed> $settings The `translation` settings group.
+     */
+    public static function providerReady(string $provider, array $settings): bool
+    {
+        switch ($provider) {
+            case 'anthropic':
+            case 'openai':
+            case 'google':
+            case 'deepl':
+                return (string) ($settings[$provider]['apiKey'] ?? '') !== '';
+            case 'libre':
+                return \rtrim((string) ($settings['libre']['baseUrl'] ?? 'https://libretranslate.com'), '/') !== '';
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * 💰 Is this month's MONEY limit reached, for the organisation being
+     *    served? The ONE comparison, asked by `translate()` and by the admin
+     *    page, so the page cannot say "reached" while a press still sends.
+     *    `>=`, because a limit of £50 is reached AT £50.
+     */
+    public static function moneyReached(int $pence): bool
+    {
+        $cap = self::capPence();
+        return $cap > 0 && $pence >= $cap;
+    }
+
+    /**
+     * 🔢 Is this month's limit on the NUMBER of requests reached? For the admin
+     *    page. `translate()` does not ask this: it takes a slot with
+     *    `reserveCall()`, whose condition `calls < cap` is the same rule
+     *    written as one atomic statement.
+     */
+    public static function callsReached(int $calls): bool
+    {
+        $cap = self::callCap();
+        return $cap > 0 && $calls >= $cap;
     }
 
     /**
@@ -128,7 +368,7 @@ class Translation
      */
     public static function detect(string $text, string $fallback = 'en'): string
     {
-        $sample = mb_strtolower(mb_substr($text, 0, 600));
+        $sample = \mb_strtolower(\mb_substr($text, 0, 600));
         $signals = [
             'es' => [' el ', ' la ', ' que ', ' por ', ' para ', ' como ', ' con ', ' una ', ' ¿', ' ¡', 'ñ'],
             'fr' => [' le ', ' la ', ' les ', ' que ', ' pour ', ' avec ', ' une ', ' nous ', ' vous ', 'ç', 'œ'],
@@ -146,7 +386,7 @@ class Translation
         foreach ($signals as $code => $needles) {
             $score = 0;
             foreach ($needles as $n) {
-                $score += substr_count($sample, $n);
+                $score += \substr_count($sample, $n);
             }
             if ($score > $bestScore) {
                 $bestScore = $score;
@@ -178,18 +418,13 @@ class Translation
      * 💰 The most that may be spent on translation in a month, in pence — the
      *    ONE answer to that question.
      *
-     * **DO NOT CALL THIS "THIS ORGANISATION'S" LIMIT WITHOUT A QUALIFIER, which
-     * an earlier version of this docblock did.** The LIMIT can differ by
-     * organisation, because `SettingLimit` lets an organisation tighten the
-     * installation's figure. The SPEND it is compared against cannot:
-     * `monthSpendPence()` sums `tblContentTranslation.costPence` across the
-     * whole installation, because that table has no organisation column. So on
-     * an installation serving several organisations, **one organisation's
-     * spending counts against every organisation's limit** — recorded as #765
-     * rather than fixed here, because fixing it needs a column and a migration
-     * and the owner's decision about what to do with rows already there. The
-     * class header's "a per-site monthly cost cap" has always had the same
-     * problem.
+     * The LIMIT can differ by organisation, because `SettingLimit` lets an
+     * organisation tighten the installation's figure, and the SPEND it is
+     * compared against is per organisation too: #765 made it so, and since
+     * #762 it is read from `tblTranslationUsage` by `monthUsage()`. (This
+     * docblock said, until #762, that the spend was summed across the whole
+     * installation — true when it was written, untrue after #765, and left
+     * standing in the one place a reader of the limit would look.)
      *
      * THREE TIERS, each able to tighten the one above it and none to loosen it
      * (D-013): the hard maximum below, then the installation, then the
@@ -218,48 +453,202 @@ class Translation
     }
 
     /**
-     * Month-to-date spend in pence — **across EVERY organisation on this
-     * installation**, because `tblContentTranslation` has no organisation
-     * column to filter on.
+     * 🔢 The most provider requests allowed in a month — the ONE answer to that
+     *    question (#762, D-059). The twin of `capPence()`, built the same way.
      *
-     * That is fine on a single-organisation installation and wrong on a shared
-     * one, where it lets one organisation's spending exhaust another's limit
-     * (#765). It is stated here as well as on `capPence()` because this is the
-     * figure the admin page shows as "This month spend", which a customer will
-     * read as their own.
+     * Three tiers through `SettingLimit`, never compared by hand: the hard
+     * maximum, then the installation, then the organisation, each able to
+     * tighten the one above and none to loosen it (D-013). Zero means no
+     * limit, so it is the LARGEST value (`$zeroIsLargest`), for exactly the
+     * reasons written on `capPence()`.
+     *
+     * @return int Requests per calendar month (UTC), or 0 for no limit.
      */
-    public static function monthSpendPence(): int
+    public static function callCap(): int
     {
-        $db = App::db();
-        // 🏢 THIS ORGANISATION'S SPENDING, NOT THE INSTALLATION'S (#765).
-        //    The budget this is compared against can differ by organisation —
-        //    `SettingLimit` lets one hold itself to less than the installation
-        //    allows, and the two administrators may be different parties
-        //    (D-013). Summing across the installation meant one organisation's
-        //    spending counted against every organisation's budget.
-        //
-        //    A row with NO organisation is counted by nobody, deliberately: it
-        //    is a translation whose source has since been deleted, and
-        //    attributing it would move real money between two parties' budgets
-        //    on a guess. See migration 250.
-        $siteId = Site::id();
-        $stmt = $db->prepare(
-            'SELECT COALESCE(SUM(`costPence`), 0) FROM `tblContentTranslation` '
-            . 'WHERE `siteID` = ? AND `translatedAt` >= DATE_FORMAT(NOW(), "%Y-%m-01")'
-        );
-        if ($stmt === false) {
-            return 0;
+        return SettingLimit::effective('translation.monthCallCap', self::DEFAULT_CALL_CAP, self::MAX_CALL_CAP, true);
+    }
+
+    /**
+     * Why the last `translate()` in this request answered false. See the
+     * property for the words. A handler asks this rather than re-reading the
+     * figures, because only `translate()` knows which test actually refused.
+     */
+    public static function lastRefusal(): string
+    {
+        return self::$lastRefusal;
+    }
+
+    /**
+     * 🗓️ The month a call made now is counted in: the first day of the current
+     *    calendar month IN UTC, as `Y-m-01`.
+     *
+     * Worked out ONCE per `translate()` and handed to every statement, so the
+     * read, the reservation and the spend all agree about which month it is
+     * even across midnight on the last day. UTC because a moment is stored in
+     * UTC here (the time-zone rule in `.claude/CLAUDE.md`), and because the
+     * database's own `NOW()` is in whatever zone the server's session happens
+     * to be — #783 is that exact fault elsewhere. The cost, said plainly: for
+     * an organisation east of Greenwich the month turns over a few hours after
+     * its own midnight, and west of it a few hours before.
+     */
+    public static function usageMonth(): string
+    {
+        return \gmdate('Y-m-01');
+    }
+
+    /**
+     * 🧾 This organisation's use this month — requests made and pence reported
+     *    — or NULL when it cannot be read.
+     *
+     * WHY A RECORD OF ITS OWN, AND NOT THE CACHE (measured, #762). The money
+     * figure used to be `SUM(costPence)` over `tblContentTranslation`, the cache.
+     * The cache holds ONE row per piece, field and language — `persist()` is an
+     * upsert on that key — so it can only ever say how many PIECES were
+     * translated, never how many CALLS were made. Today the two differ in three
+     * ways:
+     *
+     *   • two presses of the same new piece at the same moment both miss the
+     *     cache, both call the provider and both pay, and leave one row
+     *     carrying the second call's cost;
+     *   • a call that fails, or answers something unusable, writes no row at
+     *     all, though it may have been billed (see `provider-failed`); and
+     *   • NOTHING invalidates a cached row when its source is edited:
+     *     `grep -rn tblContentTranslation web/` (6 November 2026) finds no
+     *     DELETE anywhere, and the only writers are migration 250's backfill
+     *     and `persist()`, which runs only after `lookupCached()` found
+     *     nothing. So an edited announcement keeps showing the translation of
+     *     its OLD words (a fault of its own, reported with #762). The day somebody
+     *     fixes that by translating afresh, every re-translation would cost
+     *     money and leave still one row — so a figure read from the cache
+     *     would quietly start under-counting a money path.
+     *
+     * So both limits are counted here, at the moment a call is made, one row
+     * per organisation per month, and the cache is only a cache.
+     *
+     * @param int    $siteId The organisation being served.
+     * @param string $month  `usageMonth()`.
+     *
+     * @return array{calls:int, pence:int}|null
+     */
+    public static function monthUsage(int $siteId, string $month): ?array
+    {
+        try {
+            $stmt = App::db()->prepare(
+                'SELECT `calls`, `costPence` FROM `tblTranslationUsage` '
+                . 'WHERE `siteID` = ? AND `monthStartUtc` = ? LIMIT 1'
+            );
+            if ($stmt === false) {
+                return null;
+            }
+            $stmt->bind_param('is', $siteId, $month);
+            $stmt->execute();
+            $stmt->bind_result($calls, $pence);
+            $hit = $stmt->fetch() === true;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            // ⚠️ The usual cause is a server where the files have arrived and
+            //    "Run migrations" has not been pressed, so the table is not
+            //    there yet. Refusing is the recoverable direction; the admin
+            //    page says the record could not be read.
+            return null;
         }
-        // ⚠️ BIND IT. The query gained a `?` when the sum was scoped to this
-        //    organisation, and a prepared statement executed without its
-        //    parameter throws — which would have turned a budget check into a
-        //    fatal on the one page that spends money.
-        $stmt->bind_param('i', $siteId);
-        $stmt->execute();
-        $stmt->bind_result($s);
-        $stmt->fetch();
-        $stmt->close();
-        return (int) $s;
+        if ($hit === false) {
+            return ['calls' => 0, 'pence' => 0];
+        }
+        return ['calls' => (int) $calls, 'pence' => (int) $pence];
+    }
+
+    /**
+     * 🎟️ Take one request slot for this organisation this month, or say why not.
+     *
+     * ONE conditional `UPDATE` does the test and the count together, so two
+     * presses at the same moment cannot both see "999 of 1,000" and both go
+     * through: InnoDB takes the row lock, the second waits, then finds 1,000
+     * and matches nothing. The row is made first if this is the month's first
+     * call, by an insert that changes nothing when it is already there.
+     *
+     * `$cap` of 0 means no limit, and the slot is still counted, so the admin
+     * page can say how many requests were made even where nothing limits them.
+     *
+     * @return string 'reserved', 'full', or 'unreadable' (nothing was counted
+     *                and nothing may be sent).
+     */
+    private static function reserveCall(int $siteId, string $month, int $cap): string
+    {
+        try {
+            $db = App::db();
+            $make = $db->prepare(
+                'INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) '
+                . 'VALUES (?, ?, 0, 0) ON DUPLICATE KEY UPDATE `calls` = `calls`'
+            );
+            if ($make === false) {
+                return 'unreadable';
+            }
+            $make->bind_param('is', $siteId, $month);
+            $make->execute();
+            $make->close();
+
+            $take = $db->prepare(
+                'UPDATE `tblTranslationUsage` SET `calls` = `calls` + 1 '
+                . 'WHERE `siteID` = ? AND `monthStartUtc` = ? AND (? = 0 OR `calls` < ?)'
+            );
+            if ($take === false) {
+                return 'unreadable';
+            }
+            $take->bind_param('isii', $siteId, $month, $cap, $cap);
+            $take->execute();
+            $taken = $take->affected_rows;
+            $take->close();
+        } catch (\Throwable $e) {
+            return 'unreadable';
+        }
+        // affected_rows is exactly 1 when the slot was taken: the row exists
+        // (made just above) and `calls + 1` always changes it. Anything else —
+        // 0 when the limit is reached, -1 on an error — sends nothing.
+        return $taken === 1 ? 'reserved' : 'full';
+    }
+
+    /**
+     * 💷 Add what a call that SUCCEEDED was reported to cost.
+     *
+     * Its slot was taken before the call, so only the money is added here. If
+     * this write fails the translation is still returned — the provider has
+     * already been paid and refusing the words would waste that — and the
+     * failure is written to PHP's error log in fixed words, so an under-count
+     * is at least visible to whoever reads that log. Never the fault's own
+     * words: they can quote the statement and its values.
+     */
+    private static function recordSpend(int $siteId, string $month, int $costPence): void
+    {
+        if ($costPence <= 0) {
+            return;
+        }
+        try {
+            $stmt = App::db()->prepare(
+                'UPDATE `tblTranslationUsage` SET `costPence` = `costPence` + ? '
+                . 'WHERE `siteID` = ? AND `monthStartUtc` = ?'
+            );
+            if ($stmt === false) {
+                \error_log('Translation: the cost of a translation could not be recorded; this month\'s spend is under-counted.');
+                return;
+            }
+            $stmt->bind_param('iis', $costPence, $siteId, $month);
+            $stmt->execute();
+            $matched = $stmt->affected_rows;
+            $stmt->close();
+            // ⚠️ NO ROW MATCHED (#762 round 2). The reservation made this
+            //    month's row moments ago, so this means it vanished in between
+            //    — a restore in that window, say — and the spend was lost
+            //    without any error. Logged in fixed words naming only the
+            //    organisation, never the figure's context.
+            if ($matched !== 1) {
+                \error_log('Translation: the cost of a translation for organisation ' . $siteId
+                    . ' could not be recorded because this month\'s usage row was not there; this month\'s spend is under-counted.');
+            }
+        } catch (\Throwable $e) {
+            \error_log('Translation: the cost of a translation could not be recorded; this month\'s spend is under-counted.');
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -306,34 +695,34 @@ class Translation
                 'content' => 'Translate from ' . $from . ' to ' . $to . ":\n\n" . $text,
             ]],
         ];
-        $ch = curl_init('https://api.anthropic.com/v1/messages');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        $ch = \curl_init('https://api.anthropic.com/v1/messages');
+        \curl_setopt($ch, \CURLOPT_RETURNTRANSFER, true);
+        \curl_setopt($ch, \CURLOPT_POST, true);
+        \curl_setopt($ch, \CURLOPT_POSTFIELDS, \json_encode($payload));
+        \curl_setopt($ch, \CURLOPT_HTTPHEADER, [
             'x-api-key: ' . $key,
             'anthropic-version: 2023-06-01',
             'content-type: application/json',
         ]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $resp = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        \curl_setopt($ch, \CURLOPT_TIMEOUT, 30);
+        $resp = \curl_exec($ch);
+        $code = (int) \curl_getinfo($ch, \CURLINFO_HTTP_CODE);
         // No curl_close() here: the handle has been an object since PHP 8.0 and is
         // freed when it goes out of scope. The call has done nothing since then,
         // and PHP 8.5 raises a "deprecated" notice every time it runs (#673).
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
-        $body = json_decode((string) $resp, true);
-        if (is_array($body) === false || isset($body['content'][0]['text']) === false) {
+        $body = \json_decode((string) $resp, true);
+        if (\is_array($body) === false || isset($body['content'][0]['text']) === false) {
             return null;
         }
-        $out = trim((string) $body['content'][0]['text']);
+        $out = \trim((string) $body['content'][0]['text']);
         $inTok  = (int) ($body['usage']['input_tokens']  ?? 0);
         $outTok = (int) ($body['usage']['output_tokens'] ?? 0);
         // Haiku 4.5 list price ~$0.80 / $4 per MTok → tiny per call.
-        $costPence = (int) ceil((($inTok * 0.00008) + ($outTok * 0.0004)) * 100);
-        return ['text' => $out, 'costPence' => max(0, $costPence)];
+        $costPence = (int) \ceil((($inTok * 0.00008) + ($outTok * 0.0004)) * 100);
+        return ['text' => $out, 'costPence' => \max(0, $costPence)];
     }
 
     /**
@@ -356,29 +745,29 @@ class Translation
             ],
             'temperature' => 0.2,
         ];
-        $ch = curl_init('https://api.openai.com/v1/chat/completions');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        $ch = \curl_init('https://api.openai.com/v1/chat/completions');
+        \curl_setopt($ch, \CURLOPT_RETURNTRANSFER, true);
+        \curl_setopt($ch, \CURLOPT_POST, true);
+        \curl_setopt($ch, \CURLOPT_POSTFIELDS, \json_encode($payload));
+        \curl_setopt($ch, \CURLOPT_HTTPHEADER, [
             'Authorization: Bearer ' . $key,
             'Content-Type: application/json',
         ]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $resp = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        \curl_setopt($ch, \CURLOPT_TIMEOUT, 30);
+        $resp = \curl_exec($ch);
+        $code = (int) \curl_getinfo($ch, \CURLINFO_HTTP_CODE);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
-        $body = json_decode((string) $resp, true);
-        $out = is_array($body) === true ? trim((string) ($body['choices'][0]['message']['content'] ?? '')) : '';
+        $body = \json_decode((string) $resp, true);
+        $out = \is_array($body) === true ? \trim((string) ($body['choices'][0]['message']['content'] ?? '')) : '';
         if ($out === '') {
             return null;
         }
         $inTok  = (int) ($body['usage']['prompt_tokens']     ?? 0);
         $outTok = (int) ($body['usage']['completion_tokens'] ?? 0);
-        $costPence = (int) ceil((($inTok * 0.00015) + ($outTok * 0.0006)) * 100);
-        return ['text' => $out, 'costPence' => max(0, $costPence)];
+        $costPence = (int) \ceil((($inTok * 0.00015) + ($outTok * 0.0006)) * 100);
+        return ['text' => $out, 'costPence' => \max(0, $costPence)];
     }
 
     /**
@@ -392,29 +781,29 @@ class Translation
         if ($key === '') {
             return null;
         }
-        $url = 'https://translation.googleapis.com/language/translate/v2?key=' . rawurlencode($key);
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
+        $url = 'https://translation.googleapis.com/language/translate/v2?key=' . \rawurlencode($key);
+        $ch = \curl_init($url);
+        \curl_setopt($ch, \CURLOPT_RETURNTRANSFER, true);
+        \curl_setopt($ch, \CURLOPT_POST, true);
+        \curl_setopt($ch, \CURLOPT_POSTFIELDS, \http_build_query([
             'q'      => $text,
             'source' => $from,
             'target' => $to,
             'format' => 'text',
         ]));
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $resp = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        \curl_setopt($ch, \CURLOPT_TIMEOUT, 30);
+        $resp = \curl_exec($ch);
+        $code = (int) \curl_getinfo($ch, \CURLINFO_HTTP_CODE);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
-        $body = json_decode((string) $resp, true);
-        $out = is_array($body) === true ? (string) ($body['data']['translations'][0]['translatedText'] ?? '') : '';
+        $body = \json_decode((string) $resp, true);
+        $out = \is_array($body) === true ? (string) ($body['data']['translations'][0]['translatedText'] ?? '') : '';
         if ($out === '') {
             return null;
         }
         // Google charges per source char; ~$20/M → ~1.5p / 10k chars.
-        $cost = (int) ceil((mb_strlen($text) / 10000) * 1.5);
+        $cost = (int) \ceil((\mb_strlen($text) / 10000) * 1.5);
         return ['text' => $out, 'costPence' => $cost];
     }
 
@@ -430,28 +819,28 @@ class Translation
             return null;
         }
         // Free-tier keys end in ':fx' and use a different host.
-        $host = str_ends_with($key, ':fx') === true ? 'api-free.deepl.com' : 'api.deepl.com';
-        $ch = curl_init('https://' . $host . '/v2/translate');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query([
+        $host = \str_ends_with($key, ':fx') === true ? 'api-free.deepl.com' : 'api.deepl.com';
+        $ch = \curl_init('https://' . $host . '/v2/translate');
+        \curl_setopt($ch, \CURLOPT_RETURNTRANSFER, true);
+        \curl_setopt($ch, \CURLOPT_POST, true);
+        \curl_setopt($ch, \CURLOPT_POSTFIELDS, \http_build_query([
             'text'        => $text,
-            'source_lang' => strtoupper($from),
-            'target_lang' => strtoupper($to),
+            'source_lang' => \strtoupper($from),
+            'target_lang' => \strtoupper($to),
         ]));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: DeepL-Auth-Key ' . $key]);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $resp = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        \curl_setopt($ch, \CURLOPT_HTTPHEADER, ['Authorization: DeepL-Auth-Key ' . $key]);
+        \curl_setopt($ch, \CURLOPT_TIMEOUT, 30);
+        $resp = \curl_exec($ch);
+        $code = (int) \curl_getinfo($ch, \CURLINFO_HTTP_CODE);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
-        $body = json_decode((string) $resp, true);
-        $out = is_array($body) === true ? (string) ($body['translations'][0]['text'] ?? '') : '';
+        $body = \json_decode((string) $resp, true);
+        $out = \is_array($body) === true ? (string) ($body['translations'][0]['text'] ?? '') : '';
         if ($out === '') {
             return null;
         }
-        $cost = (int) ceil((mb_strlen($text) / 10000) * 1.5);
+        $cost = (int) \ceil((\mb_strlen($text) / 10000) * 1.5);
         return ['text' => $out, 'costPence' => $cost];
     }
 
@@ -462,25 +851,25 @@ class Translation
      */
     private static function libreTranslate(array $settings, string $text, string $from, string $to): ?array
     {
-        $base = rtrim((string) ($settings['libre']['baseUrl'] ?? 'https://libretranslate.com'), '/');
+        $base = \rtrim((string) ($settings['libre']['baseUrl'] ?? 'https://libretranslate.com'), '/');
         $key  = (string) ($settings['libre']['apiKey'] ?? '');
         $payload = ['q' => $text, 'source' => $from, 'target' => $to, 'format' => 'text'];
         if ($key !== '') {
             $payload['api_key'] = $key;
         }
-        $ch = curl_init($base . '/translate');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-        $resp = curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $ch = \curl_init($base . '/translate');
+        \curl_setopt($ch, \CURLOPT_RETURNTRANSFER, true);
+        \curl_setopt($ch, \CURLOPT_POST, true);
+        \curl_setopt($ch, \CURLOPT_POSTFIELDS, \json_encode($payload));
+        \curl_setopt($ch, \CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+        \curl_setopt($ch, \CURLOPT_TIMEOUT, 30);
+        $resp = \curl_exec($ch);
+        $code = (int) \curl_getinfo($ch, \CURLINFO_HTTP_CODE);
         if ($resp === false || $code < 200 || $code >= 300) {
             return null;
         }
-        $body = json_decode((string) $resp, true);
-        $out = is_array($body) === true ? (string) ($body['translatedText'] ?? '') : '';
+        $body = \json_decode((string) $resp, true);
+        $out = \is_array($body) === true ? (string) ($body['translatedText'] ?? '') : '';
         if ($out === '') {
             return null;
         }
@@ -520,6 +909,13 @@ class Translation
         //
         //    `siteID` is set on a duplicate too: a row rewritten for a new
         //    translation of the same thing belongs to whoever owns it now.
+        //
+        //    🧾 SINCE #762 NEITHER LIMIT READS THIS TABLE. The month's spend and
+        //    the month's number of requests are counted in `tblTranslationUsage`
+        //    at the moment a call is made (see `monthUsage()` for why the cache
+        //    cannot count calls). `costPence` and `siteID` are still written
+        //    here as a record of what each cached piece cost and whose it was;
+        //    nothing sums them any more, and nothing should start to.
         $siteId = Site::id();
         $stmt = $db->prepare(
             'INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, '
@@ -543,9 +939,9 @@ class Translation
      */
     public static function normaliseLocale(string $locale): string
     {
-        $bare = strtolower(trim($locale));
-        if (strpos($bare, '-') !== false) {
-            $bare = substr($bare, 0, strpos($bare, '-'));
+        $bare = \strtolower(\trim($locale));
+        if (\strpos($bare, '-') !== false) {
+            $bare = \substr($bare, 0, \strpos($bare, '-'));
         }
         return $bare === '' ? 'en' : $bare;
     }

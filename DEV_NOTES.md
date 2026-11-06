@@ -20294,3 +20294,89 @@ was caught by `check_capability_registry.py` going red — the file had lost its
 `App::can(Capabilities::GROUPS_MANAGE)` gate — and `git checkout --` put it back.
 **This repository's memory already records that trap from earlier the same day.
 Use distinct backup names, or better, use git.**
+
+### A cache cannot count calls (#762)
+
+`tblContentTranslation` looked like the obvious place to count translations: one row per
+translation, with `costPence` on it, and the money limit already summed it. It is a
+CACHE — one row per (table, row, field, language), written by an upsert — so it answers
+"how many pieces have been translated", never "how many requests were made". Today the two
+differ three ways: two simultaneous presses pay twice and leave one row; a failed request
+leaves no row though it may have been billed; and nothing invalidates a cached row when its
+source is edited (`grep -rn tblContentTranslation web/` on 6 November 2026: no DELETE
+anywhere; the only writers are migration 250's backfill and `persist()`, reached only on a
+cache miss). That last one is also a live fault of its own: an edited announcement keeps
+showing the translation of its old words. The day somebody fixes it by translating afresh,
+a count of cache rows would silently fall behind the bill.
+
+So both limits are counted in `tblTranslationUsage`, at the moment a request is made.
+**When a limit is about money, count the thing that costs money, where it is spent — not
+a by-product of it.**
+
+Two further points worth keeping:
+
+- **A counter must count only what it says it counts.** The first version took the slot
+  before asking whether the request could be sent at all, so a portal switched on before
+  its key was typed exhausted its month on requests that never left the server, and the
+  admin page called them "sent". Ask "can this be sent" before counting; keep counting a
+  request that was sent and failed.
+- **A sentence about a per-provider property must not be phrased as a per-organisation
+  one.** "With LibreTranslate the money spent stays at £0.00" was untrue whenever money had
+  been spent earlier in the month on a paid company, because the record is per
+  organisation; it then contradicted the money banner above it. Say what the provider
+  ADDS, not what the figure IS.
+- **A guard checked only for being PRESENT is half a guard.** The "not set up" warning was
+  proved to appear when it should; nothing proved it was absent on a working set-up, so a
+  condition showing it on every portal passed. Every warning needs its negative case.
+- **A substring pin on unreachable code is not enough; pin the whole region.** Two
+  substrings around `return self::settle(` let one inserted line zero the cost. The
+  repository's settled remedy (#485, #763, D-065) — compare the whole region as code —
+  closed it.
+- **A cost path no test can reach should be coupled to one it can.** Recording the cost
+  was a separate line, reached only by a provider reporting more than 0, which no test
+  can call; deleting it left every check green. Now the words come back through the
+  method that records the cost.
+- **A count can be reserved; money cannot.** The cost is known only after the provider
+  answers, so money is check-then-add and can overshoot by one call per simultaneous
+  press. The count is one conditional UPDATE (`... SET calls = calls + 1 WHERE ... AND
+  (? = 0 OR calls < ?)`, `affected_rows === 1`), which InnoDB serialises. Money is asked
+  FIRST so a money refusal uses no slot (F01d pins that order).
+- **Two fail-closed reads mask each other.** With the usage table missing, both
+  `monthUsage()` and `reserveCall()` refuse. Planting a fail-open in `monthUsage()` alone
+  left the press refused (the reservation still refuses) and only the admin page's
+  "could not be read" check went red; it took both planted together to turn F2-09 red.
+  Defence in depth is real here, but say it: each guard alone is not proved by the press.
+- **A check that a value "stayed the same" cannot tell a refusal from a clamp to the same
+  value.** J11 (money, "stays at 100000" after J10 stored exactly 100000) passed with a
+  planted clamp; so did the new number check until a smaller value was saved between them.
+
+### Pinning code no test can reach: eight rounds, and where it ended (#762)
+
+No test here can reach a paid translation company, so whether a PAID translation is checked
+against the limits could only be guarded by pinning the code. Every round from 3 to 7 found
+the same thing one step further out — a single line, outside whatever was pinned, that
+switched the limits off for paid providers while every check stayed green:
+
+| round | what was pinned | the one line that got past it |
+|---|---|---|
+| 1 | two substrings | `$result['costPence'] = 0;` above the return |
+| 2 | from the provider call to the return | `$month = '1999-01-01';` above it |
+| 3 | from the provider choice; start "exactly once" | a paid-provider shortcut above it; a dead copy plus a respelled live one |
+| 4 | the whole of `translate()` | the shortcut moved into a method it calls; a second `Translate()` (PHP ignores case) |
+| 5 | the whole FILE, as tokens | `function ceil()` in ANY other `Portal\Core` file — an unqualified call is looked up in the namespace first |
+| 6 | every built-in written `\ceil`; the gate refusing unqualified ones by a list of positions to skip | the skipped positions hid real lookups (a ternary's middle, a `switch` case) |
+| 7 | refuse in EVERY position except the four that can never be a lookup | — (round 8 clean) |
+
+**Three lessons, each already recorded once here and needed again.** (1) **Pin the unit PHP
+loads, not a region of it** — #485 and #763 ended the same way. (2) **A pinned line can
+still change MEANING if a name in it is resolved somewhere else**: inside a namespace, PHP
+looks an unqualified function or constant up in that namespace first, so write built-ins
+fully qualified wherever a guard depends on what a line does (#807 carries this to the
+other money paths). (3) **A rule that lists the shapes to skip is a spelling list; refuse by
+default and allow only what the grammar proves harmless** — the #763 lesson, met by the
+guard that was written to close #763's own kind of hole.
+
+**Where it honestly stops:** the code of the classes the engine calls by design
+(`SettingLimit`, `App`, `Site`, `ContentTranslation`) and the endpoint that calls it. Any of
+them could be edited to treat paid providers differently; review of a change to them is what
+covers that, and the gate says so rather than pushing its edge outwards again.

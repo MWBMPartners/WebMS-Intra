@@ -8,8 +8,8 @@
  * Every setting this handler saves is portal-wide: it is written with nothing
  * in the siteID column, so it is the value EVERY organisation on this
  * installation uses. That includes the translation provider, its account keys,
- * the address of a self-hosted translation server, and the monthly spending
- * limit.
+ * the address of a self-hosted translation server, and the two monthly limits
+ * (money, and the number of requests sent to the provider — #762).
  *
  * Until 11 September 2026 the only check was App::isAdmin(), which is true for
  * an administrator of a SINGLE organisation as well as for a global
@@ -192,9 +192,55 @@ if ($capPence > Translation::MAX_CAP_PENCE) {
 //    cannot fail — which is a shape this repository has had to delete more
 //    than once.
 
+// 🔢 THE LIMIT ON THE NUMBER OF REQUESTS, judged exactly as the money one is
+//    and for the same reasons (#762, D-059). It is the limit that still works
+//    when a provider reports no cost, so a figure that silently became "no
+//    limit" here would remove the only limit LibreTranslate has.
+//
+//    • A STRING FIRST: `monthCalls[]=7` arrives as an array (see the money
+//      field above for the 27 October shape).
+//    • WHOLE NUMBERS ONLY. A request is not divisible, and `12.5` read as 12
+//      or 13 is the portal choosing a figure nobody typed. Refused with the
+//      reason, like `abc`, an empty box and a minus sign — each of which
+//      `(int)` would have made 0, which is NO LIMIT.
+//    • NINE DIGITS for the same reason as the money field: so that a FIGURE
+//      that is merely too large meets the "too large" refusal, which says what
+//      the maximum is, rather than being called "not a number".
+//    • A DIFFERENT activity type from the money refusal, so the log says which
+//      of the two limits somebody tried to set wrongly.
+//    • Both fields are judged BEFORE anything is written, so a bad count does
+//      not take the provider, the keys or the money limit down with it.
+$callsPosted = $_POST['monthCalls'] ?? '';
+$callsRaw    = is_string($callsPosted) === true ? trim($callsPosted) : '';
+if (preg_match('/^\d{1,9}$/', $callsRaw) !== 1) {
+    Logger::activity(
+        'TranslationCallCapRefused',
+        'A monthly limit on the number of translations that could not be read as a whole number was refused.'
+    );
+    $_SESSION['flash_msg'] = 'Nothing was saved. The monthly limit on the number of translations has to be '
+        . 'a whole number — for example 1000. Enter 0 if you want no limit on the number at all.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/translation'));
+    exit();
+}
+$callCap = (int) $callsRaw;
+if ($callCap > Translation::MAX_CALL_CAP) {
+    Logger::activity(
+        'TranslationCallCapRefused',
+        'A monthly limit on the number of translations above the most this portal allows was refused.'
+    );
+    $_SESSION['flash_msg'] = 'Nothing was saved. The monthly limit on the number of translations cannot be more than '
+        . number_format(Translation::MAX_CALL_CAP)
+        . '. Enter 0 for no limit, or a smaller number.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/translation'));
+    exit();
+}
+
 $upsert($db, 'translation.enabled',        isset($_POST['enabled']) === true ? '1' : '0', false);
 $upsert($db, 'translation.provider',       $provider, false);
 $upsert($db, 'translation.monthCapPence',  (string) $capPence, false);
+$upsert($db, 'translation.monthCallCap',   (string) $callCap, false);
 $upsert($db, 'translation.anthropic.model', trim((string) ($_POST['anth_model']  ?? 'claude-haiku-4-5-20251001')), false);
 $upsert($db, 'translation.openai.model',    trim((string) ($_POST['oa_model']    ?? 'gpt-4o-mini')), false);
 $upsert($db, 'translation.libre.baseUrl',   trim((string) ($_POST['libre_base']  ?? 'https://libretranslate.com')), false);

@@ -5256,6 +5256,22 @@ CREATE TABLE IF NOT EXISTS `tblUserTranslationPref` (
     CONSTRAINT `fk_utp_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- Translation requests and reported spend, per organisation per month (#762,
+-- migration 254). Both monthly limits are counted HERE, at the moment a request
+-- is made, and not from `tblContentTranslation` above: that table is a cache
+-- with one row per piece and language, so it can count pieces but never
+-- requests. See the migration's header and `Translation::monthUsage()`.
+-- No foreign key on purpose, for migration 250's reason: what an installation
+-- was charged should outlive the organisation that caused it.
+CREATE TABLE IF NOT EXISTS `tblTranslationUsage` (
+    `siteID`        INT  NOT NULL COMMENT 'The organisation whose members asked for these translations. Never empty: a key with an empty part does not hold (#487), and a row nobody owns would count against nobody',
+    `monthStartUtc` DATE NOT NULL COMMENT 'The first day of the calendar month, IN UTC, that these requests were made in',
+    `calls`         INT  NOT NULL DEFAULT 0 COMMENT 'How many requests were sent to the translation company this month, counted just BEFORE each is sent, whether or not an answer then came back (#762). A request never sent, because no key is set or the provider is unknown, is not counted',
+    `costPence`     INT  NOT NULL DEFAULT 0 COMMENT 'What the translation company reported those requests cost, in pence. LibreTranslate reports nothing, so on that route this stays 0 and only `calls` can limit use',
+    PRIMARY KEY (`siteID`, `monthStartUtc`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Translation requests and reported spend, per organisation per month (#762). Read and written only by Portal\\Core\\Translation.';
+
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/translation',      'admin/translation/index.php',  1),
     ('admin/translation/save', 'admin/translation/save.php',   1),
@@ -5270,6 +5286,9 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'translation.displayIcon',      'fa-solid fa-language', 'fa-solid fa-language', 0),
     (NULL, 'translation.provider',         'anthropic', 'anthropic', 0),
     (NULL, 'translation.monthCapPence',    '5000', '5000', 0),
+    -- #762, migration 254: the limit on the NUMBER of requests, which still
+    -- works when a provider reports no cost. 0 means no limit.
+    (NULL, 'translation.monthCallCap',     '1000', '1000', 0),
     (NULL, 'translation.anthropic.apiKey', '', '', 1),
     (NULL, 'translation.anthropic.model',  'claude-haiku-4-5-20251001', 'claude-haiku-4-5-20251001', 0),
     (NULL, 'translation.openai.apiKey',    '', '', 1),
@@ -11188,6 +11207,14 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('252_wall_clock_columns_say_so.
 -- nobody knows whether it has.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('253_scheduled_jobs_record_their_runs.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 254_translation_counts_requests.sql (#762) ─────────────────────────
+-- `tblTranslationUsage` and the `translation.monthCallCap` setting are declared
+-- above, beside the rest of translation. The migration's backfill reads the
+-- cache, which is empty on a fresh install, so there is nothing to carry here.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('254_translation_counts_requests.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

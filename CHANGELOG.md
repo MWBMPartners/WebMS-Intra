@@ -4,6 +4,79 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Translation now counts the NUMBER of requests as well as money (#762, D-059, migration 254)
+
+- **A second monthly limit, `translation.monthCallCap`**, default 1,000 requests per
+  organisation per month, hard maximum 100,000, 0 meaning no limit. It works whatever a
+  provider reports, which matters because LibreTranslate reports a cost of 0 for every
+  call, so on that route the money limit could never stop anything.
+- **Which limit bites first depends on the company** (measured with the code's own price
+  formulas, ~1,000-character announcement): on Google and DeepL (~1p a request) the
+  NUMBER limit is reached first, at about £10, well before the £50 money default (which
+  alone would allow ~5,000); on Anthropic (~13p) and OpenAI (~20p) the MONEY limit is
+  reached first (~385 and ~250 requests). 1,000 is chosen as roughly ten times ordinary
+  use and a stop on runaway use; no customer installation exists, so nobody loses
+  anything they had.
+- **Both limits are now counted in a new table, `tblTranslationUsage`** (one row per
+  organisation per calendar month in UTC), written at the moment a request is made — not
+  read back out of the translation cache. The cache holds one row per piece and language,
+  so it counts pieces, never requests.
+- **The request is counted just BEFORE it is sent, by one conditional UPDATE**, so two
+  presses at the same moment cannot both slip under the limit, and a request that was sent
+  and failed still counts, because the portal cannot tell whether it reached the company
+  (an address that cannot be connected to looks the same as a timeout after the company
+  accepted it), and it may have been charged for.
+- **A request that could never be sent is not counted:** with no API key, or a provider
+  name the portal does not know, nothing is sent, nothing is counted, and the member is
+  told translation "has not been fully set up". `Translation::providerReady()` decides
+  this before anything is counted. The admin page warns when translation is switched on
+  and it is not fully set up (no key, no address, or a company name it does not
+  recognise).
+- **A spend lost because the month's row vanished between reservation and recording is
+  now logged** in fixed words naming only the organisation number.
+- **A reported cost reaches the record through `Translation::settle()`**, which also
+  returns the translated words, so the translation path cannot skip it.
+- **If this month's use cannot be read, nothing is sent.** The old money reader answered
+  0 ("nothing spent") when its statement could not be prepared.
+- **The admin Translation page says WHICH limit is stopping translation** (money, number,
+  both, or "could not be read"), and that raising the other one will not help. It shows
+  the month's requests beside the month's spend, and says that LibreTranslate adds nothing
+  to the money figure (never that the money limit cannot stop translation: money spent
+  earlier in the month on a paid company stays in the organisation's record). The page and
+  `translate()` share one comparison each (`moneyReached()`, `callsReached()`).
+- **The "Cached translations" card showed 0 on every installation** (it printed a key the
+  query never produced) and counted the whole installation; it now counts this
+  organisation's cached translations (#800 item 2).
+- **Personal-data catalogue:** entries added for `tblTranslationUsage` and
+  `tblScheduledJobRun` (neither holds personal data), and the `tblContentTranslation`
+  entry rewritten — it still said the feature was unreachable and the table empty (#800
+  item 1).
+- A member sees the same words for either limit ("This organisation has reached its
+  translation limit for this month. Ask an administrator."), on purpose.
+- The save handler refuses an empty, negative, fractional, non-numeric, array or
+  over-maximum count with the reason, records it as `TranslationCallCapRefused`, and saves
+  nothing — never clamps.
+- Migration 254 creates the table, seeds the setting, and backfills each organisation's
+  past months from the cache (a lower bound for requests; exactly the old money sum),
+  taking the larger figure on a second run.
+- Tests: section F rewritten onto the usage record (with F01d, money uses no slot, and
+  F01e, spend exactly at the limit refuses), new F2, F3 and J2 in
+  `tools/content-translation-selftest.php`; J10b added so J11 can tell a refusal from a
+  clamp. F2-10 makes the reservation's write fail with a trigger while the read succeeds;
+  F3-04 drives `Translation::settle()` through a probe page in the scratch copy with a
+  reported cost of 37p; the whole engine file is pinned by a new hard gate (below). F3-07 is a 23-case table for `providerReady()`, both directions; F2-04e
+  requires the "not fully set up" warning to be ABSENT on a complete set-up. 143 checks.
+- **The translation engine's code is pinned whole by a new hard gate,
+  `tools/audit-checks/check_translation_engine_pinned.py`**, because no test can reach a
+  paid provider: every behavioural check of the limits runs on LibreTranslate, which
+  reports a cost of 0. Seven review rounds each switched the limits off for PAID providers
+  with one line that every behavioural test passed, each just outside whatever had been
+  pinned; the gate now pins all of `Translation.php` as one PHP token per line (comments
+  and spacing free), and every built-in function and constant in the engine is written
+  with a leading `\` so no other file in the namespace can silently replace one — the gate
+  refuses one that is not. Review: eight rounds by fresh Claude agents, the eighth clean;
+  Codex has not reviewed it.
+
 ### Event times are right on the morning the clocks go forward, on every page (#777 part two)
 
 Twenty-four pages showed an event's time by turning the stored time into a

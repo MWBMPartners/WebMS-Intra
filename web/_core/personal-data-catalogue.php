@@ -2766,14 +2766,45 @@ return [
     ],
     'tblContentTranslation' => [
         'decision' => 'retain',
-        'reason'   => 'A translated copy of text taken from somewhere else in the portal, kept so the same '
-                    . 'text is not translated twice. Because it is a copy of other text, it can hold a copy '
-                    . 'of anything personal that was in the original. Said plainly: content translation is '
-                    . 'not reachable by anybody today (#485) and ships switched off, so this table is empty '
-                    . 'on every installation — do not read this entry as describing something in use. '
-                    . 'Nothing links a row to an account; it names the table and field it came from',
-        'period'   => 'no time limit, and nothing is in it: the feature that would fill it is unreachable (#485)',
+        // ⚠️ THIS ENTRY SAID, UNTIL 6 NOVEMBER 2026, that content translation
+        //    was "not reachable by anybody today (#485)" and that this table
+        //    was "empty on every installation". #485/#761 made it reachable
+        //    on 4 November 2026, so both halves had become untrue, in the file
+        //    a request for somebody's information is answered from (#800).
+        'reason'   => 'A machine translation of the organisation\'s OWN published words, kept so the same text '
+                    . 'is not paid for twice. Only three things can be translated (ContentTranslation::SOURCES): '
+                    . 'an announcement, a project\'s description and an update posted on a project. A prayer '
+                    . 'request is never translated, on purpose (D-049), because it is a person\'s own words, '
+                    . 'often about somebody else. Because a row is a copy of published text, it holds whatever '
+                    . 'that text held: an announcement naming a person is translated with the name in it. '
+                    . 'Nothing on the row links it to an account (it names the table, row and field it came '
+                    . 'from, and the organisation), so an erasure request cannot reach it. The words are the '
+                    . 'organisation\'s, and changing or removing the original is how a name is taken out of '
+                    . 'them; note that nothing yet removes or refreshes a translation when its original is '
+                    . 'edited or deleted (#800), so an old translation can outlive the words it was made from',
+        'period'   => 'no time limit: nothing removes a row, not even when its original is edited or deleted '
+                    . '(#800). The cached row is served instead of translating again, so in practice a row '
+                    . 'is never replaced either',
         'columns'  => ['translatedContent'],
+    ],
+    'tblTranslationUsage' => [
+        'decision' => 'not-personal',
+        // #762, migration 254. Written down rather than left out: an absence
+        // looks exactly like the #706 fault, where tables had no decision.
+        'reason'   => 'How many translations one organisation asked for in one month, and what the '
+                    . 'translation company reported they cost: an organisation number, a month and two '
+                    . 'counts. It says nothing about which member pressed the button or what was translated',
+        'columns'  => [],
+    ],
+    'tblScheduledJobRun' => [
+        'decision' => 'not-personal',
+        // #775, migration 253. It had no entry, which reads exactly like the
+        // #706 fault; nothing enforces an entry for a table with no personal
+        // column, so this is written down by hand.
+        'reason'   => 'When each of the portal\'s own scheduled jobs last started and finished, and one word '
+                    . 'for how it ended. One row per job for the whole installation; it names a job, never a '
+                    . 'person, and deliberately never records the words of a fault',
+        'columns'  => [],
     ],
     // 🚫 tblErasureAudit is DELIBERATELY ABSENT, and this note is here so the
     //    gap is not read as the #706 fault it looks like. It is the sealed
