@@ -1,44 +1,49 @@
 #!/usr/bin/env python3
 """
-The test OF the #775 hard gate's token-refusal detector.
+The test OF the #775 hard gate's token-gate NESTING check.
 ======================================================================
 
-WHY THIS EXISTS, and it is the whole point: `gate_refuses()` in
-`tools/audit-checks/check_scheduled_jobs_recorded.py` has been WRONG IN BOTH
-DIRECTIONS THREE TIMES across five review rounds, and every version was
-"verified by planting" the shapes its author had thought of — with a throwaway
-harness that nobody re-ran. **That is why v4 failed v1's own case by a new
-spelling.**
+WHY THIS FILE EXISTS, AND WHY IT NO LONGER TESTS WHAT IT USED TO.
 
-    v1  passed an exit inside a braced closure.
-    v2  cried wolf on a real exit one level deeper; passed `$log->exit();`.
-    v3  asked the tokeniser; passed `fn() => exit()`; cried wolf on a
-        braceless gate.
-    v4  skipped an arrow body but STOPPED at a `{`, so
-        `fn() => match (true) { default => exit('x') }` passed — v1's fault
-        again; and read `$matches = hash_equals(...)` above the gate as
-        braceless, going RED on correct code.
+Rounds 1-6 of #775's review each defeated a source-reading detector that tried
+to answer "does this token gate REFUSE an unauthenticated request". Five
+versions, wrong in BOTH directions four times:
 
-A fifth cleverer pattern would have produced a round 6. **An accumulating,
-COMMITTED plant set will not**, because every earlier round's case is re-run on
-every push. This follows `tools/api-spec-check-selftest.py`, which the
-repository already uses for the same reason: a check is only as good as the
-test of the check.
+    v1  passed an exit inside a braced closure
+    v2  cried wolf on a real exit one level deeper; passed `$log->exit();`
+    v3  passed `fn() => exit()`; cried wolf on a braceless gate
+    v4  passed `fn() => match (…) { … exit(…) }`; cried wolf on
+        `$matches = hash_equals(…)` above the gate
+    v5  cried wolf on a refusal in an `else` branch; passed
+        `$bad = !hash_equals(…)`
 
-WHAT IT PROVES. For each case below: that `gate_refuses()` answers what the
-case says it should. A case marked REFUSES is a gate that really ends the
-request; one marked DOES NOT is a gate that does not, whatever it looks like.
-Getting either wrong has a cost, and they are different costs:
+**That question is BEHAVIOURAL, and D-065 is the owner's own rule for it:
+where the property is "this code RUNS", DRIVE it.** It is now driven, on all
+fifteen pages, by section I-ALL of `tools/scheduled-jobs-selftest.php` — a
+wrong token and no token, with the row read back.
 
-  * a false PASS lets an unauthenticated request run on — it writes the record
-    whose whole purpose is to be truthful, and then does the job's real work;
-  * a false RED is a hard gate in `pr-security.yml` accusing correct code, which
-    blocks every pull request (#483).
+WHAT DRIVING CANNOT SEE, which is what this check and this test are for. Round
+6 found a gate the REQUEST decides whether to apply:
 
-WHAT IT CANNOT PROVE. That the gate's OTHER checks are right (the job list, the
-call counts, the ordering) — those are the check's own concern — nor that any of
-this RUNS, which is `tools/scheduled-jobs-selftest.php`'s section I, over real
-HTTP.
+    if (($_GET['debug'] ?? '') !== '1') {
+        if ($expected === '' || hash_equals(…) === false) { exit; }
+    }
+
+Driving with a wrong token does NOT catch it — the wrapper's condition holds,
+so the gate applies and the request IS refused. **Measured: with that planted,
+the driven test stayed at 196 of 196.** It is reachable only by sending the
+magic parameter, and no test can guess one.
+
+Its SHAPE, though, is plain: the gate became NESTED. So `gate_enclosures()`
+asks only what blocks enclose the gate, and the rule is that each must have
+been opened by `try` — a `try` cannot decide whether its body runs, while an
+`if`, a loop, a `switch` or a function can. That is a "this code LOOKS like
+this" property, which is the half D-065 says to pin.
+
+WHAT THIS TEST PROVES: that the nesting reading is right, in both directions,
+on every shape that matters. **It exists at all because the detector it
+replaced was verified four times by throwaway harnesses nobody re-ran, which
+is precisely how v4 lost v1's case.**
 
 @package WebMS\\Portal\\Tools
 @author  MWBM Partners Ltd (t/a MWservices)
@@ -54,128 +59,101 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 GATE = HERE / "audit-checks" / "check_scheduled_jobs_recorded.py"
 
-HEAD = "<?php\ndeclare(strict_types=1);\n$incoming = (string) ($_GET['key'] ?? '');\n$expected = 'x';\n"
+GATE_BODY = ("if ($expected === '' || hash_equals($expected, $incoming) === false) {\n"
+             "    http_response_code(403);\n    exit('Forbidden');\n}\n")
 
-# Each case: (name, the PHP, whether the gate really refuses, which round found it)
-CASES: list[tuple[str, str, bool, str]] = [
-    # ── Gates that really DO refuse ───────────────────────────────────────
-    ("the ordinary shape",
-     "if ($expected === '' || hash_equals($expected, $incoming) === false) {\n"
-     "    http_response_code(403);\n    exit('Forbidden');\n}\n", True, "v1"),
-    ("die instead of exit",
-     "if (hash_equals($expected, $incoming) === false) {\n    die('Forbidden');\n}\n", True, "v1"),
-    ("an exit one level deeper, in an if/else",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    if (($_GET['json'] ?? '') === '1') {\n        exit('{}');\n"
-     "    } else {\n        exit('Forbidden');\n    }\n}\n", True, "v2 cried wolf"),
-    ("an exit in a switch arm",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    switch ($_GET['f'] ?? '') {\n        case 'json': exit('{}');\n"
-     "        default: exit('Forbidden');\n    }\n}\n", True, "v2 cried wolf"),
-    ("an exit in a match arm",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    match (true) { default => exit('Forbidden') };\n}\n", True, "v3"),
-    ("an exit inside try/finally",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    try { exit('Forbidden'); } finally { }\n}\n", True, "v3"),
-    ("a BRACELESS gate",
-     "if (hash_equals($expected, $incoming) === false) exit('Forbidden');\n", True, "v3 cried wolf"),
-    ("an arrow function BESIDE a real exit",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $fmt = fn(string $m): string => $m;\n    exit($fmt('Forbidden'));\n}\n", True, "v4"),
-    ("the comparison read into a variable FIRST",
-     "$matches = hash_equals($expected, $incoming);\n"
-     "if ($expected === '' || $matches === false) {\n"
-     "    http_response_code(403);\n    exit('Forbidden');\n}\n", True, "v4 cried wolf"),
-    ("an elseif gate",
-     "if ($expected === '') {\n    exit('Forbidden');\n"
-     "} elseif (hash_equals($expected, $incoming) === false) {\n    exit('Forbidden');\n}\n",
-     True, "v5"),
+# (name, PHP after the header, the enclosures expected, why it matters)
+CASES: list[tuple[str, str, list[str], str]] = [
+    ("at file scope, the ordinary shape", GATE_BODY, [], "14 of the 15 pages"),
+    ("inside its own try, as health.php has it",
+     "try {\n" + GATE_BODY + "} catch (\\Throwable $e) { throw $e; }\n", ["T_TRY"],
+     "health.php — allowed, and the reason the rule is not 'depth 0'"),
+    ("inside two nested trys",
+     "try {\n try {\n" + GATE_BODY + " } finally { }\n} catch (\\Throwable $e) { }\n",
+     ["T_TRY", "T_TRY"], "still only trys"),
 
-    # ── Gates that do NOT refuse, however they look ───────────────────────
-    ("no exit at all",
-     "if (hash_equals($expected, $incoming) === false) {\n    http_response_code(403);\n}\n",
-     False, "v1"),
-    ("an exit inside a braced closure merely DEFINED",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $stop = static function (): void { exit('Forbidden'); };\n}\n", False, "v1"),
-    ("a METHOD named exit",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    http_response_code(403);\n    $log->exit();\n}\n", False, "v2"),
-    ("an ARROW function, typed",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $stop = fn(): never => exit('Forbidden');\n}\n", False, "v3"),
-    ("an ARROW function, untyped",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $stop = fn() => exit('Forbidden');\n}\n", False, "v3"),
-    ("an arrow whose body is a MATCH",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $stop = fn() => match (true) { default => exit('Forbidden') };\n}\n", False, "v4"),
-    ("an arrow whose body is a CLOSURE",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $stop = fn() => function (): never { exit('Forbidden'); };\n}\n", False, "v4"),
-    ("a nested arrow whose body is a closure",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $stop = fn() => fn() => function (): never { exit('no'); };\n}\n", False, "v4"),
-    ("a STATIC arrow whose body is a match",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $stop = static fn() => match (true) { default => exit('no') };\n}\n", False, "v4"),
-    ("an arrow in an ARRAY literal",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $h = ['stop' => fn() => match (true) { default => exit('no') }];\n}\n", False, "v4"),
-    ("an anonymous CLASS with an exiting method",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $o = new class { public function go(): never { exit('no'); } };\n}\n", False, "v4"),
-    ("`exit` only inside a string",
-     "if (hash_equals($expected, $incoming) === false) {\n"
-     "    $m = 'exit now';\n    http_response_code(403);\n}\n", False, "v3"),
+    ("inside a REQUEST-CONTROLLED if",
+     "if ((($_GET['debug'] ?? '') !== '1')) {\n" + GATE_BODY + "}\n", ["T_IF"],
+     "round 6's bypass: ?debug=1 skips the gate entirely"),
+    ("inside a plain if",
+     "if (true) {\n" + GATE_BODY + "}\n", ["T_IF"], "any if can be made conditional"),
+    ("inside a while",
+     "while (false) {\n" + GATE_BODY + "}\n", ["T_WHILE"], "a loop that may not run"),
+    ("inside a foreach",
+     "foreach ([] as $x) {\n" + GATE_BODY + "}\n", ["T_FOREACH"], "an empty list skips it"),
+    ("inside a function",
+     "function gate(string $expected, string $incoming): void {\n" + GATE_BODY + "}\n",
+     ["T_FUNCTION"], "a function nobody calls refuses nothing"),
+    ("inside a closure",
+     "$g = function (string $expected, string $incoming): void {\n" + GATE_BODY + "};\n",
+     ["T_FUNCTION"], "the v1 fault's shape, caught by nesting instead"),
+    ("inside a switch arm",
+     "switch (1) {\n    case 1:\n" + GATE_BODY + "}\n", ["T_SWITCH"], "an arm that may not be taken"),
+    ("inside a try INSIDE an if",
+     "if (true) {\n try {\n" + GATE_BODY + " } finally { }\n}\n", ["T_IF", "T_TRY"],
+     "a try does not launder an if above it"),
 ]
 
 
-def load_gate():
-    spec = importlib.util.spec_from_file_location("gate", GATE)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
 def main() -> int:
-    gate = load_gate()
+    spec = importlib.util.spec_from_file_location("gate", GATE)
+    gate = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(gate)
+    except Exception as exc:                      # noqa: BLE001
+        # ⚠️ REFUSE, DO NOT CRASH. A traceback is "a crash with a label", not a
+        #    check that reports (#735). The previous version of this file did
+        #    exactly that when the gate would not import.
+        print("REFUSED: the gate module could not be loaded: %s" % exc)
+        print("Nothing was checked. This is not a pass.")
+        return 1
+
     good = bad = 0
-    print("The #775 token-gate detector, every case from five review rounds.\n")
-    for name, php, refuses, found in CASES:
+    print("The #775 token-gate NESTING check, in both directions.\n")
+    for name, php, want, why in CASES:
         with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False) as handle:
-            handle.write(HEAD + php)
+            handle.write("<?php\ndeclare(strict_types=1);\n"
+                         "$incoming = (string) ($_GET['key'] ?? '');\n$expected = 'x';\n" + php)
             path = pathlib.Path(handle.name)
         try:
-            code = gate.php_code_only(path)
-            at = code.find("hash_equals")
-            if at == -1:
-                print("  FAIL  %-52s the probe lost `hash_equals`" % name)
-                bad += 1
-                continue
-            got = gate.gate_refuses(code, at)
+            got = gate.gate_enclosures(path)
         except gate.ProbeUnavailable as exc:
             print("REFUSED: %s" % exc)
             print("Nothing was checked. This is not a pass.")
             return 1
         finally:
             path.unlink(missing_ok=True)
-        if got == refuses:
+        allowed = [kind for kind in got if kind != "T_TRY"]
+        if got == want:
             good += 1
-            print("  ok    %-52s %s (%s)"
-                  % (name, "refuses" if refuses else "does NOT refuse", found))
+            print("  ok    %-44s %-22s %s"
+                  % (name, "allowed" if len(allowed) == 0 else "REFUSED", why))
         else:
             bad += 1
-            print("  FAIL  %-52s wanted %s, got %s  [%s]"
-                  % (name, refuses, got, found))
-    print("\n%d cases: %d as expected, %d not." % (len(CASES), good, bad))
-    if bad > 0:
-        print("A case here is a shape some earlier version of this detector got")
-        print("wrong. Losing one again is how v4 re-created v1's fault.")
+            print("  FAIL  %-44s wanted %s, got %s" % (name, want, got))
+
+    # ⚠️ THE COUNTS ARE PINNED, because the previous version's were not: deleting
+    #    the two cases that cost rounds 4 and 5 left it printing "20 of 20" and
+    #    exit 0. The printed total was `len(CASES)`, so it moved with the list —
+    #    #697's recorded remedy, which is to pin the list itself.
+    if len(CASES) != 11:
+        print("\nFAIL: this file holds %d cases and must hold 11." % len(CASES))
+        print("A case here is a shape the nesting rule has to get right. Losing")
+        print("one silently is how the detector this replaced lost v1's case.")
         return 1
-    print("NOT PROVED HERE: that any of it RUNS. That is section I of")
-    print("tools/scheduled-jobs-selftest.php, over real HTTP.")
+    must_refuse = len([c for c in CASES if [k for k in c[2] if k != "T_TRY"]])
+    if (must_refuse, len(CASES) - must_refuse) != (8, 3):
+        print("\nFAIL: the split moved — %d must be refused and %d allowed, "
+              "expected 8 and 3." % (must_refuse, len(CASES) - must_refuse))
+        return 1
+
+    print("\n%d cases: %d as expected, %d not. 8 must be refused, 3 allowed."
+          % (len(CASES), good, bad))
+    if bad > 0:
+        return 1
+    print("NOT PROVED HERE: that a gate actually REFUSES. That is behavioural,")
+    print("and section I-ALL of tools/scheduled-jobs-selftest.php drives it on")
+    print("all fifteen pages (D-065).")
     return 0
 
 

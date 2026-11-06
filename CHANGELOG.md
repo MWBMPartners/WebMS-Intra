@@ -40,10 +40,18 @@ finished**, and the "Check this portal" page reads it. It tells you:
 - and, straight after an update, that **nothing is known yet** about a task.
 
 **How late is too late differs by task**, because they do not run on the same
-timetable. The mail task is expected every few minutes; the nightly ones daily;
-giving statements weekly. One figure for all fifteen would either let the mail
-task sit dead for a week, or complain about the nightly backup every single
-day.
+timetable. One figure for all fifteen would either let the mail task sit dead
+for a week, or complain about the nightly backup every single day.
+
+**The allowances are generous, and it is worth knowing by how much.** Fifteen
+minutes for the mail task, two hours for event reminders, six hours for
+importing outside calendars, eight days for giving statements, and 36 hours for
+the other eleven. **So a task that your scheduler calls every few minutes can
+be well over a day late and still be reported as having run recently enough.**
+That is deliberate — a stricter figure would complain every time a host paused
+its scheduler for an hour — but it means this page tells you a task has
+*stopped*, not that it is *late*. Whether those figures should be tighter is
+being looked at.
 
 **Straight after this update almost every task will say "nothing is known yet",
 and that is expected.** Each one starts being watched the first time it runs,

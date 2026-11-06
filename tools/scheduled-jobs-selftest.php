@@ -858,6 +858,81 @@ foreach (['PHP Fatal', 'PHP Warning', 'PHP Deprecated', 'Undefined variable', 'U
 }
 check('I12 the server wrote no PHP error, warning or deprecation', $noisy, []);
 
+echo "\n=== I-ALL. EVERY page refuses a wrong token and records NOTHING ===\n";
+// 🚨 THIS REPLACES A SOURCE CHECK THAT WAS WRONG IN BOTH DIRECTIONS FOUR TIMES,
+//    AND IT IS THE OWNER'S OWN RULE FOR THIS SITUATION (D-065): where the
+//    property is "this code RUNS", DRIVE it; where it is "this code LOOKS like
+//    this", pin it.
+//
+//    "Does this gate refuse an unauthenticated request" is BEHAVIOURAL. Five
+//    versions of `gate_refuses()` tried to read it out of the source, and each
+//    was defeated — v1 by an exit in a closure, v2 by `$log->exit()`, v3 by an
+//    arrow function, v4 by an arrow body containing a brace, v5 by an `else`
+//    branch (false red) and by `!hash_equals(...)` (false pass). Round 6 then
+//    found the shape that settles it:
+//
+//        if (($_GET['debug'] ?? '') !== '1') {
+//            if ($expected === '' || hash_equals(...) === false) { exit; }
+//        }
+//
+//    A gate the REQUEST decides whether to apply. Every committed guard stayed
+//    green and `?debug=1` let anybody on the internet write the record and run
+//    the job's real work. **No source reading can see that**, and the only
+//    thing that found it was an HTTP probe.
+//
+//    So the detector is gone and this is what replaces it, over all fifteen
+//    pages rather than two. Every wrapping the detector caught also fails this
+//    — a gate that does not refuse answers something other than 403 — and this
+//    catches the classes it provably could not.
+//
+//    `ScheduledJobs::JOBS` supplies the address and the token setting, so a new
+//    job is covered the day it is listed. The query parameter differs by page
+//    (`key` or `token`), which is read from the page itself rather than kept in
+//    a second list.
+$tokenParamFor = static function (string $jobKey) use ($repo, $sep): string {
+    $file = $repo . $sep . 'web' . $sep . '_apps' . $sep . 'cron' . $sep
+        . substr($jobKey, strlen('cron/')) . '.php';
+    $src = (string) file_get_contents($file);
+    // ⚠️ ASKED OF THE PAGE, NOT TYPED HERE. A second list would drift, and a
+    //    page whose parameter was renamed would then be driven with the wrong
+    //    one — which looks exactly like a refusal, so the check would pass
+    //    while testing nothing.
+    if (preg_match("/\\\$_GET\\['(key|token)'\\]/", $src, $hit) !== 1) {
+        return '';
+    }
+
+    return $hit[1];
+};
+
+$drivenOk = 0;
+foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
+    $param = $tokenParamFor($jobKey);
+    check('IA ' . $jobKey . ' reads its token from a query parameter', $param !== '', true);
+    if ($param === '') {
+        continue;
+    }
+    $setSetting($facts['token'], $token);
+    MailQueue::forget();
+    $db->query('DELETE FROM `tblScheduledJobRun`');
+
+    // A wrong token, from somebody who does not have it.
+    $answer = $get('/' . $jobKey . '?' . $param . '=' . bin2hex(random_bytes(16)));
+    check('IA ' . $jobKey . ' refuses a wrong token', $answer['code'], 403);
+    check('IA ' . $jobKey . ' and records NOTHING', $row($jobKey), null);
+
+    // No token at all.
+    $answer = $get('/' . $jobKey);
+    check('IA ' . $jobKey . ' refuses no token at all', $answer['code'], 403);
+    check('IA ' . $jobKey . ' and still records nothing', $row($jobKey), null);
+    $drivenOk++;
+}
+check(
+    'IA-all every one of the ' . count(ScheduledJobs::JOBS) . ' jobs was driven, not just the two '
+    . 'the old section covered — a count, so a job silently dropped from the loop is caught',
+    $drivenOk,
+    count(ScheduledJobs::JOBS)
+);
+
 echo "\n=== H0. What the page SAYS in the states the independent check found ===\n";
 // Every one of these is a sentence an administrator reads, printed by calling
 // the real code. Three of the four PORTAL faults in this package were sentences
@@ -908,6 +983,29 @@ check(
     'H0c2 and names WHY that job is not counted, rather than leaving an unexplained number',
     str_contains($text, 'part-way through, which have not recorded a finish'),
     true
+);
+// ⚠️ THE ALLOWANCE SENTENCE IS PINNED, because nothing read a character past
+//    "recorded a FINISH" — so reverting it to round 4's withdrawn wording left
+//    every guard green, and round 5's replacement was wrong about
+//    `cron/import-feeds` (six hours told as 36) with nothing noticing.
+//
+//    It asks for EVERY distinct allowance by name, derived the same way the
+//    page derives them, so a figure the page omits fails here. That is the
+//    whole fault: the old sentence named four of five.
+$allowances = [];
+foreach (ScheduledJobs::JOBS as $facts) {
+    $allowances[$facts['overdue']] = true;
+}
+check(
+    'H0c3 the sentence names every one of the ' . count($allowances) . ' distinct allowances — '
+    . 'it named four of five, so one job was told six times its real figure',
+    str_contains($text, ScheduledJobs::allowancesInWords()),
+    true
+);
+check(
+    'H0c4 and does NOT carry round 4\'s withdrawn claim that the allowance matches each job',
+    str_contains($text, 'the nightly jobs daily'),
+    false
 );
 
 // ── `refused` must not be worded as one of its three causes ────────────

@@ -540,6 +540,54 @@ final class ScheduledJobs
         return $out;
     }
 
+    /**
+     * 🕒 The allowances in words, DERIVED from the list rather than typed.
+     *
+     * ⚠️ TYPING THEM OUT WAS WRONG TWICE IN TWO ROUNDS. Round 4's wording
+     *    claimed the allowance matched each job's own cadence, which is false
+     *    for six of them. Round 5 replaced it with four figures — and there
+     *    are FIVE: `cron/import-feeds` has six hours, and fell under "36 hours
+     *    for the rest", so the page told an administrator its allowance was
+     *    SIX TIMES what it is. The same comment also called 36 hours "the
+     *    longest of them" when eight days is.
+     *
+     *    So nothing here is typed. The figures and the job counts come out of
+     *    JOBS, which means a new job or a changed constant cannot leave this
+     *    sentence stale — the shape of mistake that made it wrong both times.
+     *
+     * @return string A list ready to drop into a sentence, longest last.
+     */
+    public static function allowancesInWords(): string
+    {
+        $byLimit = [];
+        foreach (self::JOBS as $facts) {
+            $byLimit[$facts['overdue']] = ($byLimit[$facts['overdue']] ?? 0) + 1;
+        }
+        ksort($byLimit);
+        $parts = [];
+        foreach ($byLimit as $seconds => $howMany) {
+            $parts[] = self::lengthInWords((int) $seconds)
+                . ($howMany === 1 ? ' for one job' : ' for ' . $howMany . ' of them');
+        }
+        $last = array_pop($parts);
+
+        return count($parts) === 0 ? (string) $last : implode(', ', $parts) . ' and ' . $last;
+    }
+
+    /** A number of seconds as a person would say it. */
+    private static function lengthInWords(int $seconds): string
+    {
+        if ($seconds < 3600) {
+            return intdiv($seconds, 60) . ' minutes';
+        }
+        if ($seconds < 172800) {
+            $hours = intdiv($seconds, 3600);
+            return $hours === 1 ? 'an hour' : $hours . ' hours';
+        }
+
+        return intdiv($seconds, 86400) . ' days';
+    }
+
     /** Whether this is a job this class knows, compared exactly: the keys are written here. */
     public static function isKnownJob(string $jobKey): bool
     {

@@ -247,7 +247,8 @@ payment-webhook retry sweep.
 | v2 | `$log->exit();` (a method named exit) | a real exit one level deeper |
 | v3 | `fn() => exit()` (no braces) | a braceless gate |
 | v4 | `fn() => match (…) { … exit(…) }` (an arrow body with a brace) | `$matches = hash_equals(…)` above the gate |
-| v5 | — | — **and the first version with a COMMITTED test** |
+| v5 | `$bad = !hash_equals(…)`, a cast, a line break | a refusal in an `else` branch, a braceless `else`, an elseif chain, an invoked closure |
+| **gone** | **the detector is DELETED — the property is behavioural and is now DRIVEN on all fifteen pages (D-065); what remains is a NESTING check, which is the half a source reading can honestly do** | |
 
 v4 marks `T_FN` separately from `T_FUNCTION` and skips an arrow function's body
 as the EXPRESSION it is; a braceless gate is read as the one statement that
@@ -372,6 +373,69 @@ two sources and not of the other, since the mail-queue catch takes any
 throwable including the table being absent, and `tblMailRouteState` arrives at
 migration 216 against this package's 253.
 
+#### Round 6: the detector is GONE, because the property was never one a source reading could answer
+
+**Round 6 found v5 wrong in both directions — the fourth version running — and
+then found the shape that settles the design question.** A gate the REQUEST
+decides whether to apply:
+
+    if (($_GET['debug'] ?? '') !== '1') {
+        if ($expected === '' || hash_equals(…) === false) { exit; }
+    }
+
+Every committed guard stayed green, and over real HTTP a request carrying
+`?debug=1` was not refused, wrote `began()`, and ran the payment-webhook retry
+sweep.
+
+**And driving it does not catch that either** — measured, not assumed: with the
+wrapper planted, the driven test stayed at 196 of 196, because a wrong token
+sent WITHOUT `?debug=1` meets the gate and is properly refused. It is reachable
+only by sending the magic parameter, and no test can guess one.
+
+So neither half could do the whole job, and **D-065 is the owner's own rule for
+exactly this**: where the property is "this code RUNS", drive it; where it is
+"this code LOOKS like this", pin it. The split is now honest:
+
+* **"Does this gate refuse?" is BEHAVIOURAL and is DRIVEN** — section I-ALL
+  sends a wrong token and no token to ALL FIFTEEN pages and reads the row back,
+  where the old section covered two. `&& false` on a gate's condition fails it;
+  so does a missing exit, an inverted condition, and every shape the five
+  detectors argued about.
+* **"Is the gate NESTED?" is STRUCTURAL and is pinned** — `gate_enclosures()`
+  asks what blocks enclose it, and the rule is that each must have been opened
+  by `try`, because a `try` cannot decide whether its body runs while an `if`,
+  a loop, a `switch` or a function can. Measured across all fifteen: fourteen
+  at file scope, `health.php` inside its own `try`, so this is a general rule
+  rather than an exception for one file.
+
+`gate_refuses()` and its five versions are **deleted**. The lesson is not that
+the fifth pattern was bad: it is that **four of the five versions were wrong in
+BOTH directions, which is what a check tells you when it is being asked a
+question of the wrong kind.**
+
+**The new check has its own committed test**, rewritten for the nesting rule —
+eleven cases, eight that must be refused and three allowed, with **both counts
+pinned**, because round 6 showed the previous version's were not: deleting the
+two cases that cost rounds 4 and 5 left it printing "20 of 20" and exit 0, the
+total being `len(CASES)`.
+
+**And the all-clear was STILL untrue.** Round 5's replacement named FOUR
+allowances when there are FIVE: `cron/import-feeds` has six hours, fell under
+"36 hours for the rest", and was told to an administrator as SIX TIMES its real
+figure — and the same comment called 36 hours "the longest of them" when eight
+days is. **Nothing read a character past "recorded a FINISH"**, so reverting the
+whole sentence left every guard green. The figures are now DERIVED from JOBS by
+`ScheduledJobs::allowancesInWords()` — typing them out was wrong in two
+consecutive rounds — and H0c3 asks for every distinct allowance by name, so a
+figure the page omits fails.
+
+Round 6 also found the comment eight lines above the `$unreadable` fix still
+asserting "The record is THERE and could not be read", which the comment below
+it forbids, both inside round 5's own hunk — and the customer-facing CHANGELOG
+still carrying the withdrawn cadence claim, which now states the allowances and
+says plainly that a task called every few minutes can be well over a day late
+and still read as healthy.
+
 #### Two guards, and what each cannot see
 
 `tools/audit-checks/check_scheduled_jobs_recorded.py` (a hard gate in
@@ -385,7 +449,7 @@ with the wrong token that could write there would let anybody on the internet
 make a dead job look alive, turning the page from a true report into a
 forgeable one.
 
-It states two blind spots. `finished()` could be moved up next to `began()` and
+It states its blind spots (five, counted from the file rather than written here). `finished()` could be moved up next to `began()` and
 it would pass. And **one exit path losing its finish is invisible** — because a
 page may legitimately hold several finishes, it requires only one. That is the
 exact fault this package shipped, so it is planted and recorded green rather

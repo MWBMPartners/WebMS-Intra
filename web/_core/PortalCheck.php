@@ -1049,10 +1049,18 @@ final class PortalCheck
         }
 
         if (count($unreadable) > 0) {
-            // ⚠️ A WARNING, NOT THE "nothing is known yet" NOTE. The record is
-            //    THERE and could not be read, so telling an administrator to
-            //    wait would be telling them to wait for something that is not
-            //    going to happen.
+            // ⚠️ A WARNING, NOT THE "nothing is known yet" NOTE. Something is
+            //    wrong with where this is kept — it may be missing or
+            //    incomplete — so telling an administrator to wait would be
+            //    telling them to wait for something that is not going to
+            //    happen.
+            //
+            //    (This said "The record is THERE and could not be read", which
+            //    the comment eight lines below forbids and which round 5
+            //    established is false for one of the two sources. Two comments
+            //    in one hunk, one asserting what the other denies, and the
+            //    surviving one was the stated REASON for the severity — so the
+            //    next reader would have checked the design against it.)
             $findings[] = [
                 'severity' => self::WARNING,
                 // ⚠️ DO NOT SAY THE PLACE "EXISTS". Two sources feed this, and only
@@ -1216,15 +1224,23 @@ final class PortalCheck
                 //    be dead for a day and a half behind that sentence.
                 //
                 //    The 36 hours is the owner's figure (D-070) and is not
-                //    changed here; what is corrected is the CLAIM. The
-                //    sentence now says what is true — each job has its own
-                //    allowance and this is the longest of them — and #793 puts
-                //    the measured fact to the owner against D-070's row.
+                //    changed here; what is corrected is the CLAIM, and #793
+                //    puts the measured fact to the owner against D-070's row.
+                //
+                // ⚠️ THE FIGURES ARE DERIVED, NOT TYPED, because typing them was
+                //    wrong twice in two rounds. Round 4's version claimed the
+                //    allowance matched each job's own cadence. Round 5's named
+                //    FOUR figures when there are FIVE — `cron/import-feeds` has
+                //    six hours and fell under "36 hours for the rest", so the
+                //    page told an administrator its allowance was SIX TIMES
+                //    what it is — and called 36 hours "the longest of them"
+                //    when eight days is. `ScheduledJobs::allowancesInWords()`
+                //    reads them out of JOBS, so a changed constant or a new job
+                //    cannot leave this sentence stale.
                 'why'      => $finishedWell . ' of the ' . count($state) . ' recorded a FINISH '
                     . 'inside the time allowed for it. That allowance differs by job and is '
-                    . 'generous: 15 minutes for the mail queue, two hours for event reminders, '
-                    . 'eight days for giving statements, and 36 hours for the rest — so a job '
-                    . 'called every few minutes can be hours late and still count here.'
+                    . 'generous — ' . ScheduledJobs::allowancesInWords() . ' — so a job called '
+                    . 'every few minutes can be many hours late and still count here.'
                     . (count($setAside) > 0
                         ? ' Not counted here: ' . implode(', and ', $setAside)
                             . ' — each is reported above.'

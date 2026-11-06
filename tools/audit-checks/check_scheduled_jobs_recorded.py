@@ -189,7 +189,7 @@ def sql_without_comments(text: str) -> str:
        PACKAGE (#788). `re.sub(r"--[^\n]*", "", text)` chops from `--` to the
        end of the line whether or not it is inside a string — and
        `full_schema.sql` has EIGHT `COMMENT` strings containing ` -- `, and
-       this package wrote NONE of them — the one it did write was removed four
+       this package wrote NONE of them — the one it did write was removed TWO
        commits later, by `3d2e1b0`. Each loses its closing quote, so every
        following quote pairs up wrongly.
 
@@ -310,207 +310,77 @@ def listed_jobs() -> list[str]:
     return re.findall(r"'(cron/[a-z0-9-]+)'\s*=>", block)
 
 
-def _skip_braced(code: str, at: int) -> int:
-    """Past a balanced `{ ... }` starting at `at`."""
-    depth = 0
-    i = at
-    while i < len(code):
-        if code[i] == "{":
-            depth += 1
-        elif code[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return i + 1
-        i += 1
-    return i
-
-
-def _end_of_arrow(code: str, at: int) -> int:
+def gate_enclosures(path: pathlib.Path) -> list[str]:
     """
-    Where an arrow function's single-expression body ends.
+    What BLOCKS enclose the token gate, named by the keyword that opened each.
 
-    ⚠️ IT MUST STEP OVER A BRACE, NOT STOP AT ONE. v4 ended the body at the
-       first `{` under a comment reading "defensive: never expected" — and it
-       IS expected: `match`, a closure and an anonymous class all sit in
-       expression position, so `fn() => match (true) { default => exit('x') }`
-       ended the body at the `{`, the main walk resumed INSIDE it, and the
-       `exit` of a definition nobody calls was read as the gate's own.
+    ⚠️ THIS REPLACES FIVE VERSIONS OF A REFUSAL DETECTOR, AND THE REASON IS THE
+       OWNER'S OWN RULE (D-065): **where the property is "this code RUNS",
+       drive it; where it is "this code LOOKS like this", pin it.**
 
-       Measured on five spellings (arrow→match, arrow→closure, nested
-       arrow→closure, static arrow→match, arrow in an array literal): all five
-       passed a gate that refuses nothing. `fn() => function (): never {
-       exit('no'); };` is v1's fault verbatim, reached by a new spelling.
+       "Does this gate refuse an unauthenticated request" is BEHAVIOURAL.
+       `gate_refuses()` tried to read it out of the source and was wrong in both
+       directions four times — v1 an exit in a closure, v2 `$log->exit()`, v3 an
+       arrow function, v4 an arrow body containing a brace, v5 an `else` branch
+       (false RED on secure code) and `!hash_equals(...)` (false pass). That job
+       belongs to section I-ALL of `tools/scheduled-jobs-selftest.php`, which
+       now drives ALL FIFTEEN pages with a wrong token and with none, and reads
+       the row back.
+
+       WHAT DRIVING CANNOT SEE, and why this check still exists. Round 6 found a
+       gate the REQUEST decides whether to apply:
+
+           if (($_GET['debug'] ?? '') !== '1') {
+               if ($expected === '' || hash_equals(…) === false) { exit; }
+           }
+
+       Driving with a wrong token does not catch that — the wrapper's condition
+       holds, so the gate applies and the request IS refused. It is only
+       reachable by sending the magic parameter, and no test can guess one.
+       **Measured both ways: the planted wrapper left the driven test at 196 of
+       196 green.**
+
+       But its SHAPE is visible, and that is a static property: the gate became
+       NESTED inside something. So this asks only that — what encloses the
+       gate — and nothing about refusal.
+
+    THE RULE: every block enclosing the gate must have been opened by `try`. A
+    `try` cannot change whether its body runs; an `if`, a loop, a `switch` or a
+    function can. Measured across all fifteen pages: fourteen gates sit at file
+    scope, and `health.php`'s sits inside its own `try` — so this is a general
+    rule rather than a named exception for one file.
+
+    WHAT IT CANNOT SEE: a `goto` or a conditional `require` above the gate, and
+    a gate whose condition is inverted. The first two are not nesting; the third
+    is behavioural and is section I-ALL's.
     """
-    brackets = 0
-    i = at
-    while i < len(code):
-        ch = code[i]
-        if ch == "{":
-            i = _skip_braced(code, i)
-            continue
-        if ch in "([":
-            brackets += 1
-        elif ch in ")]":
-            if brackets == 0:
-                return i
-            brackets -= 1
-        elif brackets == 0 and ch in ";,":
-            return i
-        i += 1
-    return i
+    probe = (
+        '$t = token_get_all(file_get_contents($argv[1]));'
+        '$stack = []; $pending = null; $out = null;'
+        'foreach ($t as $x) {'
+        ' if (is_array($x)) {'
+        '  if ($x[0] === T_STRING && $x[1] === "hash_equals" && $out === null) {'
+        '   $out = implode(",", $stack); continue; }'
+        '  if (in_array($x[0], [T_TRY, T_IF, T_ELSEIF, T_ELSE, T_WHILE, T_FOR,'
+        '      T_FOREACH, T_SWITCH, T_DO, T_FUNCTION, T_FN, T_CLASS, T_MATCH,'
+        '      T_CATCH, T_FINALLY], true)) {'
+        '   $pending = token_name($x[0]); }'
+        '  continue; }'
+        ' if ($x === "{") { $stack[] = $pending ?? "T_BLOCK"; $pending = null; }'
+        ' elseif ($x === "}") { array_pop($stack); } }'
+        'echo $out ?? "NO_GATE";'
+    )
+    lint = subprocess.run(["php", "-l", str(path)], capture_output=True, text=True)
+    if lint.returncode != 0:
+        raise ProbeUnavailable("%s does not parse, so nothing was checked" % path.name)
+    run = subprocess.run(["php", "-r", probe, str(path)], capture_output=True, text=True)
+    if run.returncode != 0:
+        raise ProbeUnavailable("php could not read %s" % path.name)
+    answer = run.stdout.strip()
+    if answer == "NO_GATE":
+        return ["NO_GATE"]
 
-
-def _if_governing(code: str, at: int) -> int | None:
-    """
-    The `if` whose condition encloses `at`, or None.
-
-    ⚠️ WHY THIS EXISTS. v4 decided "braceless gate" by asking whether the next
-       `;` came before the next `{`, and that is true of an ORDINARY shape —
-       the comparison read into a variable first:
-
-           $matches = hash_equals($expected, $incoming);
-           if ($expected === '' || $matches === false) { … exit('Forbidden'); }
-
-       which the gate then reported, falsely, as refusing nothing. A hard gate
-       going red with a security accusation about correct code is #483's cost
-       on the one check that cannot be switched off.
-    """
-    i = at
-    depth = 0
-    while i > 0:
-        i -= 1
-        ch = code[i]
-        if ch == ")":
-            depth += 1
-        elif ch == "(":
-            if depth == 0:
-                # The opening bracket of the expression holding `at`. Is the
-                # word before it `if` or `elseif`?
-                before = code[:i].rstrip()
-                if before.endswith("if") and (len(before) == 2 or before[-3].isalnum() is False
-                                              or before[-3] == "e"):
-                    return i
-                return None
-            depth -= 1
-        elif ch == ";" and depth == 0:
-            return None          # a statement boundary: not inside a condition
-    return None
-
-
-def gate_refuses(code: str, gate_at: int) -> bool:
-    """
-    Whether the block holding the token comparison ENDS THE REQUEST.
-
-    ⚠️ THIS GUARD HAS BEEN WRONG IN BOTH DIRECTIONS THREE TIMES, and the
-       history is kept because the PATTERN is the finding: every version was
-       "verified by planting" the shapes its author had thought of, with a
-       throwaway harness nobody re-ran — which is exactly why v4 failed v1's
-       own case by a new spelling.
-
-       v1  passed an exit inside a braced closure.
-       v2  cried wolf on a real exit one level deeper; passed `$log->exit();`.
-       v3  asked the tokeniser; passed `fn() => exit()` (no braces); cried wolf
-           on a braceless gate.
-       v4  skipped an arrow body — but STOPPED at a `{`, so
-           `fn() => match (true) { default => exit('x') }` passed, which is
-           v1's fault again; and decided "braceless" by `;` before `{`, so an
-           ordinary `$matches = hash_equals(...)` above the gate went RED.
-       v5  (this one) steps OVER braces inside an arrow body, and locates the
-           gate as the `if` whose CONDITION encloses the comparison rather than
-           guessing from punctuation.
-
-    **AND v5 IS THE FIRST VERSION WITH A COMMITTED TEST.**
-    `tools/scheduled-jobs-gate-selftest.py` holds every case from all five
-    rounds and is a hard gate of its own, so a sixth version cannot quietly
-    lose an earlier round's case. A fifth cleverer pattern would have produced
-    a round 6; an accumulating plant set will not.
-
-    WHAT IT STILL CANNOT SEE, kept complete and re-checked each round:
-
-      * a refusal by some other means — a `return` at file scope, a thrown
-        exception, a helper that exits. Reported as a fault, which is loud
-        rather than silent.
-      * a gate whose condition is INVERTED so the block runs on SUCCESS and
-        exits. That would pass and be catastrophic, and no source check can see
-        it; section I of `tools/scheduled-jobs-selftest.php` drives it.
-      * a comparison that reaches the gate through more than ONE hop (assigned,
-        passed to a helper, returned). Such a gate is judged unlocatable and
-        PASSES rather than going red, because a false red here blocks every
-        pull request — stated plainly as the cost of that choice.
-      * `Foo::EXIT` as a class constant, which tokenises as `T_EXIT`.
-      * the FIRST `hash_equals` in the file is the one judged, so a file with
-        two could put `began()` above the real gate.
-    """
-    opening = _if_governing(code, gate_at)
-    if opening is None:
-        # ── ONE HOP: `$matches = hash_equals(...);` then an `if` using it. ──
-        semi = code.find(";", gate_at)
-        head = code.rfind("\n", 0, gate_at)
-        assign = code[head + 1:gate_at] if head != -1 else code[:gate_at]
-        name = re.search(r"(\$[A-Za-z_][A-Za-z0-9_]*)\s*=\s*$", assign)
-        if name is None or semi == -1:
-            # Unlocatable. PASS rather than accuse correct code — see above.
-            return True
-        nxt = code.find(name.group(1), semi)
-        if nxt == -1:
-            return True
-        opening = _if_governing(code, nxt)
-        if opening is None:
-            return True
-
-    # The body starts after the condition's matching `)`.
-    depth = 0
-    i = opening
-    while i < len(code):
-        if code[i] == "(":
-            depth += 1
-        elif code[i] == ")":
-            depth -= 1
-            if depth == 0:
-                break
-        i += 1
-    body = i + 1
-    while body < len(code) and code[body].isspace():
-        body += 1
-
-    # ── A BRACELESS GATE: `if (...) exit('Forbidden');` refuses perfectly. ──
-    if body < len(code) and code[body] != "{":
-        semi = code.find(";", body)
-        return semi != -1 and "@EXIT@" in code[body:semi]
-
-    depth = 0
-    func_at: list[int] = []
-    i = body
-    pending_func = False
-    while i < len(code):
-        if code.startswith("@ARROW@", i):
-            i = _end_of_arrow(code, i + len("@ARROW@"))
-            continue
-        if code.startswith("@FUNC@", i):
-            pending_func = True
-            i += len("@FUNC@")
-            continue
-        if code.startswith("@EXIT@", i):
-            if len(func_at) == 0:
-                return True
-            i += len("@EXIT@")
-            continue
-        ch = code[i]
-        if ch == "{":
-            depth += 1
-            if pending_func is True:
-                func_at.append(depth)
-                pending_func = False
-        elif ch == "}":
-            if len(func_at) > 0 and func_at[-1] == depth:
-                func_at.pop()
-            depth -= 1
-            if depth == 0:
-                return False
-        elif ch == ";" and pending_func is True:
-            pending_func = False
-        i += 1
-    return False
+    return [part for part in answer.split(",") if part != ""]
 
 
 def main() -> int:
@@ -613,24 +483,31 @@ def main() -> int:
                 "look alive, which turns the Check this portal page from a true "
                 "report into a forgeable one." % path.name
             )
-        elif gate_refuses(code, min(gate)) is False:
-            # ⚠️ A GATE MUST REFUSE, NOT MERELY EXIST. This repository has
-            #    recorded that twice already (#668's section D, and
-            #    gdpr-coverage-selftest.php: "Every gate must REFUSE, not
-            #    merely exist") and this check shipped without it.
-            #
-            #    Measured: deleting `exit();` from the token block of
-            #    `webhook-retry.php` left `php -l` clean and this check at exit
-            #    0, printing the success line "with the start after its token
-            #    gate" — while the self-test went to 80 passed, 3 FAILED, with
-            #    I2, I4 and I6 ("and NOTHING was recorded") all red. That is an
-            #    unauthenticated request writing the record.
-            problems.append(
-                "%s checks its token but the block that fails the check does not "
-                "end the request — no exit() or die() before it closes. The "
-                "comparison then decides nothing, so an unauthenticated request "
-                "runs on and records that the job began." % path.name
-            )
+        else:
+            # ⚠️ THE GATE MUST NOT BE NESTED IN ANYTHING THE REQUEST CAN
+            #    INFLUENCE. Round 6 wrapped it in
+            #    `if (($_GET['debug'] ?? '') !== '1') { … }` and every guard
+            #    stayed green, including the driven one — a request carrying
+            #    `?debug=1` was not refused, wrote `began()` and ran the job's
+            #    real work. Driving cannot find that without knowing the magic
+            #    parameter; the SHAPE is what gives it away.
+            try:
+                around = gate_enclosures(path)
+            except ProbeUnavailable as exc:
+                print("REFUSED: %s" % exc)
+                print("Nothing was checked. This is not a pass.")
+                return 1
+            outer = [kind for kind in around if kind != "T_TRY"]
+            if len(outer) > 0:
+                problems.append(
+                    "%s has its token gate nested inside %s. A gate inside "
+                    "anything but a `try` can be skipped by whatever decides "
+                    "that block — and if a REQUEST decides it, somebody can "
+                    "ask to have the gate skipped. Round 6 of this package's "
+                    "review did exactly that with one line, and every other "
+                    "guard stayed green."
+                    % (path.name, " inside ".join(outer))
+                )
 
         # ── D. the finish comes after the start.
         if done[0] < began[0]:
