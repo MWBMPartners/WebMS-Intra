@@ -1011,8 +1011,15 @@ expect('J13', 'an unreadable zone moves nothing rather than guessing', [
 //    `event-repeat-pages-selftest.php` at 251/251 on a real database.
 //
 //    `EventRecurrence::whyFirstDateMoved()` is the ONE place that decides, and
-//    the page asks it. So this check asks it too, and a wrong branch in the
-//    page is now a wrong answer here.
+//    the page asks it. So this check asks it too.
+//
+// ⚠️ BUT THIS DOES NOT CATCH A WRONG BRANCH IN THE PAGE, and an earlier
+//    version of this comment said it did (#777 round 15). It pins the RULE.
+//    WHICH ANSWER the page branches on is a separate thing, and one word
+//    there -- `=== 'gap'` to `=== 'pattern'` -- left every check in this file
+//    and all 251 HTTP checks green. That mapping is pinned as text in
+//    `check_clock_time_not_a_moment.py`'s `FLASH_BRANCHES`; the behavioural
+//    gap is #787.
 $j14 = [];
 foreach ([
     ['America/Nuuk',  '2026-03-28 23:30:00', '2026-03-29 00:30:00'],

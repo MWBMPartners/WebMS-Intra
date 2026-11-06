@@ -566,6 +566,14 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         ['2026-6-1T10:00:00',             '2026-06-01 10:00:00', 'round 13 refused it'],
         ['20260601T10',                   '2026-06-01 10:00:00', 'round 13 refused it'],
         ['2026-152 10:00',                '2026-06-01 10:00:00', 'round 13 refused it (ISO ordinal)'],
+        ['2026-152',                      '2026-06-01 00:00:00', 'round 13 refused it (ISO ordinal, no time)'],
+        ['2026-W23-1 10:00',              '2026-06-01 10:00:00', 'ISO week date'],
+        // legitimate fractional SECONDS, which step 2 takes, so the fraction
+        // rule below must never reach them
+        ['2026-06-01T10:00:00.000',       '2026-06-01 10:00:00', ''],
+        ['2026-06-01 10:00:00.000',       '2026-06-01 10:00:00', ''],
+        // a real leap day, so the impossible-date rule cannot just refuse 29 February
+        ['2028-02-29 10:00',              '2028-02-29 10:00:00', ''],
     ];
     $storeBad = [];
     foreach ($mustStore as [$cell, $want, $hist]) {
@@ -581,10 +589,32 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     // MUST REFUSE. A date that cannot exist, in every spelling, and the one
     // fractional shape PHP would misread.
     $mustRefuse = [
+        // a day that month does not have
         '2026-02-31 10:00', '2026-2-31 10:00', '2026-6-31 10:00', '2026-4-31 09:00',
         '02/31/2026 10:00', '2/31/2026 10:00', 'Feb 31 2026 10:00',
         '31 February 2026 10:00', '29 Feb 2026',
+        // ⚠️ ROUND 14 STORED EVERY ONE OF THESE, under a comment saying its
+        //    rule covered "any spelling". The broken component is a ZERO or
+        //    the year is missing, which its day-1-to-31 test stepped over.
+        //    `0000-00-00` is the MySQL zero date, so it is what a CSV exported
+        //    from a legacy dump contains — and it rolled to `-0001-11-30`,
+        //    which a DATETIME column REFUSES, aborting the whole import
+        //    part-way with earlier rows already written.
+        '2026-06-00 10:00', '2026-6-0 10:00', '06/00/2026 10:00',
+        'Feb 0 2026 10:00', '0 June 2026 10:00',
+        '2026-00-10 10:00', '2026-0-10 10:00', '00/10/2026 10:00',
+        'Feb 31 10:00',
+        '0000-00-00 10:00', '0000-00-00 00:00:00',
+        // a fraction on the wrong component: ISO says 10.5 means 10:30, and
+        // strtotime answers 10:05
         '2026-06-01T10.5', '2026-06-01T10:00.5',
+        // ⚠️ AND THE SAME WITH AN UNPADDED DATE OR A SPACE SEPARATOR, which
+        //    round 14 stored: it tightened the date half of its own pattern
+        //    from `\d{1,2}` to `\d{2}` without saying so, and the space form
+        //    stored 10:05 in every version including the original.
+        '2026-6-1T10.5', '2026-06-1T10.5', '2026-6-01T10.5', '2026-6-1T10:00.5',
+        '2026-6-1T10.5Z',
+        '2026-06-01 10.5', '2026-6-1 10.5', '2026-06-01 23.9', '2026-06-01 10:00.5',
         'rubbish',
     ];
     $refuseBad = [];

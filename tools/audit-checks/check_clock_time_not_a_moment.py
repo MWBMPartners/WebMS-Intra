@@ -705,6 +705,21 @@ FLASH_BRANCHES = (
      "decided it inline on the page and re-implemented it in the test, so a "
      "one-word change there left every gate and all 251 HTTP checks green "
      "(round 14). The page must ASK the shared rule."),
+    # ⚠️ AND THE MAPPING, WHICH ROUND 14 CLAIMED WAS COVERED AND WAS NOT.
+    #    Moving the arithmetic into `whyFirstDateMoved()` pins the RULE, and
+    #    J14 asks it — but nothing pinned WHICH ANSWER the page branches on.
+    #    Measured by round 15: one word in `save.php`, `=== 'gap'` to
+    #    `=== 'pattern'`, gives every clocks-moved-it date the "to match the
+    #    repeat you chose" sentence — round 12's original fault restored — with
+    #    all 65 audit scripts, 75 recurrence checks, 104 clock checks AND 251
+    #    HTTP checks green. The three sentence pins below survive any
+    #    mis-mapping, so they could not see it either.
+    ("$why === 'gap'",
+     "the page branching on the answer it was given. Pinning the rule is not "
+     "pinning the mapping, and a round-14 claim that it was is corrected."),
+    ("$why === 'pattern and time'",
+     "the second branch. Without this pin, collapsing the three cases to two "
+     "is invisible."),
     ("Any later dates keep the time you typed",
      "the clocks-moved-it sentence."),
     ("and its time became",

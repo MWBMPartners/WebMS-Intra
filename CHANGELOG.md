@@ -132,8 +132,21 @@ holds whatever somebody typed, so the import still accepts `June 1 2026 10:00`,
 `Tue, 3 Mar 2026 19:00` and `2026-06-01 7pm`, and it reads `01/06/2026`
 month-first as 6 January. Refusing those would turn imports that work today
 into failures. What the import now refuses is a date that cannot exist — a cell
-reading `2026-02-31`, in any spelling — which it used to accept and store three
-days later without telling anybody.
+reading `2026-02-31`, in any spelling, and that includes a day or a month of
+zero and a date with no year at all — which it used to accept and store days or
+months later without telling anybody. `0000-00-00`, which is what a spreadsheet
+exported from an old database contains, used to stop the whole import part-way
+through with some rows already added; it is now refused on the preview screen
+before anything is written.
+
+**One thing the import will no longer accept, said plainly because somebody
+could notice it.** A cell writing the time with a decimal point — `10.5` meaning
+half past ten — used to be stored as **five past ten**, which is neither
+reading. It is refused now. Nothing else was narrowed: `10:00 PM`, `7pm`,
+`March 3 2026`, `Tue, 3 Mar 2026 19:00`, an unpadded `2026-6-1`, an e-mail-style
+date with a time zone on it, and a day-first `01/06/2026` all import exactly as
+before — 31 formats are checked on every run, and 32 cells that must be refused
+with them.
 
 **And the preview screen for changing a repeating series showed an hour late**
 on the clock-change morning — on the one screen whose purpose is comparing a

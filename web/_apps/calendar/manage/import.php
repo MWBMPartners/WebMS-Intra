@@ -170,7 +170,34 @@ $fmtClock = static function (string $text): ?string {
     //    handle every legitimate machine form" -- was false, and the comment
     //    thirty lines below named `2026-6-1` as a format the fallback exists
     //    to support. **The rule is about the FRACTION, so it says so.**
-    if (preg_match('/^(?:\d{4}-\d{2}-\d{2}|\d{8})[Tt][\d:]*\.\d/', $trimmed) === 1) {
+    //
+    // ⚠️ ROUND 14 SILENTLY TIGHTENED THE DATE HALF OF THIS PATTERN and said
+    //    nothing about it: `\d{1,2}` became `\d{2}`, so the rule started
+    //    depending on how the DATE was spelled. Measured, round 14 against
+    //    round 13:
+    //
+    //      2026-6-1T10.5      ISO 10:30   r13 refused   r14 stored 10:05
+    //      2026-06-1T10.5     ISO 10:30   r13 refused   r14 stored 10:05
+    //      2026-6-1T10:00.5   ISO 10:00:30 r13 refused  r14 stored 10:00:05
+    //      2026-06-01T10.5    ISO 10:30   both refused  (padded, so caught)
+    //
+    //    A refusal turned into "stores something wrong", which round 10's own
+    //    lesson names as the direction to check first — and it is the same
+    //    "spelling list wearing a rule's clothes" criticism the note below
+    //    levels at round 12, reproduced in the rule written to replace it.
+    //
+    // ⚠️ AND THE SEPARATOR IS A SPACE AS WELL AS A `T`. `2026-06-01 10.5`
+    //    stored 10:05 in EVERY version of this closure including the original
+    //    — `I18n::wallClockFromInput()`'s own docblock names `2026-06-01 23.9`
+    //    as exactly this fault and refuses it on the API and form paths, while
+    //    the import stored it. **That is a deliberate narrowing of
+    //    long-standing behaviour**, taken because either reading of `10.5`
+    //    means half past ten and `strtotime()` answers five past.
+    //
+    //    Legitimate fractional SECONDS are unaffected, measured rather than
+    //    assumed: `2026-06-01T10:00:00.000` and the same with a space are both
+    //    taken by step 2, so they never reach this line.
+    if (preg_match('/^(?:\d{4}-\d{1,2}-\d{1,2}|\d{8})[Tt ][\d:]*\.\d/', $trimmed) === 1) {
         return null;
     }
 
@@ -196,16 +223,50 @@ $fmtClock = static function (string $text): ?string {
     //    So the test is the HARM, stated exactly: a day somebody could have
     //    typed (1 to 31) in a month that does not have it. Day 152 is not
     //    such a day, so an ordinary parser disagreement falls through.
+    //
+    // 🚨 ROUND 14's VERSION OF THIS LET AN IMPOSSIBLE DATE THROUGH IN ELEVEN
+    //    SPELLINGS, under a comment saying "IN ANY SPELLING". It required the
+    //    day to be 1-31, the month 1-12 and the year to be a number, so every
+    //    cell whose broken component was a ZERO, or which had no year at all,
+    //    fell straight to `strtotime()` and was rolled silently. Measured,
+    //    round 13 refused every one of these and round 14 stored them:
+    //
+    //      2026-06-00 10:00   -> 31 May 2026        (day zero)
+    //      Feb 0 2026 10:00   -> 31 January 2026    (day zero, word month)
+    //      2026-00-10 10:00   -> 10 December 2025   (month zero)
+    //      Feb 31 10:00       -> 3 March 2026       (no year at all)
+    //      0000-00-00 10:00   -> -0001-11-30        (the MySQL zero date)
+    //
+    //    The last is the worst: `-0001-11-30` is out of range for a DATETIME,
+    //    and with the portal's strict mysqli reporting `execute()` THROWS. The
+    //    insert loop has no try/catch there, so the whole import stops
+    //    part-way with earlier rows already written, no per-row report and no
+    //    activity record — where round 13 had refused the cell politely at
+    //    preview time. A CSV exported from a legacy MySQL dump contains
+    //    exactly that value.
+    //
+    // 🧮 SO THE RANGE TEST IS WHAT IT SHOULD ALWAYS HAVE BEEN: anything a
+    //    calendar day or month COULD be, including zero, with the year taken
+    //    from `strtotime()`'s own assumption when the cell gives none.
+    //
+    //    The upper bounds are what still lets an ISO ordinal date through:
+    //    `date_parse('2026-152')` answers day 152, which no month has a
+    //    152nd of, so it is a PARSER DISAGREEMENT rather than an impossible
+    //    date — `strtotime()` reads it correctly as 1 June. A day above 31 or
+    //    a month above 12 therefore falls through on purpose.
     $parsed = date_parse($trimmed);
     if (count($parsed['errors']) > 0) {
         return null;
     }
-    if (is_int($parsed['year']) === true
-        && is_int($parsed['month']) === true
+    if (is_int($parsed['month']) === true
         && is_int($parsed['day']) === true
-        && $parsed['day'] >= 1 && $parsed['day'] <= 31
-        && $parsed['month'] >= 1 && $parsed['month'] <= 12
-        && checkdate($parsed['month'], $parsed['day'], $parsed['year']) === false) {
+        && $parsed['day'] <= 31
+        && $parsed['month'] <= 12
+        && checkdate(
+            $parsed['month'],
+            $parsed['day'],
+            is_int($parsed['year']) === true ? $parsed['year'] : (int) date('Y')
+        ) === false) {
         return null;
     }
 

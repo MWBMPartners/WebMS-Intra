@@ -19295,7 +19295,18 @@ WORD in the page left all 65 audit scripts green, J14 green at 75/75,
 clock-change at 100/100 **and `event-repeat-pages-selftest.php` at 251/251 on a
 real database** — because that test's M02 asserts only the DATE substring,
 which every branch produces. `EventRecurrence::whyFirstDateMoved()` is the ONE
-place now and J14 asks it; planted, the same one-word change goes red.
+place now and J14 asks it.
+
+⚠️ **AND "planted, the same one-word change goes red" WAS UNTRUE, which round
+15 measured.** Moving the arithmetic into one method pins the RULE; it does not
+pin **which answer the page branches on**. One word in `save.php` — `=== 'gap'`
+to `=== 'pattern'`, giving every clocks-moved-it date the "to match the repeat
+you chose" sentence, which is round 12's original fault restored — left all 65
+audit scripts, 75 recurrence checks, 104 clock checks AND 251 HTTP checks green.
+The three sentence pins survive any mis-mapping, so they could not see it
+either. The mapping is pinned now, as `$why === 'gap'` and
+`$why === 'pattern and time'` in `FLASH_BRANCHES`, and that plant goes red.
+**Pinning a rule is not pinning its use.**
 
 **AND I MADE THE DOCBLOCK MISTAKE AGAIN IN THE COMMIT THAT WROTE THE LESSON.**
 Round 13 reported a docblock stranded from its method, fixed it for

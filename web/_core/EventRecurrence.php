@@ -933,8 +933,14 @@ final class EventRecurrence
     /**
      * 🕳️ What the missing-hour step would make of this reading.
      *
-     * Public for the same reason as `readingIsReal()`, and it is the SHARPER
-     * question (#777 round 13). A caller explaining why a repeating event's
+     * ⚠️ IT IS NOT CALLED FROM OUTSIDE THIS CLASS EITHER. `whyFirstDateMoved()`
+     *    above is its only caller under `web/`, plus checks J12-J13 of
+     *    `tools/event-recurrence-selftest.php`. An earlier version of this
+     *    line said "Public for the same reason as `readingIsReal()`" and so
+     *    inherited that method's untrue claim about a caller (#777 round 15).
+     *    Public for the tests, which pin it directly.
+     *
+     * It is the SHARPER question than `readingIsReal()` (#777 round 13). A caller explaining why a repeating event's
      * first date moved has to tell two causes apart, and asking only whether
      * the TYPED reading was real gets it wrong in BOTH directions:
      *
@@ -974,9 +980,29 @@ final class EventRecurrence
     /**
      * 🕳️ Is this reading a time that really exists in that zone?
      *
-     * Public because a CALLER has to tell two quite different reasons apart
-     * when it explains itself to somebody (#777 round 12). A repeating event's
-     * first date can move for two reasons:
+     * ⚠️ NOTHING UNDER `web/` CALLS THIS, and its own docblock claimed a
+     *    caller for three rounds (#777 round 15). Established with
+     *    `grep -rn "readingIsReal" web/ tools/`: the only callers are checks
+     *    J06-J09 of `tools/event-recurrence-selftest.php`.
+     *
+     *    `calendar/manage/save.php` DID call it, at round 12. Round 13 moved
+     *    it to `readingPastTheGap()` — the sharper question — and round 14 to
+     *    `whyFirstDateMoved()`, and each time this docblock kept saying
+     *    "Public because a CALLER has to tell two quite different reasons
+     *    apart … `calendar/manage/save.php` showed ONE sentence for both".
+     *    This repository's own rule is that a public method nothing calls,
+     *    under an authoritative docblock, is worse than none (#687).
+     *
+     *    **It is kept, and the honest reason is the tests.** It states the
+     *    rule `whyFirstDateMoved()` depends on, and J06-J09 pin it directly:
+     *    the gap seen in two zones that change at 23:00 and two that change
+     *    at 01:00, the over-reach direction held down, and an unreadable zone
+     *    claiming nothing. Deleting it would move that coverage onto a
+     *    method that answers three things at once, where a wrong answer is
+     *    harder to localise.
+     *
+     * The question it answers, which is why the rule matters: a repeating
+     * event's first date can move for two reasons —
      *
      *   • the pattern puts it elsewhere -- ticking Thursday on a Wednesday --
      *     which is the organiser's own choice working as asked; or
