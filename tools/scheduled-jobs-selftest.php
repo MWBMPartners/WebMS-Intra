@@ -1142,6 +1142,94 @@ check(
     true
 );
 
+// ── The mail job stopped AND every other job healthy ────────────────────
+// ⚠️ NO FIXTURE REACHED THIS, AND IT IS WHERE ROUND 2's NEW BUCKET HID.
+//    H0m-H0p2 give the mail job a record, so the fallback never fires;
+//    H0q-H0v leave `tblScheduledJobRun` empty, so `count($notKnown)` suppresses
+//    the all-clear. "Mail stopped, everything else fine" fell between them —
+//    and there the all-clear counted the mail job as having finished and
+//    claimed to speak for it, directly beneath the warning saying it had not
+//    run. Four jobs had finished and the sentence said five.
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    if ($job === 'cron/mail-queue') {
+        continue;
+    }
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+$db->query(
+    "INSERT INTO `tblMailRouteState` (`routeKey`, `jobLastRanAt`) "
+    . "VALUES ('installation', UTC_TIMESTAMP() - INTERVAL 3 DAY) "
+    . "ON DUPLICATE KEY UPDATE `jobLastRanAt` = UTC_TIMESTAMP() - INTERVAL 3 DAY"
+);
+MailQueue::forget();
+$found = $pageSays();
+$text  = $allText($found);
+check(
+    'H0w the mail job is reported as stopped',
+    $severityOf($found, 'mail job has not run'),
+    \Portal\Core\PortalCheck::WARNING
+);
+check(
+    'H0x and there is NO all-clear beside it — it used to say "Every scheduled job has '
+    . 'run recently enough" directly under that warning',
+    $severityOf($found, 'has run recently enough'),
+    null
+);
+check(
+    'H0y so nothing claims to speak for the job the page has just said has stopped',
+    str_contains($text, 'can speak for has run recently enough'),
+    false
+);
+
+// ── One page, one number for one fact ───────────────────────────────────
+// ⚠️ THE PROBLEM COUNTED TOKENS AND THE NOTE COUNTED JOBS. There are eleven
+//    tokens and fifteen jobs, and `maintenance.cronToken` alone covers five —
+//    so with only that token empty the page said "Some scheduled jobs can
+//    never run" with a count of ONE, beside "the 5 with no token … each is
+//    reported above". Differing fivefold, pointing at a single line.
+$db->query('DELETE FROM `tblScheduledJobRun`');
+$db->query("DELETE FROM `tblMailRouteState`");
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+$setSetting('maintenance.cronToken', '');
+$sharesIt = 0;
+foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
+    if ($facts['token'] === 'maintenance.cronToken') {
+        $sharesIt++;
+        continue;
+    }
+    ScheduledJobs::began($db, $jobKey);
+    ScheduledJobs::finished($db, $jobKey);
+}
+MailQueue::forget();
+$found = $pageSays();
+$problem = null;
+foreach ($found as $f) {
+    if (str_contains($f['what'], 'can never run, because no token') === true) {
+        $problem = $f;
+    }
+}
+check(
+    'H0z the no-token problem counts JOBS, not tokens — ' . $sharesIt
+    . ' jobs share maintenance.cronToken, and it used to report 1',
+    $problem['count'] ?? null,
+    $sharesIt
+);
+check(
+    'H0z2 and the all-clear names the SAME number, so one page gives one number for one fact',
+    str_contains($allText($found), 'the ' . $sharesIt . ' with no token'),
+    true
+);
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+
 echo "\n=== Summary ===\n";
 echo "{$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

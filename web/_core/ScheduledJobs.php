@@ -355,12 +355,19 @@ final class ScheduledJobs
      *
      * ⚠️ EVERY EARLY EXIT BETWEEN began() AND HERE MUST CALL THIS, and getting
      *    that wrong was a real fault in the first version of #775's wiring.
-     *    Nine of the fifteen pages exit early when a setting switches them
+     *    EIGHT of the fifteen pages exit early when a setting switches them
      *    off, when another run holds the lock, or when nothing is due. Those
-     *    twelve paths recorded a START and no finish — TEN of them are
-     *    refusals, across EIGHT pages, and two are genuine failures (a third
-     *    failure lives in `health.php`'s handled catch, which is not an
-     *    early-exit path) — so a job somebody had
+     *    TWELVE paths recorded a START and no finish — ten are refusals and
+     *    two are genuine failures, and both failures sit in pages already
+     *    among the eight. A THIRTEENTH early finish lives in `health.php`'s
+     *    handled catch, which is not an early-exit path, so NINE pages record
+     *    an early finish in all.
+     *
+     *    (This said "nine of the fifteen pages … those twelve paths", which
+     *    cannot both be true: the twelve live in eight pages, and nine counts
+     *    `health.php`, which the same sentence removed from the early-exit
+     *    set. The correction of a count was itself inconsistent, in four
+     *    places.) So a job somebody had
      *    deliberately switched off read as "started and never finished" on the
      *    check page, for ever, as a PROBLEM. **A job working exactly as
      *    configured must never be reported as broken**, and a check that cries

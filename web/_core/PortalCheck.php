@@ -703,7 +703,7 @@ final class PortalCheck
         //    knowable from the database whether or not the job ever recorded
         //    anything — which is why this check is FIRST, and why D-071's
         //    "nothing is known yet" gives nothing away.
-        $silent = [];
+        $emptyTokens = [];
         foreach (self::JOB_TOKENS as $key => $whatStops) {
             $stmt = $db->prepare(
                 'SELECT `settingValue` FROM `tblSettings` '
@@ -716,7 +716,26 @@ final class PortalCheck
             // ⚠️ NEVER PRINT THE VALUE. It is a secret that lets anybody run
             //    the job. Only whether it is empty is ever said out loud.
             if ($row === null || trim((string) $row['settingValue']) === '') {
-                $silent[] = $whatStops;
+                $emptyTokens[$key] = true;
+            }
+        }
+
+        // ⚠️ COUNT JOBS, NOT TOKENS, BECAUSE EVERY OTHER NUMBER ON THIS PAGE
+        //    COUNTS JOBS. There are eleven tokens and fifteen jobs, and
+        //    `maintenance.cronToken` alone covers five — so with only that one
+        //    empty the page said "Some scheduled jobs can never run" with a
+        //    count of ONE, beside a sentence saying "the 5 with no token …
+        //    each is reported above". One page, two numbers for one fact,
+        //    differing fivefold, and "each is reported above" pointing at a
+        //    single line.
+        //
+        //    A token is not a job — that is the whole reason this package has
+        //    its own table — and the count an administrator needs is how many
+        //    jobs are dead, not how many secrets are unset.
+        $silent = [];
+        foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
+            if (array_key_exists($facts['token'], $emptyTokens) === true) {
+                $silent[] = $facts['whatStops'];
             }
         }
         if (count($silent) > 0) {
@@ -742,16 +761,18 @@ final class PortalCheck
         //    appeared under "can never run, because no token has been set" AND
         //    under "Each of these has a token set, so it CAN run". Reached
         //    whenever a token is cleared after the job has run.
+        // ⚠️ ONE SOURCE FOR BOTH, SO THEY CANNOT DISAGREE. This used to match a
+        //    job to its token by comparing their human SENTENCES, with a
+        //    second clause matching on the token key. Only one job satisfied
+        //    the first clause today (by coincidence), the second already
+        //    covered it, and a reworded sentence would have changed which
+        //    fired — while a sentence that collided with a DIFFERENT token
+        //    would have excluded a job whose token is perfectly well set.
+        //    Matching on the token KEY is the only identifier that means
+        //    anything, so that is all there is now.
         $noToken = [];
         foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
-            if (in_array($facts['whatStops'], $silent, true) === true) {
-                $noToken[$jobKey] = true;
-                continue;
-            }
-            // JOB_TOKENS is keyed by token and $silent holds its sentences, so
-            // match a job to its token through the token itself as well.
-            if (array_key_exists($facts['token'], self::JOB_TOKENS) === true
-                && in_array(self::JOB_TOKENS[$facts['token']], $silent, true) === true) {
+            if (array_key_exists($facts['token'], $emptyTokens) === true) {
                 $noToken[$jobKey] = true;
             }
         }
@@ -831,7 +852,35 @@ final class PortalCheck
                 //       the first stays "nothing is known yet" — which is both
                 //       true and what D-071 asks for.
                 if ($jobKey === 'cron/mail-queue') {
-                    $everRan = (string) (MailRoutes::state($db)['jobLastRanAt'] ?? '');
+                    // ⚠️ WRAPPED, BECAUSE `MailRoutes::state()` HAS NO TRY/CATCH
+                    //    AND THIS COMMENT USED TO CLAIM IT DID. It handles "no
+                    //    row" with `$row ?? [...]`, and nothing else: under
+                    //    `MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT` its
+                    //    `prepare()` THROWS, the exception escapes this method,
+                    //    and `run()`'s catch replaces the WHOLE scheduled-jobs
+                    //    check with one tidy "This check could not be
+                    //    completed."
+                    //
+                    //    Measured on a half-applied upgrade (the table there,
+                    //    `jobLastRanAt` not yet added — the exact state
+                    //    COULD_NOT_READ exists for): the page went from
+                    //    "ten jobs can never run, including the clearing-out of
+                    //    personal data" to that one warning. **Round 1's version
+                    //    used `MailQueue::jobIsRunning()`, which catches, so it
+                    //    gave a wrong sentence but the check survived; round 2
+                    //    traded a wrong sentence for a vanished check.**
+                    //
+                    //    A read that fails means "nothing is known", which is
+                    //    the truthful answer and what the rest of this method
+                    //    already does.
+                    $everRan = '';
+                    try {
+                        $everRan = (string) (MailRoutes::state($db)['jobLastRanAt'] ?? '');
+                    } catch (Throwable $e) {
+                        // Never the fault's own words: a database message can
+                        // quote the value that caused it.
+                        $everRan = '';
+                    }
                     if ($everRan !== '' && MailQueue::jobIsRunning($db) === false) {
                         $mailStopped = $words;
                         continue;
@@ -1023,9 +1072,31 @@ final class PortalCheck
         //
         //    It counts the jobs it can actually speak for, rather than all of
         //    them, because that is the number the sentence is about.
+        // ⚠️ EVERY BUCKET MUST BE SUBTRACTED AND MUST SUPPRESS, AND
+        //    `$mailStopped` WAS NEITHER. Round 2 added it in the same edit that
+        //    excluded the running and token-less jobs, and did not add it to
+        //    either place — so the all-clear counted the mail job as having
+        //    "recorded a FINISH" and claimed to speak for it, directly beneath
+        //    a WARNING saying it had stopped. Measured: four jobs had really
+        //    finished and the sentence said five, with the mail job absent from
+        //    its own "Not counted here" list.
+        //
+        //    That is this package's headline fault for the FOURTH time, in the
+        //    bucket created to fix the third. **The rule, written here because
+        //    three rounds have now broken it: a new bucket in this loop is not
+        //    finished until it appears in BOTH of the two lines below.**
+        //    ONE MECHANISM, NOT TWO. The obvious fix was to subtract the
+        //    stopped mail job from the count AS WELL as suppressing the
+        //    all-clear, and that subtraction is provably DEAD: the count is
+        //    only ever printed when no bucket is populated, and in that state
+        //    the mail job is not stopped. Measured — dropping it alone changed
+        //    no output and no check could tell. **A clause that cannot matter
+        //    makes a guard look stronger than it is**, so suppression does the
+        //    work and this says which.
         $finishedWell = count($state) - count($running) - count($noToken);
         if (count($overdue) === 0 && count($diedPart) === 0 && count($notKnown) === 0
-            && count($broke) === 0 && count($unreadable) === 0 && $finishedWell > 0) {
+            && count($broke) === 0 && count($unreadable) === 0 && $mailStopped === ''
+            && $finishedWell > 0) {
             // ⚠️ "EVERY" MUST MEAN EVERY, AND THE FIRST FIX MOVED A
             //    CONTRADICTION IN HERE RATHER THAN REMOVING IT. Token-less
             //    jobs were taken out of the findings above and subtracted from

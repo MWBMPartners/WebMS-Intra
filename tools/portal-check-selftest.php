@@ -89,6 +89,9 @@ require PORTAL_CORE . $sep . 'PortalCheck.php';
 //    That is #536's recorded lesson, and it cost a run here.
 use Portal\Core\Maintenance;
 use Portal\Core\PortalCheck;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\ScheduledJobs;
 
 $passed = 0;
 $failed = 0;
@@ -553,9 +556,17 @@ $silentFinding = static function (array $f): ?array {
     return null;
 };
 
+// ⚠️ THE COUNT IS JOBS, NOT TOKENS, AND THAT CHANGED DELIBERATELY (#775
+//    round 3). There are eleven tokens and fifteen jobs, and
+//    `maintenance.cronToken` alone covers five — so this finding used to
+//    report ONE while the all-clear beside it said "the 5 with no token …
+//    each is reported above". One page, two numbers for one fact, differing
+//    fivefold. A token is not a job, which is the whole reason that package
+//    has its own table, and the number an administrator needs is how many
+//    JOBS are dead.
 $fresh = $silentFinding(PortalCheck::run($db, ORG));
-check('O3 a fresh install reports every job as unable to run',
-    $fresh === null ? -1 : (int) $fresh['count'], count($jobs));
+check('O3 a fresh install reports every JOB as unable to run, not every token',
+    $fresh === null ? -1 : (int) $fresh['count'], count(ScheduledJobs::JOBS));
 check('O4 and it is a PROBLEM, not a note',
     $fresh === null ? '' : $fresh['severity'], PortalCheck::PROBLEM);
 
@@ -579,10 +590,41 @@ $stmt->bind_param('s', $one);
 $stmt->execute();
 $stmt->close();
 $justOne = $silentFinding(PortalCheck::run($db, ORG));
-check('O6 emptying one token reports exactly one',
+// `giving.cron_token` covers exactly one job, so one token and one job agree
+// here — which is why this check could not see the token/job confusion. O6b
+// below uses the token that covers FIVE.
+check('O6 emptying a token that covers one job reports exactly one',
     $justOne === null ? -1 : (int) $justOne['count'], 1);
-check('O7 and it names what stops, not the setting key',
-    $justOne !== null && in_array('Giving statements', $justOne['examples'], true), true);
+check('O7 and it names what stops, in the JOB\'s own words, not the setting key',
+    $justOne !== null && in_array(
+        ScheduledJobs::JOBS['cron/giving-statements']['whatStops'],
+        $justOne['examples'],
+        true
+    ), true);
+
+// ── O6b. The token that covers FIVE jobs ────────────────────────────────
+// This is the state that exposed the fault, and no check reached it: every
+// fixture used a single-job token, where a token count and a job count are
+// the same number.
+$stmt = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+$put  = 'tok';
+$stmt->bind_param('ss', $put, $one);
+$stmt->execute();
+$stmt->close();
+$shared = 'maintenance.cronToken';
+$stmt = $db->prepare('UPDATE `tblSettings` SET `settingValue` = \'\' WHERE `settingKey` = ? AND `siteID` IS NULL');
+$stmt->bind_param('s', $shared);
+$stmt->execute();
+$stmt->close();
+$sharedBy = 0;
+foreach (ScheduledJobs::JOBS as $facts) {
+    if ($facts['token'] === $shared) {
+        $sharedBy++;
+    }
+}
+$many = $silentFinding(PortalCheck::run($db, ORG));
+check('O6b emptying the token FIVE jobs share reports ' . $sharedBy . ', not 1',
+    $many === null ? -1 : (int) $many['count'], $sharedBy);
 
 // ⚠️ THE TOKEN IS A SECRET — anybody holding it can run the job. The page must
 //    never print it, and this is the check that would notice if it did.

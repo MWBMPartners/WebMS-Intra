@@ -154,6 +154,8 @@ def php_code_only(path: pathlib.Path) -> str:
         'if (in_array($x[0], [T_COMMENT, T_DOC_COMMENT, T_INLINE_HTML,'
         ' T_ENCAPSED_AND_WHITESPACE, T_START_HEREDOC, T_END_HEREDOC], true)) { '
         '$out .= str_repeat("\\n", substr_count($x[1], "\\n")); continue; }'
+        'if ($x[0] === T_EXIT) { $out .= "@EXIT@"; continue; }'
+        'if (in_array($x[0], [T_FUNCTION, T_FN], true)) { $out .= "@FUNC@"; continue; }'
         'if ($x[0] === T_CONSTANT_ENCAPSED_STRING) {'
         ' $v = trim($x[1], "\'\\"");'
         ' $out .= preg_match("#^cron/[a-z0-9-]+$#", $v) === 1 ? "\'" . $v . "\'" : "\'\'";'
@@ -298,65 +300,83 @@ def gate_refuses(code: str, gate_at: int) -> bool:
     """
     Whether the block holding the token comparison ENDS THE REQUEST.
 
-    Walks forward from the comparison to the end of its `{ ... }` block and
-    asks whether an `exit` or `die` appears inside it. Braces are matched on
-    the masked code, so a `{` inside a message cannot swallow the rest of the
-    function — this repository's recorded trap from the money pages.
+    ⚠️ IT ASKS PHP'S PARSER, AND TWO EARLIER VERSIONS DID NOT — one wrong in
+       each direction, which is the worst pair there is.
 
-    WHAT IT CANNOT SEE, stated rather than implied: a refusal that happens by
-    some other means (a `return` at file scope, a thrown exception, a helper
-    that exits), and a gate whose condition is inverted so the block runs on
-    success. The first would be reported as a fault and is worth a loud
-    failure rather than a silent pass; the second is behavioural, and section I
-    of the self-test is what drives it.
+       Version 1 searched the block for the word `exit` ANYWHERE. An `exit`
+       inside a closure merely DEFINED in the block refuses nothing, and that
+       passed:
+
+           if ($expected === '' || hash_equals(...) === false) {
+               $stop = static function (): void { exit('Forbidden'); };
+           }
+
+       Version 2 then required the exit at the block's own depth. That CRIED
+       WOLF on correct code — a genuinely refusing gate whose exits are one
+       level deeper, an ordinary `if/else` on `?json=1` with both branches
+       exiting, was reported as refusing nothing, with a message asserting
+       something false about the file. A `switch` arm or a `headers_sent()`
+       branch is the same shape, and this is a hard gate in `pr-security.yml`,
+       so a false red blocks every pull request (#483).
+
+       Version 2 ALSO still passed on `$log->exit();`, because it text-scanned
+       the reconstructed source and a METHOD named `exit` reads the same.
+       `.claude/CLAUDE.md` already records that exact trap from #763: "`die` as
+       a plain name … only as a METHOD".
+
+    So: the probe marks a real `T_EXIT` as `@EXIT@` and a `function`/`fn` as
+    `@FUNC@`. A gate refuses when a marked exit appears anywhere in its block
+    that is NOT inside a nested function body. Depth no longer matters, which
+    is what stops the crying wolf; the token kind is what stops the false pass.
+
+    WHAT IT STILL CANNOT SEE, stated rather than implied: a refusal by some
+    other means — a `return` at file scope, a thrown exception, a helper that
+    exits — and a gate whose condition is INVERTED so the block runs on
+    success. The first would be reported as a fault, which is a loud failure
+    rather than a silent pass; the second is behavioural, and section I of
+    `tools/scheduled-jobs-selftest.php` is what drives it.
     """
-    # ⚠️ THE EXIT MUST BE AT THE BLOCK'S OWN LEVEL. A first version asked
-    #    whether `exit` appeared ANYWHERE inside the block, and this passed it
-    #    with exit 0 while an unauthenticated request ran straight on:
-    #
-    #        if ($expected === '' || hash_equals($expected, $incoming) === false) {
-    #            $stop = static function (): void { exit('Forbidden'); };
-    #        }
-    #
-    #    `php -l` clean, the gate green, and the self-test went to 90 passed /
-    #    6 failed (I1-I6) — so the behaviour WAS caught, but by a test in
-    #    `portal-selftests.yml`, which GitHub has never registered (#754),
-    #    while this gate runs for real in `pr-security.yml`. On GitHub today
-    #    that made it guarded by nothing.
-    #
-    #    Three documents said of the two bypasses "Both closed and planted".
-    #    One was; this one was not.
-    #
-    #    Requiring depth 1 means the exit is a statement of the refusal block
-    #    itself, not of something merely defined inside it.
     opened = code.find("{", gate_at)
     if opened == -1:
         return False
-    # A braceless gate refuses nothing this can see, and `find` would then
-    # pick up some LATER block's braces — so the brace must belong to the
-    # gate: nothing but whitespace between the condition's end and it.
+    # The brace must belong to the GATE, not be the next one `find` happens
+    # upon: nothing but whitespace between the condition's close and it.
     between = code[gate_at:opened]
     if between.count(")") == 0 or between.rstrip().endswith(")") is False:
         return False
+
     depth = 0
-    for i in range(opened, len(code)):
+    func_at: list[int] = []        # depths at which a function body opened
+    i = opened
+    pending_func = False
+    while i < len(code):
+        if code.startswith("@FUNC@", i):
+            pending_func = True
+            i += len("@FUNC@")
+            continue
+        if code.startswith("@EXIT@", i):
+            if len(func_at) == 0:
+                return True        # a real exit, not inside a closure
+            i += len("@EXIT@")
+            continue
         ch = code[i]
         if ch == "{":
             depth += 1
-            continue
-        if ch == "}":
+            if pending_func is True:
+                func_at.append(depth)
+                pending_func = False
+        elif ch == "}":
+            if len(func_at) > 0 and func_at[-1] == depth:
+                func_at.pop()
             depth -= 1
             if depth == 0:
                 return False
-            continue
-        if depth == 1 and (code.startswith("exit", i) or code.startswith("die", i)):
-            before = code[i - 1] if i > 0 else " "
-            after = code[i + (4 if code.startswith("exit", i) else 3):i
-                         + (5 if code.startswith("exit", i) else 4)]
-            if before.isalnum() is False and before not in "_$" and after[:1] != "_" \
-                    and (after[:1].isalnum() is False):
-                return True
+        elif ch == ";" and pending_func is True:
+            # An abstract or interface method: no body follows.
+            pending_func = False
+        i += 1
     return False
+
 
 def main() -> int:
     problems: list[str] = []

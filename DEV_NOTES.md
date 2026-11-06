@@ -153,6 +153,76 @@ unable to run" — is the only thing that notices, and it has now earned its pla
 three times. **Whoever adds a dependency to a check must add the require in the
 same change.**
 
+#### Round 3: the same fault a FOURTH time, in the bucket round 2 created to fix the third
+
+**The all-clear counted, and claimed to speak for, the mail job the page had
+just said had stopped.** `$mailStopped` was the only bucket in the loop that
+neither suppressed the all-clear nor was subtracted from the count — and round 2
+added it in the same edit that excluded the running and token-less jobs.
+Measured: four jobs had really finished, the sentence said five, and the "Not
+counted here" list did not name the mail job, so it explicitly claimed to cover
+the one the warning above it was about.
+
+**The rule, written into the code because three rounds have now broken it: a
+new bucket in that loop is not finished until it appears in BOTH the count and
+the suppression.** And no fixture reached the state — H0m-H0p2 give the mail job
+a record so the fallback never fires, H0q-H0v leave the table empty so
+`count($notKnown)` suppresses the all-clear, and "mail stopped and everything
+else healthy" fell between them.
+
+**One mechanism, not two.** The obvious fix was to subtract AND suppress, and
+the subtraction is provably dead: the count only prints when no bucket is
+populated, and then the mail job is not stopped. Measured — dropping it alone
+changed no output and no check could tell. A clause that cannot matter makes a
+guard look stronger than it is, so suppression does the work and the comment
+says which.
+
+**ROUND 2 TRADED A WRONG SENTENCE FOR A VANISHED CHECK.** `MailRoutes::state()`
+has no try/catch — `$row ?? [...]` handles "no row" and nothing else — so under
+the portal's reporting mode its `prepare()` throws, the exception escapes
+`scheduledJobs()`, and `run()`'s catch replaces the WHOLE check with one tidy
+"This check could not be completed." Measured on a half-applied upgrade, the
+exact state `COULD_NOT_READ` exists for: the page went from "ten jobs can never
+run, including the clearing-out of personal data" to that one warning. Round
+1's version used `MailQueue::jobIsRunning()`, which catches, so it gave a wrong
+sentence and the check survived. **And the comment round 2 added asserted that
+this case was handled, which is why nobody would look** — the same shape as the
+missing `require`s that commit wrote up, re-created by an uncaught read in the
+same edit.
+
+**ONE PAGE, TWO NUMBERS FOR ONE FACT, DIFFERING FIVEFOLD.** The no-token PROBLEM
+counted TOKENS (eleven) while the new "Not counted here" sentence counted JOBS
+(fifteen), and `maintenance.cronToken` covers five. With only that token empty
+the page reported a count of ONE beside "the 5 with no token … each is reported
+above". Both are built from one source now, and both count jobs — a token is not
+a job, which is the whole reason this package has its own table. **Every fixture
+had used a single-job token, where the two numbers coincide**, which is why
+nothing saw it; `portal-check-selftest.php` has O6b for the five-job token now.
+
+**And `gate_refuses()` was wrong in BOTH directions, which is the worst pair
+there is.** Round 2's depth-1 rule CRIED WOLF on a genuinely refusing gate whose
+exits are one level deeper — an ordinary `if/else` on `?json=1` — with a message
+asserting something false about the file, in a hard gate that really runs, so a
+false red blocks every pull request (#483). And it still passed on
+`$log->exit();`, because it text-scanned the reconstructed source and a METHOD
+named `exit` reads the same. **`.claude/CLAUDE.md` already records that trap
+from #763 verbatim — "`die` as a plain name … only as a METHOD" — and
+`php_code_only()` already calls `token_get_all()`, so the token kind was in hand
+and thrown away.** The probe marks `T_EXIT` and `T_FUNCTION`/`T_FN` now: a real
+exit anywhere in the block, not inside a nested function body. Depth no longer
+matters, which stops the crying wolf; the token kind stops the false pass. Three
+plants, two of them must-stay-green.
+
+**Three documents still said of round 1's two bypasses "Both closed and
+planted".** One was, and round 2's commit message said so while leaving the
+sentence standing in both instruction files — which is where the next reader
+looks to decide whether the gate is guarded.
+
+**And the count correction was itself inconsistent.** "Nine of the fifteen pages
+exit early … those twelve paths" cannot both be true: the twelve live in EIGHT
+pages, and nine counts `health.php`, which the same sentence removes from the
+early-exit set. In four places, in the comment edited to fix a count.
+
 #### Two guards, and what each cannot see
 
 `tools/audit-checks/check_scheduled_jobs_recorded.py` (a hard gate in
