@@ -156,6 +156,24 @@ done
 #    not see the two missing-dependency breaks that happened in it**.
 #    `clock-change` is #777's and had been relied on for twenty-two review
 #    rounds; the two i18n tests are #763's.
+#
+# ⚠️ AND THE ONE-LINER IN THAT NOTE IS PHP-ONLY, so it could not see the two
+#    NON-PHP self-tests that were also missing. Use this instead:
+#
+#      find tools -type f -name "*selftest*" | while read -r f; do
+#        grep -q "$(basename "$f")" tools/run-all-selftests.sh || echo "$f"
+#      done
+#
+#    `tools/csrf-carriers-selftest.mjs` and
+#    `tools/document-write-check-selftest.py` are in EXTRA_SHELL now. Being in
+#    a workflow is NOT the inclusion rule — `api-spec-check-selftest.py` is in
+#    both, and this file claims to run every self-test in the repository.
+#
+# ⚠️ AND A ROW MUST NOT CARRY A PORT ITS TEST DOES NOT READ. The `portal-check`
+#    row was added with `SELFTEST_WEB_PORT=9833`, and that test reads neither
+#    that variable nor any port. The pre-flight scrapes `_PORT…=` out of this
+#    table, so a stale listener on a port NO test uses would have refused the
+#    whole suite.
 TESTS=$(cat <<'LIST'
 gdpr-coverage|tools/gdpr-coverage-selftest.php|-|
 giving-retention|tools/giving-retention-selftest.php|-|
@@ -225,7 +243,7 @@ live-chat-moderation|tools/live-chat-moderation-selftest.php|selftest_livechat|w
 go-live-button|tools/go-live-button-selftest.php|selftest_golive|web:go-live SELFTEST_WEB_PORT=9762
 activity-log|tools/activity-log-selftest.php|selftest_activitylog|web:activity-log SELFTEST_WEB_PORT=9770
 scheduled-jobs|tools/scheduled-jobs-selftest.php|selftest_scheduledjobs|web:scheduled-jobs SELFTEST_WEB_PORT=9893
-portal-check|tools/portal-check-selftest.php|selftest_portalcheck|SELFTEST_WEB_PORT=9833
+portal-check|tools/portal-check-selftest.php|selftest_portalcheck|
 mail-pages|tools/mail-pages-selftest.php|selftest_mailpages|web:mail-pages SELFTEST_WEB_PORT=9580
 mail-queue|tools/mail-queue-selftest.php|selftest_mailqueue|web:mail-queue SELFTEST_WEB_PORT=9585
 mail-queue-pages|tools/mail-queue-pages-selftest.php|selftest_mailqueuepages|
@@ -244,6 +262,9 @@ LIST
 #    than squeezed into the table above.
 EXTRA_SHELL='deploy-settings|bash tools/deploy/resolve-settings-selftest.sh
 api-spec-check|python3 -I tools/api-spec-check-selftest.py
+scheduled-jobs-gate|python3 -I tools/scheduled-jobs-gate-selftest.py
+document-write-check|python3 -I tools/document-write-check-selftest.py
+csrf-carriers|node tools/csrf-carriers-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 
 if [ "$LIST_ONLY" -eq 1 ]; then

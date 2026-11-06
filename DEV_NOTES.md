@@ -246,7 +246,8 @@ payment-webhook retry sweep.
 | v1 | an exit inside a braced closure | — |
 | v2 | `$log->exit();` (a method named exit) | a real exit one level deeper |
 | v3 | `fn() => exit()` (no braces) | a braceless gate |
-| v4 | — | — |
+| v4 | `fn() => match (…) { … exit(…) }` (an arrow body with a brace) | `$matches = hash_equals(…)` above the gate |
+| v5 | — | — **and the first version with a COMMITTED test** |
 
 v4 marks `T_FN` separately from `T_FUNCTION` and skips an arrow function's body
 as the EXPRESSION it is; a braceless gate is read as the one statement that
@@ -299,6 +300,77 @@ ninety seconds ago** — a token cleared after the job ran, with the row saying 
 read by the same method twenty lines later. The alarming direction rather than
 the reassuring one, and still untrue on the page whose subject is saying what is
 true.
+
+#### Round 5: the gate was wrong both ways for the THIRD version, and the remedy was not a fifth pattern
+
+**`gate_refuses()` v4 passed an arrow function whose body contains a brace.**
+`_end_of_arrow()` stopped at the first `{` under a comment reading *"defensive:
+never expected"* — and it IS expected, because `match`, a closure and an
+anonymous class all sit in expression position. The main walk then resumed
+INSIDE that brace with no function recorded, so the exit of a definition nobody
+calls read as the gate's own. Five spellings measured, all passing a gate that
+refuses nothing; **`fn() => function (): never { exit('no'); };` is v1's fault
+verbatim, reached by a new spelling.**
+
+**And it went RED on an ordinary refactor** — the comparison read into a
+variable first:
+
+    $matches = hash_equals($expected, $incoming);
+    if ($expected === '' || $matches === false) { … exit('Forbidden'); }
+
+v4 decided "braceless" by asking whether the next `;` came before the next `{`,
+which is true of that shape. A hard gate accusing correct code of a security
+fault blocks every pull request (#483).
+
+**THE ROOT CAUSE, AND THE REMEDY, WHICH IS THE POINT OF THIS SECTION.** There
+was **no committed test of the gate**: `grep -rln "gate_refuses" tools/ web/`
+returned only the gate's own file. Rounds 1-4 each verified with a throwaway
+harness that nobody re-ran — *which is exactly why v4 lost v1's case.*
+
+A fifth cleverer pattern would have produced a round 6.
+`tools/scheduled-jobs-gate-selftest.py` will not: it holds **every case from all
+five rounds** — twenty-two, ten that must refuse and twelve that must not — and
+is a hard gate in `pr-security.yml`. The repository already had this answer in
+`tools/api-spec-check-selftest.py`; it simply had not been applied here.
+
+v5 itself steps OVER braces inside an arrow body and locates the gate as the
+`if` whose CONDITION encloses the comparison, with one hop through an
+assignment, rather than guessing from punctuation. Where it cannot locate the
+gate it PASSES rather than accusing — stated as the cost of that choice, because
+a false red here stops all work.
+
+**And round 5 found four more documents wrong**, each the same shape:
+
+* `DEV_NOTES.md`'s own v4 row said "— | —" for a version wrong both ways.
+* A **third** copy of the stale "Nine pages exit early" survived in the gate's
+  `WHAT IT CANNOT SEE` section — the part a reader consults to decide what the
+  gate covers — because round 4's search was line-based and that one wraps
+  across a line break. **#768 already records that exact trap**: "a line-based
+  `grep` that cannot see a phrase spanning two lines".
+* "NINE `COMMENT` strings containing ` -- `, one of which this package wrote"
+  was wrong in both halves: it is EIGHT and this package wrote none — the one
+  it did write was removed four commits later. True when written, wrong in the
+  very next commit of the same package, and migration 253's own header said
+  eight all along, so two shipping documents disagreed about one count.
+* The withdrawn "has never run and never will" still stood as fact in
+  `ScheduledJobs.php` and in migration 253's header, quoting a page sentence
+  that no longer exists. D-071 has a note rather than an edit, the register
+  being append-only.
+
+**The all-clear also claimed an allowance it does not have.** It said "inside
+the time expected for that job", and six of the eleven jobs on the 36-hour
+default say in their own headers that they are called every 5 to 60 minutes —
+so three of them 35 hours late read as "15 of the 15 recorded a FINISH", with
+todo "Nothing", while the payment-webhook retry sweep was dead. The sentence now
+names the four figures and says a job called every few minutes can be hours late
+and still count. **The figure is the owner's (D-070) and is unchanged; the
+measured fact is put to them as #793**, which is the register's route for a fact
+that unsettles a recorded answer.
+
+And `$unreadable` asserted "the place this is kept EXISTS" — true of one of its
+two sources and not of the other, since the mail-queue catch takes any
+throwable including the table being absent, and `tblMailRouteState` arrives at
+migration 216 against this package's 253.
 
 #### Two guards, and what each cannot see
 

@@ -1055,10 +1055,24 @@ final class PortalCheck
             //    going to happen.
             $findings[] = [
                 'severity' => self::WARNING,
+                // ⚠️ DO NOT SAY THE PLACE "EXISTS". Two sources feed this, and only
+                //    one of them knows that. `ScheduledJobs::COULD_NOT_READ`
+                //    arises only when `tableExists()` is true — but the
+                //    mail-queue catch takes ANY throwable from
+                //    `MailRoutes::state()`, including `tblMailRouteState` not
+                //    being there at all. That table arrives at migration 216
+                //    and this package's is 253, so a portal several migrations
+                //    behind reaches it. Measured with the table dropped: the
+                //    page asserted it existed.
+                //
+                //    This is the one method whose whole design tells "no row"
+                //    from "could not read", so telling "absent" apart is the
+                //    same distinction one step on — and the honest wording
+                //    covers all three without claiming any.
                 'what'     => 'The record of which scheduled jobs have run could not be read.',
-                'why'      => 'The place this is kept exists but this page could not read it, so '
-                    . 'it cannot say whether these jobs have run. The usual cause is a database '
-                    . 'upgrade that did not finish.',
+                'why'      => 'This page could not read where that is kept, so it cannot say '
+                    . 'whether these jobs have run. It may be missing, or incomplete. The usual '
+                    . 'cause is a database upgrade that did not finish.',
                 'todo'     => 'Open Admin, Migrations and check that every database upgrade has '
                     . 'been run. The error log for this portal will have the cause.',
                 'count'    => count($unreadable),
@@ -1188,10 +1202,29 @@ final class PortalCheck
                 'what'     => count($setAside) > 0
                     ? 'Every scheduled job this page can speak for has run recently enough.'
                     : 'Every scheduled job has run recently enough.',
+                // ⚠️ DO NOT SAY "the time expected for that job". It was untrue for
+                //    six of the fifteen: their own page headers say they are
+                //    called every 5 to 60 minutes (push-golive every 5,
+                //    webhook-retry every 5-15, user-reminders every 15,
+                //    asset-reminders 15-60, venue-reminders 30-60,
+                //    workflow-timeouts hourly) and they carry the 36-hour
+                //    default. Measured: with three of them last finished 35
+                //    hours ago the page said "15 of the 15 recorded a FINISH
+                //    inside the time expected for that job" with todo
+                //    "Nothing" — so a customer could drop webhook-retry from
+                //    their scheduler and the payment-webhook retry sweep would
+                //    be dead for a day and a half behind that sentence.
+                //
+                //    The 36 hours is the owner's figure (D-070) and is not
+                //    changed here; what is corrected is the CLAIM. The
+                //    sentence now says what is true — each job has its own
+                //    allowance and this is the longest of them — and #793 puts
+                //    the measured fact to the owner against D-070's row.
                 'why'      => $finishedWell . ' of the ' . count($state) . ' recorded a FINISH '
-                    . 'inside the time expected for that job, which differs by job: the mail '
-                    . 'queue is expected every few minutes, the nightly jobs daily, and giving '
-                    . 'statements weekly.'
+                    . 'inside the time allowed for it. That allowance differs by job and is '
+                    . 'generous: 15 minutes for the mail queue, two hours for event reminders, '
+                    . 'eight days for giving statements, and 36 hours for the rest — so a job '
+                    . 'called every few minutes can be hours late and still count here.'
                     . (count($setAside) > 0
                         ? ' Not counted here: ' . implode(', and ', $setAside)
                             . ' — each is reported above.'

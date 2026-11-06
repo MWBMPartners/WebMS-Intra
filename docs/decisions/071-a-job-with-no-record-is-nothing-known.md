@@ -35,3 +35,19 @@ clear" about anything it cannot see, and "nothing is known yet" is the truthful
 form of that.
 
 **Where:** #775.
+
+---
+
+**Note added 6 November 2026 (not an edit to the decision — the register is
+append-only).** The last paragraph of this file reads *"a job with no token
+'has never run and never will', and that IS knowable from the database"*. Round
+4 of #775's review withdrew that wording **from the page**, because a token can
+be cleared AFTER the job has run: the page then said a job had never run while
+the same method could read its finish row from ninety seconds earlier. The
+page now says it "cannot run now and will not until one is set — whether or not
+it has run in the past".
+
+**The decision itself is unaffected.** What is knowable from the database is
+still that such a job cannot run; only the wording that described it was wrong.
+Recorded here because this quotation outlived the sentence it quoted, which is
+the "corrected in one place, not the others" pattern #775's review kept finding.

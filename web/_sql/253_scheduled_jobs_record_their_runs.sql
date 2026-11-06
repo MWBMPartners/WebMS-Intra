@@ -62,8 +62,10 @@
 -- administrator what is actually true.
 --
 -- This weakens nothing. A portal whose jobs were never set up is still caught,
--- and caught better, by the existing token check: a job with no token has
--- never run and never will, and that IS knowable from the database.
+-- and caught better, by the existing token check: a job with no token cannot
+-- run at all until somebody sets one, and that IS knowable from the database.
+-- (This said "has never run and never will" — wording round 4 withdrew from
+-- the page, because a token can be cleared AFTER the job has run.)
 --
 -- -----------------------------------------------------------------------------
 -- SAFE TO RUN TWICE

@@ -63,7 +63,14 @@
  *
  * This weakens nothing. A portal whose jobs were never set up is still caught,
  * and caught better, by the token check in `PortalCheck`: a job with no token
- * "has never run and never will", and that IS knowable from the database.
+ * cannot run at all until somebody sets one, and that IS knowable from the
+ * database — unlike whether a job WITH a token actually ran.
+ *
+ * ⚠️ THIS SAID "has never run and never will", quoting what the page used to
+ *    say, and round 4 withdrew that wording from the page because it is untrue
+ *    when a token is cleared AFTER the job has run. The quotation outlived the
+ *    sentence it quoted, which is this package's "corrected in one place, not
+ *    the others" pattern yet again.
  *
  * -----------------------------------------------------------------------------
  * ⚠️ RECORDING MUST NEVER BE ABLE TO STOP THE JOB IT IS RECORDING
@@ -118,7 +125,33 @@ final class ScheduledJobs
     /** Weekly at most, so a week plus a day's grace. */
     public const OVERDUE_GIVING_STATEMENTS = 691200; // 8 days
 
-    /** Nightly, plus a day's grace. The default for everything else. */
+    /**
+     * 36 hours: a night plus a day's grace. **THE DEFAULT, NOT A STATEMENT
+     * THAT THESE JOBS ARE NIGHTLY** — and the name says "nightly" because
+     * D-070's table calls this row "everything else | 36 hours | nightly, plus
+     * a day's grace", which was decided on that premise.
+     *
+     * ⚠️ THE PREMISE IS MEASURABLY FALSE FOR SIX OF THE ELEVEN JOBS THAT USE
+     *    IT, and their own page headers say so:
+     *
+     *      cron/push-golive        "every 5 minutes"
+     *      cron/webhook-retry      "every 5-15 minutes"
+     *      cron/user-reminders     "every 15 minutes"
+     *      cron/asset-reminders    "every 15-60 minutes"
+     *      cron/venue-reminders    "every 30-60 minutes"
+     *      cron/workflow-timeouts  "called hourly"
+     *
+     *    The other five are genuinely nightly or state no cadence
+     *    (retention-sweep "once a night", backup-run and backup-check
+     *    "daily", health and discipleship-sweep silent).
+     *
+     *    So a job called every five minutes can be 35 hours late and still
+     *    count as healthy. **The figure is the owner's and is NOT changed
+     *    here**; the measured fact is put to them against D-070's row as #793,
+     *    which is the register's own route for a fact that unsettles a
+     *    recorded answer, and which quotes the row and the fact. Until that is decided, this comment is the warning
+     *    and the page no longer claims the allowance matches each job.
+     */
     public const OVERDUE_NIGHTLY = 129600;          // 36 hours
 
     /**

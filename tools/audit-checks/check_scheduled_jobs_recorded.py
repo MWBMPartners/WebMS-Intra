@@ -66,7 +66,7 @@ WHAT IT CANNOT SEE, measured rather than assumed:
     exists and why this check is not the only guard.
 
   * **ONE exit path losing its finish**, which is a measured blind spot and
-    not a hypothetical: it is the exact fault this package shipped first. Nine
+    not a hypothetical: it is the exact fault this package shipped first. EIGHT
     of these pages exit early when a setting switches them off, and each such
     path records a finish of its own. Because a page may legitimately hold
     several, this check requires only that it holds ONE -- so deleting the
@@ -188,9 +188,22 @@ def sql_without_comments(text: str) -> str:
     ⚠️ THE OBVIOUS ONE-LINER IS WRONG, AND IT COST A REAL FAULT IN THIS SAME
        PACKAGE (#788). `re.sub(r"--[^\n]*", "", text)` chops from `--` to the
        end of the line whether or not it is inside a string — and
-       `full_schema.sql` has NINE `COMMENT` strings containing ` -- `, one of
-       which this package wrote. Each one loses its closing quote, so every
-       following quote pairs up wrongly. In `check_schema_seed_parity.py` that
+       `full_schema.sql` has EIGHT `COMMENT` strings containing ` -- `, and
+       this package wrote NONE of them — the one it did write was removed four
+       commits later, by `3d2e1b0`. Each loses its closing quote, so every
+       following quote pairs up wrongly.
+
+       (This said "NINE … one of which this package wrote". It was true when
+       written and became wrong in the very NEXT commit of the same package,
+       and three review rounds walked past it while migration 253's own header
+       said eight — so the package's two shipping documents disagreed about one
+       count. Measure it rather than trusting either:
+
+           python3 -c "import re,pathlib; s=pathlib.Path('web/_sql/full_schema.sql').read_text(); \
+               print(len([m for m in re.finditer(r\"COMMENT '(?:[^']|'')*'\", s) if ' -- ' in m.group(0)]))"
+
+       The conclusion — do the comment stripping properly — stands on the first
+       half alone.) In `check_schema_seed_parity.py` that
        made 37 migrations read as missing their mark while the check went
        blind to real drift in all of them. Same file, same shape, so this
        function does it properly.
@@ -297,73 +310,180 @@ def listed_jobs() -> list[str]:
     return re.findall(r"'(cron/[a-z0-9-]+)'\s*=>", block)
 
 
+def _skip_braced(code: str, at: int) -> int:
+    """Past a balanced `{ ... }` starting at `at`."""
+    depth = 0
+    i = at
+    while i < len(code):
+        if code[i] == "{":
+            depth += 1
+        elif code[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return i
+
+
+def _end_of_arrow(code: str, at: int) -> int:
+    """
+    Where an arrow function's single-expression body ends.
+
+    ⚠️ IT MUST STEP OVER A BRACE, NOT STOP AT ONE. v4 ended the body at the
+       first `{` under a comment reading "defensive: never expected" — and it
+       IS expected: `match`, a closure and an anonymous class all sit in
+       expression position, so `fn() => match (true) { default => exit('x') }`
+       ended the body at the `{`, the main walk resumed INSIDE it, and the
+       `exit` of a definition nobody calls was read as the gate's own.
+
+       Measured on five spellings (arrow→match, arrow→closure, nested
+       arrow→closure, static arrow→match, arrow in an array literal): all five
+       passed a gate that refuses nothing. `fn() => function (): never {
+       exit('no'); };` is v1's fault verbatim, reached by a new spelling.
+    """
+    brackets = 0
+    i = at
+    while i < len(code):
+        ch = code[i]
+        if ch == "{":
+            i = _skip_braced(code, i)
+            continue
+        if ch in "([":
+            brackets += 1
+        elif ch in ")]":
+            if brackets == 0:
+                return i
+            brackets -= 1
+        elif brackets == 0 and ch in ";,":
+            return i
+        i += 1
+    return i
+
+
+def _if_governing(code: str, at: int) -> int | None:
+    """
+    The `if` whose condition encloses `at`, or None.
+
+    ⚠️ WHY THIS EXISTS. v4 decided "braceless gate" by asking whether the next
+       `;` came before the next `{`, and that is true of an ORDINARY shape —
+       the comparison read into a variable first:
+
+           $matches = hash_equals($expected, $incoming);
+           if ($expected === '' || $matches === false) { … exit('Forbidden'); }
+
+       which the gate then reported, falsely, as refusing nothing. A hard gate
+       going red with a security accusation about correct code is #483's cost
+       on the one check that cannot be switched off.
+    """
+    i = at
+    depth = 0
+    while i > 0:
+        i -= 1
+        ch = code[i]
+        if ch == ")":
+            depth += 1
+        elif ch == "(":
+            if depth == 0:
+                # The opening bracket of the expression holding `at`. Is the
+                # word before it `if` or `elseif`?
+                before = code[:i].rstrip()
+                if before.endswith("if") and (len(before) == 2 or before[-3].isalnum() is False
+                                              or before[-3] == "e"):
+                    return i
+                return None
+            depth -= 1
+        elif ch == ";" and depth == 0:
+            return None          # a statement boundary: not inside a condition
+    return None
+
+
 def gate_refuses(code: str, gate_at: int) -> bool:
     """
     Whether the block holding the token comparison ENDS THE REQUEST.
 
-    ⚠️ THIS HAS NOW BEEN WRONG IN BOTH DIRECTIONS TWICE, so the history is kept
-       in full: each version was "verified by planting" the shapes its author
-       had thought of, which is this repository's own recorded way of getting a
-       guard wrong.
+    ⚠️ THIS GUARD HAS BEEN WRONG IN BOTH DIRECTIONS THREE TIMES, and the
+       history is kept because the PATTERN is the finding: every version was
+       "verified by planting" the shapes its author had thought of, with a
+       throwaway harness nobody re-ran — which is exactly why v4 failed v1's
+       own case by a new spelling.
 
-       v1  searched the block for the word `exit` ANYWHERE. An `exit` inside a
-           closure merely DEFINED in the block refuses nothing, and that passed.
-       v2  required the exit at the block's own depth. That CRIED WOLF on a
-           genuinely refusing gate whose exits are one level deeper (an
-           ordinary `if/else` on `?json=1`), and still passed on
-           `$log->exit();` — a METHOD named exit, read the same by a text scan.
-       v3  asked the tokeniser for `T_EXIT`, outside any nested function body.
-           **It passed on an ARROW function**, because `fn() => exit(...)` has
-           NO BRACES, so a brace-depth walk never enters its body and the exit
-           inside it counted as the gate's own. One line restored v1's fault:
+       v1  passed an exit inside a braced closure.
+       v2  cried wolf on a real exit one level deeper; passed `$log->exit();`.
+       v3  asked the tokeniser; passed `fn() => exit()` (no braces); cried wolf
+           on a braceless gate.
+       v4  skipped an arrow body — but STOPPED at a `{`, so
+           `fn() => match (true) { default => exit('x') }` passed, which is
+           v1's fault again; and decided "braceless" by `;` before `{`, so an
+           ordinary `$matches = hash_equals(...)` above the gate went RED.
+       v5  (this one) steps OVER braces inside an arrow body, and locates the
+           gate as the `if` whose CONDITION encloses the comparison rather than
+           guessing from punctuation.
 
-               $stop = fn(): never => exit('Forbidden');
+    **AND v5 IS THE FIRST VERSION WITH A COMMITTED TEST.**
+    `tools/scheduled-jobs-gate-selftest.py` holds every case from all five
+    rounds and is a hard gate of its own, so a sixth version cannot quietly
+    lose an earlier round's case. A fifth cleverer pattern would have produced
+    a round 6; an accumulating plant set will not.
 
-           Measured: the gate said OK while the self-test went 3 red (I2, I4,
-           I6 — "and NOTHING was recorded"). Worse than v1, which only forged
-           the record: here an unauthenticated request gets its 403 header and
-           then RUNS ON, writing `began()` and executing the job's real work.
-       v4  (this one) marks `T_FN` separately and skips an arrow function's
-           body as the EXPRESSION it is, and treats a braceless gate as the one
-           statement that follows it.
-
-    WHAT IT STILL CANNOT SEE, kept complete because v3 deleted one of these
-    and the deletion was itself a finding:
+    WHAT IT STILL CANNOT SEE, kept complete and re-checked each round:
 
       * a refusal by some other means — a `return` at file scope, a thrown
-        exception, a helper that exits. Reported as a fault, which is a loud
-        failure rather than a silent pass.
+        exception, a helper that exits. Reported as a fault, which is loud
+        rather than silent.
       * a gate whose condition is INVERTED so the block runs on SUCCESS and
         exits. That would pass and be catastrophic, and no source check can see
         it; section I of `tools/scheduled-jobs-selftest.php` drives it.
-      * `Foo::EXIT` as a class constant, which tokenises as `T_EXIT`. No
-        instance in the tree.
+      * a comparison that reaches the gate through more than ONE hop (assigned,
+        passed to a helper, returned). Such a gate is judged unlocatable and
+        PASSES rather than going red, because a false red here blocks every
+        pull request — stated plainly as the cost of that choice.
+      * `Foo::EXIT` as a class constant, which tokenises as `T_EXIT`.
+      * the FIRST `hash_equals` in the file is the one judged, so a file with
+        two could put `began()` above the real gate.
     """
-    opened = code.find("{", gate_at)
-    semi = code.find(";", gate_at)
+    opening = _if_governing(code, gate_at)
+    if opening is None:
+        # ── ONE HOP: `$matches = hash_equals(...);` then an `if` using it. ──
+        semi = code.find(";", gate_at)
+        head = code.rfind("\n", 0, gate_at)
+        assign = code[head + 1:gate_at] if head != -1 else code[:gate_at]
+        name = re.search(r"(\$[A-Za-z_][A-Za-z0-9_]*)\s*=\s*$", assign)
+        if name is None or semi == -1:
+            # Unlocatable. PASS rather than accuse correct code — see above.
+            return True
+        nxt = code.find(name.group(1), semi)
+        if nxt == -1:
+            return True
+        opening = _if_governing(code, nxt)
+        if opening is None:
+            return True
 
-    # ── A BRACELESS GATE. `if (...) exit('Forbidden');` refuses perfectly
-    #    well, and v2/v3 reported it as refusing nothing — a false RED in a
-    #    hard gate, which blocks every pull request (#483). Its body is the one
-    #    statement that follows, so that is what is read.
-    if semi != -1 and (opened == -1 or semi < opened):
-        return "@EXIT@" in code[gate_at:semi]
+    # The body starts after the condition's matching `)`.
+    depth = 0
+    i = opening
+    while i < len(code):
+        if code[i] == "(":
+            depth += 1
+        elif code[i] == ")":
+            depth -= 1
+            if depth == 0:
+                break
+        i += 1
+    body = i + 1
+    while body < len(code) and code[body].isspace():
+        body += 1
 
-    if opened == -1:
-        return False
-    between = code[gate_at:opened]
-    if between.count(")") == 0 or between.rstrip().endswith(")") is False:
-        return False
+    # ── A BRACELESS GATE: `if (...) exit('Forbidden');` refuses perfectly. ──
+    if body < len(code) and code[body] != "{":
+        semi = code.find(";", body)
+        return semi != -1 and "@EXIT@" in code[body:semi]
 
     depth = 0
     func_at: list[int] = []
-    i = opened
+    i = body
     pending_func = False
     while i < len(code):
         if code.startswith("@ARROW@", i):
-            # An arrow function's body is an EXPRESSION, not a block: it runs
-            # to the next `;` or `,` at this bracket depth, or to the `)` that
-            # closes the call it sits in.
             i = _end_of_arrow(code, i + len("@ARROW@"))
             continue
         if code.startswith("@FUNC@", i):
@@ -388,29 +508,9 @@ def gate_refuses(code: str, gate_at: int) -> bool:
             if depth == 0:
                 return False
         elif ch == ";" and pending_func is True:
-            pending_func = False      # an abstract method: no body follows
+            pending_func = False
         i += 1
     return False
-
-
-def _end_of_arrow(code: str, at: int) -> int:
-    """Where an arrow function's single-expression body ends."""
-    brackets = 0
-    i = at
-    while i < len(code):
-        ch = code[i]
-        if ch in "([":
-            brackets += 1
-        elif ch in ")]":
-            if brackets == 0:
-                return i          # the `)` that closes the enclosing call
-            brackets -= 1
-        elif brackets == 0 and ch in ";,":
-            return i
-        elif brackets == 0 and ch == "{":
-            return i              # defensive: never expected
-        i += 1
-    return i
 
 
 def main() -> int:
