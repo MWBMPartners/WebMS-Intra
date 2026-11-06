@@ -5,7 +5,8 @@ The test OF the #775 hard gate's token-gate NESTING check.
 
 WHY THIS FILE EXISTS, AND WHY IT NO LONGER TESTS WHAT IT USED TO.
 
-Rounds 1-6 of #775's review each defeated a source-reading detector that tried
+Rounds 1-6 of #775's review (round 7 then found the nesting probe itself
+wrong both ways — see its four cases at the end of CASES) each defeated a source-reading detector that tried
 to answer "does this token gate REFUSE an unauthenticated request". Five
 versions, wrong in BOTH directions four times:
 
@@ -92,6 +93,20 @@ CASES: list[tuple[str, str, list[str], str]] = [
     ("inside a try INSIDE an if",
      "if (true) {\n try {\n" + GATE_BODY + " } finally { }\n}\n", ["T_IF", "T_TRY"],
      "a try does not launder an if above it"),
+
+    # ── Round 7's four, two each way. ──
+    ("written \\hash_equals, at file scope",
+     GATE_BODY.replace("hash_equals(", "\\hash_equals("), [],
+     "round 7: was NO_GATE, a false accusation (#483)"),
+    ("inside a bare block",
+     "{\n" + GATE_BODY + "}\n", ["T_BLOCK"],
+     "round 7: a bare block cannot skip its body; was refused"),
+    ("in an if, after {$x} in a string",
+     "if (true) {\n $s = \"{$expected}\";\n" + GATE_BODY + "}\n", ["T_IF"],
+     "round 7: the string's } popped the if; was allowed"),
+    ("in an if whose condition calls Foo::try()",
+     "if (Foo::try() === null) {\n" + GATE_BODY + "}\n", ["T_IF"],
+     "round 7: the method name replaced the if; was allowed"),
 ]
 
 
@@ -123,7 +138,10 @@ def main() -> int:
             return 1
         finally:
             path.unlink(missing_ok=True)
-        allowed = [kind for kind in got if kind != "T_TRY"]
+        # ⚠️ ASK THE GATE'S OWN RULE. This line used to be
+        #    `kind != "T_TRY"` — a copy of the rule, so the test could not see
+        #    the rule change (round 7; #647's lesson).
+        allowed = gate.nesting_problem(got)
         if got == want:
             good += 1
             print("  ok    %-44s %-22s %s"
@@ -136,18 +154,18 @@ def main() -> int:
     #    the two cases that cost rounds 4 and 5 left it printing "20 of 20" and
     #    exit 0. The printed total was `len(CASES)`, so it moved with the list —
     #    #697's recorded remedy, which is to pin the list itself.
-    if len(CASES) != 11:
-        print("\nFAIL: this file holds %d cases and must hold 11." % len(CASES))
+    if len(CASES) != 15:
+        print("\nFAIL: this file holds %d cases and must hold 15." % len(CASES))
         print("A case here is a shape the nesting rule has to get right. Losing")
         print("one silently is how the detector this replaced lost v1's case.")
         return 1
-    must_refuse = len([c for c in CASES if [k for k in c[2] if k != "T_TRY"]])
-    if (must_refuse, len(CASES) - must_refuse) != (8, 3):
+    must_refuse = len([c for c in CASES if gate.nesting_problem(c[2])])
+    if (must_refuse, len(CASES) - must_refuse) != (10, 5):
         print("\nFAIL: the split moved — %d must be refused and %d allowed, "
-              "expected 8 and 3." % (must_refuse, len(CASES) - must_refuse))
+              "expected 10 and 5." % (must_refuse, len(CASES) - must_refuse))
         return 1
 
-    print("\n%d cases: %d as expected, %d not. 8 must be refused, 3 allowed."
+    print("\n%d cases: %d as expected, %d not. 10 must be refused, 5 allowed."
           % (len(CASES), good, bad))
     if bad > 0:
         return 1

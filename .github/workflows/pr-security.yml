@@ -1204,11 +1204,13 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_scheduled_jobs_recorded.py
 
-      # The test OF the gate above. Its token-refusal detector has been wrong in
-      # BOTH directions three times across five review rounds, and every version
-      # was verified by a throwaway harness nobody re-ran — which is why v4
-      # re-created v1's fault by a new spelling. This holds every case from all
-      # five rounds, so a sixth version cannot quietly lose one. It lives in
+      # The test OF the gate above's NESTING check. The token-refusal detector
+      # that came before it was wrong in BOTH directions in four of its five
+      # versions and was DELETED (D-065: refusal is behavioural, so it is now
+      # driven on all fifteen pages by tools/scheduled-jobs-selftest.php). What
+      # is left is static — is the gate nested inside something that can skip
+      # it — and this pins that in both directions, with its case counts pinned
+      # so a case cannot quietly go missing. It lives in
       # tools/ rather than tools/audit-checks/ so the pre-push hook's glob does
       # not run it twice, which means it must be named here or it runs nowhere
       # (#646).

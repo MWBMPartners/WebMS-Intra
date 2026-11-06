@@ -154,9 +154,6 @@ def php_code_only(path: pathlib.Path) -> str:
         'if (in_array($x[0], [T_COMMENT, T_DOC_COMMENT, T_INLINE_HTML,'
         ' T_ENCAPSED_AND_WHITESPACE, T_START_HEREDOC, T_END_HEREDOC], true)) { '
         '$out .= str_repeat("\\n", substr_count($x[1], "\\n")); continue; }'
-        'if ($x[0] === T_EXIT) { $out .= "@EXIT@"; continue; }'
-        'if ($x[0] === T_FN) { $out .= "@ARROW@"; continue; }'
-        'if ($x[0] === T_FUNCTION) { $out .= "@FUNC@"; continue; }'
         'if ($x[0] === T_CONSTANT_ENCAPSED_STRING) {'
         ' $v = trim($x[1], "\'\\"");'
         ' $out .= preg_match("#^cron/[a-z0-9-]+$#", $v) === 1 ? "\'" . $v . "\'" : "\'\'";'
@@ -352,20 +349,48 @@ def gate_enclosures(path: pathlib.Path) -> list[str]:
 
     WHAT IT CANNOT SEE: a `goto` or a conditional `require` above the gate, and
     a gate whose condition is inverted. The first two are not nesting; the third
-    is behavioural and is section I-ALL's.
+    is behavioural and is section I-ALL's. Nor can it see the ALTERNATIVE syntax
+    (`if (...): ... endif;` and its loop and `switch` forms), which opens no
+    brace, nor a magic parameter folded into the gate's OWN condition or
+    guarding the `exit` inside it — neither of those nests anything. All of
+    them are recorded on #794 rather than chased here (#775's review
+    closed at round 7 under D-064/D-066).
+
+    ⚠️ ROUND 7 FOUND THIS PROBE WRONG BOTH WAYS, and the fixes below are why it
+       looks the way it does:
+
+       * it looked for `hash_equals` only as a plain name, so `\\hash_equals(`,
+         an ordinary spelling, came back NO_GATE with a security accusation —
+         a hard gate crying wolf (#483);
+       * a bare `{ ... }`, a `namespace X { }` or a `declare(...) { }` was
+         pushed as "T_BLOCK" and REFUSED, though none of them can decide
+         whether its body runs — so T_BLOCK is allowed, like T_TRY;
+       * `{$x}` and `${x}` inside a string open with a token that is not the
+         character `{` but close with a plain `}`, so the close POPPED the
+         enclosing `if` and a gate nested in it read as file scope;
+       * `Foo::try()` and `$x->if()` are method calls, and their keyword
+         replaced the `if` that was really opening the block.
     """
     probe = (
         '$t = token_get_all(file_get_contents($argv[1]));'
-        '$stack = []; $pending = null; $out = null;'
+        '$stack = []; $pending = null; $out = null; $prev = null;'
         'foreach ($t as $x) {'
         ' if (is_array($x)) {'
-        '  if ($x[0] === T_STRING && $x[1] === "hash_equals" && $out === null) {'
+        '  if (in_array($x[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) { continue; }'
+        '  $member = in_array($prev, [T_DOUBLE_COLON, T_OBJECT_OPERATOR,'
+        '      T_NULLSAFE_OBJECT_OPERATOR], true);'
+        '  $prev = $x[0];'
+        '  if (in_array($x[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true)'
+        '      && $member === false && ltrim($x[1], "\\\\") === "hash_equals" && $out === null) {'
         '   $out = implode(",", $stack); continue; }'
-        '  if (in_array($x[0], [T_TRY, T_IF, T_ELSEIF, T_ELSE, T_WHILE, T_FOR,'
-        '      T_FOREACH, T_SWITCH, T_DO, T_FUNCTION, T_FN, T_CLASS, T_MATCH,'
-        '      T_CATCH, T_FINALLY], true)) {'
+        '  if (in_array($x[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true)) {'
+        '   $stack[] = "T_INTERP"; continue; }'
+        '  if ($member === false && in_array($x[0], [T_TRY, T_IF, T_ELSEIF, T_ELSE,'
+        '      T_WHILE, T_FOR, T_FOREACH, T_SWITCH, T_DO, T_FUNCTION, T_FN, T_CLASS,'
+        '      T_MATCH, T_CATCH, T_FINALLY], true)) {'
         '   $pending = token_name($x[0]); }'
         '  continue; }'
+        ' $prev = $x;'
         ' if ($x === "{") { $stack[] = $pending ?? "T_BLOCK"; $pending = null; }'
         ' elseif ($x === "}") { array_pop($stack); } }'
         'echo $out ?? "NO_GATE";'
@@ -381,6 +406,23 @@ def gate_enclosures(path: pathlib.Path) -> list[str]:
         return ["NO_GATE"]
 
     return [part for part in answer.split(",") if part != ""]
+
+
+# What may enclose the gate. A `try` cannot decide whether its body runs, and
+# neither can a bare block, a `namespace { }` or a `declare() { }` (all
+# "T_BLOCK"). Everything else can.
+NESTING_ALLOWED = ("T_TRY", "T_BLOCK")
+
+
+def nesting_problem(around: list[str]) -> list[str]:
+    """
+    The enclosures that break the rule, outermost first; empty means allowed.
+
+    ⚠️ THE ONE PLACE THE RULE IS APPLIED. The gate's own self-test asks THIS,
+       because round 7 found it holding its own copy (`kind != "T_TRY"`) —
+       a test holding a copy of the logic it tests is not testing it (#647).
+    """
+    return [kind for kind in around if kind not in NESTING_ALLOWED]
 
 
 def main() -> int:
@@ -497,7 +539,7 @@ def main() -> int:
                 print("REFUSED: %s" % exc)
                 print("Nothing was checked. This is not a pass.")
                 return 1
-            outer = [kind for kind in around if kind != "T_TRY"]
+            outer = nesting_problem(around)
             if len(outer) > 0:
                 problems.append(
                     "%s has its token gate nested inside %s. A gate inside "

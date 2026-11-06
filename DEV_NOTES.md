@@ -248,7 +248,7 @@ payment-webhook retry sweep.
 | v3 | `fn() => exit()` (no braces) | a braceless gate |
 | v4 | `fn() => match (…) { … exit(…) }` (an arrow body with a brace) | `$matches = hash_equals(…)` above the gate |
 | v5 | `$bad = !hash_equals(…)`, a cast, a line break | a refusal in an `else` branch, a braceless `else`, an elseif chain, an invoked closure |
-| **gone** | **the detector is DELETED — the property is behavioural and is now DRIVEN on all fifteen pages (D-065); what remains is a NESTING check, which is the half a source reading can honestly do** | |
+| **gone** | — | **the detector is DELETED — the property is behavioural and is now DRIVEN on all fifteen pages (D-065); what remains is a NESTING check, which is the half a source reading can honestly do** | |
 
 v4 marks `T_FN` separately from `T_FUNCTION` and skips an arrow function's body
 as the EXPRESSION it is; a braceless gate is read as the one statement that
@@ -414,10 +414,30 @@ BOTH directions, which is what a check tells you when it is being asked a
 question of the wrong kind.**
 
 **The new check has its own committed test**, rewritten for the nesting rule —
-eleven cases, eight that must be refused and three allowed, with **both counts
-pinned**, because round 6 showed the previous version's were not: deleting the
+eleven cases then (fifteen after round 7, below), eight that must be refused
+and three allowed, with **both counts pinned**, because round 6 showed the previous version's were not: deleting the
 two cases that cost rounds 4 and 5 left it printing "20 of 20" and exit 0, the
 total being `len(CASES)`.
+
+**Round 7 then found the nesting check wrong both ways — the pattern of this
+whole package, one level down — and it was the last round.** Every finding was
+in a check, a test or a document, and none in the portal, so under D-064 and
+D-066 review closed there; what is left is on issues. The four fixed:
+
+| shape | was | now |
+|---|---|---|
+| `\hash_equals(…)` at file scope | NO GATE, with a security accusation (false RED) | allowed |
+| a bare `{ … }`, `namespace X { }` | refused as "T_BLOCK" (false RED) | allowed: it cannot skip its body |
+| `if (…) { $s = "{$x}"; gate }` | the string's `}` popped the `if`: allowed (false PASS) | refused |
+| `if (Foo::try()) { gate }` | the method name replaced the `if`: allowed (false PASS) | refused |
+
+The rule now lives in ONE function, `nesting_problem()`, and the gate's test
+asks it — it used to hold its own copy, `kind != "T_TRY"`, so it could not have
+noticed the rule change at all (#647). Each fix was planted back out and failed
+exactly its own case. **Still invisible, and on #794:** the
+alternative syntax (`if (…): … endif;`), which opens no brace, and a magic
+parameter folded into the gate's own condition or guarding its `exit`, neither
+of which nests anything.
 
 **And the all-clear was STILL untrue.** Round 5's replacement named FOUR
 allowances when there are FIVE: `cron/import-feeds` has six hours, fell under
@@ -529,8 +549,9 @@ token gate"* — while the self-test went to 80 passed, 3 failed, with I2, I4 an
 I6 ("and NOTHING was recorded") red. That is an unauthenticated request writing
 the record. **This repository had already recorded that lesson twice** (#668's
 section D, and `gdpr-coverage-selftest.php`: "Every gate must REFUSE, not merely
-exist"). `gate_refuses()` now walks the block and requires an `exit` or `die`
-inside it.
+exist"). `gate_refuses()` then walked the block and required an `exit` or
+`die` inside it — and was later DELETED with its other four versions (round 6,
+below).
 
 **`hash_equals(` inside an ordinary string literal.** `php_code_only()` kept
 string CONTENTS — while its own docblock said it removed them, which is what
