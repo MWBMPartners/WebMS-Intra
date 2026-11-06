@@ -706,6 +706,18 @@ if ($foundBoth === false) {
         ['1.6.2026 10:00',                '2026-06-01 10:00:00', ''],
         // a real leap day, so the impossible-date rule cannot just refuse 29 February
         ['2028-02-29 10:00',              '2028-02-29 10:00:00', ''],
+        // ⚠️ #797's rule must NOT refuse a full date carrying a relative step:
+        //    the answer is the same whenever the import runs, so it is not
+        //    "read against the day of the import".
+        ['2026-06-01 +1 day',             '2026-06-02 00:00:00', 'a full date with a relative step does not depend on now'],
+        // ⚠️ #797 deliberately does NOT refuse a month and year with no day:
+        //    PHP always supplies the 1st, whenever the import runs. Pinned so
+        //    a rule refusing too much goes red (round 2 found nothing did).
+        //    (A `'2026-06-01'` "date alone" entry was added here too and was
+        //    a DUPLICATE of one already in the list — round 17's shape —
+        //    so it is gone and the count is 62, not 61 + 2.)
+        ['Jan 2026',                      '2026-01-01 00:00:00', 'no day: PHP supplies the 1st, not taken from now'],
+        ['June 2026 10:00',               '2026-06-01 10:00:00', 'no day: PHP supplies the 1st, not taken from now'],
     ];
     $storeBad = [];
     foreach ($mustStore as [$cell, $want, $hist]) {
@@ -742,9 +754,28 @@ if ($foundBoth === false) {
         //    RED for the whole of 2028, 2032, 2036 … on correct code — the
         //    cry-wolf direction (#483), in the package whose own written
         //    lesson is "a test written in December passes in London whatever
-        //    the code does". It is now K06 below, which asserts BOTH
-        //    directions against the real year and so cannot go stale.
+        //    the code does". Since #797 a year-less cell is refused EVERY
+        //    year, for the reason that is true every year, and K06 below pins
+        //    that — so it could come back here, and is kept in K06 instead
+        //    because K06 also pins the reason.
         '0000-00-00 10:00', '0000-00-00 00:00:00',
+        // ⚠️ CELLS WITH NO FULL DATE (#797). Each used to be stored at a date
+        //    taken from the moment of import — `2026` as TODAY at 20:26,
+        //    `1999` as today's date in 1999, `10:00` as today, `Monday` as the
+        //    next Monday. They cover each part a cell can leave out: the whole
+        //    date, the year, the day, and a relative word.
+        '2026', '1999', '1462', '10:00', '10:00:00', '23:59', 'noon',
+        'tomorrow 10:00', 'Monday', 'next Monday 10:00', 'today', 'now',
+        '+1 day', '1 June 10:00', '15 January 10:00', 'June 1',
+        // A dotted date with a two-digit year: PHP reads it as a TIME
+        // (01:06:26), so it was stored on the import day. And an Excel serial
+        // number with a decimal part, which was stored in the year 4617.
+        '01.06.26', '13.06.26', '1.6.26', '46174.5',
+        // NOT here: `Jan 2026` and `June 2026 10:00`. They have no DAY, but
+        //    PHP always supplies the 1st — the same answer whenever the import
+        //    runs — so they are not "read against the day of the import" and
+        //    this rule rightly lets them through. Whether a cell with no day
+        //    should be refused anyway is a separate question, raised on #797.
         // ⚠️ OUTSIDE THE DOCUMENTED `DATETIME` RANGE (1000-01-01 to
         //    9999-12-31). MySQL REFUSES the negative and five-digit years
         //    below and ACCEPTS 0001-0999 without a warning (measured, round
@@ -857,53 +888,26 @@ if ($foundBoth === false) {
     //       only thing guarding the fraction and impossible-date rules (see
     //       the note at the head of this section for what else covers the
     //       reader, and what does not).
-    check('K04 the must-store list has not shrunk', count($mustStore), 59);
-    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 80);
+    check('K04 the must-store list has not shrunk', count($mustStore), 62);
+    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 100);
 
-    // ── K06. The fallback year is TODAY'S, asserted in both directions ───
-    // ⚠️ THIS REPLACES A CELL THAT WOULD HAVE GONE RED FOR THE WHOLE OF 2028.
-    //    `Feb 29 10:00` has no year, so the closure supplies `date('Y')`. It
-    //    is the only cell whose VALIDITY depends on which year that is —
-    //    impossible in 2026, a real date in 2028 — and it sat in the
-    //    must-refuse list, which would have made this test fail on correct
-    //    code every day of 2028, 2032, 2036 … That is the cry-wolf direction
-    //    (#483), and this package's own lesson is that a test written in one
-    //    month can pass in London whatever the code does.
+    // ── K06. A year-less cell is refused EVERY year, for a reason true every year ──
+    // ⚠️ THIS USED TO ASSERT THE OPPOSITE, and that was #797's fault being
+    //    pinned as correct. `Feb 29 10:00` has no year, so `strtotime()`
+    //    supplied the year the import ran in: stored in a leap year, refused
+    //    in any other, and every year-less cell landed in whichever year
+    //    somebody happened to press Import — next January's services,
+    //    imported in December, eleven months in the past. Round 21 had made
+    //    the test year-proof by asserting BOTH directions against the real
+    //    year, which was right about the time bomb and pinned the fault.
     //
-    //    Asserting BOTH directions against the REAL year is strictly stronger
-    //    than the old cell AND cannot go stale: in a non-leap year it must be
-    //    refused, in a leap year it must store 29 February of that year. A
-    //    wrong fallback year fails one branch or the other, whichever year it
-    //    is run in.
-    $thisYear = (int) date('Y');
-    $isLeap   = ((int) date('L')) === 1;
-    $febWhy   = null;
-    $feb      = $fmtStore('Feb 29 10:00', $febWhy);
-    check(
-        'K06 the premise: date("L") agrees with the calendar about ' . $thisYear,
-        $isLeap,
-        checkdate(2, 29, $thisYear)
-    );
-    if ($isLeap === true) {
-        check(
-            'K06b in a leap year (' . $thisYear . ') a year-less "Feb 29" stores that year, '
-            . 'which proves the fallback year is TODAY and not a number typed in',
-            $feb,
-            $thisYear . '-02-29 10:00:00'
-        );
-    } else {
-        check(
-            'K06b in a non-leap year (' . $thisYear . ') a year-less "Feb 29" is refused, '
-            . 'which proves the fallback year is TODAY and not a leap year typed in',
-            $feb,
-            null
-        );
-        check(
-            'K06c and refused for the right reason',
-            $febWhy,
-            'is a date that does not exist'
-        );
-    }
+    //    Now one answer holds in every year, so there is no branch on the
+    //    year and nothing here can go stale.
+    $febWhy = null;
+    $feb    = $fmtStore('Feb 29 10:00', $febWhy);
+    check('K06 a year-less "Feb 29" is refused, whatever year this runs in', $feb, null);
+    check('K06b and refused because it gives no full date, not because of any year', $febWhy,
+        'could not be read as a complete date: what came out depended on the day of the import. Give the day, the month and a four-digit year, for example 2026-06-01 10:00');
 
     // K05 — WHICH REFUSAL IT IS. The closure reports a reason through its
     //       second argument, and the import shows it to the administrator.
@@ -922,10 +926,26 @@ if ($foundBoth === false) {
     //    administrator was told their file could not be read when the portal
     //    had decided not to accept it, which hides the one thing that would
     //    let them fix the row.
+    //
+    //    (While #797 was being written — before anything was committed — a
+    //    rewrite of K06 sliced between two markers and deleted this comment,
+    //    the edit style this project has already recorded as deleting
+    //    working text. Restored from
+    //    `git show 8047e04:tools/clock-change-selftest.php`.)
     $reasonFor = [
         '2026-02-31 10:00'  => 'is a date that does not exist',
         '0000-00-00 10:00'  => 'is a date that does not exist',
-        'Feb 31 10:00'      => 'is a date that does not exist',
+        // ⚠️ NOT "does not exist" ANY MORE (#797). Feb 31 is impossible in
+        //    every year, so that message was true — but (a2) now refuses every
+        //    cell with no year BEFORE the impossible-date test, so this one
+        //    gets (a2)'s reason. The administrator adds a year and is then told
+        //    the date does not exist: two round trips where one would do,
+        //    recorded on #796 rather than reordered here.
+        'Feb 31 10:00'      => 'could not be read as a complete date: what came out depended on the day of the import. Give the day, the month and a four-digit year, for example 2026-06-01 10:00',
+        '01.06.26'          => 'could not be read as a complete date: what came out depended on the day of the import. Give the day, the month and a four-digit year, for example 2026-06-01 10:00',
+        '2026'              => 'could not be read as a complete date: what came out depended on the day of the import. Give the day, the month and a four-digit year, for example 2026-06-01 10:00',
+        '10:00'             => 'could not be read as a complete date: what came out depended on the day of the import. Give the day, the month and a four-digit year, for example 2026-06-01 10:00',
+        'tomorrow 10:00'    => 'could not be read as a complete date: what came out depended on the day of the import. Give the day, the month and a four-digit year, for example 2026-06-01 10:00',
         // ⚠️ BOTH COMPONENTS, because the old single sentence was untrue of
         //    the minute case: there the choice is seconds against part of a
         //    MINUTE, not minutes against part of an hour. K05 pinned only
@@ -950,6 +970,10 @@ if ($foundBoth === false) {
     ];
     $reasonsWrong = [];
     foreach ($reasonFor as $cell => $wantReason) {
+        // ⚠️ `(string)` IS LOAD-BEARING: PHP makes the key `'2026'` an INT,
+        //    and under strict_types the closure then throws a TypeError
+        //    (the #669 trap, met again when #797 added a bare-year cell).
+        $cell      = (string) $cell;
         $gotReason = null;
         $stored    = $fmtStore($cell, $gotReason);
         if ($stored !== null) {

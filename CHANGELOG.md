@@ -4,6 +4,46 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Importing events: a cell with no full date is refused, not given today's date (#797)
+
+When events were imported from a spreadsheet, a date cell that did not say
+which day it meant was filled in from **the moment the import ran**, and the
+row was reported as imported. So a cell holding just `2026` became an event
+**today at 20:26**; `10:00` became today at ten; `Monday` became the next
+Monday; and `1 June 10:00`, with no year, went into whichever year somebody
+happened to press Import — so next January's services, imported in December,
+were stored eleven months in the past.
+
+Such a cell is now refused, and the administrator is told it could not be read
+as a complete date and shown an example. The test is one rule rather than a
+list of spellings — the cell is read against two different moments, and if the
+answers differ, the date came from the import and not from the cell.
+
+**Changes in behaviour to know about:**
+
+- A date with a day and month but no year (`1 June 10:00`) used to import into
+  the current year and is now refused. Add the year and it imports.
+- A dotted date with a **two-digit year** (`01.06.26`) is now refused. It was
+  never imported correctly: PHP reads it as the time 01:06:26, so it was stored
+  on the day of the import. Write the year with four digits (`01.06.2026`).
+- An Excel date number with a decimal part (`46174.5`) is now refused; it was
+  stored in the year 4617.
+
+Dates written with a four-digit year, in any format that imported correctly
+before, are unaffected — checked by running the old and new readers over a
+large generated set of cells, where nothing that used to store correctly was
+refused and nothing was stored differently. (The set was not committed, so no
+count is given; the committed cases are in the clock-change self-test.) One
+narrow exception: a year written BEFORE the day and month (`2026 1 June noon`)
+imported correctly only because the import ran in 2026 — PHP reads that `2026`
+as the time 20:26 — and is now refused.
+
+**If you imported test data containing any of the cells above before this
+change**, check those events: a bare year, a bare time or a two-digit-year
+date may be dated on the day of the import, a date with no year in the year of
+the import (possibly months in the past), and an Excel number with a decimal
+part in the year 4617.
+
 ### The portal now notices when a scheduled task has stopped (#775)
 
 This portal relies on tasks that run on a timer: sending reminders, clearing

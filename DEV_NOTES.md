@@ -20180,6 +20180,31 @@ withdrawn claim by its words, everywhere, before calling the withdrawal done.**
 Outside its scope the round also found a real storage fault older than round
 22: a cell with no date, such as `2026`, is stored as today at 20:26 (#797).
 
+**#797, fixed straight after.** The import's last reader is `strtotime()`, which
+fills in whatever a cell leaves out from the moment the import runs. The fix is
+step (a2) of `$fmtClockRaw`: read the cell against two reference moments that
+differ in every field IN UTC (2001-02-03 04:05:06 and 2010-11-12 13:14:15, a
+Saturday and a Friday) and refuse it when the two answers differ. **Not in every
+zone, and the first version said otherwise:** the page reads them in the
+organisation's zone, and in 118 zones both land on the same local weekday. The
+independent check found no gap (a cell that takes its weekday from "now" takes a
+date from it too), but the stated reason was wrong. **And its message was
+untrue of a real cell:** "does not give a full date" was said of `01.06.26`,
+which IS a full date with a two-digit year that PHP reads as the time 01:06:26.
+The message now says what is true of every cell reaching it — it could not be
+read as a complete date — with an example. **It sits before the
+impossible-date test on purpose**, because that test judged a year-less cell
+against the year `strtotime()` assumed — the very assumption now refused — and
+its `(int) date('Y')` fallback, unreachable as a result, was removed rather than
+kept as a clause that cannot run. **K06 had pinned the fault as correct:** round
+21 made it year-proof by asserting "stored in a leap year, refused otherwise",
+which was right about the time bomb and wrong about the behaviour; it now asserts
+one answer in every year. Two cells deliberately still store: `Jan 2026` and
+`June 2026 10:00`, because PHP always supplies the 1st, so the result does not
+depend on when the import runs. And the bare-year cell met the #669 trap in the
+test: the array key `'2026'` became an INT and the closure threw a TypeError
+under strict types.
+
 
 ### Raised rather than bundled
 

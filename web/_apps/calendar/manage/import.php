@@ -437,6 +437,77 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
         return null;
     }
 
+    // (a2) 🚨 A CELL THAT DOES NOT SAY WHICH DAY IT MEANS (#797). `strtotime()`
+    //      fills in whatever a cell leaves out from THE MOMENT THE IMPORT RUNS,
+    //      so a cell with no full date was stored as a real event on a date
+    //      nobody typed, and the row reported success. Measured on 6 November
+    //      2026, before this test:
+    //
+    //        2026            -> 2026-11-06 20:26:00   (read as a TIME, 20:26 today)
+    //        1999            -> 1999-11-06 19:32:35   (today's date and clock, in 1999)
+    //        10:00           -> today at 10:00
+    //        tomorrow 10:00  -> the day after the import
+    //        Monday          -> the next Monday after the import
+    //
+    //      Found by #777's round-23 check, outside its scope; it predates every
+    //      round of #777 that touched this closure.
+    //
+    //      🧮 ONE RULE, NOT A LIST OF SPELLINGS (the lesson of rounds 12-15
+    //      above): read the cell against TWO different reference moments and
+    //      refuse it when the answers differ — because then the value came
+    //      from the moment of import, not from the cell. IN UTC the two
+    //      moments differ in every field (2001 against 2010, February against
+    //      November, the 3rd against the 12th, Saturday against Friday,
+    //      04:05:06 against 13:14:15).
+    //
+    //      ⚠️ NOT IN EVERY ZONE, and the first version of this comment said
+    //         otherwise. The page reads them in the organisation's zone, and
+    //         in 118 of PHP's 419 zones (PHP 8.5.12, tzdata 2026.5:
+    //         compare `format('N')` of the two moments in each zone of
+    //         `DateTimeZone::listIdentifiers()`) both land on the SAME local
+    //         weekday — America/Bogota, America/Anchorage, Pacific/Pago_Pago
+    //         and Pacific/Kiritimati among them. That does not open a gap,
+    //         which #797's independent check measured over a generated set
+    //         that was not committed (so no count is given): a cell that
+    //         takes its weekday from "now" takes a DATE from it too, and the
+    //         dates still differ by nine years. An `@`-timestamp or a full
+    //      date with a relative step (`9999-12-31 +1 day`) does NOT depend on
+    //      now, so it falls through to the range test in `$fmtStore`, which is
+    //      what decides those.
+    //
+    //      ⚠️ A DATE WITH NO YEAR IS NOW REFUSED, AND THAT IS A DELIBERATE
+    //         CHANGE. `1 June 10:00` used to be stored in the year the import
+    //         happened to run — so an administrator importing next January's
+    //         services in December stored them eleven months in the PAST.
+    //         Refusing asks for one more word and cannot store a date nobody
+    //         meant; storing could. It also retires the leap-year time bomb
+    //         round 21 found (`Feb 29 10:00` stored or refused depending on
+    //         the year the test ran): such a cell is now refused every year,
+    //         for the reason that is true every year.
+    //
+    //      ORDER: before #797, (b) judged a year-less cell against the year
+    //      `strtotime()` ASSUMED, so this had to come first. Since #797 (b)
+    //      requires a year the cell itself gave and assumes none, so the order
+    //      no longer changes any answer — measured by #797's round-2 check,
+    //      which moved this below (b) and got identical output. It stays
+    //      first because it is the cheaper question and the broader one.
+    $baseA = 981173106;    // 2001-02-03 04:05:06 UTC, a Saturday
+    $baseB = 1289567655;   // 2010-11-12 13:14:15 UTC, a Friday
+    if (strtotime($trimmed, $baseA) !== strtotime($trimmed, $baseB)) {
+        // 🗣️ WORDED FOR WHAT PHP DID, NOT FOR WHAT THE CELL LACKS. The first
+        //    version said the cell "does not give a full date", which is
+        //    untrue of `01.06.26`: that IS a full date, typed with a two-digit
+        //    year, and PHP reads it as the TIME 01:06:26 (it stored the import
+        //    day at 01:06:26 before this rule). The same goes for an Excel
+        //    serial number with a decimal part (`46174.5`). What is true of
+        //    every cell reaching here is that it could not be read as a
+        //    complete date — and the example tells the administrator the fix.
+        $why = 'could not be read as a complete date: what came out depended on the day '
+            . 'of the import. Give the day, the month and a four-digit year, for example '
+            . '2026-06-01 10:00';
+        return null;
+    }
+
     // (b) AN IMPOSSIBLE CALENDAR DAY, IN ANY SPELLING. `strtotime()` rolls one
     //     forward silently, so `2026-02-31 10:00` was stored as 2026-03-03
     //     10:00:00 -- three days out -- and the row reported `ok => true`,
@@ -482,8 +553,11 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //    exactly that value.
     //
     // 🧮 SO THE RANGE TEST IS WHAT IT SHOULD ALWAYS HAVE BEEN: anything a
-    //    calendar day or month COULD be, including zero, with the year taken
-    //    from `strtotime()`'s own assumption when the cell gives none.
+    //    calendar day or month COULD be, including zero, with the year the
+    //    cell itself gives. (This said "with the year taken from
+    //    `strtotime()`'s own assumption when the cell gives none" until #797:
+    //    a cell with no year now never reaches here, and the code below
+    //    requires one.)
     //
     //    The upper bounds are what still lets an ISO ordinal date through:
     //    `date_parse('2026-152')` answers day 152, which no month has a
@@ -494,15 +568,16 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     if (count($parsed['errors']) > 0) {
         return null;
     }
-    if (is_int($parsed['month']) === true
+    // ⚠️ THE YEAR IS REQUIRED HERE NOW. This used to fall back to
+    //    `(int) date('Y')` for a cell with no year; since (a2) refuses every
+    //    such cell before it gets here, that fallback could never run, and a
+    //    clause that cannot run is not kept dressed as a safeguard.
+    if (is_int($parsed['year']) === true
+        && is_int($parsed['month']) === true
         && is_int($parsed['day']) === true
         && $parsed['day'] <= 31
         && $parsed['month'] <= 12
-        && checkdate(
-            $parsed['month'],
-            $parsed['day'],
-            is_int($parsed['year']) === true ? $parsed['year'] : (int) date('Y')
-        ) === false) {
+        && checkdate($parsed['month'], $parsed['day'], $parsed['year']) === false) {
         $why = 'is a date that does not exist';
         return null;
     }
