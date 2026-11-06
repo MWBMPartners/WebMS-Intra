@@ -76,8 +76,13 @@ WHAT IT CANNOT SEE, measured rather than assumed:
 
     Requiring a finish before every `exit()` was tried and rejected: the
     NORMAL end of these pages is also an `exit()`, reached after a finish
-    further up, and two of them end inside a `catch` that RE-THROWS, where
-    recording nothing is correct. A rule that cannot tell those apart cries
+    further up, and ONE of them (`health.php`) ends inside a `catch` that
+    RE-THROWS, where recording nothing is correct.
+
+    (That said "two of them" in four places. Counted with PHP's tokeniser,
+    `T_THROW` appears exactly once under `web/_apps/cron/` — `health.php` line
+    321. The conclusion stands on the first half alone; the evidence was
+    overstated, which is the shape this repository keeps recording.) A rule that cannot tell those apart cries
     wolf, and a check that cries wolf gets switched off (#483). The property is
     behavioural, so section H of the self-test drives a switched-off job and
     reads the row back.
@@ -109,8 +114,13 @@ class ProbeUnavailable(RuntimeError):
 
 def php_code_only(path: pathlib.Path) -> str:
     """
-    The file's PHP CODE, with every comment and every string literal's CONTENTS
-    removed, via PHP's own tokeniser.
+    The file's PHP CODE, with every comment blanked and every string literal's
+    content blanked EXCEPT a `cron/...` job key, via PHP's own tokeniser.
+
+    ⚠️ AN EARLIER VERSION OF THIS SENTENCE SAID "every string literal's
+       CONTENTS removed" AND THE FUNCTION KEPT THEM. It re-quoted each literal
+       with its content intact, and emitted heredoc bodies raw. That sentence
+       is what made the bypass below invisible to anybody reading the file.
 
     ⚠️ A TEXT SEARCH CANNOT DO THIS JOB HERE. Every one of these pages
        describes its own token gate in a docblock -- "authenticates via
@@ -121,12 +131,33 @@ def php_code_only(path: pathlib.Path) -> str:
     # ⚠️ NO `<?php` HERE. `php -r` is already in PHP mode and refuses the tag
     #    with "unexpected token <", which looks exactly like the file under
     #    inspection being broken.
+    # ⚠️ A STRING'S CONTENT IS BLANKED UNLESS IT IS A JOB KEY, and the first
+    #    version kept every content — which defeated check C with ONE ordinary
+    #    line. Measured: putting
+    #
+    #        $why = 'compared with hash_equals( so timing gives nothing away';
+    #
+    #    above `began()` in `retention-sweep.php` moved the start ABOVE the
+    #    real token gate with the gate at exit 0, all 66 audit scripts green
+    #    and the self-test at 83 of 83 — on the job whose own description is
+    #    "clearing out personal data past the period this portal said it would
+    #    keep it". Any internet request would then have written a start.
+    #
+    #    Only `cron/...` keys are kept, because that is the one thing the check
+    #    reads out of a literal. Heredoc and interpolated bodies are blanked
+    #    too: they are not T_CONSTANT_ENCAPSED_STRING, so the first version
+    #    emitted them raw and a heredoc containing `hash_equals(` worked just
+    #    as well.
     script = (
         '$t = token_get_all(file_get_contents($argv[1])); $out = "";'
         'foreach ($t as $x) { if (is_array($x)) {'
-        'if (in_array($x[0], [T_COMMENT, T_DOC_COMMENT], true)) { '
+        'if (in_array($x[0], [T_COMMENT, T_DOC_COMMENT, T_INLINE_HTML,'
+        ' T_ENCAPSED_AND_WHITESPACE, T_START_HEREDOC, T_END_HEREDOC], true)) { '
         '$out .= str_repeat("\\n", substr_count($x[1], "\\n")); continue; }'
-        'if ($x[0] === T_CONSTANT_ENCAPSED_STRING) { $out .= "\'" . trim($x[1], "\'\\"") . "\'"; continue; }'
+        'if ($x[0] === T_CONSTANT_ENCAPSED_STRING) {'
+        ' $v = trim($x[1], "\'\\"");'
+        ' $out .= preg_match("#^cron/[a-z0-9-]+$#", $v) === 1 ? "\'" . $v . "\'" : "\'\'";'
+        ' continue; }'
         '$out .= $x[1]; } else { $out .= $x; } } echo $out;'
     )
     lint = subprocess.run(
@@ -146,10 +177,98 @@ def php_code_only(path: pathlib.Path) -> str:
     return run.stdout
 
 
+def sql_without_comments(text: str) -> str:
+    """
+    The SQL with `--` and `/* */` comments blanked, **tracking quoted strings**
+    so a `--` INSIDE a literal is left alone.
+
+    ⚠️ THE OBVIOUS ONE-LINER IS WRONG, AND IT COST A REAL FAULT IN THIS SAME
+       PACKAGE (#788). `re.sub(r"--[^\n]*", "", text)` chops from `--` to the
+       end of the line whether or not it is inside a string — and
+       `full_schema.sql` has NINE `COMMENT` strings containing ` -- `, one of
+       which this package wrote. Each one loses its closing quote, so every
+       following quote pairs up wrongly. In `check_schema_seed_parity.py` that
+       made 37 migrations read as missing their mark while the check went
+       blind to real drift in all of them. Same file, same shape, so this
+       function does it properly.
+
+    Newlines are preserved so reported positions stay meaningful.
+    """
+    out = []
+    i, n = 0, len(text)
+    quote = None
+    while i < n:
+        ch = text[i]
+        if quote is not None:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                # A doubled quote is an escaped one and does not close.
+                if i + 1 < n and text[i + 1] == quote:
+                    out.append(quote)
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            out.append(ch)
+            i += 1
+            continue
+        if text.startswith("--", i):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            out.append("\n" * text.count("\n", i, end))
+            i = end
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def registered_cron_routes() -> set[str]:
-    """The `cron/` addresses `full_schema.sql` registers, read from the file."""
-    text = SCHEMA.read_text(encoding="utf-8")
-    return set(re.findall(r"'(cron/[a-z0-9-]+)'", text))
+    """
+    The `cron/` addresses `full_schema.sql` really registers.
+
+    ⚠️ NOT A SEARCH OVER THE WHOLE FILE, which is what this did first — in the
+       check whose own docstring makes the point that a text search finds prose
+       rather than code. `full_schema.sql` is eleven thousand lines of dense
+       commentary, so one future comment mentioning a removed address, say
+
+           -- An old address we removed in migration 99: 'cron/old-tidy' is gone.
+
+       made this report a registered job that does not exist and BLOCKED EVERY
+       PULL REQUEST until somebody added a `JOBS` entry for it. Measured. A
+       check that cries wolf gets switched off (#483).
+
+       It also ignored the statement KIND, so a route later removed by a
+       `DELETE FROM tblRoutes` still read as registered — `seeded_switches()`'s
+       measured fault in #675. Comments are blanked first, then only
+       `INSERT INTO tblRoutes` statements are read, then any address a `DELETE`
+       takes away is removed, in file order.
+    """
+    text = sql_without_comments(SCHEMA.read_text(encoding="utf-8"))
+    routes: set[str] = set()
+    for stmt in re.split(r";", text):
+        lowered = stmt.lower()
+        if "tblroutes" not in lowered:
+            continue
+        found = set(re.findall(r"'(cron/[a-z0-9-]+)'", stmt))
+        if len(found) == 0:
+            continue
+        if re.search(r"\binsert\s+(?:ignore\s+)?into\b", lowered) is not None:
+            routes |= found
+        elif re.search(r"\bdelete\s+from\b", lowered) is not None:
+            routes -= found
+    return routes
 
 
 def listed_jobs() -> list[str]:
@@ -174,6 +293,37 @@ def listed_jobs() -> list[str]:
     block = code[start:end]
     return re.findall(r"'(cron/[a-z0-9-]+)'\s*=>", block)
 
+
+def gate_refuses(code: str, gate_at: int) -> bool:
+    """
+    Whether the block holding the token comparison ENDS THE REQUEST.
+
+    Walks forward from the comparison to the end of its `{ ... }` block and
+    asks whether an `exit` or `die` appears inside it. Braces are matched on
+    the masked code, so a `{` inside a message cannot swallow the rest of the
+    function — this repository's recorded trap from the money pages.
+
+    WHAT IT CANNOT SEE, stated rather than implied: a refusal that happens by
+    some other means (a `return` at file scope, a thrown exception, a helper
+    that exits), and a gate whose condition is inverted so the block runs on
+    success. The first would be reported as a fault and is worth a loud
+    failure rather than a silent pass; the second is behavioural, and section I
+    of the self-test is what drives it.
+    """
+    opened = code.find("{", gate_at)
+    if opened == -1:
+        return False
+    depth = 0
+    for i in range(opened, len(code)):
+        ch = code[i]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                block = code[opened:i]
+                return re.search(r"\b(?:exit|die)\b", block) is not None
+    return False
 
 def main() -> int:
     problems: list[str] = []
@@ -261,7 +411,7 @@ def main() -> int:
         if len(began) != 1 or len(done) == 0:
             continue
 
-        # ── C. the gate comes FIRST. The security property.
+        # ── C. the gate comes FIRST, AND IT REFUSES. The security property.
         gate = [m.start() for m in re.finditer(r"hash_equals\s*\(", code)]
         if len(gate) == 0:
             problems.append(
@@ -274,6 +424,24 @@ def main() -> int:
                 "Anybody on the internet could then make a job that has stopped "
                 "look alive, which turns the Check this portal page from a true "
                 "report into a forgeable one." % path.name
+            )
+        elif gate_refuses(code, min(gate)) is False:
+            # ⚠️ A GATE MUST REFUSE, NOT MERELY EXIST. This repository has
+            #    recorded that twice already (#668's section D, and
+            #    gdpr-coverage-selftest.php: "Every gate must REFUSE, not
+            #    merely exist") and this check shipped without it.
+            #
+            #    Measured: deleting `exit();` from the token block of
+            #    `webhook-retry.php` left `php -l` clean and this check at exit
+            #    0, printing the success line "with the start after its token
+            #    gate" — while the self-test went to 80 passed, 3 FAILED, with
+            #    I2, I4 and I6 ("and NOTHING was recorded") all red. That is an
+            #    unauthenticated request writing the record.
+            problems.append(
+                "%s checks its token but the block that fails the check does not "
+                "end the request — no exit() or die() before it closes. The "
+                "comparison then decides nothing, so an unauthenticated request "
+                "runs on and records that the job began." % path.name
             )
 
         # ── D. the finish comes after the start.

@@ -672,8 +672,18 @@ final class PortalCheck
      *    to the job instead of sending it now?" — on a fixed 15-minute window,
      *    and it is still the one place that answers it. This page asks the
      *    different question "has this job stopped?", of all fifteen jobs, by
-     *    one rule. Reading both here would let one page give two answers about
-     *    one job, which is worse than either.
+     *    one rule. Reading both for a job that has a record would let one page
+     *    give two answers about one job, which is worse than either.
+     *
+     * ⚠️ WITH ONE EXCEPTION, ADDED BECAUSE DROPPING IT LOST A REAL WARNING.
+     *    `tblMailRouteState.jobLastRanAt` survives an upgrade WITH HISTORY,
+     *    while `tblScheduledJobRun` is empty on upgrade day. So a portal whose
+     *    mail job had genuinely stopped was downgraded from a warning with an
+     *    action to a note saying "Nothing" — with the fact still in the
+     *    database. Measured, old page and new, against the same rows.
+     *
+     *    The older reading is therefore used for the mail queue ALONE and ONLY
+     *    while the new record has nothing to say. One job, one answer, always.
      *
      * ⚠️ A JOB WITH NO RECORD IS "NOTHING IS KNOWN YET", NEVER A WARNING
      *    (D-071). On the day these files land no job anywhere has written a
@@ -726,6 +736,26 @@ final class PortalCheck
         }
 
         // ── What each job's own record says ────────────────────────────────
+        // ⚠️ A JOB WITH NO TOKEN IS LEFT OUT OF EVERYTHING BELOW, because the
+        //    finding above already covers it and `state()` never looks at a
+        //    token. Without this, one answer contradicted itself: the same job
+        //    appeared under "can never run, because no token has been set" AND
+        //    under "Each of these has a token set, so it CAN run". Reached
+        //    whenever a token is cleared after the job has run.
+        $noToken = [];
+        foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
+            if (in_array($facts['whatStops'], $silent, true) === true) {
+                $noToken[$jobKey] = true;
+                continue;
+            }
+            // JOB_TOKENS is keyed by token and $silent holds its sentences, so
+            // match a job to its token through the token itself as well.
+            if (array_key_exists($facts['token'], self::JOB_TOKENS) === true
+                && in_array(self::JOB_TOKENS[$facts['token']], $silent, true) === true) {
+                $noToken[$jobKey] = true;
+            }
+        }
+
         $state     = ScheduledJobs::state($db);
         $overdue   = [];
         $diedPart  = [];
@@ -733,8 +763,16 @@ final class PortalCheck
         $refused   = [];
         $broke     = [];
         $unreadable = [];
+        $running   = [];
         foreach ($state as $jobKey => $facts) {
+            if (array_key_exists($jobKey, $noToken) === true) {
+                continue;
+            }
             $words = $facts['whatStops'];
+            if ($facts['status'] === ScheduledJobs::RUNNING_NOW) {
+                $running[] = $words;
+                continue;
+            }
             if ($facts['status'] === ScheduledJobs::OVERDUE) {
                 $overdue[] = $words . ' — last ran '
                     . ScheduledJobs::howLongAgo((int) $facts['seconds']);
@@ -751,6 +789,28 @@ final class PortalCheck
                 continue;
             }
             if ($facts['status'] === ScheduledJobs::NOT_KNOWN) {
+                // ⚠️ THE MAIL QUEUE HAS A SECOND, OLDER RECORD, AND IT SURVIVES
+                //    THE UPGRADE WITH REAL HISTORY. `tblScheduledJobRun` is
+                //    empty on upgrade day (D-071, correctly) — but
+                //    `tblMailRouteState.jobLastRanAt` is not, and the page used
+                //    to WARN from it. Dropping that reading downgraded every
+                //    portal whose mail job had genuinely stopped, on upgrade
+                //    day, from a warning with an action to a note saying
+                //    "Nothing" — while the database still held the fact.
+                //    Measured against the same database, old page and new.
+                //
+                //    So for this ONE job, while the new record has nothing to
+                //    say, the older one is asked. That does not reopen the
+                //    "one page, two answers" problem the new reading was
+                //    written to avoid: it applies ONLY when the new source has
+                //    no answer at all, and stops the moment the job records
+                //    once. D-071 decides what to say about a job with NO
+                //    record; it does not say an existing record should be
+                //    ignored.
+                if ($jobKey === 'cron/mail-queue' && MailQueue::jobIsRunning($db) === false) {
+                    $overdue[] = $words . ' — the mail job has not run in the last 15 minutes';
+                    continue;
+                }
                 $notKnown[] = $words;
                 continue;
             }
@@ -817,14 +877,39 @@ final class PortalCheck
         }
 
         if (count($refused) > 0) {
+            // ⚠️ DO NOT NAME ONE CAUSE HERE. `refused` means any of THREE
+            //    things — a setting switches the job off, another run already
+            //    holds the lock, or nothing was due yet — and this said "a
+            //    setting turns them off" for all three. Every clause was then
+            //    false in the commonest state: nothing was switched off, the
+            //    work WAS being done, and there was no setting to go and look
+            //    at.
+            //
+            //    It is the commonest state rather than a corner case, measured:
+            //    `cron/backup-run` records `refused` whenever the newest
+            //    snapshot is not old enough yet, so on a WEEKLY schedule the
+            //    nightly call refuses on six nights in seven and on a monthly
+            //    one 27 in 28 — the last outcome on record is `refused` nearly
+            //    always, and this note told the administrator their backup was
+            //    switched off, permanently.
+            //
+            //    This is #775's own headline fault one step on: one word
+            //    carrying several meanings, worded as one of them. The remedy
+            //    here is to say what is KNOWN — the job ran and chose to do
+            //    nothing — and to list the three reasons rather than assert
+            //    one. Recording WHICH reason would need a column and every
+            //    caller to pass it, which is #791.
             $findings[] = [
                 'severity' => self::NOTE,
-                'what'     => 'Some scheduled jobs are being called but are switched off.',
-                'why'      => 'These ran recently and refused to do anything, because a setting '
-                    . 'turns them off. That is not a fault — somebody chose it — but it is worth '
-                    . 'knowing, because the work they would do is not being done.',
-                'todo'     => 'Nothing, unless this was not intended. The setting that switches '
-                    . 'each one off is in Admin, Settings.',
+                'what'     => 'Some scheduled jobs ran recently and deliberately did nothing.',
+                'why'      => 'Each of these was called, decided there was nothing for it to do, '
+                    . 'and said so. That is not a fault. There are three ordinary reasons: a '
+                    . 'setting switches the job off, another run of it was already in progress, '
+                    . 'or its work was not due yet — a nightly backup on a weekly schedule '
+                    . 'reports this on six nights out of seven, which is correct.',
+                'todo'     => 'Nothing. If you expected one of these to be doing work, check '
+                    . 'both its own settings and how often it is being called; this page cannot '
+                    . 'tell which of the three reasons applied.',
                 'count'    => count($refused),
                 'examples' => array_slice($refused, 0, self::EXAMPLES),
             ];
@@ -866,14 +951,50 @@ final class PortalCheck
             ];
         }
 
-        if (count($overdue) === 0 && count($diedPart) === 0 && count($notKnown) === 0
-            && count($broke) === 0 && count($unreadable) === 0) {
+        if (count($running) > 0) {
+            // Said separately and NOT counted as finished. It is not a fault —
+            // a job that began a moment ago has simply not finished yet — but
+            // the all-clear used to sweep it up and claim it had.
             $findings[] = [
                 'severity' => self::NOTE,
-                'what'     => 'Every scheduled job has run recently enough.',
-                'why'      => 'All ' . count($state) . ' of them recorded a finish inside the time '
-                    . 'expected for that job, which differs by job: the mail queue is expected '
-                    . 'every few minutes, the nightly jobs daily, and giving statements weekly.',
+                'what'     => 'Some scheduled jobs were part-way through when this page was drawn.',
+                'why'      => 'Each of these recorded a start and has not yet recorded a finish, '
+                    . 'and not enough time has passed for that to be a worry. Usually it means '
+                    . 'the job is running at this moment. If one is still listed here after its '
+                    . 'own expected gap it will be reported as having started and never '
+                    . 'finished, which IS a problem.',
+                'todo'     => 'Nothing. Reload this page in a few minutes to see whether they '
+                    . 'finished.',
+                'count'    => count($running),
+                'examples' => array_slice($running, 0, self::EXAMPLES),
+            ];
+        }
+
+        // ⚠️ THE ALL-CLEAR MUST EXCLUDE A JOB THAT IS STILL RUNNING, AND ITS
+        //    SENTENCE MUST NOT COUNT ONE AS FINISHED. It used to say "All N of
+        //    them recorded a finish" where N was every job, while a run that
+        //    had begun and not finished fell through every test above and was
+        //    swept in here — so a nightly backup that died part-way at 02:00
+        //    was reported as an all-clear for the next 36 hours, with the
+        //    record holding the opposite. Measured.
+        //
+        //    It counts the jobs it can actually speak for, rather than all of
+        //    them, because that is the number the sentence is about.
+        $finishedWell = count($state) - count($running) - count($noToken);
+        if (count($overdue) === 0 && count($diedPart) === 0 && count($notKnown) === 0
+            && count($broke) === 0 && count($unreadable) === 0 && $finishedWell > 0) {
+            $findings[] = [
+                'severity' => self::NOTE,
+                'what'     => count($running) > 0
+                    ? 'Every scheduled job that is not mid-run has run recently enough.'
+                    : 'Every scheduled job has run recently enough.',
+                'why'      => $finishedWell . ' of them recorded a FINISH inside the time expected '
+                    . 'for that job, which differs by job: the mail queue is expected every few '
+                    . 'minutes, the nightly jobs daily, and giving statements weekly.'
+                    . (count($running) > 0
+                        ? ' The ones listed above as part-way through are not counted here, '
+                            . 'because they have not recorded a finish.'
+                        : ''),
                 'todo'     => 'Nothing.',
                 'examples' => [],
             ];

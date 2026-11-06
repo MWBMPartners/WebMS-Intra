@@ -87,14 +87,52 @@ $fmtStore = static function (string $text, ?string &$why = null) use (&$fmtClock
     if ($out === null) {
         return null;
     }
-    // A `DATETIME` column holds 1000-01-01 00:00:00 to 9999-12-31 23:59:59 and
-    // NOTHING ELSE. Anything outside that either throws on insert — stopping
-    // the import part-way with earlier rows already written — or stores a
-    // year nobody meant.
-    if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $out) !== 1
-        || $out < '1000-01-01 00:00:00'
-        || $out > '9999-12-31 23:59:59') {
-        $why = 'is a date outside the range this portal can store (the year must be 1000 to 9999)';
+    // ⚠️ TWO TESTS DOING TWO DIFFERENT JOBS, AND AN EARLIER COMMENT HERE RAN
+    //    THEM TOGETHER AS ONE. It said a `DATETIME` "holds 1000-01-01 to
+    //    9999-12-31 and NOTHING ELSE", which is MySQL's DOCUMENTED range and
+    //    not what it enforces. Measured on MySQL 8.0.36 with
+    //    `STRICT_TRANS_TABLES`, inserting each literal into a real `DATETIME`
+    //    column:
+    //
+    //      '-0001-12-31 23:58:45'    ERROR 1292, Incorrect datetime value
+    //      '10000-01-01 00:00:00'    ERROR 1292
+    //      '33658-09-27 02:46:39'    ERROR 1292
+    //      '1002026-06-01 00:00:00'  ERROR 1292
+    //      '0001-01-01 00:00:00'     ACCEPTED, stored as given
+    //      '0500-01-01 10:00:00'     ACCEPTED, stored as given, no warning
+    //      '0999-12-31 23:59:59'     ACCEPTED, stored as given
+    //
+    //    So:
+    //
+    //    (1) THE SHAPE TEST IS THE ONE THAT PREVENTS THE ABORT. A year that is
+    //        negative or longer than four digits is the literal MySQL REFUSES,
+    //        and under this portal's reporting mode that throw escapes the
+    //        insert loop — stopping the import part-way with earlier rows
+    //        already written. Requiring exactly four year digits catches every
+    //        one of them.
+    //
+    //    (2) THE FLOOR TEST REFUSES WHAT THE DATABASE WOULD HAVE ACCEPTED, so
+    //        it is this portal's own rule and is worded as one. A year from
+    //        0001 to 0999 in a diary is a typing mistake — `202-06-01` for
+    //        2026, or `0226` — and before this it was stored silently as year
+    //        202 while the row reported "Imported as event #N". Refusing with
+    //        a reason is better than storing a date nobody meant, and nothing
+    //        a customer could plausibly have in a spreadsheet is affected
+    //        (checked against two-digit years, both Excel epochs, written-out
+    //        months and offsets: two cells changed, both improvements).
+    //
+    //    There is NO ceiling test, and that is deliberate rather than an
+    //    omission: a five-digit year cannot get past the shape test to reach
+    //    one. The clause that used to be here (`> '9999-12-31 23:59:59'`)
+    //    could never fire — a lexicographic compare reads `10000-…` as LESS
+    //    than `9999-…` — so it read as a third safeguard while doing nothing.
+    //    Deleting it changed no behaviour, measured.
+    if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $out) !== 1) {
+        $why = 'is a date the database cannot store at all (the year must be four digits)';
+        return null;
+    }
+    if ($out < '1000-01-01 00:00:00') {
+        $why = 'has a year before 1000, which this portal does not accept — check for a typing mistake';
         return null;
     }
     $why = '';
@@ -166,6 +204,27 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
         return $clock;
     }
 
+    // ⚠️ NO CELL COUNT IS WRITTEN IN THIS FILE, AND THAT IS DELIBERATE.
+    //    Three were — "2,160", "6,480" and "64,224" — in the very commit that
+    //    withdrew "89 zone spellings", and then "91", for being
+    //    unreproducible. Each is a property of a cell list nobody committed,
+    //    so nobody can reproduce one, and a figure nobody can reproduce reads
+    //    as evidence.
+    //
+    //    **Round 22 then found that removing them had put FOUR MORE in their
+    //    place** — including one in this very block — so the rule is written
+    //    here plainly rather than argued: the committed matrix is section K
+    //    of `tools/clock-change-selftest.php`, its two counts are pinned
+    //    there as K04/K04b, and they are read from the file that fails on
+    //    them.
+    //
+    //    **It also found that removing the number had SPLICED a sentence in
+    //    half**, leaving a bolded fragment with no subject and eleven lines
+    //    wedged between "so" and its own continuation. This project's rule,
+    //    recorded in round 19 about prose: **rewrite the sentence, do not
+    //    splice it.** Written down here because this is the third time in
+    //    #777 that an edit between two markers damaged working text.
+
     // ── 3. THE SPREADSHEET FALLBACK ─────────────────────────────────────────
     //
     // A spreadsheet holds whatever somebody typed -- "1/3/26 7pm", "March 3
@@ -183,17 +242,6 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
 
     // 🚨 ASK WHETHER PHP CAN READ THE CELL AT ALL, FIRST. Until round 20 the
     //    fraction rule above ran before anything consulted `strtotime()`, so
-    // ⚠️ NO CELL COUNTS ANYWHERE IN THIS FILE, AND THAT IS DELIBERATE. Three
-    //    were written here and in the self-test — "2,160", "6,480" and
-    //    "64,224" — in the very commit that withdrew "89 zone spellings" and
-    //    then "91" for being unreproducible. An independent sweep of 3.8
-    //    million cells got roughly thirty and nineteen times the first two.
-    //    They are not wrong so much as MEANINGLESS: each is a property of an
-    //    uncommitted cell list, so nobody can reproduce one, and a figure
-    //    nobody can reproduce reads as evidence. **The committed matrix is
-    //    section K of `tools/clock-change-selftest.php`, whose two counts are
-    //    pinned there as K04/K04b — read them from the file that fails on
-    //    them.**
     //    **cells PHP refuses outright were told their fraction was
     //    ambiguous** — including the plausible European shorthand
     //    `1.6. 10:00`, which got "writes the hour with a single digit after a

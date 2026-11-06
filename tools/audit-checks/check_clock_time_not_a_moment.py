@@ -1420,6 +1420,40 @@ def main() -> int:
                     f"in the same edit and say why."
                 )
 
+        # ⚠️ AND THE OUTPUT TEST MUST NOT BE REASSIGNABLE. Round 22 of #777
+        #    switched the whole thing off with ONE added line,
+        #    `$fmtStore = $fmtClockRaw;`, with 110 clock checks and 66 audit
+        #    scripts green — PHP runs the LAST assignment, so the page used
+        #    the bare reader and `-0001-12-31 23:58:45` came back, which is
+        #    the literal MySQL refuses (ERROR 1292, measured) and therefore
+        #    the whole round-14 harm: an import stopping part-way with
+        #    earlier rows already written.
+        #
+        #    A dead CORRECT copy above a live permissive one does the same,
+        #    because a first-match lift tests the copy that does not run.
+        #    Both are shapes this repository had already closed elsewhere
+        #    (#485 round 2, #763, and round 10's own text pin "defeated by a
+        #    REASSIGNMENT"), and round 22 was the FIFTH round running to find
+        #    a headline fix pinned by nothing.
+        #
+        #    Pinning the NUMBER of assignments closes both at once, and says
+        #    nothing about what the code does — which is deliberate: the
+        #    behaviour is pinned by section K of clock-change-selftest.php,
+        #    and this is only here because the pre-push hook runs the audit
+        #    scripts and NOT the self-tests (#646's shape).
+        if rel == IMPORT_GUARD_FILE:
+            for name in ("fmtStore", "fmtClockRaw"):
+                writes = len(re.findall(r"\$" + name + r"\s*=(?!=)", code))
+                if writes != 1:
+                    problems.append(
+                        f"{rel} assigns `${name}` {writes} times, not once.\n"
+                        f"       One assignment is the whole pin. A second one "
+                        f"lower down replaces the output test with whatever it "
+                        f"names, and a dead copy ABOVE the live one makes a "
+                        f"first-match lift test the wrong body. Round 22 of "
+                        f"#777 did both with everything green."
+                    )
+
     # ── The one display helper nothing drives ─────────────────────────────
     # ⚠️ ROUND 7's FIX FOR `series-repattern.php` WAS PINNED BY NOTHING.
     #    Planting the pre-round-7 body back -- `createFromFormat('Y-m-d

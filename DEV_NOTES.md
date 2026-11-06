@@ -108,10 +108,108 @@ it would pass. And **one exit path losing its finish is invisible** — because 
 page may legitimately hold several finishes, it requires only one. That is the
 exact fault this package shipped, so it is planted and recorded green rather
 than left implicit. Requiring a finish before every `exit()` was tried and
-rejected: the NORMAL end of these pages is also an `exit()`, and two end inside
-a `catch` that RE-THROWS, where recording nothing is correct.
+rejected: the NORMAL end of these pages is also an `exit()`, and ONE
+(`health.php`) ends inside a `catch` that RE-THROWS, where recording nothing is
+correct.
 
-`tools/scheduled-jobs-selftest.php` (83 checks, real MySQL) covers what the
+**That said "two" in four places, and the count was never run.** PHP's
+tokeniser finds `T_THROW` exactly ONCE under `web/_apps/cron/`:
+
+    php -r 'foreach (glob("web/_apps/cron/*.php") as $f)
+            foreach (token_get_all(file_get_contents($f)) as $x)
+            if (is_array($x) && $x[0] === T_THROW) echo basename($f)." line ".$x[2]."\n";'
+    health.php line 321
+
+The conclusion survives on the first half alone — the normal end really is an
+`exit()` — so this is an overstated piece of evidence rather than a wrong
+decision. It is still the shape this repository keeps recording, and it is the
+fifth wrong count in two packages.
+
+#### The independent check found four PORTAL faults, and three were reassuring sentences
+
+All three are this package's own headline fault reached from a new direction: a
+word or a number carrying more than it can, put in front of an administrator.
+
+**1. The all-clear asserted a finish for a job that was still running.** A run
+with no finish yet, inside its own threshold, answered `RECENT` — and
+`scheduledJobs()` had no branch for it, so it fell through every test and was
+swept into *"Every scheduled job has run recently enough … All 15 of them
+recorded a finish"*. Fourteen had. **The cost is not a corner case:** a nightly
+backup that dies part-way at 02:00 — the state the whole design calls "the state
+worth reporting" — was reported as an all-clear for the next 36 hours, through
+the morning somebody would look; and a busy portal's mail job is mid-run often
+enough that the false sentence showed routinely. `RUNNING_NOW` is its own status
+now, said separately, and the all-clear counts only the jobs it can speak for.
+**Why nothing caught it: C4 pinned the CLASSIFICATION and section G drove the
+page only with everything finished or one job overdue. No check asked what the
+PAGE said in C4's state.**
+
+**2. `refused` was worded as "switched off by a setting" when it means three
+things.** The class documented all three — a setting switches it off, another
+run holds the lock, or nothing was due — and the page named the first. Every
+clause was then false in the commonest state: nothing switched off, the work
+being done, and no setting to go and look at. **And it IS the commonest state:**
+`backup-run` records `refused` whenever the newest snapshot is not old enough,
+so on a weekly schedule the nightly call refuses six nights in seven and on a
+monthly one 27 in 28 — so the last outcome on record is `refused` nearly always
+and the page told the administrator their backup was switched off, permanently.
+The finding now says what is known — the job ran and chose to do nothing — and
+lists the three reasons rather than asserting one. Recording WHICH reason needs
+a column and every caller to pass it, which is #791.
+
+**3. The one WARNING the page used to give about a stopped mail job was deleted,
+and its evidence survives the upgrade.** `tblMailRouteState.jobLastRanAt` has
+real history; `tblScheduledJobRun` is empty on upgrade day (D-071, correctly).
+Measured against the SAME database, old page and new: the old one gave a warning
+with an action, the new one a note saying "Nothing". **The stated reason for
+dropping it — "reading both would let one page give two answers about one job" —
+does not apply at the moment the new source has no answer at all.** The older
+reading is used for the mail queue alone, only while the new record is silent,
+and stops the moment it records once.
+
+**4. The overdue sentence asserted a token is set while the finding above it said
+the opposite.** `state()` never looks at a token, so one answer contradicted
+itself whenever a token was cleared after the job had run. A job with no token is
+left out of every later finding, because the token finding already covers it.
+
+#### And the hard gate's one security property was bypassable two ways
+
+Neither was in its blind-spot list, while three documents said it "pins the
+security property".
+
+**A gate that EXISTS but does not REFUSE.** Deleting `exit();` from a token block
+left `php -l` clean and the gate at exit 0, printing *"with the start after its
+token gate"* — while the self-test went to 80 passed, 3 failed, with I2, I4 and
+I6 ("and NOTHING was recorded") red. That is an unauthenticated request writing
+the record. **This repository had already recorded that lesson twice** (#668's
+section D, and `gdpr-coverage-selftest.php`: "Every gate must REFUSE, not merely
+exist"). `gate_refuses()` now walks the block and requires an `exit` or `die`
+inside it.
+
+**`hash_equals(` inside an ordinary string literal.** `php_code_only()` kept
+string CONTENTS — while its own docblock said it removed them, which is what
+made this invisible to a reader — so one line,
+`$why = 'compared with hash_equals( so timing gives nothing away';`, placed
+`began()` above the real gate with the gate green, all 66 scripts green and the
+self-test at 83 of 83. On `cron/retention-sweep`, the job whose description is
+"clearing out personal data past the period this portal said it would keep it".
+Contents are blanked now except a `cron/...` key, and heredoc bodies with them.
+
+#### The route list read the schema as raw text
+
+`re.findall(r"'(cron/[a-z0-9-]+)'", text)` over the whole file — in the check
+whose own docstring makes the point that a text search finds prose. Measured:
+one added comment line, `-- An old address we removed in migration 99:
+'cron/old-tidy' is gone.`, made it report a registered job that does not exist
+and **block every pull request** until somebody added a `JOBS` entry for it.
+`full_schema.sql` is eleven thousand lines of commentary, so that is a question
+of when. It also ignored statement kind, so a route removed by a `DELETE` still
+read as registered — `seeded_switches()`'s measured fault in #675. Comments are
+blanked **tracking quoted strings** (#788's lesson, from this same package),
+only `INSERT INTO tblRoutes` is read, and a `DELETE` takes an address away.
+
+`tools/scheduled-jobs-selftest.php` (real MySQL; count the checks from the
+file) covers what the
 source cannot: section H drives two real pages over HTTP, including a
 **switched-off** one, and reads the row back; section I proves a wrong token
 records NOTHING. Eight portal faults were planted and each turned a named check
@@ -19613,29 +19711,36 @@ because the sentence read as a measurement and was a prediction.
 
 The measurement it cited was round 18-versus-19 — the two versions BEFORE round
 20's own edit — and it was presented as round 20's verdict on round 20. Round 20
-then widened the reader: round 21 generated 3,809,496 cells and found **214,812
-newly stored**. So the round asserting the churn was over was itself a round of
-churn. Every one of rounds 16, 17, 19 and 20 restored an over-refusal in this
-closure.
+then widened the reader, by thousands of cells. So the round asserting the churn
+was over was itself a round of churn. Every one of rounds 16, 17, 19, 20 and 21
+restored an over-refusal in this closure.
 
-**What was actually measured, each time, and nothing beyond it.** Round 21's own
-sweep of the same 3.8 million cells, round 19 against round 20:
+**What was actually measured, each time, and nothing beyond it.** Round 21 swept
+round 19 against round 20; round 22 swept round 20 against round 21. **Both
+report the same SHAPE, which is the finding — the absolute counts are not,
+because each depends on a cell list nobody committed:**
 
-| | count |
-|---|---|
-| stored by r19, refused by r20 | 0 |
-| stored by r20, refused by r19 | 214,812 |
-| both store, different value | 0 |
-| both refuse, r20's reason worse | 0 |
+| direction | r19 → r20 | r20 → r21 |
+|---|---|---|
+| newly REFUSED (an over-refusal, the harmful direction) | none | thousands, every one a sub-1000, negative or 5+ digit year |
+| newly STORED | thousands | none |
+| both store, DIFFERENT value | none | none |
 
-So round 20's change was a **pure widening with better reasons** — which is a
-good result and is all it is. It says nothing about whether a round 22 will find
-another over-refusal, and round 21 did find one more thing in the reader (the
-output-range fault below).
+So each change was clean in the direction that matters, and nothing a customer
+could plausibly have in a spreadsheet changed either way — round 22 checked that
+separately against two-digit years, both Excel epochs, written-out months and
+offsets, and found two cells changed, both improvements.
+
+**And round 22 found me writing FOUR MORE unreproducible figures while removing
+three** — one of them in `import.php`, under the very paragraph saying such a
+figure "reads as evidence". That is why this table gives directions and not
+totals.
 
 **The transferable part: a sweep comparing two OLD versions cannot be the
 verdict on a NEW one, and "the churn is over" is not a measurement at all.** No
-cell counts are quoted in `import.php` or the self-test any more, for the reason
+cell count is written in PROSE in `import.php`, the self-test or these notes any
+more — section K's two counts are pinned in the test as K04/K04b, which is code
+that fails when they move — for the reason
 in the next section.
 
 Rounds 18 to 21 also found the *record* wrong about the reader, repeatedly, and

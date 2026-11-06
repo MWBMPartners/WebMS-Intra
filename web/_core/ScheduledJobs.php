@@ -256,6 +256,31 @@ final class ScheduledJobs
     public const DIED_PART_WAY = 'died-part-way';
 
     /**
+     * Answered by state(): a run has begun and not finished, and is still
+     * inside its own threshold — so it is very likely RUNNING right now.
+     *
+     * ⚠️ THIS USED TO BE FOLDED INTO `RECENT`, AND THAT MADE THE ALL-CLEAR
+     *    SAY SOMETHING FALSE. `scheduledJobs()` had no branch for it, so such
+     *    a job fell through every test and was swept into "Every scheduled job
+     *    has run recently enough … All 15 of them recorded a finish inside the
+     *    time expected for that job" — about a job that had recorded no finish
+     *    at all, with the record holding that very fact.
+     *
+     *    The cost was measured and it is not a corner case: a nightly backup
+     *    that dies part-way at 02:00 — the state the whole design calls "the
+     *    state worth reporting" — was reported as an all-clear for the next 36
+     *    hours, straight through the morning somebody would look. For the mail
+     *    queue the window is 15 minutes, and a busy portal's mail job is
+     *    mid-run a noticeable fraction of the time, so the false sentence was
+     *    shown routinely.
+     *
+     *    It is NOT a fault in itself: a job that started a moment ago has
+     *    simply not finished YET, which is why it is not DIED_PART_WAY until
+     *    it passes its own threshold. It just must not be counted as finished.
+     */
+    public const RUNNING_NOW = 'running-now';
+
+    /**
      * Answered by state(): the record EXISTS but could not be read.
      *
      * ⚠️ THIS IS NOT THE SAME AS "NOTHING IS KNOWN YET", and conflating them
@@ -444,10 +469,15 @@ final class ScheduledJobs
             // A run that began and never reached the end is its own state, and
             // it is only worth saying once the run is past its own threshold:
             // a job that started a second ago has simply not finished YET.
+            //
+            // ⚠️ BUT IT IS STILL NOT "FINISHED", and answering RECENT here let
+            //    the page claim every job had recorded a finish when one had
+            //    not. RUNNING_NOW is the honest answer, and the page counts it
+            //    separately.
             if ($neverFinished === true && $since > $facts['overdue']) {
                 $status = self::DIED_PART_WAY;
             } elseif ($neverFinished === true) {
-                $status = self::RECENT;
+                $status = self::RUNNING_NOW;
             } elseif ($since > $facts['overdue']) {
                 $status = self::OVERDUE;
             } else {

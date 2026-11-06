@@ -295,10 +295,21 @@ if (($result['success'] ?? false) !== true) {
         'action' => 'snapshot',
         'error'  => 'the backup could not be taken; the reason is in the portal\'s error log',
     ]);
-    // ⏰ A FINISH, because the backup could not be taken (#775). This path is the job
-    //    doing what it was told, not failing to run, and a start
-    //    with no finish would report it as having died part-way
-    //    — a job working as configured read as broken, for ever.
+    // ⏰ A FINISH, recorded as a FAILURE (#775). The job RAN and could not do
+    //    its work, which is a real problem and the check page reports it as
+    //    one — never as "switched off".
+    //
+    // 🚨 DO NOT "CORRECT" THIS TO OUTCOME_REFUSED. The twelve other early
+    //    paths in these pages ARE refusals — switched off, locked, nothing due
+    //    — and carry a comment saying so. This path is not one of them, and an
+    //    earlier version of this comment was that boilerplate, pasted: it said
+    //    "the job doing what it was told, not failing to run". A reader acting
+    //    on it would have changed the word and re-created #775's own worst
+    //    finding, a nightly backup that FAILED being reported to an
+    //    administrator as switched off. Found by the independent check.
+    //    Here the backup could not be taken: the lines above record
+    //    SCHEDULED_BACKUP_FAILED and answer HTTP 500, so there is NO new
+    //    snapshot. Reporting that as switched off is the exact harm.
     ScheduledJobs::finished(App::db(), 'cron/backup-run', ScheduledJobs::OUTCOME_FAILED);
     exit();
 }

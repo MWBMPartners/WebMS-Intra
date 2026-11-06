@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS `tblScheduledJobRun` (
     `jobKey`        VARCHAR(40) NOT NULL COMMENT 'Which scheduled job the row is about, as its own address under cron/. That name is already registered in tblRoutes and already given to whoever runs the scheduled tasks. Portal\\Core\\ScheduledJobs::JOBS is the one list',
     `startedAtUtc`  DATETIME    NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when this job last BEGAN, recorded only after its token was accepted. A request with the wrong token writes nothing, or anybody on the internet could make a dead job look alive',
     `finishedAtUtc` DATETIME        NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC: when this job last finished its work. EMPTY means the newest run began and never reached the end, which is what distinguishes a job dying part-way from one that is not being called at all',
-    `lastOutcome`   VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'How the last finished run ended, as one word: ok or refused. NEVER the words of a fault, which can quote the value that caused it. Empty while a run is in flight',
+    `lastOutcome`   VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'How the last finished run ended, as one word: ok, refused (it was called and deliberately did nothing) or failed (it tried and could not). NEVER the words of a fault, which can quote the value that caused it. Empty while a run is in flight',
     PRIMARY KEY (`jobKey`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Whether each scheduled job has actually run (#775). Read by the Check this portal page.';

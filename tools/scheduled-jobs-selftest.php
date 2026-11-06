@@ -141,6 +141,10 @@ $db->set_charset('utf8mb4');
 
 // The class under test, loaded on its own: it must need nothing else.
 require $repo . $sep . 'web' . $sep . '_core' . $sep . 'ScheduledJobs.php';
+use Portal\Core\MailQueue;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+//    This one was missing and section H0 died at the very last check.
 use Portal\Core\ScheduledJobs;
 
 $tidy = static function () use (&$state, $sep): void {
@@ -307,9 +311,25 @@ check(
 
 $age('cron/backup-run', 30, false);
 check(
-    'C4 a run that began 30 seconds ago and has not finished is RECENT, not a fault: it has simply not finished YET',
+    'C4 a run that began 30 seconds ago and has not finished is RUNNING_NOW — not a fault, '
+    . 'it has simply not finished YET, but NOT counted as finished either',
     ScheduledJobs::state($db)['cron/backup-run']['status'],
-    ScheduledJobs::RECENT
+    ScheduledJobs::RUNNING_NOW
+);
+// ⚠️ C4b IS THE CHECK WHOSE ABSENCE LET THE WORST FAULT IN THIS PACKAGE SHIP.
+//    C4 pins the CLASSIFICATION, and that is all it ever pinned. The page had
+//    no branch for this state, so such a job fell through every test and was
+//    swept into the all-clear, which then said "All 15 of them recorded a
+//    finish" about a job that had recorded none. Section G drove the page only
+//    with everything finished, or one job overdue — never in C4's state.
+//
+//    **When a check pins how a state is CLASSIFIED, ask what the page SAYS in
+//    that state.** The two are different questions and only the second is what
+//    an administrator reads.
+check(
+    'C4b and RUNNING_NOW is NOT the same answer as RECENT, so nothing can fold them back together',
+    ScheduledJobs::RUNNING_NOW === ScheduledJobs::RECENT,
+    false
 );
 
 $age('cron/backup-run', ScheduledJobs::OVERDUE_NIGHTLY + 60, false);
@@ -347,7 +367,11 @@ $all = ScheduledJobs::state($db);
 check('E1 three hours is OVERDUE for the mail queue (15 minutes)', $all['cron/mail-queue']['status'], ScheduledJobs::OVERDUE);
 check('E2 three hours is OVERDUE for event reminders (2 hours)', $all['cron/event-reminders']['status'], ScheduledJobs::OVERDUE);
 check('E3 the SAME three hours is RECENT for giving statements (8 days)', $all['cron/giving-statements']['status'], ScheduledJobs::RECENT);
-check('E4 the four thresholds are four different numbers', count(array_unique([
+// ⚠️ NAMED FOR THE JOB, NOT A NUMBER. This said "the four thresholds are four
+//    different numbers" while asserting FIVE — a label named after a number is
+//    the shape #739 recorded, and it would have printed "four" on the day a
+//    sixth was added.
+check('E4 every threshold is a distinct number, so none is a copy of another', count(array_unique([
     ScheduledJobs::OVERDUE_MAIL_QUEUE,
     ScheduledJobs::OVERDUE_EVENT_REMINDERS,
     ScheduledJobs::OVERDUE_IMPORT_FEEDS,
@@ -439,11 +463,56 @@ $db->query('DROP TABLE `tblScheduledJobRun`');
 $db->query($grab[0]);
 ScheduledJobs::forgetTableCheck();
 
+// PortalCheck is required here because the token seeding below reads its
+// JOB_TOKENS list, and section G calls its scheduledJobs() by reflection.
+//
+// ⚠️ MailQueue COMES WITH IT. `scheduledJobs()` asks
+//    `MailQueue::jobIsRunning()` for the mail job while the new record has
+//    nothing to say (the independent check's finding 3), and this test has no
+//    autoloader — the portal does, so this is a requirement of the TEST and
+//    not of the page. Without it the section died with "Class MailQueue not
+//    found" rather than reporting anything.
+require $repo . $sep . 'web' . $sep . '_core' . $sep . 'MailQueue.php';
+require $repo . $sep . 'web' . $sep . '_core' . $sep . 'PortalCheck.php';
+
+$setSetting = static function (string $key, string $value) use ($db): void {
+    $stmt = $db->prepare(
+        'INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) '
+        . 'VALUES (NULL, ?, ?, \'\', 0) '
+        . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)'
+    );
+    $stmt->bind_param('ss', $key, $value);
+    $stmt->execute();
+    $stmt->close();
+};
+
+// A plaintext token. `SecretSettings::forReader()` hands back a value it
+// cannot decrypt unchanged, so a short token works and nothing is encrypted.
+$token = bin2hex(random_bytes(16));
+
+// ⚠️ EVERY TOKEN IS SET BEFORE THE PAGE IS ASKED ANYTHING, and leaving them
+//    unset made this whole section vacuous the moment the page started
+//    excluding token-less jobs from its later findings.
+//
+//    `full_schema.sql` seeds all eleven tokens EMPTY on purpose, so a fresh
+//    test database is a portal whose jobs can never run. Every check below
+//    then got NULL — no finding at all — because the only true thing to say
+//    about such a portal is the no-token PROBLEM. They passed before only
+//    because the page used to report a job as overdue while also reporting
+//    that it had no token, which is the contradiction the independent check
+//    found (finding 4).
+//
+//    **A fixture that cannot reach the state a check is about tests nothing**,
+//    and the other half of that lesson is here too: these checks had been
+//    GREEN against a world where their subject did not exist.
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+
 echo "\n=== G. What the Check this portal page actually says ===\n";
 // ⚠️ THE REAL METHOD, reached by reflection because it is private. A copy of
 //    its logic in this test would prove only that the copy agrees with itself
 //    (#647).
-require $repo . $sep . 'web' . $sep . '_core' . $sep . 'PortalCheck.php';
 $pageSays = static function () use ($db): array {
     // ⚠️ NO setAccessible(): it has had no effect since PHP 8.1 and PHP 8.5
     //    DEPRECATES it, so calling it would print a notice on the version this
@@ -551,9 +620,13 @@ check(
 
 ScheduledJobs::finished($db, 'cron/backup-run', ScheduledJobs::OUTCOME_REFUSED);
 $found = $pageSays();
+// The needle is the NEW wording. It used to be 'switched off', which the
+// independent check showed was false in this state's commonest cause — so a
+// check searching for those words would now pin the untruth back in place
+// (this repository's "a check that pins a reassurance" shape).
 check(
     'G11 a run that deliberately did nothing is only a NOTE',
-    $severityOf($found, 'switched off'),
+    $severityOf($found, 'deliberately did nothing'),
     \Portal\Core\PortalCheck::NOTE
 );
 check('G12 and is not reported as a failure', $severityOf($found, 'could not finish their work'), null);
@@ -687,20 +760,6 @@ if ($up === false) {
     refuse('the test server never answered on port ' . $port);
 }
 
-$setSetting = static function (string $key, string $value) use ($db): void {
-    $stmt = $db->prepare(
-        'INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) '
-        . 'VALUES (NULL, ?, ?, \'\', 0) '
-        . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)'
-    );
-    $stmt->bind_param('ss', $key, $value);
-    $stmt->execute();
-    $stmt->close();
-};
-
-// A plaintext token. `SecretSettings::forReader()` hands back a value it
-// cannot decrypt unchanged, so a short token works and nothing is encrypted.
-$token = bin2hex(random_bytes(16));
 $setSetting('webhooks.cron_token', $token);
 $setSetting('webhooks.enabled', 'true');
 
@@ -797,6 +856,146 @@ foreach (['PHP Fatal', 'PHP Warning', 'PHP Deprecated', 'Undefined variable', 'U
     }
 }
 check('I12 the server wrote no PHP error, warning or deprecation', $noisy, []);
+
+echo "\n=== H0. What the page SAYS in the states the independent check found ===\n";
+// Every one of these is a sentence an administrator reads, printed by calling
+// the real code. Three of the four PORTAL faults in this package were sentences
+// that were false in the state producing them, and all three were found by
+// PRINTING them rather than reading the code.
+$allText = static function (array $findings): string {
+    $out = '';
+    foreach ($findings as $f) {
+        // ⚠️ THE EXAMPLES COUNT AS WORDS THE ADMINISTRATOR READS. The page
+        //    prints them under each finding, and the per-job detail — "last ran
+        //    3 days ago", "has not run in the last 15 minutes" — lives ONLY
+        //    there. Leaving them out made a check look for a sentence that was
+        //    on the page and report it absent.
+        $out .= $f['what'] . ' ' . $f['why'] . ' ' . $f['todo'] . ' '
+            . implode(' ', $f['examples'] ?? []) . ' ';
+    }
+
+    return $out;
+};
+
+// ── The all-clear must not claim a finish for a job that is mid-run ─────
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+$age('cron/backup-run', 600, false);          // began 10 minutes ago, no finish
+$found = $pageSays();
+$text  = $allText($found);
+check(
+    'H0a a job mid-run is reported as part-way through, in its own finding',
+    $severityOf($found, 'part-way through when this page was drawn'),
+    \Portal\Core\PortalCheck::NOTE
+);
+check(
+    'H0b and the all-clear no longer claims ALL of them recorded a finish — '
+    . 'it used to say exactly that about a job that had recorded none',
+    str_contains($text, 'All ' . count(ScheduledJobs::JOBS) . ' of them recorded a finish'),
+    false
+);
+check(
+    'H0c the number it DOES give excludes the mid-run job',
+    str_contains($text, (string) (count(ScheduledJobs::JOBS) - 1) . ' of them recorded a FINISH'),
+    true
+);
+
+// ── `refused` must not be worded as one of its three causes ────────────
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+// The commonest real cause, and NOT a setting: the newest backup is not old
+// enough yet, which on a weekly schedule happens six nights in seven.
+ScheduledJobs::finished($db, 'cron/backup-run', ScheduledJobs::OUTCOME_REFUSED);
+$text = $allText($pageSays());
+check(
+    'H0d a refused run is NOT described as "switched off", which was false in its '
+    . 'commonest state — nothing switched off, the work being done, and no setting to look at',
+    str_contains($text, 'are being called but are switched off'),
+    false
+);
+check(
+    'H0e nor does it tell the administrator a setting turns them off',
+    str_contains($text, 'because a setting turns them off'),
+    false
+);
+check(
+    'H0f it says what is KNOWN — the job ran and chose to do nothing',
+    str_contains($text, 'deliberately did nothing'),
+    true
+);
+check(
+    'H0g and names all three reasons rather than asserting one',
+    str_contains($text, 'another run of it was already in progress')
+        && str_contains($text, 'was not due yet'),
+    true
+);
+
+// ── The overdue finding must not contradict the token finding ──────────
+$db->query('DELETE FROM `tblScheduledJobRun`');
+ScheduledJobs::began($db, 'cron/retention-sweep');
+ScheduledJobs::finished($db, 'cron/retention-sweep');
+$age('cron/retention-sweep', ScheduledJobs::OVERDUE_NIGHTLY + 3600, true);
+$setSetting('maintenance.cronToken', '');     // cleared AFTER the job had run
+$found = $pageSays();
+check(
+    'H0h with the token cleared, the no-token PROBLEM is reported',
+    $severityOf($found, 'can never run, because no token has been set'),
+    \Portal\Core\PortalCheck::PROBLEM
+);
+check(
+    'H0i and the SAME job is NOT also reported as overdue with "has a token set, so it CAN run" — '
+    . 'one answer used to say a job both could and could not run',
+    $severityOf($found, 'have not run for longer'),
+    null
+);
+$setSetting('maintenance.cronToken', $token);
+
+// ── The mail job's older record must still be read while the new one is
+//    silent, which is the upgrade-day case (finding 3) ──────────────────
+// ⚠️ THIS IS THE STATE EVERY EXISTING PORTAL IS IN THE MORNING AFTER THE
+//    UPGRADE: `tblScheduledJobRun` is empty (D-071, correctly), and
+//    `tblMailRouteState.jobLastRanAt` still holds real history. Dropping that
+//    second reading downgraded a portal whose mail job had GENUINELY STOPPED
+//    from a warning with an action to a note saying "Nothing".
+$db->query('DELETE FROM `tblScheduledJobRun`');
+$db->query(
+    "INSERT INTO `tblMailRouteState` (`routeKey`, `jobLastRanAt`) "
+    . "VALUES ('installation', UTC_TIMESTAMP() - INTERVAL 30 DAY) "
+    . "ON DUPLICATE KEY UPDATE `jobLastRanAt` = UTC_TIMESTAMP() - INTERVAL 30 DAY"
+);
+MailQueue::forget();
+$found = $pageSays();
+$text  = $allText($found);
+check(
+    'H0j with NO new record and a mail job that last ran 30 days ago, the page '
+    . 'still reports it as overdue — not as "nothing is known yet"',
+    $severityOf($found, 'have not run for longer'),
+    \Portal\Core\PortalCheck::PROBLEM
+);
+check(
+    'H0k and names the mail job in it',
+    str_contains($text, 'has not run in the last 15 minutes'),
+    true
+);
+
+// And the moment the job records once, the older reading stops being used:
+// one job, one answer, always.
+ScheduledJobs::began($db, 'cron/mail-queue');
+ScheduledJobs::finished($db, 'cron/mail-queue');
+MailQueue::forget();
+$text = $allText($pageSays());
+check(
+    'H0l once the new record says the mail job just ran, the older reading is '
+    . 'no longer used — so one page never gives two answers about one job',
+    str_contains($text, 'has not run in the last 15 minutes'),
+    false
+);
 
 echo "\n=== Summary ===\n";
 echo "{$passed} passed, {$failed} failed.\n";

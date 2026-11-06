@@ -530,7 +530,39 @@ $grabRaw   = [];
 $grabStore = [];
 $foundBoth = preg_match('/\$fmtClockRaw = static function.*?\n\};/s', $importSrc, $grabRaw) === 1
     && preg_match('/\$fmtStore = static function.*?\n\};/s', $importSrc, $grabStore) === 1;
-$grab = [0 => ($grabRaw[0] ?? '') . "\n" . ($grabStore[0] ?? '')];
+// ⚠️ EXACTLY ONE DEFINITION OF EACH, AND NO REASSIGNMENT. Round 22 defeated
+//    the whole output test with ONE added line and with a dead duplicate, and
+//    everything stayed green:
+//
+//      (a) `$fmtStore = $fmtClockRaw;` anywhere below the definitions. PHP
+//          runs the LAST assignment, so the page then used the bare reader
+//          and `-0001-12-31 23:58:45` came back again — the whole round-14
+//          harm restored, 110 of 110 passing and 66 audit scripts green.
+//
+//      (b) A dead CORRECT copy above a live permissive one. `preg_match`
+//          takes the FIRST match, so this section lifted and tested the
+//          copy that does not run.
+//
+//    Both are shapes this package has already closed elsewhere — "the start
+//    anchor must appear exactly ONCE" (#485 round 2, #763) and round 10's
+//    text pin "defeated by a REASSIGNMENT". **This was the fifth round
+//    running to find a headline fix pinned by nothing**, so the pin is on the
+//    NUMBER of definitions and on there being no later write, which closes
+//    both at once.
+$storeWrites = preg_match_all('/\$fmtStore\s*=(?!=)/', $importSrc);
+$rawWrites   = preg_match_all('/\$fmtClockRaw\s*=(?!=)/', $importSrc);
+check(
+    'K00a `$fmtStore` is assigned exactly ONCE, so nothing can reassign it to the bare reader '
+    . 'and nothing can hide a dead copy above the live one',
+    $storeWrites,
+    1
+);
+check(
+    'K00b and `$fmtClockRaw` likewise',
+    $rawWrites,
+    1
+);
+
 if ($foundBoth === false) {
     check('K00 the import closure was found, so section K tests the live code', false, true);
 } else {
@@ -720,11 +752,25 @@ if ($foundBoth === false) {
         '9999-12-31 +1 day', '9999-12-31 23:59:59 +1 second',
         '2026-06-01 +1000000 years', 'Tue, 3 Mar 2026 +1000000 years',
         '9999-12-31 next year',
-        //    And a FOUR-DIGIT year below the floor, which reaches the closure
-        //    through step 2's strict reader and NOT step 3 — which is how a
-        //    test placed at the bottom of step 3 missed it, and why the output
-        //    test is a wrapper over every path rather than a step.
+        //    And a FOUR-DIGIT year below the floor. `0500-01-01 10:00`
+        //    reaches the closure through step 2's strict reader and returns
+        //    from there, which is how a test placed at the bottom of step 3
+        //    missed it, and why the output test is a WRAPPER over every path
+        //    rather than a step.
+        //
+        // ⚠️ AN EARLIER VERSION SAID SUCH A YEAR REACHES THE CLOSURE "NOT VIA
+        //    STEP 3", AND THAT IS FALSE. Step 3 produces one too — measured,
+        //    `2026-06-01 -1027 years` comes out of the fallback as
+        //    `0999-06-01 00:00:00`, and `date('Y')` zero-pads years 1 to 999
+        //    to four digits. The DESIGN is unaffected (step 2 really does
+        //    bypass a step-3 test, which `0500-01-01 10:00` proves on its
+        //    own), but the reason as written sent the next reader to the wrong
+        //    place. The step-3 route to the floor is exercised by the second
+        //    cell below, which did not exist until round 22 pointed this out:
+        //    before it, every floor cell arrived via step 2, so the claim was
+        //    self-confirming.
         '0500-01-01 10:00', '0001-01-01 00:00:00',
+        '2026-06-01 -1027 years',
         // a fraction on the wrong component: ISO says 10.5 means 10:30, and
         // strtotime answers 10:05
         '2026-06-01T10.5', '2026-06-01T10:00.5',
@@ -788,7 +834,7 @@ if ($foundBoth === false) {
             $refuseBad[] = $cell . ' -> ' . $got;
         }
     }
-    check('K02 all ' . count($mustRefuse) . ' impossible or misreadable cells are refused',
+    check('K02 all ' . count($mustRefuse) . ' cells this portal refuses really are refused',
         $refuseBad === [] ? 'all refused' : implode(' | ', $refuseBad), 'all refused');
 
     // K04 — THE LISTS MAY NOT SHRINK UNNOTICED. Both are iterated and both
@@ -805,7 +851,7 @@ if ($foundBoth === false) {
     //       the note at the head of this section for what else covers the
     //       reader, and what does not).
     check('K04 the must-store list has not shrunk', count($mustStore), 59);
-    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 79);
+    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 80);
 
     // ── K06. The fallback year is TODAY'S, asserted in both directions ───
     // ⚠️ THIS REPLACES A CELL THAT WOULD HAVE GONE RED FOR THE WHOLE OF 2028.
