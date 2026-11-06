@@ -1230,6 +1230,100 @@ foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
     $setSetting($tokenKey, $token);
 }
 
+// ── An unreadable mail-route table ──────────────────────────────────────
+// ⚠️ NOTHING EXERCISED THIS, AND IT IS WHERE ROUND 3's FIX WENT WRONG AND
+//    ROUND 2's VANISHED THE WHOLE CHECK. The state is a half-applied upgrade:
+//    `tblMailRouteState` is there and `jobLastRanAt` is not.
+//
+//    Round 2 (no try/catch): the exception escaped and `run()` replaced the
+//    ENTIRE scheduled-jobs check with one tidy warning — so "ten jobs can
+//    never run, including the clearing-out of personal data" was lost.
+//    Round 3 (catch setting $everRan = ''): the mail job fell into $notKnown
+//    and got "expected straight after an update: each one starts being watched
+//    the first time it runs", with todo "Nothing", while mail sat unsent — the
+//    exact reassurance COULD_NOT_READ exists to prevent, at a LOWER severity
+//    than round 2.
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+// ⚠️ EVERY JOB BUT THE MAIL QUEUE GETS A RECORD. The older mail reading is
+//    only consulted when the NEW record has nothing to say, so a fixture that
+//    gives the mail job a record never reaches the read at all — my first
+//    version of this check did exactly that and went red for the wrong reason.
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    if ($job === 'cron/mail-queue') {
+        continue;
+    }
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+$db->query('ALTER TABLE `tblMailRouteState` DROP COLUMN `jobLastRanAt`');
+MailQueue::forget();
+$threw = false;
+try {
+    $found = $pageSays();
+} catch (Throwable $e) {
+    $threw = true;
+    $found = [];
+}
+check('H1a the page does not throw when the mail-route table cannot be read', $threw, false);
+check(
+    'H1b and the whole scheduled-jobs check is NOT replaced by "could not be completed" — '
+    . 'round 2 lost every other finding that way',
+    count($found) > 0,
+    true
+);
+check(
+    'H1c it reports a record it could not READ, as a WARNING',
+    $severityOf($found, 'could not be read'),
+    \Portal\Core\PortalCheck::WARNING
+);
+check(
+    'H1d and NOT the reassuring "nothing is known yet" — which told a half-applied '
+    . 'upgrade to wait for something that was never going to happen',
+    $severityOf($found, 'Nothing is known yet'),
+    null
+);
+$db->query(
+    'ALTER TABLE `tblMailRouteState` ADD COLUMN `jobLastRanAt` DATETIME DEFAULT NULL'
+);
+MailQueue::forget();
+
+// ── "Never run" must not be said about a job that just ran ──────────────
+// ⚠️ A TOKEN CAN BE CLEARED AFTER THE JOB HAS RUN, and the page then said "it
+//    has never run and never will" about a job whose finish row the same
+//    method reads twenty lines later. The "never will" half is true and the
+//    action is right, so this is the alarming direction rather than the
+//    reassuring one — and still an untrue sentence on the page whose whole
+//    subject is saying what is true.
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
+    $setSetting($tokenKey, $token);
+}
+ScheduledJobs::began($db, 'cron/venue-reminders');
+ScheduledJobs::finished($db, 'cron/venue-reminders');
+$setSetting('venues.cron_token', '');       // cleared AFTER it ran
+MailQueue::forget();
+$found = $pageSays();
+check(
+    'H1e the no-token problem is still reported',
+    $severityOf($found, 'can never run, because no token'),
+    \Portal\Core\PortalCheck::PROBLEM
+);
+check(
+    'H1f and it does NOT claim the job has never run, when its finish row says it did '
+    . 'ninety seconds ago',
+    str_contains($allText($found), 'has never run and never will'),
+    false
+);
+check(
+    'H1g while still saying it cannot run now, which is the part that matters',
+    str_contains($allText($found), 'cannot run now and will not until one is set'),
+    true
+);
+$setSetting('venues.cron_token', $token);
+
 echo "\n=== Summary ===\n";
 echo "{$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

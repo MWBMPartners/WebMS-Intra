@@ -133,10 +133,36 @@ done
 # tests REFUSE outright when `SELFTEST_WEB_DIR` does not already exist, and the
 # refusal reads exactly like a failure. Twenty-three of them did that on the
 # first run of this set.
+# ⚠️ NO COMMENTS INSIDE THE LIST BELOW. It is a heredoc read line by line with
+#    `IFS='|' read -r name script db extra`, and the only line it skips is an
+#    EMPTY one — so a `#` line becomes a test called "#    something" and the
+#    run reports it RED with "Could not open input file". Measured, by putting
+#    two comment blocks in there and watching `--only scheduled-jobs` report
+#    "2 tests ran; 1 not green".
+#
+#    FIVE TESTS WERE MISSING FROM THIS LIST, found by round 4 of #775 with this
+#    file's own one-liner:
+#
+#      for f in tools/*-selftest.php; do
+#        grep -q "$(basename "$f")" tools/run-all-selftests.sh || echo "$f"
+#      done
+#
+#    `scheduled-jobs` is named in four documents and in the #775 hard gate's
+#    own docstring as the guard for everything that gate cannot see — including
+#    its one security property, that a job records its start only AFTER its
+#    token is accepted — and it was run by nothing automatic anywhere.
+#    `portal-check` was in `portal-selftests.yml`, which GitHub has never
+#    registered (#754), and absent from here, **which is why this runner could
+#    not see the two missing-dependency breaks that happened in it**.
+#    `clock-change` is #777's and had been relied on for twenty-two review
+#    rounds; the two i18n tests are #763's.
 TESTS=$(cat <<'LIST'
 gdpr-coverage|tools/gdpr-coverage-selftest.php|-|
 giving-retention|tools/giving-retention-selftest.php|-|
 php-runtime|tools/php-runtime-selftest.php|-|
+clock-change|tools/clock-change-selftest.php|-|
+i18n-member-language|tools/i18n-member-language-selftest.php|-|
+i18n-member-language-http|tools/i18n-member-language-http-selftest.php|selftest_i18nhttp|
 pdf-write|tools/pdf-write-selftest.php|-|
 asset-identifier|tools/asset-identifier-selftest.php|-|
 event-recurrence|tools/event-recurrence-selftest.php|-|
@@ -198,6 +224,8 @@ two-step|tools/two-step-selftest.php|selftest_twostep|web:two-step SELFTEST_WEB_
 live-chat-moderation|tools/live-chat-moderation-selftest.php|selftest_livechat|web:live-chat SELFTEST_WEB_PORT=9760
 go-live-button|tools/go-live-button-selftest.php|selftest_golive|web:go-live SELFTEST_WEB_PORT=9762
 activity-log|tools/activity-log-selftest.php|selftest_activitylog|web:activity-log SELFTEST_WEB_PORT=9770
+scheduled-jobs|tools/scheduled-jobs-selftest.php|selftest_scheduledjobs|web:scheduled-jobs SELFTEST_WEB_PORT=9893
+portal-check|tools/portal-check-selftest.php|selftest_portalcheck|SELFTEST_WEB_PORT=9833
 mail-pages|tools/mail-pages-selftest.php|selftest_mailpages|web:mail-pages SELFTEST_WEB_PORT=9580
 mail-queue|tools/mail-queue-selftest.php|selftest_mailqueue|web:mail-queue SELFTEST_WEB_PORT=9585
 mail-queue-pages|tools/mail-queue-pages-selftest.php|selftest_mailqueuepages|

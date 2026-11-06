@@ -742,10 +742,20 @@ final class PortalCheck
             $findings[] = [
                 'severity' => self::PROBLEM,
                 'what'     => 'Some scheduled jobs can never run, because no token has been set.',
+                // ⚠️ "NEVER RUN" IS NOT ALWAYS TRUE, AND THE ROW SAYING SO IS
+                //    READ BY THIS SAME METHOD TWENTY LINES LATER. A token can
+                //    be cleared AFTER the job has run, and then the page said
+                //    "it has never run and never will" about a job that
+                //    finished ninety seconds ago. The "never will" half is
+                //    true and the action is right, so this is the alarming
+                //    direction rather than the reassuring one — but it is an
+                //    untrue sentence on the page whose whole subject is saying
+                //    what is true.
                 'why'      => 'Each of these refuses every request until somebody sets its token, '
-                    . 'so it has never run and never will. Nothing anywhere says so — the job '
-                    . 'simply does nothing. If the clearing-out of personal data is among them, '
-                    . 'this portal is keeping records it told people it would delete.',
+                    . 'so it cannot run now and will not until one is set — whether or not it '
+                    . 'has run in the past. Nothing anywhere says so: the job simply does '
+                    . 'nothing. If the clearing-out of personal data is among them, this portal '
+                    . 'is keeping records it told people it would delete.',
                 'todo'     => 'Set a token for each in Admin, Settings, then give the address and '
                     . 'that token to whoever runs the scheduled tasks for this portal. The '
                     . 'installation guide has the addresses.',
@@ -784,7 +794,15 @@ final class PortalCheck
         $refused   = [];
         $broke     = [];
         $unreadable = [];
-        $mailStopped = '';
+        // ⚠️ AN ARRAY LIKE EVERY OTHER BUCKET. It was a string holding the
+        //    job's own description, so `=== ''` meant BOTH "not stopped" and
+        //    "stopped, but its description happens to be empty" — and planting
+        //    an empty `whatStops` made the warning vanish AND the all-clear
+        //    return, saying "15 of the 15 recorded a FINISH" about a job with
+        //    no row at all. The headline fault a fifth time, from a flag whose
+        //    emptiness carried two meanings, a hundred lines from the place
+        //    round 3 removed sentence-matching for exactly that reason.
+        $mailStopped = [];
         $running   = [];
         foreach ($state as $jobKey => $facts) {
             if (array_key_exists($jobKey, $noToken) === true) {
@@ -873,16 +891,39 @@ final class PortalCheck
                     //    A read that fails means "nothing is known", which is
                     //    the truthful answer and what the rest of this method
                     //    already does.
-                    $everRan = '';
+                    //    ⚠️ A FAILED READ IS `COULD_NOT_READ`, NOT "nothing is
+                    //       known yet", AND MY FIRST CATCH GOT THAT WRONG. It
+                    //       set `$everRan = ''`, so the mail job fell into
+                    //       `$notKnown` and a half-applied upgrade was told
+                    //       "expected straight after an update: each one starts
+                    //       being watched the first time it runs" — with
+                    //       `'todo' => 'Nothing.'` — while mail sat unsent.
+                    //       Nothing was going to start being watched: the read
+                    //       was broken and would stay broken.
+                    //
+                    //       That is word for word the fault `COULD_NOT_READ`
+                    //       was added to prevent, re-created for one job, and
+                    //       at a LOWER severity than the version it replaced
+                    //       (a NOTE where round 2 gave a WARNING). The comment
+                    //       beside it claimed "a read that fails means nothing
+                    //       is known, which is … what the rest of this method
+                    //       already does" — the rest of this method does the
+                    //       opposite, which is why that branch exists.
+                    $everRan   = '';
+                    $readFine  = true;
                     try {
                         $everRan = (string) (MailRoutes::state($db)['jobLastRanAt'] ?? '');
                     } catch (Throwable $e) {
                         // Never the fault's own words: a database message can
                         // quote the value that caused it.
-                        $everRan = '';
+                        $readFine = false;
+                    }
+                    if ($readFine === false) {
+                        $unreadable[] = $words;
+                        continue;
                     }
                     if ($everRan !== '' && MailQueue::jobIsRunning($db) === false) {
-                        $mailStopped = $words;
+                        $mailStopped[] = $words;
                         continue;
                     }
                 }
@@ -990,7 +1031,7 @@ final class PortalCheck
             ];
         }
 
-        if ($mailStopped !== '') {
+        if (count($mailStopped) > 0) {
             // A WARNING, not a PROBLEM, and the "likeliest reason" sentence is
             // the old page's own — it is the one that names the real cause.
             $findings[] = [
@@ -1003,7 +1044,7 @@ final class PortalCheck
                 'todo'     => 'Check with whoever set this portal up that the scheduled jobs '
                     . 'are still running.',
                 'count'    => 1,
-                'examples' => [$mailStopped],
+                'examples' => $mailStopped,
             ];
         }
 
@@ -1082,20 +1123,37 @@ final class PortalCheck
         //    its own "Not counted here" list.
         //
         //    That is this package's headline fault for the FOURTH time, in the
-        //    bucket created to fix the third. **The rule, written here because
-        //    three rounds have now broken it: a new bucket in this loop is not
-        //    finished until it appears in BOTH of the two lines below.**
-        //    ONE MECHANISM, NOT TWO. The obvious fix was to subtract the
-        //    stopped mail job from the count AS WELL as suppressing the
-        //    all-clear, and that subtraction is provably DEAD: the count is
-        //    only ever printed when no bucket is populated, and in that state
-        //    the mail job is not stopped. Measured — dropping it alone changed
-        //    no output and no check could tell. **A clause that cannot matter
-        //    makes a guard look stronger than it is**, so suppression does the
-        //    work and this says which.
+        //    bucket created to fix the third.
+        //
+        //    **THE RULE, AND ITS ONE EXCEPTION — the exception matters, because
+        //    the rule without it is the NEXT fault written into the code as an
+        //    instruction.** A bucket that means "this job did NOT finish" must
+        //    appear in both lines below: subtracted from the count and
+        //    suppressing the all-clear. `$running`, `$noToken`, `$overdue`,
+        //    `$diedPart`, `$broke`, `$unreadable` and `$mailStopped` are all
+        //    of that kind.
+        //
+        //    `$refused` is NOT, and belongs in neither: a refused run IS a
+        //    finish — the job was called and chose to do nothing. Adding it
+        //    would remove the all-clear from almost every portal, because
+        //    `cron/backup-run` records `refused` six nights in seven on a
+        //    weekly schedule (see the note on that finding above). Measured
+        //    with fourteen jobs `ok` and the backup `refused`: the all-clear
+        //    prints, correctly.
+        //
+        //    SUPPRESSION DOES THE WORK, NOT A SUBTRACTION. The obvious fix was
+        //    to do both, and the subtraction is unreachable — but **the reason
+        //    first given for that was false** and is worth correcting rather
+        //    than quietly dropping: it said "the count is only ever printed
+        //    when no bucket is populated", and `$refused` is a populated
+        //    bucket in exactly the run above. The true reason is narrower and
+        //    is the explicit clause on the next line: the count cannot print
+        //    while `$mailStopped` is non-empty, because that clause says so.
+        //    A reader who checked the old reason would have found it false and
+        //    might have restored the subtraction.
         $finishedWell = count($state) - count($running) - count($noToken);
         if (count($overdue) === 0 && count($diedPart) === 0 && count($notKnown) === 0
-            && count($broke) === 0 && count($unreadable) === 0 && $mailStopped === ''
+            && count($broke) === 0 && count($unreadable) === 0 && count($mailStopped) === 0
             && $finishedWell > 0) {
             // ⚠️ "EVERY" MUST MEAN EVERY, AND THE FIRST FIX MOVED A
             //    CONTRADICTION IN HERE RATHER THAN REMOVING IT. Token-less

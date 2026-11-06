@@ -40,7 +40,7 @@ repository:
      as healthy whenever the other ran.
 
      **At least one, not exactly one, and the first version of this check had
-     that wrong.** Nine of the pages exit early when a setting switches them
+     that wrong.** EIGHT of the pages exit early when a setting switches them
      off, when another run holds the lock, or when nothing is due yet, and each
      such path records a finish of its own: without it, a job somebody had
      deliberately switched off read as "started and never finished" on the
@@ -155,7 +155,8 @@ def php_code_only(path: pathlib.Path) -> str:
         ' T_ENCAPSED_AND_WHITESPACE, T_START_HEREDOC, T_END_HEREDOC], true)) { '
         '$out .= str_repeat("\\n", substr_count($x[1], "\\n")); continue; }'
         'if ($x[0] === T_EXIT) { $out .= "@EXIT@"; continue; }'
-        'if (in_array($x[0], [T_FUNCTION, T_FN], true)) { $out .= "@FUNC@"; continue; }'
+        'if ($x[0] === T_FN) { $out .= "@ARROW@"; continue; }'
+        'if ($x[0] === T_FUNCTION) { $out .= "@FUNC@"; continue; }'
         'if ($x[0] === T_CONSTANT_ENCAPSED_STRING) {'
         ' $v = trim($x[1], "\'\\"");'
         ' $out .= preg_match("#^cron/[a-z0-9-]+$#", $v) === 1 ? "\'" . $v . "\'" : "\'\'";'
@@ -300,63 +301,78 @@ def gate_refuses(code: str, gate_at: int) -> bool:
     """
     Whether the block holding the token comparison ENDS THE REQUEST.
 
-    ⚠️ IT ASKS PHP'S PARSER, AND TWO EARLIER VERSIONS DID NOT — one wrong in
-       each direction, which is the worst pair there is.
+    ⚠️ THIS HAS NOW BEEN WRONG IN BOTH DIRECTIONS TWICE, so the history is kept
+       in full: each version was "verified by planting" the shapes its author
+       had thought of, which is this repository's own recorded way of getting a
+       guard wrong.
 
-       Version 1 searched the block for the word `exit` ANYWHERE. An `exit`
-       inside a closure merely DEFINED in the block refuses nothing, and that
-       passed:
+       v1  searched the block for the word `exit` ANYWHERE. An `exit` inside a
+           closure merely DEFINED in the block refuses nothing, and that passed.
+       v2  required the exit at the block's own depth. That CRIED WOLF on a
+           genuinely refusing gate whose exits are one level deeper (an
+           ordinary `if/else` on `?json=1`), and still passed on
+           `$log->exit();` — a METHOD named exit, read the same by a text scan.
+       v3  asked the tokeniser for `T_EXIT`, outside any nested function body.
+           **It passed on an ARROW function**, because `fn() => exit(...)` has
+           NO BRACES, so a brace-depth walk never enters its body and the exit
+           inside it counted as the gate's own. One line restored v1's fault:
 
-           if ($expected === '' || hash_equals(...) === false) {
-               $stop = static function (): void { exit('Forbidden'); };
-           }
+               $stop = fn(): never => exit('Forbidden');
 
-       Version 2 then required the exit at the block's own depth. That CRIED
-       WOLF on correct code — a genuinely refusing gate whose exits are one
-       level deeper, an ordinary `if/else` on `?json=1` with both branches
-       exiting, was reported as refusing nothing, with a message asserting
-       something false about the file. A `switch` arm or a `headers_sent()`
-       branch is the same shape, and this is a hard gate in `pr-security.yml`,
-       so a false red blocks every pull request (#483).
+           Measured: the gate said OK while the self-test went 3 red (I2, I4,
+           I6 — "and NOTHING was recorded"). Worse than v1, which only forged
+           the record: here an unauthenticated request gets its 403 header and
+           then RUNS ON, writing `began()` and executing the job's real work.
+       v4  (this one) marks `T_FN` separately and skips an arrow function's
+           body as the EXPRESSION it is, and treats a braceless gate as the one
+           statement that follows it.
 
-       Version 2 ALSO still passed on `$log->exit();`, because it text-scanned
-       the reconstructed source and a METHOD named `exit` reads the same.
-       `.claude/CLAUDE.md` already records that exact trap from #763: "`die` as
-       a plain name … only as a METHOD".
+    WHAT IT STILL CANNOT SEE, kept complete because v3 deleted one of these
+    and the deletion was itself a finding:
 
-    So: the probe marks a real `T_EXIT` as `@EXIT@` and a `function`/`fn` as
-    `@FUNC@`. A gate refuses when a marked exit appears anywhere in its block
-    that is NOT inside a nested function body. Depth no longer matters, which
-    is what stops the crying wolf; the token kind is what stops the false pass.
-
-    WHAT IT STILL CANNOT SEE, stated rather than implied: a refusal by some
-    other means — a `return` at file scope, a thrown exception, a helper that
-    exits — and a gate whose condition is INVERTED so the block runs on
-    success. The first would be reported as a fault, which is a loud failure
-    rather than a silent pass; the second is behavioural, and section I of
-    `tools/scheduled-jobs-selftest.php` is what drives it.
+      * a refusal by some other means — a `return` at file scope, a thrown
+        exception, a helper that exits. Reported as a fault, which is a loud
+        failure rather than a silent pass.
+      * a gate whose condition is INVERTED so the block runs on SUCCESS and
+        exits. That would pass and be catastrophic, and no source check can see
+        it; section I of `tools/scheduled-jobs-selftest.php` drives it.
+      * `Foo::EXIT` as a class constant, which tokenises as `T_EXIT`. No
+        instance in the tree.
     """
     opened = code.find("{", gate_at)
+    semi = code.find(";", gate_at)
+
+    # ── A BRACELESS GATE. `if (...) exit('Forbidden');` refuses perfectly
+    #    well, and v2/v3 reported it as refusing nothing — a false RED in a
+    #    hard gate, which blocks every pull request (#483). Its body is the one
+    #    statement that follows, so that is what is read.
+    if semi != -1 and (opened == -1 or semi < opened):
+        return "@EXIT@" in code[gate_at:semi]
+
     if opened == -1:
         return False
-    # The brace must belong to the GATE, not be the next one `find` happens
-    # upon: nothing but whitespace between the condition's close and it.
     between = code[gate_at:opened]
     if between.count(")") == 0 or between.rstrip().endswith(")") is False:
         return False
 
     depth = 0
-    func_at: list[int] = []        # depths at which a function body opened
+    func_at: list[int] = []
     i = opened
     pending_func = False
     while i < len(code):
+        if code.startswith("@ARROW@", i):
+            # An arrow function's body is an EXPRESSION, not a block: it runs
+            # to the next `;` or `,` at this bracket depth, or to the `)` that
+            # closes the call it sits in.
+            i = _end_of_arrow(code, i + len("@ARROW@"))
+            continue
         if code.startswith("@FUNC@", i):
             pending_func = True
             i += len("@FUNC@")
             continue
         if code.startswith("@EXIT@", i):
             if len(func_at) == 0:
-                return True        # a real exit, not inside a closure
+                return True
             i += len("@EXIT@")
             continue
         ch = code[i]
@@ -372,10 +388,29 @@ def gate_refuses(code: str, gate_at: int) -> bool:
             if depth == 0:
                 return False
         elif ch == ";" and pending_func is True:
-            # An abstract or interface method: no body follows.
-            pending_func = False
+            pending_func = False      # an abstract method: no body follows
         i += 1
     return False
+
+
+def _end_of_arrow(code: str, at: int) -> int:
+    """Where an arrow function's single-expression body ends."""
+    brackets = 0
+    i = at
+    while i < len(code):
+        ch = code[i]
+        if ch in "([":
+            brackets += 1
+        elif ch in ")]":
+            if brackets == 0:
+                return i          # the `)` that closes the enclosing call
+            brackets -= 1
+        elif brackets == 0 and ch in ";,":
+            return i
+        elif brackets == 0 and ch == "{":
+            return i              # defensive: never expected
+        i += 1
+    return i
 
 
 def main() -> int:
@@ -449,7 +484,7 @@ def main() -> int:
                 % (path.name, len(began))
             )
         # ⚠️ SEVERAL FINISHES ARE RIGHT, AND REQUIRING EXACTLY ONE WAS WRONG.
-        #    Nine of these pages exit early when a setting switches them off,
+        #    EIGHT of these pages exit early when a setting switches them off,
         #    when another run holds the lock, or when nothing is due, and each
         #    of those paths must record a finish of its own — otherwise a job
         #    working exactly as configured reads as having died part-way, for

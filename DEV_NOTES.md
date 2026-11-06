@@ -54,7 +54,7 @@ which is the opposite direction from the fault being fixed.
 
 #### THE FAULT THIS SHIPPED FIRST, and it is the lesson
 
-Nine of the fifteen pages **exit early** when a setting switches them off, when
+EIGHT of the fifteen pages **exit early** when a setting switches them off, when
 another run holds the lock, or when nothing is due. Twelve such paths recorded
 a START and no finish — so a job somebody had **deliberately switched off** read
 as "started and never finished" on the check page, as a PROBLEM, for ever. **A
@@ -140,7 +140,9 @@ unauthenticated request wrote the record. The self-test caught it (I1-I6), which
 is the right division of labour, except that the gate runs in `pr-security.yml`
 (registered) and the self-test in `portal-selftests.yml`, which GitHub has never
 registered (#754) — so on GitHub it was guarded by nothing. It requires the exit
-at the block's OWN depth now, and the block must belong to the gate rather than
+at the block's own depth **after round 2 — a design round 3 withdrew and round 4
+withdrew again; see the round-4 section below for where it ended up** — and the
+block must belong to the gate rather than
 being the next one `find()` happens upon. **Three documents had said of round
 1's two bypasses "Both closed and planted". One was.**
 
@@ -222,6 +224,81 @@ looks to decide whether the gate is guarded.
 exit early … those twelve paths" cannot both be true: the twelve live in EIGHT
 pages, and nine counts `health.php`, which the same sentence removes from the
 early-exit set. In four places, in the comment edited to fix a count.
+
+#### Round 4: a one-line security bypass, and both of this package's tests ran nowhere
+
+**`gate_refuses()` PASSED ON AN ARROW FUNCTION, which restored round 1's fault
+in one line.** `fn(): never => exit('Forbidden');` has NO BRACES, so a
+brace-depth walk never enters its body and the exit inside it counted as the
+gate's own. Measured: the hard gate said OK while the self-test went three red
+(I2, I4, I6 — "and NOTHING was recorded").
+
+**It is worse than the fault it restored.** Round 1's bypass only forged the
+record. Here an unauthenticated request gets its 403 header and then RUNS ON —
+writing `began()` and executing `WebhookDispatcher::retryDue()`, the
+payment-webhook retry sweep.
+
+**That guard has now been wrong in both directions twice**, and each version was
+"verified by planting" the shapes its author had thought of:
+
+| version | false PASS | false RED |
+|---|---|---|
+| v1 | an exit inside a braced closure | — |
+| v2 | `$log->exit();` (a method named exit) | a real exit one level deeper |
+| v3 | `fn() => exit()` (no braces) | a braceless gate |
+| v4 | — | — |
+
+v4 marks `T_FN` separately from `T_FUNCTION` and skips an arrow function's body
+as the EXPRESSION it is; a braceless gate is read as the one statement that
+follows it. Four plants, four must-stay-green.
+
+**AND BOTH OF THIS PACKAGE'S TESTS RAN NOWHERE AUTOMATIC.**
+`scheduled-jobs-selftest.php` — named in four documents and in the gate's own
+docstring as the guard for everything the gate cannot see, including that one
+security property — was in no workflow and not in `tools/run-all-selftests.sh`.
+`portal-check-selftest.php` was in `portal-selftests.yml`, which GitHub has
+never registered (#754), and also absent from the runner, **which is why that
+runner could not see the two missing-dependency breaks that happened in it.**
+
+The runner's own one-liner found three more absent: `clock-change-selftest.php`
+(#777's, relied on for twenty-two review rounds) and the two i18n tests
+(#763's). All five are in the runner now, and `scheduled-jobs` is in the
+workflow with its database created.
+
+**And a failed read was still reported as "nothing is known yet".** Round 3's
+try/catch set `$everRan = ''`, so the mail job fell into `$notKnown` — so a
+half-applied upgrade got "expected straight after an update: each one starts
+being watched the first time it runs", with `'todo' => 'Nothing.'`, while mail
+sat unsent. That is word for word the fault `COULD_NOT_READ` exists to prevent,
+re-created for one job, **at a LOWER severity than the version round 3
+replaced** (a NOTE where round 2 gave a WARNING). It goes to `$unreadable` now.
+
+**`$mailStopped` was a STRING whose emptiness meant two things** — "not stopped"
+and "stopped, but its description is empty". Planting an empty `whatStops` made
+the warning vanish AND the all-clear return, claiming every job had finished:
+the headline fault a fifth time, from a flag a hundred lines from where round 3
+removed sentence-matching for exactly that reason. It is an array like every
+other bucket now.
+
+**THE RULE ROUND 3 WROTE INTO THE CODE WAS ITSELF THE NEXT FAULT, as an
+instruction.** "A new bucket in this loop is not finished until it appears in
+BOTH lines" is violated by `$refused`, correctly — a refused run IS a finish —
+and a reader applying it literally would remove the all-clear from almost every
+portal, because `cron/backup-run` refuses six nights in seven on a weekly
+schedule. The rule now states its exception. **And the stated reason for
+dropping the subtraction was false**: it said the count only prints when no
+bucket is populated, and `$refused` is a populated bucket in exactly that run.
+The conclusion held only because of the explicit clause beside it.
+
+**"Corrected in all four places" was false** — three still carried the
+impossible pair, including `DEV_NOTES.md` 164 lines above its own correction of
+it, and two in the gate's header, in a file the same commit edited.
+
+**And "it has never run and never will" was said about a job that finished
+ninety seconds ago** — a token cleared after the job ran, with the row saying so
+read by the same method twenty lines later. The alarming direction rather than
+the reassuring one, and still untrue on the page whose subject is saying what is
+true.
 
 #### Two guards, and what each cannot see
 
