@@ -75,7 +75,34 @@ $imported = false;
 //    the one comparison that cannot disagree with storage, in either format,
 //    and it needs no branch at all -- which is also why the "kept FOR THOSE
 //    ONLY" claim that used to sit here has gone rather than been reworded.
-$fmtClock = static function (string $text, ?string &$why = null): ?string {
+// ⚠️ THE OUTPUT TEST IS A WRAPPER, NOT A STEP, and putting it in step 3 was
+//    the same mistake one level up — it guarded a PATH, not the value. A cell
+//    like `0500-01-01 10:00` reaches step 2's strict reader and returns from
+//    there, so a test at the bottom of step 3 never saw it. **Follow the
+//    value to the thing that finally produces it** (round 11's rule): what
+//    finally produces a stored reading is this closure's return, whichever
+//    step reached it.
+$fmtStore = static function (string $text, ?string &$why = null) use (&$fmtClockRaw): ?string {
+    $out = $fmtClockRaw($text, $why);
+    if ($out === null) {
+        return null;
+    }
+    // A `DATETIME` column holds 1000-01-01 00:00:00 to 9999-12-31 23:59:59 and
+    // NOTHING ELSE. Anything outside that either throws on insert — stopping
+    // the import part-way with earlier rows already written — or stores a
+    // year nobody meant.
+    if (preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $out) !== 1
+        || $out < '1000-01-01 00:00:00'
+        || $out > '9999-12-31 23:59:59') {
+        $why = 'is a date outside the range this portal can store (the year must be 1000 to 9999)';
+        return null;
+    }
+    $why = '';
+
+    return $out;
+};
+
+$fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     $trimmed = trim($text);
     $why = 'cannot be read';
 
@@ -156,7 +183,18 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
 
     // 🚨 ASK WHETHER PHP CAN READ THE CELL AT ALL, FIRST. Until round 20 the
     //    fraction rule above ran before anything consulted `strtotime()`, so
-    //    **2,160 cells PHP refuses outright were told their fraction was
+    // ⚠️ NO CELL COUNTS ANYWHERE IN THIS FILE, AND THAT IS DELIBERATE. Three
+    //    were written here and in the self-test — "2,160", "6,480" and
+    //    "64,224" — in the very commit that withdrew "89 zone spellings" and
+    //    then "91" for being unreproducible. An independent sweep of 3.8
+    //    million cells got roughly thirty and nineteen times the first two.
+    //    They are not wrong so much as MEANINGLESS: each is a property of an
+    //    uncommitted cell list, so nobody can reproduce one, and a figure
+    //    nobody can reproduce reads as evidence. **The committed matrix is
+    //    section K of `tools/clock-change-selftest.php`, whose two counts are
+    //    pinned there as K04/K04b — read them from the file that fails on
+    //    them.**
+    //    **cells PHP refuses outright were told their fraction was
     //    ambiguous** — including the plausible European shorthand
     //    `1.6. 10:00`, which got "writes the hour with a single digit after a
     //    decimal point" although `strtotime()` cannot read it at all.
@@ -165,6 +203,12 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //    removed, in the other direction: the administrator is given a reason
     //    that is not the reason. `$why` is already 'cannot be read' here, so
     //    returning now says the true thing.
+    //
+    //    (Round 21 noted that `$why` was ALSO left saying 'cannot be read' on a
+    //    SUCCESSFUL read through steps 1 and 2, harmless only because nothing
+    //    looks at it when the return is not null. `$fmtStore` now sets it empty
+    //    on every success, so that is no longer a caveat anybody has to hold in
+    //    their head — measured on all three steps.)
     $moment = strtotime($trimmed);
     if ($moment === false) {
         return null;
@@ -297,7 +341,7 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //
     //    And the exemption was written as ONE SPELLING, `:\d{2}:\d{2}\.\d`,
     //    which demands a zero-padded minute AND second. Measured, that refused
-    //    6,480 cells round 15 stored, all of them a seconds fraction with an
+    //    cells round 15 stored, all of them a seconds fraction with an
     //    unpadded component: `Tue, 3 Mar 2026 10:00:5.5`,
     //    `1 June 2026 10:0:00.5`, `2026-06-01 9:05:5.5`. All six exemption
     //    cells in section K used `10:00:00.X` — **one value of the
@@ -414,11 +458,52 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
         return null;
     }
 
+    // (c) 🚨 AND FINALLY, TEST THE VALUE THIS ACTUALLY RETURNS — not the
+    //        spelling it came from. Everything above asks about the INPUT, and
+    //        that is how rounds 12, 13, 14 and 15 each closed a spelling list
+    //        and left the class open. This asks the only question that decides
+    //        whether the row can be stored at all.
+    //
+    //        A `DATETIME` column holds 1000-01-01 00:00:00 to 9999-12-31
+    //        23:59:59 and NOTHING ELSE. `date()` will cheerfully format a
+    //        moment outside that range, and `strtotime()` reaches such moments
+    //        from ordinary-looking cells. Measured on the live closure before
+    //        this test existed:
+    //
+    //          @-62167219200                  ->  -0001-12-31 23:58:45
+    //          @999999999999                  ->  33658-09-27 02:46:39
+    //          9999-12-31 +1 day              ->  10000-01-01 00:00:00
+    //          2026-06-01 +1000000 years      ->  1002026-06-01 00:00:00
+    //          9999-12-31 next year           ->  10000-12-31 00:00:00
+    //
+    //        `-0001-12-31 …` is the SAME SHAPE round 14 wrote up as the worst
+    //        thing in this package (`-0001-11-30`, from a MySQL zero date).
+    //        Under the portal's strict mysqli reporting `execute()` THROWS on
+    //        such a literal, and the insert loop has no try/catch of its own —
+    //        so the import stops part-way **with earlier rows already
+    //        written**, no per-row report, and the activity record never
+    //        reached. An administrator sees a preview saying every row is fine
+    //        and then an import that half happened, with no list of which half.
+    //
+    //        Round 14 closed `0000-00-00`, the one spelling it was handed.
+    //        This repository's own rule from round 11 is "follow the value to
+    //        the thing that finally produces it": ONE test on the returned
+    //        string covers every spelling at once, including the ones nobody
+    //        has thought of.
+    //
+    //        It is deliberately NOT a date-range check on `$parsed`: the
+    //        reachable cases are relative expressions and `@`-timestamps,
+    //        where `date_parse()` reports no year at all. The returned string
+    //        is the one place every path meets.
+    //        The test itself is the WRAPPER above (`$fmtStore`), because every
+    //        step of this closure can return a value and a test here would
+    //        only have covered this one. Measured: `0500-01-01 10:00` returns
+    //        from step 2 and a test placed here never saw it.
     $why = '';
     return date('Y-m-d H:i:s', $moment);
 };
 
-$parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock): array {
+$parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtStore): array {
     $handle = fopen($tmpFile, 'r');
     if ($handle === false) {
         return ['rows' => [], 'errors' => ['Could not open uploaded file.']];
@@ -500,7 +585,7 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock):
         if ($name === '')  { $rowErr[] = 'eventName required'; }
         if ($start === '') { $rowErr[] = 'startDateTime required'; }
         // 🕐 THE CHECK COMPARES WHAT WILL ACTUALLY BE STORED (#777 round 9).
-        //    `$fmtClock()` is the one thing that decides a cell's stored value,
+        //    `$fmtStore()` is the one thing that decides a cell's stored value,
         //    so asking IT both questions is the only comparison that cannot
         //    disagree with storage. See its definition above for the two
         //    measured faults that got us here.
@@ -515,7 +600,7 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock):
         //       claim, not the code. Measured, the two really did disagree in
         //       both directions --
         //
-        //         `2026-06-01 10`    strtotime REFUSES, `$fmtClock` stores it
+        //         `2026-06-01 10`    strtotime REFUSES, `$fmtStore` stores it
         //                            as 10:00:00. So that text was refused in
         //                            the START column as "not parseable",
         //                            which was untrue, while the identical
@@ -524,14 +609,14 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock):
         //                            impossible date three days forward.
         //
         //       ⚠️ THE SECOND EXAMPLE'S CONCLUSION WAS WRONG WHEN I WROTE IT,
-        //          and round 12 measured it. I said `$fmtClock` refused
+        //          and round 12 measured it. I said it refused
         //          `2026-02-31` and the row "was then refused further down
         //          under a different message". It did NOT refuse it: the
         //          fallback rolled the date forward too, so the row was
         //          IMPORTED as a success with the start three days out. The
         //          claim is exactly the kind that stops the next reader
         //          looking, in the comment written to record a fault of the
-        //          same shape. `$fmtClock` refuses it NOW -- see the two
+        //          same shape. `$fmtStore` refuses it NOW -- see the two
         //          narrowings at the end of that closure.
         //
         //       ⚠️ A SENTENCE HERE SAID "Nothing was ever stored wrongly,
@@ -546,13 +631,13 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock):
         //       What was wrong was WHICH rows were refused, what they were
         //       told, and -- for an impossible date -- what got stored.
         $startWhy    = null;
-        $startStored = $start !== '' ? $fmtClock($start, $startWhy) : null;
+        $startStored = $start !== '' ? $fmtStore($start, $startWhy) : null;
         if ($start !== '' && $startStored === null) {
             $rowErr[] = 'startDateTime ' . (string) $startWhy;
         }
         if ($end !== '') {
             $endWhy    = null;
-            $endStored = $fmtClock($end, $endWhy);
+            $endStored = $fmtStore($end, $endWhy);
             if ($endStored === null) {
                 $rowErr[] = 'endDateTime ' . (string) $endWhy;
             } elseif ($startStored !== null && $endStored < $startStored) {
@@ -686,16 +771,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         //    A spreadsheet column has no offset in it, so
                         //    every value here is a reading on the clock named
                         //    by `$importZone` -- which is exactly why building
-                        //    a moment was never needed. `$fmtClock()` puts the
+                        //    a moment was never needed. `$fmtStore()` puts the
                         //    text into the column's shape without resolving
                         //    anything; a row whose value cannot be read at all
                         //    was already refused upstream (line 133).
-                        // 📌 `$fmtClock` is defined ONCE near the top of this file, so
+                        // 📌 `$fmtStore` is defined ONCE near the top of this file, so
                         //    the row CHECK and the row STORE cannot disagree (#777 round 9).
 
-                        $startSql = $fmtClock((string) $r['startDateTime']);
+                        $startSql = $fmtStore((string) $r['startDateTime']);
                         $hasEnd   = $r['endDateTime'] !== null && $r['endDateTime'] !== '';
-                        $endSql   = $hasEnd === true ? $fmtClock((string) $r['endDateTime']) : null;
+                        $endSql   = $hasEnd === true ? $fmtStore((string) $r['endDateTime']) : null;
                         if ($startSql === null) {
                             $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'startDateTime could not be read'];
                             continue;

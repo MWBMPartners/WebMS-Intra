@@ -19605,14 +19605,41 @@ every place a claim lives, by searching for it, before calling a correction
 done.**
 
 
-### Rounds 18 to 20: the reader converged, and what was left was the record
+### Rounds 18 to 21: what each round measured, and the claim round 21 withdrew
 
-**Round 20 found nine — three in the portal, six in the checks and the test —
-and its behavioural verdict was the same as rounds 18 and 19's: the import
-reader has CONVERGED.** Over 64,224 generated cells there was not one case where
-round 19 stores a value round 18 would not, nor one where it refuses something
-round 18 stored. Ten rounds of churn in that closure are over; what rounds 18 to
-20 found instead was the *record* being wrong about it.
+**⚠️ "THE READER HAS CONVERGED … TEN ROUNDS OF CHURN ARE OVER" WAS WRITTEN HERE
+AND IS WITHDRAWN.** Round 21 found the fault in it, and it is worth keeping
+because the sentence read as a measurement and was a prediction.
+
+The measurement it cited was round 18-versus-19 — the two versions BEFORE round
+20's own edit — and it was presented as round 20's verdict on round 20. Round 20
+then widened the reader: round 21 generated 3,809,496 cells and found **214,812
+newly stored**. So the round asserting the churn was over was itself a round of
+churn. Every one of rounds 16, 17, 19 and 20 restored an over-refusal in this
+closure.
+
+**What was actually measured, each time, and nothing beyond it.** Round 21's own
+sweep of the same 3.8 million cells, round 19 against round 20:
+
+| | count |
+|---|---|
+| stored by r19, refused by r20 | 0 |
+| stored by r20, refused by r19 | 214,812 |
+| both store, different value | 0 |
+| both refuse, r20's reason worse | 0 |
+
+So round 20's change was a **pure widening with better reasons** — which is a
+good result and is all it is. It says nothing about whether a round 22 will find
+another over-refusal, and round 21 did find one more thing in the reader (the
+output-range fault below).
+
+**The transferable part: a sweep comparing two OLD versions cannot be the
+verdict on a NEW one, and "the churn is over" is not a measurement at all.** No
+cell counts are quoted in `import.php` or the self-test any more, for the reason
+in the next section.
+
+Rounds 18 to 21 also found the *record* wrong about the reader, repeatedly, and
+that is the rest of this section.
 
 **THE REFUSAL HAD SWALLOWED A CASE THAT IS NEVER AMBIGUOUS.** The one-digit
 fraction rule is about an hour or a minute, where `10.5` could mean five past

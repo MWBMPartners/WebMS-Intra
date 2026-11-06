@@ -520,7 +520,18 @@ $importSrc = (string) file_get_contents(
     . DIRECTORY_SEPARATOR . 'calendar' . DIRECTORY_SEPARATOR . 'manage'
     . DIRECTORY_SEPARATOR . 'import.php'
 );
-if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !== 1) {
+// ⚠️ LIFT BOTH, AND TEST THE WRAPPER. `$fmtStore` is what decides a cell's
+//    stored value; `$fmtClockRaw` is the reader it wraps. Lifting only the
+//    reader would have left the range test this section exists to cover
+//    completely untested while every check stayed green — the exact shape
+//    this package keeps recording. The two patterns are separate so a
+//    rename of either fails K00 loudly rather than silently testing less.
+$grabRaw   = [];
+$grabStore = [];
+$foundBoth = preg_match('/\$fmtClockRaw = static function.*?\n\};/s', $importSrc, $grabRaw) === 1
+    && preg_match('/\$fmtStore = static function.*?\n\};/s', $importSrc, $grabStore) === 1;
+$grab = [0 => ($grabRaw[0] ?? '') . "\n" . ($grabStore[0] ?? '')];
+if ($foundBoth === false) {
     check('K00 the import closure was found, so section K tests the live code', false, true);
 } else {
     check('K00 the import closure was found, so section K tests the live code', true, true);
@@ -542,7 +553,9 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     if (class_exists('Site', false) === false) {
         eval('class Site { public static function timezone(): string { return "Europe/London"; } }');
     }
-    eval($grab[0]);
+    // The reader is defined FIRST: the wrapper binds it with `use (&...)`.
+    eval($grabRaw[0]);
+    eval($grabStore[0]);
 
     // MUST STORE. Every one of these imported correctly at some point in this
     // package's history, and each row names the round that broke it, so a
@@ -637,7 +650,7 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         // ⚠️ THE COMPONENT WIDTH, which every one of these missed. All six used
         //    `10:00:00.X`, so the exemption's single spelling
         //    (`:\d{2}:\d{2}\.\d`, demanding a padded minute AND second) was
-        //    never tested — and it refused 6,480 cells round 15 stored. A
+        //    never tested — and it refused cells round 15 stored. A
         //    seconds fraction is never ambiguous: both readings store the same
         //    value, because a DATETIME holds no fraction.
         ['2026-06-01 10:00:5.5',          '2026-06-01 10:00:05', 'unpadded second — round 19 refused it'],
@@ -661,7 +674,7 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     ];
     $storeBad = [];
     foreach ($mustStore as [$cell, $want, $hist]) {
-        $got = $fmtClock($cell);
+        $got = $fmtStore($cell);
         if ($got !== $want) {
             $storeBad[] = $cell . ' -> ' . var_export($got, true) . ' (wanted ' . $want
                 . ($hist === '' ? '' : '; ' . $hist) . ')';
@@ -688,12 +701,30 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         'Feb 0 2026 10:00', '0 June 2026 10:00',
         '2026-00-10 10:00', '2026-0-10 10:00', '00/10/2026 10:00',
         'Feb 31 10:00',
-        // ⚠️ AND ONE WHOSE VALIDITY DEPENDS ON THE YEAR. `Feb 31` is impossible
-        //    in every year, so it could not tell a right fallback year from a
-        //    wrong one: planting `(int) date('Y')` as 2028, a leap year, left
-        //    107/107 green while `Feb 29 10:00` stored as 1 March 2026.
-        'Feb 29 10:00',
+        // ⚠️ `Feb 29 10:00` USED TO BE HERE AND WAS A TIME BOMB. It is the one
+        //    year-less, year-DEPENDENT cell: impossible in 2026, and a real
+        //    date in 2028. Listed as a refusal it would have turned this test
+        //    RED for the whole of 2028, 2032, 2036 … on correct code — the
+        //    cry-wolf direction (#483), in the package whose own written
+        //    lesson is "a test written in December passes in London whatever
+        //    the code does". It is now K06 below, which asserts BOTH
+        //    directions against the real year and so cannot go stale.
         '0000-00-00 10:00', '0000-00-00 00:00:00',
+        // ⚠️ OUTSIDE WHAT A `DATETIME` CAN HOLD (1000-01-01 to 9999-12-31).
+        //    These are the cells that made the insert THROW part-way through
+        //    an import with earlier rows already written — the shape round 14
+        //    recorded as the worst thing in this package (`-0001-11-30` from a
+        //    MySQL zero date), still reachable until the output test. Every
+        //    one measured on the live closure before it existed.
+        '@-62167219200', '@-99999999999', '@999999999999',
+        '9999-12-31 +1 day', '9999-12-31 23:59:59 +1 second',
+        '2026-06-01 +1000000 years', 'Tue, 3 Mar 2026 +1000000 years',
+        '9999-12-31 next year',
+        //    And a FOUR-DIGIT year below the floor, which reaches the closure
+        //    through step 2's strict reader and NOT step 3 — which is how a
+        //    test placed at the bottom of step 3 missed it, and why the output
+        //    test is a wrapper over every path rather than a step.
+        '0500-01-01 10:00', '0001-01-01 00:00:00',
         // a fraction on the wrong component: ISO says 10.5 means 10:30, and
         // strtotime answers 10:05
         '2026-06-01T10.5', '2026-06-01T10:00.5',
@@ -752,7 +783,7 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     ];
     $refuseBad = [];
     foreach ($mustRefuse as $cell) {
-        $got = $fmtClock($cell);
+        $got = $fmtStore($cell);
         if ($got !== null) {
             $refuseBad[] = $cell . ' -> ' . $got;
         }
@@ -774,7 +805,52 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     //       the note at the head of this section for what else covers the
     //       reader, and what does not).
     check('K04 the must-store list has not shrunk', count($mustStore), 59);
-    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 70);
+    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 79);
+
+    // ── K06. The fallback year is TODAY'S, asserted in both directions ───
+    // ⚠️ THIS REPLACES A CELL THAT WOULD HAVE GONE RED FOR THE WHOLE OF 2028.
+    //    `Feb 29 10:00` has no year, so the closure supplies `date('Y')`. It
+    //    is the only cell whose VALIDITY depends on which year that is —
+    //    impossible in 2026, a real date in 2028 — and it sat in the
+    //    must-refuse list, which would have made this test fail on correct
+    //    code every day of 2028, 2032, 2036 … That is the cry-wolf direction
+    //    (#483), and this package's own lesson is that a test written in one
+    //    month can pass in London whatever the code does.
+    //
+    //    Asserting BOTH directions against the REAL year is strictly stronger
+    //    than the old cell AND cannot go stale: in a non-leap year it must be
+    //    refused, in a leap year it must store 29 February of that year. A
+    //    wrong fallback year fails one branch or the other, whichever year it
+    //    is run in.
+    $thisYear = (int) date('Y');
+    $isLeap   = ((int) date('L')) === 1;
+    $febWhy   = null;
+    $feb      = $fmtStore('Feb 29 10:00', $febWhy);
+    check(
+        'K06 the premise: date("L") agrees with the calendar about ' . $thisYear,
+        $isLeap,
+        checkdate(2, 29, $thisYear)
+    );
+    if ($isLeap === true) {
+        check(
+            'K06b in a leap year (' . $thisYear . ') a year-less "Feb 29" stores that year, '
+            . 'which proves the fallback year is TODAY and not a number typed in',
+            $feb,
+            $thisYear . '-02-29 10:00:00'
+        );
+    } else {
+        check(
+            'K06b in a non-leap year (' . $thisYear . ') a year-less "Feb 29" is refused, '
+            . 'which proves the fallback year is TODAY and not a leap year typed in',
+            $feb,
+            null
+        );
+        check(
+            'K06c and refused for the right reason',
+            $febWhy,
+            'is a date that does not exist'
+        );
+    }
 
     // K05 — WHICH REFUSAL IT IS. The closure reports a reason through its
     //       second argument, and the import shows it to the administrator.
@@ -822,7 +898,7 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     $reasonsWrong = [];
     foreach ($reasonFor as $cell => $wantReason) {
         $gotReason = null;
-        $stored    = $fmtClock($cell, $gotReason);
+        $stored    = $fmtStore($cell, $gotReason);
         if ($stored !== null) {
             $reasonsWrong[] = $cell . ' was stored (' . $stored . ') rather than refused';
             continue;
@@ -839,7 +915,7 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     //       satisfied in one direction and K01 would catch it -- but state it
     //       explicitly, because a reader should not have to work that out.
     check('K03 the closure really does store something, so K02 is not vacuous',
-        $fmtClock('2026-06-01 10:00'), '2026-06-01 10:00:00');
+        $fmtStore('2026-06-01 10:00'), '2026-06-01 10:00:00');
 
     date_default_timezone_set($wasZone);
 }

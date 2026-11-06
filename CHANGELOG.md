@@ -240,6 +240,16 @@ decided not to accept them. The message now distinguishes "is a date that does
 not exist", a time written with a single digit after a decimal point, and "cannot be
 read", so somebody can fix the row.
 
+**And an import can no longer stop part-way through.** A cell holding a date
+outside what this portal can store — before the year 1000 or after 9999 — used
+to get as far as being written to the database, which refused it. The import
+then **stopped where it was, with the earlier rows already added and no list of
+which ones**, after a preview that had said every row was fine. Such cells are
+refused up front now, with the range named: "is a date outside the range this
+portal can store (the year must be 1000 to 9999)". Ordinary cells are
+unaffected — reaching one of these took something like a date arithmetic
+expression or a raw timestamp, not a mistyped date.
+
 **And it no longer blames a decimal point for a cell that simply cannot be
 read.** A cell reading `1.6. 10:00` — a dotted date, which this portal cannot
 read — was told it "writes the hour with a single digit after a decimal point",
