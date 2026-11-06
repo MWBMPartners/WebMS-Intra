@@ -83,13 +83,19 @@ if ($slug !== '' && preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', $slug) === 1) {
     $stmt->close();
 } elseif ($upcoming > 0) {
     $n = min(max(1, $upcoming), 20);
+    // 🕰️ "Upcoming" on EACH EVENT'S OWN CLOCK (#804), not the database
+    //    server's `NOW()` -- see Events::nowOnItsOwnClock(). Exact inside SQL,
+    //    so `LIMIT ?` is filled from the right rows. (This page has no address
+    //    of its own at present -- see above -- and is put right anyway, so
+    //    that giving it one back does not bring the fault with it.)
+    $nowOnClock = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'tblEvents', $siteId);
     $stmt = $mysqli->prepare(
         'SELECT eventID, eventName, eventSlug, startDateTime, locationName '
         . 'FROM tblEvents WHERE siteID = ? AND isDeleted = 0 AND status = "published" '
         . '  AND isPublic = 1 '
-        . '  AND startDateTime >= NOW() ORDER BY startDateTime ASC LIMIT ?'
+        . '  AND `startDateTime` >= ? AND `startDateTime` >= ' . $nowOnClock['sql'] . ' ORDER BY startDateTime ASC LIMIT ?'
     );
-    $stmt->bind_param('ii', $siteId, $n);
+    $stmt->bind_param('is' . $nowOnClock['types'] . 'i', ...array_merge([$siteId, \Portal\Core\Events::looseUtcBound('-1 day')], $nowOnClock['params'], [$n]));
     $stmt->execute();
     while ($e = $stmt->get_result()->fetch_assoc()) { $events[] = $e; }
     $stmt->close();

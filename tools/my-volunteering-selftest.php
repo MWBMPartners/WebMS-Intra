@@ -325,6 +325,11 @@ namespace {
     mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT); // a SQL error ends the page loudly
     define('PORTAL_CORE', $argv[8]);                            // stand-in templates folder
     require $core . DIRECTORY_SEPARATOR . 'Events.php';
+    // #777 part two made the page put each start into words through
+    // I18n::formatClockDateTime(), and this runner has no autoloader, so the
+    // page died with "Class I18n not found" on every case from 3f29995 on.
+    // I18n stands alone (it needs no other portal class for that call).
+    require $core . DIRECTORY_SEPARATOR . 'I18n.php';
     $mysqli = new mysqli($host, $user, $pass, $name, (int) $port);
     $mysqli->set_charset('utf8mb4');
     $_SESSION = ['user_id' => (int) getenv('MV_USER')];

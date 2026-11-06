@@ -95,6 +95,22 @@ class Discipleship
         // 🎫 Rule 3 — rsvpd_event: a confirmed "going" RSVP to the named
         // event, only once the event has actually started (intent must
         // have met the date — a future RSVP never completes the step).
+        //
+        // 🕰️ "Has it started" is asked on the EVENT's OWN CLOCK (#804). This
+        //    was `ev.startDateTime <= UTC_TIMESTAMP()`, which compares a
+        //    reading of the event's clock with UTC: for an event in New York a
+        //    step was marked complete up to five hours BEFORE the event began
+        //    -- "a future RSVP never completes the step" broken, and stored for
+        //    good, because the progress row this writes is permanent -- and for
+        //    one in Auckland it waited up to thirteen hours after. The zones
+        //    read are this organisation's events' (a step names one of its own
+        //    events), and a zone PHP cannot open falls back to this
+        //    organisation's clock. (Unlike rules 1 and 2, this rule's join does
+        //    not ALSO require `ev.siteID = p.siteID`; an event of another
+        //    organisation named here would be judged on this one's clock if its
+        //    zone were one this organisation never uses. Found while fixing
+        //    #804 and deliberately not changed here.)
+        $nowOnClock = Events::nowOnItsOwnClock($db, 'ev', $siteId);
         $sql = 'INSERT IGNORE INTO tblPathwayProgress '
              . '(siteID, stepID, userID, source, autoRef, completedAt) '
              . 'SELECT p.siteID, s.stepID, e.userID, \'auto\', '
@@ -104,9 +120,9 @@ class Discipleship
              . 'JOIN tblPathwayEnrolments e ON e.pathwayID = p.pathwayID AND e.status = \'active\' '
              . 'JOIN tblEventRSVPs r ON r.eventID = s.autoRefID AND r.userID = e.userID '
              . '  AND r.siteID = p.siteID AND r.response = \'going\' AND r.status = \'confirmed\' '
-             . 'JOIN tblEvents ev ON ev.eventID = s.autoRefID AND ev.startDateTime <= UTC_TIMESTAMP() '
+             . 'JOIN tblEvents ev ON ev.eventID = s.autoRefID AND `ev`.`startDateTime` <= ' . $nowOnClock['sql'] . ' '
              . 'WHERE s.autoRule = \'rsvpd_event\' AND s.autoRefID IS NOT NULL AND p.siteID = ?';
-        $inserted += self::runSweepRule($db, $sql, $siteId, $pathwayId);
+        $inserted += self::runSweepRule($db, $sql, $siteId, $pathwayId, $nowOnClock['types'], $nowOnClock['params']);
 
         // 🔄 Enrolment status follows from the progress state we just wrote.
         self::refreshEnrolmentStatuses($siteId, $pathwayId);
@@ -119,8 +135,14 @@ class Discipleship
      * optional `AND p.pathwayID = ?` clause, binds params, and returns the
      * number of rows actually inserted (INSERT IGNORE reports 0 for rows it
      * skipped as duplicates).
+     *
+     * `$leadTypes` / `$leadParams` are bound FIRST, for a rule whose statement
+     * has marks before its `WHERE` (rule 3's "now on the event's own clock",
+     * #804, which sits in a join).
+     *
+     * @param list<string> $leadParams
      */
-    private static function runSweepRule(\mysqli $db, string $sql, int $siteId, ?int $pathwayId): int
+    private static function runSweepRule(\mysqli $db, string $sql, int $siteId, ?int $pathwayId, string $leadTypes = '', array $leadParams = []): int
     {
         if ($pathwayId !== null) {
             $sql .= ' AND p.pathwayID = ?';
@@ -132,9 +154,9 @@ class Discipleship
         }
 
         if ($pathwayId !== null) {
-            $stmt->bind_param('ii', $siteId, $pathwayId);
+            $stmt->bind_param($leadTypes . 'ii', ...array_merge($leadParams, [$siteId, $pathwayId]));
         } else {
-            $stmt->bind_param('i', $siteId);
+            $stmt->bind_param($leadTypes . 'i', ...array_merge($leadParams, [$siteId]));
         }
         $stmt->execute();
         $affected = $stmt->affected_rows;

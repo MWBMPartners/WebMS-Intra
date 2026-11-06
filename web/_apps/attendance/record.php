@@ -207,6 +207,11 @@ if (str_starts_with($attVisibility['sql'], ' AND ') === false) {
 // and the rule's own parentheses sitting side by side with nothing between them, which
 // MySQL refused outright (error 1064). Using the fragment AS THE DOCS SAY, unstripped,
 // is correct here.
+// 🕰️ #804, LEFT ON PURPOSE: the ±30-day window below is on the DATABASE
+//    SERVER's clock, not each event's, so its two edges can be some hours out.
+//    It only chooses which nearby events the picker offers; nothing decides
+//    "upcoming", "past" or "today" from it, and an event thirty days away
+//    give or take half a day is equally fine to offer or leave out.
 $stmtEvents = $mysqli->prepare(
     'SELECT eventID, eventName, startDateTime FROM tblEvents e '
     . "WHERE e.isDeleted = 0 AND e.status = 'published' AND e.siteID = ? AND e.externalFeedID IS NULL "

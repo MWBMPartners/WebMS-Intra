@@ -4,6 +4,13 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Events count as upcoming, today or begun on their own clock (#804, #805, #806)
+
+- **Events now count as "upcoming", "today" or "begun" on their OWN clock, not the database server's (#804).** Nine statements compared an event's start (a reading of the event's clock) with the database's `NOW()`, `CURDATE()` or `UTC_TIMESTAMP()`. Fixed: the calendar list's "upcoming", the public countdown feed (which, with an Auckland organisation on a database in UTC, went on publishing an event that had begun up to thirteen hours earlier as "next"), the "all upcoming" calendar subscription, the dashboard's "Events This Week", the Host Console's "starting today", the admin reminder preview's "next 48 hours", the newsletter's "Upcoming events" block, and the discipleship sweep's "has the event started" (which could mark a pathway step complete up to five hours before a New York event began, permanently). (The embeddable events widget page was changed too, but it has no address today.) Four were left on purpose, each with its reason written beside it: the sitemap, the attendance-recording picker (±30 days), the asset page's event picker and "My volunteering" (both "since a day ago").
+- **The month and year grids now show a multi-day event on its last day (#806).** An event from 1 June 10:00 to 3 June 09:00 was missing from the 3rd, because the grids walked from the start TIME and stopped once past the end time. Long events also no longer cost one step per day of their whole length in the year view.
+- **The attendance register no longer offers a day the event was not on (#806).** In a zone whose clocks go forward at 23:00 (America/Nuuk, America/Scoresbysund), an event at 23:30 that night was listed on the following day.
+- **An event ending at exactly midnight is now on one day in the month and year grids and the attendance register (#806)**, not two — stated because it is a deliberate change: the old attendance register gave a 23:00-to-midnight event two columns.
+
 ### Translation now counts the NUMBER of requests as well as money (#762, D-059, migration 254)
 
 - **A second monthly limit, `translation.monthCallCap`**, default 1,000 requests per

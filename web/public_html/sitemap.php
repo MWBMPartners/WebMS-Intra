@@ -231,6 +231,13 @@ $siteId = Site::id();
 try {
     $today      = date('Y-m-d');
     $visibility = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today);
+    // 🕰️ #804, LEFT ON PURPOSE: `endDateTime >= NOW()` compares a reading of
+    //    the event's own clock with the DATABASE SERVER's, so an event can
+    //    leave this list some hours early or late. Nobody reads that edge:
+    //    the list is for search engines, it is cached for an hour, and an
+    //    ended event's page still answers. Events::nowOnItsOwnClock() would
+    //    make it exact at the cost of one more query on a page crawlers hit;
+    //    not worth it here. Pages a PERSON reads are exact (#804).
     $stmt = $db->prepare(
         'SELECT e.eventSlug, e.updatedAt, e.externalFeedID '
         . 'FROM tblEvents e '

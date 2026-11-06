@@ -1201,6 +1201,126 @@ class I18n
     }
 
     /**
+     * 📆 The first and last CALENDAR DAY a wall-clock start and end cover, as
+     *    `Y-m-d` text -- the ONE place a page asks "which days is this event
+     *    on" (#806).
+     *
+     * Two faults made this worth one place.
+     *
+     *  1. The attendance register built the start as a moment in the event's
+     *     zone and then set the time to midnight. In a zone whose clocks go
+     *     forward at 23:00 (America/Nuuk, America/Scoresbysund) a reading of
+     *     23:00-23:59 that night does not exist, PHP moves it an hour on, and
+     *     that is the NEXT DAY: measured, an event at `2027-03-27 23:30` in
+     *     Nuuk was offered on the 28th. Here the day is taken off the reading
+     *     itself (`wallClockReading()` is built in UTC, which has no
+     *     transitions), so no zone is involved and nothing can move.
+     *
+     *  2. The month and year grids walked from the START READING one day at a
+     *     time while the walk was still `<=` the END READING -- comparing a
+     *     time of day as well as a date. An event from 06-01 10:00 to 06-03
+     *     09:00 reached 06-03 10:00, which is after 09:00, so its last day was
+     *     left out. This compares DATES.
+     *
+     * ⚠️ AN END OF EXACTLY 00:00:00 DOES NOT OCCUPY ITS OWN DAY. An evening
+     *    event from 19:00 to midnight ends as the next day BEGINS; walking by
+     *    date alone would put it on that next day too, which the old
+     *    time-of-day walk happened never to do. So an end at 00:00:00 that is
+     *    later than the start counts as finishing on the day before. (An event
+     *    imported as all-day is stored ending 23:59:59 on its last day --
+     *    `IcsReader`, the `allDayDays` step -- so it is not affected.)
+     *
+     * An end BEFORE the start (a broken row) gives the start day alone, as
+     * the attendance register always did.
+     *
+     * @param string|null $start A wall-clock reading (`Y-m-d H:i:s`).
+     * @param string|null $end   A wall-clock reading, or null/'' for "no end".
+     *
+     * @return array{first: string, last: string}|null Null when the start is
+     *                                                  not a reading at all.
+     */
+    public static function wallClockDaySpan(?string $start, ?string $end): ?array
+    {
+        $startReading = self::wallClockReading($start);
+        if ($startReading === null) {
+            return null;
+        }
+        $first = $startReading->format('Y-m-d');
+        $last  = $first;
+
+        $endReading = self::wallClockReading($end);
+        if ($endReading !== null) {
+            $last = $endReading->format('Y-m-d');
+            if ($endReading->format('H:i:s') === '00:00:00' && $endReading > $startReading) {
+                // Finished as this day began -- see the warning above.
+                $last = $endReading->modify('-1 day')->format('Y-m-d');
+            }
+            if (strcmp($last, $first) < 0) {
+                $last = $first;
+            }
+        }
+
+        return ['first' => $first, 'last' => $last];
+    }
+
+    /**
+     * 📆 Every calendar day a wall-clock start and end cover, as `Y-m-d` text,
+     *    optionally only those inside a window and never more than `$max`
+     *    (#806). The days come from `wallClockDaySpan()`; read its docblock
+     *    for the rules.
+     *
+     * The window is what keeps a long event cheap: the year view used to walk
+     * every day from an event's start to its end, and an imported event can
+     * legitimately end as late as 9999-12-31 (`FeedImporter`'s own note), so
+     * one such row cost millions of steps on every view of the year. Here the
+     * walk starts at whichever is later, the event's first day or the
+     * window's, and stops at whichever is earlier.
+     *
+     * The days are stepped on an object built in UTC, so `modify('+1 day')`
+     * is a calendar step that no clock change can stretch or shrink.
+     *
+     * @param string|null $start   A wall-clock reading.
+     * @param string|null $end     A wall-clock reading, or null for none.
+     * @param string|null $fromDay `Y-m-d`: leave out days before this one.
+     * @param string|null $toDay   `Y-m-d`: leave out days after this one.
+     * @param int         $max     The most days to return.
+     *
+     * @return list<string>
+     */
+    public static function wallClockDays(?string $start, ?string $end, ?string $fromDay = null, ?string $toDay = null, int $max = 366): array
+    {
+        $span = self::wallClockDaySpan($start, $end);
+        if ($span === null || $max < 1) {
+            return [];
+        }
+        $first = $span['first'];
+        $last  = $span['last'];
+        if ($fromDay !== null && strcmp($fromDay, $first) > 0) {
+            $first = $fromDay;
+        }
+        if ($toDay !== null && strcmp($toDay, $last) < 0) {
+            $last = $toDay;
+        }
+
+        $day = self::wallClockReading($first . ' 00:00:00');
+        if ($day === null) {
+            // Only reachable with a window day that is not a real date.
+            return [];
+        }
+        $days = [];
+        while (count($days) < $max) {
+            $text = $day->format('Y-m-d');
+            if (strcmp($text, $last) > 0) {
+                break;
+            }
+            $days[] = $text;
+            $day    = $day->modify('+1 day');
+        }
+
+        return $days;
+    }
+
+    /**
      * Format a date according to the current locale.
      *
      * @param string $date   Date string (Y-m-d or datetime)

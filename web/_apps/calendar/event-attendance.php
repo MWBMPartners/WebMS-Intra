@@ -22,6 +22,7 @@ declare(strict_types=1);
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\I18n;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -65,35 +66,42 @@ if ($event === null) { http_response_code(404); exit('Event not found'); }
 // TIMESTAMPS 24 hours apart, not calendar days — two timestamps 2 hours
 // apart never satisfy "add a day and you have passed the end".
 //
-// THE FIX steps CALENDAR days from midnight, in the EVENT's OWN time zone
-// (tblEvents.timezone, written by manage/save.php — the same field
-// event.php's own comment already treats as the source of truth for
-// reading this event's wall-clock times). DateTimeImmutable::modify('+1
-// day') is calendar arithmetic, not a fixed number of seconds, so it
-// steps correctly over a 23- or 25-hour day. The 14-day cap is unchanged.
-$zone = new DateTimeZone(date_default_timezone_get());
-try {
-    $zone = new DateTimeZone((string) ($event['timezone'] ?? ''));
-} catch (\Exception $e) {
-    // An old row, or one that somehow never got a usable zone name: fall
-    // back to the server's own zone rather than fail the page. Not logged
-    // — the resulting day LIST is identical whatever zone is used here; the
-    // zone only decides how the wall-clock text in the database is read,
-    // and a blank/unusable name is not itself a fault worth an error row.
+// THE FIX (#528) stepped CALENDAR days rather than seconds, and that part
+// stands. HOW it found the days was wrong, and #806 replaced it.
+//
+// #806 — WHAT WAS STILL WRONG. It built the start as a MOMENT in the event's
+// zone and then set the time to midnight:
+// `(new DateTimeImmutable($start, $zone))->setTime(0, 0)`. In a zone whose
+// clocks go forward at 23:00 (America/Nuuk, America/Scoresbysund) a reading of
+// 23:00-23:59 that night does not exist, PHP moves it an hour on — onto the
+// NEXT DAY. Measured: an event at 2027-03-27 23:30 in Nuuk was listed on
+// 2027-03-28, so the register offered a day the event was not on. The comment
+// that stood here said "the resulting day LIST is identical whatever zone is
+// used", which was untrue for exactly that night.
+//
+// The stored values are readings on the event's own clock, and the DAY is
+// the first ten characters of a reading — no zone is needed at all.
+// I18n::wallClockDays() takes the days off the readings (built in UTC, which
+// has no transitions, so nothing can move) and steps them as calendar days.
+// It is the ONE place a page asks which days an event covers; the month and
+// year grids ask it too. One difference from before, on purpose: an end of
+// exactly 00:00:00 no longer adds a column for the day it begins (an event
+// from 23:00 to midnight is a one-day event) — see that method's docblock.
+// The 14-day cap is unchanged.
+$daySpan = I18n::wallClockDaySpan((string) $event['startDateTime'], $event['endDateTime'] !== null ? (string) $event['endDateTime'] : null);
+if ($daySpan === null) {
+    // A start that is not a reading at all (a DATETIME column always gives
+    // one, so only a damaged row lands here): show the one day its text
+    // begins with rather than fail the page.
+    $firstTen = substr((string) $event['startDateTime'], 0, 10);
+    $daySpan  = ['first' => $firstTen, 'last' => $firstTen];
 }
-$startDay = (new DateTimeImmutable((string) $event['startDateTime'], $zone))->setTime(0, 0);
-$endDay   = !empty($event['endDateTime'])
-    ? (new DateTimeImmutable((string) $event['endDateTime'], $zone))->setTime(0, 0)
-    : $startDay;
-if ($endDay < $startDay) { $endDay = $startDay; }
-$days = [];
-for ($day = $startDay; $day <= $endDay && count($days) < 14; $day = $day->modify('+1 day')) {
-    $days[] = $day->format('Y-m-d');
+$days = I18n::wallClockDays((string) $event['startDateTime'], $event['endDateTime'] !== null ? (string) $event['endDateTime'] : null, null, null, 14);
+if ($days === []) {
+    $days = [$daySpan['first']];
 }
-// count($days) === 0 is no longer reachable: the loop above always runs at
-// least once, because $startDay <= $endDay is guaranteed by the check two
-// lines up. The old fallback for an empty list is therefore removed rather
-// than kept as dead code nothing can ever execute.
+// An empty list cannot reach the page: wallClockDays() always returns the
+// first day for a real reading, and the damaged-row branch above puts one in.
 
 // 👥 Participants: confirmed RSVPs (with userID).
 $participants = [];
@@ -201,7 +209,7 @@ $anonStoredNow  = [];
 // against the true end of the event even when the day-by-day grid itself
 // stops showing columns after 14.
 $eventFirstDay  = $days[0];
-$eventLastDay   = $endDay->format('Y-m-d');
+$eventLastDay   = $daySpan['last'];
 
 if ($mayViewAnon === true) {
     $anon = AnonymousCheckins::summaryForEvent($mysqli, $eventId, $siteId);

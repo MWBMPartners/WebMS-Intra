@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 161;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783)
+const EXPECTED_CHECKS = 175;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -2572,6 +2572,29 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960902, 1, ?, ?, '2028-03-12 02:30:00', NULL, 'America/New_York', 'published', 1, 0)",
         'ss', [$landSlug, $landName]
     );
+    // #805: an EVENING event on the same day. X03 used to look only at the
+    // 02:30 one, and 02:30 falls inside its own day whichever clock the day
+    // columns are built on -- a check that could not fail. 23:30 cannot: on a
+    // column built on PHP's (Auckland's) zone it lands in the NEXT day.
+    $eveName = 'Selftest zones evening 960903';
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960903, 1, 'selftest-zones-evening-960903', ?, '2028-09-24 23:30:00', '2028-09-24 23:50:00', 'Pacific/Auckland', 'published', 1, 0)",
+        's', [$eveName]
+    );
+    // #806 (b): a multi-day event that ENDS EARLIER IN THE DAY than it began.
+    // The month and year grids walked from the start reading while it was
+    // still `<=` the end reading, so 09-27 10:00 was "after" 09-27 09:00 and
+    // the last day was left out.
+    $spanName = 'Selftest zones three days 960904';
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960904, 1, 'selftest-zones-three-days-960904', ?, '2028-09-25 10:00:00', '2028-09-27 09:00:00', 'Pacific/Auckland', 'published', 1, 0)",
+        's', [$spanName]
+    );
+    // #806 (a): Nuuk's clocks go forward at 23:00, so 23:30 on 2027-03-27
+    // does not exist there and a MOMENT made of it is on the 28th.
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960905, 1, 'selftest-zones-nuuk-960905', 'Selftest zones Nuuk 960905', '2027-03-27 23:30:00', '2027-03-27 23:55:00', 'America/Nuuk', 'published', 1, 0)"
+    );
     $moved = (new DateTimeImmutable($skip, new DateTimeZone('Pacific/Auckland')))->format('Y-m-d H:i:s');
     ok('X00 premise: ' . $skip . ' really does not exist in Pacific/Auckland (PHP moves it to ' . $moved . ')', $moved !== $skip);
 
@@ -2593,9 +2616,52 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
     );
     $day = req($adminJar, 'GET', '/calendar?view=day&date=2028-09-24');
     ok(
-        'X03 the day column draws it from 02:30 to 04:00',
-        $day['status'] === 200 && str_contains($day['body'], 'title="02:30 – 04:00 · ' . $skipName . '"') === true,
+        'X03 the day column draws the skipped-hour event from 02:30 to 04:00 AND the 23:30 event in the 24th\'s own column (#805: 23:30 lands in the NEXT day on columns built on PHP\'s zone; 02:30 alone could not fail)',
+        $day['status'] === 200 && str_contains($day['body'], 'title="02:30 – 04:00 · ' . $skipName . '"') === true
+            && str_contains($day['body'], 'title="23:30 – 23:50 · ' . $eveName . '"') === true,
         said($day)
+    );
+
+    // ---- #806 (b): the last day of a multi-day event, in the month AND year grids ----
+    // A cell is the text from its own day link up to the next cell's.
+    $cellOf = static function (string $html, string $date, string $nextCell): string {
+        $at = strpos($html, 'date=' . $date . '"');
+        if ($at === false) {
+            return '';
+        }
+        $next = strpos($html, $nextCell, $at + 1);
+
+        return substr($html, $at, $next === false ? 6000 : $next - $at);
+    };
+    $monthAgain = req($adminJar, 'GET', '/calendar?view=month&date=2028-09');
+    $m25 = $cellOf($monthAgain['body'], '2028-09-25', 'class="portal-cal-month-cell-date"');
+    $m27 = $cellOf($monthAgain['body'], '2028-09-27', 'class="portal-cal-month-cell-date"');
+    $m28 = $cellOf($monthAgain['body'], '2028-09-28', 'class="portal-cal-month-cell-date"');
+    ok(
+        'X03b the month grid shows the 25th-10:00-to-27th-09:00 event on its LAST day, the 27th (and on the 25th, and not on the 28th)',
+        $monthAgain['status'] === 200 && str_contains($m25, $spanName) === true && str_contains($m27, $spanName) === true && str_contains($m28, $spanName) === false,
+        said($monthAgain) . '; 25th has it: ' . json_encode(str_contains($m25, $spanName)) . ', 27th: ' . json_encode(str_contains($m27, $spanName)) . ', 28th: ' . json_encode(str_contains($m28, $spanName))
+    );
+    $yearPage = req($adminJar, 'GET', '/calendar?view=year&date=2028-09-24');
+    $y27 = $cellOf($yearPage['body'], '2028-09-27', '<a class="portal-cal-yearplan-num');
+    $y28 = $cellOf($yearPage['body'], '2028-09-28', '<a class="portal-cal-yearplan-num');
+    ok(
+        'X03c the year grid shows it on the 27th too, and not on the 28th',
+        $yearPage['status'] === 200 && str_contains($y27, $spanName) === true && str_contains($y28, $spanName) === false,
+        said($yearPage) . '; 27th has it: ' . json_encode(str_contains($y27, $spanName)) . ', 28th: ' . json_encode(str_contains($y28, $spanName))
+    );
+
+    // ---- #806 (a): the attendance register offers the day the event is ON ----
+    ok(
+        'X03d premise: 2027-03-27 23:30 does not exist in America/Nuuk, and a moment made of it is on the 28th',
+        (new DateTimeImmutable('2027-03-27 23:30:00', new DateTimeZone('America/Nuuk')))->format('Y-m-d') === '2027-03-28'
+    );
+    $register = req($adminJar, 'GET', '/calendar/event/attendance?eventID=960905');
+    ok(
+        'X03e the attendance register offers 27 March for the Nuuk event at 23:30, and not the 28th the old moment-then-midnight gave',
+        $register['status'] === 200 && str_contains($register['body'], 'option value="2027-03-27"') === true
+            && str_contains($register['body'], 'option value="2027-03-28"') === false,
+        said($register) . '; ' . (preg_match_all('#option value="(\d{4}-\d{2}-\d{2})"#', $register['body'], $offered) > 0 ? implode(', ', $offered[1]) : 'no day offered')
     );
     $list     = req($adminJar, 'GET', '/calendar?view=list&q=' . rawurlencode($skipName));
     $listText = words($list['body']);
@@ -2613,7 +2679,189 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
             && str_contains(words($landing['body']), 'Sunday 12 March 2028, 02:30') === true,
         said($landing) . '; data-target ' . json_encode($target[1] ?? null)
     );
-    q('DELETE FROM tblEvents WHERE eventID IN (960901, 960902)');
+    q('DELETE FROM tblEvents WHERE eventID IN (960901, 960902, 960903, 960904, 960905)');
+
+    // ---- #804 / #805: "still to come", "past" and "today" on the EVENT's clock ----
+    // Two events, each on a clock far from the database's and from the
+    // organisation's (Auckland, which is PHP's zone on every page):
+    //   * one in NEW YORK starting in half an hour -- still to come on its own
+    //     clock, but its reading is hours BEHIND the database's NOW() (so the
+    //     old `>= NOW()` dropped it) and hours behind Auckland's clock (so a
+    //     page judging "past" on PHP's zone greys it out);
+    //   * one in AUCKLAND that began an hour ago -- its reading is hours AHEAD
+    //     of the database's NOW(), so the old `>= NOW()` kept it, and the
+    //     countdown feed published it as "next".
+    $nyZone   = new DateTimeZone('America/New_York');
+    $aklZone  = new DateTimeZone('Pacific/Auckland');
+    $nySoon   = (new DateTimeImmutable('now', $nyZone))->modify('+30 minutes')->format('Y-m-d H:i:00');
+    $aklBegun = (new DateTimeImmutable('now', $aklZone))->modify('-60 minutes')->format('Y-m-d H:i:00');
+    $nyName   = 'Selftest zones list 960906 New York soon';
+    $aklName  = 'Selftest zones list 960907 Auckland begun';
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960906, 1, 'selftest-zones-list-960906', ?, ?, DATE_ADD(?, INTERVAL 1 HOUR), 'America/New_York', 'published', 1, 0)",
+        'sss', [$nyName, $nySoon, $nySoon]
+    );
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960907, 1, 'selftest-zones-list-960907', ?, ?, DATE_ADD(?, INTERVAL 2 HOUR), 'Pacific/Auckland', 'published', 1, 0)",
+        'sss', [$aklName, $aklBegun, $aklBegun]
+    );
+    $freshX = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);
+    $dbNowX = (string) $freshX->query('SELECT NOW() AS n')->fetch_assoc()['n'];
+    $freshX->close();
+    $aklNow = (new DateTimeImmutable('now', $aklZone))->format('Y-m-d H:i:s');
+    ok(
+        'X10 premise: the New York reading is BEFORE the database\'s NOW() and before Auckland\'s clock, and the Auckland one is AFTER the database\'s NOW() -- so the old comparisons answer the opposite way and nothing below is vacuous',
+        strcmp($nySoon, $dbNowX) < 0 && strcmp($nySoon, $aklNow) < 0 && strcmp($aklBegun, $dbNowX) > 0,
+        'New York start ' . $nySoon . ', Auckland start ' . $aklBegun . ', database NOW() ' . $dbNowX . ', Auckland now ' . $aklNow
+    );
+
+    $upcoming     = req($adminJar, 'GET', '/calendar?view=list&q=' . rawurlencode('Selftest zones list 96090'));
+    $upcomingText = words($upcoming['body']);
+    ok(
+        'X11 the list\'s "upcoming" keeps the New York event still to come on ITS clock and drops the Auckland one that began an hour ago on ITS clock (#804: the old NOW() did the reverse)',
+        $upcoming['status'] === 200 && str_contains($upcomingText, $nyName) === true && str_contains($upcomingText, $aklName) === false,
+        said($upcoming) . '; New York listed: ' . json_encode(str_contains($upcomingText, $nyName)) . ', Auckland listed: ' . json_encode(str_contains($upcomingText, $aklName))
+    );
+
+    // A card is the text from its own `card h-100` opening up to its event's
+    // name; "Today" is the badge between the name and the next card.
+    $cardBefore = static function (string $html, string $name): string {
+        $at = strpos($html, $name);
+        if ($at === false) {
+            return '';
+        }
+        $open = strrpos(substr($html, 0, $at), '<div class="card h-100');
+
+        return $open === false ? '' : substr($html, $open, $at - $open);
+    };
+    $badgeAfter = static function (string $html, string $name): string {
+        $at = strpos($html, $name);
+        if ($at === false) {
+            return '';
+        }
+        $next = strpos($html, '<div class="card h-100', $at);
+
+        return substr($html, $at, $next === false ? 3000 : $next - $at);
+    };
+    $pastView = req($adminJar, 'GET', '/calendar?view=list&past=1&q=' . rawurlencode('Selftest zones list 96090'));
+    $nyCard   = $cardBefore($pastView['body'], $nyName);
+    $aklCard  = $cardBefore($pastView['body'], $aklName);
+    ok(
+        'X12 the list does NOT grey out the New York event as past (it is still to come on its own clock, though past on Auckland\'s) -- and DOES grey out the Auckland one that has begun',
+        $pastView['status'] === 200 && $nyCard !== '' && $aklCard !== ''
+            && str_contains($nyCard, 'opacity-75') === false && str_contains($aklCard, 'opacity-75') === true,
+        said($pastView) . '; New York card greyed: ' . json_encode(str_contains($nyCard, 'opacity-75')) . ', Auckland card greyed: ' . json_encode(str_contains($aklCard, 'opacity-75'))
+    );
+    $nyToday = substr($nySoon, 0, 10) === (new DateTimeImmutable('now', $nyZone))->format('Y-m-d');
+    ok(
+        'X13 "Today" on the New York card follows New York\'s date (' . ($nyToday === true ? 'today there' : 'not today there') . ')',
+        str_contains($badgeAfter($pastView['body'], $nyName), '>Today</span>') === $nyToday,
+        'badge shown: ' . json_encode(str_contains($badgeAfter($pastView['body'], $nyName), '>Today</span>'))
+    );
+
+    // The public countdown feed: NO test fetched it before (#805).
+    $feed = req('', 'GET', '/widget/countdown.json');
+    $next = json_decode($feed['body'], true);
+    $want = (new DateTimeImmutable($nySoon, $nyZone))->format('c');
+    ok(
+        'X14 the countdown feed publishes the New York event as next, at New York\'s instant (' . $want . '), and NOT the Auckland one that has begun (#804, #805)',
+        $feed['status'] === 200 && is_array($next) === true && (int) ($next['nextEvent']['id'] ?? 0) === 960906
+            && ($next['nextEvent']['startsAt'] ?? null) === $want,
+        said($feed) . '; ' . substr($feed['body'], 0, 300)
+    );
+
+    // ---- #804: the other places that decided "still to come", "today" or "begun" ----
+    // Each of these was a NOW()/CURDATE()/UTC_TIMESTAMP() comparison that no
+    // test reached. The same two events, so X10's premise holds for each.
+    $remind     = req($adminJar, 'GET', '/admin/calendar/reminders');
+    $remindText = words($remind['body']);
+    ok(
+        'X15 the reminder preview\'s "next 48 hours" lists the New York event and not the Auckland one that has begun (#804: the old NOW() did the reverse)',
+        $remind['status'] === 200 && str_contains($remindText, $nyName) === true && str_contains($remindText, $aklName) === false,
+        said($remind) . '; New York listed: ' . json_encode(str_contains($remindText, $nyName)) . ', Auckland listed: ' . json_encode(str_contains($remindText, $aklName))
+    );
+
+    // "Today" on each event's own calendar. Whether each is today THERE depends
+    // on the hour this runs, so the expectation is worked out from the event's
+    // own clock rather than assumed.
+    $console     = req($adminJar, 'GET', '/admin/host-console');
+    $consoleText = words($console['body']);
+    $nyIsToday   = substr($nySoon, 0, 10) === (new DateTimeImmutable('now', $nyZone))->format('Y-m-d');
+    $aklIsToday  = substr($aklBegun, 0, 10) === (new DateTimeImmutable('now', $aklZone))->format('Y-m-d');
+    ok(
+        'X16 the Host Console\'s "starting today" follows each event\'s own date (New York ' . ($nyIsToday === true ? 'today' : 'not today') . ' there, Auckland ' . ($aklIsToday === true ? 'today' : 'not today') . ' there)',
+        $console['status'] === 200 && str_contains($consoleText, $nyName) === $nyIsToday && str_contains($consoleText, $aklName) === $aklIsToday,
+        said($console) . '; New York listed: ' . json_encode(str_contains($consoleText, $nyName)) . ', Auckland listed: ' . json_encode(str_contains($consoleText, $aklName))
+    );
+
+    // The newsletter's "Upcoming events" block, through the real preview page.
+    $newsletterWas = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'newsletter.enabled' AND siteID IS NULL")['settingValue'] ?? '0';
+    setting('newsletter.enabled', '1');
+    q("INSERT INTO tblNewsletter (siteID, title, subject, status) VALUES (1, 'Selftest zones newsletter 804', 'Selftest zones newsletter 804', 'draft')");
+    $newsId = (int) one("SELECT newsletterID FROM tblNewsletter WHERE title = 'Selftest zones newsletter 804'")['newsletterID'];
+    q("INSERT INTO tblNewsletterContent (newsletterID, blockType, position, payload) VALUES (?, 'events', 0, '{\"days\":7}')", 'i', [$newsId]);
+    $letter     = req($adminJar, 'GET', '/newsletter/preview?id=' . $newsId);
+    $letterText = words($letter['body']);
+    ok(
+        'X17 the newsletter\'s "Upcoming events" lists the New York event and not the Auckland one that has begun (#804)',
+        $letter['status'] === 200 && str_contains($letterText, $nyName) === true && str_contains($letterText, $aklName) === false,
+        said($letter) . '; New York listed: ' . json_encode(str_contains($letterText, $nyName)) . ', Auckland listed: ' . json_encode(str_contains($letterText, $aklName))
+    );
+    q('DELETE FROM tblNewsletter WHERE newsletterID = ?', 'i', [$newsId]);
+    setting('newsletter.enabled', (string) $newsletterWas);
+
+    // The discipleship sweep: a pathway step "RSVP'd going to this event" is
+    // completed only once the event has BEGUN -- and that row is permanent.
+    // Asked against UTC_TIMESTAMP(), the New York step completed before its
+    // event began and the Auckland one hours after.
+    q("INSERT INTO tblPathways (siteID, name, isActive) VALUES (1, 'Selftest zones pathway 804', 1)");
+    $pathId = (int) one("SELECT pathwayID FROM tblPathways WHERE name = 'Selftest zones pathway 804'")['pathwayID'];
+    q("INSERT INTO tblPathwaySteps (pathwayID, sortOrder, name, autoRule, autoRefID) VALUES (?, 1, 'Selftest 804 New York', 'rsvpd_event', 960906), (?, 2, 'Selftest 804 Auckland', 'rsvpd_event', 960907)", 'ii', [$pathId, $pathId]);
+    q("INSERT INTO tblPathwayEnrolments (siteID, pathwayID, userID, status) VALUES (1, ?, ?, 'active')", 'ii', [$pathId, MEMBER]);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (960906, ?, 1, 'going', 'confirmed'), (960907, ?, 1, 'going', 'confirmed')", 'ii', [MEMBER, MEMBER]);
+    $sweepPage = req($xMemberJar, 'GET', '/discipleship');
+    $doneSteps = array_column(q(
+        'SELECT s.name FROM tblPathwayProgress pr JOIN tblPathwaySteps s ON s.stepID = pr.stepID WHERE s.pathwayID = ? AND pr.userID = ? ORDER BY s.name',
+        'ii', [$pathId, MEMBER]
+    ), 'name');
+    ok(
+        'X18 the discipleship sweep completes the step for the Auckland event that has BEGUN on its own clock, and NOT the one for the New York event still to come (#804: UTC_TIMESTAMP() did the reverse, and the row it writes is permanent)',
+        $sweepPage['status'] === 200 && $doneSteps === ['Selftest 804 Auckland'],
+        said($sweepPage) . '; completed: ' . json_encode($doneSteps)
+    );
+    q('DELETE FROM tblPathwayProgress WHERE stepID IN (SELECT stepID FROM tblPathwaySteps WHERE pathwayID = ?)', 'i', [$pathId]);
+    q('DELETE FROM tblPathwayEnrolments WHERE pathwayID = ?', 'i', [$pathId]);
+    q('DELETE FROM tblPathwaySteps WHERE pathwayID = ?', 'i', [$pathId]);
+    q('DELETE FROM tblPathways WHERE pathwayID = ?', 'i', [$pathId]);
+    q('DELETE FROM tblEventRSVPs WHERE eventID IN (960906, 960907)');
+
+    // The dashboard's "Events This Week" -- loaded as a page, because its count
+    // is the statement that answered HTTP 500 for every organisation with no
+    // events yet while this was being built (a `CASE` with no `WHEN`). Other
+    // events in this run share the count, so it is MEASURED three times: with
+    // both events, without the Auckland one, without either. Only the New York
+    // event (still to come this week on its own clock) may move the number.
+    $weekCount = static function () use ($adminJar): ?int {
+        $page = req($adminJar, 'GET', '/dashboard');
+        if ($page['status'] !== 200
+            || preg_match('#fw-bold">(\d+)</div>\s*<small class="text-muted">Events This Week</small>#', $page['body'], $m) !== 1
+        ) {
+            return null;
+        }
+
+        return (int) $m[1];
+    };
+    $withBoth = $weekCount();
+    q('DELETE FROM tblEvents WHERE eventID = 960907');
+    $withNy = $weekCount();
+    q('DELETE FROM tblEvents WHERE eventID = 960906');
+    $withNone = $weekCount();
+    ok(
+        'X19 the dashboard\'s "Events This Week" counts the New York event still to come on its own clock and NOT the Auckland one that has begun (#804: the old NOW() did the reverse)',
+        $withBoth !== null && $withNy !== null && $withNone !== null && $withBoth === $withNy && $withNy - $withNone === 1,
+        'count with both ' . json_encode($withBoth) . ', without Auckland ' . json_encode($withNy) . ', without either ' . json_encode($withNone)
+    );
+    q('DELETE FROM tblEvents WHERE eventID IN (960906, 960907)');
 
     // ---- #783: "still to come" on the organisation's clock ------------------
     $fresh = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);

@@ -1167,6 +1167,84 @@ check('L26 an impossible date is refused by BOTH, not rolled into March',
     \Portal\Core\FeedAdmin::showWallClock('2027-02-31 10:00:00', null, false, new DateTimeZone('UTC')) . ' | ' . I18n::formatClockDateTime('2027-02-31 10:00:00'),
     '2027-02-31 10:00:00 | 2027-02-31 10:00:00');
 
+// =============================================================================
+// Section M -- #806: WHICH DAYS an event is on, decided by its readings
+// =============================================================================
+// `I18n::wallClockDaySpan()` / `wallClockDays()` are the ONE place the month
+// grid, the year grid and the attendance register ask which calendar days an
+// event covers. Two faults, each shown against the OLD code beside the new so
+// neither check can pass vacuously.
+echo "\n-- Section M: which days an event is on (#806) --\n";
+
+// M00 -- THE PREMISE: in Nuuk 23:30 on 27 March 2027 does not exist, and PHP
+//        moves it onto the 28th. Without this, M01-M02 prove nothing.
+check('M00 premise: 2027-03-27 23:30 does not exist in America/Nuuk and PHP moves it to the NEXT DAY',
+    (new DateTimeImmutable('2027-03-27 23:30:00', new DateTimeZone('America/Nuuk')))->format('Y-m-d'), '2027-03-28');
+// M01 -- the attendance register's OLD day: a moment in the event's zone, then
+//        midnight. It offered the 28th, a day the event was not on.
+check('M01 OLD: the attendance register\'s moment-then-midnight listed the Nuuk event on the 28th',
+    (new DateTimeImmutable('2027-03-27 23:30:00', new DateTimeZone('America/Nuuk')))->setTime(0, 0)->format('Y-m-d'), '2027-03-28');
+// M02 -- NEW: the day comes off the reading, whatever PHP's zone is.
+date_default_timezone_set('America/Nuuk');
+check('M02 NEW: the Nuuk event is on the 27th and only the 27th',
+    I18n::wallClockDays('2027-03-27 23:30:00', '2027-03-27 23:55:00'), ['2027-03-27']);
+check('M03 ...and its span says so too (the register\'s "last day" badge reads this)',
+    I18n::wallClockDaySpan('2027-03-27 23:30:00', '2027-03-28 00:45:00'), ['first' => '2027-03-27', 'last' => '2027-03-28']);
+
+// M04 -- THE LAST DAY of a multi-day event that ends EARLIER in the day than
+//        it began. The grids walked from the start READING while `<=` the end
+//        READING, so 06-03 10:00 was "after" 06-03 09:00 and the 3rd was lost.
+//        The OLD walk is run here exactly as the month view had it.
+$oldWalk = static function (string $s, string $e): array {
+    $start = I18n::wallClockReading($s);
+    $end   = I18n::wallClockReading($e);
+    $out   = [];
+    for ($cur = $start; $cur <= $end; $cur = $cur->modify('+1 day')) {
+        $out[] = $cur->format('Y-m-d');
+    }
+
+    return $out;
+};
+check('M04 OLD: the grids\' walk left out the last day of 06-01 10:00 to 06-03 09:00',
+    $oldWalk('2026-06-01 10:00:00', '2026-06-03 09:00:00'), ['2026-06-01', '2026-06-02']);
+check('M05 NEW: all three days',
+    I18n::wallClockDays('2026-06-01 10:00:00', '2026-06-03 09:00:00'), ['2026-06-01', '2026-06-02', '2026-06-03']);
+
+// M06-M07 -- AN END OF EXACTLY MIDNIGHT. Walking by date alone would put an
+//        evening event from 19:00 to midnight on the next day too, which the
+//        old walk happened never to do. Both sides pinned, so neither a
+//        "simplification" that drops the rule nor one that over-applies it
+//        passes.
+check('M06 an evening event ending at 00:00 is on ONE day, not two',
+    I18n::wallClockDays('2026-06-01 19:00:00', '2026-06-02 00:00:00'), ['2026-06-01']);
+check('M07 ...but one ending at 00:01 really is on the second day as well',
+    I18n::wallClockDays('2026-06-01 19:00:00', '2026-06-02 00:01:00'), ['2026-06-01', '2026-06-02']);
+check('M08 an all-day import (ends 23:59:59 on its last day) keeps all three days',
+    I18n::wallClockDays('2026-12-24 00:00:00', '2026-12-26 23:59:59'), ['2026-12-24', '2026-12-25', '2026-12-26']);
+check('M09 an end before the start gives the start day alone, as the register always did',
+    I18n::wallClockDays('2026-06-03 10:00:00', '2026-06-01 09:00:00'), ['2026-06-03']);
+check('M10 no end gives the start day alone',
+    I18n::wallClockDays('2026-06-03 10:00:00', null), ['2026-06-03']);
+
+// M11-M13 -- THE WINDOW AND THE CAP. The year view passes its own year, the
+//        month view a week either side of its month, the register a cap of
+//        14. An event ending in 9999 must cost the window, not millennia.
+check('M11 the window clips both ends',
+    I18n::wallClockDays('2026-12-30 10:00:00', '2027-01-02 09:00:00', '2026-12-31', '2027-01-01'), ['2026-12-31', '2027-01-01']);
+// (First version counted the days only: 2020 is a leap year too, so with the
+// window's start ignored the walk gave 2020's 366 days and still passed.)
+$m12 = I18n::wallClockDays('2020-01-01 00:00:00', '9999-12-31 23:59:59', '2028-01-01', '2028-12-31');
+check('M12 an event ending in 9999 costs only the year asked for: 2028-01-01 to 2028-12-31, 366 days',
+    [$m12[0] ?? null, $m12[count($m12) - 1] ?? null, count($m12)], ['2028-01-01', '2028-12-31', 366]);
+check('M13 the cap stops the list (the register shows at most 14 columns)',
+    count(I18n::wallClockDays('2026-06-01 10:00:00', '2026-07-01 09:00:00', null, null, 14)), 14);
+check('M14 the days step across Nuuk\'s spring change night one date at a time (a 23-hour day is still one day)',
+    I18n::wallClockDays('2027-03-27 23:30:00', '2027-03-29 01:30:00'), ['2027-03-27', '2027-03-28', '2027-03-29']);
+check('M14b ...and across Nuuk\'s autumn one (a 25-hour day, 2027-10-30 into the 31st)',
+    I18n::wallClockDays('2027-10-29 22:00:00', '2027-10-31 01:00:00'), ['2027-10-29', '2027-10-30', '2027-10-31']);
+check('M15 a start that is not a reading gives no days and no span',
+    [I18n::wallClockDays('2027-02-31 10:00:00', null), I18n::wallClockDaySpan('not a time', null)], [[], null]);
+
 date_default_timezone_set($wasZoneL);
 
 echo "\n";
@@ -1180,4 +1258,7 @@ echo "both this and check_clock_time_not_a_moment.py, which says so too.\n";
 echo "Section L drives the four I18n methods #777 part two converted twenty-four\n";
 echo "event pages to; whether each PAGE still calls them is the gate's question,\n";
 echo "and the HTTP half is part X of tools/time-zones-selftest.php.\n";
+echo "Section M drives the one place the grids and the attendance register ask\n";
+echo "which DAYS an event is on (#806); whether each page asks it is again the\n";
+echo "HTTP half's question.\n";
 exit($failed === 0 ? 0 : 1);

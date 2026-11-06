@@ -58,6 +58,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\EventRecurrence;
+use Portal\Core\Events;
 use Portal\Core\EventVisibility;
 use Portal\Core\Ical;
 use Portal\Core\Router;
@@ -288,14 +289,24 @@ if ($eventId > 0) {
     [$exportMode, $exportViewer] = [EventVisibility::MODE_ANONYMOUS, 0];
     $visibility = EventVisibility::where('e', EventVisibility::MODE_ANONYMOUS, 0, $today);
     $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_ANONYMOUS, 0, $today, 'canSeeFull');
+    // 🕰️ "Upcoming" on EACH EVENT'S OWN CLOCK (#804). This was
+    //    `e.startDateTime >= NOW()`, the DATABASE SERVER's clock in its own
+    //    session zone, so a subscriber's calendar app lost an event hours
+    //    before it began, or kept one hours after, whenever the organisation
+    //    (or the event) was in a different zone from the database host.
+    //    Events::nowOnItsOwnClock() is exact row by row inside SQL, so the
+    //    200-event `LIMIT` is filled from the right rows; the loose bound is
+    //    only for the `startDateTime` index.
+    $nowOnClock = Events::nowOnItsOwnClock($db, 'e', $siteId);
     $stmt = $db->prepare(sprintf(
-        'SELECT e.*, %s FROM tblEvents e WHERE e.isDeleted = 0 AND e.startDateTime >= NOW() AND e.siteID = ? AND e.status = \'published\'',
-        $fullDetail['sql']
+        'SELECT e.*, %s FROM tblEvents e WHERE e.isDeleted = 0 AND `e`.`startDateTime` >= ? AND `e`.`startDateTime` >= %s AND e.siteID = ? AND e.status = \'published\'',
+        $fullDetail['sql'],
+        $nowOnClock['sql']
     ) . $visibility['sql'] . ' ORDER BY e.startDateTime LIMIT 200');
     if ($stmt !== false) {
         $stmt->bind_param(
-            $fullDetail['types'] . 'i' . $visibility['types'],
-            ...array_merge($fullDetail['params'], [$siteId], $visibility['params'])
+            $fullDetail['types'] . 's' . $nowOnClock['types'] . 'i' . $visibility['types'],
+            ...array_merge($fullDetail['params'], [Events::looseUtcBound('-1 day')], $nowOnClock['params'], [$siteId], $visibility['params'])
         );
         $stmt->execute();
         $result = $stmt->get_result();

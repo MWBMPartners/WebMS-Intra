@@ -47,6 +47,14 @@ if (App::isAdmin() === false) {
 }
 
 // 📋 Events with livestream activity OR starting today.
+//
+// 🕰️ "Today" is the EVENT's own today (#804). This was
+//    `DATE(e.startDateTime) = CURDATE()` -- the DATABASE SERVER's date, in its
+//    own session zone -- so for an organisation far from the database host's
+//    zone, a service starting this morning was missing from the console for
+//    hours, or yesterday's still offered. Events::nowOnItsOwnClock() gives each
+//    row's own clock, and the date is taken off that.
+$nowOnClock = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'e', $siteId);
 $events = [];
 $stmt = $mysqli->prepare(
     'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, '
@@ -60,11 +68,11 @@ $stmt = $mysqli->prepare(
     . 'WHERE e.siteID = ? AND e.isDeleted = 0 AND e.externalFeedID IS NULL AND e.status = "published" '
     . '  AND ('
     . '    EXISTS (SELECT 1 FROM tblLivestreamSessions s WHERE s.eventID = e.eventID) '
-    . '    OR DATE(e.startDateTime) = CURDATE() '
+    . '    OR DATE(`e`.`startDateTime`) = DATE(' . $nowOnClock['sql'] . ') '
     . '  ) '
     . 'ORDER BY liveNow DESC, e.startDateTime DESC LIMIT 30'
 );
-$stmt->bind_param('i', $siteId);
+$stmt->bind_param('i' . $nowOnClock['types'], $siteId, ...$nowOnClock['params']);
 $stmt->execute();
 $result = $stmt->get_result();
 while ($r = $result->fetch_assoc()) {

@@ -347,6 +347,21 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
         "'tblEvents' => ['eventTimezone'],",
         "names tblEvents in the backup's list of removed columns; no row of any event is read on this line",
     ),
+    # Not an event read at all (#804): Events::nowOnItsOwnClock() reads the
+    # DISTINCT ZONE TEXTS in use, so that each event can be compared with what
+    # its own clock reads now. It returns no event, no name and no detail, and
+    # it must include imported events' zones, because the statements it serves
+    # list imported events too (each applying the visibility rule itself).
+    # Keyed by line number like every entry here, so a change higher up
+    # Events.php moves both of these.
+    ("_core/Events.php", 486): (
+        "SELECT DISTINCT `timezone` FROM `tblEvents`')",
+        "reads only the zone texts in use, to work out each event's clock (#804); no event is returned",
+    ),
+    ("_core/Events.php", 487): (
+        "SELECT DISTINCT `timezone` FROM `tblEvents` WHERE `siteID` = ?",
+        "reads only one organisation's zone texts, to work out each event's clock (#804); no event is returned",
+    ),
 }
 
 

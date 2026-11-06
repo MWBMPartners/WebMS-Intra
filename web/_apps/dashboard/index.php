@@ -35,6 +35,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\AssetRegister;
+use Portal\Core\Events;
 use Portal\Core\EventVisibility;
 use Portal\Core\ImportNotifier;
 use Portal\Core\Router;
@@ -117,15 +118,27 @@ if (isset($SETTINGS['expenses']['enabled']) === true && $SETTINGS['expenses']['e
 //    organisation's.
 if (isset($SETTINGS['calendar']['enabled']) === true && $SETTINGS['calendar']['enabled'] === 'true') {
     $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, EventVisibility::sessionViewerId(), date('Y-m-d'));
+    // 🕰️ "This week" on EACH EVENT'S OWN CLOCK (#804): from what its clock
+    //    reads now to seven days on. This was `NOW()` and `DATE_ADD(NOW(), …)`,
+    //    the DATABASE SERVER's clock in its own session zone, so the count
+    //    took in events that had begun hours ago, or missed ones still to
+    //    come, whenever the organisation was in a different zone from the
+    //    database host. The expression is written twice, so its values are
+    //    bound twice, in the order the marks appear.
+    $nowOnClock = Events::nowOnItsOwnClock($mysqli, 'e', $siteId);
     $evStmt = $mysqli->prepare(
         'SELECT COUNT(*) AS cnt FROM tblEvents e '
         . 'WHERE e.isDeleted = 0 AND e.siteID = ? '
-        . 'AND e.startDateTime >= NOW() AND e.startDateTime <= DATE_ADD(NOW(), INTERVAL 7 DAY) '
+        . 'AND `e`.`startDateTime` >= ' . $nowOnClock['sql'] . ' '
+        . 'AND `e`.`startDateTime` <= DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL 7 DAY) '
         . 'AND e.status = \'published\''
         . $visibility['sql']
     );
     if ($evStmt !== false) {
-        $evStmt->bind_param('i' . $visibility['types'], $siteId, ...$visibility['params']);
+        $evStmt->bind_param(
+            'i' . $nowOnClock['types'] . $nowOnClock['types'] . $visibility['types'],
+            ...array_merge([$siteId], $nowOnClock['params'], $nowOnClock['params'], $visibility['params'])
+        );
         $evStmt->execute();
         $cnt = (int) ($evStmt->get_result()->fetch_assoc()['cnt'] ?? 0);
         $evStmt->close();

@@ -32,30 +32,31 @@ $byDate = [];
 //    gives an object that cannot move, and `modify('+1 day')` on it is the
 //    same clock time on the next calendar day. Only `format()` and comparisons
 //    with OTHER readings are done with it below -- never a real "now".
+//
+// #806: the walk below USED to step from the start READING while it was
+// still `<=` the end READING -- comparing a time of day as well as a date, so
+// an event from 06-01 10:00 to 06-03 09:00 reached 06-03 10:00, which is after
+// 09:00, and its LAST DAY was left out of the grid. I18n::wallClockDays()
+// compares DATES, and is the one place the days an event covers are decided
+// (the year view and the attendance register ask it too). The window keeps
+// the walk to what the grid can show: up to six padding days fall either side
+// of the month, so a week either side is enough, and an event that ends years
+// away costs a handful of steps rather than one per day.
+$monthWindowFrom = $cursor->modify('first day of this month')->modify('-7 days')->format('Y-m-d');
+$monthWindowTo   = $cursor->modify('last day of this month')->modify('+7 days')->format('Y-m-d');
 foreach ($events as $ev) {
-    $start = \Portal\Core\I18n::wallClockReading((string) $ev['startDateTime']);
-    if ($start === null) {
-        continue;
-    }
-    $end   = $ev['endDateTime'] !== null
-        ? (\Portal\Core\I18n::wallClockReading((string) $ev['endDateTime']) ?? $start)
-        : $start;
-
+    $evDays = \Portal\Core\I18n::wallClockDays(
+        (string) $ev['startDateTime'],
+        $ev['endDateTime'] !== null ? (string) $ev['endDateTime'] : null,
+        $monthWindowFrom,
+        $monthWindowTo
+    );
     // Multi-day events appear on every day they overlap with the visible month
-    $current = $start;
-    while ($current <= $end) {
-        $k = $current->format('Y-m-d');
+    foreach ($evDays as $k) {
         if (isset($byDate[$k]) === false) {
             $byDate[$k] = [];
         }
         $byDate[$k][] = $ev;
-        $current = $current->modify('+1 day');
-        // Safety: don't loop past the month's visible range
-        if ($current->format('Y-m') > $cursor->format('Y-m')
-            && $current->format('Y-m') !== $cursor->modify('+1 month')->format('Y-m')
-        ) {
-            break;
-        }
     }
 }
 

@@ -312,7 +312,22 @@ if ($filterTo !== '') {
 
 if ($view === 'list') {
     if ($showPast === false) {
-        $conditions[] = 'e.startDateTime >= NOW()';
+        // 🕰️ "Upcoming" on EACH EVENT'S OWN CLOCK (#804). This was
+        //    `e.startDateTime >= NOW()` -- the DATABASE SERVER's clock, in its
+        //    own session zone -- so with the organisation (or an event) in a
+        //    different zone from the database host, events dropped off the
+        //    list hours early or stayed on hours after they began.
+        //    Events::nowOnItsOwnClock() is exact row by row INSIDE SQL, which
+        //    is what keeps the count and the pages right: judging rows in PHP
+        //    after the fetch cannot, once the list is counted and paged. The
+        //    loose bound is only for the `startDateTime` index.
+        $nowOnClock   = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'e', $siteId);
+        $conditions[] = '`e`.`startDateTime` >= ?';
+        $params[]     = \Portal\Core\Events::looseUtcBound('-1 day');
+        $types       .= 's';
+        $conditions[] = '`e`.`startDateTime` >= ' . $nowOnClock['sql'];
+        $params       = array_merge($params, $nowOnClock['params']);
+        $types       .= $nowOnClock['types'];
     }
     $where = 'WHERE ' . implode(' AND ', $conditions);
 

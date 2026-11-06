@@ -22,6 +22,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\Events;
 use Portal\Core\EventVisibility;
 use Portal\Core\Site;
 
@@ -64,6 +65,19 @@ $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_WEBSI
 //    recognise a statement at all when PHP code sits between SELECT and FROM
 //    (measured while building #514 part P2). The text sprintf() puts in is
 //    SQL built by EventVisibility itself, never anything a visitor sent.
+// 🕰️ "STILL TO COME" IS ASKED ON EACH EVENT'S OWN CLOCK (#804). This was
+//    `e.startDateTime >= NOW()`, and `NOW()` is the DATABASE SERVER's clock
+//    in its own session zone: with an Auckland organisation on a database
+//    running in UTC, an event that had begun up to about thirteen hours ago
+//    was still published to every website embedding this feed as "next",
+//    with its start time already in the past. Events::nowOnItsOwnClock()
+//    gives each row's own clock exactly, inside SQL, so `LIMIT 1` still
+//    picks from the right rows; the loose bound beside it is only there so
+//    the `startDateTime` index can still be used. The visibility rule is
+//    unchanged: EventVisibility::where() in "website" mode, built above, is
+//    still appended to this statement.
+$nowOnClock = Events::nowOnItsOwnClock($mysqli, 'e', $siteId);
+$looseFloor = Events::looseUtcBound('-1 day');
 $stmt = $mysqli->prepare(sprintf(
     'SELECT e.eventID, e.eventName AS title, e.locationName AS location, e.startDateTime, e.endDateTime, '
     // The event's own zone (#777 part two): `startsAt` below is an instant,
@@ -72,14 +86,16 @@ $stmt = $mysqli->prepare(sprintf(
     . 'FROM tblEvents e '
     . 'WHERE e.siteID = ? '
     . '  AND e.isDeleted = 0 '
-    . '  AND e.startDateTime >= NOW() '
+    . '  AND `e`.`startDateTime` >= ? '
+    . '  AND `e`.`startDateTime` >= %s '
     . '  AND e.status = "published"',
-    $fullDetail['sql']
+    $fullDetail['sql'],
+    $nowOnClock['sql']
 ) . $visibility['sql'] . ' ORDER BY e.startDateTime ASC LIMIT 1');
 if ($stmt !== false) {
     $stmt->bind_param(
-        $fullDetail['types'] . 'i' . $visibility['types'],
-        ...array_merge($fullDetail['params'], [$siteId], $visibility['params'])
+        $fullDetail['types'] . 'is' . $nowOnClock['types'] . $visibility['types'],
+        ...array_merge($fullDetail['params'], [$siteId, $looseFloor], $nowOnClock['params'], $visibility['params'])
     );
     $stmt->execute();
     $nextEvent = $stmt->get_result()->fetch_assoc() ?: null;

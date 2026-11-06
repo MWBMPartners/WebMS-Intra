@@ -40,16 +40,35 @@ while ($r = $result->fetch_assoc()) { $recent[] = $r; }
 // fix round raises) could read a HIDDEN imported event's name here even though the event page
 // itself gives that same viewer a 404. This cannot fix the missing siteID scoping (a separate,
 // pre-existing cross-organisation gap, not #514's to fix inside P3).
-$upcoming = [];
-$result = $mysqli->query(
+//
+// 🕰️ "The next 48 hours" on EACH EVENT'S OWN CLOCK (#804). This was
+//    `BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 48 HOUR)` -- the DATABASE
+//    SERVER's clock in its own session zone -- so the preview showed events
+//    that had already begun, or left out ones about to, whenever an event's
+//    zone was far from the database host's. Exact inside SQL, so `LIMIT 20` is
+//    filled from the right rows. This list is not scoped to one organisation
+//    (see above), so every organisation's zones are read (siteId null).
+$upcoming   = [];
+$nowOnClock = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'e', null);
+$stmt = $mysqli->prepare(
     'SELECT e.eventID, e.eventName, e.startDateTime, '
     . '  (SELECT COUNT(*) FROM tblEventReminderLog WHERE eventID = e.eventID) AS sentCount '
     . 'FROM tblEvents e '
     . 'WHERE e.isDeleted = 0 AND e.status = "published" AND e.externalFeedID IS NULL '
-    . '  AND e.startDateTime BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 48 HOUR) '
+    . '  AND `e`.`startDateTime` >= ? '
+    . '  AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL 48 HOUR) '
     . 'ORDER BY e.startDateTime ASC LIMIT 20'
 );
-while ($r = $result->fetch_assoc()) { $upcoming[] = $r; }
+if ($stmt !== false) {
+    $stmt->bind_param(
+        's' . $nowOnClock['types'] . $nowOnClock['types'],
+        ...array_merge([\Portal\Core\Events::looseUtcBound('-1 day')], $nowOnClock['params'], $nowOnClock['params'])
+    );
+    $stmt->execute();
+    $result = $stmt->get_result();
+    while ($r = $result->fetch_assoc()) { $upcoming[] = $r; }
+    $stmt->close();
+}
 
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');

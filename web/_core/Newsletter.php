@@ -655,16 +655,27 @@ class Newsletter
                 $days = max(1, min(60, (int) ($cfg['days'] ?? 14)));
                 $items = [];
                 $visibility = EventVisibility::where('e', EventVisibility::MODE_BULK_MEMBERS, 0, date('Y-m-d'));
+                // 🕰️ "Upcoming" on EACH EVENT'S OWN CLOCK (#804). This was
+                //    `BETWEEN NOW() AND DATE_ADD(NOW(), …)` -- the DATABASE
+                //    SERVER's clock -- so an e-mail that cannot be corrected
+                //    once sent could list as "upcoming" an event that had begun
+                //    hours earlier, or leave out one about to start. Exact
+                //    inside SQL, so `LIMIT 20` is filled from the right rows;
+                //    the expression appears twice, so its values are bound twice.
+                $nowOnClock = Events::nowOnItsOwnClock($db, 'e', $siteId);
                 $stmt = $db->prepare(
                     'SELECT e.eventName, e.startDateTime FROM tblEvents e '
                     . 'WHERE e.siteID = ? AND e.isDeleted = 0 '
-                    . 'AND e.startDateTime BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL ? DAY) '
+                    . 'AND `e`.`startDateTime` BETWEEN ' . $nowOnClock['sql'] . ' AND DATE_ADD(' . $nowOnClock['sql'] . ', INTERVAL ? DAY) '
                     . 'AND e.status = "published"'
                     . $visibility['sql'] . ' '
                     . 'ORDER BY e.startDateTime LIMIT 20'
                 );
                 if ($stmt !== false) {
-                    $stmt->bind_param('ii' . $visibility['types'], $siteId, $days, ...$visibility['params']);
+                    $stmt->bind_param(
+                        'i' . $nowOnClock['types'] . $nowOnClock['types'] . 'i' . $visibility['types'],
+                        ...array_merge([$siteId], $nowOnClock['params'], $nowOnClock['params'], [$days], $visibility['params'])
+                    );
                     $stmt->execute();
                     $rs = $stmt->get_result();
                     while ($r = $rs->fetch_assoc()) {

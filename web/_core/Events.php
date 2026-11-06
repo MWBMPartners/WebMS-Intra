@@ -375,6 +375,18 @@ class Events
      */
     public static function volunteeringFor(mysqli $db, int $userId, int $siteId): array
     {
+        // 🕰️ #804, LEFT ON PURPOSE: "since a day ago" below is on the
+        //    DATABASE SERVER's clock, not the event's. It is a deliberate day
+        //    of grace (somebody looks up what they helped with yesterday), and
+        //    the bound is the DATABASE's session clock, not UTC, and clocks span 26 hours
+        //    (UTC-12 to UTC+14). So it never drops an event still to come only while the
+        //    database clock is at most 12 hours ahead of UTC — true for a server on UTC or
+        //    Europe, but a server on UTC+13 (Tonga, Samoa) would drop an `Etc/GMT+12` event
+        //    in its last hour (#804's check measured it). The harm is small and rare; this
+        //    used to claim it could never happen, which was untrue. Otherwise
+        //    only how much of yesterday shows varies. Nothing here says
+        //    "upcoming" or "past" per row -- a page that needs that asks
+        //    nowOnItsOwnClock().
         $stmt = $db->prepare(
             'SELECT e.eventID, e.eventName, e.eventSlug, e.startDateTime, e.endDateTime, '
             . '       e.locationName, e.status, e.description, '
@@ -406,6 +418,125 @@ class Events
         $stmt->close();
 
         return $rows;
+    }
+
+    /**
+     * 🕰️ "Now", ON EACH EVENT'S OWN CLOCK, as an SQL expression -- the ONE
+     *    place a query asks whether an event is still to come, under way or
+     *    today (#804).
+     *
+     * `tblEvents.startDateTime` and `endDateTime` hold a reading of the
+     * EVENT's clock (`tblEvents.timezone`). Thirteen statements compared them
+     * with `NOW()`, `CURDATE()` or `UTC_TIMESTAMP()` -- the DATABASE SERVER's
+     * clock, in a session zone that is `SYSTEM` by default, so whatever the
+     * database host happens to be set to. With an Auckland organisation on a
+     * database in UTC, the public countdown feed went on publishing as "next"
+     * an event that had begun up to thirteen hours earlier.
+     *
+     * WHY AN EXPRESSION AND NOT ONE BOUND "NOW". Each event carries its own
+     * zone, so no single value is right for every row (#783 could bind one
+     * for a resource page only because a resource belongs to one
+     * organisation). A database cannot convert a zone NAME reliably either:
+     * `CONVERT_TZ()` with a name needs the time-zone tables loaded, which
+     * shared hosting usually does not do, and then answers NULL.
+     *
+     * So the zones actually in use are read first (a handful, whatever the
+     * number of events -- `withUnknownZone()` below does the same), PHP works
+     * out what each one's clock reads now, and the answer is
+     *
+     *     CAST(CASE `e`.`timezone` WHEN ? THEN ? ... ELSE ? END AS DATETIME)
+     *
+     * with every value bound. That is EXACT, row by row, inside SQL -- so a
+     * `LIMIT`, an `OFFSET` and a `COUNT(*)` all stay right, which "fetch a
+     * loose superset and judge each row in PHP" (#783's My Bookings shape)
+     * cannot promise once a page counts or pages its rows.
+     *
+     * The `ELSE` is the organisation's clock: a zone text PHP cannot open is
+     * read on the organisation's zone everywhere else too (`Site::zoneFor()`),
+     * and so is a zone written after the list was read -- a row saved in the
+     * instant between the two statements. That is the one case this can be
+     * wrong in, and only by that row's offset from the organisation's.
+     *
+     * ⚠️ THE EXPRESSION CANNOT USE THE `startDateTime` INDEX, because it
+     *    differs row by row. A caller that wants the index adds a loose bound
+     *    beside it -- `looseUtcBound('-1 day')`: no clock on Earth reads more
+     *    than twelve hours behind UTC or fourteen ahead, so a reading still to
+     *    come anywhere is after "UTC now, less a day".
+     *
+     * ⚠️ IN THE HOUR THE CLOCKS GO BACK a clock reads 01:00-01:59 twice; this
+     *    answers by what it reads at the moment of asking
+     *    (`I18n::wallClockNow()`), which is what a person in the room would say.
+     *
+     * @param mysqli   $db     The connection the expression will be used on.
+     * @param string   $alias  The table alias for `tblEvents` in that statement
+     *                         (letters, digits, underscore -- it is written
+     *                         into SQL, so anything else is refused).
+     * @param int|null $siteId One organisation: read only its events' zones,
+     *                         and fall back to its clock. Null: every
+     *                         organisation's zones, falling back to the clock
+     *                         of the organisation this request is for.
+     *
+     * @return array{sql: string, types: string, params: list<string>} Bind
+     *         `params` (all text) at the point `sql` appears -- and once more
+     *         for each further time the caller writes `sql` into a statement.
+     */
+    public static function nowOnItsOwnClock(mysqli $db, string $alias, ?int $siteId = null): array
+    {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]{0,30}$/', $alias) !== 1) {
+            throw new \InvalidArgumentException('Events::nowOnItsOwnClock(): the alias must be a plain SQL name.');
+        }
+
+        $zones = [];
+        $stmt  = $siteId === null
+            ? $db->prepare('SELECT DISTINCT `timezone` FROM `tblEvents`')
+            : $db->prepare('SELECT DISTINCT `timezone` FROM `tblEvents` WHERE `siteID` = ?');
+        if ($stmt !== false) {
+            if ($siteId !== null) {
+                $stmt->bind_param('i', $siteId);
+            }
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $zones[] = (string) ($row['timezone'] ?? '');
+            }
+            $stmt->close();
+        }
+
+        $orgNow = I18n::wallClockNow(new \DateTimeZone(Site::timezone($siteId)));
+        if ($zones === []) {
+            // No events at all (or the list could not be read): `CASE` with no
+            // `WHEN` is not SQL, and the first version of this method built
+            // exactly that, so every page asking it on an installation with no
+            // events yet -- the dashboard first -- answered with an error. The
+            // organisation's clock is the answer for any row anyway.
+            return ['sql' => 'CAST(? AS DATETIME)', 'types' => 's', 'params' => [$orgNow]];
+        }
+
+        $sql    = 'CAST(CASE `' . $alias . '`.`timezone`';
+        $params = [];
+        foreach ($zones as $zone) {
+            $sql     .= ' WHEN ? THEN ?';
+            $params[] = $zone;
+            // Site::zoneFor() is the one place a stored zone text becomes a
+            // clock, falling back to the organisation's for text PHP cannot
+            // open -- exactly as every page that SHOWS the event does.
+            $params[] = I18n::wallClockNow(Site::zoneFor($zone, $siteId));
+        }
+        $sql     .= ' ELSE ? END AS DATETIME)';
+        $params[] = $orgNow;
+
+        return ['sql' => $sql, 'types' => str_repeat('s', count($params)), 'params' => $params];
+    }
+
+    /**
+     * UTC "now" moved by `$shift` (a `modify()` phrase such as `'-1 day'`), as
+     * `Y-m-d H:i:s` text -- ONLY for a LOOSE bound beside
+     * `nowOnItsOwnClock()`, so a query can still use the `startDateTime`
+     * index. It is not any event's clock and must never decide anything alone.
+     */
+    public static function looseUtcBound(string $shift): string
+    {
+        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->modify($shift)->format('Y-m-d H:i:s');
     }
 
     /**

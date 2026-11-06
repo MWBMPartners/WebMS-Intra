@@ -503,6 +503,15 @@ $eventAssignments = AssetRegister::listEventAssignments($assetId);
 $eventCandidates = [];
 if ($privileged === true) {
     // Imported events are read-only (#514 D5); an asset cannot be assigned to an event nobody here can edit.
+    // 🕰️ #804, LEFT ON PURPOSE: "since a day ago" on the DATABASE SERVER's
+    //    clock, not each event's. It is a deliberately generous picker floor
+    //    (an asset can still be tied to yesterday's event). But the bound is the DATABASE's session clock, not UTC, and clocks span 26 hours
+    //    (UTC-12 to UTC+14). So it never drops an event still to come only while the
+    //    database clock is at most 12 hours ahead of UTC — true for a server on UTC or
+    //    Europe, but a server on UTC+13 (Tonga, Samoa) would drop an `Etc/GMT+12` event
+    //    in its last hour (#804's check measured it). The harm is small and rare; this
+    //    used to claim it could never happen, which was untrue. Otherwise
+    //    only how much of yesterday is included varies.
     $evStmt = $db->prepare(
         'SELECT eventID, eventName, startDateTime FROM tblEvents '
         . 'WHERE siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL AND startDateTime >= DATE_SUB(NOW(), INTERVAL 1 DAY) '

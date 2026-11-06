@@ -65,24 +65,25 @@ if ($stmtMt !== false) {
 $byDate = [];
 // 🕰️ #777 part two: readings on the event's own clock, made objects that
 //    cannot move -- see the same step in views/month.php for why.
+//
+// #806: this walked from the start READING while still `<=` the end READING,
+// so an event ending earlier in the day than it started (06-01 10:00 to 06-03
+// 09:00) lost its LAST DAY -- see views/month.php. I18n::wallClockDays()
+// compares dates, and the year's own bounds are its window, so an event that
+// runs for years (an import may end as late as 9999-12-31) costs at most one
+// step per day of THIS year rather than one per day of its whole length.
 foreach ($events as $ev) {
-    $start = \Portal\Core\I18n::wallClockReading((string) $ev['startDateTime']);
-    if ($start === null) {
-        continue;
-    }
-    $end   = $ev['endDateTime'] !== null
-        ? (\Portal\Core\I18n::wallClockReading((string) $ev['endDateTime']) ?? $start)
-        : $start;
-    $cur = $start;
-    while ($cur <= $end) {
-        if ((int) $cur->format('Y') === $year) {
-            $k = $cur->format('Y-m-d');
-            if (isset($byDate[$k]) === false) {
-                $byDate[$k] = [];
-            }
-            $byDate[$k][] = $ev;
+    $evDays = \Portal\Core\I18n::wallClockDays(
+        (string) $ev['startDateTime'],
+        $ev['endDateTime'] !== null ? (string) $ev['endDateTime'] : null,
+        sprintf('%04d-01-01', $year),
+        sprintf('%04d-12-31', $year)
+    );
+    foreach ($evDays as $k) {
+        if (isset($byDate[$k]) === false) {
+            $byDate[$k] = [];
         }
-        $cur = $cur->modify('+1 day');
+        $byDate[$k][] = $ev;
     }
 }
 
