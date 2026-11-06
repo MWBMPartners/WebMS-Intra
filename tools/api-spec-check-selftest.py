@@ -68,11 +68,32 @@ SCHEMA_FILE = REPO / "web/_core/api-spec.schema.json"
 SPEC = REPO / "web/_core/api-spec.json"
 ROUTER = REPO / "web/_core/ApiRouter.php"
 SQL = REPO / "web/_sql/full_schema.sql"
-TRANSLATE = REPO / "web/_apps/api/translate.php"
+# ⚠️ THIS MUST BE A FILE CURRENTLY ON
+#    `check_api_spec_matches_code.py`'s `UNREACHABLE_ON_PURPOSE` LIST,
+#    because plant F deletes it to prove that list fails BOTH ways -- an
+#    unlisted fault, and a listed entry that has stopped being true.
+#
+#    It pointed at `web/_apps/api/translate.php` until 6 November 2026,
+#    and `e54fa7f` (#485/#761) DELETED that handler. The list itself was
+#    updated in that commit; THIS FILE WAS NOT, so the whole self-test
+#    died on its first plant -- "translate.php is missing, so nothing can
+#    be planted into it" -- and it is a hard gate in `pr-security.yml`,
+#    which IS registered with GitHub, so it would have failed the pull
+#    request for every other package as well.
+#
+#    Nothing caught it because this file lives in `tools/` rather than
+#    `tools/audit-checks/`, so the pre-push hook's glob does not pick it
+#    up -- a gap this project has already written down. It was found by
+#    running the whole suite for an unrelated package, which is the only
+#    thing that finds this shape (#690's lesson).
+#
+#    KEEP THE NAME GENERAL: naming it after one handler is what made its
+#    going stale read as deliberate.
+UNREACHABLE_LISTED = REPO / "web/_apps/api/ai-improve.php"
 
 # Every file a plant may edit or delete. Backed up and restored as one set, so a
 # plant cannot leave one of them changed -- see point 2 in the header.
-WATCHED = [SPEC, ROUTER, SQL, TRANSLATE, SCHEMA_FILE]
+WATCHED = [SPEC, ROUTER, SQL, UNREACHABLE_LISTED, SCHEMA_FILE]
 
 VERBOSE = "--verbose" in sys.argv
 
@@ -217,7 +238,7 @@ def plants() -> list[Plant]:
         out.append(Plant("a file at %s" % rel.replace("web/_apps/", "_apps/"), "F",
                          apply, creates))
     out.append(Plant("the unreachable list gone stale (file deleted)", "F",
-                     lambda: TRANSLATE.unlink()))
+                     lambda: UNREACHABLE_LISTED.unlink()))
 
     # ---- G / H: the two switch lists, both directions ---------------------
     apply, creates = new_file("web/_apps/venues/api/teapot.php")

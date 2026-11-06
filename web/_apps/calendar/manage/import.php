@@ -218,11 +218,31 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock):
         //    `Y-m-d H:i:s` sorts the way a clock does, which is #435's own fix,
         //    so once both cells are in that shape the comparison is text and
         //    nothing is resolved into a moment.
-        $startTs = $start !== '' ? strtotime($start) : false;
-        if ($start !== '' && $startTs === false) { $rowErr[] = 'startDateTime not parseable'; }
+        //    ⚠️ ROUND 9 WROTE THE PARAGRAPH ABOVE AND LEFT `strtotime()` ON
+        //       THE LINE BELOW IT, where it stayed until round 11 (#777). So
+        //       the comment promising one decider sat directly on top of two,
+        //       which is worse than no comment: the next reader checks the
+        //       claim, not the code. Measured, the two really did disagree in
+        //       both directions --
+        //
+        //         `2026-06-01 10`    strtotime REFUSES, `$fmtClock` stores it
+        //                            as 10:00:00. So that text was refused in
+        //                            the START column as "not parseable",
+        //                            which was untrue, while the identical
+        //                            text in the END column was accepted.
+        //         `2026-02-31 10:00` strtotime ACCEPTS it (PHP rolls an
+        //                            impossible date forward into March) and
+        //                            `$fmtClock` refuses it, so the row passed
+        //                            this check and was then refused further
+        //                            down under a different message.
+        //
+        //       Nothing was ever stored wrongly, because the store step guards
+        //       both cells. What was wrong was WHICH rows were refused and
+        //       what they were told.
+        $startStored = $start !== '' ? $fmtClock($start) : null;
+        if ($start !== '' && $startStored === null) { $rowErr[] = 'startDateTime not parseable'; }
         if ($end !== '') {
-            $startStored = $start !== '' ? $fmtClock($start) : null;
-            $endStored   = $fmtClock($end);
+            $endStored = $fmtClock($end);
             if ($endStored === null) {
                 $rowErr[] = 'endDateTime not parseable';
             } elseif ($startStored !== null && $endStored < $startStored) {

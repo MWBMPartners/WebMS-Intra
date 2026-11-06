@@ -358,6 +358,39 @@ check('I23 fractional seconds are DROPPED, not refused — toISOString() sends t
     I18n::wallClockFromInput('2027-06-01T19:00:00.000'), '2027-06-01 19:00:00');
 check('I24 fractional seconds with a Z are still an offset',
     I18n::inputCarriesOffset('2027-06-01T19:00:00.000Z'), true);
+
+// ── I23a-I23e — THE FRACTION MUST BELONG TO THE SECONDS (#777 round 11) ──────
+//
+// I23 above proves a fraction on the SECONDS is dropped, which is what
+// `toISOString()` sends and is right. It could not catch the opposite fault,
+// and the gap mattered: round 10 found that the strip was unanchored, so a
+// fraction on ANY component was removed. In ISO 8601 a fractional part belongs
+// to the LOWEST component written, so `19:00.5` means 19:00:30 and `19.5`
+// means 19:30 — and stripping it stored 19:00:00 in both cases, **silently
+// losing up to 59 minutes on a live API and a public form where the old code
+// had answered an honest 400.**
+//
+// Round 10 anchored the strip to follow `:MM:SS`. **NOTHING PINNED THAT**: the
+// anchor could be removed with all 65 audit scripts and all 95 clock checks
+// green, because nothing anywhere sends a decimal time — every value the
+// HTTP test posts is built with `gmdate('Y-m-d\TH:i:s\Z', …)`, so it cannot
+// reach this either. These five are that pin.
+//
+// Round 10's own observation is why they are here: every earlier round moved
+// the code from "stores something wrong" to "refuses", and round 9 moved a
+// refusal to "stores something wrong". That is the direction to check first on
+// any shape accepted from here on, and a refusal is the correct answer because
+// there is no reading to store — the value names a time the field cannot hold.
+check('I23a a fraction on the MINUTES is refused, not truncated to the minute',
+    I18n::wallClockFromInput('2027-06-01T19:00.5'), null);
+check('I23b a fraction on the HOUR is refused too',
+    I18n::wallClockFromInput('2027-06-01T19.5'), null);
+check('I23c the same with a space separator, so the T is not what is doing the work',
+    I18n::wallClockFromInput('2027-06-01 19:00.25'), null);
+check('I23d ISO basic form takes no fractional part at all',
+    I18n::wallClockFromInput('20270601T190000.000'), null);
+check('I23e and a fraction on the minutes is refused on the OFFSET side as well',
+    I18n::instantFromInput('2027-06-01T19:00.5Z', new DateTimeZone('Europe/London')), null);
 check('I25 a date with NO time means midnight on it — the API has an isAllDay field',
     I18n::wallClockFromInput('2027-06-01'), '2027-06-01 00:00:00');
 check('I26 and a bare date is still not read as carrying an offset',

@@ -588,6 +588,42 @@ READING_ROUTER = (
 )
 
 
+# ⚠️ AND THE SAME FOR THE REPEATING-SERIES RULE (#777 round 11).
+#
+#    `calendar/manage/save.php` derives a repeating series' day of the month,
+#    month of the year and start date FROM THE TEXT of the typed reading. Round
+#    10 made them slices; round 11 measured that the slices could be put back
+#    to `date('j', strtotime($startReading))` with ALL 65 AUDIT SCRIPTS GREEN,
+#    this one included.
+#
+#    The reason is this check's own stated blind spot: it needs a declared
+#    wall-clock COLUMN NAME near the conversion, and `$startReading` is a
+#    local variable. **Round 10's own fix created the blind spot its own fix
+#    then sat behind** -- before it, the expressions named `$startDateTime`
+#    directly and the gate could see them.
+#
+#    So the guard is not another pattern over column names: it is that in THIS
+#    file, `$startReading` may never reach a moment builder, and the three
+#    slices must still be there. The harm is not cosmetic -- the pattern was
+#    stored on the wrong day, so the series' first date disagreed with the
+#    typed start and the handler UPDATED the event onto the pattern's date,
+#    telling the administrator it had moved on purpose.
+SLICED_RULE_FILE = os.path.join("web", "_apps", "calendar", "manage", "save.php")
+SLICED_RULE_PARTS = (
+    "substr($startReading, 8, 2)",
+    "substr($startReading, 5, 2)",
+    "substr($startReading, 0, 10)",
+)
+# Anything that turns a reading into a moment, with `$startReading` close
+# enough to be its argument. Kept to one line and one statement on purpose:
+# `[^;\n]` is what stopped an earlier version of this check walking across a
+# multi-line statement and crying wolf.
+SLICED_RULE_FORBIDDEN = re.compile(
+    r"(?:strtotime|date|mktime|date_create(?:_immutable)?|new\s+\\?DateTime(?:Immutable)?)"
+    r"\s*\([^;\n]{0,160}\$startReading"
+)
+
+
 class ProbeUnavailable(Exception):
     """The PHP probe could not run. NOT a finding about the file."""
 
@@ -1111,6 +1147,34 @@ def main() -> int:
             router_code = blank_comments(handle.read())
         tidy = " ".join(router_code.split())
         wanted = " ".join(READING_ROUTER.split())
+        # ⚠️ EVERY USE OF THE NAME IS JUDGED, NOT JUST THE DECLARATION
+        #    (#777 round 11). Counting declarations left the pin defeated by a
+        #    REASSIGNMENT: planted, the pinned closure was left byte-identical
+        #    and `$readingFor = $readFast;` added below it, where `$readFast`
+        #    built a moment through a VARIABLE class name. The declaration
+        #    still appeared exactly once, the pinned text still matched, and
+        #    all 65 audit scripts were green while the whole pre-round-8 harm
+        #    was back -- `01/06/2026 10:00 +0100` stored as 6 January again.
+        #
+        #    This repository had already written that exact class down, about
+        #    #485: "A reassignment (`shareToken = function () {...}`) killed
+        #    the whole token fix with the gate green, because round 3 had
+        #    closed the second-DECLARATION spelling." Round 10 adopted the
+        #    text pin as the remedy and reproduced the known hole in it.
+        #
+        #    So: each occurrence of the name must be either the pinned
+        #    declaration or a CALL. There is no third legitimate shape -- the
+        #    closure is not passed anywhere, returned, or stored.
+        uses = [m for m in re.finditer(r"\$readingFor\b", tidy)]
+        stray = []
+        for found in uses:
+            after = tidy[found.end():found.end() + 2].lstrip()
+            before_decl = tidy[found.start():found.start() + len("$readingFor = static function")]
+            if before_decl == "$readingFor = static function":
+                continue
+            if after.startswith("("):
+                continue
+            stray.append(tidy[max(0, found.start() - 30):found.end() + 30])
         if tidy.count("$readingFor = static function") != 1:
             problems.append(
                 f"{READING_ROUTER_FILE} defines $readingFor "
@@ -1118,6 +1182,14 @@ def main() -> int:
                 f"define it exactly ONCE. A pin that finds its anchor by the "
                 f"FIRST match is satisfied by a dead copy above a gutted live "
                 f"one -- #485 round 2, #763, and #777 round 9 all record it."
+            )
+        elif stray != []:
+            problems.append(
+                f"{READING_ROUTER_FILE} uses $readingFor somewhere that is "
+                f"neither its pinned declaration nor a call, so the pin above "
+                f"it proves nothing: a REASSIGNMENT leaves the pinned text "
+                f"byte-identical and sends every value through other code.\n"
+                f"       seen: " + " | ".join(stray[:3])
             )
         elif wanted not in tidy:
             problems.append(
@@ -1133,6 +1205,43 @@ def main() -> int:
                 f"       If the change is deliberate, update READING_ROUTER in "
                 f"the same edit and say why in the commit. Whitespace is free; "
                 f"anything else is not."
+            )
+
+    # ── The repeating series' rule parts, which the column rule cannot see ─
+    sliced_path = os.path.join(root, SLICED_RULE_FILE)
+    if os.path.isfile(sliced_path) is False:
+        problems.append(f"{SLICED_RULE_FILE} is not there, so the series rule cannot be checked.")
+    else:
+        with open(sliced_path, "r", encoding="utf-8", errors="replace") as handle:
+            sliced_code = blank_comments(handle.read())
+        missing = [part for part in SLICED_RULE_PARTS if part not in sliced_code]
+        if missing != []:
+            problems.append(
+                f"{SLICED_RULE_FILE} no longer slices the repeating series' "
+                f"date parts out of the typed reading.\n"
+                f"       missing: " + ", ".join(missing) + "\n"
+                f"       These three decide a series' day of the month, month "
+                f"of the year and start date. Derived with a conversion "
+                f"instead, they name the wrong day in the two zones whose "
+                f"clocks go forward at 23:00 -- the pattern is then stored on "
+                f"a day the organiser did not type, the series' first date "
+                f"disagrees with it, and the handler moves the event onto the "
+                f"pattern's date while telling the administrator that was "
+                f"deliberate. Every occurrence is wrong, permanently."
+            )
+        bad_use = SLICED_RULE_FORBIDDEN.search(sliced_code)
+        if bad_use is not None:
+            line = sliced_code[:bad_use.start()].count("\n") + 1
+            problems.append(
+                f"{SLICED_RULE_FILE}:{line} turns $startReading into a moment: "
+                f"{bad_use.group(0)[:70]}\n"
+                f"       $startReading IS the typed reading. Building a moment "
+                f"from it is the fault this whole package is about, and THIS "
+                f"check could not see it any other way: it needs a declared "
+                f"wall-clock column name near the conversion, and this is a "
+                f"local variable, so the ordinary rule above is blind here. "
+                f"Round 10 introduced the variable, which is how its own fix "
+                f"came to sit behind this check's own stated blind spot."
             )
 
     # ── The one display helper nothing drives ─────────────────────────────

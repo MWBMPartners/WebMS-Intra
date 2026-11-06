@@ -312,7 +312,38 @@ $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
 //    -- and `America/Scoresbysund` does the same, 64 quarter-hour readings
 //    each between 2026 and 2041 (swept across every IANA zone rather than
 //    reasoned about). So the slug would carry the wrong day for that hour.
-$slug .= '-' . substr(I18n::wallClockFromInput($startDateTime) ?? $startDateTime, 0, 10);
+//
+// ⚠️ AND THE FALLBACK IS SANITISED, which round 10 left out (#777 round 11).
+//    `$startDateTime` is shape-checked NOWHERE in this file -- only against
+//    '' -- so when `wallClockFromInput()` refuses it the raw POSTED TEXT was
+//    sliced straight into a stored URL slug. The old `date('Y-m-d', ...)` line
+//    could only ever produce `YYYY-MM-DD`, so replacing it opened this.
+//
+//    It matters because MySQL accepts ANY punctuation as a DATETIME
+//    delimiter, so the INSERT succeeds and the slug is really stored:
+//    measured on 8.0.36 in strict mode, `2026/06/01 10:00`, `2026"06"01
+//    10:00:00` and `2026.06.01 10*00*00` all insert cleanly as
+//    `2026-06-01 10:00:00` while the slug kept the slash or the quote. A `/`
+//    makes the event unreachable at its own clean address.
+//
+//    NOT an injection or a scripting hole -- every reader of `eventSlug` uses
+//    `rawurlencode()` or `htmlspecialchars(..., ENT_QUOTES)`, which was
+//    checked rather than assumed -- but it is corrupted stored data and a
+//    broken link, which is the "stores something wrong" direction this
+//    package's own round-10 lesson says to look at first.
+//
+//    The date part now gets exactly the treatment the NAME part above already
+//    gets: runs of anything that is not a digit become a single hyphen. A
+//    valid reading is unchanged (`2026-06-01` stays `2026-06-01`), and every
+//    punctuation MySQL would have accepted collapses to the same safe shape.
+$slug .= '-' . trim(
+    (string) preg_replace(
+        '/[^0-9]+/',
+        '-',
+        substr(I18n::wallClockFromInput($startDateTime) ?? $startDateTime, 0, 10)
+    ),
+    '-'
+);
 
 // 🖼️ Handle image uploads
 $uploadsDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'calendar';

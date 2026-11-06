@@ -18263,7 +18263,13 @@ moments found" and the gate PASSED on it.** Measured on a deliberately broken
 file. It asks `php -l` first now.
 
 **(5) The row check and the row store did disagree, in the shape round 9 added
-in the same commit.** `import.php`'s comment said asking `$fmtClock()` both
+in the same commit.** ⚠️ **ROUND 10 REPORTED THIS AND DID NOT FIX IT, and then
+described it in the PAST TENSE in three documents and said nothing about leaving
+it.** `import.php` is byte-identical at `86e1ae8` — `git show --stat 86e1ae8`
+does not list the file, and `git log --oneline -- web/_apps/calendar/manage/import.php`
+answers `0326163`, round 9, as its last change. Fixed in round 11. **A finding
+written up as fixed is worse than one left open**, because the next round reads
+the list and moves on. `import.php`'s comment said asking `$fmtClock()` both
 questions "cannot disagree with storage" — and the line immediately below it
 still read `strtotime($start)` for the not-parseable test.
 `strtotime('2026-06-01 10')` is false while `$fmtClock('2026-06-01 10')`
@@ -18292,6 +18298,45 @@ The cost was not cosmetic: the monthly pattern was stored on the 29th,
 event onto the pattern's date while telling the administrator the first date
 had moved — so **every occurrence of that series fell a day late, permanently,
 and it read as deliberate.** All four slice the text now.
+
+⚠️ **AND SLICING THEM WAS NOT ENOUGH. ROUND 11 MEASURED THE SERIES STILL BEING
+STORED ON THE WRONG DATE, AND MONTHLY HAD BEEN MADE WORSE.** The four
+expressions were the half of this that `save.php` owns. The other half is
+`EventRecurrence::datesFor()`, one call away, which built its ANCHOR with
+`createFromFormat('Y-m-d H:i:s', $firstStart, $zone)` — so the reading was
+resolved after all, and **every value taken off that anchor was the moved one:
+the time of day, the weekday, and the day of the month.** Measured in
+`America/Nuuk`, typed start `2026-03-28 23:30`:
+
+    monthly, AFTER round 10   first occurrence 2026-04-28 00:30   March LOST
+    monthly, BEFORE round 10  first occurrence 2026-03-29 00:30
+    weekly,  AFTER round 10   first occurrence 2026-04-04 00:30   a week late
+    now                       2026-03-29 00:30, then 04-28 23:30, 05-28 23:30
+
+So round 10 made the monthly case **worse** — a month late instead of a day,
+with March's occurrence gone — because the sliced rule asked for the 28th while
+the generator had resolved to the 29th, and the two no longer agreed. Before
+round 10 both were wrong in the same direction, which is why it looked fixed.
+
+**The fix is the pattern this codebase already uses elsewhere: the anchor is
+built in UTC, which has no transitions, so a reading put in comes back out.**
+The event's real zone is still used, in the one place it should be — the
+deliberate `pastTheHourThatIsMissing()` step, which is C13 and **D-006**. Doing it in both places, one of them by
+accident, is what broke the series.
+
+**THE LESSON, which is the third round running to produce it: a fix on one side
+of a stored value is not a fix.** Round 2 learned it across a write and its
+readers; round 11 learned it across a handler and the class it calls. **Follow
+the value to the thing that finally produces it**, and check there.
+
+It was pinned by nothing: all 60 checks of `event-recurrence-selftest.php`
+passed before and after, because **every clock-change fixture in it is
+Europe/London or America/New_York**, where the clocks go forward at 01:00 and
+02:00 — the same day, the same weekday, the same day of the month. Only a
+transition at 23:00 moves the DATE. Section J is six checks in the two zones
+that do, with the premise asserted first (J00) and the over-reach direction
+held down (J04); four of the six go red on the old anchor, and J00 and J04 stay
+green, which is what they are for.
 
 It cannot join the write-path list, because one live `strtotime` remains at
 `save.php:1210` formatting a DATE-ONLY value. That was swept the same way: **a

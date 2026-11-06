@@ -482,7 +482,46 @@ final class EventRecurrence
             ];
         }
 
-        $start = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $firstStart, $zone);
+        // 🕐 THE ANCHOR IS BUILT IN UTC, AND THAT IS THE WHOLE POINT (#777).
+        //
+        //    `$firstStart` is a READING on the event's own clock, and this
+        //    method's job is to produce more readings. UTC has no clock
+        //    changes, so a reading put in comes straight back out: the time of
+        //    day below is the typed time of day, and the weekday and the day
+        //    of the month are the typed ones.
+        //
+        //    ⚠️ IT USED TO BUILD THIS IN `$zone`, THE EVENT'S OWN ZONE, AND
+        //       THAT SILENTLY MOVED THE WHOLE SERIES. On the one morning a
+        //       year when the hour the reading names does not exist, PHP
+        //       resolves it to the next real instant — so EVERY value taken
+        //       off the anchor was the moved one. Measured in `America/Nuuk`,
+        //       where the clocks go forward at 23:00, with a typed start of
+        //       `2026-03-28 23:30`:
+        //
+        //         before: the anchor became 2026-03-29 00:30, so the time of
+        //                 day was 00:30, the weekday was Sunday not Saturday,
+        //                 and the day of the month was 29 not 28. A MONTHLY
+        //                 series asked for the 28th then matched no day in
+        //                 March and began on 28 APRIL — March lost entirely —
+        //                 with every occurrence an hour out. A WEEKLY one
+        //                 began a week late, also an hour out.
+        //         after:  the first occurrence is the typed 2026-03-28 23:30,
+        //                 and only that one date is then moved forward by the
+        //                 deliberate step below.
+        //
+        //    SO DO NOT "TIDY" THIS BACK TO `$zone`. The event's real zone is
+        //    still needed, and is still used, in exactly one place: the
+        //    `pastTheHourThatIsMissing()` step further down, which is where a
+        //    date landing in a missing hour is handled ON PURPOSE (the owner,
+        //    23 September 2026, and check C13). That step is the design; doing
+        //    it here as well, by accident, is what broke the series.
+        //
+        //    Note what follows from this and is intended: the comparisons
+        //    below (`$candidate >= $start`, and the ceiling) are then all in
+        //    one frame with no transitions in it, which is why they agree.
+        $readingFrame = new DateTimeZone('UTC');
+
+        $start = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $firstStart, $readingFrame);
         if ($start === false) {
             return ['dates' => [], 'capped' => false, 'why' => 'The event\'s start could not be read, so no repeats were made.'];
         }

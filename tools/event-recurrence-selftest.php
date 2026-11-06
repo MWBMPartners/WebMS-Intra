@@ -732,5 +732,134 @@ expect('I05', 'a date far from any clock change is not moved at all', $got, [
     '2027-06-13 10:00:00 -> 2027-06-13 11:30:00',
 ]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// J — THE ANCHOR IS A READING, NOT A MOMENT (#777 round 11)
+//
+// Section I above covers a date landing in the missing hour, and it is good.
+// It could not catch this, and the reason is worth keeping: EVERY fixture in it
+// is Europe/London or America/New_York, where the clocks go forward at 01:00
+// and 02:00. A transition in the small hours moves a 01:30 reading to 02:30 —
+// the same DAY, the same day of the MONTH, the same weekday. So a fault that
+// corrupts the DATE taken off the anchor is invisible there.
+//
+// TWO ZONES OF 419 GO FORWARD AT 23:00 — `America/Nuuk` and
+// `America/Scoresbysund` — and there a 23:30 reading moves to 00:30 THE NEXT
+// DAY. That is the only shape in which the anchor's date is wrong, and it is
+// what these checks are for.
+//
+// THE FAULT THEY PIN. `datesFor()` used to build its anchor in the event's own
+// zone, so on that one night PHP resolved the typed reading to the next real
+// instant and every value taken off the anchor was the moved one — the time of
+// day, the weekday, and the day of the month. Measured consequences, which is
+// why this is not a tidy-up:
+//
+//   • MONTHLY asked for the 28th matched no day in March and began on 28
+//     APRIL. The March occurrence was lost outright, and the administrator was
+//     told "the first date was moved to 28 April 2026 to match the repeat you
+//     chose" as though that were deliberate.
+//   • WEEKLY began a week late.
+//   • EVERY occurrence, in both, carried 00:30 instead of the typed 23:30.
+//
+// The anchor is built in UTC now, which has no transitions, so a reading put in
+// comes back out. The event's real zone is still used, in the one place it
+// should be: the deliberate `pastTheHourThatIsMissing()` step, which is why J01
+// and J02 still expect the FIRST date to move.
+
+// J00 — THE PREMISE, ASSERTED BEFORE ANYTHING DEPENDS ON IT. If this hour were
+//       not really missing in these zones, every check below would pass on any
+//       code at all. A test written on an ordinary day proves nothing (#549).
+$j00 = [];
+foreach (['America/Nuuk', 'America/Scoresbysund'] as $zoneName) {
+    $built = DateTimeImmutable::createFromFormat(
+        'Y-m-d H:i:s',
+        '2026-03-28 23:30:00',
+        new DateTimeZone($zoneName)
+    );
+    $j00[$zoneName] = $built === false ? '(unreadable)' : $built->format('Y-m-d H:i');
+}
+$londonSame = DateTimeImmutable::createFromFormat(
+    'Y-m-d H:i:s',
+    '2026-03-28 23:30:00',
+    new DateTimeZone('Europe/London')
+);
+expect('J00', 'the premise: 23:30 on 2026-03-28 is missing in both zones and ordinary in London', [
+    'Nuuk'          => $j00['America/Nuuk'],
+    'Scoresbysund'  => $j00['America/Scoresbysund'],
+    'London'        => $londonSame === false ? '(unreadable)' : $londonSame->format('Y-m-d H:i'),
+], [
+    'Nuuk'          => '2026-03-29 00:30',
+    'Scoresbysund'  => '2026-03-29 00:30',
+    'London'        => '2026-03-28 23:30',
+]);
+
+// J01 — MONTHLY. The first date is moved forward, on purpose (C13). Every date
+//       after it must carry the TYPED day of the month and the TYPED time.
+$r = EventRecurrence::datesFor(
+    rule(['frequency' => 'monthly', 'dayOfMonth' => 28, 'startDate' => '2026-03-28', 'maxOccurrences' => 3]),
+    '2026-03-28 23:30:00',
+    null,
+    'America/Nuuk'
+);
+expect('J01', 'monthly at 23:30 in Nuuk keeps March, and keeps the typed day and time after it', starts($r), [
+    '2026-03-29 00:30:00',
+    '2026-04-28 23:30:00',
+    '2026-05-28 23:30:00',
+]);
+
+// J02 — WEEKLY. 28 March 2026 is a SATURDAY. Taken off the moved anchor it
+//       reads as Sunday, which is how the series came to start a week late.
+$r = EventRecurrence::datesFor(
+    rule(['dayOfWeek' => '6', 'startDate' => '2026-03-28', 'maxOccurrences' => 3]),
+    '2026-03-28 23:30:00',
+    null,
+    'America/Nuuk'
+);
+expect('J02', 'weekly at 23:30 in Nuuk starts on the typed Saturday, not a week later', starts($r), [
+    '2026-03-29 00:30:00',
+    '2026-04-04 23:30:00',
+    '2026-04-11 23:30:00',
+]);
+
+// J03 — the SECOND such zone, so that one zone's table cannot carry the result.
+$r = EventRecurrence::datesFor(
+    rule(['frequency' => 'monthly', 'dayOfMonth' => 28, 'startDate' => '2026-03-28', 'maxOccurrences' => 2]),
+    '2026-03-28 23:30:00',
+    null,
+    'America/Scoresbysund'
+);
+expect('J03', 'the same holds in Scoresbysund', starts($r), [
+    '2026-03-29 00:30:00',
+    '2026-04-28 23:30:00',
+]);
+
+// J04 — THE OVER-REACH DIRECTION. The identical input in a zone where that
+//       hour is ordinary must not be touched at all. Without this, a fix that
+//       simply stopped moving anything would pass J01-J03 (#645's I7d lesson).
+$r = EventRecurrence::datesFor(
+    rule(['frequency' => 'monthly', 'dayOfMonth' => 28, 'startDate' => '2026-03-28', 'maxOccurrences' => 2]),
+    '2026-03-28 23:30:00',
+    null,
+    'Europe/London'
+);
+expect('J04', 'the same reading in London is not moved at all', starts($r), [
+    '2026-03-28 23:30:00',
+    '2026-04-28 23:30:00',
+]);
+
+// J05 — THE TIME OF DAY, asked on its own. J01-J03 would also go red if the
+//       dates were right and the times wrong, but nothing would SAY so, and
+//       the time was the half of this fault that reached every occurrence.
+$r = EventRecurrence::datesFor(
+    rule(['dayOfWeek' => '6', 'startDate' => '2026-03-28', 'maxOccurrences' => 5]),
+    '2026-03-28 23:30:00',
+    null,
+    'America/Nuuk'
+);
+$timesAfterTheFirst = array_values(array_unique(array_map(
+    static fn (string $d): string => substr($d, 11),
+    array_slice(starts($r), 1)
+)));
+expect('J05', 'every occurrence after the moved one carries the typed time of day', $timesAfterTheFirst, ['23:30:00']);
+
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 exit($failed === 0 ? 0 : 1);

@@ -56,13 +56,18 @@ never checked, although the published description said it did and creating an
 event has always checked. The check also found that two of our own tests had
 been quietly storing events that end before they begin.
 
-**And the main event form no longer works out a date by converting the time
-first.** In two time zones in the world the clocks go forward at eleven at
-night, so a time typed between 23:00 and midnight landed on the following day —
-and for a repeating event that meant the whole series was stored a day late,
-permanently, with the administrator told the first date had moved as though it
-were deliberate. Swept across every time zone to 2041: two are affected, and a
-date with no time is affected in none.
+**And a repeating event is no longer stored on the wrong date.** In two time
+zones in the world the clocks go forward at eleven at night, so a time typed
+between 23:00 and midnight landed on the following day — and for a repeating
+event that meant the whole series was stored on a day nobody chose, permanently,
+with the administrator told the first date had moved as though it were
+deliberate. A monthly series lost one of its months outright. The event form and
+the part that works out the repeat dates were both doing it, and **fixing only
+the form made the monthly case worse**, which is why this is being described
+again: an earlier note in this file said the form was the whole of it. Both are
+fixed now, and every date after the first keeps the time that was typed. Swept
+across every time zone to 2041: two are affected, and a date with no time is
+affected in none.
 
 **The events API can read this portal's own calendar format again.** Tightening
 the check a few hours earlier had started refusing `20260601T100000Z` — the form

@@ -323,8 +323,13 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # explaining why four date parts are now SLICED out of the posted reading
     # rather than derived with `strtotime()`. The probe itself is unchanged
     # again, which is the third time this entry has moved for a reason that had
-    # nothing to do with it.)
-    ("_apps/calendar/manage/save.php", 506): (
+    # nothing to do with it. Moved 506 -> 537 on 6 November 2026: #777 round 11
+    # sanitised the slug's own date part, which added thirty-one lines of
+    # comment and code above this probe. FOURTH move, probe still unchanged --
+    # and note what it cost to learn: the comment two entries down warns that
+    # ANY change higher up moves these, and this one went red on the very next
+    # edit to the file. That is the list working as designed, not a nuisance.)
+    ("_apps/calendar/manage/save.php", 537): (
         "SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ?",
         "the slug-uniqueness probe on event CREATE must search every event, imported ones included, so two events can never share a slug regardless of origin",
     ),
