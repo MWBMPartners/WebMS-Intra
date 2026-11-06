@@ -547,13 +547,16 @@ $foundBoth = preg_match('/\$fmtClockRaw = static function.*?\n\};/s', $importSrc
 //    anchor must appear exactly ONCE" (#485 round 2, #763) and round 10's
 //    text pin "defeated by a REASSIGNMENT". **This was the fifth round
 //    running to find a headline fix pinned by nothing**, so the pin is on the
-//    NUMBER of definitions and on there being no later write, which closes
-//    both at once.
+//    NUMBER of definitions and on there being no later write. **That closes
+//    only the plain `=` spelling, and round 23 proved it:** a destructuring
+//    assignment, `list()`, a variable variable, `extract()` or a reference
+//    each switched the guard off with this section at 112 of 112. The
+//    behavioural fix — drive the real import with out-of-range cells — is
+//    #796.
 $storeWrites = preg_match_all('/\$fmtStore\s*=(?!=)/', $importSrc);
 $rawWrites   = preg_match_all('/\$fmtClockRaw\s*=(?!=)/', $importSrc);
 check(
-    'K00a `$fmtStore` is assigned exactly ONCE, so nothing can reassign it to the bare reader '
-    . 'and nothing can hide a dead copy above the live one',
+    'K00a `$fmtStore` is written by a plain `=` exactly ONCE (other spellings are NOT seen — #796)',
     $storeWrites,
     1
 );
@@ -742,7 +745,11 @@ if ($foundBoth === false) {
         //    the code does". It is now K06 below, which asserts BOTH
         //    directions against the real year and so cannot go stale.
         '0000-00-00 10:00', '0000-00-00 00:00:00',
-        // ⚠️ OUTSIDE WHAT A `DATETIME` CAN HOLD (1000-01-01 to 9999-12-31).
+        // ⚠️ OUTSIDE THE DOCUMENTED `DATETIME` RANGE (1000-01-01 to
+        //    9999-12-31). MySQL REFUSES the negative and five-digit years
+        //    below and ACCEPTS 0001-0999 without a warning (measured, round
+        //    22), so the sub-1000 cells are refused by the portal's own floor,
+        //    not by the database.
         //    These are the cells that made the insert THROW part-way through
         //    an import with earlier rows already written — the shape round 14
         //    recorded as the worst thing in this package (`-0001-11-30` from a

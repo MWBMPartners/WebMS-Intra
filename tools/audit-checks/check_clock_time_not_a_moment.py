@@ -1436,7 +1436,10 @@ def main() -> int:
         #    REASSIGNMENT"), and round 22 was the FIFTH round running to find
         #    a headline fix pinned by nothing.
         #
-        #    Pinning the NUMBER of assignments closes both at once, and says
+        #    Pinning the NUMBER of plain `=` assignments closes those two
+        #    spellings and NO OTHERS — round 23 switched the guard off with
+        #    `[$fmtStore] = [...]`, `list()`, `${"fmtStore"}`, `extract()` and
+        #    a reference, each with this check green (#796). It says
         #    nothing about what the code does — which is deliberate: the
         #    behaviour is pinned by section K of clock-change-selftest.php,
         #    and this is only here because the pre-push hook runs the audit

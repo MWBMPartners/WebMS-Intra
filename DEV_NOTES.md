@@ -20079,8 +20079,9 @@ because the sentence read as a measurement and was a prediction.
 The measurement it cited was round 18-versus-19 — the two versions BEFORE round
 20's own edit — and it was presented as round 20's verdict on round 20. Round 20
 then widened the reader, by thousands of cells. So the round asserting the churn
-was over was itself a round of churn. Every one of rounds 16, 17, 19, 20 and 21
-restored an over-refusal in this closure.
+was over was itself a round of churn. Every one of rounds 16, 17, 19 and 20
+repaired an over-refusal in this closure; round 21 newly stored nothing (the
+table below). Round 22 had added "and 21" here, which the table contradicts.
 
 **What was actually measured, each time, and nothing beyond it.** Round 21 swept
 round 19 against round 20; round 22 swept round 20 against round 21. **Both
@@ -20165,6 +20166,19 @@ because W07e and W07f send `24 September 2028 3:15am`. The accurate narrowing,
 stated once and in the test itself: **none of the six sends an impossible date, a
 decimal fraction or an offset**, so they cover the round trip and not the rules
 section K is about. That is #787.
+
+**ROUND 23 WAS THE LAST ROUND (D-066), because every finding was in a test, a
+check or a written note.** Two are worth carrying forward. The guard round 22
+pinned by counting assignments was switched off by five other spellings of an
+assignment, each with section K at 112 of 112 — the spelling-list mistake one
+level up, and the reason the fix is to DRIVE the real import with out-of-range
+cells (#796, D-065). And round 22 corrected "a `DATETIME` holds 1000-01-01 to
+9999-12-31 and NOTHING ELSE" in ONE comment while the same sentence stood in
+the same file, the self-test and both mirrors — so the mirrors agreed with each
+other and were both wrong, and diffing them could not catch it. **Search for a
+withdrawn claim by its words, everywhere, before calling the withdrawal done.**
+Outside its scope the round also found a real storage fault older than round
+22: a cell with no date, such as `2026`, is stored as today at 20:26 (#797).
 
 
 ### Raised rather than bundled

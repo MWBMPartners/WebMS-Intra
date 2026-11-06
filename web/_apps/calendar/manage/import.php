@@ -119,7 +119,8 @@ $fmtStore = static function (string $text, ?string &$why = null) use (&$fmtClock
     //        a reason is better than storing a date nobody meant, and nothing
     //        a customer could plausibly have in a spreadsheet is affected
     //        (checked against two-digit years, both Excel epochs, written-out
-    //        months and offsets: two cells changed, both improvements).
+    //        months and offsets, on a cell list that was not committed — so,
+    //        by this file's own rule below, no count is given).
     //
     //    There is NO ceiling test, and that is deliberate rather than an
     //    omission: a five-digit year cannot get past the shape test to reach
@@ -512,8 +513,14 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        and left the class open. This asks the only question that decides
     //        whether the row can be stored at all.
     //
-    //        A `DATETIME` column holds 1000-01-01 00:00:00 to 9999-12-31
-    //        23:59:59 and NOTHING ELSE. `date()` will cheerfully format a
+    //        A `DATETIME` column is DOCUMENTED to hold 1000-01-01 00:00:00 to
+    //        9999-12-31 23:59:59 — but measured on MySQL 8.0.36 in strict
+    //        mode it REFUSES only a negative or five-digit year and ACCEPTS
+    //        0001-0999 without a warning (round 22). So the shape test is
+    //        what stops the insert throwing, and the year-1000 floor is this
+    //        portal's own rule. (This sentence said "and NOTHING ELSE" until
+    //        round 23 found it here after round 22 had corrected it
+    //        elsewhere.) `date()` will cheerfully format a
     //        moment outside that range, and `strtotime()` reaches such moments
     //        from ordinary-looking cells. Measured on the live closure before
     //        this test existed:
