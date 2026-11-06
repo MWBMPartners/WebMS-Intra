@@ -154,6 +154,22 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //    commonest spreadsheet in the world stopped importing, under a comment
     //    promising nothing had changed.
 
+    // 🚨 ASK WHETHER PHP CAN READ THE CELL AT ALL, FIRST. Until round 20 the
+    //    fraction rule above ran before anything consulted `strtotime()`, so
+    //    **2,160 cells PHP refuses outright were told their fraction was
+    //    ambiguous** — including the plausible European shorthand
+    //    `1.6. 10:00`, which got "writes the hour with a single digit after a
+    //    decimal point" although `strtotime()` cannot read it at all.
+    //
+    //    That is the same defect as the "not parseable" message round 17
+    //    removed, in the other direction: the administrator is given a reason
+    //    that is not the reason. `$why` is already 'cannot be read' here, so
+    //    returning now says the true thing.
+    $moment = strtotime($trimmed);
+    if ($moment === false) {
+        return null;
+    }
+
     // (a) A FRACTION PHP WILL READ AS A DIFFERENT TIME FROM THE ONE MEANT.
     //
     // 🚨 THE PREMISE WAS WRONG FOR FOUR ROUNDS, AND MEASURING PHP IS WHAT
@@ -230,8 +246,10 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //    because **the number is a property of the list you sweep, not of the
     //    code.** Measured against round 16's own committed closure: 4 of
     //    PHP's 419 identifiers, 34 of the 598 that include the
-    //    backward-compatible names, and 91 once a `GMT±N`/`UTC±N`/`Etc/GMT±N`
-    //    family is generated alongside them. I took 89 from a report without
+    //    backward-compatible names, and a different figure again once a
+    //    `GMT±N`/`UTC±N`/`Etc/GMT±N` family is generated alongside them —
+    //    **round 20 could not reproduce my 91 either**, which is the point
+    //    made twice over. I took 89 from a report without
     //    re-deriving it, which is this project's own rule broken — **and a
     //    figure nobody can reproduce is worse than none, because it reads as
     //    evidence.** What is reproducible, and is what matters: the live rule
@@ -264,8 +282,34 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //           three other homes as well. **Read them from K04/K04b in that
     //           file**, which is the only place that cannot go stale, because
     //           it is the place the test fails on.
-    if (preg_match('/:\d{2}:\d{2}\.\d/', $trimmed) !== 1
-        && preg_match('/(?<![\d.])(\d{1,2}(?::\d{1,2})*)\.[1-9](?!\d|\.\d)/', $trimmed, $which) === 1) {
+    // 🚨 A FRACTION ON THE SECONDS IS NEVER AMBIGUOUS, so it is exempt —
+    //    and getting that wrong cost two findings at once (round 20).
+    //
+    //    Both readings of `10:00:5.5` store the SAME value: PHP reads 10:00:05
+    //    and drops the fraction, and the ISO reading of 5.5 seconds is
+    //    truncated to the same thing, because a DATETIME column holds no
+    //    fractions. **There is no competing reading, so there is nothing to
+    //    refuse.**
+    //
+    //    Round 19 instead invented a THIRD refusal sentence for it, whose two
+    //    alternatives — "fractions of a second or part of a second" — are the
+    //    same thing, so it asserted an ambiguity that does not exist.
+    //
+    //    And the exemption was written as ONE SPELLING, `:\d{2}:\d{2}\.\d`,
+    //    which demands a zero-padded minute AND second. Measured, that refused
+    //    6,480 cells round 15 stored, all of them a seconds fraction with an
+    //    unpadded component: `Tue, 3 Mar 2026 10:00:5.5`,
+    //    `1 June 2026 10:0:00.5`, `2026-06-01 9:05:5.5`. All six exemption
+    //    cells in section K used `10:00:00.X` — **one value of the
+    //    component-width dimension**, the same mistake as the three earlier
+    //    bypasses.
+    //
+    //    With the exemption widened the rule really is what the paragraph
+    //    above says: one digit, non-zero, **on the hour or the minute**. That
+    //    sentence had been untrue in three places since round 19 added the
+    //    third component.
+    if (preg_match('/:\d{1,2}:\d{1,2}\.\d/', $trimmed) !== 1
+        && preg_match('/(?<![\d.])(\d{1,2}(?::\d{1,2})?)\.[1-9](?!\d|\.\d)/', $trimmed, $which) === 1) {
         // 🗣️ WHICH COMPONENT, because the two ambiguities are different and a
         //    single sentence was untrue of one of them. The old wording said
         //    "minutes or part of an hour" for BOTH, and for the minute case
@@ -290,12 +334,13 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
         //    components; this is the same thing one level on — it closed the
         //    spelling it was handed and left the catch-all. **Counting the
         //    colons has no default**, so there is nothing left to fall into.
-        $colons = substr_count($which[1], ':');
-        $why = 'writes the ' . ['hour', 'minute', 'second'][min($colons, 2)]
-             . ' with a single digit after a decimal point, which could mean either '
-             . ['minutes past the hour or part of an hour',
-                'seconds or part of a minute',
-                'fractions of a second or part of a second'][min($colons, 2)];
+        // Two components, and only two, because a seconds fraction is exempt
+        // above. No `min()` clamp: the pattern can match at most one colon.
+        $why = substr_count($which[1], ':') === 1
+            ? 'writes the minute with a single digit after a decimal point, which could '
+                . 'mean either seconds or part of a minute'
+            : 'writes the hour with a single digit after a decimal point, which could '
+                . 'mean either minutes past the hour or part of an hour';
         return null;
     }
 
@@ -369,10 +414,6 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
         return null;
     }
 
-    $moment = strtotime($trimmed);
-    if ($moment === false) {
-        return null;                                   // $why stays "cannot be read"
-    }
     $why = '';
     return date('Y-m-d H:i:s', $moment);
 };

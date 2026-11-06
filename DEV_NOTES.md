@@ -19447,7 +19447,9 @@ readings agree.**
 
 **And that dissolved the OTHER fault in the same breath.** Round 16's rule
 needed a trailing set to decide what counted as a zone, and it allowed letters,
-`/` and `_` but not digits, `+` or `-` — so **89 zone spellings** (`GMT+1`,
+`/` and `_` but not digits, `+` or `-` — so any zone whose NAME holds one of
+those (`GMT+1`,
+
 `Etc/GMT+1`, `America/Port-au-Prince`, `Asia/Ust-Nera`) fell through and stored
 the wrong hour, under a comment saying a fraction "followed only by a zone or an
 offset" was refused. **A date-spelling list had been replaced by a zone-spelling
@@ -19461,11 +19463,12 @@ time; it was:
 
 1. **Measure what the library actually does** before writing a rule about it.
    One `strtotime()` sweep would have settled the premise in round 12.
-2. **Commit the matrix.** Section K of `clock-change-selftest.php` is 47 cells
-   that must store and some that must be refused — **the counts are pinned in
-   the test as K04/K04b and are deliberately not repeated here**, because this
-   line said 47 and 48 while the pins had moved, in four places at once. Each
-   is annotated with the round
+2. **Commit the matrix.** Section K of `clock-change-selftest.php` holds cells
+   that must store and cells that must be refused — **the two counts are pinned
+   in the test as K04/K04b and are deliberately not written here**, because this
+   line carried a stale pair twice over, and the second time the stale figure
+   was sitting inside this very clause saying it was not repeated. Read them
+   from the file that fails on them. Each cell is annotated with the round
    that broke it, lifting the real closure out of the page so it needs no
    database. **Both counts are pinned** (K04/K04b), because round 17 measured
    that deleting ten entries left 104 of 104 green.
@@ -19482,6 +19485,69 @@ named as this package's technical record, for fourteen rounds, and round 16 is
 the only round in the package to change no DEV_NOTES line at all. **Enumerate
 every place a claim lives, by searching for it, before calling a correction
 done.**
+
+
+### Rounds 18 to 20: the reader converged, and what was left was the record
+
+**Round 20 found nine — three in the portal, six in the checks and the test —
+and its behavioural verdict was the same as rounds 18 and 19's: the import
+reader has CONVERGED.** Over 64,224 generated cells there was not one case where
+round 19 stores a value round 18 would not, nor one where it refuses something
+round 18 stored. Ten rounds of churn in that closure are over; what rounds 18 to
+20 found instead was the *record* being wrong about it.
+
+**THE REFUSAL HAD SWALLOWED A CASE THAT IS NEVER AMBIGUOUS.** The one-digit
+fraction rule is about an hour or a minute, where `10.5` could mean five past
+ten or half past ten. **A fraction on the SECONDS has no such problem, and the
+reason is the column:** a `DATETIME` holds no fractional part, so both readings
+of `10:00:05.5` store the identical value. The rule was refusing it anyway, so
+`2026-06-01 10:00:05.5` — an ordinary database or log export — was turned away
+with a message about an ambiguity that does not exist. It is **exempt** now
+(`/:\d{1,2}:\d{1,2}\.\d/` tested first), not refused, and the third refusal
+sentence, which existed only to explain the seconds case, is deleted.
+
+**AND THE REFUSAL BLAMED THE WRONG THING WHEN THE CELL WAS SIMPLY UNREADABLE.**
+`1.6. 10:00` is a dotted European date PHP cannot read at all, and the fraction
+rule reached it first, so the administrator was told it "writes the hour with a
+single digit after a decimal point" — about a cell with no hour in it. The
+readability test (`strtotime`) runs **ahead** of the fraction rule now, so an
+unreadable cell says "cannot be read" and only a readable one is judged for
+ambiguity. **Order the refusals so each one is only ever reached by a cell it
+can describe truthfully.**
+
+**SECTION K PASSED ON BROKEN CODE A FOURTH TIME, AND ALL FOUR WERE ONE
+MISTAKE.** Each time, the matrix held one representative of a dimension the rule
+ranges over, so narrowing the rule along that dimension left every cell green:
+
+| the narrowing | why K could not see it |
+|---|---|
+| `\d{1,2}` → `\d{2}` on the hour | every one-digit-fraction cell used a two-digit hour |
+| dropping the `:SS.` exemption | every fractional-second cell used three or six digits |
+| `[1-9]` → `[359]` on the digit | only three of the nine digit values appeared |
+| requiring a padded component | every cell was zero-padded |
+
+**The rule: cover the DIMENSION, not an example of it.** A matrix is only a
+matrix along the axes you varied. Section K now varies hour width, minute width,
+fraction digit value, fraction length and whether the year is given, and all
+four narrowings go red.
+
+**THE REST WERE FIGURES AND SENTENCES, and two are worth keeping.** "89 zone
+spellings" had been taken from a review report and written down without being
+re-derived; round 19 replaced it with "91", **which round 20 could not reproduce
+either** — the sweep answers anything from 82 to 146 depending on whether an
+offset family is generated, so the number is a property of the list you sweep
+and not of the code. **No count is given now.** A figure nobody can reproduce is
+worse than none, because it reads as evidence — and this was the second attempt
+at the same sentence, in the paragraph whose own thesis that is.
+
+And the comment above section K said **"nothing POSTS a CSV"**, which is false:
+`tools/time-zones-selftest.php` posts six to `/calendar/manage/import`. Round 19
+said it had corrected this and corrected a different sentence. The replacement
+claim — that every cell those six send is a clean ISO value — **is also false**,
+because W07e and W07f send `24 September 2028 3:15am`. The accurate narrowing,
+stated once and in the test itself: **none of the six sends an impossible date, a
+decimal fraction or an offset**, so they cover the round trip and not the rules
+section K is about. That is #787.
 
 
 ### Raised rather than bundled

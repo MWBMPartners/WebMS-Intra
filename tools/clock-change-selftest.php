@@ -499,8 +499,21 @@ check('I20 a bare date is not an offset', I18n::inputCarriesOffset('2027-03-28')
 //
 // It needs no database and no web server: the closure is lifted out of the
 // page source and run directly, which is also why it is here rather than in
-// the HTTP test. The behavioural gap that remains -- nothing POSTS a CSV --
-// is #787.
+// the HTTP test.
+//
+// ⚠️ WHAT COVERS THIS READER, AND WHAT DOES NOT — stated once, here, because
+//    three attempts at this sentence have been wrong. It is NOT true that
+//    "nothing POSTS a CSV": `tools/time-zones-selftest.php` posts SIX to
+//    `/calendar/manage/import` (W07, W07b-W07f). Round 19 said it had
+//    corrected this and corrected a different sentence instead.
+//
+//    Nor is every cell those six send "a clean ISO value", which was round
+//    19's replacement claim: W07e and W07f send `24 September 2028 3:15am`,
+//    a loose spreadsheet form that reaches the step-3 fallback.
+//
+//    **The accurate narrowing: none of the six sends an impossible date, a
+//    decimal fraction or an offset** — so they cover the round trip and not
+//    the rules this section is about. That is #787.
 echo "\n";
 $importSrc = (string) file_get_contents(
     dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps'
@@ -621,6 +634,16 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         //    exactly what was missing. Round 18 deleted that whole clause and
         //    got 65 audit scripts and 107 clock checks green while these six
         //    were refused: the "189 machine formats" class, back again.
+        // ⚠️ THE COMPONENT WIDTH, which every one of these missed. All six used
+        //    `10:00:00.X`, so the exemption's single spelling
+        //    (`:\d{2}:\d{2}\.\d`, demanding a padded minute AND second) was
+        //    never tested — and it refused 6,480 cells round 15 stored. A
+        //    seconds fraction is never ambiguous: both readings store the same
+        //    value, because a DATETIME holds no fraction.
+        ['2026-06-01 10:00:5.5',          '2026-06-01 10:00:05', 'unpadded second — round 19 refused it'],
+        ['Tue, 3 Mar 2026 10:00:5.5',     '2026-03-03 10:00:05', 'unpadded second — round 19 refused it'],
+        ['1 June 2026 10:0:00.5',         '2026-06-01 10:00:00', 'unpadded minute — round 19 refused it'],
+        ['2026-06-01 9:05:5.5',           '2026-06-01 09:05:05', 'unpadded hour and second — round 19 refused it'],
         ['2026-6-1 10:00:00.5',           '2026-06-01 10:00:00', 'the :SS. exemption, one digit'],
         ['2026-06-01 10:00:00.5 UTC',     '2026-06-01 11:00:00', 'the :SS. exemption, one digit'],
         ['2026-06-01 10:00:00.9 GMT',     '2026-06-01 11:00:00', 'the :SS. exemption, one digit'],
@@ -665,6 +688,11 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         'Feb 0 2026 10:00', '0 June 2026 10:00',
         '2026-00-10 10:00', '2026-0-10 10:00', '00/10/2026 10:00',
         'Feb 31 10:00',
+        // ⚠️ AND ONE WHOSE VALIDITY DEPENDS ON THE YEAR. `Feb 31` is impossible
+        //    in every year, so it could not tell a right fallback year from a
+        //    wrong one: planting `(int) date('Y')` as 2028, a leap year, left
+        //    107/107 green while `Feb 29 10:00` stored as 1 March 2026.
+        'Feb 29 10:00',
         '0000-00-00 10:00', '0000-00-00 00:00:00',
         // a fraction on the wrong component: ISO says 10.5 means 10:30, and
         // strtotime answers 10:05
@@ -709,6 +737,11 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         '2026-06-01 10.1', '2026-06-01 10.2', '2026-06-01 10.3', '2026-06-01 10.4',
         '2026-06-01 10.6', '2026-06-01 10.7', '2026-06-01 10.8',
         'Tue, 3 Mar 2026 10.1', '2026-06-01 10:00.1', '2026-06-01 10:00.8',
+        // ⚠️ A ONE-DIGIT MINUTE. Every 1-colon cell used a two-digit minute,
+        //    so nothing distinguished `:\d{2}` from `:\d{1,2}` — reverting
+        //    that one atom restored round 18's fault (the HOUR sentence shown
+        //    for a minute fraction) with 107/107 green.
+        '2026-06-01 10:0.5', '2026-06-01 9:0.5', 'Tue, 3 Mar 2026 10:0.5',
         '2026-06-01 9.5', '2026-06-01 8.5', '2026-06-01 1.5', '2026-06-01 9.3',
         '1 June 2026 9.5', 'Tue, 3 Mar 2026 9.5', '01.06.2026 9.5',
         '2026-06-01 9:00.5',
@@ -740,8 +773,8 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     //       only thing guarding the fraction and impossible-date rules (see
     //       the note at the head of this section for what else covers the
     //       reader, and what does not).
-    check('K04 the must-store list has not shrunk', count($mustStore), 55);
-    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 66);
+    check('K04 the must-store list has not shrunk', count($mustStore), 59);
+    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 70);
 
     // K05 — WHICH REFUSAL IT IS. The closure reports a reason through its
     //       second argument, and the import shows it to the administrator.
@@ -776,6 +809,11 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
                              . 'mean either minutes past the hour or part of an hour',
         '2026-06-01 10:00.5' => 'writes the minute with a single digit after a decimal point, which could '
                              . 'mean either seconds or part of a minute',
+        // a ONE-digit minute, which is what the `:\d{1,2}` atom is for
+        '2026-06-01 10:0.5' => 'writes the minute with a single digit after a decimal point, which could '
+                             . 'mean either seconds or part of a minute',
+        // and a cell PHP cannot read at all must say so, not blame a fraction
+        '1.6. 10:00'        => 'cannot be read',
         '2026-152 10:00.5'  => 'writes the minute with a single digit after a decimal point, which could '
                              . 'mean either seconds or part of a minute',
         'rubbish'           => 'cannot be read',

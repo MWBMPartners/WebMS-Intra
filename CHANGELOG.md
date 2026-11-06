@@ -155,9 +155,10 @@ minute, where the time it means is not the time it would be read as.
 Nothing else was narrowed, and this time the list is checked on every run:
 `10:00 PM`, `7pm`, `March 3 2026`, `Tue, 3 Mar 2026 19:00`, an unpadded
 `2026-6-1`, a dotted `01.06.2026`, an e-mail-style date with a time zone, a
-day-first `01/06/2026`, and fractions of a second in eight shapes — **47
-formats that must import, and 48 cells that must be refused**, both counts
-pinned so the list cannot quietly shrink.
+day-first `01/06/2026`, and fractions of a second in several shapes. **The
+numbers are checked by the test itself and are deliberately not quoted here** —
+they have been wrong in this file twice, and a count in prose goes stale the
+next time somebody adds a case.
 
 ⚠️ **AND THE FIRST ATTEMPT AT THAT REFUSAL ALSO TURNED AWAY THE ORDINARY WAY A
 BRITISH SPREADSHEET WRITES A TIME.** A cell reading `19.30` meaning half past
@@ -177,12 +178,28 @@ typing `19.30` means 19:18. A **single** digit is refused because there the
 intention genuinely is unclear — `10.5` reads as naturally as five past ten as
 it does as half past.)
 
+⚠️ **AND IT WAS STILL REFUSING FRACTIONS OF A SECOND WHEN NOTHING FOLLOWED
+THEM.** The correction above restored `2026-06-01 10:00:00.000 UTC`, where a time
+zone comes after the fraction — but `2026-06-01 10:00:05.5`, the same kind of
+cell with nothing after it, was still turned away, with a message about an
+ambiguity that cannot arise there. **Fractions of a second are never unclear**,
+because a stored date and time has no fractional part at all, so both ways of
+reading such a cell save the identical value. Those import again, in every way
+of writing the date. Only a single digit after a decimal point on the **hour or
+the minute** is refused.
+
 **And a refused cell now says which it is.** It used to say "startDateTime not
 parseable" for every refusal, which was untrue of all of them: a date that does
 not exist and a decimal time are both perfectly readable — the portal has
 decided not to accept them. The message now distinguishes "is a date that does
-not exist", "has a decimal point on the hour or the minute" and "cannot be
+not exist", a time written with a single digit after a decimal point, and "cannot be
 read", so somebody can fix the row.
+
+**And it no longer blames a decimal point for a cell that simply cannot be
+read.** A cell reading `1.6. 10:00` — a dotted date, which this portal cannot
+read — was told it "writes the hour with a single digit after a decimal point",
+about a cell with no hour in it. Whether a cell can be read at all is now
+settled first, so a refusal only ever describes something the cell really does.
 
 **And the preview screen for changing a repeating series showed an hour late**
 on the clock-change morning — on the one screen whose purpose is comparing a
