@@ -142,11 +142,28 @@ before anything is written.
 **One thing the import will no longer accept, said plainly because somebody
 could notice it.** A cell writing the time with a decimal point — `10.5` meaning
 half past ten — used to be stored as **five past ten**, which is neither
-reading. It is refused now. Nothing else was narrowed: `10:00 PM`, `7pm`,
-`March 3 2026`, `Tue, 3 Mar 2026 19:00`, an unpadded `2026-6-1`, an e-mail-style
-date with a time zone on it, and a day-first `01/06/2026` all import exactly as
-before — 31 formats are checked on every run, and 32 cells that must be refused
-with them.
+reading. It is refused now, in every way of writing the date.
+
+⚠️ **AND AN EARLIER VERSION OF THIS NOTE SAID "nothing else was narrowed",
+which was wrong.** The first attempt at that refusal also turned away **189**
+ways of writing a perfectly good time — anything with fractions of a second
+followed by a time zone, such as `2026-06-01 10:00:00.000 UTC`, which is what a
+spreadsheet exported from a database or a log contains. Those import again.
+What is refused is only a time whose decimal point is on the hour or the
+minute, where the time it means is not the time it would be read as.
+
+Nothing else was narrowed, and this time the list is checked on every run:
+`10:00 PM`, `7pm`, `March 3 2026`, `Tue, 3 Mar 2026 19:00`, an unpadded
+`2026-6-1`, a dotted `01.06.2026`, an e-mail-style date with a time zone, a
+day-first `01/06/2026`, and fractions of a second in six shapes — **40 formats
+that must import, and 42 cells that must be refused.**
+
+**And a refused cell now says which it is.** It used to say "startDateTime not
+parseable" for every refusal, which was untrue of all of them: a date that does
+not exist and a decimal time are both perfectly readable — the portal has
+decided not to accept them. The message now distinguishes "is a date that does
+not exist", "has a decimal point on the hour or the minute" and "cannot be
+read", so somebody can fix the row.
 
 **And the preview screen for changing a repeating series showed an hour late**
 on the clock-change morning — on the one screen whose purpose is comparing a

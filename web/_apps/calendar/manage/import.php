@@ -75,8 +75,9 @@ $imported = false;
 //    the one comparison that cannot disagree with storage, in either format,
 //    and it needs no branch at all -- which is also why the "kept FOR THOSE
 //    ONLY" claim that used to sit here has gone rather than been reworded.
-$fmtClock = static function (string $text): ?string {
+$fmtClock = static function (string $text, ?string &$why = null): ?string {
     $trimmed = trim($text);
+    $why = 'cannot be read';
 
     // ⚠️ READ THIS BEFORE ADDING ANY RULE HERE. This closure has been
     //    rewritten three times and TWO of those rewrites broke formats that
@@ -153,51 +154,61 @@ $fmtClock = static function (string $text): ?string {
     //    commonest spreadsheet in the world stopped importing, under a comment
     //    promising nothing had changed.
 
-    // (a) A MISPLACED FRACTION, and NOTHING WIDER THAN THAT. In ISO 8601 a
-    //     fractional part belongs to the lowest component written, so
-    //     `2026-06-01T10.5` means 10:30 and `T10:00.5` means 10:00:30. Step 2
-    //     refuses both on purpose (#777 round 10, where truncating to 10:00
-    //     lost up to 59 minutes silently), and `strtotime()` reads the `.5` as
-    //     five MINUTES or five SECONDS -- neither reading. So this one shape
-    //     must not reach it.
+    // (a) A FRACTION ON ANYTHING BUT THE SECONDS. In ISO 8601 a fractional
+    //     part belongs to the lowest component written, so `10.5` means 10:30
+    //     and `10:00.5` means 10:00:30 — and `strtotime()` reads them as five
+    //     past and five seconds past. Step 2 refuses both on purpose (#777
+    //     round 10, where truncating to 10:00 lost up to 59 minutes
+    //     silently), so this must not let `strtotime()` guess at them.
     //
-    // 🚨 ROUND 13 WROTE THIS AS "ANY ISO `T`-FORM VALUE STEP 2 DECLINED",
-    //    which refused three legitimate forms NEITHER step handles:
-    //    `2026-6-1T10:00`, `2026-6-1T10:00:00` and `20260601T10` (a bare hour,
-    //    which `wallClockFromInput()`'s own comment calls a legal ISO time).
-    //    So `2026-6-1 10:00` imported and the identical date with a `T` in it
-    //    did not. Its justifying sentence -- "steps 1 and 2 between them
-    //    handle every legitimate machine form" -- was false, and the comment
-    //    thirty lines below named `2026-6-1` as a format the fallback exists
-    //    to support. **The rule is about the FRACTION, so it says so.**
+    // 🚨 THIS RULE MENTIONED THE DATE FOR THREE ROUNDS, AND WAS WRONG BOTH
+    //    WAYS BECAUSE OF IT. Rounds 12 to 15 each matched a date pattern and
+    //    each was defeated by a date spelling:
     //
-    // ⚠️ ROUND 14 SILENTLY TIGHTENED THE DATE HALF OF THIS PATTERN and said
-    //    nothing about it: `\d{1,2}` became `\d{2}`, so the rule started
-    //    depending on how the DATE was spelled. Measured, round 14 against
-    //    round 13:
+    //      round 14 padded dates only, so `2026-6-1T10.5` stored 10:05
+    //      round 15 added a space separator and `\d{1,2}` — and then
+    //               **refused 189 machine formats that had imported in EVERY
+    //               previous version, including the original**, because a
+    //               fraction on the SECONDS with anything after it
+    //               (`2026-06-01 10:00:00.000 UTC`, a database export with
+    //               microseconds and a zone name) does not reach step 2:
+    //               step 2 strips a fraction only at the END of the string.
+    //               Round 15 ALSO still missed `1 June 2026 10.5`,
+    //               `01/06/2026 10.5`, `2026-152 10.5` and
+    //               `2026-W23-1 10.5` — two of which it ADDED to the
+    //               supported list in the same commit.
     //
-    //      2026-6-1T10.5      ISO 10:30   r13 refused   r14 stored 10:05
-    //      2026-06-1T10.5     ISO 10:30   r13 refused   r14 stored 10:05
-    //      2026-6-1T10:00.5   ISO 10:00:30 r13 refused  r14 stored 10:00:05
-    //      2026-06-01T10.5    ISO 10:30   both refused  (padded, so caught)
+    //    **The rule is about the TIME, so it now says nothing about the
+    //    date.** A fraction is legitimate exactly when it follows `HH:MM:SS`;
+    //    otherwise, if it ends the value or is followed only by a zone or an
+    //    offset, it is on the wrong component and is refused. No date
+    //    spelling appears in either pattern, so no date spelling can defeat
+    //    it.
     //
-    //    A refusal turned into "stores something wrong", which round 10's own
-    //    lesson names as the direction to check first — and it is the same
-    //    "spelling list wearing a rule's clothes" criticism the note below
-    //    levels at round 12, reproduced in the rule written to replace it.
+    //    The lookbehind is what keeps a dotted European date out of it:
+    //    `31.12.2026` and `01.06.2026 10:00` have `\d.\d` in them and are
+    //    perfectly readable, and the digits before a date's dot are
+    //    themselves preceded by a dot.
     //
-    // ⚠️ AND THE SEPARATOR IS A SPACE AS WELL AS A `T`. `2026-06-01 10.5`
-    //    stored 10:05 in EVERY version of this closure including the original
-    //    — `I18n::wallClockFromInput()`'s own docblock names `2026-06-01 23.9`
-    //    as exactly this fault and refuses it on the API and form paths, while
-    //    the import stored it. **That is a deliberate narrowing of
-    //    long-standing behaviour**, taken because either reading of `10.5`
-    //    means half past ten and `strtotime()` answers five past.
-    //
-    //    Legitimate fractional SECONDS are unaffected, measured rather than
-    //    assumed: `2026-06-01T10:00:00.000` and the same with a space are both
-    //    taken by step 2, so they never reach this line.
-    if (preg_match('/^(?:\d{4}-\d{1,2}-\d{1,2}|\d{8})[Tt ][\d:]*\.\d/', $trimmed) === 1) {
+    //    What it still cannot see, stated rather than implied: a fraction
+    //    followed by something that is neither a zone nor an offset, and a
+    //    time written in a way `strtotime()` reads but no standard describes.
+    //    43 cases are measured both ways in section K's own matrix.
+    if (preg_match('/:\d{2}:\d{2}\.\d/', $trimmed) !== 1
+        && preg_match(
+            '/(?<![\d.])\d{1,2}(?::\d{2})?\.\d+'
+            . '(?=\s*(?:[A-Za-z][A-Za-z\/_]*|[+-]\d{2}:?\d{2}|[+-]\d{2})?\s*$)/',
+            $trimmed
+        ) === 1) {
+        // 🗣️ SAY WHICH REFUSAL THIS IS. "not parseable" was shown for every
+        //    value these rules refuse, and every one of them IS parseable —
+        //    `strtotime('2026-06-01 10.5')` answers a real moment. The
+        //    administrator was told their file could not be read when the
+        //    portal had decided not to accept it, which hides the one thing
+        //    that would let them fix the row. The same untruth is recorded as
+        //    a REPAIRED fault thirty lines above this closure.
+        $why = 'has a decimal point on the hour or the minute, so the time it '
+             . 'means is not the time it would be read as';
         return null;
     }
 
@@ -267,11 +278,16 @@ $fmtClock = static function (string $text): ?string {
             $parsed['day'],
             is_int($parsed['year']) === true ? $parsed['year'] : (int) date('Y')
         ) === false) {
+        $why = 'is a date that does not exist';
         return null;
     }
 
     $moment = strtotime($trimmed);
-    return $moment === false ? null : date('Y-m-d H:i:s', $moment);
+    if ($moment === false) {
+        return null;                                   // $why stays "cannot be read"
+    }
+    $why = '';
+    return date('Y-m-d H:i:s', $moment);
 };
 
 $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock): array {
@@ -401,12 +417,16 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtClock):
         //
         //       What was wrong was WHICH rows were refused, what they were
         //       told, and -- for an impossible date -- what got stored.
-        $startStored = $start !== '' ? $fmtClock($start) : null;
-        if ($start !== '' && $startStored === null) { $rowErr[] = 'startDateTime not parseable'; }
+        $startWhy    = null;
+        $startStored = $start !== '' ? $fmtClock($start, $startWhy) : null;
+        if ($start !== '' && $startStored === null) {
+            $rowErr[] = 'startDateTime ' . (string) $startWhy;
+        }
         if ($end !== '') {
-            $endStored = $fmtClock($end);
+            $endWhy    = null;
+            $endStored = $fmtClock($end, $endWhy);
             if ($endStored === null) {
-                $rowErr[] = 'endDateTime not parseable';
+                $rowErr[] = 'endDateTime ' . (string) $endWhy;
             } elseif ($startStored !== null && $endStored < $startStored) {
                 $rowErr[] = 'endDateTime is before startDateTime';
             }

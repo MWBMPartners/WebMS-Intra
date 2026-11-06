@@ -714,12 +714,22 @@ FLASH_BRANCHES = (
     #    all 65 audit scripts, 75 recurrence checks, 104 clock checks AND 251
     #    HTTP checks green. The three sentence pins below survive any
     #    mis-mapping, so they could not see it either.
-    ("$why === 'gap'",
-     "the page branching on the answer it was given. Pinning the rule is not "
-     "pinning the mapping, and a round-14 claim that it was is corrected."),
-    ("$why === 'pattern and time'",
-     "the second branch. Without this pin, collapsing the three cases to two "
-     "is invisible."),
+    # ⚠️ THE WHOLE CONDITION, NOT THE COMPARISON — because a substring pin is
+    #    defeated by `&& false`, which is the one-edit bypass this repository
+    #    has recorded five times (#668 section D, #709, #485, #763). Measured
+    #    by round 16: `if ($why === 'gap' && false) {` left all 65 audit
+    #    scripts, 104 clock checks and 75 recurrence checks green while every
+    #    clocks-moved-it date fell into the `else` branch and was told only
+    #    "to match the repeat you chose" — round 12's original fault restored.
+    #
+    #    Round 15 pinned the comparison because that was the spelling round 15
+    #    was handed. Three successive rounds now: pin the WHOLE condition.
+    ("if ($why === 'gap') {",
+     "the page branching on the answer it was given, pinned whole so that "
+     "appending to the condition cannot pass."),
+    ("} elseif ($why === 'pattern and time') {",
+     "the second branch, pinned whole for the same reason. Without it, "
+     "collapsing the three cases to two is invisible."),
     ("Any later dates keep the time you typed",
      "the clocks-moved-it sentence."),
     ("and its time became",

@@ -568,10 +568,27 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         ['2026-152 10:00',                '2026-06-01 10:00:00', 'round 13 refused it (ISO ordinal)'],
         ['2026-152',                      '2026-06-01 00:00:00', 'round 13 refused it (ISO ordinal, no time)'],
         ['2026-W23-1 10:00',              '2026-06-01 10:00:00', 'ISO week date'],
-        // legitimate fractional SECONDS, which step 2 takes, so the fraction
-        // rule below must never reach them
+        // ⚠️ LEGITIMATE FRACTIONAL SECONDS. Round 15 listed only the first two
+        //    of these, under a comment saying step 2 takes them "so the
+        //    fraction rule below must never reach them" — and measured
+        //    exactly those two. **Step 2 strips a fraction only at the END of
+        //    the string and needs a zero-padded date, so none of the rest
+        //    reaches it**, and round 15's rule refused all of them: 189
+        //    machine formats that had imported in EVERY previous version
+        //    including the original. A database or log export with
+        //    microseconds and a zone name is an ordinary CSV cell.
         ['2026-06-01T10:00:00.000',       '2026-06-01 10:00:00', ''],
         ['2026-06-01 10:00:00.000',       '2026-06-01 10:00:00', ''],
+        ['2026-06-01 10:00:00.000 UTC',   '2026-06-01 11:00:00', 'round 15 refused it'],
+        ['2026-06-01 10:00:00.123456 UTC', '2026-06-01 11:00:00', 'round 15 refused it'],
+        ['2026-6-1 10:00:00.000',         '2026-06-01 10:00:00', 'round 15 refused it'],
+        ['2026-6-1 10:00:00.000+01:00',   '2026-06-01 10:00:00', 'round 15 refused it'],
+        ['2028-02-29 10:00:00.123456 GMT', '2028-02-29 10:00:00', 'round 15 refused it'],
+        ['2026-06-01T10:00:00.000Z',      '2026-06-01 11:00:00', ''],
+        // dotted European dates, which must not be mistaken for a fraction
+        ['01.06.2026 10:00',              '2026-06-01 10:00:00', ''],
+        ['31.12.2026',                    '2026-12-31 00:00:00', ''],
+        ['1.6.2026 10:00',                '2026-06-01 10:00:00', ''],
         // a real leap day, so the impossible-date rule cannot just refuse 29 February
         ['2028-02-29 10:00',              '2028-02-29 10:00:00', ''],
     ];
@@ -615,6 +632,15 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         '2026-6-1T10.5', '2026-06-1T10.5', '2026-6-01T10.5', '2026-6-1T10:00.5',
         '2026-6-1T10.5Z',
         '2026-06-01 10.5', '2026-6-1 10.5', '2026-06-01 23.9', '2026-06-01 10:00.5',
+        // ⚠️ AND IN EVERY OTHER DATE SPELLING. Rounds 12 to 15 each matched a
+        //    DATE pattern here and each was defeated by a date spelling —
+        //    round 15 still stored all of these as five past the hour, and two
+        //    of them (`2026-152`, `2026-W23-1`) it ADDED to the supported
+        //    list in the same commit. The rule says nothing about the date
+        //    now, so no date spelling can defeat it.
+        '1 June 2026 10.5', 'June 1 2026 10.5', 'Mon, 01 Jun 2026 10.5',
+        '01/06/2026 10.5', '2026/06/01 10.5', '2026-152 10.5', '2026-W23-1 10.5',
+        '2026-152 10:00.5', '2026-06-01 10.5 UTC', '2026-06 10.5',
         'rubbish',
     ];
     $refuseBad = [];
