@@ -97,6 +97,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Maintenance;
+use Portal\Core\ScheduledJobs;
 
 // -----------------------------------------------------------------------------
 // 🙈 NEVER PRINT A PHP WARNING INTO THIS PAGE'S ANSWER, MAINTENANCE OR NOT.
@@ -289,10 +290,22 @@ try {
         exit();
     }
 
+    // ⏰ The token was accepted, so this really is the scheduler
+    //    calling. Record that the job began (#775). AFTER the gate
+    //    on purpose: a request with the wrong token must never be
+    //    able to make a job that has stopped look alive.
+    ScheduledJobs::began(App::db(), 'cron/health');
+
     // -------------------------------------------------------------------------
     // 🩺 Run the checks, only for a caller with the right token.
     // -------------------------------------------------------------------------
     $health = maintenance_health_probes(App::db());
+    // ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+    //    began and never reached here leaves `finishedAtUtc` empty,
+    //    which is how a job dying part-way is told apart from one
+    //    that is not being called at all.
+    ScheduledJobs::finished(App::db(), 'cron/health');
+
 
     // 📤 Report. Same shape, same key order as before.
     header('Content-Type: application/json');
@@ -311,6 +324,15 @@ try {
         '[WebMS-Intra] /cron/health checks failed during maintenance mode (not written to the database): '
         . get_class($e) . ': ' . str_replace(["\r", "\n"], ' ', $e->getMessage())
     );
+    // ⏰ A FINISH, recorded as a FAILURE (#775). The checks threw and this
+    //    page HANDLED it, so "ran and could not complete its work" is what
+    //    happened, and it is more precise than leaving a start with no finish
+    //    — which means "died without reaching any ending we know about".
+    //
+    //    Only this branch records. The branch above RE-THROWS when the portal
+    //    is open, and a request that ends by throwing really did die part-way,
+    //    so leaving that one unrecorded is correct rather than an oversight.
+    ScheduledJobs::finished(App::db(), 'cron/health', ScheduledJobs::OUTCOME_FAILED);
     http_response_code(500);
     header('Content-Type: application/json');
     echo json_encode(['error' => 'health_check_failed']);

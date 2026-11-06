@@ -59,6 +59,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Mailer;
 use Portal\Core\PortalAddress;
+use Portal\Core\ScheduledJobs;
 
 require_once __DIR__ . DIRECTORY_SEPARATOR . '_backup-freshness.php';
 
@@ -73,6 +74,12 @@ if ($expected === '' || hash_equals($expected, $supplied) === false) {
     echo json_encode(['error' => 'invalid_token']);
     exit();
 }
+
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/backup-check');
 
 // 📦 The verdict, shared with the staff page.
 $check          = backup_freshness_check();
@@ -117,6 +124,12 @@ if ($state !== 'ok' && count($recipients) > 0) {
 
 // 🖼️ Report — same keys, same order as the old job mode.
 header('Content-Type: application/json');
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/backup-check');
+
 echo json_encode([
     'state'           => $state,
     'message'         => $message,

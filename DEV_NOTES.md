@@ -5,6 +5,124 @@
 
 ---
 
+### Every scheduled job records that it ran (#775, migration 253)
+
+**`Portal\Core\ScheduledJobs` is the ONE place a job's run is recorded and the
+ONE place it is read.** `tblScheduledJobRun` holds one row per job: the job's
+own address under `cron/`, when it last began, when it last finished, and how
+it ended.
+
+Fifteen addresses under `cron/` are called by whatever runs scheduled tasks on
+a customer's hosting. Until #775 only ONE left any trace — the mail queue,
+through `MailRoutes::jobRan()` — so a portal could silently stop sending
+reminders, stop clearing out personal data past its retention period, or stop
+taking backups, with no error, no log line and nothing on any page.
+
+**KEYED BY JOB, NEVER BY TOKEN, and that is the whole reason it is a new
+table.** `PortalCheck::JOB_TOKENS` lists the eleven tokens, and
+`maintenance.cronToken` alone covers FIVE jobs — the mail queue, the retention
+sweep, the backup run, the backup check and the health check. Keyed by token,
+"the backup has not run for a month" could not be told from "the mail queue ran
+a minute ago".
+
+**OVERDUE IS PER JOB (D-070).** One number cannot work: giving statements go
+out weekly, so anything loose enough for them would let the mail queue sit dead
+for a week, and anything tight enough for the mail queue would complain about
+the nightly backup every day. A two-tier split was rejected for the same
+measured reason — statements would read as overdue six days in seven, a
+permanent false alarm, and **a check that cries wolf gets switched off (#483)**.
+
+**NO RECORD MEANS "NOTHING IS KNOWN YET" (D-071)**, never a warning and never a
+backfilled run time. Warning would give every correctly-configured portal a
+page of warnings the morning after it upgrades, with no way to clear them but
+to wait. Backfilling would write a record saying a job ran when nobody knows
+whether it did — inventing evidence in the one place whose purpose is telling
+an administrator what is actually true. The never-configured case still has a
+real answer, from the token check, which IS knowable from the database.
+
+#### Recording must never be able to stop the job it records
+
+Files reach a customer's server BEFORE anybody presses "Run migrations" (#694),
+so these pages are called while the table does not exist. If `began()` threw
+then, the mail queue, the reminders and the retention sweep would all stop —
+this class would have caused the exact silence it exists to reveal. So
+`began()` and `finished()` answer `false` on any cause.
+
+**The cost, said plainly: a recording that fails is silent**, and the page then
+says "nothing is known yet" about a job that really ran. That under-claims,
+which is the opposite direction from the fault being fixed.
+
+#### THE FAULT THIS SHIPPED FIRST, and it is the lesson
+
+Nine of the fifteen pages **exit early** when a setting switches them off, when
+another run holds the lock, or when nothing is due. Twelve such paths recorded
+a START and no finish — so a job somebody had **deliberately switched off** read
+as "started and never finished" on the check page, as a PROBLEM, for ever. **A
+job working exactly as configured must never be reported as broken.**
+
+Every one of those paths now records a finish. Which word it records matters:
+
+**THERE ARE THREE OUTCOME WORDS, NOT TWO, AND THE THIRD WAS ADDED FOR A
+MEASURED REASON.** A first version had only `ok` and `refused`, so `refused`
+was doing two different jobs — "somebody switched this off" and "this ran and
+could not do its work". The check page words `refused` as *being called but
+switched off*, so **a nightly backup that FAILED would have been reported as
+switched off**: untrue in the reassuring direction, about backups. `failed` is
+its own word and its own finding.
+
+An unrecognised word is stored as `failed`, not `refused`: it means the caller
+is out of step with the class, and `refused` reads as a reassurance nobody has
+earned.
+
+#### A broken READ is not "nothing is known yet" either
+
+Both used to answer `NOT_KNOWN`, so a half-applied migration — the table there
+but a column missing — reported the reassuring *expected straight after an
+update: each one starts being watched the first time it runs*. Nothing was
+going to start being watched. `COULD_NOT_READ` is its own answer and a WARNING.
+
+**That also found that the `SHOW TABLES LIKE` guard was doing nothing
+observable**: the self-test passed with it deleted, because the `try`/`catch`
+answered identically. **A guard nothing can distinguish from its absence is not
+a guard.** The one in `state()` now is, and planting `if (true)` in its place
+turns F4 red. The ones in `began()`/`finished()` still cannot be — both return
+`false` — and that is stated rather than pretended: they are there to avoid
+throwing and catching on every call before the migration runs, and to keep "not
+there yet" from being answered like "something is wrong".
+
+#### Two guards, and what each cannot see
+
+`tools/audit-checks/check_scheduled_jobs_recorded.py` (a hard gate in
+`pr-security.yml`) reads the SOURCE with PHP's tokeniser — **not a text search,
+because every one of these pages quotes its own token gate in a docblock**, so a
+search for `hash_equals` finds the prose. It requires every registered `cron/`
+address to be listed and every listed entry to be a real address (both ways),
+one `began()` and at least one `finished()` per page with its OWN key, and —
+the security property — **the start recorded AFTER the token gate**: a request
+with the wrong token that could write there would let anybody on the internet
+make a dead job look alive, turning the page from a true report into a
+forgeable one.
+
+It states two blind spots. `finished()` could be moved up next to `began()` and
+it would pass. And **one exit path losing its finish is invisible** — because a
+page may legitimately hold several finishes, it requires only one. That is the
+exact fault this package shipped, so it is planted and recorded green rather
+than left implicit. Requiring a finish before every `exit()` was tried and
+rejected: the NORMAL end of these pages is also an `exit()`, and two end inside
+a `catch` that RE-THROWS, where recording nothing is correct.
+
+`tools/scheduled-jobs-selftest.php` (83 checks, real MySQL) covers what the
+source cannot: section H drives two real pages over HTTP, including a
+**switched-off** one, and reads the row back; section I proves a wrong token
+records NOTHING. Eight portal faults were planted and each turned a named check
+red — including the blind spot, one threshold for all fifteen, and
+"nothing is known" reported as a warning.
+
+**It drives two of fifteen. The other thirteen are #789**, and that is said in
+the file rather than left to be discovered.
+
+---
+
 ### A page that checks the portal against itself (#477, migration 249)
 
 **`Portal\Core\PortalCheck` is the ONE place the checks live**, and

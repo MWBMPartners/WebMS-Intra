@@ -10536,6 +10536,34 @@ CREATE TABLE IF NOT EXISTS `tblMailQueueFiles` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Files attached to waiting mail (#592). The files are copies under _uploads/mail-queue/.';
 
+-- Which scheduled jobs have actually run (#775, migration 253).
+--
+-- WHY IT EXISTS. Fifteen addresses under `cron/` are called by whatever runs
+-- scheduled tasks on a customer's hosting, and until #775 only ONE of them left
+-- any trace: the mail queue, in `tblMailRouteState`.`jobLastRanAt` below. So a
+-- portal could silently stop sending reminders, stop clearing out personal data
+-- past its retention period, or stop taking backups, and nothing anywhere would
+-- show it. The retention sweep is how personal data stops being kept, so a
+-- portal whose sweep died six months ago is keeping records it told people it
+-- would delete, and the only way to find out was to query the tables by hand.
+--
+-- ONE ROW PER JOB, NEVER PER ORGANISATION. A scheduled job is called once for
+-- the whole installation and works across every organisation on it.
+--
+-- KEYED BY JOB, NOT BY TOKEN, and that is the point: `maintenance.cronToken`
+-- alone covers five jobs, so keyed by token "the backup has not run for a
+-- month" could not be told from "the mail queue ran a minute ago".
+--
+-- `Portal\Core\ScheduledJobs` is the ONE place this table is written or read.
+CREATE TABLE IF NOT EXISTS `tblScheduledJobRun` (
+    `jobKey`        VARCHAR(40) NOT NULL COMMENT 'Which scheduled job the row is about, as its own address under cron/ -- the name already registered in tblRoutes and already given to whoever runs the scheduled tasks. Portal\\Core\\ScheduledJobs::JOBS is the one list',
+    `startedAtUtc`  DATETIME    NOT NULL COMMENT 'A MOMENT IN UTC, written with UTC_TIMESTAMP(): when this job last BEGAN, recorded only after its token was accepted. A request with the wrong token writes nothing, or anybody on the internet could make a dead job look alive',
+    `finishedAtUtc` DATETIME        NULL DEFAULT NULL COMMENT 'A MOMENT IN UTC: when this job last finished its work. EMPTY means the newest run began and never reached the end, which is what distinguishes a job dying part-way from one that is not being called at all',
+    `lastOutcome`   VARCHAR(20) NOT NULL DEFAULT '' COMMENT 'How the last finished run ended, as one word: ok or refused. NEVER the words of a fault, which can quote the value that caused it. Empty while a run is in flight',
+    PRIMARY KEY (`jobKey`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Whether each scheduled job has actually run (#775). Read by the Check this portal page.';
+
 CREATE TABLE IF NOT EXISTS `tblMailRouteState` (
     `routeKey`           VARCHAR(40)   NOT NULL COMMENT 'Which mail route the row is about. Today always installation: the one route every organisation shares',
     `problem`            VARCHAR(30)   NOT NULL DEFAULT '' COMMENT 'What is wrong with the route, as one word: certificate or sign-in-refused. Empty when nothing is known to be wrong',
@@ -11150,6 +11178,16 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('251_member_language_is_a_choic
 -- The two comments are declared above, on the columns themselves.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('252_wall_clock_columns_say_so.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 253_scheduled_jobs_record_their_runs.sql (#775) ────────────────────
+-- `tblScheduledJobRun` is declared above, beside the mail route state it
+-- generalises. A fresh install starts with the table EMPTY on purpose: a job
+-- with no row reads as "nothing is known yet" rather than as a warning
+-- (D-071), and writing a row at install time would say a job had run when
+-- nobody knows whether it has.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('253_scheduled_jobs_record_their_runs.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

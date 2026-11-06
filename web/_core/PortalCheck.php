@@ -655,38 +655,44 @@ final class PortalCheck
     }
 
     /**
-     * What is known about the scheduled jobs — which is very little, and this
-     * says so rather than implying coverage.
+     * ⏰ Whether each scheduled job has actually run (#775).
      *
-     * ⚠️ ONLY ONE JOB RECORDS THAT IT RAN. `MailQueue::jobIsRunning()` reads
-     *    `tblMailRouteState`, and nothing equivalent exists for the others. A
-     *    site can silently stop sending reminders, clearing old data or taking
-     *    backups and nothing here would know. That is #775. **Reporting "all
-     *    clear" for the jobs we cannot see would be exactly the false
-     *    reassurance this page exists to end.**
+     * UNTIL #775 THIS COULD SAY ALMOST NOTHING. Only the mail queue recorded
+     * that it ran, so a portal could silently stop sending reminders, stop
+     * clearing out personal data past its retention period, or stop taking
+     * backups, and this page could not tell. It said so rather than implying
+     * coverage, which was right — and was no use to anybody.
+     *
+     * Every job now writes a one-row record through `ScheduledJobs`, and this
+     * reads it.
+     *
+     * ⚠️ THE MAIL JOB HAS TWO RECORDS, FOR TWO DIFFERENT QUESTIONS, and this
+     *    page reads only one of them on purpose. `MailQueue::jobIsRunning()`
+     *    answers the QUEUE's operational question — "may I hand this message
+     *    to the job instead of sending it now?" — on a fixed 15-minute window,
+     *    and it is still the one place that answers it. This page asks the
+     *    different question "has this job stopped?", of all fifteen jobs, by
+     *    one rule. Reading both here would let one page give two answers about
+     *    one job, which is worse than either.
+     *
+     * ⚠️ A JOB WITH NO RECORD IS "NOTHING IS KNOWN YET", NEVER A WARNING
+     *    (D-071). On the day these files land no job anywhere has written a
+     *    record, so warning would give every correctly-configured portal a
+     *    page of warnings about jobs that are running perfectly well, with no
+     *    way to clear them but to wait. **A check that cries wolf gets
+     *    switched off (#483).** The never-configured case still has a real
+     *    answer, from the token check below, which is knowable from the
+     *    database.
      */
     private static function scheduledJobs(mysqli $db, int $siteId): array
     {
-        $mailRunning = MailQueue::jobIsRunning($db);
         $findings = [];
-        $findings[] = [
-            'severity' => $mailRunning === true ? self::NOTE : self::WARNING,
-            'what'     => $mailRunning === true
-                ? 'The mail job has run in the last 15 minutes.'
-                : 'The mail job has not run in the last 15 minutes.',
-            'why'      => $mailRunning === true
-                ? 'Messages that cannot be sent at once are being picked up.'
-                : 'Anything waiting in the mail queue is not being sent. If this portal has never '
-                    . 'had its scheduled jobs set up, that is the likeliest reason.',
-            'todo'     => $mailRunning === true
-                ? 'Nothing.'
-                : 'Check with whoever set this portal up that the scheduled jobs are running.',
-            'examples' => [],
-        ];
+
         // 🚨 A JOB WITH NO TOKEN HAS NEVER RUN AND NEVER WILL. Every one of
         //    these pages refuses when its stored token is empty, so this is
-        //    knowable from the database — unlike whether a job with a token
-        //    actually ran, which nothing records (#775).
+        //    knowable from the database whether or not the job ever recorded
+        //    anything — which is why this check is FIRST, and why D-071's
+        //    "nothing is known yet" gives nothing away.
         $silent = [];
         foreach (self::JOB_TOKENS as $key => $whatStops) {
             $stmt = $db->prepare(
@@ -719,17 +725,160 @@ final class PortalCheck
             ];
         }
 
-        $findings[] = [
-            'severity' => self::NOTE,
-            'what'     => 'For the jobs that CAN run, nothing records whether they did.',
-            'why'      => 'Only the mail job records that it ran. Reminders, clearing out old '
-                . 'personal data, and the nightly tidy-up leave no trace this page can read, so '
-                . 'one with a token set could still have been silent for months without anything '
-                . 'showing it here.',
-            'todo'     => 'Treat this as unknown rather than clear. Making every job record its '
-                . 'own runs is tracked as issue #775.',
-            'examples' => [],
-        ];
+        // ── What each job's own record says ────────────────────────────────
+        $state     = ScheduledJobs::state($db);
+        $overdue   = [];
+        $diedPart  = [];
+        $notKnown  = [];
+        $refused   = [];
+        $broke     = [];
+        $unreadable = [];
+        foreach ($state as $jobKey => $facts) {
+            $words = $facts['whatStops'];
+            if ($facts['status'] === ScheduledJobs::OVERDUE) {
+                $overdue[] = $words . ' — last ran '
+                    . ScheduledJobs::howLongAgo((int) $facts['seconds']);
+                continue;
+            }
+            if ($facts['status'] === ScheduledJobs::DIED_PART_WAY) {
+                $diedPart[] = $words . ' — started '
+                    . ScheduledJobs::howLongAgo((int) $facts['seconds'])
+                    . ' and never finished';
+                continue;
+            }
+            if ($facts['status'] === ScheduledJobs::COULD_NOT_READ) {
+                $unreadable[] = $words;
+                continue;
+            }
+            if ($facts['status'] === ScheduledJobs::NOT_KNOWN) {
+                $notKnown[] = $words;
+                continue;
+            }
+            if ($facts['outcome'] === ScheduledJobs::OUTCOME_FAILED) {
+                $broke[] = $words;
+                continue;
+            }
+            if ($facts['outcome'] === ScheduledJobs::OUTCOME_REFUSED) {
+                $refused[] = $words;
+            }
+        }
+
+        if (count($overdue) > 0) {
+            $findings[] = [
+                'severity' => self::PROBLEM,
+                'what'     => 'Some scheduled jobs have not run for longer than they should have.',
+                'why'      => 'Each of these has a token set, so it CAN run — it simply has not. '
+                    . 'Whatever runs the scheduled tasks for this portal may have been switched '
+                    . 'off, moved, or given the wrong address. If the clearing-out of personal '
+                    . 'data is among them, this portal is keeping records it told people it '
+                    . 'would delete.',
+                'todo'     => 'Ask whoever runs the scheduled tasks for this portal to check that '
+                    . 'each of these is still being called, and that it is not reporting an '
+                    . 'error. The installation guide has the addresses.',
+                'count'    => count($overdue),
+                'examples' => array_slice($overdue, 0, self::EXAMPLES),
+            ];
+        }
+
+        if (count($diedPart) > 0) {
+            $findings[] = [
+                'severity' => self::PROBLEM,
+                'what'     => 'Some scheduled jobs started and never finished.',
+                'why'      => 'These are being called, so whatever runs the scheduled tasks is '
+                    . 'working — but the job itself stopped part-way through and did not get to '
+                    . 'the end of its work. That is different from a job nobody is calling, and '
+                    . 'usually means it ran out of time or hit an error. Part of its work may '
+                    . 'have been done and part not.',
+                'todo'     => 'Call the job once by hand with its token and read what it answers. '
+                    . 'If it reports nothing, the error log for this portal will have the cause.',
+                'count'    => count($diedPart),
+                'examples' => array_slice($diedPart, 0, self::EXAMPLES),
+            ];
+        }
+
+        if (count($broke) > 0) {
+            // ⚠️ THIS MUST NOT BE FOLDED INTO THE NOTE BELOW. A first version of
+            //    #775 had one word for "switched off" and "ran and failed", so a
+            //    nightly backup that FAILED was reported to an administrator as
+            //    "switched off" — untrue in the reassuring direction, about
+            //    backups.
+            $findings[] = [
+                'severity' => self::PROBLEM,
+                'what'     => 'Some scheduled jobs ran and could not finish their work.',
+                'why'      => 'These are being called and they are not switched off: each one '
+                    . 'tried, and reported that it could not do what it was asked. That is a '
+                    . 'fault in the job itself or in something it depends on, not in whatever '
+                    . 'calls it.',
+                'todo'     => 'The error log for this portal will have the cause. Calling the job '
+                    . 'once by hand with its token will usually reproduce it.',
+                'count'    => count($broke),
+                'examples' => array_slice($broke, 0, self::EXAMPLES),
+            ];
+        }
+
+        if (count($refused) > 0) {
+            $findings[] = [
+                'severity' => self::NOTE,
+                'what'     => 'Some scheduled jobs are being called but are switched off.',
+                'why'      => 'These ran recently and refused to do anything, because a setting '
+                    . 'turns them off. That is not a fault — somebody chose it — but it is worth '
+                    . 'knowing, because the work they would do is not being done.',
+                'todo'     => 'Nothing, unless this was not intended. The setting that switches '
+                    . 'each one off is in Admin, Settings.',
+                'count'    => count($refused),
+                'examples' => array_slice($refused, 0, self::EXAMPLES),
+            ];
+        }
+
+        if (count($unreadable) > 0) {
+            // ⚠️ A WARNING, NOT THE "nothing is known yet" NOTE. The record is
+            //    THERE and could not be read, so telling an administrator to
+            //    wait would be telling them to wait for something that is not
+            //    going to happen.
+            $findings[] = [
+                'severity' => self::WARNING,
+                'what'     => 'The record of which scheduled jobs have run could not be read.',
+                'why'      => 'The place this is kept exists but this page could not read it, so '
+                    . 'it cannot say whether these jobs have run. The usual cause is a database '
+                    . 'upgrade that did not finish.',
+                'todo'     => 'Open Admin, Migrations and check that every database upgrade has '
+                    . 'been run. The error log for this portal will have the cause.',
+                'count'    => count($unreadable),
+                'examples' => array_slice($unreadable, 0, self::EXAMPLES),
+            ];
+        }
+
+        if (count($notKnown) > 0) {
+            // ⚠️ A NOTE, NEVER A WARNING (D-071). And it must not read as an
+            //    all-clear either: it says plainly that nothing is known.
+            $findings[] = [
+                'severity' => self::NOTE,
+                'what'     => 'Nothing is known yet about some scheduled jobs.',
+                'why'      => 'Each job records that it ran, and these have not recorded anything '
+                    . 'since this portal was last updated. That is expected straight after an '
+                    . 'update: each one starts being watched the first time it runs, with no '
+                    . 'action from anybody. It is NOT a sign that they are working — only that '
+                    . 'this page cannot yet say either way.',
+                'todo'     => 'Nothing. If any of these is still listed here a day or two from '
+                    . 'now, it is not being called, and that is worth looking into.',
+                'count'    => count($notKnown),
+                'examples' => array_slice($notKnown, 0, self::EXAMPLES),
+            ];
+        }
+
+        if (count($overdue) === 0 && count($diedPart) === 0 && count($notKnown) === 0
+            && count($broke) === 0 && count($unreadable) === 0) {
+            $findings[] = [
+                'severity' => self::NOTE,
+                'what'     => 'Every scheduled job has run recently enough.',
+                'why'      => 'All ' . count($state) . ' of them recorded a finish inside the time '
+                    . 'expected for that job, which differs by job: the mail queue is expected '
+                    . 'every few minutes, the nightly jobs daily, and giving statements weekly.',
+                'todo'     => 'Nothing.',
+                'examples' => [],
+            ];
+        }
+
         return $findings;
     }
 

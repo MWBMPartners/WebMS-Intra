@@ -86,6 +86,16 @@ ALLOWED = {
         "started — not a count of calendar days. A 23-hour day does not make a "
         "machine's uptime shorter."
     ),
+    os.path.join("web", "_core", "ScheduledJobs.php"): (
+        "How long ago a scheduled job last ran, for the words an administrator "
+        "reads. The span comes from TIMESTAMPDIFF(SECOND, ...) between two "
+        "moments BOTH IN UTC, and UTC has no clock changes, so it is an exact "
+        "duration and not a count of calendar days -- the same case as server "
+        "uptime above. The question being answered is 'how long since this "
+        "ran', which a duration answers; 'which day did it last run' would be "
+        "a calendar question and is not asked anywhere. The phrase is "
+        "deliberately rough and the method says so."
+    ),
 }
 
 SUFFIXES = (".php",)

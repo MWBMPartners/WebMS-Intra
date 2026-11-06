@@ -28,6 +28,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Discipleship;
+use Portal\Core\ScheduledJobs;
 use Portal\Core\Settings;
 
 // 🔑 Token gate (constant-time compare) — mirrors reminders.cron_token.
@@ -38,10 +39,21 @@ if ($expected === '' || hash_equals($expected, $incoming) === false) {
     exit('Forbidden');
 }
 
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/discipleship-sweep');
+
 header('Content-Type: text/plain; charset=utf-8');
 
 if (Discipleship::isEnabled() === false) {
     echo 'Discipleship disabled';
+    // ⏰ A FINISH, because discipleship is switched off (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/discipleship-sweep', ScheduledJobs::OUTCOME_REFUSED);
     exit();
 }
 
@@ -63,5 +75,11 @@ $stats = [];
 foreach ($siteIds as $siteId) {
     $stats[$siteId] = Discipleship::autoSweep($siteId);
 }
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/discipleship-sweep');
+
 
 echo 'OK ' . json_encode(['sitesSwept' => count($siteIds), 'inserted' => $stats]);

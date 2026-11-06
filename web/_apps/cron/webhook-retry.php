@@ -38,6 +38,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\ScheduledJobs;
 use Portal\Core\WebhookDispatcher;
 
 // -----------------------------------------------------------------------------
@@ -56,10 +57,21 @@ if ($expected === '' || hash_equals($expected, $incoming) === false) {
     exit('Forbidden');
 }
 
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/webhook-retry');
+
 header('Content-Type: text/plain; charset=utf-8');
 
 if ((string) (App::settings('webhooks.enabled') ?? 'true') !== 'true') {
     echo 'Webhooks disabled';
+    // ⏰ A FINISH, because a setting switches webhooks off (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/webhook-retry', ScheduledJobs::OUTCOME_REFUSED);
     exit();
 }
 
@@ -68,5 +80,11 @@ if ((string) (App::settings('webhooks.enabled') ?? 'true') !== 'true') {
 // method's own doc for the full selection/backoff/dead-letter contract.
 // -----------------------------------------------------------------------------
 $summary = WebhookDispatcher::retryDue();
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/webhook-retry');
+
 
 echo 'OK ' . json_encode($summary);

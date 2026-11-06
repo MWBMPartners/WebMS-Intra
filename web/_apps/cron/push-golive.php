@@ -64,6 +64,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Livestream;
 use Portal\Core\Logger;
+use Portal\Core\ScheduledJobs;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
@@ -77,6 +78,12 @@ if ($expected === '' || hash_equals($expected, $incoming) === false) {
     http_response_code(403);
     exit('Forbidden');
 }
+
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/push-golive');
 
 header('Content-Type: text/plain; charset=utf-8');
 
@@ -233,5 +240,11 @@ foreach ($siteIds as $siteId) {
         }
     }
 }
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/push-golive');
+
 
 echo 'OK ' . json_encode($totals);

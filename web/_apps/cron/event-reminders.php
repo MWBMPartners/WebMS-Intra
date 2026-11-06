@@ -133,10 +133,12 @@
 
 declare(strict_types=1);
 
+use Portal\Core\App;
 use Portal\Core\EventVisibility;
 use Portal\Core\Logger;
-use Portal\Core\Mailer;
 use Portal\Core\MailQueue;
+use Portal\Core\Mailer;
+use Portal\Core\ScheduledJobs;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
@@ -147,7 +149,18 @@ $expected = (string) (Settings::get('reminders.cron_token', '') ?? '');
 if ($expected === '' || hash_equals($expected, $incoming) === false) {
     http_response_code(403); exit('Forbidden');
 }
+
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/event-reminders');
 if ((string) Settings::get('reminders.enabled', '1') !== '1') {
+    // ⏰ A FINISH, because a setting switches reminders off (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/event-reminders', ScheduledJobs::OUTCOME_REFUSED);
     echo 'Reminders disabled'; exit();
 }
 
@@ -669,6 +682,12 @@ $stmt->close();
     }
     $stmt->close();
 }
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/event-reminders');
+
 
 // ⏳ Reminders that were only KEPT in the mail queue in this run, said apart
 //    from the ones that went: they used to be counted as sent.

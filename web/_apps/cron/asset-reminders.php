@@ -75,6 +75,7 @@ use Portal\Core\AssetRegister;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
 use Portal\Core\PortalAddress;
+use Portal\Core\ScheduledJobs;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 
@@ -90,10 +91,21 @@ if ($expected === '' || hash_equals($expected, $incoming) === false) {
     exit('Forbidden');
 }
 
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/asset-reminders');
+
 header('Content-Type: text/plain; charset=utf-8');
 
 if ((string) Settings::get('assets.reminders_enabled', '1') !== '1') {
     echo 'Asset reminders disabled';
+    // ⏰ A FINISH, because a setting switches asset reminders off (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/asset-reminders', ScheduledJobs::OUTCOME_REFUSED);
     exit();
 }
 
@@ -458,6 +470,12 @@ foreach ($grandTotals as $family => $t) {
         $t['skipped']
     );
 }
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/asset-reminders');
+
 // ⏳ Reminders only KEPT in the mail queue in this run (#592): not sent yet.
 echo "waiting-in-mail-queue=" . Mailer::keptThisRequest() . "\n";
 echo "valuationsWritten=" . $grandValuationsWritten . "\n";

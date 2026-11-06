@@ -110,6 +110,7 @@ use Portal\Core\App;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\MailRoutes;
+use Portal\Core\ScheduledJobs;
 use Portal\Core\Sms;
 
 // 🙈 Never print a PHP warning into the answer: it is read by a machine, and
@@ -157,6 +158,12 @@ if ($configured === '' || hash_equals($configured, $given) === false) {
     echo json_encode(['status' => 'forbidden']);
     exit();
 }
+
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/mail-queue');
 
 // -----------------------------------------------------------------------------
 // 🏃 One run: the mail step, then the held texts step.
@@ -226,6 +233,11 @@ foreach ($texts as $what => $howMany) {
 if ($mailStopped === true) {
     http_response_code(500);
     echo json_encode(['status' => 'error'] + $textNumbers);
+    // ⏰ A FINISH, because the mail route is in a state that stops mail (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/mail-queue', ScheduledJobs::OUTCOME_FAILED);
     exit();
 }
 
@@ -233,6 +245,11 @@ if ($numbers['ran'] === 0) {
     // Not an error: the other run is doing the work. HTTP 200, so that a
     // scheduler which reports every failure does not report this.
     echo json_encode(['status' => 'busy'] + $numbers + $textNumbers);
+    // ⏰ A FINISH, because another run of this job holds the lock (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/mail-queue', ScheduledJobs::OUTCOME_REFUSED);
     exit();
 }
 
@@ -245,5 +262,11 @@ if ($numbers['sent'] + $numbers['held'] + $numbers['failed'] + $numbers['expired
         . $numbers['expired'] . ' expired, ' . $numbers['removed'] . ' old rows removed'
     );
 }
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/mail-queue');
+
 echo json_encode(['status' => 'ok'] + $numbers + $textNumbers);
 exit();

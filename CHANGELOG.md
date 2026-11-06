@@ -4,6 +4,51 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The portal now notices when a scheduled task has stopped (#775)
+
+This portal relies on tasks that run on a timer: sending reminders, clearing
+out personal information once the time you said you would keep it has passed,
+taking backups, sending messages that could not go out at once. Whoever set
+the portal up arranged for these to be called.
+
+**Until now, only one of the fifteen left any trace that it had run.** So if
+the arrangement was switched off, moved, or given the wrong address, the tasks
+simply stopped — with no error, no message and nothing on any page to show it.
+The first sign was usually somebody asking why they had stopped getting
+reminders.
+
+That matters most for the task that clears out old personal information. If it
+had quietly stopped six months ago, the portal was keeping records it had told
+people it would delete, and the only way to find out was to look in the
+database by hand.
+
+**Every one of the fifteen now records when it last ran and whether it
+finished**, and the "Check this portal" page reads it. It tells you:
+
+- a task that has not run for longer than it should have, which is a problem;
+- a task that started and did not finish, which is a different problem and
+  usually means it ran out of time or hit an error;
+- a task that ran and reported that it could not do its work;
+- a task that is being called but is switched off by a setting — not a fault,
+  but worth knowing, because the work is not being done;
+- and, straight after an update, that **nothing is known yet** about a task.
+
+**How late is too late differs by task**, because they do not run on the same
+timetable. The mail task is expected every few minutes; the nightly ones daily;
+giving statements weekly. One figure for all fifteen would either let the mail
+task sit dead for a week, or complain about the nightly backup every single
+day.
+
+**Straight after this update every task will say "nothing is known yet", and
+that is expected.** Each one starts being watched the first time it runs, with
+nothing for anybody to do. It deliberately does not warn, because that would
+show every portal a page of warnings about tasks that are working perfectly
+well. It also does not pretend everything is fine — "nothing is known yet"
+says exactly what it means.
+
+A task that was never set up at all is still reported as a problem, as before,
+because that can be seen directly.
+
 ### A meeting at half past one showed as half past two, one morning a year (#777)
 
 A time written on a clock — "the group meets at 19:30" — is not a point in

@@ -48,6 +48,7 @@ use Portal\Core\App;
 use Portal\Core\Giving;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
+use Portal\Core\ScheduledJobs;
 use Portal\Core\Settings;
 use Portal\Core\Site;
 use Portal\Core\TimeLimit;
@@ -62,6 +63,12 @@ if ($expected === '' || hash_equals($expected, $incoming) === false) {
     http_response_code(403);
     exit('Forbidden');
 }
+
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/giving-statements');
 
 header('Content-Type: text/plain; charset=utf-8');
 
@@ -143,4 +150,10 @@ echo "Giving statements sweep — " . count($pending) . " queued row(s) processe
 foreach ($perSite as $siteId => $t) {
     echo sprintf("site %d: sent=%d waiting=%d failed=%d\n", $siteId, $t['sent'], $t['waiting'], $t['failed']);
 }
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/giving-statements');
+
 echo sprintf("TOTAL: sent=%d waiting=%d failed=%d\n", $totalSent, Mailer::keptThisRequest(), $totalFailed);

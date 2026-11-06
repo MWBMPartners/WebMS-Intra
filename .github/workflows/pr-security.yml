@@ -1189,6 +1189,21 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_table_name_comparisons.py
 
+      # #775: fifteen addresses under cron/ are called by a customer's
+      # scheduler and until now only ONE recorded that it ran, so a portal
+      # could silently stop sending reminders, stop clearing out personal data
+      # past its retention period, or stop taking backups with nothing showing
+      # it. The recording is advisory at run time on purpose -- it must never
+      # be able to stop the job it records -- which means a job that stops
+      # recording looks exactly like one nobody has looked at. This is what
+      # notices, and its sharpest check is that `began()` comes AFTER the token
+      # gate: a request with the wrong token that could write there would let
+      # anybody on the internet make a dead job look alive.
+      - name: 'Every scheduled job records that it ran (hard gate, #775)'
+        id: scheduled_jobs_recorded
+        if: always()
+        run: python3 tools/audit-checks/check_scheduled_jobs_recorded.py
+
       # CVE-2026-111497, the flaw called HTTP2Shell, is an out-of-bounds write
       # in Google's Brotli decoder, remotely triggerable by a crafted stream and
       # on CISA's actively-exploited list since 27 October 2026. This portal

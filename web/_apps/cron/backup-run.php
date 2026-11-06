@@ -72,6 +72,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\DbBackup;
 use Portal\Core\Logger;
+use Portal\Core\ScheduledJobs;
 
 // -----------------------------------------------------------------------------
 // 🔑 Token check. No session is involved at all.
@@ -88,6 +89,12 @@ if ($expected === '' || is_string($supplied) === false || hash_equals($expected,
     echo json_encode(['error' => 'invalid_token']);
     exit();
 }
+
+// ⏰ The token was accepted, so this really is the scheduler
+//    calling. Record that the job began (#775). AFTER the gate
+//    on purpose: a request with the wrong token must never be
+//    able to make a job that has stopped look alive.
+ScheduledJobs::began(App::db(), 'cron/backup-run');
 
 header('Content-Type: application/json');
 
@@ -147,6 +154,11 @@ if ($period === 0) {
         'reason'    => 'scheduled backups are switched off',
         'frequency' => $frequency,
     ]);
+    // ⏰ A FINISH, because scheduled backups are switched off (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/backup-run', ScheduledJobs::OUTCOME_REFUSED);
     exit();
 }
 
@@ -182,6 +194,11 @@ if ($lockHandle !== false && flock($lockHandle, LOCK_EX | LOCK_NB) === false) {
         'action' => 'none',
         'reason' => 'another backup run is in progress',
     ]);
+    // ⏰ A FINISH, because another backup run is in progress (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/backup-run', ScheduledJobs::OUTCOME_REFUSED);
     exit();
 }
 // Released when the handle closes, which PHP does at the end of the request
@@ -238,6 +255,11 @@ if ($ageHours !== null && $ageHours < ($period - $slackHours)) {
         'everyHours'    => $period,
         'newestAgeHours' => round($ageHours, 2),
     ]);
+    // ⏰ A FINISH, because the newest backup is not old enough yet (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/backup-run', ScheduledJobs::OUTCOME_REFUSED);
     exit();
 }
 
@@ -273,6 +295,11 @@ if (($result['success'] ?? false) !== true) {
         'action' => 'snapshot',
         'error'  => 'the backup could not be taken; the reason is in the portal\'s error log',
     ]);
+    // ⏰ A FINISH, because the backup could not be taken (#775). This path is the job
+    //    doing what it was told, not failing to run, and a start
+    //    with no finish would report it as having died part-way
+    //    — a job working as configured read as broken, for ever.
+    ScheduledJobs::finished(App::db(), 'cron/backup-run', ScheduledJobs::OUTCOME_FAILED);
     exit();
 }
 
@@ -303,6 +330,12 @@ Logger::activity(
     . '; ' . (int) ($pruned['pruned'] ?? 0) . ' older snapshot(s) removed',
     null
 );
+// ⏰ THE WORK IS DONE, so record the finish (#775). A run that
+//    began and never reached here leaves `finishedAtUtc` empty,
+//    which is how a job dying part-way is told apart from one
+//    that is not being called at all.
+ScheduledJobs::finished(App::db(), 'cron/backup-run');
+
 
 echo json_encode([
     'ok'         => true,
