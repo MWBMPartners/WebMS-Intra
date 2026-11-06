@@ -354,11 +354,11 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # list imported events too (each applying the visibility rule itself).
     # Keyed by line number like every entry here, so a change higher up
     # Events.php moves both of these.
-    ("_core/Events.php", 486): (
+    ("_core/Events.php", 491): (
         "SELECT DISTINCT `timezone` FROM `tblEvents`')",
         "reads only the zone texts in use, to work out each event's clock (#804); no event is returned",
     ),
-    ("_core/Events.php", 487): (
+    ("_core/Events.php", 492): (
         "SELECT DISTINCT `timezone` FROM `tblEvents` WHERE `siteID` = ?",
         "reads only one organisation's zone texts, to work out each event's clock (#804); no event is returned",
     ),
