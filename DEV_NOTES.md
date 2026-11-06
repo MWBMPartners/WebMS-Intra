@@ -19405,14 +19405,45 @@ refused by ROUND 12; `2026-06-01 19.30` and `2026-6-1 19.30` by ROUND 15; only
 existing refusal rather than introducing it, and "all five earlier versions
 stored it" is true of the Excel form alone. Section K's precedent labels said
 "round 16" for all of them — **the field whose whole purpose is naming the
-round that broke a format, giving the wrong one.** Round 15 had — the ordinary way a
-British spreadsheet writes a time — and pushed that refusal into every date
-spelling, so `Tue, 3 Mar 2026 19.30`, **Excel's long date format**, stopped
-importing. It was internally inconsistent too: `19.30` refused while
+round that broke a format, giving the wrong one.**
+
+⚠️ **AND THE SENTENCE THAT USED TO SIT HERE WAS BROKEN BY MY OWN CORRECTION.**
+Round 18 spliced "Round 16 had generalised the one-digit case…" down to the two
+words "Round 15 had", leaving a subject with no verb — and, as it then read,
+crediting **round 15** with pushing the refusal into every date spelling and
+with breaking Excel's long date. Both are round 16's, which the paragraph
+immediately above states correctly, so the correcting paragraph was followed by
+a restatement of the error it corrects. Round 19 found it. `.claude/CLAUDE.md`
+and `.OpenAI/CONTEXT.md` got the same edit and both read correctly, so **the two
+mirrors agreed with each other and disagreed with this file** — which is why
+diffing the mirrors is not enough.
+
+**The lesson is about the edit, not the fact.** This project's own note says
+never to slice between two markers, because that style has already deleted
+working code once and duplicated a block once. Replacing a verb phrase by a
+subject is the same mistake in prose. **Rewrite the sentence; do not splice
+it.**
+
+To state it plainly, measured by running every committed closure over the same
+cells: **round 12** first refused `2026-06-01T19.30`; **round 15** first refused
+`2026-06-01 19.30` and `2026-6-1 19.30`; **round 16** widened the refusal to
+every other date spelling and so broke `Tue, 3 Mar 2026 19.30`, Excel's long
+date format. Round 16 was also internally inconsistent: `19.30` refused while
 `19.30:00` stored.
 
-The rule is now one digit, non-zero, on the hour or the minute — the only case
-where the two readings genuinely differ and the cell is therefore ambiguous.
+The rule is now one digit, non-zero, on the hour or the minute — the case where
+the cell is genuinely ambiguous, because `10.5` reads as naturally as five past
+ten as it does as half past.
+
+⚠️ **NOT "the only case where the two readings genuinely differ", which is what
+this line said until round 19.** That sentence is the one round 18's own
+finding declared measurably false and removed from `import.php` — and it
+survived HERE, twenty-five lines below this file's own correction of it, and
+below its own round-17 lesson "enumerate every place a claim lives". Measured:
+of 100 two-digit fractions, 60 are parseable and the two readings agree in just
+TWO. **Two-digit fractions are stored because PHP's reading matches what a
+spreadsheet writer intends, which is a product judgement, not because the
+readings agree.**
 
 **And that dissolved the OTHER fault in the same breath.** Round 16's rule
 needed a trailing set to decide what counted as a zone, and it allowed letters,
@@ -19431,7 +19462,10 @@ time; it was:
 1. **Measure what the library actually does** before writing a rule about it.
    One `strtotime()` sweep would have settled the premise in round 12.
 2. **Commit the matrix.** Section K of `clock-change-selftest.php` is 47 cells
-   that must store and 48 that must be refused, each annotated with the round
+   that must store and some that must be refused — **the counts are pinned in
+   the test as K04/K04b and are deliberately not repeated here**, because this
+   line said 47 and 48 while the pins had moved, in four places at once. Each
+   is annotated with the round
    that broke it, lifting the real closure out of the page so it needs no
    database. **Both counts are pinned** (K04/K04b), because round 17 measured
    that deleting ten entries left 104 of 104 green.

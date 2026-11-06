@@ -553,7 +553,7 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         ['2026-06-01T10:00:00+01:00',     '2026-06-01 10:00:00', 'round 12 refused it'],
         ['2026-06-01T10:00:00+0100',      '2026-06-01 10:00:00', 'round 12 refused it'],
         ['2026-06-01T10:00:00z',          '2026-06-01 11:00:00', 'round 12 refused it'],
-        ['20260601T100000Z',              '2026-06-01 11:00:00', 'round 12 refused it'],
+        ['20260601T100000Z',              '2026-06-01 11:00:00', 'NEVER refused by any version — kept because it is this portal\'s own .ics shape'],
         // offset-bearing with a NON-ISO date spelling
         ['Mon, 01 Jun 2026 10:00:00 +0100', '2026-06-01 10:00:00', 'round 13 refused it (RFC 2822)'],
         ['Thu, 01 Jan 2026 10:00:00 +0100', '2026-01-01 09:00:00', 'round 13 refused it'],
@@ -582,7 +582,7 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         ['2026-06-01 10:00:00.000 UTC',   '2026-06-01 11:00:00', 'round 15 refused it'],
         ['2026-06-01 10:00:00.123456 UTC', '2026-06-01 11:00:00', 'round 15 refused it'],
         ['2026-6-1 10:00:00.000',         '2026-06-01 10:00:00', 'round 15 refused it'],
-        ['2026-6-1 10:00:00.000+01:00',   '2026-06-01 10:00:00', 'round 15 refused it'],
+        ['2026-6-1 10:00:00.000+01:00',   '2026-06-01 10:00:00', 'round 13 refused it first, round 15 again'],
         ['2028-02-29 10:00:00.123456 GMT', '2028-02-29 10:00:00', 'round 15 refused it'],
         // ⚠️ A TWO-DIGIT `HH.MM` TIME — the ordinary way a British spreadsheet
         //    writes one, and NOT ONE OF THESE WAS HERE for four rounds. That
@@ -697,6 +697,18 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
         //    — left 65 audit scripts and 107 clock checks green while
         //    `2026-06-01 9.5` stored 09:05 and `Tue, 3 Mar 2026 9.5` stored
         //    09:05. Up to 25 minutes wrong, with `ok => true`.
+        // ⚠️ AND ALL NINE DIGITS, not three. The list used only `.3`, `.5` and
+        //    `.9`, so narrowing the rule's `[1-9]` to `[359]` — ONE CHARACTER
+        //    — left 107 of 107 clock checks and 65 audit scripts green while
+        //    the other six stored again: `10.1` as 10:01, and worst `10.8` as
+        //    10:08 against a decimal reading of 10:48, **forty minutes wrong
+        //    with `ok => true`**. That is the THIRD way section K has been
+        //    shown to pass on broken code, and all three were the same
+        //    mistake: a list that covers one value of a dimension the rule
+        //    ranges over. **Cover the dimension, not an example of it.**
+        '2026-06-01 10.1', '2026-06-01 10.2', '2026-06-01 10.3', '2026-06-01 10.4',
+        '2026-06-01 10.6', '2026-06-01 10.7', '2026-06-01 10.8',
+        'Tue, 3 Mar 2026 10.1', '2026-06-01 10:00.1', '2026-06-01 10:00.8',
         '2026-06-01 9.5', '2026-06-01 8.5', '2026-06-01 1.5', '2026-06-01 9.3',
         '1 June 2026 9.5', 'Tue, 3 Mar 2026 9.5', '01.06.2026 9.5',
         '2026-06-01 9:00.5',
@@ -725,9 +737,11 @@ if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !==
     //       These two numbers are the pin. Raise them in the same edit that
     //       adds a case, and never lower them without saying why in the
     //       commit — a smaller list is a smaller guard, and section K is the
-    //       ONLY thing guarding the import reader.
+    //       only thing guarding the fraction and impossible-date rules (see
+    //       the note at the head of this section for what else covers the
+    //       reader, and what does not).
     check('K04 the must-store list has not shrunk', count($mustStore), 55);
-    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 56);
+    check('K04b the must-refuse list has not shrunk', count($mustRefuse), 66);
 
     // K05 — WHICH REFUSAL IT IS. The closure reports a reason through its
     //       second argument, and the import shows it to the administrator.

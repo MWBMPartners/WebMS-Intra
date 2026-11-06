@@ -219,11 +219,23 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //
     //    AND IT NEEDS NO LIST OF ZONE SPELLINGS, which is what the previous
     //    version got wrong a second way: its trailing set allowed letters,
-    //    `/` and `_` but not digits, `+` or `-`, so **89 zone spellings** —
-    //    `GMT+1`, `UTC+1`, `Etc/GMT+1`, `America/Port-au-Prince`,
-    //    `Asia/Ust-Nera` — fell through and stored the wrong hour, under a
-    //    comment saying a fraction "followed only by a zone or an offset" was
-    //    refused. A date-spelling list had been replaced by a zone-spelling
+    //    `/` and `_` but not digits, `+` or `-`, so any zone whose NAME holds
+    //    one of those — `GMT+1`, `UTC+1`, `Etc/GMT+1`,
+    //    `America/Port-au-Prince`, `Asia/Ust-Nera` — fell through and stored
+    //    the wrong hour, under a comment saying a fraction "followed only by a
+    //    zone or an offset" was refused.
+    //
+    // ⚠️ NO COUNT IS GIVEN, AND THAT IS THE POINT. This said "89 zone
+    //    spellings", which round 19 could not reproduce — and nor could I,
+    //    because **the number is a property of the list you sweep, not of the
+    //    code.** Measured against round 16's own committed closure: 4 of
+    //    PHP's 419 identifiers, 34 of the 598 that include the
+    //    backward-compatible names, and 91 once a `GMT±N`/`UTC±N`/`Etc/GMT±N`
+    //    family is generated alongside them. I took 89 from a report without
+    //    re-deriving it, which is this project's own rule broken — **and a
+    //    figure nobody can reproduce is worse than none, because it reads as
+    //    evidence.** What is reproducible, and is what matters: the live rule
+    //    leaks NONE of any of those sets, because nothing trails it. A date-spelling list had been replaced by a zone-spelling
     //    list. **An allow-list written from the spellings you were handed is
     //    not a rule.** Nothing trails the pattern now, so nothing can be
     //    missing from it.
@@ -241,11 +253,19 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
     //        every one of 428 zone spellings after a one-digit fraction, and
     //        nine legitimate values. It is what established the rule.
     //      • SECTION K of `clock-change-selftest.php`, which IS committed and
-    //        runs every time: 47 cells that must store and 48 that must be
-    //        refused, each one way, with both counts pinned so the lists
-    //        cannot shrink unnoticed.
+    //        runs every time: cells that must store and cells that must be
+    //        refused, each measured one way, with both counts pinned so the
+    //        lists cannot shrink unnoticed.
+    //
+    //        ⚠️ THE NUMBERS ARE DELIBERATELY NOT WRITTEN HERE. This paragraph
+    //           said "47 cells that must store and 48 that must be refused",
+    //           and round 18 raised the pins without touching it — in the one
+    //           paragraph whose subject is that the counts are pinned, and in
+    //           three other homes as well. **Read them from K04/K04b in that
+    //           file**, which is the only place that cannot go stale, because
+    //           it is the place the test fails on.
     if (preg_match('/:\d{2}:\d{2}\.\d/', $trimmed) !== 1
-        && preg_match('/(?<![\d.])(\d{1,2})(:\d{2})?\.[1-9](?!\d|\.\d)/', $trimmed, $which) === 1) {
+        && preg_match('/(?<![\d.])(\d{1,2}(?::\d{1,2})*)\.[1-9](?!\d|\.\d)/', $trimmed, $which) === 1) {
         // 🗣️ WHICH COMPONENT, because the two ambiguities are different and a
         //    single sentence was untrue of one of them. The old wording said
         //    "minutes or part of an hour" for BOTH, and for the minute case
@@ -257,11 +277,25 @@ $fmtClock = static function (string $text, ?string &$why = null): ?string {
         //    Round 16's finding 3 was "the message was untrue of every one of
         //    them"; saying it of one component while the rule covers two is
         //    that shape one level down.
-        $why = ($which[2] ?? '') !== ''
-            ? 'writes the minute with a single digit after a decimal point, which could '
-                . 'mean either seconds or part of a minute'
-            : 'writes the hour with a single digit after a decimal point, which could '
-                . 'mean either minutes past the hour or part of an hour';
+        // ⚠️ THE COMPONENT IS COUNTED, NOT GUESSED FROM A GROUP THAT MIGHT
+        //    NOT HAVE MATCHED. Round 18 used an optional `(:\d{2})?` and made
+        //    the HOUR sentence the default for everything it missed — and it
+        //    requires exactly two minute digits, so a one-digit minute or a
+        //    fraction on the seconds fell into it and was explained as an
+        //    hour that has no decimal point at all. Measured, all read by
+        //    PHP and all given the hour message: `10:0.5` (10:00:05),
+        //    `10:00:5.5` (10:00:05), `10:00:0.5`, `9:05:5.5`.
+        //
+        //    Round 18's own finding was that one sentence covered two
+        //    components; this is the same thing one level on — it closed the
+        //    spelling it was handed and left the catch-all. **Counting the
+        //    colons has no default**, so there is nothing left to fall into.
+        $colons = substr_count($which[1], ':');
+        $why = 'writes the ' . ['hour', 'minute', 'second'][min($colons, 2)]
+             . ' with a single digit after a decimal point, which could mean either '
+             . ['minutes past the hour or part of an hour',
+                'seconds or part of a minute',
+                'fractions of a second or part of a second'][min($colons, 2)];
         return null;
     }
 
