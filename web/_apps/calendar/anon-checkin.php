@@ -124,7 +124,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 <div class="container py-5 text-center" style="max-width:480px;">
     <h1 class="h3 mb-2"><?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
-    <p class="text-muted small mb-4"><?php echo htmlspecialchars(date('l j M Y', strtotime((string) $event['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?></p>
+    <p class="text-muted small mb-4"><?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $event['startDateTime'], 'l j M Y'), ENT_QUOTES, 'UTF-8'); ?></p>
 
     <?php
     // 🛡️ Codex catch-up B4 (20 September 2026): WHAT WAS WRONG — this form

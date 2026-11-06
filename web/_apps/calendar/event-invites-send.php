@@ -82,7 +82,9 @@ $stmt->close();
 // there is no address to give: no e-mail is sent then (below), because an
 // invitation whose button opens nothing is worse than none.
 $rsvpUrl = PortalAddress::absolute('calendar/rsvp-by-link?t=' . $token, $siteId);
-$when    = date('l j M Y, H:i', strtotime((string) $event['startDateTime']));
+// #777: a wall-clock reading on the event's own clock — never strtotime(),
+// which moves a reading inside the hour the clocks skip.
+$when    = \Portal\Core\I18n::formatClockDateTime((string) $event['startDateTime'], 'l j M Y, H:i');
 
 $subject = 'You\'re invited: ' . (string) $event['eventName'];
 $bodyHtml = '<p>Hi' . ($display !== '' ? ' ' . htmlspecialchars($display, ENT_QUOTES, 'UTF-8') : '') . ',</p>'

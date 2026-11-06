@@ -347,7 +347,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <option value="0">— none —</option>
                             <?php foreach ($events as $ev): $eId = (int) $ev['eventID']; ?>
                                 <option value="<?php echo $eId; ?>" <?php echo $eId === $currentEventId ? 'selected' : ''; ?>>
-                                    <?php echo $esc(date('j M', strtotime((string) $ev['startDateTime'])) . ' — ' . $ev['eventName']); ?>
+                                    <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo $esc(\Portal\Core\I18n::formatClockDateTime((string) $ev['startDateTime'], 'j M') . ' — ' . $ev['eventName']); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>

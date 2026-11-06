@@ -335,7 +335,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php
                             $evSelected = ($editSession !== null && $editSession['eventID'] !== null
                                 && (int) $editSession['eventID'] === (int) $ev['eventID']) ? 'selected' : '';
-                            $evDate = (new DateTime($ev['startDateTime']))->format('j M Y');
+                            // #777: a wall-clock reading on the event's own clock. `new
+                            // DateTime()` of it moved a reading inside the hour the clocks
+                            // skip -- onto the NEXT DAY in a zone that skips 23:00.
+                            $evDate = \Portal\Core\I18n::formatClockDateTime((string) $ev['startDateTime'], 'j M Y');
                             ?>
                             <option value="<?php echo (int) $ev['eventID']; ?>" <?php echo $evSelected; ?>>
                                 <?php echo htmlspecialchars($ev['eventName'] . ' (' . $evDate . ')', ENT_QUOTES, 'UTF-8'); ?>

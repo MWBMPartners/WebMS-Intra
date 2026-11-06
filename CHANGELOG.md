@@ -4,6 +4,40 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Event times are right on the morning the clocks go forward, on every page (#777 part two)
+
+Twenty-four pages showed an event's time by turning the stored time into a
+moment in the server's default time zone. On the morning the clocks go
+forward, an event at 01:30 was shown at **02:30**; and in a zone whose clocks
+go forward at 23:00 (Greenland), an event at 23:30 that night was shown on the
+**next day**, in the wrong square of the month grid. Every one now shows the
+time as stored, on the event's own clock: the event page, the month, year,
+day and list views, the photo view, the public event page, My events, My
+volunteering, event moderation and reminders, the host console, the
+denominational report, asset bookings, attendance, the RSVP and invitation
+pages, the event hub, anonymous check-in, the calendar widget, venue bookings,
+the countdown feed, the newsletter's "Upcoming events" block, and the start
+time sent to Zoom (with a meeting across the skipped hour given its real
+length).
+
+**"Has this event begun?" and the public countdown now use the event's own
+time zone**, not the organisation's — so an event kept on another clock is no
+longer greyed out as past, or counted down to, hours early or late. The list
+view's "Today" badge follows the event's clock too, so a viewer in London can
+see "Today" on an Auckland event that is tomorrow by their own calendar; that
+is deliberate, because the event's day is the one that matters to people
+attending it.
+
+**Room bookings decide "still to come" on the organisation's clock (#783).**
+My Bookings and a resource's page used to compare with the database server's
+clock, so an organisation in a different zone from its database had finished
+bookings kept, or bookings still to come hidden, by hours.
+
+Still open, each with an issue: thirteen other places decide which events are
+upcoming with the database server's clock (#804); three of these fixes are not
+yet guarded by a test (#805); and two day lists put an event on the wrong day
+or leave out its last day (#806).
+
 ### Importing events: a cell with no full date is refused, not given today's date (#797)
 
 When events were imported from a spreadsheet, a date cell that did not say

@@ -385,8 +385,13 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-$startDt = new DateTime($event['startDateTime']);
-$endDt   = $event['endDateTime'] !== null ? new DateTime($event['endDateTime']) : null;
+// 🕰️ #777 part two. These are readings on the EVENT's own clock, used below
+//    only to print the date and the time. `new DateTime()` read them on PHP's
+//    default zone, so on the morning the clocks go forward a start inside the
+//    missing hour was printed an hour late. `wallClockReading()` gives an
+//    object that cannot move; it must never be compared with a real "now".
+$startDt = \Portal\Core\I18n::wallClockReading((string) $event['startDateTime']);
+$endDt   = $event['endDateTime'] !== null ? \Portal\Core\I18n::wallClockReading((string) $event['endDateTime']) : null;
 
 // 📋 Fetch RSVP data (logged-in users only)
 $userRsvp   = null;
@@ -846,12 +851,13 @@ endif;
                 <div class="card-body">
                     <p class="mb-1">
                         <i class="fa-regular fa-calendar me-1 text-primary"></i>
-                        <strong><?php echo htmlspecialchars(\Portal\Core\I18n::formatDate($startDt->format('Y-m-d H:i:s'), 'long'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <?php /* #777: the DATE only. formatDate() runs strtotime(), and handed the time too it moved a reading inside a 23:00 gap (America/Nuuk) onto the next day. */ ?>
+                        <strong><?php echo htmlspecialchars(\Portal\Core\I18n::formatDate((string) $startDt?->format('Y-m-d'), 'long'), ENT_QUOTES, 'UTF-8'); ?></strong>
                     </p>
                     <?php if ($event['isAllDay'] !== '1' && (int) $event['isAllDay'] !== 1): ?>
                         <p class="mb-1">
                             <i class="fa-regular fa-clock me-1 text-primary"></i>
-                            <?php echo htmlspecialchars($startDt->format('g:i A'), ENT_QUOTES, 'UTF-8'); ?>
+                            <?php echo htmlspecialchars((string) $startDt?->format('g:i A'), ENT_QUOTES, 'UTF-8'); ?>
                             <?php if ($endDt !== null): ?>
                                 &ndash; <?php echo htmlspecialchars($endDt->format('g:i A'), ENT_QUOTES, 'UTF-8'); ?>
                             <?php endif; ?>

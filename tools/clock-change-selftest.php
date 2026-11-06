@@ -999,6 +999,176 @@ if ($foundBoth === false) {
 
 date_default_timezone_set($wasZone);
 
+// ══════════════════════════════════════════════════════════════════════════
+// SECTION L — #777 PART TWO: AN EVENT'S STORED READING, ON THE WAY OUT
+// ══════════════════════════════════════════════════════════════════════════
+// 🚨 #549's TRAP, STATED FIRST: every check here would pass on the OLD code on
+//    an ordinary day, because the old `date(…, strtotime($stored))` and the new
+//    code agree on every day except the one where the hour does not exist. So
+//    every case below is a FIXED reading inside a FIXED skipped hour, in a zone
+//    that really skips it; the premise (the hour really is missing) is asserted
+//    BEFORE anything relies on it; and the OLD behaviour is shown beside each,
+//    so no check can pass by the old code being right that day too.
+//
+//    Twenty-four pages put `tblEvents.startDateTime`/`endDateTime` through
+//    `strtotime()` or a zone-less DateTime. They were converted to FOUR
+//    methods of `I18n`, each driven here directly; the hard gate
+//    `check_clock_time_not_a_moment.py` is what stops a PAGE going back to
+//    the old call. Between them: a page that goes back to `strtotime()` or a
+//    zone-less DateTime fails the gate, and a method that reverts fails here.
+//
+//    ⚠️ NOT EVERY PAGE FAULT. A page that keeps the new methods but passes them
+//       the WRONG ZONE — the organisation's or PHP's instead of the event's —
+//       is invisible to both, because the gate cannot see which zone a call
+//       is given. #777 part two's check planted three such reverts (the
+//       countdown feed, the list view's past/today, the day columns) with
+//       everything green; that is #805. An earlier version of this sentence
+//       said "a fault is caught on either side", which was untrue.
+//
+//      formatClockDateTime()  -- words (the ONE place, #784)
+//      wallClockReading()     -- an object for the calendar grids to walk
+//      wallClockNow()         -- "has it begun?" on the EVENT's clock
+//      wallClockInstant()     -- a real instant, for a countdown or a feed
+echo "\n-- Section L: an event's stored reading, on the way OUT (#777 part two, #784) --\n";
+require_once PORTAL_CORE . $sep . 'FeedAdmin.php';
+
+$wasZoneL = date_default_timezone_get();
+
+/** Is this reading really missing from that zone's clock? (PHP moves it.) */
+$readingIsMissing = static function (string $reading, string $zone): bool {
+    $moment = new DateTimeImmutable($reading, new DateTimeZone($zone));
+
+    return $moment->format('Y-m-d H:i:s') !== $reading;
+};
+
+// The three skipped hours the brief names, and the one that crosses midnight.
+$skipped = [
+    'Europe/London'    => '2027-03-28 01:30:00',
+    'America/New_York' => '2027-03-14 02:30:00',
+    'Pacific/Auckland' => '2028-09-24 02:30:00',
+    // Greenland goes forward at 23:00, so a reading of 23:30 that evening
+    // lands on the NEXT DAY -- the case that put an event in the wrong cell
+    // of the month grid, not merely an hour low.
+    'America/Nuuk'     => '2027-03-27 23:30:00',
+];
+
+foreach ($skipped as $zone => $reading) {
+    // L00 -- THE PREMISE. Without it every check below is vacuous.
+    check("L00 premise: {$reading} really does not exist in {$zone}", $readingIsMissing($reading, $zone), true);
+
+    // Pages run with PHP's default zone set to the organisation's, by
+    // bootstrap.php; this is the organisation whose clock skips the hour.
+    date_default_timezone_set($zone);
+    $hm = substr($reading, 11, 5);
+
+    check("L01 words: the reading comes out as stored in {$zone}",
+        I18n::formatClockDateTime($reading, 'Y-m-d H:i'), substr($reading, 0, 16));
+    check("L02 ...and the OLD date(strtotime()) really moved it, so L01 is not vacuous",
+        date('Y-m-d H:i', (int) strtotime($reading)) !== substr($reading, 0, 16), true);
+
+    $object = I18n::wallClockReading($reading);
+    check("L03 the grid's object keeps the reading in {$zone}",
+        $object !== null ? $object->format('Y-m-d H:i') : 'null', substr($reading, 0, 16));
+    check("L04 ...and the OLD new DateTimeImmutable() really moved it",
+        (new DateTimeImmutable($reading))->format('Y-m-d H:i') !== substr($reading, 0, 16), true);
+    check("L05 the grid's object stays on the reading's own DAY in {$zone}",
+        $object !== null ? $object->format('Y-m-d') : 'null', substr($reading, 0, 10));
+    check("L06 walking it one day on keeps the same clock time ({$hm})",
+        $object !== null ? $object->modify('+1 day')->format('H:i') : 'null', $hm);
+}
+
+// L07 -- THE DAY, NOT JUST THE HOUR. In Nuuk the old reading crossed midnight,
+//        which is what put an event in the WRONG CELL of the month grid and
+//        what made `formatDate()` -- handed the time as well as the date --
+//        print the next day on the event page and the list. Both pages now
+//        hand it the DATE alone, and a date with no time has no hour to move.
+date_default_timezone_set('America/Nuuk');
+check('L07 OLD: the Nuuk reading came out on the NEXT DAY',
+    date('Y-m-d', (int) strtotime('2027-03-27 23:30:00')), '2027-03-28');
+check('L08 NEW: the date alone, as event.php and list.php now pass it to formatDate(), stays put',
+    date('Y-m-d', (int) strtotime((string) I18n::wallClockReading('2027-03-27 23:30:00')?->format('Y-m-d'))), '2027-03-27');
+
+// ── The calendar grids compare readings with readings, never with PHP's zone ──
+// `_day_columns.php` used to bucket an event into a day column by comparing
+// it with the column's midnight in PHP's DEFAULT zone. With the event now an
+// object built in UTC, a column built in Auckland would be compared across
+// two clocks (thirteen hours apart), so the columns are readings too.
+date_default_timezone_set('Pacific/Auckland');
+$col0 = I18n::wallClockReading('2028-09-24 00:00:00');
+$col1 = I18n::wallClockReading('2028-09-24 23:59:59');
+$ev   = I18n::wallClockReading('2028-09-24 02:30:00');
+check('L09 a reading inside the skipped hour falls inside its own day column',
+    $ev !== null && $col0 !== null && $col1 !== null && $ev >= $col0 && $ev <= $col1, true);
+// L10 -- WHY THE COLUMNS HAD TO BECOME READINGS TOO, shown rather than said.
+//    An evening reading compared with a column built on PHP's (Auckland's)
+//    clock falls OUTSIDE its own day, because the two objects are thirteen
+//    hours apart. (A first version of this check used 02:30, which happens to
+//    land inside either way -- a check that cannot fail; 20:00 cannot.)
+$evening = I18n::wallClockReading('2028-09-24 20:00:00');
+check('L10 an evening reading falls inside its own day column, read against reading-columns',
+    $evening !== null && $evening >= $col0 && $evening <= $col1, true);
+check('L10b ...and against a column built on PHP\'s zone (the shape avoided) it would NOT',
+    $evening !== null && $evening >= new DateTimeImmutable('2028-09-24 00:00:00') && $evening <= new DateTimeImmutable('2028-09-24 23:59:59'), false);
+check('L11 the day column draws it at 02:30, not 03:30',
+    $ev !== null ? ((int) $ev->format('H')) * 60 + (int) $ev->format('i') : -1, 150);
+
+// ── "Has it begun?" is asked on the EVENT's clock ────────────────────────────
+// `views/list.php` greyed an event out as past with `new DateTime($start) <
+// new DateTime()`, both on PHP's default zone -- the ORGANISATION's. An event
+// kept on another clock was judged by the wrong one. The organisation here is
+// in Auckland and the event in New York: between sixteen and eighteen hours
+// apart all year, so a two-hour margin cannot be tipped by the season.
+date_default_timezone_set('Pacific/Auckland');
+$nyZone   = new DateTimeZone('America/New_York');
+$nyNow    = I18n::wallClockNow($nyZone);
+$inTwoHrs = (new DateTimeImmutable('now', $nyZone))->modify('+2 hours')->format('Y-m-d H:i:s');
+$twoAgo   = (new DateTimeImmutable('now', $nyZone))->modify('-2 hours')->format('Y-m-d H:i:s');
+check('L12 premise: wallClockNow() reads the New York clock, not PHP\'s (Auckland)',
+    $nyNow !== date('Y-m-d H:i:s') && abs(strtotime($nyNow . ' UTC') - strtotime(date('Y-m-d H:i:s') . ' UTC')) >= 15 * 3600, true);
+check('L13 a New York event two hours away is NOT past, on its own clock',
+    strcmp($inTwoHrs, I18n::wallClockNow($nyZone)) < 0, false);
+check('L14 ...and the OLD comparison, on Auckland\'s clock, called it past',
+    new DateTime($inTwoHrs) < new DateTime(), true);
+check('L15 a New York event two hours ago IS past, on its own clock (no over-reach)',
+    strcmp($twoAgo, I18n::wallClockNow($nyZone)) < 0, true);
+
+// ── An INSTANT, on the event's own clock ─────────────────────────────────────
+// The public countdown feed and the public landing page published
+// `date('c', strtotime($start))`, on the ORGANISATION's clock.
+check('L16 an instant is taken on the EVENT\'s clock, with its offset',
+    I18n::wallClockInstant('2027-06-01 19:00:00', $nyZone)?->format('c'), '2027-06-01T19:00:00-04:00');
+check('L17 ...and the OLD way stamped it with Auckland\'s offset (hours out)',
+    date('c', (int) strtotime('2027-06-01 19:00:00')), '2027-06-01T19:00:00+12:00');
+check('L18 the skipped hour resolves forward by the gap (RFC 5545 3.3.5): 02:30 New York is 07:30 UTC',
+    I18n::wallClockInstant('2027-03-14 02:30:00', $nyZone)?->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i'), '2027-03-14 07:30');
+check('L19 a reading that is not real gives NO instant, not a confident wrong one',
+    I18n::wallClockInstant('2027-02-31 10:00:00', $nyZone), null);
+
+// ── Zoom is told the event's clock by name, so it must get the reading as written ──
+date_default_timezone_set('Europe/London');
+check('L20 zoom-create.php\'s start_time is the reading itself',
+    I18n::wallClockReading('2027-03-28 01:30:00')?->format('Y-m-d\TH:i:s'), '2027-03-28T01:30:00');
+check('L21 ...where the OLD round trip sent the meeting an hour late',
+    date('Y-m-d\TH:i:s', (int) strtotime('2027-03-28 01:30:00')), '2027-03-28T02:30:00');
+$zStart = I18n::wallClockInstant('2027-03-28 00:30:00', new DateTimeZone('Europe/London'));
+$zEnd   = I18n::wallClockInstant('2027-03-28 02:30:00', new DateTimeZone('Europe/London'));
+check('L22 a meeting\'s LENGTH across the skipped hour is the real one (00:30-02:30 lasts one hour)',
+    $zStart !== null && $zEnd !== null ? intdiv($zEnd->getTimestamp() - $zStart->getTimestamp(), 60) : -1, 60);
+
+// ── #784: ONE place for the words, and showWallClock() is a caller of it ─────
+check('L23 showWallClock() on the change morning keeps the reading and names a different zone',
+    \Portal\Core\FeedAdmin::showWallClock('2027-03-28 01:30:00', 'America/New_York', false, new DateTimeZone('Europe/London')),
+    'Sun 28 Mar 2027, 01:30 (America/New_York)');
+check('L24 ...an all-day date reads "(all day)"',
+    \Portal\Core\FeedAdmin::showWallClock('2027-03-28 00:00:00', null, true, new DateTimeZone('Europe/London')), 'Sun 28 Mar 2027 (all day)');
+check('L25 ...and text that is not a reading is handed back, as before',
+    \Portal\Core\FeedAdmin::showWallClock('not a time', null, false, new DateTimeZone('UTC')), 'not a time');
+check('L26 an impossible date is refused by BOTH, not rolled into March',
+    \Portal\Core\FeedAdmin::showWallClock('2027-02-31 10:00:00', null, false, new DateTimeZone('UTC')) . ' | ' . I18n::formatClockDateTime('2027-02-31 10:00:00'),
+    '2027-02-31 10:00:00 | 2027-02-31 10:00:00');
+
+date_default_timezone_set($wasZoneL);
+
 echo "\n";
 echo ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 echo "Sections A-F cover the ARITHMETIC of #549's mistake 3. G and H cover TWO\n";
@@ -1007,4 +1177,7 @@ echo "display sites and the three booking readers #777 fixed. The rest of\n";
 echo "mistake 1 still needs reading: a reading pulled into a variable and\n";
 echo "converted several lines later, or a call split over lines, is invisible to\n";
 echo "both this and check_clock_time_not_a_moment.py, which says so too.\n";
+echo "Section L drives the four I18n methods #777 part two converted twenty-four\n";
+echo "event pages to; whether each PAGE still calls them is the gate's question,\n";
+echo "and the HTTP half is part X of tools/time-zones-selftest.php.\n";
 exit($failed === 0 ? 0 : 1);

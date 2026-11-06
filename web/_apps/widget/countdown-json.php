@@ -65,7 +65,10 @@ $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_WEBSI
 //    (measured while building #514 part P2). The text sprintf() puts in is
 //    SQL built by EventVisibility itself, never anything a visitor sent.
 $stmt = $mysqli->prepare(sprintf(
-    'SELECT e.eventID, e.eventName AS title, e.locationName AS location, e.startDateTime, e.endDateTime, %s '
+    'SELECT e.eventID, e.eventName AS title, e.locationName AS location, e.startDateTime, e.endDateTime, '
+    // The event's own zone (#777 part two): `startsAt` below is an instant,
+    // and an instant depends on the clock the reading was written on.
+    . '`e`.`timezone`, %s '
     . 'FROM tblEvents e '
     . 'WHERE e.siteID = ? '
     . '  AND e.isDeleted = 0 '
@@ -97,6 +100,14 @@ if ($nextEvent === null) {
     exit();
 }
 
+// 🕰️ A stored reading as an ISO 8601 instant on the event's own clock (#777).
+$nextZone    = Site::zoneFor((string) ($nextEvent['timezone'] ?? ''));
+$nextInstant = static function (mixed $reading) use ($nextZone): ?string {
+    $instant = \Portal\Core\I18n::wallClockInstant((string) $reading, $nextZone);
+
+    return $instant !== null ? $instant->format('c') : null;
+};
+
 // 📡 Emit a minimal, stable shape — the JS widget reads only these keys.
 echo json_encode([
     'siteName'    => $siteName,
@@ -107,9 +118,15 @@ echo json_encode([
         // #514 part P2: null at "title, date and time only" (canSeeFull 0,
         // the number 0 from the database); otherwise exactly as before.
         'location'  => (int) $nextEvent['canSeeFull'] === 1 ? (string) ($nextEvent['location'] ?? '') : null,
-        'startsAt'  => date('c', strtotime((string) $nextEvent['startDateTime'])),
+        // 🕰️ #777 part two. These were `date('c', strtotime(...))`, which
+        //    reads the stored reading on PHP's default zone (the
+        //    organisation's) -- so an event kept on another clock was
+        //    published hours out to every website embedding this feed. The
+        //    instant is now taken on the event's OWN clock; a reading that is
+        //    not a real one gives null rather than a confident wrong instant.
+        'startsAt'  => $nextInstant($nextEvent['startDateTime']),
         'endsAt'    => $nextEvent['endDateTime'] !== null
-            ? date('c', strtotime((string) $nextEvent['endDateTime']))
+            ? $nextInstant($nextEvent['endDateTime'])
             : null,
     ],
 ], JSON_UNESCAPED_SLASHES);

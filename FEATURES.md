@@ -519,6 +519,10 @@ Events, series, RSVP, exports, and seven view modes.
   The events API's create takes an optional `timezone`. Manage Events lists events with no usable zone, and
   older events marked "Europe/London" in an organisation on another clock, with one button to put those right
   (#604).
+- An event's time is shown as stored, on the event's own clock, on every page — including the morning the clocks
+  go forward, when an event at 01:30 used to be shown at 02:30 (#777 part two). Whether an event has begun, and
+  the public countdown, follow the event's own zone. Room bookings' "still to come" follows the organisation's
+  clock, not the database server's (#783).
 - Public + admin-managed views.
 - Events copied in from somebody else's calendar, with their own audience, choices, rules and approvals: see "Outside calendars" below (#514).
 - Crews (#343), volunteer job board (#344), multi-day attendance grid (#345), segment broadcast (#119), registrations (#347) — per-event coordinator tools at `/calendar/event/{crews,jobs,attendance,broadcast}` + `/admin/calendar/registrations`.

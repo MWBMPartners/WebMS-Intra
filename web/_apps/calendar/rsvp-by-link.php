@@ -331,7 +331,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // 🎨 GET → render the landing page.
 $pageTitle = 'RSVP — ' . (string) $invite['eventName'];
-$when = date('l j M Y, H:i', strtotime((string) $invite['startDateTime']));
+// #777: a wall-clock reading on the event's own clock — never strtotime(),
+// which moves a reading inside the hour the clocks skip.
+$when = \Portal\Core\I18n::formatClockDateTime((string) $invite['startDateTime'], 'l j M Y, H:i');
 $currentResponse = (string) ($invite['response'] ?? '');
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>

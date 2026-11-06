@@ -1843,7 +1843,10 @@ function fi_runJob(string $token = 'p6-selftest-token', bool $standInForPass = f
         // found" in the middle of a check about something else. (`Sabbath.php`
         // was on this list while the pass held people in their quiet hours.
         // It holds nothing now, and no longer reaches for that class.)
-        . "'AppRegistry.php','ExternalAudience.php','FeedAdmin.php','PortalAddress.php','WebPush.php',"
+        // `I18n.php` since #777 part two: `FeedAdmin::showWallClock()`, which
+        // the pass uses for the e-mail's dates, now asks
+        // `I18n::formatClockDateTime()` for the words (#784).
+        . "'AppRegistry.php','ExternalAudience.php','I18n.php','FeedAdmin.php','PortalAddress.php','WebPush.php',"
         // ⚠️ `ScheduledJobs.php` IS NOT OPTIONAL, AND LEAVING IT OFF KILLED THE
         //    WHOLE JOB. #775 made every cron page record that it ran, so
         //    `cron/import-feeds.php` now calls `ScheduledJobs::began()` right

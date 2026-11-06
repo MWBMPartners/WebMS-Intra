@@ -107,7 +107,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div>
             <h1 class="h4 mb-1"><i class="fa-solid fa-headset me-2 text-primary"></i><?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h1>
             <p class="text-muted small mb-0">
-                <?php echo htmlspecialchars(date('l j M Y, H:i', strtotime((string) $event['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>
+                <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $event['startDateTime'], 'l j M Y, H:i'), ENT_QUOTES, 'UTF-8'); ?>
                 <?php if (!empty($event['locationName'])): ?>
                     &middot; <?php echo htmlspecialchars((string) $event['locationName'], ENT_QUOTES, 'UTF-8'); ?>
                 <?php endif; ?>

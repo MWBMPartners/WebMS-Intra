@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 148;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10)
+const EXPECTED_CHECKS = 161;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -2534,6 +2534,137 @@ setting('mail.provider', $routeWas);
 if ($switchedOff !== []) {
     q('UPDATE tblUsers SET isActive = 1 WHERE userID IN (' . implode(',', $switchedOff) . ')');
 }
+
+// =============================================================================
+// X. #777 PART TWO AND #783 — EVENT PAGES ON THE MORNING THE CLOCKS GO FORWARD,
+//    AND "STILL TO COME" ON THE ORGANISATION'S CLOCK
+// =============================================================================
+// 🚨 #549's TRAP, which is why every reading here is FIXED: the old pages and
+//    the new agree on every ordinary day. An event at 02:30 on
+//    2028-09-24 in Pacific/Auckland is inside the hour that day skips, so the
+//    old `strtotime()`/`new DateTime()` printed it as 03:30 -- the premise is
+//    asserted first, so nothing below can pass vacuously.
+//
+//    #783 is different in kind: the old queries compared a wall-clock booking
+//    with the DATABASE's `NOW()`. The premise there is that the database's
+//    clock really is hours away from the organisation's -- asserted, from a
+//    fresh connection like the pages make -- and the check runs in TWO zones,
+//    one ahead of UTC and one behind, because each direction hid a different
+//    fault: ahead kept finished bookings, behind lost bookings still to come.
+head('X. #777 part two and #783: event pages on the morning the clocks go forward, and "still to come" on the organisation\'s clock');
+$xOrgZoneWas = one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? null;
+$xMemberJar  = signIn('member');
+$withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): void {
+    // ---- the event pages ---------------------------------------------------
+    orgZone(1, 'Pacific/Auckland');
+    $skip      = '2028-09-24 02:30:00';
+    $skipName  = 'Selftest zones skipped hour 960901';
+    $skipSlug  = 'selftest-zones-skipped-960901';
+    $landName  = 'Selftest zones landing 960902';
+    $landSlug  = 'selftest-zones-landing-960902';
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960901, 1, ?, ?, ?, '2028-09-24 04:00:00', 'Pacific/Auckland', 'published', 1, 0)",
+        'sss', [$skipSlug, $skipName, $skip]
+    );
+    // A public event on a DIFFERENT clock from the organisation's, at a reading
+    // New York skips: its countdown must aim at New York's instant.
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960902, 1, ?, ?, '2028-03-12 02:30:00', NULL, 'America/New_York', 'published', 1, 0)",
+        'ss', [$landSlug, $landName]
+    );
+    $moved = (new DateTimeImmutable($skip, new DateTimeZone('Pacific/Auckland')))->format('Y-m-d H:i:s');
+    ok('X00 premise: ' . $skip . ' really does not exist in Pacific/Auckland (PHP moves it to ' . $moved . ')', $moved !== $skip);
+
+    $eventPage = req($adminJar, 'GET', '/calendar/event?slug=' . $skipSlug);
+    $eventText = words($eventPage['body']);
+    ok(
+        'X01 the event page prints the stored 2:30 AM, not the 3:30 AM the old new DateTime() made of it',
+        $eventPage['status'] === 200 && str_contains($eventText, '2:30 AM') === true && str_contains($eventText, '3:30 AM') === false
+            && str_contains($eventText, 'Sunday, 24 September 2028') === true,
+        said($eventPage) . '; ' . substr($eventText, max(0, (int) strpos($eventText, 'When') - 10), 220)
+    );
+    $month = req($adminJar, 'GET', '/calendar?view=month&date=2028-09');
+    ok(
+        'X02 the month grid puts it in the 24th\'s cell at 02:30',
+        $month['status'] === 200
+            && preg_match('#data-date|portal-cal-month-cell#', $month['body']) === 1
+            && preg_match('#pill-time">02:30</span>\s*<span class="portal-cal-month-pill-name">\s*' . preg_quote($skipName, '#') . '#', $month['body']) === 1,
+        said($month)
+    );
+    $day = req($adminJar, 'GET', '/calendar?view=day&date=2028-09-24');
+    ok(
+        'X03 the day column draws it from 02:30 to 04:00',
+        $day['status'] === 200 && str_contains($day['body'], 'title="02:30 – 04:00 · ' . $skipName . '"') === true,
+        said($day)
+    );
+    $list     = req($adminJar, 'GET', '/calendar?view=list&q=' . rawurlencode($skipName));
+    $listText = words($list['body']);
+    ok(
+        'X04 the list view prints 2:30 AM and the right date',
+        $list['status'] === 200 && str_contains($listText, $skipName) === true && str_contains($listText, '2:30 AM') === true
+            && str_contains($listText, '3:30 AM') === false && str_contains($listText, 'Sunday, 24 September 2028') === true,
+        said($list) . '; ' . substr($listText, max(0, (int) strpos($listText, $skipName) - 10), 200)
+    );
+    $landing = req('', 'GET', '/e/' . $landSlug);
+    preg_match('#data-target="([^"]*)"#', $landing['body'], $target);
+    ok(
+        'X05 the public landing page counts down to NEW YORK\'s instant (2028-03-12T03:30:00-04:00, the skipped 02:30 resolved forward), not Auckland\'s',
+        $landing['status'] === 200 && ($target[1] ?? '') === '2028-03-12T03:30:00-04:00'
+            && str_contains(words($landing['body']), 'Sunday 12 March 2028, 02:30') === true,
+        said($landing) . '; data-target ' . json_encode($target[1] ?? null)
+    );
+    q('DELETE FROM tblEvents WHERE eventID IN (960901, 960902)');
+
+    // ---- #783: "still to come" on the organisation's clock ------------------
+    $fresh = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);
+    $dbNow = (string) $fresh->query('SELECT NOW() AS n')->fetch_assoc()['n'];
+    $fresh->close();
+    $clockNow = static fn (string $zone): string => (new DateTimeImmutable('now', new DateTimeZone($zone)))->format('Y-m-d H:i:s');
+    $apart    = static fn (string $a, string $b): int => abs((int) strtotime($a . ' UTC') - (int) strtotime($b . ' UTC'));
+    ok(
+        'X06 premise: the database\'s NOW() is at least three hours from BOTH Auckland\'s and New York\'s clocks, so the old NOW() comparison can be told apart',
+        $apart($dbNow, $clockNow('Pacific/Auckland')) >= 3 * 3600 && $apart($dbNow, $clockNow('America/New_York')) >= 3 * 3600,
+        'database NOW() ' . $dbNow . ', Auckland ' . $clockNow('Pacific/Auckland') . ', New York ' . $clockNow('America/New_York')
+    );
+    q("INSERT INTO tblResource (siteID, name, category, isActive) VALUES (1, 'Selftest zones room 783', 'room', 1)");
+    $room = (int) one("SELECT resourceID FROM tblResource WHERE name = 'Selftest zones room 783'")['resourceID'];
+    $book = static function (string $zone, int $fromHours, int $toHours, string $purpose) use ($room): void {
+        $now = new DateTimeImmutable('now', new DateTimeZone($zone));
+        q(
+            "INSERT INTO tblResourceBooking (resourceID, bookedByID, startAt, endAt, purpose, status) VALUES (?, ?, ?, ?, ?, 'approved')",
+            'iisss',
+            [$room, MEMBER, $now->modify(($fromHours >= 0 ? '+' : '') . $fromHours . ' hours')->format('Y-m-d H:i:s'),
+                $now->modify(($toHours >= 0 ? '+' : '') . $toHours . ' hours')->format('Y-m-d H:i:s'), $purpose]
+        );
+    };
+    foreach (['Pacific/Auckland' => 'AKL', 'America/New_York' => 'NYC'] as $zone => $tag) {
+        orgZone(1, $zone);
+        q('DELETE FROM tblResourceBooking WHERE resourceID = ?', 'i', [$room]);
+        $book($zone, -3, -2, 'Selftest 783 ' . $tag . ' finished');
+        $book($zone, 2, 3, 'Selftest 783 ' . $tag . ' to come');
+        $mine  = words(req($xMemberJar, 'GET', '/resources/my-bookings')['body']);
+        $there = words(req($xMemberJar, 'GET', '/resources/resource?id=' . $room)['body']);
+        $old   = $tag === 'AKL' ? 'the old NOW() kept it, hours after it ended' : 'the old NOW() would have dropped the other one';
+        ok(
+            'X07 ' . $tag . ': My Bookings lists the booking still to come on ' . $zone . '\'s clock' . ($tag === 'NYC' ? ' (the old NOW() hid it)' : ''),
+            str_contains($mine, 'Selftest 783 ' . $tag . ' to come') === true,
+            substr($mine, max(0, (int) strpos($mine, 'My Bookings')), 400)
+        );
+        ok(
+            'X08 ' . $tag . ': My Bookings leaves out the booking that finished two hours ago on ' . $zone . '\'s clock (' . $old . ')',
+            str_contains($mine, 'Selftest 783 ' . $tag . ' finished') === false && str_contains($mine, 'My Bookings') === true,
+            substr($mine, max(0, (int) strpos($mine, 'My Bookings')), 400)
+        );
+        ok(
+            'X09 ' . $tag . ': the resource page lists the booking still to come and leaves out the one that has begun, on ' . $zone . '\'s clock',
+            str_contains($there, 'Selftest 783 ' . $tag . ' to come') === true && str_contains($there, 'Selftest 783 ' . $tag . ' finished') === false,
+            substr($there, max(0, (int) strpos($there, 'Selftest zones room 783')), 400)
+        );
+    }
+    q('DELETE FROM tblResourceBooking WHERE resourceID = ?', 'i', [$room]);
+    q('DELETE FROM tblResource WHERE resourceID = ?', 'i', [$room]);
+});
+orgZone(1, $xOrgZoneWas === null ? null : (string) $xOrgZoneWas);
 
 // =============================================================================
 // 🏁 The end

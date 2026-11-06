@@ -81,6 +81,9 @@ $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_ANONY
 //    itself, never anything a visitor sent; every value is still bound.
 $stmt = $mysqli->prepare(sprintf(
     'SELECT e.eventID, e.eventName, e.eventSlug, e.description, e.startDateTime, e.endDateTime, '
+    // The event's own zone (#777 part two): the countdown below needs the
+    // instant the event starts, and that depends on the clock it was written on.
+    . '       `e`.`timezone`, '
     . '       e.locationName, e.locationAddress, e.status, e.capacityCount, %s '
     . 'FROM tblEvents e WHERE e.eventSlug = ? AND e.siteID = ? AND e.isDeleted = 0 AND e.status = "published"',
     $fullDetail['sql']
@@ -128,9 +131,19 @@ $brandName     = method_exists(Site::class, 'productName') === true ? (string) S
 $siteName      = (string) (Site::branding('name')  ?? 'Portal');
 $primaryColor  = (string) (Site::branding('color') ?? '#5e6ad2');
 
-$startTs   = strtotime((string) $event['startDateTime']);
-$startIso  = date('c', $startTs);
-$startNice = date('l j F Y, H:i', $startTs);
+// 🕰️ #777 part two. `startDateTime` is a reading on the EVENT's own clock
+//    (`tblEvents.timezone`), and this used to be `strtotime()` of it -- which
+//    reads it on PHP's default zone, the organisation's. So an event in
+//    another zone counted down to the wrong instant, and on the morning the
+//    clocks go forward a start inside the missing hour was SHOWN an hour late
+//    ("01:30" printed as "02:30"). The words now come from the reading itself
+//    and only the countdown, which genuinely needs an instant, is given one,
+//    on the event's own clock.
+$startReading = (string) $event['startDateTime'];
+$startInstant = \Portal\Core\I18n::wallClockInstant($startReading, Site::zoneFor((string) ($event['timezone'] ?? '')));
+$startTs   = $startInstant !== null ? $startInstant->getTimestamp() : 0;
+$startIso  = $startInstant !== null ? $startInstant->format('c') : '';
+$startNice = \Portal\Core\I18n::formatClockDateTime($startReading, 'l j F Y, H:i');
 
 $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $host   = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');

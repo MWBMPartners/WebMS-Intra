@@ -78,16 +78,29 @@ if (function_exists('render_day_columns') === false) {
             $dayKeys[] = $k;
         }
 
+        // 🕰️ #777 part two. `startDateTime`/`endDateTime` are readings on the
+        //    EVENT's own clock. `new DateTimeImmutable()` of them used PHP's
+        //    default zone, so on the morning the clocks go forward a reading
+        //    inside the missing hour was drawn an hour low in the column (and
+        //    in a zone that skips 23:00, in the NEXT day's column).
+        //    `wallClockReading()` gives objects that cannot move -- and the
+        //    day columns they are compared with must be readings TOO: `$days`
+        //    arrive from the router in PHP's default zone, and comparing a
+        //    reading with one of those would compare across two clocks. So
+        //    each column's bounds are rebuilt from its date as readings.
         foreach ($events as $ev) {
-            $start = new DateTimeImmutable((string) $ev['startDateTime']);
+            $start = \Portal\Core\I18n::wallClockReading((string) $ev['startDateTime']);
+            if ($start === null) {
+                continue;
+            }
             $end   = isset($ev['endDateTime']) === true && $ev['endDateTime'] !== null
-                ? new DateTimeImmutable((string) $ev['endDateTime'])
+                ? (\Portal\Core\I18n::wallClockReading((string) $ev['endDateTime']) ?? $start->modify('+1 hour'))
                 : $start->modify('+1 hour');
             $isAllDay = (int) ($ev['isAllDay'] ?? 0) === 1;
 
             foreach ($days as $d) {
-                $dStart = $d->setTime(0, 0, 0);
-                $dEnd   = $d->setTime(23, 59, 59);
+                $dStart = \Portal\Core\I18n::wallClockReading($d->format('Y-m-d') . ' 00:00:00');
+                $dEnd   = \Portal\Core\I18n::wallClockReading($d->format('Y-m-d') . ' 23:59:59');
                 // overlap test
                 if ($start <= $dEnd && $end >= $dStart) {
                     $k = $d->format('Y-m-d');
@@ -182,12 +195,14 @@ if (function_exists('render_day_columns') === false) {
                         <!-- Events absolutely positioned -->
                         <?php foreach ($byDay[$k] as $ev): ?>
                             <?php
-                            $colDate = new DateTimeImmutable($k);
-                            $colStart = $colDate->setTime(0, 0, 0);
-                            $colEnd   = $colDate->setTime(23, 59, 59);
-                            $evStart  = new DateTimeImmutable((string) $ev['startDateTime']);
+                            // #777: readings on both sides -- see the bucketing above.
+                            // (Bucketing skipped any row whose start is not a reading,
+                            // so `$evStart` is never null here.)
+                            $colStart = \Portal\Core\I18n::wallClockReading($k . ' 00:00:00');
+                            $colEnd   = \Portal\Core\I18n::wallClockReading($k . ' 23:59:59');
+                            $evStart  = \Portal\Core\I18n::wallClockReading((string) $ev['startDateTime']);
                             $evEnd    = $ev['endDateTime'] !== null
-                                ? new DateTimeImmutable((string) $ev['endDateTime'])
+                                ? (\Portal\Core\I18n::wallClockReading((string) $ev['endDateTime']) ?? $evStart->modify('+1 hour'))
                                 : $evStart->modify('+1 hour');
 
                             // Clip to the visible column window

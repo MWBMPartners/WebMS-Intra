@@ -1657,7 +1657,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) ($ea['eventSlug'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                                 <?php echo htmlspecialchars((string) $ea['eventName'], ENT_QUOTES, 'UTF-8'); ?>
                             </a>
-                            <br><small class="text-muted"><?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $ea['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?></small>
+                            <br><small class="text-muted"><?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $ea['startDateTime'], 'j M Y, H:i'), ENT_QUOTES, 'UTF-8'); ?></small>
                         </div>
                         <div class="col-4 col-md-4 small text-muted">
                             <?php if ($ea['assignedFrom'] !== null || $ea['assignedUntil'] !== null): ?>
@@ -1707,7 +1707,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                             <option value="">Select an event…</option>
                             <?php foreach ($eventCandidates as $ec): ?>
                                 <option value="<?php echo (int) $ec['eventID']; ?>"<?php echo $prefillEventId === (int) $ec['eventID'] ? ' selected' : ''; ?>>
-                                    <?php echo htmlspecialchars((string) $ec['eventName'] . ' — ' . date('j M Y H:i', strtotime((string) $ec['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars((string) $ec['eventName'] . ' — ' . \Portal\Core\I18n::formatClockDateTime((string) $ec['startDateTime'], 'j M Y H:i'), ENT_QUOTES, 'UTF-8'); ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>

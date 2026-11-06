@@ -96,7 +96,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span class="badge bg-success ms-1"><i class="fa-solid fa-circle me-1" style="font-size:.5em; vertical-align:middle;"></i>LIVE — <?php echo (int) $e['liveNow']; ?></span>
                     <?php endif; ?>
                     <div class="small text-muted">
-                        <?php echo htmlspecialchars(date('l j M Y, H:i', strtotime((string) $e['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $e['startDateTime'], 'l j M Y, H:i'), ENT_QUOTES, 'UTF-8'); ?>
                         <?php if (!empty($e['lastActivity'])): ?>
                             &middot; last ping: <?php echo htmlspecialchars(date('j M H:i', strtotime((string) $e['lastActivity'])), ENT_QUOTES, 'UTF-8'); ?>
                         <?php endif; ?>

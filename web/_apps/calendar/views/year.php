@@ -63,10 +63,15 @@ if ($stmtMt !== false) {
 
 // 🗂️ Bucket events by Y-m-d, repeating multi-day events on each day they span.
 $byDate = [];
+// 🕰️ #777 part two: readings on the event's own clock, made objects that
+//    cannot move -- see the same step in views/month.php for why.
 foreach ($events as $ev) {
-    $start = new DateTimeImmutable((string) $ev['startDateTime']);
+    $start = \Portal\Core\I18n::wallClockReading((string) $ev['startDateTime']);
+    if ($start === null) {
+        continue;
+    }
     $end   = $ev['endDateTime'] !== null
-        ? new DateTimeImmutable((string) $ev['endDateTime'])
+        ? (\Portal\Core\I18n::wallClockReading((string) $ev['endDateTime']) ?? $start)
         : $start;
     $cur = $start;
     while ($cur <= $end) {

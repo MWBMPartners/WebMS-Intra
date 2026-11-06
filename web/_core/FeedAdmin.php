@@ -2568,21 +2568,30 @@ final class FeedAdmin
      * text and converting here would make the two disagree (the owner's
      * times rule of 23 September 2026). The event's own zone is named
      * alongside it only when it differs from the organisation's.
+     *
+     * 📌 THE WORDS COME FROM `I18n::formatClockDateTime()`, WHICH IS THE ONE
+     *    PLACE A WALL-CLOCK DATE AND TIME BECOMES WORDS (#784). This method
+     *    came first and used to make the same UTC build itself; two helpers
+     *    for one rule is #768's shape, so #777 part two made this one a
+     *    caller. What is left here is only what this method ADDS: "(all day)"
+     *    and naming the event's own zone. Do not put the reading-to-words step
+     *    back in here, and do not write a third.
+     *
+     *    One behaviour moved with it, deliberately: text that is not a real
+     *    reading comes back unchanged (as before) — but `2027-02-31 10:00:00`
+     *    is now refused rather than rolled into March by `createFromFormat()`,
+     *    and a reading with no seconds (`2027-03-28 01:30`) is now shown
+     *    rather than handed back raw.
      */
-    // ⚠️ `I18n::formatClockDateTime()` (#777) now does the simple half of this
-    //    -- the same UTC build, for a reading with no zone to name. This one
-    //    came first and does more. Two helpers for one rule is #768's shape,
-    //    so the relationship is #784's to settle; do not add a third.
     public static function showWallClock(string $wall, ?string $zone, bool $allDay, \DateTimeZone $orgZone): string
     {
-        $moment = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $wall, new \DateTimeZone('UTC'));
-        if ($moment === false) {
+        if (I18n::wallClockReading($wall) === null) {
             return $wall;
         }
         if ($allDay === true) {
-            return $moment->format('D j M Y') . ' (all day)';
+            return I18n::formatClockDateTime($wall, 'D j M Y') . ' (all day)';
         }
-        $text     = $moment->format('D j M Y, H:i');
+        $text     = I18n::formatClockDateTime($wall, 'D j M Y, H:i');
         $zoneName = trim((string) $zone);
         if ($zoneName !== '' && $zoneName !== $orgZone->getName()) {
             $text .= ' (' . $zoneName . ')';

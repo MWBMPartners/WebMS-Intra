@@ -14,11 +14,20 @@
 # event in another country, and the wrong hour on the morning the clocks go
 # forward even where the zone is right.
 #
-# ⚠️ EACH NEEDS A PERSON. Fixing them is #777 part two, which is also where the
-#    other 361 uncommented time-shaped columns get their answer. They are
-#    listed here rather than fixed in part one because part one was about the
-#    `TIME` columns, and a sweep that quietly widened to 25 files would be a
-#    different package wearing part one's name.
+# ✅ THE LIST IS EMPTY SINCE #777 PART TWO (a), and that is what lets
+#    `--strict` go green. Every one of the 24 files was read and fixed by what
+#    its site NEEDED, not by one mechanical swap: words for display went to
+#    `I18n::formatClockDateTime()` (the ONE place, #784); calendar grids that
+#    walk a reading across days went to `I18n::wallClockReading()`; "has it
+#    started?" went to `I18n::wallClockNow()` on the EVENT's clock; and the
+#    two places that publish an INSTANT (the countdown feed and the public
+#    landing page's countdown) went to `I18n::wallClockInstant()` on the
+#    event's own zone. The file stays, empty, because the check reads it and a
+#    future backlog -- the 361 uncommented time-shaped columns are still #777's
+#    -- would go here.
+#
+# (What follows is the history of the list, kept because each paragraph
+#  records a way the list was once wrong.)
 #
 # WHAT THIS LIST IS FOR, AND WHAT IT IS NOT: nothing NEW may join it. A file
 # not on it that does this fails the check. `--strict` fails while the list
@@ -90,41 +99,16 @@
 #    FOUR review rounds missed it. Fixed in round 5; a guard for the class is
 #    #785.
 #
-#     web/_apps/calendar/zoom-create.php  -- $start = (string) $event['startDateTime']; (86)
-#                                            then strtotime($start) at 94, 95 and 104,
-#                                            no zone, and the result is what is sent to
+#     web/_apps/calendar/zoom-create.php  -- read `startDateTime` into `$start`,
+#                                            then strtotime($start): the value sent to
 #                                            Zoom as `start_time`.
-#     web/_core/Newsletter.php            -- $when = (string) $it['startDateTime']; (682)
-#                                            then date('D j M, H:i', strtotime($when)) (683),
-#                                            in a newsletter's "Upcoming events" block.
+#     web/_core/Newsletter.php            -- read `startDateTime` into `$when`, then
+#                                            date('D j M, H:i', strtotime($when)), in a
+#                                            newsletter's "Upcoming events" block.
 #
-# They are NAMED HERE RATHER THAN LISTED, because a listed file with no match
-# fails the stale-entry rule. Part two must fix them too; do not read the
-# length of this list as the size of the work.
+# They were NAMED HERE RATHER THAN LISTED, because a listed file with no match
+# fails the stale-entry rule. BOTH WERE FIXED IN #777 PART TWO (a), with the
+# 24 listed files.
 #
 # One path per line. Count them with `grep -vc '^#' <this file>` -- never from
 # a number written in prose, which has been wrong once already.
-web/_apps/account/my-volunteering.php
-web/_apps/admin/calendar/moderation.php
-web/_apps/admin/calendar/reminders.php
-web/_apps/admin/discipleship/pathway-form.php
-web/_apps/admin/host-console/event.php
-web/_apps/admin/host-console/index.php
-web/_apps/admin/reports/denominational.php
-web/_apps/assets/item.php
-web/_apps/attendance/record.php
-web/_apps/calendar/anon-checkin.php
-web/_apps/calendar/event-hub.php
-web/_apps/calendar/event-invites-send.php
-web/_apps/calendar/event.php
-web/_apps/calendar/my-events.php
-web/_apps/calendar/public-landing.php
-web/_apps/calendar/rsvp-by-link.php
-web/_apps/calendar/views/_day_columns.php
-web/_apps/calendar/views/list.php
-web/_apps/calendar/views/month.php
-web/_apps/calendar/views/photo.php
-web/_apps/calendar/views/year.php
-web/_apps/calendar/widget.php
-web/_apps/venues/booking.php
-web/_apps/widget/countdown-json.php

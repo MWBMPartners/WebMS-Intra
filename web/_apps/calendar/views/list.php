@@ -28,9 +28,21 @@ declare(strict_types=1);
     <div class="row g-4">
         <?php foreach ($events as $event): ?>
             <?php
-            $startDt = new DateTime($event['startDateTime']);
-            $isToday = $startDt->format('Y-m-d') === date('Y-m-d');
-            $isPast  = $startDt < new DateTime();
+            // 🕰️ #777 part two. `startDateTime` is a reading on the EVENT's
+            //    own clock (`tblEvents.timezone`). This used to be
+            //    `new DateTime()` of it compared with `new DateTime()` --
+            //    both on PHP's default zone, the organisation's -- so an
+            //    event kept on another clock was greyed out as past (or not)
+            //    hours early or late, and on the morning the clocks go forward
+            //    a start inside the missing hour was printed an hour late.
+            //    Now: the reading is printed as it is, and "today" and "past"
+            //    ask what the EVENT's clock reads now, comparing readings as
+            //    text (`Y-m-d H:i:s` sorts in time order).
+            $startText = (string) $event['startDateTime'];
+            $startDt   = \Portal\Core\I18n::wallClockReading($startText);
+            $eventNow  = \Portal\Core\I18n::wallClockNow(\Portal\Core\Site::zoneFor((string) ($event['timezone'] ?? '')));
+            $isToday   = substr($startText, 0, 10) === substr($eventNow, 0, 10);
+            $isPast    = strcmp($startText, $eventNow) < 0;
             ?>
             <?php
             // 🔢 Both Featured checks on this card used to be `$event['isFeatured'] === '1'`.
@@ -59,9 +71,9 @@ declare(strict_types=1);
 
                         <p class="card-text mb-1">
                             <i class="fa-regular fa-calendar me-1 text-primary"></i>
-                            <strong><?php echo htmlspecialchars(\Portal\Core\I18n::formatDate($startDt->format('Y-m-d H:i:s'), 'long'), ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <strong><?php echo htmlspecialchars(\Portal\Core\I18n::formatDate((string) $startDt?->format('Y-m-d'), 'long'), ENT_QUOTES, 'UTF-8'); ?></strong>
                             <?php if ($event['isAllDay'] !== '1' && (int) $event['isAllDay'] !== 1): ?>
-                                <span class="text-muted ms-1"><?php echo htmlspecialchars($startDt->format('g:i A'), ENT_QUOTES, 'UTF-8'); ?></span>
+                                <span class="text-muted ms-1"><?php echo htmlspecialchars((string) $startDt?->format('g:i A'), ENT_QUOTES, 'UTF-8'); ?></span>
                             <?php else: ?>
                                 <span class="badge bg-light text-dark ms-1">All Day</span>
                             <?php endif; ?>

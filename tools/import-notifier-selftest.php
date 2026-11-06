@@ -192,7 +192,9 @@ $coreDir = $repoDir . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core
 // AppRegistry reads the app definitions from this folder.
 define('PORTAL_CORE', rtrim($coreDir, DIRECTORY_SEPARATOR));
 foreach (['App.php', 'Settings.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'AppRegistry.php', 'EventVisibility.php',
-    'FeedResolver.php', 'ExternalAudience.php', 'FeedAdmin.php', 'PortalAddress.php', 'Sabbath.php', 'WebPush.php',
+    // `I18n.php` since #777 part two: `FeedAdmin::showWallClock()`, which
+    // builds the e-mail's dates, now asks `I18n::formatClockDateTime()` (#784).
+    'FeedResolver.php', 'ExternalAudience.php', 'I18n.php', 'FeedAdmin.php', 'PortalAddress.php', 'Sabbath.php', 'WebPush.php',
     'MailQueue.php', 'MailRoutes.php', 'Mailer.php', 'ImportNotifier.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }

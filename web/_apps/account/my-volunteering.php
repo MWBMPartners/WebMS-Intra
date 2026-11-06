@@ -113,7 +113,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php else: ?>
         <?php foreach ($events as $e):
             $eid = (int) $e['eventID'];
-            $when = date('l j M Y, H:i', strtotime((string) $e['startDateTime']));
+            // #777: a wall-clock reading on the event's own clock — never strtotime(),
+            // which moves a reading inside the hour the clocks skip.
+            $when = \Portal\Core\I18n::formatClockDateTime((string) $e['startDateTime'], 'l j M Y, H:i');
             $myRoles = (string) ($e['myRoles'] ?? '');
             $iCoord = ((int) $e['amCoordinator']) === 1;
         ?>

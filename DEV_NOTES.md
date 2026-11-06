@@ -20206,6 +20206,64 @@ test: the array key `'2026'` became an INT and the closure threw a TypeError
 under strict types.
 
 
+### Part two (a): the 24 pages, one formatter, and bookings on the right clock (#777, #784, #783)
+
+**Four methods, one job each, and the rule for choosing.** Words:
+`I18n::formatClockDateTime()` is the ONE place a wall-clock date and time
+becomes words — `FeedAdmin::showWallClock()` calls it and keeps only "(all
+day)" and naming the event's zone, and the reminder job's `eventClockText()`
+calls it too (it had been a THIRD copy of the same UTC build). Walking a
+reading across days: `wallClockReading()`, built in UTC because UTC has no
+transitions — it is NOT a moment and must never be compared with a real "now".
+Comparing with now: `wallClockNow($zone)` on the EVENT's clock
+(`Site::zoneFor($event['timezone'])`), compared as `Y-m-d H:i:s` text. A real
+instant: `wallClockInstant($reading, $zone)`, which moves a skipped-hour
+reading forward by the gap (RFC 5545 §3.3.5; 02:30 New York on 2027-03-14 is
+07:30 UTC) and, in the hour that happens twice, takes PHP's own pick, which
+differs by zone — accepted for a countdown and said in its docblock.
+
+**The calendar grids had to convert BOTH sides.** `_day_columns.php` compared
+each event with a column's midnight built in PHP's zone; with the event now a
+UTC-built reading, that compares two clocks. The columns are readings too.
+**And `formatDate()` is handed the DATE only** on the event page and list view,
+because it runs `strtotime()` itself and, handed the time, moved a Greenland
+23:30 reading onto the next day.
+
+**#783: "still to come" means the organisation's clock.** For a resource page,
+this organisation's, bound as a parameter, never SQL `NOW()`. For My Bookings,
+each booking's own organisation's, because a member's bookings can be at
+several: the query takes a loose floor (UTC now less one day — no clock on
+Earth is more than twelve hours BEHIND UTC; fourteen is the furthest ahead) and
+each row is judged exactly in PHP. The reminder job's `UTC_TIMESTAMP()`
+prefilter needs NO change: it is a −1 to +2 day net, and with every zone
+between −12 and +14 hours the margin is **more than nine hours** either way
+(9h45m at UTC+14, because its 24-hour window accepts starts up to 24h15m away —
+the builder's draft said "at least ten", which round 1 measured false).
+
+**Three hand-written class lists had to gain `I18n.php`**
+(`feed-admin-selftest.php`, `import-notifier-selftest.php`, the job runner in
+`feed-importer-selftest.php`) — the #775 lesson again: tests that load classes
+one by one break silently the day a dependency is added.
+
+**Testing, and its honest limit.** The gate stops a PAGE going back to
+`strtotime()` of the column; section L of `clock-change-selftest.php` drives
+the four methods on fixed skipped hours (London, New York, Auckland, and Nuuk
+at 23:30) with the premise asserted first and the old behaviour beside each;
+part X of `time-zones-selftest.php` drives the real pages over HTTP. **None of
+them can see a page that keeps the new methods but passes the WRONG ZONE**:
+the independent check undid three fixes that way (countdown feed, list
+past/today, day columns) with everything green. That is #805 — and the day
+columns' check could not fail because its event was at 02:30, inside its own
+day whichever way the columns are built, the exact shape the builder had fixed
+in L10 and left in X03.
+
+**Review closed at round 1 under D-066**, because every finding was in a test
+or a document; the ordinary-day sweep (old formatter against new, every 15
+minutes through 2027 in nine zones) found differences only inside skipped
+hours. Left on issues: #804 (thirteen other `NOW()` comparisons, seven of them
+in files this package changed — the countdown feed still picks its "next" event
+on the database's clock), #805, #806.
+
 ### Raised rather than bundled
 
 **#782 — eighteen hard-coded `Europe/London` literals across ten files, and two

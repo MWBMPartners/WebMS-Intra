@@ -677,9 +677,13 @@ class Newsletter
                 }
                 $html = '<h3 style="font-family:Arial,sans-serif;color:#1b2330;margin:24px 0 8px;">Upcoming events</h3><ul>';
                 foreach ($items as $it) {
+                    // #777 part two: a reading on the event's own clock, put into
+                    // words as written. `strtotime()` of it moved a start inside the
+                    // hour the clocks skip an hour on, in an e-mail that cannot be
+                    // corrected once sent.
                     $when = (string) $it['startDateTime'];
                     $html .= '<li><strong>' . $esc((string) $it['eventName']) . '</strong> — '
-                        . $esc(date('D j M, H:i', (int) strtotime($when))) . '</li>';
+                        . $esc(I18n::formatClockDateTime($when, 'D j M, H:i')) . '</li>';
                 }
                 return $html . '</ul>';
 

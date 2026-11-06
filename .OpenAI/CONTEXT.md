@@ -3317,7 +3317,7 @@ Reading those declarations found **four columns that had said the same thing
 since long before this work** — `tblEvents.startDateTime`/`endDateTime` and
 `tblEventSnapshots.snapStart`/`snapEnd` — and files still treating them as
 moments. They are in `tools/audit-checks/clock_wall_clock_datetime_pending.txt`
-and are the bulk of part two. **#783** was raised rather than fixed:
+and are the bulk of part two. **PART TWO (a) EMPTIED THAT LIST (#777, #784, #783; review closed at round 1 under D-066).** `I18n::formatClockDateTime()` is the ONE place a wall-clock date and time becomes words — `FeedAdmin::showWallClock()` and the reminder job's `eventClockText()` call it; never write another. A page walking a reading across days uses `I18n::wallClockReading()` (built in UTC, NOT a moment: never compare it with a real now); "has it begun?" is a text comparison with `I18n::wallClockNow(Site::zoneFor($event['timezone']))`, on the EVENT's clock; a real instant is `I18n::wallClockInstant()`. A booking's "still to come" is the organisation's clock bound as a parameter, never SQL `NOW()`. **What no guard here can see is a page that keeps these methods but passes the WRONG ZONE** — three such reverts were planted with everything green (#805). Still open: thirteen other `NOW()` comparisons of event columns (#804), and two day lists that put an event on the wrong day or leave out its last day (#806). **#783** was raised rather than fixed:
 `my-bookings.php` and `resource.php` decide which bookings are still to come by
 comparing a wall-clock column with `NOW()` — the DATABASE SERVER's clock, in a
 session zone that is `SYSTEM` by default — so an organisation abroad gets its

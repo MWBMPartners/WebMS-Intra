@@ -22,19 +22,48 @@ Auth::requireLogin();
 $db     = App::db();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
+// 🕰️ "STILL TO COME" IS DECIDED ON THE ORGANISATION'S CLOCK (#783).
+//    `startAt`/`endAt` are WALL-CLOCK readings on the organisation's own clock
+//    (migration 252 says so in the column comment). This used to be
+//    `b.endAt > NOW()` -- and `NOW()` is the DATABASE SERVER's clock, in its
+//    session zone, which is `SYSTEM` by default: whatever the database host
+//    happens to be set to. So an organisation in Auckland on a database host
+//    in UTC kept a booking that finished at 10:00 on "my upcoming bookings"
+//    until 23:00, and one in New York lost a booking still to come five hours
+//    early. On the morning the clocks change it was an hour out even where
+//    the two shared a country.
+//
+//    A member's bookings can be at more than one organisation, each on its own
+//    clock, so ONE bound "now" cannot be right for all of them. The query
+//    therefore takes everything that could still be to come ANYWHERE -- no
+//    clock on Earth reads more than twelve hours behind UTC (fourteen is the
+//    furthest AHEAD), so a reading ending after "UTC now, less one day" is a
+//    superset -- and each row is
+//    then judged exactly, as text, against what ITS organisation's clock
+//    reads now. `Y-m-d H:i:s` text sorts in time order, so no moment is made.
+$looseFloor = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->modify('-1 day')->format('Y-m-d H:i:s');
+$nowOnClockOf = [];
 $rows = [];
 $stmt = $db->prepare(
     'SELECT b.bookingID, b.startAt, b.endAt, b.purpose, b.status, '
-    . '       r.name AS resourceName, r.resourceID '
+    . '       r.name AS resourceName, r.resourceID, '
+    . '       `r`.`siteID` AS `resourceSiteID` '
     . 'FROM tblResourceBooking b JOIN tblResource r ON r.resourceID = b.resourceID '
-    . 'WHERE b.bookedByID = ? AND b.endAt > NOW() AND b.status <> \'cancelled\' '
+    . 'WHERE b.bookedByID = ? AND `b`.`endAt` > ? AND b.status <> \'cancelled\' '
     . 'ORDER BY b.startAt'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('i', $userId);
+    $stmt->bind_param('is', $userId, $looseFloor);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($r = $rs->fetch_assoc()) {
+        $orgId = (int) $r['resourceSiteID'];
+        if (isset($nowOnClockOf[$orgId]) === false) {
+            $nowOnClockOf[$orgId] = I18n::wallClockNow(new \DateTimeZone(Site::timezone($orgId)));
+        }
+        if (strcmp((string) $r['endAt'], $nowOnClockOf[$orgId]) <= 0) {
+            continue; // finished, on its own organisation's clock
+        }
         $rows[] = $r;
     }
     $stmt->close();

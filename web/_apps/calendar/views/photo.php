@@ -40,7 +40,6 @@ use Portal\Core\Site;
             $img = $event['heroImage'] !== null && $event['heroImage'] !== ''
                 ? '/assets/uploads/calendar/' . $event['heroImage']
                 : $brandFallback;
-            $startTs = strtotime((string) $event['startDateTime']);
             ?>
             <div class="col-md-6 col-lg-4">
                 <a href="<?php echo htmlspecialchars(Site::url('calendar/event'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo htmlspecialchars((string) $event['eventSlug'], ENT_QUOTES, 'UTF-8'); ?>"
@@ -55,7 +54,7 @@ use Portal\Core\Site;
                             <h2 class="h6 mb-1"><?php echo htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF-8'); ?></h2>
                             <div class="text-muted small">
                                 <i class="fa-solid fa-calendar me-1"></i>
-                                <?php echo htmlspecialchars(date('j M Y, H:i', $startTs), ENT_QUOTES, 'UTF-8'); ?>
+                                <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $event['startDateTime'], 'j M Y, H:i'), ENT_QUOTES, 'UTF-8'); ?>
                                 <?php if (!empty($event['locationName'])): ?>
                                     <br><i class="fa-solid fa-location-dot me-1"></i>
                                     <?php echo htmlspecialchars((string) $event['locationName'], ENT_QUOTES, 'UTF-8'); ?>

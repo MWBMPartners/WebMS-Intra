@@ -88,20 +88,38 @@ $start    = (string) $event['startDateTime'];
 $end      = (string) ($event['endDateTime'] ?? '');
 // The event's own zone, or the organisation's when the stored one cannot be
 // opened (#604): Zoom is given a real zone name either way.
-$timezone = Site::zoneFor((string) ($event['timezone'] ?? ''))->getName();
+$eventZone = Site::zoneFor((string) ($event['timezone'] ?? ''));
+$timezone  = $eventZone->getName();
+
+// 🕰️ #777 part two. `startDateTime`/`endDateTime` are readings on the EVENT's
+//    own clock, and Zoom is told that clock by name in `timezone` -- so
+//    `start_time` must be the reading itself, as written. It used to be
+//    `date('Y-m-d\TH:i:s', strtotime($start))`, which read it on PHP's
+//    default zone (the organisation's) and wrote it back out: right on an
+//    ordinary day, but on the morning the clocks go forward a start inside
+//    the missing hour was sent an hour late -- a meeting booked for 01:30
+//    opened at 02:30.
+//
+//    The LENGTH is the one thing that genuinely needs instants: a meeting
+//    from 01:00 to 03:00 on that morning lasts one hour, not two. So the two
+//    readings are made instants on the event's own clock and subtracted.
+$startReading = \Portal\Core\I18n::wallClockReading($start);
 $duration = 60;
 if ($end !== '') {
-    $startTs = (int) strtotime($start);
-    $endTs   = (int) strtotime($end);
-    if ($endTs > $startTs) {
-        $duration = (int) max(15, ($endTs - $startTs) / 60);
+    $startAt = \Portal\Core\I18n::wallClockInstant($start, $eventZone);
+    $endAt   = \Portal\Core\I18n::wallClockInstant($end, $eventZone);
+    if ($startAt !== null && $endAt !== null && $endAt->getTimestamp() > $startAt->getTimestamp()) {
+        $duration = (int) max(15, ($endAt->getTimestamp() - $startAt->getTimestamp()) / 60);
     }
+}
+if ($startReading === null) {
+    $flash('This event has no start time Zoom can be given.', 'danger', $eventId);
 }
 
 $payload = [
     'topic'      => (string) $event['eventName'],
     'type'       => 2,
-    'start_time' => date('Y-m-d\TH:i:s', (int) strtotime($start)),
+    'start_time' => $startReading->format('Y-m-d\TH:i:s'),
     'duration'   => $duration,
     'timezone'   => $timezone,
     'settings'   => [

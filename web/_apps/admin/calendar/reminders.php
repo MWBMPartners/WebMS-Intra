@@ -81,7 +81,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="portal-data-row">
                 <div class="portal-data-row-main">
                     <strong><?php echo htmlspecialchars((string) $u['eventName'], ENT_QUOTES, 'UTF-8'); ?></strong>
-                    <div class="text-muted small"><?php echo htmlspecialchars(date('l j M, H:i', strtotime((string) $u['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?></div>
+                    <div class="text-muted small"><?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $u['startDateTime'], 'l j M, H:i'), ENT_QUOTES, 'UTF-8'); ?></div>
                 </div>
                 <div class="portal-data-row-aside">
                     <span class="badge bg-info text-dark"><?php echo (int) $u['sentCount']; ?>/3 reminders sent</span>

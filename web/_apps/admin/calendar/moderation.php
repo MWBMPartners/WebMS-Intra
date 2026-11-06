@@ -108,7 +108,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             &middot; <a href="mailto:<?php echo htmlspecialchars((string) $r['submitterEmail'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars((string) $r['submitterEmail'], ENT_QUOTES, 'UTF-8'); ?></a>
                         <?php endif; ?>
                         &middot; <i class="fa-solid fa-calendar ms-1 me-1"></i>
-                        <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $r['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $r['startDateTime'], 'j M Y, H:i'), ENT_QUOTES, 'UTF-8'); ?>
                         <?php if ($r['locationName'] !== null && $r['locationName'] !== ''): ?>
                             &middot; <i class="fa-solid fa-location-dot ms-1 me-1"></i>
                             <?php echo htmlspecialchars((string) $r['locationName'], ENT_QUOTES, 'UTF-8'); ?>

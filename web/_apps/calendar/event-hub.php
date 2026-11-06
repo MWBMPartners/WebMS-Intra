@@ -282,7 +282,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
             <p class="text-muted small mb-0">
                 <i class="fa-regular fa-calendar me-1"></i>
-                <?php echo htmlspecialchars(date('j M Y, H:i', strtotime((string) $event['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>
+                <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $event['startDateTime'], 'j M Y, H:i'), ENT_QUOTES, 'UTF-8'); ?>
                 <?php if (!empty($event['locationName'])): ?>
                     &middot; <i class="fa-solid fa-location-dot ms-1 me-1"></i>
                     <?php echo htmlspecialchars((string) $event['locationName'], ENT_QUOTES, 'UTF-8'); ?>

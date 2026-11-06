@@ -996,32 +996,38 @@ class I18n
      *    zone at all. The same reasoning is written out beside
      *    `shiftWallClock()` in `_apps/resources/book.php`.
      *
-     * ⚠️ AND `FeedAdmin::showWallClock()` GOT HERE FIRST, which round 4 of
-     *    #777 pointed out and this docblock did not mention. It does the same
-     *    UTC trick -- `createFromFormat('!Y-m-d H:i:s', $wall, UTC)` -- and
-     *    has seven live callers. It is NOT a duplicate to delete: it also
-     *    names the event's own zone when that differs from the
-     *    organisation's, and handles an all-day event, so it is a richer thing
-     *    that ought to be built ON this rather than beside it. Two helpers for
-     *    one rule is #768's shape -- five copies of one rule, no two agreeing,
-     *    each new page copying the nearest -- so "which is the one place?"
-     *    must have ONE answer before part two converts 27 files and somebody
-     *    writes a third. Tracked as #784. Until it is settled: use
-     *    `showWallClock()` where an event's own zone matters, and this where
-     *    it does not.
+     * 📌 THIS IS THE ONE PLACE A WALL-CLOCK DATE AND TIME BECOMES WORDS (#784).
+     *    Two helpers used to do this job: this one and
+     *    `FeedAdmin::showWallClock()`, which came first and made the same UTC
+     *    build. Two helpers for one rule is #768's shape -- five copies of one
+     *    rule, no two agreeing, each new page copying the nearest -- so #777
+     *    part two, which converted two dozen pages, settled it before starting:
+     *
+     *      * THIS method owns the rule: read the stored text as a reading on no
+     *        clock (`wallClockReading()`), then format it.
+     *      * `showWallClock()` CALLS this for the words and keeps only what it
+     *        adds: "(all day)", and naming the event's own zone when it is not
+     *        the organisation's. Nothing else needs that -- the event page
+     *        prints "Timezone: ..." on a line of its own, and every other
+     *        reader shows the stored text as it is -- so it stays there rather
+     *        than becoming a second public helper.
+     *
+     *    Never write a third. A page needing a reading as an OBJECT (to walk
+     *    day by day across a calendar grid) asks `wallClockReading()`; a page
+     *    needing to compare a reading with "now" asks `wallClockNow()`.
      *
      * ⚠️ DO NOT PASS A ZONE-BEARING FORMAT CHARACTER. Because the moment is
      *    built in UTC, `'c'`, `'r'`, `'T'`, `'P'`, `'p'`, `'O'`, `'e'`,
      *    `'I'`, `'Z'` and `'U'` would each
      *    assert that this organisation's wall-clock reading IS UTC -- the very
      *    untruth this method exists to avoid, stated more confidently than the
-     *    code it replaced ever did. Nothing does it today (every caller uses
-     *    `'D j M, H:i'`, `'H:i'` or `'D j M Y, H:i'`), but #777 part two's
-     *    backlog includes `_apps/widget/countdown-json.php`, which emits
-     *    `date('c', strtotime($nextEvent['startDateTime']))` into a PUBLIC
-     *    JSON feed. Converting that one to this method is the obvious move and
-     *    the wrong one: a value that needs an offset needs a real zone, which
-     *    for an event is `tblEvents.timezone`.
+     *    code it replaced ever did. Nothing does it: every caller passes date
+     *    and clock characters only. `_apps/widget/countdown-json.php` used to
+     *    emit `date('c', strtotime($nextEvent['startDateTime']))` into a
+     *    PUBLIC JSON feed, and converting it to THIS method would have been
+     *    the obvious move and the wrong one -- a value that needs an offset
+     *    needs a real zone, which for an event is `tblEvents.timezone`. #777
+     *    part two sent it to `wallClockInstant()` instead.
      *
      * @param string|null $wallClock `Y-m-d H:i:s`, or anything else, which
      *                               comes back trimmed and unchanged rather
@@ -1034,25 +1040,75 @@ class I18n
      */
     public static function formatClockDateTime(?string $wallClock, string $format = 'D j M, H:i'): string
     {
+        $text    = trim((string) $wallClock);
+        $reading = self::wallClockReading($text);
+        if ($reading === null) {
+            // Not a wall-clock reading (or nothing at all). Hand it back rather
+            // than inventing a date: a wrong day shown confidently is worse
+            // than unstyled text.
+            return $text;
+        }
+
+        return $reading->format($format);
+    }
+
+    /**
+     * 🗓️ A stored wall-clock reading as an object that CANNOT MOVE -- for a
+     *    page that must walk it across days or take its parts, not just print
+     *    it (#777 part two).
+     *
+     * The calendar grids bucket an event by its day and walk a multi-day
+     * event one day at a time. They did it with `new DateTimeImmutable($text)`,
+     * which resolves the reading in PHP's default zone -- and on the morning
+     * the clocks go forward, a reading inside the hour that does not exist is
+     * moved an hour on (`2027-03-28 01:30` became `02:30` in Europe/London).
+     * In a zone whose clocks go forward at 23:00 (America/Nuuk,
+     * America/Scoresbysund) that moves it onto the NEXT DAY, so the event sat
+     * in the wrong cell of the grid.
+     *
+     * ⚠️ THE OBJECT IS BUILT IN UTC, AND IT IS NOT A MOMENT. UTC has no
+     *    transitions, so the reading goes in and comes back out unchanged, and
+     *    `modify('+1 day')` moves it to the same clock time on the next
+     *    calendar day -- exactly what "this event also runs tomorrow" means.
+     *    What it must NEVER be used for:
+     *
+     *      * comparing with a real moment (`new DateTime()`, `time()`): this
+     *        object claims to be UTC and is not -- compare the TEXT with
+     *        `wallClockNow()` instead;
+     *      * formatting with a zone-bearing character (`c`, `r`, `T`, `P`,
+     *        `O`, `e`, `U` ...): that would assert the reading IS UTC.
+     *
+     *    A value that genuinely needs an instant (a public feed's `startsAt`,
+     *    an iCalendar `DTSTART` in UTC) needs the event's real zone:
+     *    `new \DateTimeImmutable($reading, Site::zoneFor($event['timezone']))`.
+     *
+     * @param string|null $wallClock `Y-m-d H:i`, `Y-m-d H:i:s`, either with a
+     *                               `T` between date and time.
+     *
+     * @return \DateTimeImmutable|null Null for anything that is not a real
+     *                                 reading -- including an impossible date
+     *                                 (`2027-02-31`), which is refused rather
+     *                                 than rolled into March.
+     */
+    public static function wallClockReading(?string $wallClock): ?\DateTimeImmutable
+    {
         $text = trim((string) $wallClock);
         if ($text === '') {
-            return '';
+            return null;
         }
         if (preg_match('/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/', $text, $parts) !== 1) {
-            // Not a wall-clock reading. Hand it back rather than inventing a
-            // date: a wrong day shown confidently is worse than unstyled text.
-            return $text;
+            return null;
         }
         [$whole, $year, $month, $day, $hour, $minute] = $parts;
         $second = isset($parts[6]) === true ? (int) $parts[6] : 0;
         if (checkdate((int) $month, (int) $day, (int) $year) === false
             || (int) $hour > 23 || (int) $minute > 59 || $second > 59
         ) {
-            return $text;
+            return null;
         }
 
         try {
-            $reading = new \DateTimeImmutable(
+            return new \DateTimeImmutable(
                 sprintf(
                     '%04d-%02d-%02dT%02d:%02d:%02d',
                     (int) $year,
@@ -1065,10 +1121,83 @@ class I18n
                 new \DateTimeZone('UTC')
             );
         } catch (\Throwable $e) {
-            return $text;
+            return null;
         }
+    }
 
-        return $reading->format($format);
+    /**
+     * 📍 A stored wall-clock reading made into a real INSTANT, on the clock it
+     *    was written on -- for the few places that must hand an instant to
+     *    something else: a public feed's `startsAt`, a countdown in the
+     *    visitor's browser (#777 part two).
+     *
+     * Two pages did `date('c', strtotime($event['startDateTime']))`, which
+     * reads the reading on PHP's DEFAULT zone -- the organisation's. An event
+     * has its own zone (`tblEvents.timezone`), so an online service run for
+     * another country was published hours out. Pass
+     * `Site::zoneFor((string) $event['timezone'])`.
+     *
+     * ⚠️ THIS IS THE ONE PLACE THE HOUR THAT DOES NOT EXIST IS RESOLVED FOR AN
+     *    INSTANT, and it moves FORWARD by the length of the gap: `01:30` on
+     *    the morning London's clocks go forward is the instant 01:30 UTC
+     *    (shown as 02:30 BST). That is RFC 5545 section 3.3.5's rule ("the
+     *    UTC offset before the gap"), and it is right HERE because an instant
+     *    must be SOME instant -- whereas a page that only shows or compares
+     *    the reading must never come here (`formatClockDateTime()`,
+     *    `wallClockNow()`), and a writer must never store what this returns.
+     *
+     *    For the hour the clocks go BACK, the reading happens twice and this
+     *    answers with PHP's own pick, which is NOT the same in every zone
+     *    (standard time in Europe, daylight time across the Americas -- see
+     *    `IcsReader::laterOfARepeatedReading()`, which decides that question
+     *    for imported events). An hour of doubt one night a year on a
+     *    countdown is accepted rather than solved here.
+     *
+     * @return \DateTimeImmutable|null Null for anything that is not a real
+     *                                 reading, so a broken row gives no
+     *                                 instant rather than a confident wrong one.
+     */
+    public static function wallClockInstant(?string $wallClock, \DateTimeZone $zone): ?\DateTimeImmutable
+    {
+        $reading = self::wallClockReading($wallClock);
+        if ($reading === null) {
+            return null;
+        }
+        try {
+            return new \DateTimeImmutable($reading->format('Y-m-d H:i:s'), $zone);
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * 🕰️ "Now", as a reading on the given clock: `Y-m-d H:i:s` text, to be
+     *    compared AS TEXT with a stored wall-clock reading (#777 part two).
+     *
+     * Several pages asked "has this event started?" with
+     * `strtotime($event['startDateTime']) < time()` or
+     * `new DateTime($start) < new DateTime()`. That turns the stored reading
+     * into a moment in PHP's DEFAULT zone -- the organisation's, set during
+     * start-up -- and an event's zone is `tblEvents.timezone`, which need not
+     * be the organisation's at all: an online service run for another
+     * country was judged by the wrong clock, hours out. And on the morning
+     * the clocks go forward, a reading inside the missing hour was moved.
+     *
+     * The other way round needs no moment at all: ask what the EVENT's clock
+     * reads now, and compare readings. `Y-m-d H:i:s` text sorts in time
+     * order, so `strcmp($stored, I18n::wallClockNow($zone)) < 0` means
+     * "already begun". Pass `Site::zoneFor((string) $event['timezone'])`,
+     * which falls back to the organisation's zone for text PHP cannot open.
+     *
+     * ⚠️ IN THE HOUR THE CLOCKS GO BACK the event's clock reads every time
+     *    between 01:00 and 01:59 twice, and a reading cannot say which
+     *    passing it means. For that one hour a year this answers by the clock
+     *    as it reads at the moment of asking, which is what a person standing
+     *    in the room would say.
+     */
+    public static function wallClockNow(\DateTimeZone $zone): string
+    {
+        return (new \DateTimeImmutable('now', $zone))->format('Y-m-d H:i:s');
     }
 
     /**

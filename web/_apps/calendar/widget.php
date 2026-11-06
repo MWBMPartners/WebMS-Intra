@@ -121,7 +121,7 @@ $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' :
             <?php echo htmlspecialchars((string) $e['eventName'], ENT_QUOTES, 'UTF-8'); ?>
         </a>
         <div class="meta">
-            📅 <?php echo htmlspecialchars(date('D j M Y, H:i', strtotime((string) $e['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>
+            📅 <?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $e['startDateTime'], 'D j M Y, H:i'), ENT_QUOTES, 'UTF-8'); ?>
             <?php if (!empty($e['locationName'])): ?>
                 &middot; 📍 <?php echo htmlspecialchars((string) $e['locationName'], ENT_QUOTES, 'UTF-8'); ?>
             <?php endif; ?>

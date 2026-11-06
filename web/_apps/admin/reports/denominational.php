@@ -79,7 +79,9 @@ if ($report === 'attendance-by-quarter' && $qStart !== null) {
         $stmt->bind_param('iss', $siteId, $qStart, $qEnd);
         $stmt->execute();
         $r = $stmt->get_result();
-        while ($row = $r->fetch_assoc()) { $data['rows'][] = [date('j M Y', strtotime((string) $row['startDateTime'])), $row['eventName'], (int) $row['rsvps']]; }
+        // #777: a wall-clock reading on the event's own clock — never strtotime(),
+        // which moves a reading inside the hour the clocks skip.
+        while ($row = $r->fetch_assoc()) { $data['rows'][] = [\Portal\Core\I18n::formatClockDateTime((string) $row['startDateTime'], 'j M Y'), $row['eventName'], (int) $row['rsvps']]; }
         $stmt->close();
     }
 } elseif ($report === 'membership-snapshot') {

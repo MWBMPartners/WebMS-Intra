@@ -24,10 +24,21 @@ $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8'
 
 // 🗂️ Index events by their start date so we can place them in cells
 $byDate = [];
+// 🕰️ #777 part two. `startDateTime`/`endDateTime` are readings on the EVENT's
+//    own clock. `new DateTimeImmutable()` of them used PHP's default zone, and
+//    on the morning the clocks go forward a reading inside the missing hour
+//    was moved an hour on -- in a zone that skips 23:00 (America/Nuuk) onto
+//    the NEXT DAY, so the event sat in the wrong cell. `wallClockReading()`
+//    gives an object that cannot move, and `modify('+1 day')` on it is the
+//    same clock time on the next calendar day. Only `format()` and comparisons
+//    with OTHER readings are done with it below -- never a real "now".
 foreach ($events as $ev) {
-    $start = new DateTimeImmutable((string) $ev['startDateTime']);
+    $start = \Portal\Core\I18n::wallClockReading((string) $ev['startDateTime']);
+    if ($start === null) {
+        continue;
+    }
     $end   = $ev['endDateTime'] !== null
-        ? new DateTimeImmutable((string) $ev['endDateTime'])
+        ? (\Portal\Core\I18n::wallClockReading((string) $ev['endDateTime']) ?? $start)
         : $start;
 
     // Multi-day events appear on every day they overlap with the visible month
@@ -134,7 +145,8 @@ if ($hasVenueOverlay === true) {
                 $count = count($dayEvents);
                 $shown = array_slice($dayEvents, 0, $maxEvents);
                 foreach ($shown as $ev):
-                    $evStart = new DateTimeImmutable((string) $ev['startDateTime']);
+                    // #777: a reading, printed as it is -- see the bucketing above.
+                    $evStart = \Portal\Core\I18n::wallClockReading((string) $ev['startDateTime']);
                     $isAllDay = (int) ($ev['isAllDay'] ?? 0) === 1;
                     ?>
                     <a class="portal-cal-month-pill"
@@ -142,7 +154,7 @@ if ($hasVenueOverlay === true) {
                        style="--ev-color: <?php echo $esc($eventColor($ev)); ?>;"
                        title="<?php echo $esc((string) $ev['eventName']); ?>">
                         <?php if ($isAllDay === false): ?>
-                            <span class="portal-cal-month-pill-time"><?php echo $esc($evStart->format('H:i')); ?></span>
+                            <span class="portal-cal-month-pill-time"><?php echo $esc((string) $evStart?->format('H:i')); ?></span>
                         <?php endif; ?>
                         <span class="portal-cal-month-pill-name">
                             <?php echo $esc((string) $ev['eventName']); ?>

@@ -44,8 +44,21 @@ if ($r === null) {
     exit('Resource not found');
 }
 
+// 🕰️ "STILL TO COME" IS DECIDED ON THE ORGANISATION'S CLOCK (#783).
+//    `startAt` is a WALL-CLOCK reading on the organisation's own clock
+//    (migration 252 says so in the column comment). The query used to compare
+//    it with `NOW()` -- the DATABASE SERVER's clock, in its session zone,
+//    which is `SYSTEM` by default: whatever the database host happens to be
+//    set to. So a room in Auckland, on a database host in UTC, went on
+//    showing bookings that had started up to thirteen hours earlier, and one
+//    in New York hid bookings still to come. The resource belongs to THIS
+//    organisation (the query above checks `siteID`), so "now" is its clock's
+//    reading, worked out here and BOUND -- never the database's.
+$nowHere   = I18n::wallClockNow(new \DateTimeZone(Site::timezone($siteId)));
 $lookahead = (int) (App::settings()['resources']['lookahead_days'] ?? 90);
-$endWindow = date('Y-m-d', strtotime('+' . $lookahead . ' days'));
+// The window's far end, counted on the same clock: whole calendar days on from
+// today's date (a reading, so no clock change can move it).
+$endWindow = (string) I18n::wallClockReading($nowHere)?->modify('+' . $lookahead . ' days')->format('Y-m-d');
 
 $bookings = [];
 $stmt = $db->prepare(
@@ -57,11 +70,11 @@ $stmt = $db->prepare(
     . '       u.fullName AS bookedByName '
     . 'FROM tblResourceBooking b LEFT JOIN tblUsers u ON u.userID = b.bookedByID '
     . 'WHERE b.resourceID = ? AND b.status IN (\'pending\',\'approved\') '
-    . '  AND b.startAt >= NOW() AND b.startAt <= ? '
+    . '  AND `b`.`startAt` >= ? AND b.startAt <= ? '
     . 'ORDER BY b.startAt'
 );
 if ($stmt !== false) {
-    $stmt->bind_param('is', $id, $endWindow);
+    $stmt->bind_param('iss', $id, $nowHere, $endWindow);
     $stmt->execute();
     $rs = $stmt->get_result();
     while ($row = $rs->fetch_assoc()) {

@@ -196,7 +196,7 @@ function discipleshipRenderAutoRuleFields(array $step, array $eventOptions, arra
             <?php foreach ($eventOptions as $ev): ?>
                 <option value="<?php echo (int) $ev['eventID']; ?>" <?php echo ($eventVal === (int) $ev['eventID'] ? 'selected' : ''); ?>>
                     <?php echo htmlspecialchars((string) $ev['eventName'], ENT_QUOTES, 'UTF-8'); ?>
-                    (<?php echo htmlspecialchars(date('j M Y', (int) strtotime((string) $ev['startDateTime'])), ENT_QUOTES, 'UTF-8'); ?>)
+                    (<?php /* #777: a wall-clock reading, put into words without making it a moment */ echo htmlspecialchars(\Portal\Core\I18n::formatClockDateTime((string) $ev['startDateTime'], 'j M Y'), ENT_QUOTES, 'UTF-8'); ?>)
                 </option>
             <?php endforeach; ?>
         </select>

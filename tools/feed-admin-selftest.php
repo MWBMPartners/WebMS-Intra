@@ -333,7 +333,9 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 // they are named here.) None of the three runs anything when loaded.
 $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
 foreach (['App.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'SafeFetch.php', 'ApiKey.php', 'Roles.php', 'UserGroups.php', 'Departments.php',
-    'EventVisibility.php', 'FeedResolver.php', 'FeedImporter.php', 'ExternalAudience.php', 'FeedAdmin.php'] as $classFile) {
+    // `I18n.php` since #777 part two: `FeedAdmin::showWallClock()` now asks
+    // `I18n::formatClockDateTime()` for its words (#784).
+    'EventVisibility.php', 'FeedResolver.php', 'FeedImporter.php', 'ExternalAudience.php', 'I18n.php', 'FeedAdmin.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }
 

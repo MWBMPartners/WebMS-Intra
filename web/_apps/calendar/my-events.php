@@ -76,7 +76,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="portal-data-list">
         <?php foreach ($rows as $r):
             $statusBadge = ['draft' => 'bg-secondary', 'published' => 'bg-success', 'cancelled' => 'bg-danger', 'postponed' => 'bg-warning text-dark'];
-            $when = date('j M Y, H:i', strtotime((string) $r['startDateTime']));
+            // #777: a wall-clock reading on the event's own clock — never strtotime(),
+            // which moves a reading inside the hour the clocks skip.
+            $when = \Portal\Core\I18n::formatClockDateTime((string) $r['startDateTime'], 'j M Y, H:i');
         ?>
             <div class="portal-data-row">
                 <div class="portal-data-row-main">

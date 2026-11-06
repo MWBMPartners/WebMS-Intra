@@ -115,13 +115,13 @@ for three rounds:
     stop** -- and it has yielded a real fault twice now, so it is SWEPT
     MECHANICALLY rather than by eye. The attendance API's
     `createFromFormat('H:i', $timeRaw)` in `create.php` and `update.php` came
-    from here. A one-hop sweep over all 912 files today finds four sites: two
-    faults on the part-two backlog (`_core/Newsletter.php:682`,
-    `calendar/zoom-create.php:94`) and two that are CORRECT, each passing a
-    real zone deliberately -- `_core/Venues.php:3590` with the venue's own
-    zone, and `_core/Events.php:590`, which compares one reading in two zones
-    on purpose to detect an old-form migration. The sweep command is in
-    DEV_NOTES; run it rather than trusting this snapshot.
+    from here. A one-hop sweep over the files found four sites when this
+    was first written: two faults (`_core/Newsletter.php` and
+    `calendar/zoom-create.php`, BOTH FIXED in #777 part two (a)) and two that
+    are CORRECT, each passing a real zone deliberately -- `_core/Venues.php`
+    with the venue's own zone, and `_core/Events.php`, which compares one
+    reading in two zones on purpose to detect an old-form migration. The
+    sweep command is in DEV_NOTES; run it rather than trusting this snapshot.
 
   * **A WRITE PATH, which reads no column at all, and this is the worst of
     them.** This check matches a column being READ. A handler that builds its
@@ -374,9 +374,11 @@ ALLOWED: dict[str, str] = {
 
 # ── The backlog, one path per line, in a file beside this one ──────────────
 # Four `DATETIME` columns declared themselves WALL-CLOCK readings long before
-# #777 began, and nothing read that declaration. 28 files put one of them
-# through a moment function. Fixing them is #777 part two; listing them here is
-# what stops a TWENTY-NINTH joining them in the meantime.
+# #777 began, and nothing read that declaration. The list began at 28 files
+# putting one of them through a moment function, was corrected to 24 (see the
+# list file's own history), and #777 part two (a) EMPTIED it. The file stays,
+# so a future backlog has somewhere to go and the stale-entry rule keeps
+# working; `--strict` passes while it is empty.
 #
 # It fails BOTH ways: a file not on the list that does this fails, and a listed
 # file that has stopped doing it fails too, so the list cannot go stale in

@@ -135,6 +135,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\EventVisibility;
+use Portal\Core\I18n;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\Mailer;
@@ -208,11 +209,11 @@ function eventStartMoment(array $event): ?int
  */
 function eventClockText(string $stored, string $format): string
 {
-    try {
-        return (new \DateTimeImmutable($stored, new \DateTimeZone('UTC')))->format($format);
-    } catch (\Throwable $e) {
-        return $stored;
-    }
+    // 📌 #784: this was a THIRD copy of the reading-to-words rule (the same
+    //    UTC build, written out here), beside `I18n::formatClockDateTime()`
+    //    and `FeedAdmin::showWallClock()`. It is a caller of the one place
+    //    now. Kept as a name only so the four call sites below read as before.
+    return I18n::formatClockDateTime($stored, $format);
 }
 
 // ─────────────────────────────────────────────────────────────────────
