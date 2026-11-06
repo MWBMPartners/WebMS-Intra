@@ -749,7 +749,35 @@ class I18n
         //    sends `...10:00:00.000` as a matter of course (`toISOString()`),
         //    and this column holds whole seconds, so the fraction is simply
         //    not expressible. Refusing it rejected an ordinary integration.
-        $clock = (string) preg_replace('/\.\d+$/', '', $clock);
+        //
+        // 🚨 IT MUST FOLLOW `:MM` OR `:SS`, AND THE FIRST VERSION DID NOT.
+        //    `/\.\d+$/` matched the fraction on ANY component, and ISO 8601
+        //    allows a decimal fraction on the LOWEST one -- so `T10.5` means
+        //    **half past ten**, and with the bare-hour branch below it was
+        //    accepted and stored as `10:00:00`. Measured against
+        //    `3d753a4:web/_core/I18n.php`, where it was refused with a 400:
+        //
+        //        2026-06-01T10.5     before: refused   after: 10:00:00
+        //        2026-06-01 23.9     before: refused   after: 23:00:00
+        //        2026-06-01 10.5Z    before: refused   after: 11:00 (means 11:30)
+        //
+        //    **Up to 59 minutes lost silently, HTTP 200, on a live API and a
+        //    public form** -- and this is the first time in #777 that a
+        //    WIDENING caused a wrong stored value rather than a refusal. Every
+        //    earlier round moved the code from "stores something wrong" to
+        //    "refuses"; round 9 moved a refusal to "stores something wrong",
+        //    which is the direction to check first on any shape accepted from
+        //    here on (round 10).
+        //
+        //    Anchored to a two-digit minute or second, a decimal hour now
+        //    falls through to the shape check and is refused, which is what
+        //    `api-spec.json` says happens.
+        //    And it must follow the SECONDS, not the minutes: a fraction on
+        //    the minute component means seconds (`T10:00.5` is 10:00:30), so
+        //    allowing it would be the same silent truncation one component up
+        //    -- smaller, and the same fault. `api-spec.json` says "fractional
+        //    SECONDS", so this is what that sentence means.
+        $clock = (string) preg_replace('/(?<=:\d{2}:\d{2})\.\d+$/', '', $clock);
         // 📅 A DATE WITH NO TIME MEANS MIDNIGHT ON IT. The API has an
         //    `isAllDay` field and a bare date used to store `00:00:00`, so
         //    refusing one broke every all-day integration. Midnight is a

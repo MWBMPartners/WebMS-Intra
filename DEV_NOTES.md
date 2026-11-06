@@ -18201,6 +18201,117 @@ stopped doing it also fails -- and `--strict` fails while it holds anything.
 That is the `site_aware_addresses_pending.txt` pattern (#536): a backlog made
 visible rather than permanent.
 
+### Round 10: a widening caused silent data loss, and my gate's spelling list was not a rule
+
+**Seven findings, six in round 9's work. And one observation worth more than
+any of them, from the checker:** every earlier round moved the code from
+"stores something wrong" to "refuses". Round 9 moved a refusal to "stores
+something wrong" — **the first widening in this package to lose data** — and
+that is the direction to check first on any shape accepted from here on.
+
+**(1) A legal ISO 8601 decimal time was accepted and silently truncated.**
+Round 9's bare-hour branch ran after the fractional-second strip, and the strip
+matched a fraction on ANY component. In ISO 8601 a decimal fraction on the
+lowest component is legal, so `T10.5` means **half past ten**:
+
+    2026-06-01T10.5     before round 9: refused   after: stored 10:00:00
+    2026-06-01 23.9     before round 9: refused   after: stored 23:00:00
+    2026-06-01 10.5Z    before round 9: refused   after: 11:00 (means 11:30)
+
+**Up to 59 minutes lost silently, HTTP 200, on a live API and a public form**,
+where it had been an honest 400. Measured against
+`3d753a4:web/_core/I18n.php`. The strip is anchored to follow `:MM:SS` now —
+and to the SECONDS, not the minutes, because a fraction on the minute means
+seconds (`T10:00.5` is 10:00:30), which is the same truncation one component
+up. `api-spec.json` says "fractional seconds", so that is now what it means.
+
+**(2) The write-path gate was bypassed by ONE WORD.** `date_create_immutable()`
+is PHP's procedural alias for the constructor, and round 9's pattern listed the
+four spellings round 8 had used. Planted, the whole pre-round-8 revert came
+back with the gate at exit 0, 65 audit scripts green and 95 clock checks green
+— `01/06/2026 10:00 +0100` storing 6 January again.
+
+**This repository's own written lesson, verbatim: "an allow-list written from
+the spellings you were handed is not a rule."** Two changes: the list now holds
+every internal PHP function that returns a DateTime-ish value, enumerated from
+`get_defined_functions()` rather than from memory — and **the real guard is a
+TEXT PIN on the routing closure**, which is defeated by nothing because it
+compares the statement itself. That is the remedy #485 reached after four
+rounds and #763 after six, and round 10 is the third round running to find this
+same fix unguarded. Proved three ways: `date_create_immutable` → red, a
+variable class name (which the list cannot see) → red via the pin, a pure
+reformat → green.
+
+**(3) The `$showReading` pin cried wolf again, one condition over.** Round 9
+fixed it for whitespace and made `static` mandatory; `= function` — used 14
+times elsewhere under `web/` — turned a behaviour-neutral edit into a red hard
+gate, **and the message then said the helper "was renamed or removed" when it
+was on the line just read.** Round 9's own finding 5, one condition over. It
+accepts `function`, `static function` and `fn` now.
+
+**(4) The guard's own failure path blamed the files.** With `php` off the PATH,
+`live_moment_builders()` returned its excuse inside the findings list, so the
+gate printed three paragraphs asserting that three correct files build a moment
+and telling the reader to fix them. It raises `ProbeUnavailable` now, which the
+caller reports as "this check could not READ the file, so it proved nothing
+about it — that is a fault in the check's surroundings, NOT in the file".
+
+**And writing that found a second hole in the same function:**
+`token_get_all()` does NOT fail on broken PHP — it warns and hands back
+whatever it managed, exit 0 — so **a file that did not parse came back as "no
+moments found" and the gate PASSED on it.** Measured on a deliberately broken
+file. It asks `php -l` first now.
+
+**(5) The row check and the row store did disagree, in the shape round 9 added
+in the same commit.** `import.php`'s comment said asking `$fmtClock()` both
+questions "cannot disagree with storage" — and the line immediately below it
+still read `strtotime($start)` for the not-parseable test.
+`strtotime('2026-06-01 10')` is false while `$fmtClock('2026-06-01 10')`
+returns a value, so **the same text was refused in the start column and
+accepted in the end column of one row** — in the very shape round 9 had just
+legalised and written into the spec.
+
+**(6) A FIFTH write path, on no list: `calendar/manage/save.php`.** It derived
+four date parts with `date('j'|'n'|'Y-m-d', strtotime($posted))`. A date part
+looks safe to derive that way until it is measured: **in TWO zones of 419 the
+clocks go forward at 23:00**, so a reading of 23:00–23:59 that night lands on
+the next day. Swept across every IANA zone for 2026–2041 rather than reasoned
+about:
+
+    America/Nuuk           64 readings, e.g. 2026-03-28 23:00 -> 03-29 00:00
+    America/Scoresbysund   64 readings, same shape
+    every other zone       none
+
+**My own first sweep returned ZERO and one zone respectively, both wrong**,
+because it tested readings on the transition's own local date — the affected
+reading is on the day BEFORE. The third attempt asked the question directly and
+agreed with the checker.
+
+The cost was not cosmetic: the monthly pattern was stored on the 29th,
+`$firstWanted` then disagreed with the typed start, and the handler UPDATED the
+event onto the pattern's date while telling the administrator the first date
+had moved — so **every occurrence of that series fell a day late, permanently,
+and it read as deliberate.** All four slice the text now.
+
+It cannot join the write-path list, because one live `strtotime` remains at
+`save.php:1210` formatting a DATE-ONLY value. That was swept the same way: **a
+date with no time moves in ZERO zones**, so it is safe and is left alone rather
+than changed for the sake of a clean list. The exception and both sweeps are
+recorded beside the constant.
+
+**(7) The published contract promised a rule `update.php` did not enforce** —
+there was no comparison in the file at all — while `api-spec.json` documents its
+body as a subset of create's and create's own description promises it. Round 9
+raised #786 and left the sentence standing; **raising an issue does not make a
+published sentence true.** Fixed instead, in three lines, because both sides are
+now readings on one clock: the stored counterpart is read when one side is
+absent, and "before" not "before or equal", which three places document.
+
+**And it immediately caught two of the test's own fixtures storing events that
+end before they begin** — W09b and W09g both pushed a start to 21:15 while the
+stored end was 20:30, invisibly, because nothing compared them. The fixtures
+move the end too now, which is what a real client does.
+
 ### Round 9: round 8's own headline fix was pinned by nothing, and the guard that closes it stops asking what the code DOES
 
 **Seven findings, six in round 8's work. Round 8's diagnosis applied to round 8.**

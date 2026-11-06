@@ -31,6 +31,9 @@ use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Venues;
 use Portal\Core\What3Words;
+// ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
+//    the line only fails when it RUNS — `php -l` is happy without it (#536).
+use Portal\Core\I18n;
 
 // 🛡️ Admin access check
 if (App::isAdmin() === false) {
@@ -296,8 +299,20 @@ if ($keepsStoredZone === true) {
 
 // 🔤 Generate slug
 $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
-// 📅 Append date for uniqueness
-$slug .= '-' . date('Y-m-d', strtotime($startDateTime));
+// 📅 Append date for uniqueness.
+//
+// 🕐 THE DATE IS SLICED OUT OF THE TEXT, NOT RESOLVED (#777 round 10). This
+//    was `date('Y-m-d', strtotime($startDateTime))`, and a date part looks
+//    safe to derive that way until you measure it: in TWO zones of 419 the
+//    clocks go forward at 23:00, so a reading of 23:00-23:59 that night lands
+//    on the NEXT DAY. Measured in America/Nuuk --
+//
+//        2026-03-28 23:30  ->  strtotime  ->  2026-03-29 00:30
+//
+//    -- and `America/Scoresbysund` does the same, 64 quarter-hour readings
+//    each between 2026 and 2041 (swept across every IANA zone rather than
+//    reasoned about). So the slug would carry the wrong day for that hour.
+$slug .= '-' . substr(I18n::wallClockFromInput($startDateTime) ?? $startDateTime, 0, 10);
 
 // 🖼️ Handle image uploads
 $uploadsDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'calendar';
@@ -601,10 +616,17 @@ if ($action === 'create') {
     if (in_array($repeatFrequency, ['weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'], true) === true) {
         // The browser joins the date and time with a "T" and may leave the
         // seconds off; the generator wants a full reading.
+        // 📌 ONE READING, SLICED ONCE. Every date part below comes out of this
+        //    text rather than out of a moment built from it (#777 round 10).
+        //    `I18n::wallClockFromInput()` is the ONE place a posted time
+        //    becomes a stored reading; the `?? $toReading(...)` keeps the old
+        //    normalisation for anything it refuses, so no form that worked
+        //    before stops working.
         $toReading = static function (string $when): string {
             $when = trim(str_replace('T', ' ', $when));
             return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $when) === 1 ? $when . ':00' : $when;
         };
+        $startReading = I18n::wallClockFromInput($startDateTime) ?? $toReading($startDateTime);
 
         $repeatDays = [];
         foreach ((array) ($_POST['repeatDays'] ?? []) as $day) {
@@ -622,14 +644,22 @@ if ($action === 'create') {
             'frequency'      => $repeatFrequency,
             'intervalVal'    => 1,
             'dayOfWeek'      => $repeatDays === [] ? null : implode(',', $repeatDays),
-            'dayOfMonth'     => $monthlyByWeekday === true ? null : (int) date('j', (int) strtotime($toReading($startDateTime))),
+            // 🕐 SLICED, NOT RESOLVED -- see the slug above for the two zones
+            //    where `date('j', strtotime(...))` names the wrong day. Here it
+            //    cost more than a slug: the pattern was stored on the 29th, so
+            //    `$firstWanted` disagreed with the typed start and lines
+            //    692-700 then UPDATED the event onto the pattern's date, with
+            //    the administrator told the first date had moved -- so every
+            //    occurrence of the series fell a day late, permanently, and it
+            //    read as deliberate.
+            'dayOfMonth'     => $monthlyByWeekday === true ? null : (int) substr($startReading, 8, 2),
             'weekOfMonth'    => $monthlyByWeekday === true && preg_match('/^-?[1-5]$/', $weekOfMonthRaw) === 1
                 ? (int) $weekOfMonthRaw
                 : null,
             'monthOfYear'    => $repeatFrequency === 'yearly'
-                ? (int) date('n', (int) strtotime($toReading($startDateTime)))
+                ? (int) substr($startReading, 5, 2)
                 : null,
-            'startDate'      => date('Y-m-d', (int) strtotime($toReading($startDateTime))),
+            'startDate'      => substr($startReading, 0, 10),
             'endDate'        => preg_match('/^\d{4}-\d{2}-\d{2}$/', $untilRaw) === 1 ? $untilRaw : null,
             'maxOccurrences' => preg_match('/^\d+$/', $countRaw) === 1 && (int) $countRaw > 0 ? (int) $countRaw : null,
         ];

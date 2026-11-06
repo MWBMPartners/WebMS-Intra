@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 145;  // 134 + six W09d-W09h (r7) + three W07b-W07d (r8) + two W07e-W07f (r9)
+const EXPECTED_CHECKS = 148;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -1393,8 +1393,16 @@ ok(
     said($answer) . ' ' . substr($answer['body'], 0, 200) . '; stored ' . json_encode(one('SELECT timezone, startDateTime, endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$plainId]))
 );
 // Changing an event's start through the API: the new time is written on the EVENT's clock, not on PHP's (the organisation's).
-$movedTo = momentOf(clockIn(27, '21:15:00'), EVENT_ZONE);
-$answer  = req('', 'POST', '/api/events/update?id=' . $made['the events API, with a zone chosen'], (string) json_encode(['id' => $made['the events API, with a zone chosen'], 'eventID' => $made['the events API, with a zone chosen'], 'startDateTime' => gmdate('Y-m-d\TH:i:s\Z', $movedTo)]), ['bearer' => $apiKey, 'json' => true]);
+// 📌 THE END MOVES WITH THE START. Round 10 added the #786 check that refuses
+//    a start moved past its own end, and it IMMEDIATELY caught this fixture
+//    and W09g below: both pushed the start to 21:15 while the stored end was
+//    20:30, so **the test had been storing events that end before they
+//    begin** -- invisibly, because nothing compared them. Moving the end too
+//    is what a real client does, and it leaves the question this check is
+//    about (is the new start written on the EVENT's clock?) exactly as it was.
+$movedTo    = momentOf(clockIn(27, '21:15:00'), EVENT_ZONE);
+$movedEndTo = momentOf(clockIn(27, '22:45:00'), EVENT_ZONE);
+$answer  = req('', 'POST', '/api/events/update?id=' . $made['the events API, with a zone chosen'], (string) json_encode(['id' => $made['the events API, with a zone chosen'], 'eventID' => $made['the events API, with a zone chosen'], 'startDateTime' => gmdate('Y-m-d\TH:i:s\Z', $movedTo), 'endDateTime' => gmdate('Y-m-d\TH:i:s\Z', $movedEndTo)]), ['bearer' => $apiKey, 'json' => true]);
 $nowAt   = (string) (one('SELECT startDateTime FROM tblEvents WHERE eventID = ?', 'i', [$made['the events API, with a zone chosen']])['startDateTime'] ?? '');
 ok(
     'W09b the events API\'s update: a new start given as a moment is written as the reading of the EVENT\'s clock (' . EVENT_ZONE . '), not of the organisation\'s; the event keeps its zone',
@@ -1457,8 +1465,10 @@ ok(
 // An OFFSET in the value IS a zone, so such a value really is a moment and
 // must still be converted. Getting this wrong in the safe-looking direction
 // would break every integration that sends an instant.
-$instant = gmdate('Y-m-d\TH:i:s\Z', (new DateTimeImmutable('2028-07-01 12:00:00', new DateTimeZone('UTC')))->getTimestamp());
-$answer  = req('', 'POST', '/api/events/update?id=' . $skipId, (string) json_encode(['id' => $skipId, 'eventID' => $skipId, 'startDateTime' => $instant]), ['bearer' => $apiKey, 'json' => true]);
+// 📌 The end moves with the start, for the same reason as W09b above.
+$instant    = gmdate('Y-m-d\TH:i:s\Z', (new DateTimeImmutable('2028-07-01 12:00:00', new DateTimeZone('UTC')))->getTimestamp());
+$instantEnd = gmdate('Y-m-d\TH:i:s\Z', (new DateTimeImmutable('2028-07-01 13:30:00', new DateTimeZone('UTC')))->getTimestamp());
+$answer  = req('', 'POST', '/api/events/update?id=' . $skipId, (string) json_encode(['id' => $skipId, 'eventID' => $skipId, 'startDateTime' => $instant, 'endDateTime' => $instantEnd]), ['bearer' => $apiKey, 'json' => true]);
 $nowAt   = (string) (one('SELECT startDateTime FROM tblEvents WHERE eventID = ?', 'i', [$skipId])['startDateTime'] ?? '');
 $wantAt  = (new DateTimeImmutable('2028-07-01 12:00:00', new DateTimeZone('UTC')))->setTimezone(new DateTimeZone(EVENT_ZONE))->format('Y-m-d H:i:s');
 ok(
@@ -1503,6 +1513,46 @@ ok(
     said($answer) . '; stored ' . json_encode($subRow) . ', looked for ' . $orgSkipped . ' / Selftest Hall'
 );
 q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$subId]);
+
+// ══════════════════════════════════════════════════════════════════════════
+// W09i-W09k — the UPDATE endpoint refuses an end before its start (#786)
+// ══════════════════════════════════════════════════════════════════════════
+// 🚨 IT HAD NO COMPARISON AT ALL — not a weakened one, none — while
+//    `api-spec.json` documents its body as a subset of create's and create's
+//    own description promises the rule. Found in round 10 of #777.
+$withoutConsumingIds(static function () use ($apiKey, $newest): void {
+    $mk = static fn (array $b): array => req('', 'POST', '/api/events/create', (string) json_encode($b), ['bearer' => $apiKey, 'json' => true]);
+    $mk(['eventName' => 'Selftest zones order', 'startDateTime' => '2028-07-01T10:00:00', 'endDateTime' => '2028-07-01T11:00:00', 'status' => 'published']);
+    $id = $newest('Selftest zones order');
+
+    // Changing the END to before the stored start.
+    $bad = req('', 'POST', '/api/events/update?id=' . $id, (string) json_encode(['id' => $id, 'eventID' => $id, 'endDateTime' => '2028-07-01T09:00:00']), ['bearer' => $apiKey, 'json' => true]);
+    $after = (string) (one('SELECT endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$id])['endDateTime'] ?? '');
+    ok(
+        'W09i the UPDATE endpoint REFUSES an end earlier than the STORED start, and changes nothing',
+        $bad['status'] === 400 && $after === '2028-07-01 11:00:00',
+        said($bad) . ' ' . substr($bad['body'], 0, 160) . '; stored ' . json_encode($after)
+    );
+
+    // Changing only the START, past the stored end.
+    $bad2 = req('', 'POST', '/api/events/update?id=' . $id, (string) json_encode(['id' => $id, 'eventID' => $id, 'startDateTime' => '2028-07-01T12:00:00']), ['bearer' => $apiKey, 'json' => true]);
+    $after2 = (string) (one('SELECT startDateTime FROM tblEvents WHERE eventID = ?', 'i', [$id])['startDateTime'] ?? '');
+    ok(
+        'W09j and it refuses a START moved past the STORED end — the side that is absent is read from the row',
+        $bad2['status'] === 400 && $after2 === '2028-07-01 10:00:00',
+        said($bad2) . ' ' . substr($bad2['body'], 0, 160) . '; stored ' . json_encode($after2)
+    );
+
+    // An EQUAL start and end is allowed, which three places document.
+    $okq = req('', 'POST', '/api/events/update?id=' . $id, (string) json_encode(['id' => $id, 'eventID' => $id, 'endDateTime' => '2028-07-01T10:00:00']), ['bearer' => $apiKey, 'json' => true]);
+    $after3 = (string) (one('SELECT endDateTime FROM tblEvents WHERE eventID = ?', 'i', [$id])['endDateTime'] ?? '');
+    ok(
+        'W09k but an EQUAL start and end is ACCEPTED, as create.php and manage/save.php both document',
+        $okq['status'] === 200 && $after3 === '2028-07-01 10:00:00',
+        said($okq) . ' ' . substr($okq['body'], 0, 160) . '; stored ' . json_encode($after3)
+    );
+    q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$id]);
+});
 
 $answer = $api(['eventName' => 'Selftest zones API refused', 'startDateTime' => str_replace(' ', 'T', clockIn(28, '19:00:00')), 'timezone' => 'GMT+1']);
 ok(

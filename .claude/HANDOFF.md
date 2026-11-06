@@ -63,7 +63,7 @@ original build. `tools/csrf-carriers-selftest.mjs` drives a real browser.
 
 ## In flight
 
-**#777 part one: rounds 3 to 9 are done; round 10's check is next.** The rounds so far found, in order: a display fault in four
+**#777 part one: rounds 3 to 10 are done; round 11's check is next.** The rounds so far found, in order: a display fault in four
 pages (round 1, the build); a WRITE fault storing the wrong hour plus two API
 faults refusing valid input (round 2); three READER faults my own write fix made
 visible, and the fact that those three readers were guarded by nothing (round
@@ -190,6 +190,34 @@ a constant that did not exist; and **round 8 had newly refused ISO 8601 BASIC
 form, which is this portal's OWN `.ics` format** — so a script reading our own
 feed and pushing it back got a 400. #786 raised: `events/api/update.php` never
 compares end with start, which the spec implies it does.
+
+**Round 10 found SEVEN, six in round 9's work, and ONE OBSERVATION WORTH MORE
+THAN ANY OF THEM: every earlier round moved the code from "stores something
+wrong" to "refuses"; round 9 moved a refusal to "stores something wrong".** The
+first widening in this package to lose data: a legal ISO decimal time (`T10.5`
+= half past ten) was accepted and stored as `10:00:00`, up to 59 minutes gone
+silently where it had been an honest 400. **That is the direction to check
+first on any shape accepted from here on.** Also: **the write-path gate was
+bypassed by ONE WORD** — `date_create_immutable()`, PHP's procedural alias —
+because round 9 listed the four spellings round 8 had used, which is this
+repository's own lesson verbatim ("an allow-list written from the spellings you
+were handed is not a rule"); the real guard is now a TEXT PIN on the routing
+closure, #485's and #763's settled remedy, and **round 10 is the third round
+running to find that same fix unguarded.** The `$showReading` pin cried wolf
+again one condition over (`= function`, used 14 times elsewhere) with a message
+saying the helper was "renamed or removed" when it was on the line just read;
+the gate's own failure path BLAMED THE FILES when php was unavailable, and
+writing that found `token_get_all()` does not fail on broken PHP, so **a file
+that did not parse came back as "no moments found" and the gate PASSED**;
+`import.php`'s comment claimed the check "cannot disagree with storage" while
+the line below it still used `strtotime`; **a FIFTH write path**
+(`calendar/manage/save.php`) derived four date parts from a moment — harmless in
+417 zones and catastrophic in two, where the clocks go forward at 23:00, so a
+repeating series was stored a DAY LATE permanently and read as deliberate (**my
+own first two sweeps of that returned the wrong zone list**); and #786 was fixed
+rather than left, because raising an issue does not make a published sentence
+true — and doing so immediately caught two of the test's own fixtures storing
+events that end before they begin.
 
 #763 and #781 are DONE (D-064, D-065) — the protected arm of D-051, since they
 write and delete stored data, so rounds ran until one was clean. Twelve

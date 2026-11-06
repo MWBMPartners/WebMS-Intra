@@ -318,8 +318,13 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # noticed it contradicted its own entry. Moved 478 -> 491 on 30 October
     # 2026: #676 added an eleven-line status allow-list above it, and keying
     # this list by LINE NUMBER is exactly why that shows up here as a stale
-    # entry rather than as a silent pass.)
-    ("_apps/calendar/manage/save.php", 491): (
+    # entry rather than as a silent pass. Moved 491 -> 506 on 6 November 2026:
+    # #777 round 10 added a `use` line and fifteen lines of comment above it,
+    # explaining why four date parts are now SLICED out of the posted reading
+    # rather than derived with `strtotime()`. The probe itself is unchanged
+    # again, which is the third time this entry has moved for a reason that had
+    # nothing to do with it.)
+    ("_apps/calendar/manage/save.php", 506): (
         "SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ?",
         "the slug-uniqueness probe on event CREATE must search every event, imported ones included, so two events can never share a slug regardless of origin",
     ),

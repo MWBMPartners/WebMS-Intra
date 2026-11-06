@@ -363,21 +363,13 @@ def has_a_zone_argument(call: str, wanted: int = 2) -> bool:
 #    that no longer does it fails too, because an allow-list that has stopped
 #    describing the code is how the migration harness's exceptions went stale.
 ALLOWED: dict[str, str] = {
-    # ⚠️ A LOCAL VARIABLE MAY SHARE A COLUMN'S NAME, and this check matches a
-    #    NAME. `$startDateTime` here is `trim($_POST['startDateTime'] ?? '')`
-    #    (line 93) -- a value somebody typed into the form, never read from
-    #    `tblEvents` -- so the rule about wall-clock columns does not apply to
-    #    it at all.
-    #
-    #    And all four conversions extract only a DATE PART (`'Y-m-d'`, `'j'`,
-    #    `'n'`), which a moved hour cannot change: on 29 March 2026 a posted
-    #    `01:30` becomes `02:30`, the same day, month and year. So there is
-    #    nothing to fix, which is why this is ALLOWED rather than on the
-    #    part-two list. It was ON that list until round 4 of #777 pointed out
-    #    that a backlog entry asserts there is work to do.
-    os.path.join("web", "_apps", "calendar", "manage", "save.php"):
-        "$startDateTime is $_POST['startDateTime'], not a column read, and every "
-        "conversion of it takes a date part only, which a moved hour cannot change.",
+    # ⚠️ `calendar/manage/save.php` LEFT THIS LIST IN ROUND 10, and the
+    #    stale-entry rule is what said so rather than anybody noticing. Its
+    #    four `strtotime()` conversions of `$_POST['startDateTime']` now slice
+    #    the text instead (see WRITE_PATHS_WITHOUT_MOMENTS above for the two
+    #    zones that made it matter), so the file no longer hands a
+    #    clock-reading NAME to a moment function at all and an exemption for it
+    #    would read as though the shape were still there.
 }
 
 # ── The backlog, one path per line, in a file beside this one ──────────────
@@ -514,6 +506,30 @@ FORMATTER_NAME = "formatClockTime"
 #    build no moment at all: #777 rounds 2, 5, 6 and 8 each found one of them
 #    doing it, and round 9 found the newest fix unguarded. Measured when this
 #    was written: all three contain zero live moment constructions.
+# ⚠️ `calendar/manage/save.php` IS A FIFTH WRITE PATH AND IS NOT ON THIS LIST,
+#    which is a stated exception rather than an oversight. Round 10 found it
+#    deriving four date parts with `date('j'|'n'|'Y-m-d', strtotime($posted))`,
+#    and a date part looks safe to derive that way until it is measured: in
+#    TWO zones of 419 the clocks go forward at 23:00, so a reading of
+#    23:00-23:59 that night lands on the NEXT DAY. Swept across every IANA
+#    zone for 2026-2041 rather than reasoned about --
+#
+#        America/Nuuk           64 readings, e.g. 2026-03-28 23:00 -> 03-29 00:00
+#        America/Scoresbysund   64 readings, same shape
+#        every other zone       none
+#
+#    -- and the cost was not cosmetic: the monthly pattern was stored on the
+#    29th, `$firstWanted` then disagreed with the typed start, and the handler
+#    UPDATED the event onto the pattern's date while telling the administrator
+#    the first date had moved. Every occurrence of that series fell a day late,
+#    permanently, and it read as deliberate. All four now slice the text.
+#
+#    It cannot join the list because ONE live `strtotime` remains, at
+#    `save.php:1210`, formatting a DATE-ONLY value for display. That one was
+#    swept the same way: **a date with no time moves in ZERO zones** between
+#    2026 and 2041, so it is safe, and it is left alone rather than changed for
+#    the sake of a clean list. If that line ever grows a time, it stops being
+#    safe.
 WRITE_PATHS_WITHOUT_MOMENTS = (
     os.path.join("web", "_apps", "events", "api", "create.php"),
     os.path.join("web", "_apps", "events", "api", "update.php"),
@@ -527,18 +543,75 @@ WRITE_PATHS_WITHOUT_MOMENTS = (
 #    tokeniser is the only reading that can tell them apart, and this
 #    repository has paid for that lesson repeatedly (#763 ended six rounds of
 #    regular expressions by asking PHP).
+# ⚠️ AND IT IS A LIST, WHICH IS NOT A RULE. Round 9 wrote the four spellings
+#    round 8 had used, and round 10 walked through it in ONE WORD:
+#    `date_create_immutable($raw)` is PHP's procedural alias for the
+#    constructor, so the whole pre-round-8 revert came back with this gate at
+#    exit 0, 65 audit scripts green and 95 clock checks green --
+#    `01/06/2026 10:00 +0100` storing 6 January again. **This repository's own
+#    written lesson, verbatim: "an allow-list written from the spellings you
+#    were handed is not a rule."**
+#
+#    So the list now holds every internal PHP function that returns a
+#    DateTime-ish value, enumerated from `get_defined_functions()` rather than
+#    from memory, AND the real guard is the text pin below, which catches any
+#    spelling at all because it compares the routing itself.
+#
+#    What the LIST still cannot see, said plainly rather than implied: a
+#    variable class name (`$c = '\DateTimeImmutable'; new $c(...)`), a method
+#    on an object made elsewhere, and an identifier that merely CONTAINS one of
+#    these words. The pin is what covers those for `create.php`'s routing;
+#    elsewhere in these files they stay a question for a person.
 MOMENT_BUILDERS = re.compile(
-    r"strtotime|createFromFormat|new\s+\\?DateTimeImmutable\b|new\s+\\?DateTime\b"
+    r"strtotime|strptime|createFromFormat|createFromInterface"
+    r"|date_create_immutable_from_format|date_create_from_format"
+    r"|date_create_immutable|date_create"
+    r"|date_parse_from_format|date_parse"
+    r"|gmmktime|mktime"
+    r"|new\s+\\?DateTimeImmutable\b|new\s+\\?DateTime\b"
 )
+
+# 📌 THE REAL GUARD: the routing in `create.php`, pinned as TEXT.
+#    A list of spellings is defeated by a spelling nobody thought of; this is
+#    defeated by nothing, because it compares the statement itself. It is the
+#    remedy #485 reached after four rounds and #763 after six, and round 10 is
+#    the third round in a row to find this exact fix unguarded.
+#
+#    Whitespace is freed so a reformat does not go red; everything else is
+#    byte-for-byte.
+READING_ROUTER_FILE = os.path.join("web", "_apps", "events", "api", "create.php")
+READING_ROUTER = (
+    "$readingFor = static function (string $raw, \\DateTimeZone $zone): ?string { "
+    "return I18n::inputCarriesOffset($raw) === false "
+    "? I18n::wallClockFromInput($raw) "
+    ": I18n::instantFromInput($raw, $zone); };"
+)
+
+
+class ProbeUnavailable(Exception):
+    """The PHP probe could not run. NOT a finding about the file."""
 
 
 def live_moment_builders(path: str) -> list[str]:
     """Every moment construction in a file's CODE, comments excluded."""
     import subprocess
+    # ⚠️ STRINGS ARE BLANKED AS WELL AS COMMENTS. The tokeniser keeps string
+    #    literals, and a perfectly ordinary error message mentioning
+    #    `strtotime` would make this gate RED on correct code -- the direction
+    #    that gets a check switched off (#483). Measured before adding it: no
+    #    string in these three files trips the patterns TODAY, so this is
+    #    hardening against a plausible edit rather than a fix for a live fault,
+    #    and it costs nothing, because a moment is never built inside a string.
+    #    Each literal becomes a run of `x` of the same length, which is this
+    #    repository's usual remedy (`gdpr-coverage-selftest.php`), so reported
+    #    offsets stay meaningful.
     probe = (
         '$t = token_get_all(file_get_contents($argv[1])); $o = "";'
         'foreach ($t as $x) { if (is_array($x)) {'
         '  if (in_array($x[0], [T_COMMENT, T_DOC_COMMENT], true)) { continue; }'
+        '  if (in_array($x[0], [T_CONSTANT_ENCAPSED_STRING,'
+        '      T_ENCAPSED_AND_WHITESPACE, T_INLINE_HTML], true)) {'
+        '    $o .= str_repeat("x", strlen($x[1])); continue; }'
         '  $o .= $x[1]; } else { $o .= $x; } } echo $o;'
     )
     try:
@@ -546,12 +619,34 @@ def live_moment_builders(path: str) -> list[str]:
             ["php", "-r", probe, path],
             capture_output=True, text=True, timeout=30,
         )
-    except Exception:
-        # ⚠️ REFUSE RATHER THAN PASS. A check that answers "nothing wrong"
-        #    because it could not look is worse than no check (#763's rule).
-        return ["(php could not be run, so this file was not read)"]
+    except Exception as problem:
+        # ⚠️ REFUSE RATHER THAN PASS, BUT SAY THE RIGHT THING. A check that
+        #    answers "nothing wrong" because it could not look is worse than no
+        #    check (#763's rule) -- so this still fails closed. The FIRST
+        #    version returned its excuse inside the findings list, so with
+        #    `php` off the PATH the gate printed three paragraphs asserting
+        #    that three correct files build a moment and telling the reader to
+        #    fix them. **Round 9's own finding 5 -- a failure message that
+        #    sends somebody looking for the wrong thing -- reproduced in the
+        #    commit that fixed it** (round 10).
+        raise ProbeUnavailable(f"php could not be run: {problem}") from problem
+    # ⚠️ `token_get_all()` DOES NOT FAIL ON BROKEN PHP -- it warns and hands
+    #    back whatever it managed, and the process still exits 0. So a file
+    #    that does not parse came back as "no moments found" and this gate
+    #    PASSED on it: the exact "answers nothing wrong because it could not
+    #    look" failure the comment above warns against, measured on a
+    #    deliberately broken file while writing this. Ask `php -l` first.
+    lint = subprocess.run(["php", "-l", path], capture_output=True, text=True, timeout=30)
+    if lint.returncode != 0:
+        raise ProbeUnavailable(
+            "the file does not parse, so its tokens cannot be trusted"
+            + (f": {lint.stdout.strip()[:200]}" if lint.stdout.strip() != "" else "")
+        )
     if out.returncode != 0:
-        return ["(php refused the file, so it was not read)"]
+        raise ProbeUnavailable(
+            f"php exited {out.returncode} reading the file"
+            + (f": {out.stderr.strip()[:200]}" if out.stderr.strip() != "" else "")
+        )
     return MOMENT_BUILDERS.findall(out.stdout)
 
 
@@ -976,7 +1071,19 @@ def main() -> int:
                 f"there. If it moved, change the entry in the same edit."
             )
             continue
-        built = live_moment_builders(full)
+        try:
+            built = live_moment_builders(full)
+        except ProbeUnavailable as why:
+            problems.append(
+                f"this check could not READ {relative}, so it proved nothing "
+                f"about it: {why}.\n"
+                f"       That is a fault in the check's surroundings, NOT in "
+                f"the file -- do not go looking for a moment in it. PHP is "
+                f"needed because each of these files quotes the old code in a "
+                f"comment, so only the tokeniser can tell the comment from the "
+                f"code."
+            )
+            continue
         if len(built) > 0:
             problems.append(
                 f"{relative} builds a moment in live code: "
@@ -993,6 +1100,39 @@ def main() -> int:
                 f"       If this handler genuinely needs a moment of its own, "
                 f"take it off WRITE_PATHS_WITHOUT_MOMENTS in the same edit and "
                 f"say why -- do not leave the entry and work around it."
+            )
+
+    # ── The routing itself, pinned as text ────────────────────────────────
+    router_path = os.path.join(root, READING_ROUTER_FILE)
+    if os.path.isfile(router_path) is False:
+        problems.append(f"{READING_ROUTER_FILE} is not there, so the routing cannot be pinned.")
+    else:
+        with open(router_path, "r", encoding="utf-8", errors="replace") as handle:
+            router_code = blank_comments(handle.read())
+        tidy = " ".join(router_code.split())
+        wanted = " ".join(READING_ROUTER.split())
+        if tidy.count("$readingFor = static function") != 1:
+            problems.append(
+                f"{READING_ROUTER_FILE} defines $readingFor "
+                f"{tidy.count('$readingFor = static function')} time(s); it must "
+                f"define it exactly ONCE. A pin that finds its anchor by the "
+                f"FIRST match is satisfied by a dead copy above a gutted live "
+                f"one -- #485 round 2, #763, and #777 round 9 all record it."
+            )
+        elif wanted not in tidy:
+            problems.append(
+                f"{READING_ROUTER_FILE}'s $readingFor no longer reads exactly "
+                f"as pinned.\n"
+                f"       wanted: {wanted}\n"
+                f"       This closure is the ONE place the handler decides "
+                f"whether a posted time is a reading or an instant, and every "
+                f"round from 7 to 10 found its predecessor revertible with "
+                f"every guard green -- a list of banned spellings is defeated "
+                f"by a spelling nobody thought of (`date_create_immutable` did "
+                f"it in round 10), so the routing is pinned as TEXT instead.\n"
+                f"       If the change is deliberate, update READING_ROUTER in "
+                f"the same edit and say why in the commit. Whitespace is free; "
+                f"anything else is not."
             )
 
     # ── The one display helper nothing drives ─────────────────────────────
@@ -1034,14 +1174,24 @@ def main() -> int:
         #    And its failure message named `REPATTERN_HELPER`, a constant that
         #    did not exist, so the one sentence somebody acts on sent them
         #    looking for nothing. It exists now.
-        definitions = re.findall(
-            re.escape(REPATTERN_HELPER) + r"\s*=\s*static\s+function", body
-        )
+        # ⚠️ ANY LEGITIMATE CLOSURE SPELLING. Round 9 required `static
+        #    function` -- the spelling it happened to be shown -- and round 10
+        #    turned the gate RED by writing `= function` instead, which is
+        #    behaviour-neutral and used 14 times elsewhere under `web/`
+        #    (`grep -rn "= function (" web/_apps web/_core | wc -l`). Worse,
+        #    the message then said the helper "was renamed or removed" when it
+        #    was on the line just read. **Round 9's own finding 5, one
+        #    condition over**, and crying wolf gets a check switched off (#483).
+        HELPER_SHAPE = r"\s*=\s*(?:static\s+)?(?:function|fn)\b"
+        definitions = re.findall(re.escape(REPATTERN_HELPER) + HELPER_SHAPE, body)
         if len(definitions) != 1:
             problems.append(
                 f"{REPATTERN_FILE} defines {REPATTERN_HELPER} "
-                f"{len(definitions)} time(s); it must define it exactly ONCE.\n"
-                f"       At zero: it was renamed or removed -- change "
+                f"{len(definitions)} time(s) as a closure; it must define it "
+                f"exactly ONCE.\n"
+                f"       At zero: it was renamed, removed, or written in a "
+                f"shape this pin does not recognise (it accepts "
+                f"`function`, `static function` and `fn`) -- change "
                 f"REPATTERN_HELPER here in the same edit, or take this pin out "
                 f"with the helper.\n"
                 f"       At two or more: a pin that finds its anchor by the "
@@ -1050,9 +1200,7 @@ def main() -> int:
                 f"(and #485 and #763 before it)."
             )
         else:
-            found = re.search(
-                re.escape(REPATTERN_HELPER) + r"\s*=\s*static\s+function", body
-            )
+            found = re.search(re.escape(REPATTERN_HELPER) + HELPER_SHAPE, body)
             at = found.start() if found is not None else -1
             end = body.find("};", at)
             helper = body[at:end if end != -1 else at + 600]

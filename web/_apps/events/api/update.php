@@ -90,6 +90,7 @@ $set    = [];
 $types  = '';
 $params = [];
 
+$newClock = [];
 foreach ($columnMap as $col => $type) {
     if (array_key_exists($col, $body) === false) {
         continue;
@@ -151,6 +152,66 @@ foreach ($columnMap as $col => $type) {
     $set[]    = $col . ' = ?';
     $types   .= $type;
     $params[] = $value;
+    if ($col === 'startDateTime' || $col === 'endDateTime') {
+        $newClock[$col] = $value;
+    }
+}
+
+// ⏱️ AN END BEFORE ITS START IS REFUSED HERE TOO (#786, #777 round 10).
+//    This handler had NO comparison at all -- not a weakened one, none -- while
+//    `api-spec.json` documents its body as "Subset of EventCreate fields +
+//    eventID" and `EventCreate.endDateTime` promises "it must read as a date
+//    AND be no earlier than `startDateTime`, or the request is refused with
+//    400". So the published contract said one thing and the endpoint did
+//    another, and `create.php` DOES enforce it: **two halves of one documented
+//    rule disagreeing.**
+//
+//    It is three lines now and was not before: until #777 these columns held a
+//    mixture of readings and converted moments, so comparing them meant
+//    deciding what they were first. Both sides are readings on the event's own
+//    clock by this point, and `Y-m-d H:i:s` sorts the way a clock does
+//    (#435's fix), so this is a TEXT compare and builds no moment.
+//
+//    ⚠️ ONE SIDE MAY BE ABSENT, which is why the stored counterpart is read.
+//       A request that changes only the start must still be refused if it
+//       would move it past the existing end.
+//
+//    📌 "BEFORE", NOT "BEFORE OR EQUAL": `calendar/manage/save.php` records
+//       that an equal start and end is allowed -- "a moment in a diary is a
+//       reasonable thing to record" -- and `EventCreate`'s own description
+//       says "equal start and end is accepted". Three places must agree.
+if (isset($newClock) === true && count($newClock) > 0) {
+    $haveStart = $newClock['startDateTime'] ?? null;
+    $haveEnd   = array_key_exists('endDateTime', $newClock) === true ? $newClock['endDateTime'] : null;
+    if ($haveStart === null || ($haveEnd === null && array_key_exists('endDateTime', $newClock) === false)) {
+        $stored = $db->prepare(
+            // 📌 THE SAME GUARD AS THE FETCH AT THE TOP OF THIS FILE,
+            //    including `externalFeedID IS NULL`: an imported event is not
+            //    this endpoint's to read or change (#514), and
+            //    `check_event_visibility.py` is right to insist on it even
+            //    though the caller has already been authorised above.
+            'SELECT startDateTime, endDateTime FROM tblEvents '
+            . 'WHERE eventID = ? AND siteID = ? AND isDeleted = 0 '
+            . 'AND externalFeedID IS NULL LIMIT 1'
+        );
+        if ($stored !== false) {
+            $stored->bind_param('ii', $eventId, $siteId);
+            $stored->execute();
+            $wasRow = $stored->get_result()->fetch_assoc();
+            $stored->close();
+            if (is_array($wasRow) === true) {
+                if ($haveStart === null) {
+                    $haveStart = $wasRow['startDateTime'] === null ? null : (string) $wasRow['startDateTime'];
+                }
+                if (array_key_exists('endDateTime', $newClock) === false) {
+                    $haveEnd = $wasRow['endDateTime'] === null ? null : (string) $wasRow['endDateTime'];
+                }
+            }
+        }
+    }
+    if ($haveStart !== null && $haveEnd !== null && $haveEnd < $haveStart) {
+        ApiResponse::error('endDateTime must be no earlier than startDateTime', 400);
+    }
 }
 
 // 📍 #456 Chunk A — locationGeoLat/locationGeoLng are a validated PAIR

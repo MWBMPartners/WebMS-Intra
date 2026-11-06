@@ -44,6 +44,26 @@ see.** Those are listed rather than fixed: an event's time zone need not be the
 organisation's, so each needs a person to look at it, and that is the next part
 of this work. Nothing new may join the list.
 
+**A time written with a decimal fraction was being stored with the fraction
+thrown away.** `2026-06-01T10.5` means half past ten in the international
+standard, and for a few hours it was accepted and stored as ten o'clock — up to
+59 minutes lost, with no error. It had been refused before, and is refused
+again. Fractional *seconds* are still accepted and dropped, because they cannot
+be stored and every JavaScript client sends them.
+
+**Updating an event through the API now refuses an end before its start.** It
+never checked, although the published description said it did and creating an
+event has always checked. The check also found that two of our own tests had
+been quietly storing events that end before they begin.
+
+**And the main event form no longer works out a date by converting the time
+first.** In two time zones in the world the clocks go forward at eleven at
+night, so a time typed between 23:00 and midnight landed on the following day —
+and for a repeating event that meant the whole series was stored a day late,
+permanently, with the administrator told the first date had moved as though it
+were deliberate. Swept across every time zone to 2041: two are affected, and a
+date with no time is affected in none.
+
 **The events API can read this portal's own calendar format again.** Tightening
 the check a few hours earlier had started refusing `20260601T100000Z` — the form
 this portal itself writes into every `.ics` calendar file — so a script that read
