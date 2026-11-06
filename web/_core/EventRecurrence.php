@@ -875,34 +875,61 @@ final class EventRecurrence
     }
 
     /**
-     * 🕳️ Is this reading a time that really exists in that zone?
+     * 🕳️ WHY a repeating event's first date moved — the ONE place that decides.
      *
-     * Public because a CALLER has to tell two quite different reasons apart
-     * when it explains itself to somebody (#777 round 12). A repeating event's
-     * first date can move for two reasons:
+     * Takes the reading that was TYPED and the reading that was STORED, and
+     * answers which of three things happened, in words a caller can branch on:
      *
-     *   • the pattern puts it elsewhere -- ticking Thursday on a Wednesday --
-     *     which is the organiser's own choice working as asked; or
-     *   • the time they typed does not exist on that date in that zone,
-     *     because the clocks go forward through it.
+     *   `gap`              the clocks go forward through the typed time, and
+     *                      that alone accounts for where the date ended up.
+     *   `pattern and time` the pattern chose the date, and the clocks then
+     *                      moved the time on the day it chose.
+     *   `pattern`          the pattern chose the date and the time is intact.
+     *   `not moved`        the two readings are the same.
      *
-     * `calendar/manage/save.php` showed ONE sentence for both, blaming "the
-     * repeat you chose" in a case where the repeat was satisfied by the typed
-     * date -- so it pointed the administrator at a control that could not fix
-     * anything, and said nothing about the time having changed as well.
+     * ⚠️ IT IS PUBLIC AND SHARED BECAUSE A TEST HOLDING ITS OWN COPY OF THIS
+     *    ARITHMETIC TESTED NOTHING (#777 round 14, and #647's rule). Round 13
+     *    put the decision inline in `calendar/manage/save.php` and
+     *    re-implemented it inside `event-recurrence-selftest.php`'s check J14,
+     *    whose own comment claimed "a wrong branch is caught without a
+     *    database or a web server". Measured, it was not: changing ONE WORD in
+     *    the page — `if ($movedByGapAlone === true)` to `=== false`, which
+     *    gives every pattern move the gap sentence and every gap move the
+     *    pattern sentence — left all 65 audit scripts green, J14 green at
+     *    75/75, clock-change at 100/100 AND `event-repeat-pages-selftest.php`
+     *    at 251/251 on a real database.
      *
-     * ⚠️ IT ASKS `pastTheHourThatIsMissing()` RATHER THAN REPEATING IT, so
-     *    there is still ONE rule for what a missing hour is. Do not write a
-     *    second round trip in a page (#647): a page and a class that disagree
-     *    about this would explain a move by the wrong cause.
+     *    The page asks this now and J14 asks this, so the two cannot disagree.
      *
-     * An unreadable zone answers TRUE -- "no gap" -- because the honest
-     * fallback is to claim nothing. Saying "the clocks went forward" when we
-     * could not tell would be worse than the general sentence.
+     * The ORDER matters and is not arbitrary: the gap is tested FIRST and only
+     * accepted when the stored value is EXACTLY what the gap would have made
+     * of the typed one. Asking "was the typed reading real" instead was wrong
+     * in both directions — see `readingPastTheGap()` below for the two
+     * measured cases.
      *
-     * @param string $reading  A wall-clock reading, `Y-m-d H:i:s`.
-     * @param string $zoneName The zone it is a reading on.
+     * @param string $typedReading  What somebody typed, as `Y-m-d H:i:s`.
+     * @param string $storedReading What the event ended up with.
+     * @param string $zoneName      The zone both are readings on.
      */
+    public static function whyFirstDateMoved(
+        string $typedReading,
+        string $storedReading,
+        string $zoneName
+    ): string {
+        if ($storedReading === $typedReading || $typedReading === '') {
+            return 'not moved';
+        }
+
+        $gapWouldGive = self::readingPastTheGap($typedReading, $zoneName);
+        if ($gapWouldGive !== $typedReading && $storedReading === $gapWouldGive) {
+            return 'gap';
+        }
+
+        return substr($storedReading, 11) !== substr($typedReading, 11)
+            ? 'pattern and time'
+            : 'pattern';
+    }
+
     /**
      * 🕳️ What the missing-hour step would make of this reading.
      *
@@ -944,6 +971,44 @@ final class EventRecurrence
         return self::pastTheHourThatIsMissing($reading, $zone);
     }
 
+    /**
+     * 🕳️ Is this reading a time that really exists in that zone?
+     *
+     * Public because a CALLER has to tell two quite different reasons apart
+     * when it explains itself to somebody (#777 round 12). A repeating event's
+     * first date can move for two reasons:
+     *
+     *   • the pattern puts it elsewhere -- ticking Thursday on a Wednesday --
+     *     which is the organiser's own choice working as asked; or
+     *   • the time they typed does not exist on that date in that zone,
+     *     because the clocks go forward through it.
+     *
+     * `calendar/manage/save.php` showed ONE sentence for both, blaming "the
+     * repeat you chose" in a case where the repeat was satisfied by the typed
+     * date -- so it pointed the administrator at a control that could not fix
+     * anything, and said nothing about the time having changed as well.
+     *
+     * ⚠️ IT ASKS `pastTheHourThatIsMissing()` RATHER THAN REPEATING IT, so
+     *    there is still ONE rule for what a missing hour is. Do not write a
+     *    second round trip in a page (#647): a page and a class that disagree
+     *    about this would explain a move by the wrong cause.
+     *
+     * An unreadable zone answers TRUE -- "no gap" -- because the honest
+     * fallback is to claim nothing. Saying "the clocks went forward" when we
+     * could not tell would be worse than the general sentence.
+     *
+     * @param string $reading  A wall-clock reading, `Y-m-d H:i:s`.
+     * @param string $zoneName The zone it is a reading on.
+     */
+    // ⚠️ AND I DID IT AGAIN, ONE METHOD HIGHER, IN THE COMMIT THAT WROTE
+    //    THE LESSON. Round 13 reported exactly this fault below, fixed it
+    //    for `pastTheHourThatIsMissing()`, added the comment telling the
+    //    next reader to insert a method ABOVE a docblock or BELOW its
+    //    method -- and inserted `readingPastTheGap()` between THIS
+    //    docblock and THIS signature. Reflection then reported
+    //    `readingIsReal` as undocumented, measured rather than guessed.
+    //    Writing a lesson down is not the same as applying it to the edit
+    //    you are making while you write it.
     public static function readingIsReal(string $reading, string $zoneName): bool
     {
         $zone = self::zoneOrNull($zoneName);

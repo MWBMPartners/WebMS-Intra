@@ -700,22 +700,31 @@ SLICED_RULE_FORBIDDEN = re.compile(
 #    rewording stays green and deleting a branch does not.
 FLASH_BRANCH_FILE = os.path.join("web", "_apps", "calendar", "manage", "save.php")
 FLASH_BRANCHES = (
-    # The gap-alone branch must name the TIME as well as the date, because the
-    # hour changing is the half that makes somebody arrive late.
-    ("readingPastTheGap",
-     "the sharp test -- is what was STORED what the gap would make of what was "
-     "TYPED. Asking `readingIsReal()` about the typed value instead was wrong "
-     "in BOTH directions (round 13)."),
+    ("EventRecurrence::whyFirstDateMoved",
+     "the ONE place that decides WHICH of the three things happened. Round 13 "
+     "decided it inline on the page and re-implemented it in the test, so a "
+     "one-word change there left every gate and all 251 HTTP checks green "
+     "(round 14). The page must ASK the shared rule."),
     ("Any later dates keep the time you typed",
-     "the gap-alone sentence."),
+     "the clocks-moved-it sentence."),
     ("and its time became",
-     "the pattern-moved-it-AND-the-gap-shifted-the-time sentence. Round 12 had "
-     "no third branch, so this case was told only 'to match the repeat you "
-     "chose' and never heard that the hour moved."),
+     "the pattern-moved-it-AND-the-clocks-moved-its-time sentence. Round 12 "
+     "had no third branch, so this case was told only 'to match the repeat "
+     "you chose' and never heard that the hour moved."),
     ("to match the repeat you chose",
-     "the pattern-alone sentence, whose wording is also pinned by "
-     "`event-repeat-pages-selftest.php`."),
+     "the pattern-alone sentence."),
 )
+
+# ⚠️ WHAT THESE PINS DO **NOT** MEAN, because the reason given for the last one
+#    used to claim otherwise. An earlier version said that wording was "also
+#    pinned by `event-repeat-pages-selftest.php`". It is not:
+#    `grep -rn "repeat you chose" tools/event-repeat-pages-selftest.php`
+#    returns NOTHING. That test's M02 asserts only the DATE substring "first
+#    date was moved to 5 October 2028", which every branch produces, so the one
+#    HTTP check reaching this code cannot tell the branches apart.
+#
+#    Telling the next reader that behaviour is covered where it is not is how
+#    a text pin gets deleted as redundant. The behavioural gap is #787.
 
 IMPORT_GUARD_FILE = os.path.join("web", "_apps", "calendar", "manage", "import.php")
 IMPORT_GUARDS = (

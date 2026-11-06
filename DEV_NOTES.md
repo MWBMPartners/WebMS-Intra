@@ -19243,6 +19243,77 @@ Raised rather than fixed: the right answer is to pass the organisation's own
 wall-clock "now" as a parameter, and that changes which rows a member sees, so
 it is a behaviour change and not a tidy-up.
 
+### Round 14: the import closure was churning, and the remedy was a committed matrix
+
+**Four rounds running found their faults in the previous round's fixes, and
+rounds 13 and 14 were the worst of them.** Round 14: 8 findings, 5 in the
+portal, every one inside round 13's own work, and three of them faults round 13
+itself NAMED and then re-made.
+
+**THE ROOT CAUSE, which is a shape rather than a slip.** `$fmtClock` in
+`calendar/manage/import.php` has to be strict about ISO values and permissive
+about whatever a spreadsheet holds. Twice I wrote a strict rule and it **leaked
+into the permissive path**, refusing formats only that path ever handled:
+
+    round 12  refused every offset-bearing ISO value -- `toISOString()` output
+    round 13  refused RFC 2822 (an e-mail `Date:` header, an RSS `pubDate`),
+              three unpadded or basic ISO forms, and -- through a `date_parse()`
+              rule -- a legal ISO ordinal date
+
+**The cure is structural: steps 1 and 2 are ATTEMPTS, not GATES.** Each takes
+the value if it recognises it and otherwise falls through. **Nothing in that
+closure may refuse a value for the SHAPE it is written in**; the only refusals
+are for a value that is genuinely wrong — an impossible calendar day, and the
+one fractional shape PHP misreads.
+
+**`date_parse()` IS A DIFFERENT PARSER FROM `strtotime()`, and that broke my
+"ask PHP what it parsed" reasoning.** It reads `2026-152` as day 152 of month 1
+and reports "The parsed date was invalid", while `strtotime()` correctly reads
+the ISO ordinal date as 1 June. So refusing on any warning refused a value the
+fallback handles — a check crying wolf inside the rule written to stop a check
+crying wolf. The test is the HARM, stated exactly: **a day somebody could have
+typed (1 to 31) in a month that does not have it.** Day 152 is not such a day.
+**Ask the function that does the work, not a neighbouring one.**
+
+**THE REMEDY FOR THE CHURN IS THE PART TO KEEP.** Every one of those
+regressions was found by an independent checker building a MATRIX of formats,
+and every one had been missed by me probing the cases I happened to think of.
+**A list of cases you chose yourself cannot tell you about the class you
+forgot.** So the matrix is committed: section K of `clock-change-selftest.php`,
+26 formats that must store and 12 that must be refused, each annotated with the
+round that broke it, lifting the real closure out of the page source so it
+needs no database or server. Both earlier regressions were planted and both
+turn K01 red. Its stated limit: `Site::timezone()` is stood in for, so K proves
+what the closure does with a zone and nothing about the zone being the right
+one.
+
+**A TEST HOLDING ITS OWN COPY TESTED NOTHING, and its comment said the
+opposite.** Round 13 decided the moved-date branch inline in `save.php` and
+re-implemented the same arithmetic in check J14, whose comment claimed "a wrong
+branch is caught without a database or a web server". Measured: changing ONE
+WORD in the page left all 65 audit scripts green, J14 green at 75/75,
+clock-change at 100/100 **and `event-repeat-pages-selftest.php` at 251/251 on a
+real database** — because that test's M02 asserts only the DATE substring,
+which every branch produces. `EventRecurrence::whyFirstDateMoved()` is the ONE
+place now and J14 asks it; planted, the same one-word change goes red.
+
+**AND I MADE THE DOCBLOCK MISTAKE AGAIN IN THE COMMIT THAT WROTE THE LESSON.**
+Round 13 reported a docblock stranded from its method, fixed it for
+`pastTheHourThatIsMissing()`, added a comment telling the next reader to insert
+a method **above a docblock or below its method, never between the two** — and
+inserted `readingPastTheGap()` between `readingIsReal()`'s docblock and its
+signature. Reflection reported `readingIsReal` as undocumented. **Writing a
+lesson down is not the same as applying it to the edit you are making while you
+write it**, and the check that catches it is `ReflectionMethod::getDocComment()`
+rather than reading the file.
+
+**One more untrue sentence, in the branch built to be truthful.** The
+clocks-moved-it message said the typed time "does not exist on that date" while
+naming the MOVED-TO date — and in the two Greenland zones this branch exists
+for, it exists perfectly well on that date: 23:30 on 29 March 2026 in
+America/Nuuk is a real reading; it is the 28th that has no 23:30. The sentence
+names the typed date and time now, where the claim holds.
+
 ### Raised rather than bundled
 
 **#782 — eighteen hard-coded `Europe/London` literals across ten files, and two

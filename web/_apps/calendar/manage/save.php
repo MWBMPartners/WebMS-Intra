@@ -1233,69 +1233,57 @@ if ($action === 'create') {
             ? ' ' . $repeatMade . ' more date(s) were added.'
             : ' No extra dates were added.';
 
-        // 📍 Say it when the first date moved. The pattern wins over the date
-        //    typed above it (ticking Thursday means Thursdays), but a date
-        //    changing by itself has to be stated or it looks like a fault.
+        // 📍 Say it when the first date moved, and say WHY truthfully.
         //
-        // 🚨 TWO CAUSES, TWO SENTENCES (#777 round 12). This showed ONE
-        //    sentence -- "to match the repeat you chose" -- for both, and in
-        //    the case round 11 had just fixed that reason was FALSE.
+        //    The pattern wins over the date typed above it (ticking Thursday
+        //    means Thursdays), but a date changing by itself has to be stated
+        //    or it looks like a fault.
         //
-        //    Measured, typed `2026-03-28T23:30` monthly in `America/Nuuk`:
-        //    every generated date is on the 28th, the rule asks for the 28th,
-        //    and the first date still moved -- to 29 March 00:30, by the
-        //    missing-hour step and NOT by the pattern. So the administrator
-        //    was told to look at a repeat setting that was doing exactly what
-        //    they asked, and was not told the TIME had changed too, which is
-        //    the part that makes somebody arrive an hour late.
+        // 🚨 THREE CAUSES, THREE SENTENCES, AND ONE PLACE DECIDES WHICH.
+        //    `EventRecurrence::whyFirstDateMoved()` takes the reading that was
+        //    TYPED and the reading that was STORED and answers which happened.
+        //    It is shared with `event-recurrence-selftest.php`'s check J14, so
+        //    the page and the test cannot disagree (#647) -- round 13 decided
+        //    this inline here and re-implemented it in the test, and changing
+        //    ONE WORD here then left every gate and all 251 HTTP checks green.
         //
-        //    `EventRecurrence::readingIsReal()` is the ONE test of whether the
-        //    typed reading exists in the zone, and it asks the same rule the
-        //    generator uses -- never a second round trip here (#647).
+        //    Two earlier versions of this got the REASON wrong, both measured:
         //
-        //    The gap takes precedence when both could apply, because it is
-        //    the cause an administrator cannot otherwise work out, and the
-        //    sentence names the new TIME as well as the new date.
+        //      • Round 12 showed one sentence for two causes, so a date moved
+        //        by the missing hour was blamed on "the repeat you chose" --
+        //        pointing the administrator at a control that was doing
+        //        exactly what they asked.
+        //      • Round 13 chose the branch from whether the TYPED reading was
+        //        real, which is a different question from what was STORED and
+        //        was wrong both ways round: London, typed 2026-03-29T01:30
+        //        with Monday ticked, got the clocks sentence although 01:30
+        //        exists on the 30th; and typed 2026-03-28T01:30 with Sunday
+        //        ticked got the pattern sentence with no word about its hour
+        //        moving to 02:30.
         if ($movedFirst !== '') {
             $typedReading = $toReading($startDateTime);
-
-            // 🚨 THE QUESTION IS ABOUT WHAT WAS STORED, NOT WHAT WAS TYPED
-            //    (#777 round 13). Round 12 chose the branch from
-            //    `readingIsReal($typedReading)`, and that is the wrong
-            //    question -- it got BOTH cases wrong, each measured:
-            //
-            //      London, typed 2026-03-29 01:30 (inside the missing hour),
-            //      MONDAY ticked -> stored 2026-03-30 01:30. The gap sentence
-            //      fired and every clause of it was untrue: 01:30 exists on
-            //      30 March, the date moved because Monday was ticked, and
-            //      the time did not change at all.
-            //
-            //      London, typed 2026-03-28 01:30 (a real Saturday), SUNDAY
-            //      ticked -> stored 2026-03-29 02:30. The pattern sentence
-            //      fired and said nothing about the hour moving, which is
-            //      the half that makes somebody arrive an hour late.
-            //
-            //    The sharp test is whether what was STORED is exactly what
-            //    the gap would make of what was TYPED. If it is, the gap is
-            //    the whole story. If it is not, the pattern chose the date --
-            //    and the gap may ALSO have shifted the time, on the day the
-            //    pattern chose, which is the third sentence below.
-            $gapWouldGive = EventRecurrence::readingPastTheGap($typedReading, $timezone);
-            $movedByGapAlone = $typedReading !== ''
-                && $gapWouldGive !== $typedReading
-                && $movedFirst === $gapWouldGive;
-            $timeAlsoMoved = substr($movedFirst, 11) !== substr($typedReading, 11);
+            $why          = EventRecurrence::whyFirstDateMoved($typedReading, $movedFirst, $timezone);
 
             $movedOn = I18n::formatClockDateTime($movedFirst, 'j F Y');
             $movedAt = I18n::formatClockDateTime($movedFirst, 'H:i');
 
-            if ($movedByGapAlone === true) {
+            if ($why === 'gap') {
+                // 🚨 THE DATE THIS NAMES MATTERS. An earlier version said the
+                //    typed time "does not exist on that date" while naming the
+                //    MOVED-TO date -- and in the two zones whose clocks go
+                //    forward at 23:00, which is the case this branch was built
+                //    for, the time exists perfectly well on that date.
+                //    Measured: 23:30 on 29 March 2026 in America/Nuuk is a
+                //    real reading; it is 28 March that has no 23:30. So the
+                //    sentence names the TYPED date and time, where the claim
+                //    is true, and the stored one separately.
                 $repeatNote .= ' The first date was moved to ' . $movedOn
-                    . ' at ' . $movedAt
-                    . ', because the clocks go forward through the time you typed'
-                    . ' and it does not exist on that date in the time zone this'
-                    . ' event uses. Any later dates keep the time you typed.';
-            } elseif ($timeAlsoMoved === true) {
+                    . ' at ' . $movedAt . ', because the clocks go forward through '
+                    . I18n::formatClockDateTime($typedReading, 'H:i') . ' on '
+                    . I18n::formatClockDateTime($typedReading, 'j F Y')
+                    . ' in the time zone this event uses, so that time does not'
+                    . ' exist. Any later dates keep the time you typed.';
+            } elseif ($why === 'pattern and time') {
                 $repeatNote .= ' The first date was moved to ' . $movedOn
                     . ' to match the repeat you chose, and its time became '
                     . $movedAt . ' because the clocks go forward through the'

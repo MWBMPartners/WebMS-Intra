@@ -998,32 +998,37 @@ expect('J13', 'an unreadable zone moves nothing rather than guessing', [
     'empty'   => '2026-03-28 23:30:00',
 ]);
 
-// J14 — THE DISCRIMINATOR ITSELF, over the four cases `save.php` must tell
-//       apart. This is the arithmetic the page does; doing it here means a
-//       wrong branch is caught without a database or a web server.
+// J14 — THE BRANCH THE PAGE PICKS, ASKED OF THE PAGE'S OWN RULE.
 //
-//       `gap alone` is true only when the stored value IS what the gap would
-//       have produced. Round 12's version asked a different question and
-//       answered true for case 2 and false for case 3.
+// ⚠️ THIS CHECK USED TO RE-IMPLEMENT THAT RULE AND SO TESTED NOTHING (#777
+//    round 14, and #647's rule that a test holding its own copy of the logic
+//    it tests is not testing anything). Its comment claimed "a wrong branch is
+//    caught without a database or a web server". Measured, it was not:
+//    changing ONE WORD in `calendar/manage/save.php` -- `=== true` to
+//    `=== false`, giving every pattern move the clocks sentence and every gap
+//    move the pattern sentence -- left all 65 audit scripts green, this file
+//    at 75/75 with J14 among them, clock-change at 100/100 and
+//    `event-repeat-pages-selftest.php` at 251/251 on a real database.
+//
+//    `EventRecurrence::whyFirstDateMoved()` is the ONE place that decides, and
+//    the page asks it. So this check asks it too, and a wrong branch in the
+//    page is now a wrong answer here.
 $j14 = [];
 foreach ([
-    ['America/Nuuk',  '2026-03-28 23:30:00', '2026-03-29 00:30:00', 'gap alone'],
-    ['Europe/London', '2026-03-29 01:30:00', '2026-03-30 01:30:00', 'pattern'],
-    ['Europe/London', '2026-03-28 01:30:00', '2026-03-29 02:30:00', 'pattern and time'],
-    ['Europe/London', '2028-10-04 19:00:00', '2028-10-05 19:00:00', 'pattern'],
-] as [$zone, $typed, $stored, $wanted]) {
-    $gapWouldGive = EventRecurrence::readingPastTheGap($typed, $zone);
-    $gapAlone     = $gapWouldGive !== $typed && $stored === $gapWouldGive;
-    $timeAlso     = substr($stored, 11) !== substr($typed, 11);
-    $j14[$typed . ' -> ' . $stored] = $gapAlone === true
-        ? 'gap alone'
-        : ($timeAlso === true ? 'pattern and time' : 'pattern');
+    ['America/Nuuk',  '2026-03-28 23:30:00', '2026-03-29 00:30:00'],
+    ['Europe/London', '2026-03-29 01:30:00', '2026-03-30 01:30:00'],
+    ['Europe/London', '2026-03-28 01:30:00', '2026-03-29 02:30:00'],
+    ['Europe/London', '2028-10-04 19:00:00', '2028-10-05 19:00:00'],
+    ['Europe/London', '2026-06-01 10:00:00', '2026-06-01 10:00:00'],
+] as [$zone, $typed, $stored]) {
+    $j14[$typed . ' -> ' . $stored] = EventRecurrence::whyFirstDateMoved($typed, $stored, $zone);
 }
-expect('J14', 'the branch the page must pick, over all four cases', $j14, [
-    '2026-03-28 23:30:00 -> 2026-03-29 00:30:00' => 'gap alone',
+expect('J14', 'the cause of a moved first date, over all four cases and the unmoved one', $j14, [
+    '2026-03-28 23:30:00 -> 2026-03-29 00:30:00' => 'gap',
     '2026-03-29 01:30:00 -> 2026-03-30 01:30:00' => 'pattern',
     '2026-03-28 01:30:00 -> 2026-03-29 02:30:00' => 'pattern and time',
     '2028-10-04 19:00:00 -> 2028-10-05 19:00:00' => 'pattern',
+    '2026-06-01 10:00:00 -> 2026-06-01 10:00:00' => 'not moved',
 ]);
 
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";

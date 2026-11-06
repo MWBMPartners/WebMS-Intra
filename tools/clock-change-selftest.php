@@ -478,6 +478,135 @@ check('I19 the DATE\'s own hyphens are not read as an offset',
     I18n::inputCarriesOffset('2027-03-28T01:30:00'), false);
 check('I20 a bare date is not an offset', I18n::inputCarriesOffset('2027-03-28'), false);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// K — THE SPREADSHEET IMPORT'S OWN READER, AS A MATRIX (#777 round 14)
+//
+// WHY THIS EXISTS, which matters more than what it checks. The closure that
+// decides what a CSV cell stores has been rewritten three times, and TWO of
+// those rewrites broke formats that had always imported:
+//
+//   round 12  refused every ISO value carrying an offset -- `toISOString()`
+//             output, the commonest machine-written date there is.
+//   round 13  refused RFC 2822 (an e-mail `Date:` header, an RSS `pubDate`)
+//             and three unpadded or basic ISO forms, and its impossible-date
+//             rule refused a legal ISO ordinal date.
+//
+// Each time the fault was found by an independent checker building a MATRIX of
+// formats, and each time it had been missed by me probing the cases I happened
+// to think of. **A list of cases you chose yourself cannot tell you about the
+// class you forgot.** So the matrix is committed, and every future change to
+// that closure is measured against it rather than against somebody's memory.
+//
+// It needs no database and no web server: the closure is lifted out of the
+// page source and run directly, which is also why it is here rather than in
+// the HTTP test. The behavioural gap that remains -- nothing POSTS a CSV --
+// is #787.
+echo "\n";
+$importSrc = (string) file_get_contents(
+    dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps'
+    . DIRECTORY_SEPARATOR . 'calendar' . DIRECTORY_SEPARATOR . 'manage'
+    . DIRECTORY_SEPARATOR . 'import.php'
+);
+if (preg_match('/\$fmtClock = static function.*?\n\};/s', $importSrc, $grab) !== 1) {
+    check('K00 the import closure was found, so section K tests the live code', false, true);
+} else {
+    check('K00 the import closure was found, so section K tests the live code', true, true);
+    date_default_timezone_set('Europe/London');
+
+    // ⚠️ THE CLOSURE USES `I18n::` AND `Site::` BY THEIR SHORT NAMES, and an
+    //    `eval()` does not inherit `import.php`'s `use` lines, so both are
+    //    aliased into the global namespace here.
+    //
+    //    `Site::timezone()` is STOOD IN FOR, and that is a stated limit of
+    //    section K rather than a shortcut: the real one needs the whole portal
+    //    and a database. So section K proves what the closure DOES with a
+    //    zone, and proves nothing about the zone being the right one. That
+    //    second half is `$importZone` at the bottom of `import.php`, and the
+    //    only thing covering it is the comment beside it -- noted in #787.
+    if (class_exists('I18n', false) === false) {
+        class_alias(\Portal\Core\I18n::class, 'I18n');
+    }
+    if (class_exists('Site', false) === false) {
+        eval('class Site { public static function timezone(): string { return "Europe/London"; } }');
+    }
+    eval($grab[0]);
+
+    // MUST STORE. Every one of these imported correctly at some point in this
+    // package's history, and each row names the round that broke it, so a
+    // regression is reported with its own precedent.
+    $mustStore = [
+        // ordinary spreadsheet output -- the reason a loose fallback exists
+        ['2026-06-01 10:00',              '2026-06-01 10:00:00', ''],
+        ['2026-06-01 10:00 PM',           '2026-06-01 22:00:00', ''],
+        ['2026-06-01 7pm',                '2026-06-01 19:00:00', ''],
+        ['2026-06-01  10:00',             '2026-06-01 10:00:00', ''],
+        ['2026-6-1 10:00',                '2026-06-01 10:00:00', ''],
+        ['March 3 2026 19:00',            '2026-03-03 19:00:00', ''],
+        ['Tue, 3 Mar 2026 19:00',         '2026-03-03 19:00:00', ''],
+        ['2026-06-01',                    '2026-06-01 00:00:00', ''],
+        // ISO readings
+        ['2026-06-01T10:00:00',           '2026-06-01 10:00:00', ''],
+        ['20260601T100000',               '2026-06-01 10:00:00', ''],
+        // offset-bearing: these ARE instants and must be CONVERTED
+        ['2026-06-01T10:00:00Z',          '2026-06-01 11:00:00', 'round 12 refused it'],
+        ['2026-06-01T10:00:00.000Z',      '2026-06-01 11:00:00', 'round 12 refused it'],
+        ['2026-06-01T10:00:00+01:00',     '2026-06-01 10:00:00', 'round 12 refused it'],
+        ['2026-06-01T10:00:00+0100',      '2026-06-01 10:00:00', 'round 12 refused it'],
+        ['2026-06-01T10:00:00z',          '2026-06-01 11:00:00', 'round 12 refused it'],
+        ['20260601T100000Z',              '2026-06-01 11:00:00', 'round 12 refused it'],
+        // offset-bearing with a NON-ISO date spelling
+        ['Mon, 01 Jun 2026 10:00:00 +0100', '2026-06-01 10:00:00', 'round 13 refused it (RFC 2822)'],
+        ['Thu, 01 Jan 2026 10:00:00 +0100', '2026-01-01 09:00:00', 'round 13 refused it'],
+        ['Tue, 3 Mar 2026 19:00 +0100',     '2026-03-03 18:00:00', 'round 13 refused it'],
+        ['1 June 2026 10:00 +01:00',        '2026-06-01 10:00:00', 'round 13 refused it'],
+        ['Jun 1 2026 10:00 +0100',          '2026-06-01 10:00:00', 'round 13 refused it'],
+        ['Mon, 01 Jun 2026 10:00:00 GMT',   '2026-06-01 11:00:00', ''],
+        // unpadded and basic ISO forms neither strict reader handles
+        ['2026-6-1T10:00',                '2026-06-01 10:00:00', 'round 13 refused it'],
+        ['2026-6-1T10:00:00',             '2026-06-01 10:00:00', 'round 13 refused it'],
+        ['20260601T10',                   '2026-06-01 10:00:00', 'round 13 refused it'],
+        ['2026-152 10:00',                '2026-06-01 10:00:00', 'round 13 refused it (ISO ordinal)'],
+    ];
+    $storeBad = [];
+    foreach ($mustStore as [$cell, $want, $hist]) {
+        $got = $fmtClock($cell);
+        if ($got !== $want) {
+            $storeBad[] = $cell . ' -> ' . var_export($got, true) . ' (wanted ' . $want
+                . ($hist === '' ? '' : '; ' . $hist) . ')';
+        }
+    }
+    check('K01 all ' . count($mustStore) . ' formats that must import still do',
+        $storeBad === [] ? 'all import' : implode(' | ', $storeBad), 'all import');
+
+    // MUST REFUSE. A date that cannot exist, in every spelling, and the one
+    // fractional shape PHP would misread.
+    $mustRefuse = [
+        '2026-02-31 10:00', '2026-2-31 10:00', '2026-6-31 10:00', '2026-4-31 09:00',
+        '02/31/2026 10:00', '2/31/2026 10:00', 'Feb 31 2026 10:00',
+        '31 February 2026 10:00', '29 Feb 2026',
+        '2026-06-01T10.5', '2026-06-01T10:00.5',
+        'rubbish',
+    ];
+    $refuseBad = [];
+    foreach ($mustRefuse as $cell) {
+        $got = $fmtClock($cell);
+        if ($got !== null) {
+            $refuseBad[] = $cell . ' -> ' . $got;
+        }
+    }
+    check('K02 all ' . count($mustRefuse) . ' impossible or misreadable cells are refused',
+        $refuseBad === [] ? 'all refused' : implode(' | ', $refuseBad), 'all refused');
+
+    // K03 — THE PREMISE, so K02 cannot pass by refusing everything. If the
+    //       closure simply returned null the checks above would both be
+    //       satisfied in one direction and K01 would catch it -- but state it
+    //       explicitly, because a reader should not have to work that out.
+    check('K03 the closure really does store something, so K02 is not vacuous',
+        $fmtClock('2026-06-01 10:00'), '2026-06-01 10:00:00');
+
+    date_default_timezone_set($wasZone);
+}
+
 date_default_timezone_set($wasZone);
 
 echo "\n";

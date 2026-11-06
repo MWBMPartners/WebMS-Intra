@@ -118,12 +118,22 @@ because a refused row can be corrected and a silently emptied column cannot.
 written in lower case (`...10:00:00z`, which the standard allows), fractional
 seconds (which every JavaScript client sends), and a date with no time (which
 an all-day event needs). None of those needs the conversion that caused the
-original fault. **This covers the public submission form and the spreadsheet
-import as well as the API**, because all four share one rule — so a date with
-no time submitted through the form now stores midnight on that day rather than
-being refused. Genuinely loose text — `June 1 2026 10:00`, a day-first date —
-is still refused, and **the published API description now says exactly which
-shapes are accepted** instead of promising that anything readable is.
+original fault. **This covers the public submission form as well as the
+API**, because they share one rule — so a date with no time submitted through
+the form now stores midnight on that day rather than being refused. Genuinely
+loose text — `June 1 2026 10:00`, a day-first date — is still refused there,
+and **the published API description now says exactly which shapes are
+accepted** instead of promising that anything readable is.
+
+**The spreadsheet import is deliberately more forgiving, and an earlier version
+of this note wrongly said it was not.** It said the rule was shared by all four
+places and that loose text was refused everywhere. It is not: a spreadsheet
+holds whatever somebody typed, so the import still accepts `June 1 2026 10:00`,
+`Tue, 3 Mar 2026 19:00` and `2026-06-01 7pm`, and it reads `01/06/2026`
+month-first as 6 January. Refusing those would turn imports that work today
+into failures. What the import now refuses is a date that cannot exist — a cell
+reading `2026-02-31`, in any spelling — which it used to accept and store three
+days later without telling anybody.
 
 **And the preview screen for changing a repeating series showed an hour late**
 on the clock-change morning — on the one screen whose purpose is comparing a

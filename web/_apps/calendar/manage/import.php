@@ -78,58 +78,67 @@ $imported = false;
 $fmtClock = static function (string $text): ?string {
     $trimmed = trim($text);
 
-    // ── 1. A VALUE CARRYING ITS OWN OFFSET IS AN INSTANT ────────────────────
+    // ⚠️ READ THIS BEFORE ADDING ANY RULE HERE. This closure has been
+    //    rewritten three times and TWO of those rewrites broke formats that
+    //    had always imported (#777 rounds 12, 13 and 14). The cause was the
+    //    same both times and it is a shape, not a slip:
     //
-    // 🚨 THIS STEP IS A REPAIR, AND THE FAULT WAS MINE (#777 round 13).
-    //    Round 12 added a rule refusing any ISO `T`-form value the reader
-    //    below had declined -- and that swept up five shapes which had
-    //    imported CORRECTLY for as long as this page has existed. Measured,
-    //    old behaviour against round 12's:
+    //      **a strict rule written for ISO values leaked into the permissive
+    //      path, and refused things only the permissive path ever handled.**
     //
-    //      2026-06-01T10:00:00Z        was 11:00:00   became REFUSED
-    //      2026-06-01T10:00:00.000Z    was 11:00:00   became REFUSED
-    //      2026-06-01T10:00:00+01:00   was 10:00:00   became REFUSED
-    //      2026-06-01T10:00:00+0100    was 10:00:00   became REFUSED
-    //      2026-06-01T10:00:00z        was 11:00:00   became REFUSED
+    //    So steps 1 and 2 below are ATTEMPTS, not GATES. Each one takes the
+    //    value if it recognises it and otherwise FALLS THROUGH. Nothing in
+    //    this closure may refuse a value because of the SHAPE it is written
+    //    in; the only refusals are for a value that is genuinely wrong.
+
+    // ── 1. AN OFFSET IN THE VALUE MEANS IT IS AN INSTANT ────────────────────
     //
-    //    Those old answers were RIGHT. A value with an offset in it really is
-    //    a moment, and the old round trip converted it onto the
-    //    organisation's clock because start-up sets PHP's default zone to
-    //    exactly that. **So round 12 replaced correct behaviour with a
-    //    refusal, for the commonest machine-written date format there is** --
-    //    what `toISOString()` sends, and what every calendar export writes.
+    // A value carrying `+02:00`, `-0500` or a trailing `Z` is a moment, so it
+    // is converted onto the organisation's clock. `Site::timezone()` is the
+    // ONE place that answers that zone, and it is the same value `$importZone`
+    // holds further down.
     //
-    //    Two sentences of mine went with it and both were false. One claimed
-    //    `wallClockFromInput()` "handles every legitimate `T` form", which it
-    //    does not -- an offset-bearing value is `instantFromInput()`'s job,
-    //    and this file called it NOWHERE. The other said "NOTHING ELSE IS
-    //    NARROWED, which was measured rather than assumed", and I had
-    //    measured the nine formats I chose, not one of which carried an
-    //    offset. **Measuring a set you picked yourself and then writing
-    //    "measured" is worse than writing nothing**, because it removes the
-    //    next reader's reason to look.
+    // 🚨 IT FALLS THROUGH ON REFUSAL, AND THAT IS ROUND 14's REPAIR. Round 13
+    //    returned null here, and `instantFromInput()` requires the date half
+    //    to be strict zero-padded ISO -- so every offset-bearing cell whose
+    //    date was written any other way was refused outright, and the
+    //    spreadsheet fallback below was never reached for it. Measured, these
+    //    had all imported correctly before and became "startDateTime not
+    //    parseable":
     //
-    //    `Site::timezone()` is the ONE place that answers the organisation's
-    //    zone, and it is the same value `$importZone` holds further down.
+    //      Mon, 01 Jun 2026 10:00:00 +0100   (RFC 2822 -- an e-mail Date:
+    //                                         header, an RSS pubDate)
+    //      Tue, 3 Mar 2026 19:00 +0100
+    //      1 June 2026 10:00 +01:00
+    //      Jun 1 2026 10:00 +0100
+    //
+    //    The first is PHP's own `DATE_RFC2822`. Worse, the SAME format was
+    //    accepted or refused depending on how its zone was spelled, because
+    //    `GMT` does not match `inputCarriesOffset()` while `+0000` does.
     if (I18n::inputCarriesOffset($trimmed) === true) {
         $zoneName = Site::timezone();
         try {
-            return I18n::instantFromInput($trimmed, new \DateTimeZone($zoneName));
+            $instant = I18n::instantFromInput($trimmed, new \DateTimeZone($zoneName));
         } catch (\Throwable $e) {
-            return null;
+            // An unreadable stored zone is not this cell's fault. Fall
+            // through rather than blaming the row.
+            $instant = null;
+        }
+        if ($instant !== null) {
+            return $instant;
         }
     }
 
-    // ── 2. NO OFFSET: IT IS A READING, AND ONE PLACE DECIDES ────────────────
+    // ── 2. A READING, AND ONE PLACE DECIDES WHAT ONE IS ─────────────────────
     //
     // 📌 `I18n::wallClockFromInput()` is that place. Nothing here second
-    //    guesses it.
+    //    guesses it, and a refusal from it is not final -- see step 3.
     $clock = I18n::wallClockFromInput($trimmed);
     if ($clock !== null) {
         return $clock;
     }
 
-    // ── 3. THE SPREADSHEET FALLBACK, WITH TWO REFUSALS ──────────────────────
+    // ── 3. THE SPREADSHEET FALLBACK ─────────────────────────────────────────
     //
     // A spreadsheet holds whatever somebody typed -- "1/3/26 7pm", "March 3
     // 2026", "Tue, 3 Mar 2026 19:00" -- and refusing all of it would turn
@@ -140,53 +149,63 @@ $fmtClock = static function (string $text): ?string {
     //    version replaced EVERY capital `T`, so `"Tue,"` became `" ue,"`
     //    (refused) and `"UTC"` became `"U C"`, which `strtotime()` read as
     //    half past TEN -- eight hours out, a value the old code could not
-    //    produce. Excel's own long date format starts with a weekday name, so
-    //    the commonest spreadsheet in the world stopped importing, under a
-    //    comment promising nothing had changed.
+    //    produce. Excel's long date format starts with a weekday name, so the
+    //    commonest spreadsheet in the world stopped importing, under a comment
+    //    promising nothing had changed.
+
+    // (a) A MISPLACED FRACTION, and NOTHING WIDER THAN THAT. In ISO 8601 a
+    //     fractional part belongs to the lowest component written, so
+    //     `2026-06-01T10.5` means 10:30 and `T10:00.5` means 10:00:30. Step 2
+    //     refuses both on purpose (#777 round 10, where truncating to 10:00
+    //     lost up to 59 minutes silently), and `strtotime()` reads the `.5` as
+    //     five MINUTES or five SECONDS -- neither reading. So this one shape
+    //     must not reach it.
     //
-    // (a) AN ISO DATE-AND-TIME SHAPE THE READER ABOVE ALREADY JUDGED is
-    //     final. `T`-form is machine output, and steps 1 and 2 between them
-    //     handle every legitimate machine form -- extended and basic, with an
-    //     offset and without. So a `T`-form value that reached here is
-    //     malformed or ambiguous, and `strtotime()` must not guess at it: the
-    //     legal ISO decimal time `2026-06-01T10.5` means 10:30, step 2
-    //     refuses it on purpose (#777 round 10, where truncating to 10:00
-    //     lost up to 59 minutes silently), and `strtotime()` read the `.5` as
-    //     five MINUTES and stored 10:05 -- neither reading.
-    if (preg_match('/^(?:\d{4}-\d{1,2}-\d{1,2}|\d{8})[Tt]/', $trimmed) === 1) {
+    // 🚨 ROUND 13 WROTE THIS AS "ANY ISO `T`-FORM VALUE STEP 2 DECLINED",
+    //    which refused three legitimate forms NEITHER step handles:
+    //    `2026-6-1T10:00`, `2026-6-1T10:00:00` and `20260601T10` (a bare hour,
+    //    which `wallClockFromInput()`'s own comment calls a legal ISO time).
+    //    So `2026-6-1 10:00` imported and the identical date with a `T` in it
+    //    did not. Its justifying sentence -- "steps 1 and 2 between them
+    //    handle every legitimate machine form" -- was false, and the comment
+    //    thirty lines below named `2026-6-1` as a format the fallback exists
+    //    to support. **The rule is about the FRACTION, so it says so.**
+    if (preg_match('/^(?:\d{4}-\d{2}-\d{2}|\d{8})[Tt][\d:]*\.\d/', $trimmed) === 1) {
         return null;
     }
 
-    // (b) AN IMPOSSIBLE CALENDAR DATE, IN ANY SPELLING. `strtotime()` rolls
-    //     one forward without complaining, so a cell reading `2026-02-31
-    //     10:00` was stored as 2026-03-03 10:00:00 -- three days out -- and
-    //     the row reported `ok => true`, "Imported as event #N". The preview
-    //     screen prints the cell RAW, so the administrator reviewing the file
-    //     saw `2026-02-31` and nothing warned them.
+    // (b) AN IMPOSSIBLE CALENDAR DAY, IN ANY SPELLING. `strtotime()` rolls one
+    //     forward silently, so `2026-02-31 10:00` was stored as 2026-03-03
+    //     10:00:00 -- three days out -- and the row reported `ok => true`,
+    //     "Imported as event #N", while the preview screen printed the cell
+    //     raw so nothing warned anybody.
     //
-    // 🚨 ROUND 12 GUARDED THIS WITH `checkdate()` ON A ZERO-PADDED ISO
-    //    PREFIX, WHICH IS A SPELLING LIST WEARING A RULE'S CLOTHES -- and
-    //    this repository's own sentence is that an allow-list written from
-    //    the spellings you were handed is not a rule. Measured, every one of
-    //    these still rolled and imported as a success:
+    //     Round 12 guarded it with `checkdate()` on a zero-padded ISO prefix,
+    //     which is a spelling list wearing a rule's clothes: `2026-2-31`,
+    //     `02/31/2026`, `2/31/2026`, `Feb 31 2026` and `31 February 2026` all
+    //     still rolled. Asking what PHP PARSED covers every spelling.
     //
-    //      2026-2-31 10:00   02/31/2026 10:00   Feb 31 2026 10:00
-    //      2026-6-31 10:00   2/31/2026 10:00    31 February 2026 10:00
+    // 🚨 BUT `date_parse()` IS A DIFFERENT PARSER FROM `strtotime()`, AND
+    //    ROUND 13 MISSED THAT. It does not understand an ISO ordinal date:
+    //    `2026-152` comes back as day 152 of month 1 with "The parsed date was
+    //    invalid", while `strtotime()` reads it correctly as 1 June. Refusing
+    //    on any warning therefore refused a value the fallback handles -- a
+    //    check crying wolf (#483) inside the rule written to stop a check
+    //    crying wolf.
     //
-    //    `2026-6-1` unpadded and `March 3 2026` are formats this very comment
-    //    says the fallback exists to support, so the spellings it missed were
-    //    known to occur, and `02/31/2026` is the United States Excel default.
-    //
-    //    **ASK PHP WHAT IT PARSED INSTEAD.** `date_parse()` answers "The
-    //    parsed date was invalid" for every one of those spellings and
-    //    reports NOTHING for every legitimate format above -- measured both
-    //    ways. That is a rule rather than a list, and it needs no spelling to
-    //    be thought of in advance.
-    //
-    //    What it still cannot see, stated rather than implied: a fractional
-    //    time on the wrong component, which is why (a) is above it.
+    //    So the test is the HARM, stated exactly: a day somebody could have
+    //    typed (1 to 31) in a month that does not have it. Day 152 is not
+    //    such a day, so an ordinary parser disagreement falls through.
     $parsed = date_parse($trimmed);
-    if (count($parsed['warnings']) > 0 || count($parsed['errors']) > 0) {
+    if (count($parsed['errors']) > 0) {
+        return null;
+    }
+    if (is_int($parsed['year']) === true
+        && is_int($parsed['month']) === true
+        && is_int($parsed['day']) === true
+        && $parsed['day'] >= 1 && $parsed['day'] <= 31
+        && $parsed['month'] >= 1 && $parsed['month'] <= 12
+        && checkdate($parsed['month'], $parsed['day'], $parsed['year']) === false) {
         return null;
     }
 
