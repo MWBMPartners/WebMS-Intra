@@ -140,7 +140,10 @@ appended with its real date and a note that it was added later.
 | [D-082](082-only-listed-websites-may-frame-public-pages.md) | 2026-11-07 | Only websites an organisation lists may show its public pages in a frame | in force |
 | [D-083](083-the-first-release-shows-the-noticeboard-and-events.md) | 2026-11-07 | The first release puts the noticeboard and events on the public website | in force |
 | [D-084](084-the-old-widget-folder-may-be-deleted.md) | 2026-11-07 | The old web-root widget folder may be deleted | in force |
+| [D-085](085-public-website-setup-can-be-handed-to-named-people.md) | 2026-11-07 | Setting up the public website can be handed to named people, in the first release | in force |
+| [D-086](086-the-foyer-slideshow-follows-a-tiered-setting.md) | 2026-11-07 | What the foyer slideshow shows is a tiered setting | in force |
+| [D-087](087-the-public-door-on-test-copies-follows-a-tiered-setting.md) | 2026-11-07 | Whether the public door on test copies is open to anybody is a tiered setting | in force |
 
-*84 decisions. This index is checked against the folder by
+*87 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
