@@ -4,6 +4,34 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The nightly clear-out no longer deletes event registrations before their time is up (#810)
+
+- **The nightly clear-out no longer deletes event registrations before their time is up (#810).**
+  A registration's personal details (names and contact details) are deleted a set
+  number of days after its event ends. The end time is a reading of the EVENT's own clock, but it
+  was compared with the database server's clock (`NOW()`). For an event on a clock BEHIND the
+  server's, registrations went early by the difference: twelve hours for an `Etc/GMT+12` event on a
+  database in UTC, four or five for New York, eleven to thirteen for a London event on a database
+  set to New Zealand time, up to twenty-six at the extremes. (Events AHEAD of the server were
+  deleted late, which was harmless. The issue's text had the direction the other way round; the
+  self-test runs the old expression on real rows and shows which way it really went.)
+  Now:
+  - the period is measured on each event's own clock;
+  - the deadline is the LATER of "n days on the event's clock" and "n × 24 real hours", so a night
+    the clocks go forward (or a date-line jump) can never make it earlier. The price is lateness: a
+    registration can wait past that by the gap between its zone's offset when the event ended and the
+    zone's lowest offset over the organisation's look-back — an hour for ordinary summer time, about
+    two hours measured for Antarctica/Troll and America/Nuuk. The look-back is the organisation's
+    LONGEST period, so one event kept for ten years widens it for all that organisation's events;
+  - a row whose zone was written in the instant between the two statements waits until the period
+    is up on every clock on Earth;
+  - zones are compared byte for byte, so a hand-written misspelling such as `Europe/Zürich` cannot
+    put real `Europe/Zurich` events on the wrong clock (this also applies to every page #804 fixed);
+  - a zone text with no list of clock changes (`EST`, `+05:00`, only possible in old or hand-written
+    rows) is judged on the earliest clock on Earth, which makes it late, never early.
+  If the database cannot be read part-way, the clear-out stops with an error and deletes nothing
+  (strict error reporting); it does not guess. The number of days itself is unchanged.
+
 ### Events count as upcoming, today or begun on their own clock (#804, #805, #806)
 
 - **Events now count as "upcoming", "today" or "begun" on their OWN clock, not the database server's (#804).** Nine statements compared an event's start (a reading of the event's clock) with the database's `NOW()`, `CURDATE()` or `UTC_TIMESTAMP()`. Fixed: the calendar list's "upcoming", the public countdown feed (which, with an Auckland organisation on a database in UTC, went on publishing an event that had begun up to thirteen hours earlier as "next"), the "all upcoming" calendar subscription, the dashboard's "Events This Week", the Host Console's "starting today", the admin reminder preview's "next 48 hours", the newsletter's "Upcoming events" block, and the discipleship sweep's "has the event started" (which could mark a pathway step complete up to five hours before a New York event began, permanently). (The embeddable events widget page was changed too, but it has no address today.) Four were left on purpose, each with its reason written beside it: the sitemap, the attendance-recording picker (±30 days), the asset page's event picker and "My volunteering" (both "since a day ago").

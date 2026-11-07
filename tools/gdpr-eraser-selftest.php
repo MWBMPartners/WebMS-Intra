@@ -608,6 +608,12 @@ require_once $coreDir . 'TranscriptRetention.php';
 //    `Pdf::PART_MARK` to build a fixture the way the real writer builds a name.
 //    It has no dependencies of its own — dompdf is only touched by create().
 require_once $coreDir . 'Pdf.php';
+// 🕰️ #810: the registrations clear-out measures each event's period on the
+//    event's OWN clock through `Events::nowOnItsOwnClock()`, which reads the
+//    clock through `I18n` (Site is loaded above). This test calls
+//    `run_retention_sweep()` and `preview_retention_counts()`, so it needs both.
+require_once $coreDir . 'I18n.php';
+require_once $coreDir . 'Events.php';
 require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_apps' . DIRECTORY_SEPARATOR . 'cron'
     . DIRECTORY_SEPARATOR . '_retention-sweep.php';
 

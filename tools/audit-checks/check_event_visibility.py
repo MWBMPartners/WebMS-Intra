@@ -353,13 +353,18 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # it must include imported events' zones, because the statements it serves
     # list imported events too (each applying the visibility rule itself).
     # Keyed by line number like every entry here, so a change higher up
-    # Events.php moves both of these.
-    ("_core/Events.php", 491): (
-        "SELECT DISTINCT `timezone` FROM `tblEvents`')",
+    # Events.php moves both of these. Moved 491/492 -> 677/678 by #810 (6-7
+    # November 2026), which moved the zone read into one private builder
+    # shared with the new `nowForADeletionDeadline()` (the registrations
+    # clear-out's reading, which can only be late) and made it compare zones
+    # byte for byte (`CAST(... AS BINARY)`), so the probes' text changed too.
+    # They still read only zone texts.
+    ("_core/Events.php", 681): (
+        "SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents`')",
         "reads only the zone texts in use, to work out each event's clock (#804); no event is returned",
     ),
-    ("_core/Events.php", 492): (
-        "SELECT DISTINCT `timezone` FROM `tblEvents` WHERE `siteID` = ?",
+    ("_core/Events.php", 682): (
+        "SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents` WHERE `siteID` = ?",
         "reads only one organisation's zone texts, to work out each event's clock (#804); no event is returned",
     ),
 }

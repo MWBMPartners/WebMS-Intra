@@ -20398,3 +20398,58 @@ Where the expression is written twice in one statement (dashboard, reminder prev
 **`tools/my-volunteering-selftest.php` had been red since `3f29995`**: that commit made the page call `I18n::formatClockDateTime()`, and the test's own page runner has no autoloader, so every case died with "Class I18n not found". The runner now requires `I18n.php`.
 
 **Review closed at round 1 under D-066** (findings only in tests and a comment; the SQL was run on MariaDB 11.4.13, MySQL 8.4.11 and 9.7.4 with identical rows, every bind order checked, and the day-span edges probed). Left on issues: #810 (the registration clear-out deletes personal data on the database's clock — protected arm), #811 ("next" sorted across zones, a midnight sliver, an unreachable widget loop), #812 (discipleship rule 3 not scoped to the pathway's organisation), #814.
+
+### The registrations clear-out and the event's own clock (#810)
+
+- `registration_sweep_where($db, $siteId, $days)` returns `['sql','types','params']`;
+  `registration_sweep(bool $reallyDelete)` is the ONE function behind both the count (preview) and
+  the delete, the `log_sweep()` shape. Prepared once per organisation, because each organisation's
+  clock values differ.
+- **`Events::nowForADeletionDeadline($db, $alias, $siteId, $lookBackDays)`** is new and is what the
+  sweep asks. For each zone it binds "UTC now + the LOWEST offset the zone has had in the last
+  `$lookBackDays` + 2 days" as a reading m, and the row is deleted when `reading < m − n days`
+  (exact 24-hour days, because m stands for a clock with no changes). That is never earlier than
+  n days on the event's clock (m ≤ the clock now) and never earlier than n × 24 real hours (the
+  event's offset when it ended is one of those m's minimum was taken over, provided the window is
+  the caller's LONGEST period — the sweep passes `MAX(COALESCE(own days, organisation's))` for the
+  organisation). The `ELSE` is `Etc/GMT+12`. So do a zone with no list of changes
+  (`getTransitions()` answers false: `EST`, `BST`, `+05:00`) and a look-back over 36,500 days — that
+  limit is the code's own, not PHP's. The extra days are load-bearing — one is needed and the second is margin (one gave no early deletion in any zone; none gave 151,225): the later
+  meaning of a skipped-hour reading uses the offset in force just before the change, which a window
+  of exactly n days misses for an event near its start (up to two hours early in ~200 zones, per the
+  round-2 simulation). The lowest offset is over EVERY state in the window, not its two ends.
+- **`Events::deadlineReadingFor($zone, $lookBackDays, $nowUtc)`** is the per-zone rule, public and
+  given the moment, so section G drives it at fixed dates (a skipped hour at the window's start, a
+  winter in a summer-to-summer window, `EST`/`+05:00`). `nowForADeletionDeadline()` passes `time()`.
+- **Lateness, stated properly:** up to the gap between the zone's offset at the event's end and its
+  lowest offset in the window — one hour normally, about two hours (2 h 0 m 1 s measured) for Antarctica/Troll and America/Nuuk, and up to a day where a zone jumped the date line (Pacific/Apia, 2011). The window is
+  the organisation's longest period.
+- `nowOnItsOwnClock()` keeps its three-argument signature and meaning for pages; both methods share
+  one private builder, `perZoneReading()`. (Round 0 added a fourth argument to it; that is gone,
+  replaced by the dedicated method.)
+- **Byte-for-byte zone comparison:** the zone list is `SELECT DISTINCT CAST(`timezone` AS BINARY)`
+  and the expression is `CASE CAST(`e`.`timezone` AS BINARY) WHEN …`. The column is
+  `utf8mb4_general_ci`, which folds accents, so `Europe/Zürich` and `Europe/Zurich` were one value.
+  No form can store such a text today (`Site::isZoneName()`); old, hand-written or restored rows can.
+  Round 1 used `COLLATE utf8mb4_bin`, which is PAD SPACE (`'Europe/London '` = `'Europe/London'`),
+  so "exact" was untrue; behaviourally the two are identical here because `Site::zoneFor()` trims.
+- **A failed read throws; it does not come back empty.** `bootstrap.php` sets
+  `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR`, so `prepare()`/`execute()` throw and nothing is
+  deleted. The `=== false` guards in the builder, the look-back query and `registration_sweep()`
+  are marked as backstops for a caller without strict reporting. (Round 0's notes claimed a failed
+  read made every row take the `ELSE`; that path is unreachable here — #694's lesson again.)
+- **Direction trap:** a reading on a clock behind the server's is a smaller number for the same
+  moment, so it crosses the deadline early. The old docblock was right; the issue text was not.
+- "Now" comes from PHP (the web server's clock) instead of the database's. Stated in the code.
+- Other date limits in the sweep and `_core/` retention code are on the database's own clock at
+  both ends: activity log `timestamp`, error `createdAt`, `offboardedAt`, webhook `receivedAt`,
+  webhook delivery `createdAt`, transcript `generatedAt`, anonymous check-in `checkedInAt`.
+- Test: section G of `tools/retention-caps-selftest.php` (36 checks; the file expects 116). It
+  includes the organisation's own figure for events with none (20 days, and 0 = keep), a real
+  recent spring-forward zone (found among every zone PHP knows, so its name changes with the date),
+  the `Europe/Zürich` collision, and the `ELSE`. Anybody requiring `_retention-sweep.php` without
+  the autoloader must load `Site`, `I18n` and `Events`; `tools/gdpr-eraser-selftest.php` does now.
+- `tools/audit-checks/check_event_visibility.py`: the two `_core/Events.php` LINE_ALLOWLIST entries
+  moved 491/492 -> 681/682 and their text is now `SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` …`.
+
+**Review: three rounds by fresh Claude agents, the third CLEAN** (protected arm — it deletes personal data). Round 3 drove the real method over 5.67 million cases in all 598 zones, 2008–2028, on PHP 8.4, 8.5 and 8.6, with zero early deletions — and showed the simulation can fail (151,225 early deletions with the extra days removed); `CAST(... AS BINARY)` was measured on MySQL 8.0, 8.4 and 9.7 and MariaDB 11.4 and 12.3. Left open: the race where an event's own figure is raised between the longest-period read and the delete, and the installation ceiling on the figures themselves (#816, D-074).

@@ -57,6 +57,22 @@
  *      kept for ever. Before this both read one pair of settings and deleted
  *      across the whole installation, so one organisation's choice decided
  *      every organisation's history.
+ *   G. #810 — the REGISTRATIONS clear-out, driven for real: a registration's
+ *      period is measured on its EVENT's own clock, not the database server's.
+ *      The old expression is run beside it on the same rows first, to show it
+ *      really deleted early (an event behind the server's clock) and late (one
+ *      ahead of it). Also: the organisation's own figure for an event with
+ *      none (20 days, and 0 = keep indefinitely), both of its bindings; the
+ *      deadline is the LATER of n days on the clock and n x 24 real hours,
+ *      across a real recent spring-forward night, AND the per-zone rule
+ *      (`Events::deadlineReadingFor()`) driven at FIXED moments for the three
+ *      cases the real "now" cannot reach: a skipped-hour reading at the
+ *      window's start, a winter inside a summer-to-summer window, and zones
+ *      with no list of changes (`EST`, `+05:00`); zones compared byte for
+ *      byte, so a hand-written `Europe/Zürich` cannot capture the real Zurich
+ *      rows (and a trailing space still reaches its zone); and the one case
+ *      that cannot be exact — a row whose zone was written after the list was
+ *      read — reads the EARLIEST clock on Earth.
  *
  * WHAT THIS CANNOT PROVE
  *   - Nothing here runs over HTTP, so it says nothing about what the page looks
@@ -66,6 +82,20 @@
  *     the first's ceiling. It does not run many simultaneous pairs; #687's
  *     116-pair measurement is the precedent for that and was done by hand.
  *   - It runs one engine and one version, whichever the caller points it at.
+ *   - Section G cannot fix the time of day, so each reading is built from the
+ *     zone's own clock at the moment of the run, hours either side of its
+ *     deadline, and its spring-forward zone is FOUND (the most recent one
+ *     among every zone PHP knows), so which zone it names changes with the
+ *     date. It does not reach the sweep's `ELSE` THROUGH the sweep (a zone
+ *     written between two statements microseconds apart); it asks the method
+ *     directly and pins the sweep's call as text. A zone read that FAILS is
+ *     not a case at all: under strict reporting it throws and nothing is
+ *     deleted.
+ *   - A date-line jump is the same arithmetic on a larger gain and is not
+ *     separately driven. Nothing here can tell `CAST(... AS BINARY)` from
+ *     `COLLATE utf8mb4_bin`: the two differ only on trailing spaces, which
+ *     `Site::zoneFor()` trims, so no row's answer changes (planted, it stays
+ *     green); the binary form is there so "byte for byte" is true.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_retcaps SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… \
  *             php tools/retention-caps-selftest.php
@@ -80,13 +110,14 @@
  * @version   1.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/685
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/491
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/810
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const RC_EXPECTED_CHECKS = 80; // 64 until #491 added section F's sixteen.
+const RC_EXPECTED_CHECKS = 116; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six.
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -832,6 +863,399 @@ rc_check('the page shows its own organisation\'s figure through the same functio
     str_contains($rcRetentionPage, "log_retention_days('audit.retentionDays', Site::id())") === true
     && str_contains($rcRetentionPage, "log_retention_installation_days('audit.retentionDays')") === true
     && str_contains($rcRetentionPage, "App::settings('audit.retentionDays')") === false);
+
+// =============================================================================
+rc_head('G. #810 — a registration\'s period is measured on its EVENT\'s own clock');
+// =============================================================================
+// WHAT WAS WRONG. The clear-out deleted a registration once
+//     GREATEST(COALESCE(end, start), start) < DATE_SUB(NOW(), INTERVAL n DAY)
+// — but `startDateTime`/`endDateTime` are readings of the EVENT's clock
+// (`tblEvents.timezone`), while `NOW()` is the DATABASE SERVER's, in its session
+// zone. A reading on a clock BEHIND the server's is a smaller number for the
+// same moment, so it crossed the deadline EARLY by the difference: on a database
+// in UTC, an `Etc/GMT+12` event's registrations went twelve hours before the
+// period was up, a New York one's four or five. (The issue's own text has the
+// direction the other way round — "ahead of the server" — and the premise
+// checks below are what settle it: an event AHEAD of the server, Kiritimati
+// here, was deleted LATE, which is harmless; the early side is the one that
+// breaks the promise.)
+//
+// WHY REAL ROWS, THE REAL SWEEP, AND A FIXED READING. Which rows a DELETE
+// reaches is the fix, so nothing short of the real `registration_sweep()`
+// against real rows can show it. The time of day cannot be fixed, so each
+// reading is built FROM the zone's own clock now, a few hours either side of
+// its deadline; an hour of margin is far more than the run takes.
+//
+// THE PREMISE IS ASSERTED FIRST, with the OLD expression run beside the new
+// one on the very same rows: if the old expression did not delete the
+// "not yet due" rows early, the survival checks below would prove nothing.
+require_once $rcCore . 'Site.php';
+require_once $rcCore . 'I18n.php';
+require_once $rcCore . 'Events.php';
+
+// 🌐 The database on UTC, which is the ordinary case on a host and the one the
+//    issue measured. The sweep reads App::db(), which is this connection.
+$mysqli->query("SET time_zone = '+00:00'");
+
+/** Every zone's clock now, as a reading, the way the portal reads one. */
+$rcClockNow = static fn (string $zone): string => \Portal\Core\I18n::wallClockNow(new DateTimeZone($zone));
+
+/**
+ * A reading `$days` days and `$hours` hours away from `$reading`, by WALL-CLOCK
+ * arithmetic — what MySQL's DATE_SUB/DATE_ADD do to a DATETIME. Worked in UTC
+ * because UTC has no transitions, so a reading put in comes straight back out
+ * moved by exactly that much (#777's rule).
+ */
+$rcShift = static function (string $reading, int $days, int $hours): string {
+    return (new DateTimeImmutable($reading, new DateTimeZone('UTC')))
+        ->modify(sprintf('%+d days', $days))->modify(sprintf('%+d hours', $hours))
+        ->format('Y-m-d H:i:s');
+};
+
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+$mysqli->query('DELETE FROM `tblEventRegistrations`');
+$mysqli->query("DELETE FROM `tblEvents` WHERE `eventSlug` LIKE 'rc810-%'");
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+
+/**
+ * One event that ENDED at `$endReading` on its own clock in `$zone`, keeping
+ * registrations for `$ownDays` of its own (null: the organisation's figure),
+ * with one registration on it. The start is two hours before the end.
+ *
+ * @return int The registration's number.
+ */
+$rcRegistration = static function (string $slug, int $siteId, string $zone, string $endReading, ?int $ownDays = 30) use ($mysqli, $rcShift): int {
+    $start = $rcShift($endReading, 0, -2);
+    $name  = 'Selftest #810 ' . $slug;
+    $stmt  = $mysqli->prepare(
+        'INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `endDateTime`, `timezone`, `registrationRetentionDays`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
+    );
+    $stmt->bind_param('isssssi', $siteId, $name, $slug, $start, $endReading, $zone, $ownDays);
+    $stmt->execute();
+    $eventId = (int) $mysqli->insert_id;
+    $stmt->close();
+
+    $reg = $mysqli->prepare('INSERT INTO `tblEventRegistrations` (`eventID`, `fullName`) VALUES (?, ?)');
+    $who = 'Child of ' . $slug;
+    $reg->bind_param('is', $eventId, $who);
+    $reg->execute();
+    $id = (int) $mysqli->insert_id;
+    $reg->close();
+
+    return $id;
+};
+
+// 🏢 EACH ORGANISATION'S OWN FIGURE, for events that have none (#810 round 1:
+//    every event here used to carry its own 30 days, so the organisation's
+//    figure — bound TWICE in the clause, once for "above zero" and once for
+//    the arithmetic — was pinned by nothing, and binding either one wrong left
+//    every check green). Organisation 1 keeps registrations for 20 days;
+//    organisation 2 has chosen 0, "keep indefinitely", which must mean NOTHING
+//    of an event without its own figure is ever deleted.
+$mysqli->query("DELETE FROM `tblSettings` WHERE `settingKey` IN ('events.registrationRetentionDays', 'events.registrationRetentionRun') AND `siteID` IN (1, 2)");
+$mysqli->query(
+    "INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES "
+    . "(1, 'events.registrationRetentionDays', '20', '', 0), (2, 'events.registrationRetentionDays', '0', '', 0), "
+    . "(1, 'events.registrationRetentionRun', 'true', '', 0), (2, 'events.registrationRetentionRun', 'true', '', 0)"
+);
+
+// 🕰️ Each reading is "the deadline on that event's own clock, moved by a few
+//    hours": `-n days` from what the zone's clock reads now is the moment the
+//    n-day period is up for an event that ended then.
+$rcDue = static fn (string $zone, int $hours, int $days = 30): string => $rcShift($rcClockNow($zone), -$days, $hours);
+
+// 🌗 A ZONE WHOSE CLOCKS WENT FORWARD RECENTLY, for the "n days on the clock
+//    against n x 24 real hours" rule. Across such a night, n days on the
+//    clock is SHORTER than n x 24 hours by the gain, so a registration can be
+//    past its clock-day deadline while its n x 24 hours are not yet up. The
+//    test cannot pick its date, so it finds, among every zone PHP knows, the
+//    one whose most recent spring-forward is most recent (at least two days
+//    ago, with no other change in the forty days before it) — on any date of
+//    the year some zone has had one within months.
+$rcUtcNow  = time();
+$rcSpring  = null;
+foreach (DateTimeZone::listIdentifiers() as $rcZoneName) {
+    $rcT = (new DateTimeZone($rcZoneName))->getTransitions($rcUtcNow - 400 * 86400, $rcUtcNow);
+    if (is_array($rcT) === false || count($rcT) < 2) {
+        continue;
+    }
+    $rcLast = $rcT[count($rcT) - 1];
+    $rcPrev = $rcT[count($rcT) - 2];
+    $rcAge  = $rcUtcNow - (int) $rcLast['ts'];
+    $rcGain = (int) $rcLast['offset'] - (int) $rcPrev['offset'];
+    $rcQuiet = count($rcT) < 3 || (int) $rcPrev['ts'] < (int) $rcLast['ts'] - 40 * 86400;
+    if ($rcGain > 0 && $rcAge >= 2 * 86400 && $rcQuiet === true
+        && ($rcSpring === null || $rcAge < $rcSpring['age'])) {
+        $rcSpring = ['zone' => $rcZoneName, 'age' => $rcAge, 'gain' => $rcGain, 'before' => (int) $rcPrev['offset']];
+    }
+}
+// n is chosen so the event ended about three days BEFORE that night.
+$rcSpringDays = $rcSpring === null ? 30 : intdiv($rcSpring['age'], 86400) + 3;
+$rcSpringAt   = static function (int $minutesPastClockDeadline) use ($rcSpring, $rcClockNow, $rcSpringDays): string {
+    return (new DateTimeImmutable($rcClockNow($rcSpring['zone'] ?? 'UTC'), new DateTimeZone('UTC')))
+        ->modify('-' . $rcSpringDays . ' days')->modify(sprintf('%+d minutes', -$minutesPastClockDeadline))
+        ->format('Y-m-d H:i:s');
+};
+$rcGainMin = intdiv((int) ($rcSpring['gain'] ?? 3600), 60);
+
+$rcRegs = [
+    // BEHIND the server (UTC-12): three hours still to go on its own clock.
+    'behind-not-yet'   => $rcRegistration('rc810-behind-not-yet', 1, 'Etc/GMT+12', $rcDue('Etc/GMT+12', 3)),
+    // BEHIND the server: its period was up an hour ago on its own clock.
+    'behind-due'       => $rcRegistration('rc810-behind-due', 1, 'Etc/GMT+12', $rcDue('Etc/GMT+12', -1)),
+    // A REAL zone behind UTC, on an ordinary organisation's calendar: an hour to go.
+    'newyork-not-yet'  => $rcRegistration('rc810-newyork-not-yet', 1, 'America/New_York', $rcDue('America/New_York', 1)),
+    // AHEAD of the server (UTC+14), on the SECOND organisation: up three hours ago.
+    'ahead-due'        => $rcRegistration('rc810-ahead-due', 2, 'Pacific/Kiritimati', $rcDue('Pacific/Kiritimati', -3)),
+    // AHEAD of the server: an hour to go.
+    'ahead-not-yet'    => $rcRegistration('rc810-ahead-not-yet', 2, 'Pacific/Kiritimati', $rcDue('Pacific/Kiritimati', 1)),
+    // NO figure of its own, on organisation 1 (20 days): two hours to go.
+    'fallback-not-yet' => $rcRegistration('rc810-fallback-not-yet', 1, 'UTC', $rcDue('UTC', 2, 20), null),
+    // NO figure of its own, on organisation 1: up two hours ago.
+    'fallback-due'     => $rcRegistration('rc810-fallback-due', 1, 'UTC', $rcDue('UTC', -2, 20), null),
+    // NO figure of its own, on organisation 2, which keeps indefinitely: 400 days old.
+    'zero-kept'        => $rcRegistration('rc810-zero-kept', 2, 'UTC', $rcDue('UTC', 0, 400), null),
+    // Past its CLOCK-DAY deadline by half the gain, but n x 24 real hours not yet up.
+    'spring-not-yet'   => $rcRegistration('rc810-spring-not-yet', 1, $rcSpring['zone'] ?? 'UTC', $rcSpringAt(intdiv($rcGainMin, 2)), $rcSpringDays),
+    // Past BOTH deadlines: the clock-day one by the gain plus half an hour.
+    'spring-due'       => $rcRegistration('rc810-spring-due', 1, $rcSpring['zone'] ?? 'UTC', $rcSpringAt($rcGainMin + 30), $rcSpringDays),
+];
+
+/** Which of the given registrations a clause built on `$nowSql` (bound with `$types`/`$params`) would take. */
+$rcWouldTake = static function (array $ids, string $nowSql, string $types = '', array $params = []) use ($mysqli): array {
+    $stmt = $mysqli->prepare(
+        'SELECT `r`.`registrationID` AS `id` FROM `tblEventRegistrations` AS `r` '
+        . 'INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `r`.`eventID` '
+        . 'WHERE `r`.`registrationID` IN (' . implode(', ', array_map('intval', $ids)) . ') '
+        . '  AND GREATEST(COALESCE(`e`.`endDateTime`, `e`.`startDateTime`), `e`.`startDateTime`) '
+        . '      < DATE_SUB(' . $nowSql . ', INTERVAL COALESCE(`e`.`registrationRetentionDays`, 90) DAY) '
+        . 'ORDER BY `r`.`registrationID`'
+    );
+    if ($types !== '') {
+        $stmt->bind_param($types, ...$params);
+    }
+    $stmt->execute();
+    $out = [];
+    foreach ($stmt->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $out[] = (int) $row['id'];
+    }
+    $stmt->close();
+
+    return $out;
+};
+$rcOldTook = $rcWouldTake([$rcRegs['behind-not-yet'], $rcRegs['newyork-not-yet'], $rcRegs['ahead-due']], 'NOW()');
+// The CLOCK-DAY reading alone — what a page asks, `nowOnItsOwnClock()` — for
+// the spring-forward pair: it must take the one the real-hours rule keeps.
+$rcPage     = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'e', 1);
+$rcPageTook = $rcWouldTake([$rcRegs['spring-not-yet']], $rcPage['sql'], $rcPage['types'], $rcPage['params']);
+
+/** Seconds since the moment a registration's event ended, on its own zone. */
+$rcElapsed = static function (string $key) use ($mysqli, $rcRegs, $rcUtcNow): int {
+    $row = $mysqli->query(
+        'SELECT `e`.`endDateTime` AS `endAt`, `e`.`timezone` AS `zone` FROM `tblEventRegistrations` AS `r` '
+        . 'INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `r`.`eventID` WHERE `r`.`registrationID` = ' . (int) $rcRegs[$key]
+    )->fetch_assoc();
+
+    return $rcUtcNow - (new DateTimeImmutable((string) $row['endAt'], new DateTimeZone((string) $row['zone'])))->getTimestamp();
+};
+
+// 📌 THE PREMISES. Without them every survival check below is vacuous.
+rc_check('PREMISE: the database clock really is UTC for this connection',
+    (string) ($mysqli->query('SELECT TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), NOW()) AS d')->fetch_assoc()['d'] ?? 'x') === '0');
+rc_check('PREMISE: the OLD clause deleted EARLY — it took the UTC-12 registration with three hours still to go, and the New York one with an hour to go',
+    in_array($rcRegs['behind-not-yet'], $rcOldTook, true) === true
+    && in_array($rcRegs['newyork-not-yet'], $rcOldTook, true) === true,
+    json_encode($rcOldTook));
+rc_check('PREMISE: …and LATE the other way — it kept the UTC+14 registration whose period was up three hours ago',
+    in_array($rcRegs['ahead-due'], $rcOldTook, true) === false, json_encode($rcOldTook));
+rc_check('PREMISE: a zone whose clocks went forward recently was found (' . ($rcSpring['zone'] ?? 'none') . ', '
+    . intdiv((int) ($rcSpring['age'] ?? 0), 86400) . ' days ago, +' . $rcGainMin . ' min)',
+    $rcSpring !== null);
+rc_check('PREMISE: the spring-forward registration is past its CLOCK-DAY deadline (the page reading takes it) while fewer than n x 24 real hours have passed',
+    $rcPageTook === [$rcRegs['spring-not-yet']] && $rcElapsed('spring-not-yet') < $rcSpringDays * 86400,
+    json_encode([$rcPageTook, $rcElapsed('spring-not-yet'), $rcSpringDays * 86400]));
+rc_check('PREMISE: …and its partner is past n x 24 real hours too',
+    $rcElapsed('spring-due') >= $rcSpringDays * 86400,
+    json_encode([$rcElapsed('spring-due'), $rcSpringDays * 86400]));
+
+// 📊 The count an administrator is shown, then the delete. Exactly four are
+//    due: one behind the server, one ahead of it, one by its organisation's
+//    own figure, and the spring-forward one past both deadlines.
+$rcRegCount = registration_sweep(false);
+rc_check('the count shown before confirming is four: the four registrations whose period is up',
+    $rcRegCount === 4, (string) $rcRegCount);
+$rcRegDeleted = registration_sweep(true);
+rc_check('…and the delete removes exactly those four', $rcRegDeleted === 4, (string) $rcRegDeleted);
+
+$rcRegLeft = $rcStillThere('tblEventRegistrations', 'registrationID', array_values($rcRegs));
+// 🚨 THE DECISIVE CHECKS — the first is the one the old code fails.
+rc_check('a registration whose period is NOT yet up on its event\'s clock SURVIVES — UTC-12, three hours to go, which the server\'s clock took early',
+    in_array($rcRegs['behind-not-yet'], $rcRegLeft, true) === true, json_encode($rcRegLeft));
+rc_check('…and so does the New York one with an hour to go — an ordinary zone, not only the extreme one',
+    in_array($rcRegs['newyork-not-yet'], $rcRegLeft, true) === true, json_encode($rcRegLeft));
+rc_check('…and the UTC+14 one with an hour to go',
+    in_array($rcRegs['ahead-not-yet'], $rcRegLeft, true) === true, json_encode($rcRegLeft));
+rc_check('a registration whose period IS up on its event\'s clock is gone — UTC-12, up an hour ago',
+    in_array($rcRegs['behind-due'], $rcRegLeft, true) === false, json_encode($rcRegLeft));
+rc_check('…and the UTC+14 one up three hours ago is gone on time, which the server\'s clock kept late',
+    in_array($rcRegs['ahead-due'], $rcRegLeft, true) === false, json_encode($rcRegLeft));
+// 🏢 The organisation's own figure, both bindings of it.
+rc_check('an event with NO figure of its own keeps its registrations for its organisation\'s 20 days: two hours to go, still there',
+    in_array($rcRegs['fallback-not-yet'], $rcRegLeft, true) === true, json_encode($rcRegLeft));
+rc_check('…and is cleared once those 20 days are up',
+    in_array($rcRegs['fallback-due'], $rcRegLeft, true) === false, json_encode($rcRegLeft));
+rc_check('an organisation that keeps registrations INDEFINITELY (0) loses none of an event with no figure of its own, even 400 days on',
+    in_array($rcRegs['zero-kept'], $rcRegLeft, true) === true, json_encode($rcRegLeft));
+// 🌗 The later of the two deadlines.
+rc_check('a registration past its clock-day deadline but NOT yet n x 24 real hours old SURVIVES — the later of the two deadlines wins (' . ($rcSpring['zone'] ?? '?') . ')',
+    in_array($rcRegs['spring-not-yet'], $rcRegLeft, true) === true, json_encode($rcRegLeft));
+rc_check('…and one past BOTH is gone',
+    in_array($rcRegs['spring-due'], $rcRegLeft, true) === false, json_encode($rcRegLeft));
+
+// 🎯 THE DEADLINE RULE DRIVEN AT FIXED MOMENTS (#810 round 2). The cases that
+//    matter fall on particular dates, and the sweep's "now" is the real one,
+//    so the checks above cannot reach them: they would pass with the window's
+//    two extra days removed, with the lowest offset taken only at the window's
+//    two ends, or with a zone that has no list of changes read at offset 0 —
+//    each of which deletes early (up to two hours in about two hundred zones,
+//    and five hours for `EST`). `Events::deadlineReadingFor()` is the real
+//    per-zone rule the sweep uses, given the moment instead of reading the
+//    clock, and `$rcGoes` applies the clause's own comparison to its answer:
+//    a row goes when its reading is earlier than "m − n days".
+$rcGoes = static function (string $zone, int $lookBack, int $days, int $nowUtc, string $reading): bool {
+    $m = \Portal\Core\Events::deadlineReadingFor(new DateTimeZone($zone), $lookBack, $nowUtc);
+
+    return strcmp($reading, (new DateTimeImmutable($m, new DateTimeZone('UTC')))->modify('-' . $days . ' days')->format('Y-m-d H:i:s')) < 0;
+};
+$rcAt = static fn (string $utc): int => (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->getTimestamp();
+
+// (a) A reading in the hour London SKIPS, near the window's START. 01:30 on
+//     29 March 2026 never happened; its later meaning is 01:30 GMT, i.e.
+//     01:30 UTC, an offset that ended at 01:00 UTC. 30 days kept, 30 looked
+//     back: one minute before 30 x 24 hours from that later meaning.
+$rcSkipDue = $rcAt('2026-03-29 01:30:00') + 30 * 86400;
+rc_check('PREMISE: a window of exactly n days (no two extra days) WOULD delete the skipped-hour reading a minute early',
+    $rcGoes('Europe/London', 28, 30, $rcSkipDue - 60, '2026-03-29 01:30:00') === true);
+rc_check('a reading in the skipped hour near the window\'s start is NOT deleted before 30 x 24 hours from its later meaning',
+    $rcGoes('Europe/London', 30, 30, $rcSkipDue - 60, '2026-03-29 01:30:00') === false);
+rc_check('…and is deleted a minute after it, so the rule is not simply "never"',
+    $rcGoes('Europe/London', 30, 30, $rcSkipDue + 60, '2026-03-29 01:30:00') === true);
+
+// (b) A WHOLE WINTER INSIDE THE WINDOW, with summer at BOTH ends: London,
+//     an event ending at 12:00 GMT on 16 March 2026, kept 30 days, in an
+//     organisation whose longest period is 300 days — the window runs from
+//     June 2025 (BST) to April 2026 (BST).
+$rcWinterDue = $rcAt('2026-03-16 12:00:00') + 30 * 86400;
+$rcWinterEnds = (new DateTimeZone('Europe/London'))->getTransitions($rcWinterDue - 60 - 302 * 86400, $rcWinterDue - 60);
+rc_check('PREMISE: both ends of that window are on summer time (+1 h), and the winter (+0) is only in the middle',
+    is_array($rcWinterEnds) === true
+    && (int) $rcWinterEnds[0]['offset'] === 3600 && (int) $rcWinterEnds[count($rcWinterEnds) - 1]['offset'] === 3600
+    && min(array_map(static fn (array $s): int => (int) $s['offset'], $rcWinterEnds)) === 0);
+rc_check('an event that ended in the winter in the middle of the window is NOT deleted before 30 x 24 hours',
+    $rcGoes('Europe/London', 300, 30, $rcWinterDue - 30 * 60, '2026-03-16 12:00:00') === false);
+rc_check('…and is deleted a minute after them',
+    $rcGoes('Europe/London', 300, 30, $rcWinterDue + 60, '2026-03-16 12:00:00') === true);
+
+// (c) A ZONE PHP OPENS BUT HAS NO LIST OF CHANGES FOR: `EST` (-5 h, an
+//     abbreviation) and `+05:00` (a bare offset). Only an old, hand-written
+//     or restored row can hold one; it must read the lowest offset there is.
+$rcFixedDue = $rcAt('2026-06-01 12:00:00') + 30 * 86400;
+rc_check('PREMISE: PHP has no list of changes for EST or +05:00 (getTransitions answers false)',
+    (new DateTimeZone('EST'))->getTransitions($rcFixedDue - 32 * 86400, $rcFixedDue) === false
+    && (new DateTimeZone('+05:00'))->getTransitions($rcFixedDue - 32 * 86400, $rcFixedDue) === false);
+rc_check('an EST event (ended 07:00 on its clock = 12:00 UTC) is NOT deleted a minute before 30 x 24 hours',
+    $rcGoes('EST', 30, 30, $rcFixedDue - 60, '2026-06-01 07:00:00') === false);
+rc_check('…and nor is a +05:00 one (ended 17:00 on its clock = 12:00 UTC)',
+    $rcGoes('+05:00', 30, 30, $rcFixedDue - 60, '2026-06-01 17:00:00') === false);
+
+// 🧯 THE ONE CASE THAT CANNOT BE EXACT IS MADE LATE: a row whose zone was
+//    written in the instant between the method's two statements, so it is not
+//    in the list and takes the `ELSE`. That instant cannot be reached through
+//    the sweep, so the method is asked directly, with a zone written AFTER it
+//    read the list — which is exactly the race — and the sweep's own call is
+//    pinned as text below. (A FAILED read is not a case: under this portal's
+//    strict reporting it throws, and the sweep deletes nothing.)
+$rcEarliestOffset = PHP_INT_MAX;
+$rcEarliestZone   = '';
+foreach (DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC) as $rcZone) {
+    $rcOff = (new DateTimeImmutable('now', new DateTimeZone($rcZone)))->getOffset();
+    if ($rcOff < $rcEarliestOffset) {
+        $rcEarliestOffset = $rcOff;
+        $rcEarliestZone   = $rcZone;
+    }
+}
+rc_check('PREMISE: no zone PHP knows reads EARLIER than Etc/GMT+12 right now (so it really is the latest-deleting clock)',
+    $rcEarliestOffset >= -12 * 3600, $rcEarliestZone . ' at ' . $rcEarliestOffset . 's');
+
+$rcExpr        = \Portal\Core\Events::nowForADeletionDeadline($mysqli, 'e', 2, 30);
+$rcExprDefault = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'e', 2);
+$rcRegistration('rc810-written-after', 2, 'Asia/Tokyo', $rcDue('Asia/Tokyo', -1));
+/** What an expression reads for one event, found by its address. */
+$rcReadFor = static function (array $expr, string $slug = 'rc810-written-after') use ($mysqli): string {
+    $stmt = $mysqli->prepare(
+        'SELECT ' . $expr['sql'] . ' AS `n` FROM `tblEvents` AS `e` WHERE `e`.`eventSlug` = ?'
+    );
+    $stmt->bind_param($expr['types'] . 's', ...array_merge($expr['params'], [$slug]));
+    $stmt->execute();
+    $n = (string) ($stmt->get_result()->fetch_assoc()['n'] ?? '');
+    $stmt->close();
+
+    return $n;
+};
+$rcGap = static fn (string $a, string $b): int => abs(
+    (new DateTimeImmutable($a, new DateTimeZone('UTC')))->getTimestamp()
+    - (new DateTimeImmutable($b, new DateTimeZone('UTC')))->getTimestamp()
+);
+rc_check('PREMISE: the late-written zone really is NOT in the list the method read (so the `ELSE` is what answers it)',
+    in_array('Asia/Tokyo', $rcExpr['params'], true) === false, json_encode($rcExpr['params']));
+rc_check('a row the deletion reading could not place reads the EARLIEST clock on Earth, so it can only be judged late',
+    $rcGap($rcReadFor($rcExpr), $rcClockNow('Etc/GMT+12')) <= 120,
+    $rcReadFor($rcExpr) . ' against ' . $rcClockNow('Etc/GMT+12'));
+// (Only worth anything while the organisation's clock is NOT Etc/GMT+12 itself,
+// or this and the check above could not tell the two answers apart.)
+rc_check('…while a PAGE (nowOnItsOwnClock) still gets the organisation\'s clock there (nothing else changed)',
+    \Portal\Core\Site::timezone(2) !== 'Etc/GMT+12'
+    && $rcGap($rcReadFor($rcExprDefault), $rcClockNow(\Portal\Core\Site::timezone(2))) <= 120,
+    $rcReadFor($rcExprDefault) . ' against ' . $rcClockNow(\Portal\Core\Site::timezone(2)));
+
+// 🔤 THE ZONE IS COMPARED EXACTLY. `utf8mb4_general_ci` ignores accents, so a
+//    hand-written `Europe/Zürich` (PHP cannot open it, so it reads the
+//    organisation's clock) and the real `Europe/Zurich` are ONE value to it.
+//    The bad spelling goes in first, so a case-and-accent-blind list hands it
+//    back for both and its `WHEN` catches the real Zurich rows too.
+$rcRegistration('rc810-zurich-bad', 2, 'Europe/Zürich', $rcDue('UTC', 0, 1));
+$rcRegistration('rc810-zurich-real', 2, 'Europe/Zurich', $rcDue('UTC', 0, 1));
+$rcRegistration('rc810-zurich-space', 2, 'Europe/Zurich ', $rcDue('UTC', 0, 1));
+$rcCiDistinct = (int) ($mysqli->query(
+    "SELECT COUNT(*) AS `n` FROM (SELECT DISTINCT `timezone` FROM `tblEvents` WHERE `eventSlug` IN ('rc810-zurich-bad', 'rc810-zurich-real')) AS `x`"
+)->fetch_assoc()['n'] ?? 0);
+rc_check('PREMISE: the column\'s own collation really does treat the two spellings as one, and Zurich\'s clock differs from the organisation\'s',
+    $rcCiDistinct === 1 && \Portal\Core\Site::phpCanOpenZone('Europe/Zürich') === false
+    && $rcGap($rcClockNow('Europe/Zurich'), $rcClockNow(\Portal\Core\Site::timezone(2))) >= 3000,
+    'distinct: ' . $rcCiDistinct);
+$rcZurichPage = \Portal\Core\Events::nowOnItsOwnClock($mysqli, 'e', 2);
+rc_check('a real Europe/Zurich event reads ZURICH\'s clock, not the organisation\'s, beside a hand-written Europe/Zürich',
+    $rcGap($rcReadFor($rcZurichPage, 'rc810-zurich-real'), $rcClockNow('Europe/Zurich')) <= 120,
+    $rcReadFor($rcZurichPage, 'rc810-zurich-real') . ' against ' . $rcClockNow('Europe/Zurich'));
+rc_check('a stored "Europe/Zurich " with a trailing space — its own value under a byte-for-byte list — still reaches Zurich\'s clock through Site::zoneFor()\'s trim',
+    $rcGap($rcReadFor($rcZurichPage, 'rc810-zurich-space'), $rcClockNow('Europe/Zurich')) <= 120,
+    $rcReadFor($rcZurichPage, 'rc810-zurich-space'));
+rc_check('…and the hand-written one reads the organisation\'s, as every page shows it',
+    $rcGap($rcReadFor($rcZurichPage, 'rc810-zurich-bad'), $rcClockNow(\Portal\Core\Site::timezone(2))) <= 120,
+    $rcReadFor($rcZurichPage, 'rc810-zurich-bad'));
+
+// 📄 And the sweep asks for exactly the deletion reading, pinned WHOLE — the
+//    behavioural checks above cannot see a scope or a look-back changed to
+//    something that happens to give the same answer on this test's rows.
+$rcSweepCode = $rcStrip(dirname(__DIR__) . '/web/_apps/cron/_retention-sweep.php');
+rc_check('the sweep asks the deletion reading, per organisation, over its LONGEST period, and the page reading nowhere',
+    substr_count($rcSweepCode, "Events::nowForADeletionDeadline(\$db, 'e', \$siteId, max(\$longest, \$days))") === 1
+    && substr_count($rcSweepCode, 'Events::nowForADeletionDeadline(') === 1
+    && substr_count($rcSweepCode, 'Events::nowOnItsOwnClock(') === 0
+    && str_contains($rcSweepCode, 'INTERVAL COALESCE(`e`.`registrationRetentionDays`') === true
+    && preg_match('/DATE_SUB\(\s*NOW\(\)\s*,\s*INTERVAL\s+COALESCE/i', $rcSweepCode) === 0,
+    'calls: ' . substr_count($rcSweepCode, 'Events::nowForADeletionDeadline('));
 
 // =============================================================================
 echo "\n" . $rcPasses . ' passed, ' . $rcFailures . ' failed, ' . ($rcPasses + $rcFailures)

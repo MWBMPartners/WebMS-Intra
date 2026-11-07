@@ -444,18 +444,46 @@ class Events
      * number of events -- `withUnknownZone()` below does the same), PHP works
      * out what each one's clock reads now, and the answer is
      *
-     *     CAST(CASE `e`.`timezone` WHEN ? THEN ? ... ELSE ? END AS DATETIME)
+     *     CAST(CASE CAST(`e`.`timezone` AS BINARY) WHEN ? THEN ? ... ELSE ? END AS DATETIME)
      *
      * with every value bound. That is EXACT, row by row, inside SQL -- so a
      * `LIMIT`, an `OFFSET` and a `COUNT(*)` all stay right, which "fetch a
      * loose superset and judge each row in PHP" (#783's My Bookings shape)
      * cannot promise once a page counts or pages its rows.
      *
-     * The `ELSE` is the organisation's clock: a zone text PHP cannot open is
-     * read on the organisation's zone everywhere else too (`Site::zoneFor()`),
-     * and so is a zone written after the list was read -- a row saved in the
-     * instant between the two statements. That is the one case this can be
-     * wrong in, and only by that row's offset from the organisation's.
+     * 🔤 THE ZONE IS COMPARED BYTE FOR BYTE, `CAST(... AS BINARY)`, both in
+     *    the list and in the `CASE` (#810). The column's own collation,
+     *    `utf8mb4_general_ci`, ignores capitals AND ACCENTS, so a hand-written
+     *    `Europe/Zürich` (which PHP cannot open, so it reads the organisation's
+     *    clock) and the real `Europe/Zurich` are one value to it: `DISTINCT`
+     *    could hand back only the bad spelling, and its `WHEN` would then
+     *    catch every real Zurich row too and put it on the wrong clock. No
+     *    form here can store such a text today (`Site::isZoneName()` guards
+     *    the forms and the API), but a row written before #604, by hand or
+     *    restored from a backup can. Exact comparison costs nothing.
+     *    Why `BINARY` and not `COLLATE utf8mb4_bin`, which was the first
+     *    version: `utf8mb4_bin` is a PAD SPACE collation on both engines, so
+     *    `'Europe/London '` equals `'Europe/London'` under it and "exact" was
+     *    untrue. It made no difference to any row -- `Site::zoneFor()` trims
+     *    the text either way, so both spellings reach London -- but a binary
+     *    comparison is what the word means, so each spelling now gets its own
+     *    `WHEN`, and each still reaches its zone through that trim.
+     *
+     * The `ELSE` is reached by exactly one kind of row: one whose zone was
+     * written in the instant between the two statements (every zone text
+     * the statement can meet is otherwise in the list, because the column is
+     * NOT NULL). For a page it reads the organisation's clock, wrong only by
+     * that row's offset from the organisation's. A zone text PHP cannot open
+     * is NOT an `ELSE` case: it is in the list, and reads the organisation's
+     * clock exactly as every page that SHOWS the event does
+     * (`Site::zoneFor()`).
+     *
+     * ⚠️ A FAILED READ OF THE ZONE LIST THROWS; it does not come back empty.
+     *    `bootstrap.php` sets `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR`,
+     *    and with both flags `prepare()` and `execute()` throw rather than
+     *    answer false, so the exception leaves the caller and its statement
+     *    never runs. The `=== false` test below is a backstop for a caller
+     *    without strict reporting, not a path this portal takes.
      *
      * ⚠️ THE EXPRESSION CANNOT USE THE `startDateTime` INDEX, because it
      *    differs row by row. A caller that wants the index adds a loose bound
@@ -466,6 +494,9 @@ class Events
      * ⚠️ IN THE HOUR THE CLOCKS GO BACK a clock reads 01:00-01:59 twice; this
      *    answers by what it reads at the moment of asking
      *    (`I18n::wallClockNow()`), which is what a person in the room would say.
+     *
+     * A statement that DELETES on an event's time does not use this: see
+     * `nowForADeletionDeadline()` below, which can only ever be late.
      *
      * @param mysqli   $db     The connection the expression will be used on.
      * @param string   $alias  The table alias for `tblEvents` in that statement
@@ -482,14 +513,175 @@ class Events
      */
     public static function nowOnItsOwnClock(mysqli $db, string $alias, ?int $siteId = null): array
     {
+        return self::perZoneReading(
+            $db,
+            $alias,
+            $siteId,
+            static fn (\DateTimeZone $zone): string => I18n::wallClockNow($zone),
+            I18n::wallClockNow(new \DateTimeZone(Site::timezone($siteId)))
+        );
+    }
+
+    /**
+     * 🧹 "Now" for a DELETION DEADLINE on an event's time -- a reading that
+     *    can only ever be LATE (#810). The nightly clear-out of event
+     *    registrations asks this, and nothing else should.
+     *
+     * A registration (a name, a child's medical notes, a parent's telephone
+     * number) is deleted n days after its event ends. Deleting it early
+     * breaks the period the portal promised and cannot be undone; deleting
+     * it a little late harms nobody. So where `nowOnItsOwnClock()` answers
+     * what the event's clock reads now, this answers a reading no later than
+     * that, chosen so the deadline is never earlier than EITHER
+     *
+     *   - n days on the event's own clock ("the same time n days later", the
+     *     house rule for adding days), or
+     *   - n × 24 real hours after the event ended.
+     *
+     * The two differ across a night the clocks change: across a spring-forward
+     * night n days on the clock is an hour (two, in Antarctica/Troll) shorter
+     * than n × 24 hours, and across a date-line jump it is up to a day shorter
+     * (Pacific/Apia skipped 30 December 2011). For a deletion, the later of
+     * the two is the safe one.
+     *
+     * HOW, WITHOUT CONVERTING EACH ROW. For each zone this binds
+     *
+     *     UTC now + the LOWEST offset that zone has had at any moment in the
+     *     last `$lookBackDays` + 2 days
+     *
+     * written as a reading. Call that m, and the zone's offset when the event
+     * ended o. A row is deleted when `reading < m - n days`, and DATE_SUB on
+     * m is exact 24-hour days because m stands for a clock with no changes.
+     *   - The clock-day deadline: m is never later than the zone's clock
+     *     now (its offset now is one of those it has had), so passing
+     *     "m - n days" means "the clock now - n days" has been passed too.
+     *   - The real-hours deadline: the event ended at the moment
+     *     `reading - o`. While that moment is inside the window, o is one of
+     *     the offsets m's minimum was taken over, so o >= that minimum, and
+     *     `reading < m - n days` gives `reading - o < UTC now - n x 24h`.
+     *     An event that ended BEFORE the window ended more than n x 24h
+     *     ago already, because the window reaches back the caller's LONGEST
+     *     period -- which is why the caller must pass that longest period and
+     *     not a typical one.
+     *   - THE EXTRA DAYS ARE LOAD-BEARING: ONE IS NEEDED AND THE SECOND IS
+     *     MARGIN (#810's round-3 check: one extra day gave no early deletion
+     *     in any zone, none gave 151,225 cases). A reading in the
+     *     hour the clocks skip (London's 01:30 on the morning they go
+     *     forward) has two meanings, and the LATER one uses the offset that
+     *     was in force just BEFORE the change -- an offset that ended before
+     *     the moment that meaning names. For such an event ending near the
+     *     start of the window, that offset is outside a window of exactly n
+     *     days, and leaving it out deletes up to two hours early (measured in
+     *     about two hundred zones). One day reaches past it; two are kept
+     *     on purpose, because the price of the second is only lateness.
+     *   - THE LOWEST OFFSET IS TAKEN OVER EVERY STATE IN THE WINDOW, not its
+     *     two ends: a window from one summer to the next has summer at both
+     *     ends and a whole winter in the middle.
+     * THE COST IS LATENESS, NEVER EARLINESS, and it is larger than it looks.
+     * A row waits past the later deadline by the difference between its
+     * zone's offset when the event ended and the zone's LOWEST offset
+     * anywhere in the window -- an hour for an ordinary summer-time zone, and
+     * about TWO hours for both Antarctica/Troll (whose change is two hours)
+     * and America/Nuuk (which moved its clocks for good in 2023): 2 h 0 m 1 s
+     * measured for each. Where a zone jumped a whole day (Pacific/Apia, 2011)
+     * it can be a day. And the window is the ORGANISATION's
+     * longest period, not the event's: one event kept for ten years puts
+     * every event of that organisation on a ten-year window.
+     *
+     * The `ELSE` (a zone written between the two statements) reads
+     * `Etc/GMT+12`, the lowest offset there is, and a zone text PHP cannot
+     * open is judged on the organisation's zone, the clock it is shown on
+     * everywhere (`Site::zoneFor()`). Two more read `Etc/GMT+12`, both on
+     * purpose, rather than being worked out:
+     *   - a zone PHP opens but has NO list of changes for -- an abbreviation
+     *     (`EST`, `BST`) or a bare offset (`+05:00`), for which
+     *     `getTransitions()` answers false. Such texts reach the table only by
+     *     hand or from an old backup; `Etc/GMT+12` makes them very late (up
+     *     to seventeen hours for `+05:00`), which is the safe way to be wrong;
+     *   - a look-back over 36,500 days (a hundred years). That limit is this
+     *     code's own choice, not PHP's: a figure that size is a typing
+     *     mistake, and the answer for it should not depend on how far back a
+     *     zone's history happens to go.
+     * A failed read throws, as above.
+     *
+     * @param mysqli $db           The connection the expression will be used on.
+     * @param string $alias        The table alias for `tblEvents`.
+     * @param int    $siteId       The one organisation whose events the
+     *                             statement can meet. Never every
+     *                             organisation's: a deletion is per
+     *                             organisation, and a scheduled job has no
+     *                             "current" one to fall back to.
+     * @param int    $lookBackDays The LONGEST period, in days, that any row the
+     *                             statement can meet is kept for.
+     *
+     * @return array{sql: string, types: string, params: list<string>} As
+     *         `nowOnItsOwnClock()`.
+     */
+    public static function nowForADeletionDeadline(mysqli $db, string $alias, int $siteId, int $lookBackDays): array
+    {
+        $nowUtc  = time();
+        $reading = static fn (\DateTimeZone $zone): string => self::deadlineReadingFor($zone, $lookBackDays, $nowUtc);
+
+        return self::perZoneReading($db, $alias, $siteId, $reading, $reading(new \DateTimeZone('Etc/GMT+12')));
+    }
+
+    /**
+     * The per-zone half of `nowForADeletionDeadline()`: the reading m for ONE
+     * zone at ONE moment. Public, and given the moment rather than reading the
+     * clock, so a test can drive the real rule at a fixed moment -- the cases
+     * that matter (a skipped hour at the window's start, a winter inside a
+     * summer-to-summer window) are on particular dates, and the real "now"
+     * cannot be chosen. `nowForADeletionDeadline()` passes `time()`.
+     *
+     * Written in UTC because UTC has no transitions, so the answer is exactly
+     * "UTC at `$nowUtc`, moved by the lowest offset", as a reading.
+     *
+     * @param \DateTimeZone $zone         The zone.
+     * @param int           $lookBackDays The caller's LONGEST period, in days.
+     * @param int           $nowUtc       The moment, as a Unix timestamp.
+     */
+    public static function deadlineReadingFor(\DateTimeZone $zone, int $lookBackDays, int $nowUtc): string
+    {
+        // Etc/GMT+12's offset: the lowest there is. Kept for a zone with no
+        // list of changes and for a look-back past the 36,500-day limit.
+        $offset = -12 * 3600;
+        if ($lookBackDays >= 0 && $lookBackDays <= 36500) {
+            $states = $zone->getTransitions($nowUtc - ($lookBackDays + 2) * 86400, $nowUtc);
+            if (is_array($states) === true && $states !== []) {
+                // EVERY state in the window, not its two ends (see above).
+                $offset = min(array_map(static fn (array $s): int => (int) $s['offset'], $states));
+            }
+        }
+
+        return (new \DateTimeImmutable('@' . ($nowUtc + $offset)))->format('Y-m-d H:i:s');
+    }
+
+    /**
+     * The one builder behind both methods above: reads the zones in use,
+     * BYTE FOR BYTE (see the 🔤 note), and binds `$readingFor` each one's reading,
+     * with `$elseReading` for a zone written after the list was read.
+     *
+     * @param callable(\DateTimeZone): string $readingFor
+     *
+     * @return array{sql: string, types: string, params: list<string>}
+     */
+    private static function perZoneReading(
+        mysqli $db,
+        string $alias,
+        ?int $siteId,
+        callable $readingFor,
+        string $elseReading
+    ): array {
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]{0,30}$/', $alias) !== 1) {
             throw new \InvalidArgumentException('Events::nowOnItsOwnClock(): the alias must be a plain SQL name.');
         }
 
         $zones = [];
         $stmt  = $siteId === null
-            ? $db->prepare('SELECT DISTINCT `timezone` FROM `tblEvents`')
-            : $db->prepare('SELECT DISTINCT `timezone` FROM `tblEvents` WHERE `siteID` = ?');
+            ? $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents`')
+            : $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents` WHERE `siteID` = ?');
+        // A backstop only: under this portal's strict reporting a failed
+        // prepare THROWS (see the ⚠️ note above), so this is never false here.
         if ($stmt !== false) {
             if ($siteId !== null) {
                 $stmt->bind_param('i', $siteId);
@@ -497,22 +689,22 @@ class Events
             $stmt->execute();
             $result = $stmt->get_result();
             while ($row = $result->fetch_assoc()) {
-                $zones[] = (string) ($row['timezone'] ?? '');
+                $zones[] = (string) ($row['zone'] ?? '');
             }
             $stmt->close();
         }
 
-        $orgNow = I18n::wallClockNow(new \DateTimeZone(Site::timezone($siteId)));
         if ($zones === []) {
-            // No events at all (or the list could not be read): `CASE` with no
-            // `WHEN` is not SQL, and the first version of this method built
-            // exactly that, so every page asking it on an installation with no
-            // events yet -- the dashboard first -- answered with an error. The
-            // organisation's clock is the answer for any row anyway.
-            return ['sql' => 'CAST(? AS DATETIME)', 'types' => 's', 'params' => [$orgNow]];
+            // No events at all: `CASE` with no `WHEN` is not SQL, and the
+            // first version of this method built exactly that, so every page
+            // asking it on an installation with no events yet -- the
+            // dashboard first -- answered with an error. With no events
+            // there is no row for any reading to be wrong about. (A FAILED
+            // read does not reach here; it throws.)
+            return ['sql' => 'CAST(? AS DATETIME)', 'types' => 's', 'params' => [$elseReading]];
         }
 
-        $sql    = 'CAST(CASE `' . $alias . '`.`timezone`';
+        $sql    = 'CAST(CASE CAST(`' . $alias . '`.`timezone` AS BINARY)';
         $params = [];
         foreach ($zones as $zone) {
             $sql     .= ' WHEN ? THEN ?';
@@ -520,10 +712,10 @@ class Events
             // Site::zoneFor() is the one place a stored zone text becomes a
             // clock, falling back to the organisation's for text PHP cannot
             // open -- exactly as every page that SHOWS the event does.
-            $params[] = I18n::wallClockNow(Site::zoneFor($zone, $siteId));
+            $params[] = $readingFor(Site::zoneFor($zone, $siteId));
         }
         $sql     .= ' ELSE ? END AS DATETIME)';
-        $params[] = $orgNow;
+        $params[] = $elseReading;
 
         return ['sql' => $sql, 'types' => str_repeat('s', count($params)), 'params' => $params];
     }

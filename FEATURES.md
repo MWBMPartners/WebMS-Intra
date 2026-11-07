@@ -524,6 +524,7 @@ Events, series, RSVP, exports, and seven view modes.
   the public countdown, follow the event's own zone. Room bookings' "still to come" follows the organisation's
   clock, not the database server's (#783).
 - Public + admin-managed views.
+- Registrations' personal details are deleted the set number of days after the event ends — counted on the event's own clock, and never sooner than that many whole 24-hour days (#810).
 - Events copied in from somebody else's calendar, with their own audience, choices, rules and approvals: see "Outside calendars" below (#514).
 - Crews (#343), volunteer job board (#344), multi-day attendance grid (#345), segment broadcast (#119), registrations (#347) — per-event coordinator tools at `/calendar/event/{crews,jobs,attendance,broadcast}` + `/admin/calendar/registrations`.
 - **Event Team Hub (#386 Phase 1)** — per-event staff/volunteer/organiser landing page at `/calendar/event/hub`, gathering the above tools plus a Resources list and a YouTube/Vimeo/Cloudflare Stream video grid. See the dedicated section below.

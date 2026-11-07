@@ -41,6 +41,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/497
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/491
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/574
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/810
  * -----------------------------------------------------------------------------
  */
 
@@ -61,7 +62,12 @@ declare(strict_types=1);
 //   InstallationSettings -> SettingLimit -> WebhookRetention (#713),
 //   InstallationSettings -> SettingLimit -> TranscriptRetention (#714),
 //   Pdf (#721 — it has no dependencies of its own; dompdf is only loaded by
-//   create(), and sweepPartFiles() never reaches it)
+//   create(), and sweepPartFiles() never reaches it),
+//   Site -> I18n -> Events (#810 — the registrations clear-out asks
+//   `Events::nowForADeletionDeadline()` for each event's deadline reading,
+//   which reads the zones through `Site` and the clock through `I18n`; anybody
+//   calling `registration_sweep()`, `preview_retention_counts()` or
+//   `run_retention_sweep()` needs all three)
 //
 // Adding a class here without adding it there stops that test dead at the first
 // line that mentions it. That happened twice in one session, which is why the
@@ -70,6 +76,7 @@ declare(strict_types=1);
 
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
+use Portal\Core\Events;
 use Portal\Core\GdprEraser;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
@@ -282,11 +289,64 @@ function log_sweep(string $which, bool $reallyDelete): int
  * and checking each one again before deleting, which is not worth the
  * complication for a clear-out that runs on a timescale of months.
  *
- * NOW() is the database server's idea of the time, while these event columns
- * hold local wall-clock times. If the two disagree, the deadline moves by that
- * difference - later if the database is behind, earlier if it is ahead. At 90
- * days a few hours either way does not matter, but it is a real difference and
- * not a guaranteed-safe one, so it is written down here rather than assumed.
+ * 🕰️ MEASURED ON EACH EVENT'S OWN CLOCK (#810). `startDateTime` and
+ * `endDateTime` are readings of the EVENT's clock (`tblEvents.timezone`). This
+ * used to compare them with `DATE_SUB(NOW(), …)` — the DATABASE SERVER's clock,
+ * in a session zone that is `SYSTEM` by default, so whatever the database host
+ * happens to be set to. A reading on a clock BEHIND the server's is a smaller
+ * number for the same moment, so it crossed the deadline EARLY by the
+ * difference: on a database in UTC, an `Etc/GMT+12` event had its
+ * registrations — names, a child's medical notes, a parent's telephone number
+ * — deleted twelve hours before the period the portal promised was up, and a
+ * New York one four or five hours before; on a database whose session zone is
+ * Pacific/Auckland, a London event's went eleven to thirteen hours early,
+ * depending on the time of year. At the
+ * extremes (a server on UTC+14, an event on UTC-12) it is twenty-six hours.
+ * That breaks the promise outright; it is not "a few hours at 90 days". (This
+ * note used to say a few hours either way did not matter. Early deletion of
+ * personal data is not a rounding error, and it cannot be undone.) An event on
+ * a clock AHEAD of the server's was deleted late, which is harmless. (#810's
+ * own text gives the direction the other way round, "ahead of the server";
+ * section G of `tools/retention-caps-selftest.php` runs the old expression on
+ * real rows and settles it.) `Events::nowOnItsOwnClock()` is the ONE place a
+ * query asks what an event's own clock reads now; a DELETION asks its
+ * sibling `Events::nowForADeletionDeadline()`, which can only be late.
+ *
+ * ERRING LATE IS THE SAFE DIRECTION, so the reading asked for is
+ * `Events::nowForADeletionDeadline()`, not the reading a page uses, and every
+ * case that cannot be exact is made late, never early:
+ *   - THE DEADLINE IS THE LATER OF "n days on the event's clock" and
+ *     "n x 24 real hours". The two differ across a night the clocks change
+ *     (an hour, two in Antarctica/Troll) and across a date-line jump (a
+ *     whole day, Pacific/Apia 2011); for a deletion the later one is the
+ *     promise. The number n is unchanged; only which of the two meanings of
+ *     "n days" applies where they disagree. The method's docblock has the
+ *     working. The price is lateness, and it is not small: a row waits past
+ *     the later deadline by the gap between its zone's offset when the event
+ *     ended and that zone's LOWEST offset over the look-back window — an hour
+ *     for ordinary summer time, about two hours for Antarctica/Troll and for
+ *     America/Nuuk (which moved its clocks for good in 2023), and up to a day
+ *     where a zone jumped the date line (Pacific/Apia, 2011). The window
+ *     is this ORGANISATION's longest period, not the event's, so one event
+ *     kept for ten years puts every event of the organisation on a ten-year
+ *     window.
+ *   - A row whose zone was written in the instant between the method's two
+ *     statements (so it is not in the list) reads `Etc/GMT+12`, the clock
+ *     that reads earliest anywhere on Earth, so it waits until the period is
+ *     up on every clock there is.
+ *   - "Now" is worked out in PHP a moment BEFORE the statement runs, so by
+ *     the time the statement runs it is a little behind, never ahead.
+ * A FAILED READ IS NOT A CASE HERE. `bootstrap.php` sets
+ * `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR`, so a statement that cannot be
+ * prepared or run THROWS; the exception leaves `registration_sweep()` before
+ * its delete runs, and nothing is deleted. (An earlier draft of this note said
+ * every row would then read the earliest clock. That path cannot be reached
+ * under strict reporting, and a safety claim resting on an unreachable path is
+ * worth nothing.)
+ * One thing this cannot make late, said plainly: "now" comes from the WEB
+ * server's clock (PHP) rather than the database server's. A host whose clock
+ * is wrong is wrong either way; with ordinary time-keeping the two agree to
+ * well under a second, against a period counted in days.
  *
  * Written out once, on purpose, and used by BOTH the count shown to an
  * administrator and the delete that actually runs. If the two were written
@@ -294,8 +354,11 @@ function log_sweep(string $which, bool $reallyDelete): int
  * to remove one number of records and remove a different one. For a table
  * holding children's medical notes that is not an acceptable risk.
  *
- * Three values are bound, in this order: the site, then the fallback number of
- * days twice (once to test it is above zero, once to do the date arithmetic).
+ * The values are bound in this order: the site, the fallback number of days
+ * (to test it is above zero), then every value of the deadline-reading
+ * expression, then the fallback number of days again (for the date
+ * arithmetic). The function returns them with the clause, so no caller can
+ * bind them in a different order from the one the clause was written in.
  *
  * Two details worth explaining, because both look redundant and neither is:
  *
@@ -313,14 +376,89 @@ function log_sweep(string $which, bool $reallyDelete): int
  *   event starting in December with a leftover end date in January of the year
  *   just gone would have its registrations deleted today.
  *
- * @return string The WHERE clause, including the word WHERE.
+ * @return array{sql: string, types: string, params: list<int|string>} The WHERE
+ *         clause (including the word WHERE), with what to bind, in order.
  */
-function registration_sweep_where(): string
+function registration_sweep_where(mysqli $db, int $siteId, int $days): array
 {
-    return 'WHERE e.siteID = ? '
-        . '  AND COALESCE(e.registrationRetentionDays, ?) > 0 '
-        . '  AND GREATEST(COALESCE(e.endDateTime, e.startDateTime), e.startDateTime) '
-        . '      < DATE_SUB(NOW(), INTERVAL COALESCE(e.registrationRetentionDays, ?) DAY)';
+    // ONE organisation's zones, never every organisation's: the clause
+    // below is limited to `e.siteID = ?`, so this organisation's zones are
+    // exactly the ones the statement can meet, and a scheduled job has no
+    // "current" organisation to fall back to (the fault #491 was about).
+    //
+    // The look-back is the LONGEST period any of this organisation's events
+    // is kept for — each event's own number of days, or the organisation's
+    // where it has none — because the deadline reading's proof that it is
+    // never earlier than n x 24 real hours needs a window at least that long
+    // (see `Events::nowForADeletionDeadline()`). A failed read throws.
+    $longest = 0;
+    $max     = $db->prepare(
+        'SELECT MAX(COALESCE(`registrationRetentionDays`, ?)) AS `longest` FROM `tblEvents` WHERE `siteID` = ?'
+    );
+    // A backstop only: under strict reporting a failed prepare throws.
+    if ($max !== false) {
+        $max->bind_param('ii', $days, $siteId);
+        $max->execute();
+        $longest = (int) ($max->get_result()->fetch_assoc()['longest'] ?? 0);
+        $max->close();
+    }
+    $deadlineNow = Events::nowForADeletionDeadline($db, 'e', $siteId, max($longest, $days));
+
+    return [
+        'sql' => 'WHERE `e`.`siteID` = ? '
+            . '  AND COALESCE(`e`.`registrationRetentionDays`, ?) > 0 '
+            . '  AND GREATEST(COALESCE(`e`.`endDateTime`, `e`.`startDateTime`), `e`.`startDateTime`) '
+            . '      < DATE_SUB(' . $deadlineNow['sql'] . ', INTERVAL COALESCE(`e`.`registrationRetentionDays`, ?) DAY)',
+        'types'  => 'ii' . $deadlineNow['types'] . 'i',
+        'params' => array_merge([$siteId, $days], $deadlineNow['params'], [$days]),
+    ];
+}
+
+/**
+ * 🧹 Count, or really delete, the registrations past their keep-by date —
+ *    organisation by organisation, each by its own setting.
+ *
+ * ONE FUNCTION FOR BOTH, with `$reallyDelete` deciding which, exactly as
+ * `log_sweep()` does: the count an administrator is shown before confirming
+ * and the delete that then runs go through the same clause, built the same
+ * way, for the same organisations. Until #810 the two callers each wrote their
+ * own loop round one shared clause; the clause now carries values that differ
+ * by organisation (each one's clocks), so the statement is prepared once per
+ * organisation, and one loop is what keeps the count and the delete alike.
+ *
+ * @return int Registrations counted, or registrations really deleted.
+ */
+function registration_sweep(bool $reallyDelete): int
+{
+    $db    = App::db();
+    $total = 0;
+
+    $head = $reallyDelete === true
+        ? 'DELETE `r` FROM `tblEventRegistrations` AS `r` '
+        : 'SELECT COUNT(*) AS `cnt` FROM `tblEventRegistrations` AS `r` ';
+
+    foreach (registration_sweep_sites() as $siteId => $days) {
+        $where = registration_sweep_where($db, $siteId, $days);
+        $stmt  = $db->prepare(
+            $head
+            . 'INNER JOIN `tblEvents` AS `e` ON `e`.`eventID` = `r`.`eventID` '
+            . $where['sql']
+        );
+        // A backstop only: under this portal's strict reporting a statement
+        // that cannot be prepared THROWS, which leaves this function before
+        // any delete runs. This branch is for a caller without it.
+        if ($stmt === false) {
+            continue;
+        }
+        $stmt->bind_param($where['types'], ...$where['params']);
+        $stmt->execute();
+        $total += $reallyDelete === true
+            ? (int) $stmt->affected_rows
+            : (int) ($stmt->get_result()->fetch_assoc()['cnt'] ?? 0);
+        $stmt->close();
+    }
+
+    return $total;
 }
 
 /**
@@ -518,20 +656,7 @@ function preview_retention_counts(): array
     //    administrator has to be shown the real number BEFORE confirming.
     //    Being told "12 log rows" and then silently losing several thousand
     //    children's registration records would be indefensible.
-    $stmt = $db->prepare(
-        'SELECT COUNT(*) AS cnt FROM tblEventRegistrations AS r '
-        . 'INNER JOIN tblEvents AS e ON e.eventID = r.eventID '
-        . registration_sweep_where()
-    );
-    if ($stmt !== false) {
-        foreach (registration_sweep_sites() as $siteId => $days) {
-            $stmt->bind_param('iii', $siteId, $days, $days);
-            $stmt->execute();
-            $row = $stmt->get_result()->fetch_assoc();
-            $out['registrations'] += (int) ($row['cnt'] ?? 0);
-        }
-        $stmt->close();
-    }
+    $out['registrations'] = registration_sweep(false);
 
     // 🚪 Anonymous check-in detail, counted one organisation at a time with
     //    that organisation's own setting — the same loop the clear-out itself
@@ -1126,7 +1251,6 @@ function run_retention_sweep(): array
     //    for the benefit of somebody's calendar application. Nothing generates
     //    event records from it. So the dates used below always belong to the
     //    very event the registration was made for.
-    $registrationsDeleted = 0;
 
     // One site at a time, deliberately.
     //
@@ -1148,19 +1272,9 @@ function run_retention_sweep(): array
     //
     //    So each site's own setting decides, and the delete below is limited to
     //    that same site. A site is never able to reach another site's records.
-    $stmt = $db->prepare(
-        'DELETE r FROM tblEventRegistrations AS r '
-        . 'INNER JOIN tblEvents AS e ON e.eventID = r.eventID '
-        . registration_sweep_where()
-    );
-    if ($stmt !== false) {
-        foreach (registration_sweep_sites() as $siteId => $days) {
-            $stmt->bind_param('iii', $siteId, $days, $days);
-            $stmt->execute();
-            $registrationsDeleted += (int) $stmt->affected_rows;
-        }
-        $stmt->close();
-    }
+    //    Each event's period is measured on the event's OWN clock (#810);
+    //    see registration_sweep_where().
+    $registrationsDeleted = registration_sweep(true);
 
     // 🚪 Anonymous check-in detail.
     //
