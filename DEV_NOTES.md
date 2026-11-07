@@ -20867,3 +20867,32 @@ checked.
   restore uses) passed when a value was dropped from it — planted.
 - **How the self-test plants:** `TOP_BAR_SELFTEST_WEB` serves another copy of `web/`, so a
   fault is planted in a scratch copy and never in the working tree.
+
+### A search that could not run must never answer the question (#829)
+`preg_match()` returns `false`, `preg_match_all()` `false`, `preg_replace()`
+`null` and `preg_split()` `false` when PCRE cannot finish — the JIT stack, the
+backtracking limit, or bad UTF-8 under `/u`. Every comparison this repository's
+tests habitually write (`=== 1`, `!== 1`, `> 0`, `(string)`, `(array)`, `?: []`)
+turns that into "absent". So a check that asks for ABSENCE is the one that goes
+green on a page it never read, and it gets likelier as pages grow, because the
+pages grow and the tests do not. The four tests named in #829 wrap every such call
+(`ap_`, `gc_`, `glb_`, `tz_` prefixes); the wrapper records a red check first and
+then throws, because a bare uncaught exception is a crash with a label. Deliberately
+left raw: the router each HTTP test writes out for its web server (another process;
+it searches a short request path with anchored patterns) and, in the go-live test,
+`glb_stopWorkers()`, which the shutdown clean-up calls — a throw there would leave the
+clean-up half done, and it reads single lines of `ps` output with an anchored pattern
+that has no repeated group. **Not swept:** the other self-tests in `tools/`; the same
+shape almost certainly exists there (one instance: `content-translation-selftest.php`
+uses `(string) preg_replace('/\s+/u', …)`, where `/u` fails on invalid UTF-8).
+
+### The two readers of `translation.enabled` (#831)
+`AppRegistry::isEnabled()` accepts `'1'` and `'true'`; the pinned engine accepts
+only `'1'`. `ContentTranslation::isSwitchedOn()` asks both, and section E2 of the
+content-translation test is now what fails if it stops. What the test still cannot
+plant without editing the pinned engine: the engine itself accepting `'true'`. The
+"nothing sent / nothing counted" checks were proved able to fail with a plant that
+loosens `isSwitchedOn()` AND hands the engine `'1'`, and E2-08 proves the stub log
+and the usage row really do move on the same press once the switch says `'1'`.
+
+**Review: tooling arm (tests only), one round by a fresh Claude agent standing in for Codex: CLEAN.** It re-ran all five tests old and new (counts unchanged except content-translation +13), confirmed every wrapper passes arguments, flags and the match array straight through, re-planted every E2 fault, killed content-translation inside E2 and found the settings put back, and repeated the starvation proof. It corrected one count in these notes (six, not five). Codex has NOT reviewed it. The rest of `tools/` is #837.

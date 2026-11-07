@@ -240,6 +240,97 @@ function glb_check(bool $passed, string $label, string $detail = ''): void
     echo 'FAIL — ' . $label . ($detail === '' ? '' : "\n        " . $detail) . "\n";
 }
 
+/**
+ * 🔍 A PATTERN SEARCH THAT CANNOT BE MISTAKEN FOR "NOT THERE" (#829).
+ *
+ * `preg_match()` and `preg_match_all()` answer `false` when the search could
+ * not RUN at all — PCRE's JIT stack ran out, or the backtracking limit was
+ * reached — and every search in this file was read with `=== 1`, `!== 1`,
+ * `> 0` or by looking at the matches it filled in. So a search that never ran
+ * gave exactly the answer of a search that found nothing, and a check asking
+ * for ABSENCE ("the page does NOT show…") passed on a page it never read.
+ * That is not hypothetical: `tools/db-strict-mode-selftest.php` hit the JIT
+ * limit on the admin dashboard once that page grew past roughly 20-30 KB, and
+ * its "shows NO alert" check went on passing whatever the page drew (#792).
+ *
+ * These two answer EXACTLY what PHP's functions answer whenever the search
+ * runs, so no check here asks anything different. When it cannot run they
+ * record a RED check naming the pattern, how much text it was searching and
+ * PHP's own reason, and then THROW, so no caller is ever handed an answer it
+ * could read as "absent" or as "present". The red line comes first on
+ * purpose: a bare uncaught exception is a crash with a label, not a check
+ * that reports.
+ *
+ * Deliberately NOT used inside the router this file writes out for its test
+ * web server (that code runs in another process, where these functions do
+ * not exist, and it searches only a short request path), nor in `glb_stopWorkers()`, which the clean-up calls at shutdown: a throw there would leave the clean-up half done, and it splits the `ps` table into lines with a raw `preg_split()` on a plain newline and then reads each line with an anchored pattern that has no repeated group — neither can run out of stack on a few kilobytes of `ps` output.
+ *
+ * @param mixed $found Filled in exactly as `preg_match()` fills its third argument.
+ */
+function glb_find(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        glb_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same, for `preg_match_all()`: the number of matches when the search
+ * ran, and a red check plus a thrown error when it could not.
+ *
+ * @param mixed $found Filled in exactly as `preg_match_all()` fills its third argument.
+ */
+function glb_findAll(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match_all($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        glb_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same again for `preg_replace()` and `preg_split()`, because they are
+ * the same fault in another form (#829): `preg_replace()` answers `null` when
+ * it cannot run and `preg_split()` answers `false`, and this file turned both
+ * into "nothing" with `(string)`, `(array)` or `?: []`. Text that has been
+ * tidied to an EMPTY string contains nothing, so a check that then asks the
+ * tidied text for ABSENCE ("the statement does not select `moderatorID`")
+ * passed without ever having read it.
+ */
+function glb_replace(string|array $pattern, string|array $replacement, string $subject, int $limit = -1): string
+{
+    $answer = preg_replace($pattern, $replacement, $subject, $limit);
+    if ($answer === null) {
+        glb_searchCouldNotRun(is_array($pattern) === true ? implode(' ', $pattern) : $pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** `preg_split()`, with the same refusal to read "could not run" as "nothing". @return list<string> */
+function glb_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array
+{
+    $answer = preg_split($pattern, $subject, $limit, $flags);
+    if ($answer === false) {
+        glb_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** Record the red check, then stop the caller reading anything into the failure. */
+function glb_searchCouldNotRun(string $pattern, string $subject): never
+{
+    $why = preg_last_error_msg();
+    glb_check(false, 'a pattern search COULD NOT RUN, so its check was not answered (#829)', 'pattern ' . $pattern . ' over ' . strlen($subject) . ' bytes: ' . $why . ' — this is NOT "not found"');
+    throw new RuntimeException('A pattern search could not run (' . $why . '), so the check that asked it has no answer: ' . $pattern);
+}
+
 function glb_db(): mysqli
 {
     static $db = null;
@@ -396,12 +487,12 @@ function glb_request(string $jar, string $method, string $path, ?array $post = n
     }
     $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
     $head     = substr((string) $raw, 0, $headSize);
-    if (preg_match('/^X-Go-Live-Selftest:\s*' . $glb['token'] . '\s*$/mi', $head) !== 1) {
+    if (glb_find('/^X-Go-Live-Selftest:\s*' . $glb['token'] . '\s*$/mi', $head) !== 1) {
         return ['status' => -1, 'location' => '', 'body' => 'an answer without this run\'s header: it came from a server this run did not start'];
     }
     return [
         'status'   => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
-        'location' => preg_match('/^Location:\s*(\S*)\s*$/mi', $head, $found) === 1 ? $found[1] : '',
+        'location' => glb_find('/^Location:\s*(\S*)\s*$/mi', $head, $found) === 1 ? $found[1] : '',
         'body'     => substr((string) $raw, $headSize),
     ];
 }
@@ -409,23 +500,23 @@ function glb_request(string $jar, string $method, string $path, ?array $post = n
 /** The form token in a sign-in form. */
 function glb_formToken(string $html): string
 {
-    return preg_match('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $found) === 1 ? $found[1] : '';
+    return glb_find('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $found) === 1 ? $found[1] : '';
 }
 
 /** The form token a signed-in person's page carries in its `<meta name="csrf-token">` tag (64 characters), or ''. */
 function glb_metaToken(string $jar, string $path = '/'): string
 {
     $answer = glb_request($jar, 'GET', $path);
-    return preg_match('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $answer['body'], $found) === 1 ? $found[1] : '';
+    return glb_find('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $answer['body'], $found) === 1 ? $found[1] : '';
 }
 
 /** The words of the first coloured message box on a page, as plain text, or ''. */
 function glb_flash(string $html): string
 {
-    if (preg_match('/<div class="alert alert-(\w+)">(.*?)<\/div>/s', $html, $found) !== 1) {
+    if (glb_find('/<div class="alert alert-(\w+)">(.*?)<\/div>/s', $html, $found) !== 1) {
         return '';
     }
-    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($found[2]), ENT_QUOTES, 'UTF-8')));
+    return trim((string) glb_replace('/\s+/', ' ', html_entity_decode(strip_tags($found[2]), ENT_QUOTES, 'UTF-8')));
 }
 
 /**
@@ -436,20 +527,20 @@ function glb_flash(string $html): string
 function glb_readForm(string $html, string $marker = 'notify_live'): array
 {
     $none = ['found' => false, 'action' => '', 'fields' => [], 'disabled' => false];
-    if (preg_match_all('#<form\b([^>]*)>(.*?)</form>#s', $html, $forms, PREG_SET_ORDER) < 1) {
+    if (glb_findAll('#<form\b([^>]*)>(.*?)</form>#s', $html, $forms, PREG_SET_ORDER) < 1) {
         return $none;
     }
     foreach ($forms as $form) {
-        if (preg_match('/name="action" value="' . preg_quote($marker, '/') . '"/', $form[2]) !== 1) {
+        if (glb_find('/name="action" value="' . preg_quote($marker, '/') . '"/', $form[2]) !== 1) {
             continue;
         }
-        $action = preg_match('/\baction="([^"]*)"/', $form[1], $found) === 1 ? html_entity_decode($found[1], ENT_QUOTES, 'UTF-8') : '';
-        preg_match_all('/<input\b[^>]*type="hidden"[^>]*name="([^"]*)"[^>]*value="([^"]*)"/', $form[2], $inputs, PREG_SET_ORDER);
+        $action = glb_find('/\baction="([^"]*)"/', $form[1], $found) === 1 ? html_entity_decode($found[1], ENT_QUOTES, 'UTF-8') : '';
+        glb_findAll('/<input\b[^>]*type="hidden"[^>]*name="([^"]*)"[^>]*value="([^"]*)"/', $form[2], $inputs, PREG_SET_ORDER);
         $fields = [];
         foreach ($inputs as $input) {
             $fields[$input[1]] = html_entity_decode($input[2], ENT_QUOTES, 'UTF-8');
         }
-        return ['found' => true, 'action' => $action, 'fields' => $fields, 'disabled' => preg_match('/<button\b[^>]*\bdisabled\b/', $form[2]) === 1];
+        return ['found' => true, 'action' => $action, 'fields' => $fields, 'disabled' => glb_find('/<button\b[^>]*\bdisabled\b/', $form[2]) === 1];
     }
     return $none;
 }
@@ -652,10 +743,10 @@ function glb_requestMany(array $requests): array
     foreach ($handles as $i => $handle) {
         $raw  = (string) curl_multi_getcontent($handle);
         $head = substr($raw, 0, (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE));
-        $mine = preg_match('/^X-Go-Live-Selftest:\s*' . $glb['token'] . '\s*$/mi', $head) === 1;
+        $mine = glb_find('/^X-Go-Live-Selftest:\s*' . $glb['token'] . '\s*$/mi', $head) === 1;
         $out[$i] = [
             'status'   => $mine === true ? (int) curl_getinfo($handle, CURLINFO_HTTP_CODE) : -1,
-            'location' => preg_match('/^Location:\s*(\S*)\s*$/mi', $head, $found) === 1 ? $found[1] : '',
+            'location' => glb_find('/^Location:\s*(\S*)\s*$/mi', $head, $found) === 1 ? $found[1] : '',
         ];
         curl_multi_remove_handle($multi, $handle);
     }
@@ -1216,7 +1307,7 @@ echo "\nG. The button switches itself off when pressed\n";
 $consolePage = glb_request($jar['admin'], 'GET', glb_consolePath(GLB_EVENT));
 $channelsPage = glb_request($jar['admin'], 'GET', '/admin/livestream/channels');
 foreach (['the Host Console page' => $consolePage, 'the livestream channels page' => $channelsPage] as $words => $pageAnswer) {
-    glb_check(str_contains($pageAnswer['body'], 'id="golive-form"') === true && preg_match('#getElementById\(\'golive-form\'\)(?:(?!</script>).)*?addEventListener\(\'submit\'#s', $pageAnswer['body']) === 1, $words . ': the "We\'re live" form has the page\'s own small script that runs when it is sent', 'HTTP ' . $pageAnswer['status']);
+    glb_check(str_contains($pageAnswer['body'], 'id="golive-form"') === true && glb_find('#getElementById\(\'golive-form\'\)(?:(?!</script>).)*?addEventListener\(\'submit\'#s', $pageAnswer['body']) === 1, $words . ': the "We\'re live" form has the page\'s own small script that runs when it is sent', 'HTTP ' . $pageAnswer['status']);
     file_put_contents($glb['child'] . '/page.html', $pageAnswer['body']);
     $ran = glb_node(GLB_NODE_SUBMIT_PROGRAM, [$glb['child'] . '/page.html']);
     if ($ran === null) {
@@ -1321,7 +1412,7 @@ glb_check(
 );
 $noteText = (string) ($noteRows[0]['activityDescription'] ?? '') . ' ' . (string) ($db->query("SELECT activityType FROM tblActivityLogs WHERE logID > " . $mark . " AND activityType = 'GoLivePushPressed'")->fetch_row()[0] ?? '');
 glb_check(
-    str_contains($noteText, 'is live now') === false && str_contains($noteText, 'selftest.invalid') === false && str_contains($noteText, 'GLB channel') === false && str_contains($noteText, '/live') === false && preg_match('/\d{6}.*\d{6}.*\d{6}/', $noteText) !== 1,
+    str_contains($noteText, 'is live now') === false && str_contains($noteText, 'selftest.invalid') === false && str_contains($noteText, 'GLB channel') === false && str_contains($noteText, '/live') === false && glb_find('/\d{6}.*\d{6}.*\d{6}/', $noteText) !== 1,
     'and the line holds nothing of the push: no title, no words, no link, no device',
     $noteText
 );
@@ -1516,7 +1607,7 @@ $subscribe = static function (string $jarFile, ?string $csrf) use ($subscribeBod
     $raw  = (string) curl_exec($handle);
     $size = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
     $json = json_decode(substr($raw, $size), true);
-    return ['status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE), 'json' => is_array($json) ? $json : [], 'mine' => preg_match('/^X-Go-Live-Selftest:\s*' . $glb['token'] . '\s*$/mi', substr($raw, 0, $size)) === 1];
+    return ['status' => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE), 'json' => is_array($json) ? $json : [], 'mine' => glb_find('/^X-Go-Live-Selftest:\s*' . $glb['token'] . '\s*$/mi', substr($raw, 0, $size)) === 1];
 };
 $nobody = $subscribe('', null);
 glb_check($nobody['status'] === 401 && $nobody['mine'] === true && str_contains((string) ($nobody['json']['error'] ?? ''), 'Please sign in') && $devices(GLB_SUBSCRIBE_ENDPOINT) === 0, 'a request from nobody (no session at all) is refused (401) in plain words, and stores nothing', 'HTTP ' . $nobody['status'] . ' ' . json_encode($nobody['json']));
@@ -1565,9 +1656,9 @@ echo "\nL. What an administrator is told about the devices\n";
 // (No glb_reset() here: part M reads the outcomes the devices have recorded, over the whole run.)
 $integrations = glb_request($jar['admin1'], 'GET', '/admin/integrations/push');
 $numbers = [];
-if (preg_match_all('#<div class="row py-2[^"]*">\s*<div class="col-6">(.*?)</div>\s*<div class="col-6 text-end">(\d+)</div>#s', $integrations['body'], $rows, PREG_SET_ORDER) > 0) {
+if (glb_findAll('#<div class="row py-2[^"]*">\s*<div class="col-6">(.*?)</div>\s*<div class="col-6 text-end">(\d+)</div>#s', $integrations['body'], $rows, PREG_SET_ORDER) > 0) {
     foreach ($rows as $row) {
-        $numbers[trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($row[1]), ENT_QUOTES, 'UTF-8')))] = (int) $row[2];
+        $numbers[trim((string) glb_replace('/\s+/', ' ', html_entity_decode(strip_tags($row[1]), ENT_QUOTES, 'UTF-8')))] = (int) $row[2];
     }
 }
 $numberFor = static function (string $startsWith) use ($numbers): ?int {
@@ -1652,10 +1743,10 @@ $glbSaidAfter = static function () use (&$jar): string {
     //    stripping the nonce: there is nothing else in it to drift, so the
     //    comparison cannot be blinded by widening a pattern.
     $page = glb_request($jar['admin1'], 'GET', '/admin/calendar/coordinators?eventID=' . (string) GLB_EVENT);
-    if (preg_match('/<div class="alert alert-[a-z]+" role="alert" data-portal-flash>(.*?)<\/div>/s', (string) $page['body'], $found) !== 1) {
+    if (glb_find('/<div class="alert alert-[a-z]+" role="alert" data-portal-flash>(.*?)<\/div>/s', (string) $page['body'], $found) !== 1) {
         return '';
     }
-    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($found[1]), ENT_QUOTES, 'UTF-8')));
+    return trim((string) glb_replace('/\s+/', ' ', html_entity_decode(strip_tags($found[1]), ENT_QUOTES, 'UTF-8')));
 };
 
 $before = $glbCoordRows();

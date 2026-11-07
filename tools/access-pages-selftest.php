@@ -320,6 +320,97 @@ function ok(string $label, bool $passed, string $detail = ''): void
     echo 'FAIL — ' . $label . ($detail === '' ? '' : "\n        " . $detail) . "\n";
 }
 
+/**
+ * 🔍 A PATTERN SEARCH THAT CANNOT BE MISTAKEN FOR "NOT THERE" (#829).
+ *
+ * `preg_match()` and `preg_match_all()` answer `false` when the search could
+ * not RUN at all — PCRE's JIT stack ran out, or the backtracking limit was
+ * reached — and every search in this file was read with `=== 1`, `!== 1`,
+ * `> 0` or by looking at the matches it filled in. So a search that never ran
+ * gave exactly the answer of a search that found nothing, and a check asking
+ * for ABSENCE ("the page does NOT show…") passed on a page it never read.
+ * That is not hypothetical: `tools/db-strict-mode-selftest.php` hit the JIT
+ * limit on the admin dashboard once that page grew past roughly 20-30 KB, and
+ * its "shows NO alert" check went on passing whatever the page drew (#792).
+ *
+ * These two answer EXACTLY what PHP's functions answer whenever the search
+ * runs, so no check here asks anything different. When it cannot run they
+ * record a RED check naming the pattern, how much text it was searching and
+ * PHP's own reason, and then THROW, so no caller is ever handed an answer it
+ * could read as "absent" or as "present". The red line comes first on
+ * purpose: a bare uncaught exception is a crash with a label, not a check
+ * that reports.
+ *
+ * Deliberately NOT used inside the router this file writes out for its test
+ * web server (that code runs in another process, where these functions do
+ * not exist, and it searches only a short request path).
+ *
+ * @param mixed $found Filled in exactly as `preg_match()` fills its third argument.
+ */
+function ap_find(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        ap_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same, for `preg_match_all()`: the number of matches when the search
+ * ran, and a red check plus a thrown error when it could not.
+ *
+ * @param mixed $found Filled in exactly as `preg_match_all()` fills its third argument.
+ */
+function ap_findAll(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match_all($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        ap_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same again for `preg_replace()` and `preg_split()`, because they are
+ * the same fault in another form (#829): `preg_replace()` answers `null` when
+ * it cannot run and `preg_split()` answers `false`, and this file turned both
+ * into "nothing" with `(string)`, `(array)` or `?: []`. Text that has been
+ * tidied to an EMPTY string contains nothing, so a check that then asks the
+ * tidied text for ABSENCE ("the statement does not select `moderatorID`")
+ * passed without ever having read it.
+ */
+function ap_replace(string|array $pattern, string|array $replacement, string $subject, int $limit = -1): string
+{
+    $answer = preg_replace($pattern, $replacement, $subject, $limit);
+    if ($answer === null) {
+        ap_searchCouldNotRun(is_array($pattern) === true ? implode(' ', $pattern) : $pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** `preg_split()`, with the same refusal to read "could not run" as "nothing". @return list<string> */
+function ap_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array
+{
+    $answer = preg_split($pattern, $subject, $limit, $flags);
+    if ($answer === false) {
+        ap_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** Record the red check, then stop the caller reading anything into the failure. */
+function ap_searchCouldNotRun(string $pattern, string $subject): never
+{
+    $why = preg_last_error_msg();
+    ok('a pattern search COULD NOT RUN, so its check was not answered (#829)', false, 'pattern ' . $pattern . ' over ' . strlen($subject) . ' bytes: ' . $why . ' — this is NOT "not found"');
+    throw new RuntimeException('A pattern search could not run (' . $why . '), so the check that asked it has no answer: ' . $pattern);
+}
+
 function head(string $text): void
 {
     echo "\n=== " . $text . " ===\n";
@@ -602,13 +693,13 @@ function req(string $jar, string $method, string $path, ?array $post = null, str
     }
     $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
     $head     = substr((string) $raw, 0, $headSize);
-    if (preg_match('/^X-Access-Pages-Selftest:\s*' . $state['token'] . '\s*$/mi', $head) !== 1) {
+    if (ap_find('/^X-Access-Pages-Selftest:\s*' . $state['token'] . '\s*$/mi', $head) !== 1) {
         return ['status' => -1, 'location' => '', 'body' => 'an answer without this run\'s header: it came from a server this run did not start', 'head' => ''];
     }
 
     return [
         'status'   => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
-        'location' => preg_match('/^Location:\s*(\S+)\s*$/mi', $head, $l) === 1 ? $l[1] : '',
+        'location' => ap_find('/^Location:\s*(\S+)\s*$/mi', $head, $l) === 1 ? $l[1] : '',
         'body'     => substr((string) $raw, $headSize),
         'head'     => $head,
     ];
@@ -647,11 +738,11 @@ function refusedAtTheDoor(array $answer): bool
 /** The form token on a page. */
 function token(string $html): string
 {
-    if (preg_match('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $m) === 1) {
+    if (ap_find('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $m) === 1) {
         return $m[1];
     }
 
-    return preg_match('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $html, $m) === 1 ? $m[1] : '';
+    return ap_find('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $html, $m) === 1 ? $m[1] : '';
 }
 
 /** POST a form with a fresh token read from `$formPage`, as a browser would. */
@@ -708,7 +799,7 @@ function said(array $answer): string
 /** The page's top heading, as text. */
 function heading(array $answer): string
 {
-    return preg_match('#<h1[^>]*>(.*?)</h1>#s', $answer['body'], $h) === 1 ? trim(strip_tags($h[1])) : '(no heading)';
+    return ap_find('#<h1[^>]*>(.*?)</h1>#s', $answer['body'], $h) === 1 ? trim(strip_tags($h[1])) : '(no heading)';
 }
 
 // =============================================================================
@@ -1345,7 +1436,7 @@ $toSignIn = static fn (array $answer): bool => $answer['status'] === 302 && str_
  * out: form tokens and other long random values, and the venue number that
  * was asked for. Two pages that are the same after this are the same page.
  */
-$samePage = static fn (array $answer): string => $answer['status'] . ' ' . (string) preg_replace(['/[0-9a-f]{32,}/', '/[A-Za-z0-9+\/]{20,}={0,2}/', '/9167\d\d/'], ['#', '#', 'N'], $answer['body']);
+$samePage = static fn (array $answer): string => $answer['status'] . ' ' . (string) ap_replace(['/[0-9a-f]{32,}/', '/[A-Za-z0-9+\/]{20,}={0,2}/', '/9167\d\d/'], ['#', '#', 'N'], $answer['body']);
 $venuePage = ADDR_A . '/venues/venue?id=';
 foreach (['a member of B' => $jar['bmem'], 'an account with no membership anywhere' => $jar['nomem']] as $who => $file) {
     $outsider = req($file, 'GET', $venuePage . VENUE);
@@ -1814,7 +1905,7 @@ $endedRows = static fn (int $userId): int => (int) one("SELECT COUNT(*) AS n FRO
 //    look-up for a signed-in request, none for anybody else" is COUNTED
 //    rather than assumed. Put back by the clean-up.
 $logBefore = one('SELECT @@GLOBAL.general_log AS general_log, @@GLOBAL.log_output AS log_output');
-if ($logBefore === null || in_array((int) $logBefore['general_log'], [0, 1], true) === false || preg_match('/^[A-Z,]+$/', (string) $logBefore['log_output']) !== 1) {
+if ($logBefore === null || in_array((int) $logBefore['general_log'], [0, 1], true) === false || ap_find('/^[A-Z,]+$/', (string) $logBefore['log_output']) !== 1) {
     refuse('the database would not say how its query log is set');
 }
 $state['queryLog'] = ['general_log' => (int) $logBefore['general_log'], 'log_output' => (string) $logBefore['log_output']];
@@ -1930,7 +2021,7 @@ ok(
     array_column($public, 'status') === [200, 200, 200] && $lookups() === 0 && $cost['namingAccounts'] === 0 && $cost['commands'] > 0,
     'statuses: ' . implode(',', array_column($public, 'status')) . '; look-ups: ' . $lookups() . '; statements naming tblUsers: ' . $cost['namingAccounts'] . ' of ' . $cost['commands']
 );
-ok('#507 is not disturbed: the signed-out sign-in page may be kept offline, a signed-in page is not marked', preg_match('/^X-Offline-Copy:\s*allow\s*$/mi', $public[0]['head']) === 1 && preg_match('/^X-Offline-Copy:/mi', req($jar['mem'], 'GET', $account)['head']) === 0);
+ok('#507 is not disturbed: the signed-out sign-in page may be kept offline, a signed-in page is not marked', ap_find('/^X-Offline-Copy:\s*allow\s*$/mi', $public[0]['head']) === 1 && ap_find('/^X-Offline-Copy:/mi', req($jar['mem'], 'GET', $account)['head']) === 0);
 $logEmpty();
 $answer = req('', 'GET', ADDR_A . '/api/assets/list', null, $keyA);
 ok('an API key is answered as before (200), with no look-up: a key is not a person and uses no session', $answer['status'] === 200 && $lookups() === 0, said($answer) . '; look-ups: ' . $lookups());
@@ -2067,7 +2158,7 @@ $approvalsNow = static function (string $who) use (&$jar, $approve): array {
 
 /** Is the Export button drawn on this copy of the approvals page? */
 $buttonDrawn = static fn (string $html): bool
-    => preg_match('#href="[^"]*/expenses/api/export[^"]*"#i', $html) === 1;
+    => ap_find('#href="[^"]*/expenses/api/export[^"]*"#i', $html) === 1;
 
 // --- who is offered the button -----------------------------------------------
 // An administrator and a global administrator may export; the four below may
@@ -2099,9 +2190,9 @@ foreach (['appr', 'lead', 'trs', 'mem'] as $who) {
 // --- what an administrator actually gets ------------------------------------
 $page = $approvalsNow('adm');
 $csv  = req($jar['adm'], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
-$type = preg_match('/^Content-Type:\s*(.+)$/mi', $csv['head'], $m) === 1 ? strtolower(trim($m[1])) : '';
+$type = ap_find('/^Content-Type:\s*(.+)$/mi', $csv['head'], $m) === 1 ? strtolower(trim($m[1])) : '';
 ok('an administrator gets HTTP 200 and a CSV file, not a web page', $csv['status'] === 200 && str_contains($type, 'text/csv') === true, 'HTTP ' . $csv['status'] . ' type: ' . ($type === '' ? 'none' : $type));
-ok('…sent as a download, with a dated file name', preg_match('/^Content-Disposition:[^\n]*attachment[^\n]*expenses-export-\d{4}-\d{2}-\d{2}\.csv/mi', $csv['head']) === 1, 'Content-Disposition: ' . (preg_match('/^Content-Disposition:\s*(.+)$/mi', $csv['head'], $d) === 1 ? trim($d[1]) : 'none'));
+ok('…sent as a download, with a dated file name', ap_find('/^Content-Disposition:[^\n]*attachment[^\n]*expenses-export-\d{4}-\d{2}-\d{2}\.csv/mi', $csv['head']) === 1, 'Content-Disposition: ' . (ap_find('/^Content-Disposition:\s*(.+)$/mi', $csv['head'], $d) === 1 ? trim($d[1]) : 'none'));
 // The heading row is checked by name and in order. A reordering is a silent
 // break for anybody whose spreadsheet or script reads it by position.
 $firstLine = trim((string) strtok($csv['body'], "\n"));
@@ -2219,7 +2310,7 @@ $storedAll = static fn (int $id): string => (string) json_encode([
 $storedStatus = static fn (int $id): string => var_export(one('SELECT status FROM tblExpenseClaims WHERE claimID = ?', 'i', [$id])['status'] ?? '(no such claim)', true);
 /** The one-off messages a page shows, each as "type: words". Every Expenses page draws them with the same block. */
 $alerts = static function (string $body): array {
-    preg_match_all('#<div class="alert alert-(\w+) alert-dismissible fade show">\s*(.*?)\s*<button#s', $body, $found, PREG_SET_ORDER);
+    ap_findAll('#<div class="alert alert-(\w+) alert-dismissible fade show">\s*(.*?)\s*<button#s', $body, $found, PREG_SET_ORDER);
 
     return array_map(static fn (array $one): string => $one[1] . ': ' . html_entity_decode(trim($one[2]), ENT_QUOTES, 'UTF-8'), $found);
 };
@@ -2269,7 +2360,7 @@ $leave = static function (string $who, string $words) use ($child, $sep): bool {
     foreach ((array) file($who, FILE_IGNORE_NEW_LINES) as $line) {
         $cells = explode("\t", (string) $line);
         $file  = $child . $sep . 'sessions' . $sep . 'sess_' . ($cells[6] ?? '');
-        if (count($cells) === 7 && preg_match('/^[A-Za-z0-9,-]+$/', $cells[6]) === 1 && is_file($file) === true) {
+        if (count($cells) === 7 && ap_find('/^[A-Za-z0-9,-]+$/', $cells[6]) === 1 && is_file($file) === true) {
             return file_put_contents($file, 'flash_msg|' . serialize($words) . 'flash_type|' . serialize('warning'), FILE_APPEND) !== false;
         }
     }
@@ -2278,7 +2369,7 @@ $leave = static function (string $who, string $words) use ($child, $sep): bool {
 };
 /** The claim numbers a list page shows, in order. */
 $listed = static function (string $who, string $address): array {
-    preg_match_all('#</span>\#(\d+)#', req($who, 'GET', $address)['body'], $found);
+    ap_findAll('#</span>\#(\d+)#', req($who, 'GET', $address)['body'], $found);
     $ids = array_map('intval', $found[1]);
     sort($ids);
 
@@ -2288,17 +2379,17 @@ $listed = static function (string $who, string $address): array {
 $card = static function (string $who, string $label): ?int {
     $body = req($who, 'GET', ADDR_A . '/dashboard')['body'];
 
-    return preg_match('#<div class="h4 mb-0 fw-bold">(\d+)</div>\s*<small class="text-muted">' . preg_quote($label, '#') . '</small>#', $body, $m) === 1 ? (int) $m[1] : null;
+    return ap_find('#<div class="h4 mb-0 fw-bold">(\d+)</div>\s*<small class="text-muted">' . preg_quote($label, '#') . '</small>#', $body, $m) === 1 ? (int) $m[1] : null;
 };
 /** Admin → Reports, as the administrator sees it: the two totals, and the "by status" bars. */
 $reports = static function () use ($jar): array {
     $body    = req($jar['adm'], 'GET', ADDR_A . '/admin/reports')['body'];
-    $section = preg_match('#Expense Claims by Status</h5>(.*?)<!-- 📊 Top Activity Types#s', $body, $m) === 1 ? $m[1] : '';
-    preg_match_all('#<span>([A-Za-z]*)</span>\s*<span>(\d+) \(\d+%\)</span>#', $section, $bars);
+    $section = ap_find('#Expense Claims by Status</h5>(.*?)<!-- 📊 Top Activity Types#s', $body, $m) === 1 ? $m[1] : '';
+    ap_findAll('#<span>([A-Za-z]*)</span>\s*<span>(\d+) \(\d+%\)</span>#', $section, $bars);
 
     return [
-        'claims' => preg_match('#<div class="h3 mb-0 text-warning">([\d,]+)</div>\s*<small class="text-muted">Expense Claims</small>#', $body, $m) === 1 ? $m[1] : '(not shown)',
-        'value'  => preg_match('#Total value: <strong>&pound;([\d,.]+)</strong>#', $section, $m) === 1 ? $m[1] : '(not shown)',
+        'claims' => ap_find('#<div class="h3 mb-0 text-warning">([\d,]+)</div>\s*<small class="text-muted">Expense Claims</small>#', $body, $m) === 1 ? $m[1] : '(not shown)',
+        'value'  => ap_find('#Total value: <strong>&pound;([\d,.]+)</strong>#', $section, $m) === 1 ? $m[1] : '(not shown)',
         'bars'   => array_combine($bars[1], array_map('intval', $bars[2])),
     ];
 };
@@ -2311,7 +2402,7 @@ $api = static function (string $filter) use ($jar): array {
 /** One claim's status in the export an administrator downloads, or a word saying why there is none. */
 $exported = static function (int $id) use ($jar, $approve): string {
     $answer = req($jar['adm'], 'GET', ADDR_A . '/expenses/api/export?csrf_token=' . token(req($jar['adm'], 'GET', $approve)['body']));
-    foreach ((array) preg_split('/\R/', $answer['body']) as $line) {
+    foreach ((array) ap_split('/\R/', $answer['body']) as $line) {
         $cells = str_getcsv((string) $line, ',', '"', '');
         if ((string) ($cells[0] ?? '') === (string) $id) {
             return (string) end($cells);
@@ -2377,7 +2468,7 @@ $after = $picture();
 $page  = $view($jar['mem'], 916311);
 ok(
     'the claimant\'s page for it shows a grey "Withdrawn" badge and no Withdraw button',
-    preg_match('#<span class="badge bg-secondary fs-5">\s*Withdrawn\s*</span>#', $page) === 1 && str_contains($page, 'Withdraw Claim') === false && str_contains($page, 'expenses/withdraw/save') === false
+    ap_find('#<span class="badge bg-secondary fs-5">\s*Withdrawn\s*</span>#', $page) === 1 && str_contains($page, 'Withdraw Claim') === false && str_contains($page, 'expenses/withdraw/save') === false
 );
 $all = $storedAll(916311);
 $said = $withdraw($jar['mem'], 916311);
@@ -2417,7 +2508,7 @@ ok(
 ok(
     '…and "Expense Claims" and "Total value" are UNCHANGED: a withdrawn claim still counts in both, as a rejected one does (owner\'s decision, 12 October 2026)',
     $before['reports']['claims'] === $after['reports']['claims'] && $before['reports']['value'] === $after['reports']['value']
-        && preg_match('/^[\d,]+$/', $after['reports']['claims']) === 1 && preg_match('/^[\d,]+\.\d\d$/', $after['reports']['value']) === 1 && (float) str_replace(',', '', $after['reports']['value']) >= 12.5,
+        && ap_find('/^[\d,]+$/', $after['reports']['claims']) === 1 && ap_find('/^[\d,]+\.\d\d$/', $after['reports']['value']) === 1 && (float) str_replace(',', '', $after['reports']['value']) >= 12.5,
     'claims: ' . $before['reports']['claims'] . ' then ' . $after['reports']['claims'] . '; value: ' . $before['reports']['value'] . ' then ' . $after['reports']['value']
 );
 ok(
@@ -2436,7 +2527,7 @@ ok(
 );
 ok('the export an administrator downloads said Pending for it and now says Withdrawn', $before['export'] === 'Pending' && $after['export'] === 'Withdrawn', 'before: ' . $before['export'] . ' after: ' . $after['export']);
 $page = $view($jar['appr'], 916311);
-ok('an approver who opens the withdrawn claim sees the Withdrawn badge and is offered no "Go to Approvals"', str_contains($page, 'ACCESS-W claim to withdraw') === true && preg_match('#<span class="badge bg-secondary fs-5">\s*Withdrawn\s*</span>#', $page) === 1 && str_contains($page, 'Go to Approvals') === false);
+ok('an approver who opens the withdrawn claim sees the Withdrawn badge and is offered no "Go to Approvals"', str_contains($page, 'ACCESS-W claim to withdraw') === true && ap_find('#<span class="badge bg-secondary fs-5">\s*Withdrawn\s*</span>#', $page) === 1 && str_contains($page, 'Go to Approvals') === false);
 $page = $view($jar['trs'], 916311);
 ok('a treasurer who opens it is offered no "Go to Treasury"', str_contains($page, 'ACCESS-W claim to withdraw') === true && str_contains($page, 'Go to Treasury') === false);
 
@@ -2636,15 +2727,15 @@ $page = $view($jar['mem'], 916311);
 ok(
     'a WITHDRAWN claim\'s page says its stored document was last generated for status Pending and was not remade, and nowhere says it was generated for Withdrawn',
     str_contains($page, '(Last generated for status: Pending. It was not remade when the claim was withdrawn.)') === true && str_contains($page, 'Last generated for status: Withdrawn') === false,
-    preg_match('#\(Last generated for status:[^)]*\)#', $page, $m) === 1 ? 'the page says: ' . $m[0] : 'the page has no such line'
+    ap_find('#\(Last generated for status:[^)]*\)#', $page, $m) === 1 ? 'the page says: ' . $m[0] : 'the page has no such line'
 );
 $pageApproved = $view($jar['mem'], 916312);
 $pagePaid     = $view($jar['mem'], 916313);
 ok(
     '…an approved claim\'s page names the NEWEST document\'s stage (Approved, not the earlier Pending), and a document with no recorded stage gets no such line at all',
     str_contains($pageApproved, '(Last generated for status: Approved)') === true && str_contains($pagePaid, 'claim_916313.pdf') === true && str_contains($pagePaid, 'Last generated for status') === false,
-    (preg_match('#\(Last generated for status:[^)]*\)#', $pageApproved, $m) === 1 ? 'approved claim: ' . $m[0] : 'approved claim: no such line')
-        . (preg_match('#\(Last generated for status:[^)]*\)#', $pagePaid, $m) === 1 ? '; paid claim: ' . $m[0] : '; paid claim: no such line')
+    (ap_find('#\(Last generated for status:[^)]*\)#', $pageApproved, $m) === 1 ? 'approved claim: ' . $m[0] : 'approved claim: no such line')
+        . (ap_find('#\(Last generated for status:[^)]*\)#', $pagePaid, $m) === 1 ? '; paid claim: ' . $m[0] : '; paid claim: no such line')
 );
 
 // --- M9: the e-mail to approvers fails AFTER the withdrawal is stored ---------------
@@ -2697,7 +2788,7 @@ foreach ([[EV_N1, FEED_N_ON, APPR_N1], [EV_N2, FEED_N_ON, APPR_N2], [EV_N3, FEED
 $importsLabel = 'Imported events waiting for approval';
 /** The whole card as the dashboard draws it: its link, then its number, then its words. Gives the link and the number, or null. */
 $importsCard = static function (string $body) use ($importsLabel): ?array {
-    return preg_match(
+    return ap_find(
         '#<a href="([^"]*)" class="text-decoration-none">\s*<div class="card border-warning h-100">(?:(?!</a>).)*?<div class="h4 mb-0 fw-bold">(\d+)</div>\s*<small class="text-muted">'
         . preg_quote($importsLabel, '#') . '</small>#s',
         $body, $m
@@ -2753,7 +2844,7 @@ $exportAdm = $exportOf($jar['adm']);
 ok(
     'the copy of "my data": A\'s administrator is handed the record of when they were told, with the organisation, the day (on its own calendar) and what became of the e-mail',
     is_array($exportAdm) === true && count($exportAdm) === 1 && (int) $exportAdm[0]['siteID'] === ORG_A && $exportAdm[0]['siteName'] === 'Selftest access A'
-    && $exportAdm[0]['lastEmailDay'] === $eventDay && $exportAdm[0]['lastEmailOutcome'] === 'sent' && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) $exportAdm[0]['lastPushAtUtc']) === 1
+    && $exportAdm[0]['lastEmailDay'] === $eventDay && $exportAdm[0]['lastEmailOutcome'] === 'sent' && ap_find('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) $exportAdm[0]['lastPushAtUtc']) === 1
     && array_keys($exportAdm[0]) === ['siteID', 'siteName', 'lastEmailDay', 'lastEmailOutcome', 'lastEmailClaimedAtUtc', 'lastPushAtUtc'],
     json_encode($exportAdm)
 );
@@ -2768,13 +2859,13 @@ ok('…and a member, who is never told, is handed an empty list there, not someb
 /** Every field a browser would send when Save is pressed on the page as shown: ticked boxes, chosen buttons and hidden fields. */
 $fieldsOf = static function (string $html): array {
     $fields = [];
-    preg_match_all('/<input\b[^>]*>/i', $html, $inputs);
+    ap_findAll('/<input\b[^>]*>/i', $html, $inputs);
     foreach ($inputs[0] as $input) {
-        if (preg_match('/\bname="([^"]+)"/', $input, $n) !== 1 || preg_match('/\bvalue="([^"]*)"/', $input, $v) !== 1) {
+        if (ap_find('/\bname="([^"]+)"/', $input, $n) !== 1 || ap_find('/\bvalue="([^"]*)"/', $input, $v) !== 1) {
             continue;
         }
-        $type = preg_match('/\btype="([^"]+)"/', $input, $t) === 1 ? strtolower($t[1]) : 'text';
-        if (($type === 'checkbox' || $type === 'radio') && preg_match('/\bchecked\b/', $input) !== 1) {
+        $type = ap_find('/\btype="([^"]+)"/', $input, $t) === 1 ? strtolower($t[1]) : 'text';
+        if (($type === 'checkbox' || $type === 'radio') && ap_find('/\bchecked\b/', $input) !== 1) {
             continue;
         }
         $fields[html_entity_decode($n[1], ENT_QUOTES, 'UTF-8')] = html_entity_decode($v[1], ENT_QUOTES, 'UTF-8');
@@ -2977,7 +3068,7 @@ ok('clean-up: the four installation-wide rows this part borrowed are back exactl
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
-$bad = array_values(array_filter((array) preg_split('/\R/', $log), static fn (string $line): bool => preg_match('/PHP (Fatal|Parse|Warning|Deprecated|Notice)|Uncaught/', $line) === 1));
+$bad = array_values(array_filter((array) ap_split('/\R/', $log), static fn (string $line): bool => ap_find('/PHP (Fatal|Parse|Warning|Deprecated|Notice)|Uncaught/', $line) === 1));
 ok('the server\'s PHP error log holds no warning, notice or fatal error', $bad === [], count($bad) . ' found: ' . implode(' | ', array_map(static fn (string $line): string => mb_substr($line, 0, 220), array_slice($bad, 0, 4))));
 
 $before = $state['settings'];

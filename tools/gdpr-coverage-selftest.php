@@ -103,6 +103,97 @@ function check(string $what, bool $isOk, string $detail = ''): void
     }
 }
 
+/**
+ * 🔍 A PATTERN SEARCH THAT CANNOT BE MISTAKEN FOR "NOT THERE" (#829).
+ *
+ * `preg_match()` and `preg_match_all()` answer `false` when the search could
+ * not RUN at all — PCRE's JIT stack ran out, or the backtracking limit was
+ * reached — and every search in this file was read with `=== 1`, `!== 1`,
+ * `> 0` or by looking at the matches it filled in. So a search that never ran
+ * gave exactly the answer of a search that found nothing, and a check asking
+ * for ABSENCE ("the page does NOT show…") passed on a page it never read.
+ * That is not hypothetical: `tools/db-strict-mode-selftest.php` hit the JIT
+ * limit on the admin dashboard once that page grew past roughly 20-30 KB, and
+ * its "shows NO alert" check went on passing whatever the page drew (#792).
+ *
+ * These two answer EXACTLY what PHP's functions answer whenever the search
+ * runs, so no check here asks anything different. When it cannot run they
+ * record a RED check naming the pattern, how much text it was searching and
+ * PHP's own reason, and then THROW, so no caller is ever handed an answer it
+ * could read as "absent" or as "present". The red line comes first on
+ * purpose: a bare uncaught exception is a crash with a label, not a check
+ * that reports.
+ *
+ * Deliberately NOT used inside the router this file writes out for its test
+ * web server (that code runs in another process, where these functions do
+ * not exist, and it searches only a short request path).
+ *
+ * @param mixed $found Filled in exactly as `preg_match()` fills its third argument.
+ */
+function gc_find(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        gc_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same, for `preg_match_all()`: the number of matches when the search
+ * ran, and a red check plus a thrown error when it could not.
+ *
+ * @param mixed $found Filled in exactly as `preg_match_all()` fills its third argument.
+ */
+function gc_findAll(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match_all($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        gc_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same again for `preg_replace()` and `preg_split()`, because they are
+ * the same fault in another form (#829): `preg_replace()` answers `null` when
+ * it cannot run and `preg_split()` answers `false`, and this file turned both
+ * into "nothing" with `(string)`, `(array)` or `?: []`. Text that has been
+ * tidied to an EMPTY string contains nothing, so a check that then asks the
+ * tidied text for ABSENCE ("the statement does not select `moderatorID`")
+ * passed without ever having read it.
+ */
+function gc_replace(string|array $pattern, string|array $replacement, string $subject, int $limit = -1): string
+{
+    $answer = preg_replace($pattern, $replacement, $subject, $limit);
+    if ($answer === null) {
+        gc_searchCouldNotRun(is_array($pattern) === true ? implode(' ', $pattern) : $pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** `preg_split()`, with the same refusal to read "could not run" as "nothing". @return list<string> */
+function gc_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array
+{
+    $answer = preg_split($pattern, $subject, $limit, $flags);
+    if ($answer === false) {
+        gc_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** Record the red check, then stop the caller reading anything into the failure. */
+function gc_searchCouldNotRun(string $pattern, string $subject): never
+{
+    $why = preg_last_error_msg();
+    check('a pattern search COULD NOT RUN, so its check was not answered (#829)', false, 'pattern ' . $pattern . ' over ' . strlen($subject) . ' bytes: ' . $why . ' — this is NOT "not found"');
+    throw new RuntimeException('A pattern search could not run (' . $why . '), so the check that asked it has no answer: ' . $pattern);
+}
+
 echo "Erasure coverage — self-test\n";
 echo str_repeat('=', 78) . "\n\n";
 
@@ -321,13 +412,13 @@ check(
 function schemaColumns(string $file): array
 {
     $text = (string) file_get_contents($file);
-    $text = (string) preg_replace('#/\*.*?\*/#s', '', $text);
-    $text = (string) preg_replace('/--[^\n]*/', '', $text);
+    $text = (string) gc_replace('#/\*.*?\*/#s', '', $text);
+    $text = (string) gc_replace('/--[^\n]*/', '', $text);
 
     $tables = [];
-    preg_match_all('/CREATE TABLE IF NOT EXISTS\s+`(\w+)`(.*?)\n\)\s*ENGINE/s', $text, $found, PREG_SET_ORDER);
+    gc_findAll('/CREATE TABLE IF NOT EXISTS\s+`(\w+)`(.*?)\n\)\s*ENGINE/s', $text, $found, PREG_SET_ORDER);
     foreach ($found as $one) {
-        preg_match_all('/^\s+`(\w+)`/m', $one[2], $columns);
+        gc_findAll('/^\s+`(\w+)`/m', $one[2], $columns);
         $tables[$one[1]] = array_values(array_unique(array_merge($tables[$one[1]] ?? [], $columns[1])));
     }
 
@@ -618,7 +709,7 @@ check(
 //    sends the field — only that the handler still asks the right question.
 $registerSave = __DIR__ . '/../web/_apps/calendar/event-register-save.php';
 $registerText = is_readable($registerSave) === true ? (string) file_get_contents($registerSave) : '';
-$registerTidy = (string) preg_replace('/\s+/', ' ', $registerText);
+$registerTidy = (string) gc_replace('/\s+/', ' ', $registerText);
 $theCondition = 'if ($submittedByArg !== null '
     . '&& is_string($_POST[\'registeredFor\'] ?? null) === true '
     . '&& (string) $_POST[\'registeredFor\'] === \'me\' '
@@ -628,7 +719,7 @@ check(
     $registerText !== ''
     && str_contains($registerTidy, $theCondition) === true
     // Assigned in exactly two places: the empty default, and inside that block.
-    && preg_match_all('/\$registeredForArg\s*=(?!=)/', $registerText) === 2
+    && gc_findAll('/\$registeredForArg\s*=(?!=)/', $registerText) === 2
     // Named in the INSERT's column list, AND really bound: the column name on
     // its own would pass on a statement that lists it and binds nothing.
     && str_contains($registerTidy, '`submittedByUserID`, `registeredForUserID`,') === true
@@ -638,7 +729,7 @@ check(
         : 'the whole condition must be present exactly, `$registeredForArg` must be assigned in exactly two places'
         . ' (the empty default and inside that block), and the INSERT must both NAME `registeredForUserID` and'
         . ' BIND $registeredForArg. Found '
-        . preg_match_all('/\$registeredForArg\s*=(?!=)/', $registerText) . ' assignment(s); condition present: '
+        . gc_findAll('/\$registeredForArg\s*=(?!=)/', $registerText) . ' assignment(s); condition present: '
         . (str_contains($registerTidy, $theCondition) === true ? 'yes' : 'NO')
         . '; column in the INSERT: ' . (str_contains($registerTidy, '`submittedByUserID`, `registeredForUserID`,') === true ? 'yes' : 'NO')
         . '; value bound: ' . (str_contains($registerTidy, '$submittedByArg, $registeredForArg') === true ? 'yes' : 'NO')
@@ -662,7 +753,7 @@ check(
 $claimReason  = (string) ($catalogue['tblExpenseClaims']['reason'] ?? '');
 $helpAdmin    = __DIR__ . '/../web/_apps/help/admin.php';
 $helpText     = is_readable($helpAdmin) === true ? (string) file_get_contents($helpAdmin) : '';
-$helpTidy     = (string) preg_replace('/\s+/', ' ', $helpText);
+$helpTidy     = (string) gc_replace('/\s+/', ' ', $helpText);
 $claimSays    = str_contains($claimReason, 'the claimant is kept with them') === true
     && str_contains($claimReason, 'the database refuses it') === true;
 $helpSays     = str_contains($helpTidy, 'the claimant is kept with them') === true;
@@ -1295,7 +1386,7 @@ check(
 $exportPage     = __DIR__ . '/../web/_apps/auth/account/data-export.php';
 $exportText     = is_readable($exportPage) === true ? (string) file_get_contents($exportPage) : '';
 $activitySelect = '';
-if (preg_match("/'activityLogs'\s*=>.*?'(SELECT[^']*tblActivityLogs[^']*)'/s", $exportText, $m) === 1) {
+if (gc_find("/'activityLogs'\s*=>.*?'(SELECT[^']*tblActivityLogs[^']*)'/s", $exportText, $m) === 1) {
     $activitySelect = $m[1];
 }
 check(
@@ -1333,24 +1424,24 @@ check(
 // rather than reaching forward for a variable that does not exist yet. The
 // same mistake crashed the activity-description checks when they were added.
 $exportHere    = (string) @file_get_contents(__DIR__ . '/../web/_apps/auth/account/data-export.php');
-$prayerSelect  = (preg_match('/\'prayerRequests\'\s*=>.*?FROM\s+tblPrayerRequests/s', $exportHere, $m) === 1) ? $m[0] : '';
-$bookingSelect = (preg_match('/\'venueBookingsEdited\'\s*=>.*?FROM\s+tblVenueBookings/s', $exportHere, $m) === 1) ? $m[0] : '';
+$prayerSelect  = (gc_find('/\'prayerRequests\'\s*=>.*?FROM\s+tblPrayerRequests/s', $exportHere, $m) === 1) ? $m[0] : '';
+$bookingSelect = (gc_find('/\'venueBookingsEdited\'\s*=>.*?FROM\s+tblVenueBookings/s', $exportHere, $m) === 1) ? $m[0] : '';
 // Judge the CODE, not the comments beside it. Every check below reads these
 // stripped copies: the first draft tested the raw text and failed on the
 // page's own explanation, which names the columns it is explaining the
 // absence of and quotes "SELECT *" as the thing not to put back.
-$prayerCode    = (string) preg_replace('!//[^\n]*!', '', $prayerSelect);
-$bookingCode   = (string) preg_replace('!//[^\n]*!', '', $bookingSelect);
+$prayerCode    = (string) gc_replace('!//[^\n]*!', '', $prayerSelect);
+$bookingCode   = (string) gc_replace('!//[^\n]*!', '', $bookingSelect);
 
 check(
     'the download does NOT hand over the account numbers of whoever moderated a prayer request or whoever it was given to: they are other people',
     $prayerSelect !== ''
         && str_contains($prayerCode, 'SELECT *') === false
-        && preg_match('/\bmoderatorID\b/', $prayerCode) !== 1
-        && preg_match('/\bassignedToUserID\b/', $prayerCode) !== 1,
+        && gc_find('/\bmoderatorID\b/', $prayerCode) !== 1
+        && gc_find('/\bassignedToUserID\b/', $prayerCode) !== 1,
     $prayerSelect === ''
         ? 'the prayer-request query could not be found in data-export.php at all, so this check proves nothing: find it and fix this check'
-        : 'it selects: ' . preg_replace('/\s+/', ' ', $prayerSelect)
+        : 'it selects: ' . gc_replace('/\s+/', ' ', $prayerSelect)
 );
 check(
     'and it still hands over the request that is the person\'s own: the subject, the body, how it was answered and when',
@@ -1358,15 +1449,15 @@ check(
         && str_contains($prayerCode, 'subject') === true
         && str_contains($prayerCode, 'body') === true
         && str_contains($prayerCode, 'submitterID') === true,
-    'it selects: ' . preg_replace('/\s+/', ' ', $prayerSelect)
+    'it selects: ' . gc_replace('/\s+/', ' ', $prayerSelect)
 );
 check(
     'the download does NOT hand over the free-text notes of a booking somebody merely edited: anybody may have written them, about anybody',
     $bookingSelect !== ''
-        && preg_match('/\bnotes\b/', $bookingCode) !== 1,
+        && gc_find('/\bnotes\b/', $bookingCode) !== 1,
     $bookingSelect === ''
         ? 'the venue-booking query could not be found in data-export.php at all, so this check proves nothing: find it and fix this check'
-        : 'it selects: ' . preg_replace('/\s+/', ' ', $bookingSelect)
+        : 'it selects: ' . gc_replace('/\s+/', ' ', $bookingSelect)
 );
 
 // -----------------------------------------------------------------------------
@@ -1391,7 +1482,7 @@ check(
 //    appear in the catalogue at all.
 // -----------------------------------------------------------------------------
 $handWrittenPart = substr($eraser, 0, (int) strpos($eraser, 'private static function fromPersonalDataCatalogue'));
-preg_match_all(
+gc_findAll(
     "/'table'\s*=>\s*'(\w+)'\s*,\s*'userCol'\s*=>\s*'(\w+)'\s*,\s*'action'\s*=>\s*'(\w+)'/s",
     $handWrittenPart,
     $handMatches,
@@ -1502,7 +1593,7 @@ foreach ($dedicatedSteps as $table => $method) {
     } elseif ($catalogueAt !== false && $callAt > $catalogueAt) {
         $dedicatedFaults[] = 'execute() calls ' . $method . '() after the catalogue is walked';
     }
-    if (preg_match('/\b(FROM|JOIN)\s+' . preg_quote($table, '/') . '\b/', $export) !== 1) {
+    if (gc_find('/\b(FROM|JOIN)\s+' . preg_quote($table, '/') . '\b/', $export) !== 1) {
         $dedicatedFaults[] = 'the data export never reads ' . $table;
     }
 }
@@ -1598,7 +1689,7 @@ $process     = is_readable($processFile) === true ? (string) file_get_contents($
 $clockFaults = [];
 $utcUses     = 0;
 foreach (['GdprEraser.php' => $eraser, 'process.php' => $process] as $name => $source) {
-    preg_match_all('/claimedAt\s*(?:=|<|>|<=|>=)\s*([A-Za-z_]+(?:\([A-Za-z_]*)?)/', $source, $uses);
+    gc_findAll('/claimedAt\s*(?:=|<|>|<=|>=)\s*([A-Za-z_]+(?:\([A-Za-z_]*)?)/', $source, $uses);
     foreach ($uses[1] as $rightHandSide) {
         if (in_array($rightHandSide, ['UTC_TIMESTAMP(', 'DATE_SUB(UTC_TIMESTAMP', 'NULL'], true) === true) {
             $utcUses++;
@@ -1641,7 +1732,7 @@ $filers = [];
 $webDir = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../web', FilesystemIterator::SKIP_DOTS));
 foreach ($webDir as $file) {
     if ($file->getExtension() === 'php'
-        && preg_match('/INSERT\s+INTO\s+`?tblErasureRequest`?/i', $codeOnly((string) file_get_contents($file->getPathname()))) === 1
+        && gc_find('/INSERT\s+INTO\s+`?tblErasureRequest`?/i', $codeOnly((string) file_get_contents($file->getPathname()))) === 1
     ) {
         $filers[] = basename($file->getPathname());
     }
@@ -1774,7 +1865,7 @@ $maskedCode = static function (string $path): string {
             : $token[1];
     }
 
-    return (string) preg_replace('/\s+/', ' ', $code);
+    return (string) gc_replace('/\s+/', ' ', $code);
 };
 
 /**
@@ -1823,13 +1914,13 @@ foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($webBase, 
     if ($file->getExtension() !== 'php') {
         continue;
     }
-    preg_match_all('/GdprEraser::fileRequest\(([^;]*)\);/', $codeOnly((string) file_get_contents($file->getPathname())), $calls);
+    gc_findAll('/GdprEraser::fileRequest\(([^;]*)\);/', $codeOnly((string) file_get_contents($file->getPathname())), $calls);
     foreach ($calls[1] as $arguments) {
         // The PATH under `web/`, never the file's own name: `do.php` is a
         // generic name, and a new ungated file called that read as the gated
         // one (found by planting, 31 October 2026).
         $where = str_replace(DIRECTORY_SEPARATOR, '/', substr((string) $file->getPathname(), strlen($webBase) + 1));
-        $filingCalls[] = $where . ': ' . preg_replace('/\s+/', ' ', trim($arguments));
+        $filingCalls[] = $where . ': ' . gc_replace('/\s+/', ' ', trim($arguments));
     }
 }
 sort($filingCalls);
@@ -1856,11 +1947,11 @@ check(
 // say they have checked who is asking; the handler must go through the one
 // function that writes the audit line.
 $listPage    = (string) @file_get_contents(__DIR__ . '/../web/_apps/admin/erasure/index.php');
-$confirmForm = preg_match('/<form[^>]*>(?:(?!<\/form>).)*name="action" value="confirm"(?:(?!<\/form>).)*<\/form>/s', $listPage, $form) === 1 ? $form[0] : '';
+$confirmForm = gc_find('/<form[^>]*>(?:(?!<\/form>).)*name="action" value="confirm"(?:(?!<\/form>).)*<\/form>/s', $listPage, $form) === 1 ? $form[0] : '';
 check(
     'the "Confirm on the person\'s behalf" button carries the form token and a prompt about checking identity, and its handler writes the audit line',
     $confirmForm !== '' && str_contains($confirmForm, 'name="csrf_token"') === true
-        && preg_match('/data-confirm="[^"]*checked, yourself, that the request really comes from them[^"]*"/', $confirmForm) === 1
+        && gc_find('/data-confirm="[^"]*checked, yourself, that the request really comes from them[^"]*"/', $confirmForm) === 1
         && str_contains($codeOnly($process), 'GdprEraser::confirmOnBehalf($requestId, $siteId, $adminId)') === true
         && str_contains($codeOnly($process), "Auth::verifyCsrf(\$_POST['csrf_token'] ?? '') === false") === true,
     $confirmForm === '' ? 'no such form on the list page' : 'the form, the prompt or the handler is not as expected'
@@ -1885,12 +1976,12 @@ $mustBeEmptiable = [
 ];
 $stillRequired = [];
 foreach ($mustBeEmptiable as $table => $column) {
-    $definition = preg_match('/CREATE TABLE IF NOT EXISTS\s+`' . $table . '`(.*?)\n\)\s*ENGINE/s', $schemaText, $found) === 1
-        && preg_match('/^\s+`' . $column . '`\s+([^\n]*)$/m', $found[1], $line) === 1 ? $line[1] : '';
+    $definition = gc_find('/CREATE TABLE IF NOT EXISTS\s+`' . $table . '`(.*?)\n\)\s*ENGINE/s', $schemaText, $found) === 1
+        && gc_find('/^\s+`' . $column . '`\s+([^\n]*)$/m', $found[1], $line) === 1 ? $line[1] : '';
     if ($definition === '' || stripos($definition, 'NOT NULL') !== false || stripos($definition, 'DEFAULT NULL') === false) {
         $stillRequired[] = $table . '.' . $column . ' in the fresh-install script (' . trim(substr($definition, 0, 40)) . ')';
     }
-    if (preg_match('/ALTER TABLE `' . $table . '` MODIFY COLUMN `' . $column . '` INT DEFAULT NULL/', $migration) !== 1) {
+    if (gc_find('/ALTER TABLE `' . $table . '` MODIFY COLUMN `' . $column . '` INT DEFAULT NULL/', $migration) !== 1) {
         $stillRequired[] = $table . '.' . $column . ' in migration 208';
     }
 }
@@ -1913,7 +2004,7 @@ foreach ([
 ] as $page => $join) {
     // The pieces of a statement are joined up first, so that a join split
     // over two lines of PHP, or with a comment between them, is still read.
-    $joinedUp = (string) preg_replace("/'\s*\.\s*'/", '', $codeOnly((string) @file_get_contents(__DIR__ . '/../web/' . $page)));
+    $joinedUp = (string) gc_replace("/'\s*\.\s*'/", '', $codeOnly((string) @file_get_contents(__DIR__ . '/../web/' . $page)));
     if (str_contains($joinedUp, $join) === false) {
         $hidesKeptRecords[] = $page;
     }
@@ -1997,7 +2088,7 @@ $method          = static function (string $code, string $name): string {
     if ($start === false) {
         return '';
     }
-    $next = preg_match('/\n\s*(?:(?:public|private|protected)\s+)?(?:static\s+)?function\s+\w+\s*\(/', $code, $m, PREG_OFFSET_CAPTURE, $start + 10) === 1
+    $next = gc_find('/\n\s*(?:(?:public|private|protected)\s+)?(?:static\s+)?function\s+\w+\s*\(/', $code, $m, PREG_OFFSET_CAPTURE, $start + 10) === 1
         ? $m[0][1]
         : false;
 
@@ -2043,7 +2134,7 @@ check(
     $rowState !== '' && str_contains($rowState, "GdprEraser::emptiedAccountSql('u')")
     && str_contains($rowState, 'max($storedLastGift, (string) ($found[\'newestGift\'] ?? \'\'), (string) ($found[\'newestEnvelope\'] ?? \'\'))')
     && str_contains($rowState, 'self::stateFor($rule, $from, $today)')
-    && preg_match('/if \(\$state\[\'accountEmptied\'\] === false && \$state\[\'state\'\] !== \'unreadable\'\) \{\s*\$state\[\'state\'\] = \'not-erased\';/', $rowState) === 1
+    && gc_find('/if \(\$state\[\'accountEmptied\'\] === false && \$state\[\'state\'\] !== \'unreadable\'\) \{\s*\$state\[\'state\'\] = \'not-erased\';/', $rowState) === 1
     && str_contains($emptiedSql, '.isActive = 0 AND ') && str_contains($emptiedSql, 'self::TOMBSTONE_NAME') && str_contains($emptiedSql, 'self::TOMBSTONE_EMAIL')
     && substr_count($emptiedSql, ' AND ') === 2 && str_contains($emptiedSql, ' OR ') === false
     && str_contains($method($retentionCode, 'keptDonorsForSite'), 'self::stateOfKeptRow('),
@@ -2185,7 +2276,7 @@ check(
 // a cleared name is never counted as a deletion.
 $sweepFn = $method($sweepCode, 'run_giving_identity_sweep');
 $total   = '';
-if (preg_match("/'totalDeleted'\s*=>\s*([^,\]]+)/", $sweepCode, $m) === 1) {
+if (gc_find("/'totalDeleted'\s*=>\s*([^,\]]+)/", $sweepCode, $m) === 1) {
     $total = $m[1];
 }
 check(
@@ -2219,7 +2310,7 @@ check(
     && str_contains($envelopeStep, 'k.clearedAt IS NULL')
     && str_contains($envelopeStep, "SET ce.giverID = NULL, ce.giverName = NULL WHERE ce.giverID = ? AND NOT ' . \$keptEnvelope")
     && strpos($keepStep, 'self::unnameCountEnvelopes(') > strpos($keepStep, 'self::keepGivingRecordsAtSite(')
-    && preg_match('/UPDATE tblCountEnvelopes ce.*?SET ce\.giverID = NULL, ce\.giverName = NULL/s', $clear) === 1
+    && gc_find('/UPDATE tblCountEnvelopes ce.*?SET ce\.giverID = NULL, ce\.giverName = NULL/s', $clear) === 1
     && in_array('giverID', \Portal\Core\GdprEraser::LINK_COLUMNS, true) === true
     && in_array('giverID', \Portal\Core\GdprEraser::ACTOR_COLUMNS, true) === false,
     'gift: ' . $giftLine . '; envelope: ' . $envelopeLine
@@ -2248,21 +2339,21 @@ check(
 // changed; reading it would make every organisation look British.
 $countryLiterals = [];
 foreach (['GivingRetention.php' => $retentionCode, 'giving-records/index.php' => $codeOnly($settingsPage), 'giving-records/save.php' => $settingsSave] as $where => $code) {
-    if (preg_match('/org\.address|[\'"](GB|UK|US|IE)[\'"]|HMRC|United Kingdom/', $code) === 1) {
+    if (gc_find('/org\.address|[\'"](GB|UK|US|IE)[\'"]|HMRC|United Kingdom/', $code) === 1) {
         $countryLiterals[] = $where;
     }
 }
 check(
     'no country is built in: the giving-records code never reads the installation\'s own address, and names no country, no tax office and no figure of its own',
     $retentionCode !== '' && $countryLiterals === [] && str_contains($retentionCode, "'giving.retention.countryCode'")
-    && preg_match("/giving\.retention\.countryCode',\s*'',\s*''/", $migration209) === 1
-    && preg_match("/giving\.retention\.countryCode',\s*'',\s*''/", $schemaText) === 1
-    && preg_match("/giving\.retention\.confirmed',\s*'false',\s*'false'/", $schemaText) === 1,
+    && gc_find("/giving\.retention\.countryCode',\s*'',\s*''/", $migration209) === 1
+    && gc_find("/giving\.retention\.countryCode',\s*'',\s*''/", $schemaText) === 1
+    && gc_find("/giving\.retention\.confirmed',\s*'false',\s*'false'/", $schemaText) === 1,
     'a country or tax office is named in: ' . implode(', ', $countryLiterals)
 );
 
 // The words on the settings page.
-$pageText = (string) preg_replace('/\s+/', ' ', strip_tags((string) preg_replace('/<\?php.*?\?>/s', ' ', $settingsPage)));
+$pageText = (string) gc_replace('/\s+/', ' ', strip_tags((string) gc_replace('/<\?php.*?\?>/s', ' ', $settingsPage)));
 $claims   = [];
 foreach (['the law requires', 'required by law', 'legally required', 'you must keep', 'must be kept for', 'the legal period'] as $phrase) {
     if (stripos($pageText, $phrase) !== false) {
@@ -2304,7 +2395,7 @@ check(
     $privacyCode !== '' && $guardAt !== false && $yearsAt !== false && $elseAt !== false && $guardAt < $yearsAt && $yearsAt < $elseAt
     && substr_count($privacyCode, "\$givingRule['years']") === 2
     && str_contains($privacyCode, 'GivingRetention::ruleForSite(Site::id())')
-    && preg_match('/HMRC|financialRetentionYears/', $privacyCode) !== 1
+    && gc_find('/HMRC|financialRetentionYears/', $privacyCode) !== 1
     && str_contains($privacyCode, 'has not yet confirmed how many years')
     // Both branches say so when the organisation keeps the name on EVERY
     // gift. The unconfirmed one used to say "gifts covered by a tax
@@ -2420,7 +2511,7 @@ check(
     'the rule that refuses an unusable parent match is still ASKED by the step, and still fails it',
     $processEntryBody !== ''
         && str_contains($processEntryBody, '$whyNotViaParent = self::whyParentMatchUnusable($entry);') === true
-        && preg_match('/if \(\$whyNotViaParent !== xx\) \{[^}]*?return self::STEP_FAILED;/', $processEntryBody) === 1,
+        && gc_find('/if \(\$whyNotViaParent !== xx\) \{[^}]*?return self::STEP_FAILED;/', $processEntryBody) === 1,
     'processEntry() no longer asks whyParentMatchUnusable() and fails the step on its answer'
 );
 
@@ -2474,7 +2565,7 @@ $eraserCodeOnly = static function (string $path): string {
         $code .= $token[1];
     }
 
-    return (string) preg_replace('/\s+/', ' ', $code);
+    return (string) gc_replace('/\s+/', ' ', $code);
 };
 
 check(
@@ -2491,7 +2582,7 @@ check(
 check(
     'and that refusal still fails the step rather than carrying on: the guard cannot be reduced to a condition with nothing behind it',
     $processEntryBody !== ''
-        && preg_match(
+        && gc_find(
             '/if \(\$whyLookUpUnsafe !== xx\) \{[^}]*?return self::STEP_FAILED;/',
             $processEntryBody
         ) === 1,
@@ -2572,7 +2663,7 @@ foreach ($walker as $file) {
     $text = (string) file_get_contents($file->getPathname());
     // Every `Logger::audit(` call, on one line or spread over several, and the
     // first quoted table name after it.
-    if (preg_match_all('/Logger::audit\(\s*\n?\s*\x27(tblUser\w+)\x27/', $text, $found) === 1
+    if (gc_findAll('/Logger::audit\(\s*\n?\s*\x27(tblUser\w+)\x27/', $text, $found) === 1
         || isset($found[1]) === true
     ) {
         foreach ($found[1] as $table) {
@@ -2591,7 +2682,7 @@ $stepStart = strpos($eraserSource, 'function eraseAuditTrailAboutPerson');
 $stepBody  = $stepStart === false
     ? ''
     : substr($eraserSource, $stepStart, 4000);
-preg_match_all('/tableName = \x27(tblUser\w+)\x27/', $stepBody, $reached);
+gc_findAll('/tableName = \x27(tblUser\w+)\x27/', $stepBody, $reached);
 $reachedMembership = array_values(array_unique($reached[1] ?? []));
 sort($reachedMembership);
 
@@ -2676,7 +2767,7 @@ $expectedMentions = [
     'reset'       => 'self::$onlyHandWorkLeft = [];',
     'declaration' => 'private static array $onlyHandWorkLeft = [];',
 ];
-$mentionCount = preg_match_all('/onlyHandWorkLeft/', $eraserCode);
+$mentionCount = gc_findAll('/onlyHandWorkLeft/', $eraserCode);
 $mentionsFound = [];
 foreach ($expectedMentions as $what => $text) {
     $mentionsFound[$what] = substr_count($eraserCode, $text);

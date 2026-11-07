@@ -85,7 +85,11 @@
  *     is off, before the handler is loaded. So with the app switched off, no
  *     request reaches the handler's own test or the engine's, and neither can
  *     be exercised here. E02 proves what a member meets and that the router is
- *     what refused it; the two later tests are defence in depth.
+ *     what refused it; the two later tests are defence in depth. **The one
+ *     way past the router is a switch stored as `'true'`**, which the router
+ *     counts as on and the engine as off: section E2 (#831) stores it and
+ *     proves the HANDLER refuses, after the form token was spent, with the
+ *     replacement handed back and nothing sent or counted.
  *   • **It runs ONE worker** (`PHP_CLI_SERVER_WORKERS` is unset), so two
  *     presses never overlap. A test of two members translating the same piece
  *     at the same moment would pass on broken code and is not written.
@@ -107,6 +111,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/485
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/761
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/799
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/831
  * -----------------------------------------------------------------------------
  */
 
@@ -1235,6 +1240,117 @@ ok('E02g …and the Translate control is not drawn for that organisation',
     'the control was drawn although the organisation has switched translation off');
 q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', ['translation.enabled', $siteA]);
 $state['orgSwitchSite'] = 0;
+
+// =============================================================================
+// E2. A SWITCH STORED AS 'true', AND A WITHDRAWAL WHILE SWITCHED OFF (#831)
+// =============================================================================
+// 🔌 TWO READERS OF ONE SWITCH THAT DO NOT AGREE ABOUT ONE SPELLING. The
+//    router (`AppRegistry::isEnabled()`) counts `'1'` AND `'true'` as on; the
+//    pinned engine (`Translation::translate()`) counts only `'1'`. So
+//    `ContentTranslation::isSwitchedOn()` asks for BOTH — the router's answer
+//    and exactly `'1'` — or a hand-written `'true'` would draw a Translate
+//    button whose every press answers 503. That second half was pinned by
+//    NOTHING (#792 round 1 planted it out and every check stayed green),
+//    because no fixture ever stored `'true'`. This section stores it.
+//
+//    WHY THE PRESS IS ON A PIECE NEVER TRANSLATED INTO THAT LANGUAGE.
+//    Announcement A has never been asked for in French, so a press that got
+//    past the gate would have to call the provider and count a request — which
+//    is what makes "nothing was sent, nothing was counted" a check that CAN
+//    fail. A press on something already cached would pass those two whether
+//    the gate held or not. E2-08 then proves the instruments really do see
+//    such a press, by making the very same press once the switch says `'1'`.
+//
+//    The handler, not the router, is what must refuse here: the router lets
+//    `'true'` through, so the refusal arrives AFTER `ApiAuth::requireWrite()`
+//    has spent the form token, and must hand back the replacement or the page
+//    is left holding a dead token (#625).
+head('E2. A switch stored as \'true\', and a withdrawal made while translation is off (#831)');
+
+setSetting('translation.enabled', 'true');
+$page = req($jarA, 'GET', '/announcements/view?slug=ct-ann-a');
+ok('E2-01 with the switch stored as \'true\', the announcement page still opens and FINISHES',
+    $page['status'] === 200 && str_contains($page['body'], '</html>') === true,
+    'HTTP ' . $page['status'] . '; without a finished page E2-02 would pass on a page that never drew anything');
+ok('E2-02 …and the Translate control is NOT drawn, because the engine would refuse every press',
+    str_contains($page['body'], 'data-portal-translate') === false,
+    'the control was drawn while translation.enabled is \'true\', which the engine reads as off — every press would answer 503');
+$account = req($jarA, 'GET', '/account/translation');
+ok('E2-03 the member\'s own Translation page says translation is switched off here',
+    $account['status'] === 200 && str_contains($account['body'], 'id="translation-switched-off"') === true,
+    'HTTP ' . $account['status'] . '; a page saying "a Translate button appears" while none can is untrue');
+
+$before      = count(stubCalls());
+$usageBefore = usageOf($siteA) ?? ['calls' => 0, 'pence' => 0];
+$cachedFr    = static fn (): int => (int) (one('SELECT COUNT(*) AS n FROM `tblContentTranslation` '
+    . 'WHERE `sourceTable` = ? AND `sourceID` = ? AND `targetLanguage` = ?', 'sis', ['tblAnnouncements', $annA, 'fr'])['n'] ?? -1);
+ok('E2-04 (premise) announcement A has never been translated into French, so a press that got through would need a NEW call',
+    $cachedFr() === 0,
+    'a cached French row exists, so E2-06 and E2-07 below could pass whether or not the gate held');
+$tokA   = freshToken($jarA);
+$answer = press($jarA, 'tblAnnouncements', $annA, 'fr', $tokA);
+$switchedOffWords = 'Translation is switched off for this organisation.';
+ok('E2-05 a press is refused by the HANDLER with 403 and its own words — not by the router',
+    $answer['status'] === 403
+    && (string) ($answer['json']['message'] ?? '') === $switchedOffWords
+    && str_contains($answer['body'], $routerSentence) === false,
+    'expected HTTP 403 "' . $switchedOffWords . '"; got HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 300)
+    . '. A 503 means the press reached the engine; the router\'s sentence means the router stopped counting \'true\' as on');
+$handedBackTrue = (string) ($answer['json']['meta']['csrfToken'] ?? '');
+ok('E2-05b …and it carries meta.csrfToken: the token was spent before the handler refused, so a replacement is owed',
+    strlen($handedBackTrue) === 64 && $handedBackTrue !== $tokA,
+    'token length ' . strlen($handedBackTrue) . ($handedBackTrue === $tokA ? ' (the SAME token, so nothing was replaced)' : '')
+    . '; without it every other control and form on the page holds a dead token');
+ok('E2-06 nothing reached the translation company',
+    count(stubCalls()) === $before,
+    'calls before ' . $before . ', after ' . count(stubCalls()));
+$usageAfter = usageOf($siteA) ?? ['calls' => 0, 'pence' => 0];
+ok('E2-07 nothing was counted against the month (no request, no money) and nothing was cached',
+    $usageAfter === $usageBefore && $cachedFr() === 0,
+    'usage ' . json_encode($usageBefore) . ' → ' . json_encode($usageAfter) . '; French rows cached: ' . $cachedFr());
+
+// 🔬 SO THAT E2-06 AND E2-07 CAN FAIL: the same press, with the handed-back
+//    token, once the switch says '1'. It must reach the stub and be counted.
+//    If it did not, the two checks above would be reading instruments that
+//    cannot see a press at all.
+setSetting('translation.enabled', '1');
+$answer = press($jarA, 'tblAnnouncements', $annA, 'fr', $handedBackTrue);
+$usageOn = usageOf($siteA) ?? ['calls' => 0, 'pence' => 0];
+ok('E2-08 switched to \'1\', the SAME press with the handed-back token is accepted, reaches the provider and is counted',
+    $answer['status'] === 200 && count(stubCalls()) === $before + 1 && $usageOn['calls'] === $usageBefore['calls'] + 1,
+    'HTTP ' . $answer['status'] . '; calls before ' . $before . ', after ' . count(stubCalls())
+    . '; counted ' . $usageBefore['calls'] . ' → ' . $usageOn['calls']);
+
+// 🚪 A MEMBER CAN ALWAYS WITHDRAW (D-075, #792). The account page stays open
+//    while the app is switched off for exactly this, and G04b proves it OPENS
+//    — but nothing ever POSTED to it while off, so a handler that refused (or
+//    quietly ignored) a save while the app is off would have left a member
+//    unable to take their permission back, with every check green. Switched
+//    off at the installation, which is what Admin → Apps writes.
+setSetting('translation.enabled', '0');
+optIn(MEMBER_A, true);
+$storedChoice = static fn (): int => (int) (one('SELECT `autoTranslate` AS a FROM `tblUserTranslationPref` WHERE `userID` = ?',
+    'i', [MEMBER_A])['a'] ?? -1);
+$account = req($jarA, 'GET', '/account/translation');
+ok('E2-09 (premise) with translation off, the page opens, says so, and shows the permission as GIVEN',
+    $account['status'] === 200 && str_contains($account['body'], 'id="translation-switched-off"') === true
+    && str_contains($account['body'], 'name="autoTranslate" value="1" checked') === true && $storedChoice() === 1,
+    'HTTP ' . $account['status'] . ', stored ' . $storedChoice() . '; from a choice already withdrawn, E2-11 would pass whatever the save did');
+// The tick-box is simply left out of the post, which is how a browser sends
+// an unticked box.
+$answer = req($jarA, 'POST', '/account/translation', ['csrf_token' => token($account['body'])]);
+ok('E2-10 the withdrawal is accepted while translation is off (302 back to the page)',
+    $answer['status'] === 302 && str_contains($answer['location'], '/account/translation') === true,
+    'HTTP ' . $answer['status'] . ' ' . $answer['location'] . ': ' . substr($answer['body'], 0, 200));
+ok('E2-11 …and the stored choice reads back as WITHDRAWN', $storedChoice() === 0,
+    'tblUserTranslationPref.autoTranslate is ' . $storedChoice() . ' for the member who has just withdrawn');
+$account = req($jarA, 'GET', '/account/translation');
+ok('E2-12 the page then shows the box unticked and says the preference was saved',
+    $account['status'] === 200 && str_contains($account['body'], 'name="autoTranslate" value="1" checked') === false
+    && str_contains($account['body'], 'Translation preferences saved.') === true,
+    'HTTP ' . $account['status'] . '; a member told nothing, or shown the box still ticked, has no way to know the withdrawal held');
+optIn(MEMBER_A, true);
+setSetting('translation.enabled', '1');
 
 // =============================================================================
 // E3. AN EDITED ORIGINAL IS TRANSLATED AFRESH (#799)

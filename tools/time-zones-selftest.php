@@ -272,6 +272,97 @@ function ok(string $label, bool $passed, string $detail = ''): void
     echo 'FAIL — ' . $label . ($detail === '' ? '' : "\n        " . $detail) . "\n";
 }
 
+/**
+ * 🔍 A PATTERN SEARCH THAT CANNOT BE MISTAKEN FOR "NOT THERE" (#829).
+ *
+ * `preg_match()` and `preg_match_all()` answer `false` when the search could
+ * not RUN at all — PCRE's JIT stack ran out, or the backtracking limit was
+ * reached — and every search in this file was read with `=== 1`, `!== 1`,
+ * `> 0` or by looking at the matches it filled in. So a search that never ran
+ * gave exactly the answer of a search that found nothing, and a check asking
+ * for ABSENCE ("the page does NOT show…") passed on a page it never read.
+ * That is not hypothetical: `tools/db-strict-mode-selftest.php` hit the JIT
+ * limit on the admin dashboard once that page grew past roughly 20-30 KB, and
+ * its "shows NO alert" check went on passing whatever the page drew (#792).
+ *
+ * These two answer EXACTLY what PHP's functions answer whenever the search
+ * runs, so no check here asks anything different. When it cannot run they
+ * record a RED check naming the pattern, how much text it was searching and
+ * PHP's own reason, and then THROW, so no caller is ever handed an answer it
+ * could read as "absent" or as "present". The red line comes first on
+ * purpose: a bare uncaught exception is a crash with a label, not a check
+ * that reports.
+ *
+ * Deliberately NOT used inside the router this file writes out for its test
+ * web server (that code runs in another process, where these functions do
+ * not exist, and it searches only a short request path).
+ *
+ * @param mixed $found Filled in exactly as `preg_match()` fills its third argument.
+ */
+function tz_find(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        tz_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same, for `preg_match_all()`: the number of matches when the search
+ * ran, and a red check plus a thrown error when it could not.
+ *
+ * @param mixed $found Filled in exactly as `preg_match_all()` fills its third argument.
+ */
+function tz_findAll(string $pattern, string $subject, mixed &$found = null, int $flags = 0, int $offset = 0): int
+{
+    $answer = preg_match_all($pattern, $subject, $found, $flags, $offset);
+    if ($answer === false) {
+        tz_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/**
+ * The same again for `preg_replace()` and `preg_split()`, because they are
+ * the same fault in another form (#829): `preg_replace()` answers `null` when
+ * it cannot run and `preg_split()` answers `false`, and this file turned both
+ * into "nothing" with `(string)`, `(array)` or `?: []`. Text that has been
+ * tidied to an EMPTY string contains nothing, so a check that then asks the
+ * tidied text for ABSENCE ("the statement does not select `moderatorID`")
+ * passed without ever having read it.
+ */
+function tz_replace(string|array $pattern, string|array $replacement, string $subject, int $limit = -1): string
+{
+    $answer = preg_replace($pattern, $replacement, $subject, $limit);
+    if ($answer === null) {
+        tz_searchCouldNotRun(is_array($pattern) === true ? implode(' ', $pattern) : $pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** `preg_split()`, with the same refusal to read "could not run" as "nothing". @return list<string> */
+function tz_split(string $pattern, string $subject, int $limit = -1, int $flags = 0): array
+{
+    $answer = preg_split($pattern, $subject, $limit, $flags);
+    if ($answer === false) {
+        tz_searchCouldNotRun($pattern, $subject);
+    }
+
+    return $answer;
+}
+
+/** Record the red check, then stop the caller reading anything into the failure. */
+function tz_searchCouldNotRun(string $pattern, string $subject): never
+{
+    $why = preg_last_error_msg();
+    ok('a pattern search COULD NOT RUN, so its check was not answered (#829)', false, 'pattern ' . $pattern . ' over ' . strlen($subject) . ' bytes: ' . $why . ' — this is NOT "not found"');
+    throw new RuntimeException('A pattern search could not run (' . $why . '), so the check that asked it has no answer: ' . $pattern);
+}
+
 function head(string $text): void
 {
     echo "\n=== " . $text . " ===\n";
@@ -483,13 +574,13 @@ function req(string $jar, string $method, string $path, array|string|null $post 
     }
     $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
     $head     = substr((string) $raw, 0, $headSize);
-    if (preg_match('/^X-Time-Zones-Selftest:\s*' . $state['token'] . '\s*$/mi', $head) !== 1) {
+    if (tz_find('/^X-Time-Zones-Selftest:\s*' . $state['token'] . '\s*$/mi', $head) !== 1) {
         return ['status' => -1, 'location' => '', 'body' => 'an answer without this run\'s header: it came from a server this run did not start', 'head' => ''];
     }
 
     return [
         'status'   => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
-        'location' => preg_match('/^Location:\s*(\S+)\s*$/mi', $head, $l) === 1 ? $l[1] : '',
+        'location' => tz_find('/^Location:\s*(\S+)\s*$/mi', $head, $l) === 1 ? $l[1] : '',
         'body'     => substr((string) $raw, $headSize),
         'head'     => $head,
     ];
@@ -497,11 +588,11 @@ function req(string $jar, string $method, string $path, array|string|null $post 
 
 function token(string $html): string
 {
-    if (preg_match('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $m) === 1) {
+    if (tz_find('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $m) === 1) {
         return $m[1];
     }
 
-    return preg_match('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $html, $m) === 1 ? $m[1] : '';
+    return tz_find('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $html, $m) === 1 ? $m[1] : '';
 }
 
 /** POST a form with a fresh token read from `$formPage`, as a browser would. */
@@ -521,16 +612,16 @@ function said(array $answer): string
 /** A page's words, without its tags or its scripts, on one line. */
 function words(string $html): string
 {
-    $html = (string) preg_replace('#<(script|style)\b.*?</\1>#si', ' ', $html);
+    $html = (string) tz_replace('#<(script|style)\b.*?</\1>#si', ' ', $html);
 
-    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+    return trim((string) tz_replace('/\s+/', ' ', html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8')));
 }
 
 /** The message the next page shows after a form was sent (the flash), as words. */
 function flashAfter(string $jar, string $page): string
 {
     $html = req($jar, 'GET', $page)['body'];
-    preg_match_all('#<div class="alert alert-(?:danger|success|warning|info)[^"]*"[^>]*>(.*?)</div>#s', $html, $m);
+    tz_findAll('#<div class="alert alert-(?:danger|success|warning|info)[^"]*"[^>]*>(.*?)</div>#s', $html, $m);
 
     return words(implode(' | ', $m[1]));
 }
@@ -837,7 +928,7 @@ function expectedRowText(?string $installation, ?string $own): string
 function zonesOnPages(string $jar, int $moment, string $healthToken): array
 {
     $info = req($jar, 'GET', '/admin/system-info');
-    preg_match('/Default time zone\s+(\S+)/', words($info['body']), $php);
+    tz_find('/Default time zone\s+(\S+)/', words($info['body']), $php);
     $seen = ['Server Information (PHP\'s zone, set by start-up)' => $php[1] ?? '(not found: ' . said($info) . ')'];
 
     $health = json_decode(req('', 'GET', '/cron/health?token=' . $healthToken)['body'], true);
@@ -1073,13 +1164,13 @@ q('UPDATE tblSites SET siteName = ? WHERE siteID = 1', 's', [(string) ($orgOne['
 $afterPage = req($adminJar, 'GET', '/admin/sites')['body'];
 ok(
     'O24 in the gap, Admin, Organisations does NOT take a time zone: it says to run the upgrade first, with a link to it, shows the zone the portal is really using and disables the box; a zone posted anyway is not stored (the name posted with it is), and the message says so. The Settings page\'s refusal says the same, which is true in that state. After the migration both pages are back to normal',
-    preg_match('#id="zones-wait-for-upgrade">.*?href="/admin/upgrade"#s', $gapPage) === 1 && preg_match('#<select[^>]*id="formTimezone"[^>]*disabled#', $gapPage) === 1
-        && preg_match('#<dt class="col-5">Time zone</dt>\s*<dd class="col-7">\s*' . preg_quote(EVENT_ZONE, '#') . '\s*</dd>#', $gapPage) === 1
+    tz_find('#id="zones-wait-for-upgrade">.*?href="/admin/upgrade"#s', $gapPage) === 1 && tz_find('#<select[^>]*id="formTimezone"[^>]*disabled#', $gapPage) === 1
+        && tz_find('#<dt class="col-5">Time zone</dt>\s*<dd class="col-7">\s*' . preg_quote(EVENT_ZONE, '#') . '\s*</dd>#', $gapPage) === 1
         && $gapRow === ['UTC', 'Selftest zones renamed in the gap'] && str_contains($gapSaid, 'Its time zone was NOT changed') === true && str_contains($gapSaid, 'Run it at Admin, Upgrade') === true
         && $gapSetting === EVENT_ZONE && str_contains($gapRefusal, 'has not yet run their database upgrade: run it at Admin, Upgrade') === true && str_contains($gapRefusal, 'not a setting any more') === false
         && str_contains($gapList, 'Run the upgrade first (Admin, Upgrade)') === true
-        && zoneOfOrg(1) === EVENT_ZONE && str_contains($afterPage, 'zones-wait-for-upgrade') === false && preg_match('#<select[^>]*id="formTimezone"[^>]*required#', $afterPage) === 1,
-    'the notice and its link: ' . json_encode(preg_match('#id="zones-wait-for-upgrade">.*?href="/admin/upgrade"#s', $gapPage) === 1) . '; the box disabled: ' . json_encode(preg_match('#<select[^>]*id="formTimezone"[^>]*disabled#', $gapPage) === 1)
+        && zoneOfOrg(1) === EVENT_ZONE && str_contains($afterPage, 'zones-wait-for-upgrade') === false && tz_find('#<select[^>]*id="formTimezone"[^>]*required#', $afterPage) === 1,
+    'the notice and its link: ' . json_encode(tz_find('#id="zones-wait-for-upgrade">.*?href="/admin/upgrade"#s', $gapPage) === 1) . '; the box disabled: ' . json_encode(tz_find('#<select[^>]*id="formTimezone"[^>]*disabled#', $gapPage) === 1)
         . '; ' . said($gapSave) . ' "' . $gapSaid . '"; row and name ' . json_encode($gapRow) . '; the old setting ' . json_encode($gapSetting) . '; the refusal: "' . $gapRefusal . '"; after: row ' . json_encode(zoneOfOrg(1))
 );
 setting('mail.smtp.certCheck', 'on');
@@ -1136,11 +1227,11 @@ $newest = static fn (string $nameLike): int => (int) (one('SELECT eventID FROM t
 
 // ---- the event form ---------------------------------------------------------
 $formPage = req($adminJar, 'GET', '/calendar/manage')['body'];
-preg_match('#<select[^>]*name="timezone"[^>]*id="eventTimezone-new"[^>]*>(.*?)</select>#s', $formPage, $zoneBox);
+tz_find('#<select[^>]*name="timezone"[^>]*id="eventTimezone-new"[^>]*>(.*?)</select>#s', $formPage, $zoneBox);
 ok(
     'W01 the event form offers a LIST of real zone names where there used to be a free-text box, and a new event starts on the organisation\'s own zone',
     isset($zoneBox[1]) === true && substr_count($zoneBox[1], '<option') >= 400 && str_contains($zoneBox[1], '<option value="' . ORG_ZONE . '" selected>') === true
-        && preg_match('#<input[^>]*name="timezone"#', $formPage) === 0,
+        && tz_find('#<input[^>]*name="timezone"#', $formPage) === 0,
     isset($zoneBox[1]) === true ? substr_count($zoneBox[1], '<option') . ' choices; the organisation\'s zone selected: ' . json_encode(str_contains($zoneBox[1], '<option value="' . ORG_ZONE . '" selected>')) : 'no list of zones on the form'
 );
 $formFields = static fn (string $name, int $day, array $more = []): array => array_merge([
@@ -1204,8 +1295,8 @@ q(
     'sss', [$skipped, $skipped, EVENT_ZONE]
 );
 $skippedForm = req($adminJar, 'GET', '/calendar/manage?edit=960460')['body'];
-preg_match('#name="startDateTime"[^>]*value="([^"]*)"#s', $skippedForm, $shownStart);
-preg_match('#name="endDateTime"[^>]*value="([^"]*)"#s', $skippedForm, $shownEnd);
+tz_find('#name="startDateTime"[^>]*value="([^"]*)"#s', $skippedForm, $shownStart);
+tz_find('#name="endDateTime"[^>]*value="([^"]*)"#s', $skippedForm, $shownEnd);
 ok(
     'W05b the edit form shows a stored time AS STORED, for a start and an end at ' . substr($skipped, 11, 5) . ' on the night the organisation\'s own clock skips that hour (read through that clock it came out an hour later, and Save stored it)',
     ($shownStart[1] ?? '') === str_replace(' ', 'T', substr($skipped, 0, 16)) && ($shownEnd[1] ?? '') === str_replace(' ', 'T', substr($skipped, 0, 16))
@@ -1619,22 +1710,22 @@ foreach ($made as $label => $eventId) {
     ok(
         'R the event page, for an event made by ' . $label . ': "Timezone: ' . $want . '"' . ($label === 'the calendar importer' ? '' : ', and the published start carries that zone\'s offset (' . substr($offset, -6) . ')'),
         $zone === $want && str_contains(words($page['body']), 'Timezone: ' . $want) === true && $published === true,
-        said($page) . '; stored ' . $zone . '; "Timezone:" line: ' . (preg_match('/Timezone: \S+/', words($page['body']), $t) === 1 ? $t[0] : '(none)') . '; looked for ' . $offset
+        said($page) . '; stored ' . $zone . '; "Timezone:" line: ' . (tz_find('/Timezone: \S+/', words($page['body']), $t) === 1 ? $t[0] : '(none)') . '; looked for ' . $offset
     );
     // The calendar feed (a personal subscription).
-    $inFeed = preg_match('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:' . preg_quote((string) $row['eventName'], '/') . '(?:(?!END:VEVENT).)*END:VEVENT/s', $feedText, $block) === 1 ? $block[0] : '';
+    $inFeed = tz_find('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:' . preg_quote((string) $row['eventName'], '/') . '(?:(?!END:VEVENT).)*END:VEVENT/s', $feedText, $block) === 1 ? $block[0] : '';
     ok(
         'R the calendar feed, for an event made by ' . $label . ': DTSTART;TZID=' . $want . ':' . $local . ' and ' . $wantEnd,
         str_contains($inFeed, 'DTSTART;TZID=' . $want . ':' . $local) === true && str_contains($inFeed, $wantEnd) === true,
-        $inFeed === '' ? 'the event is not in the feed (' . strlen($feedText) . ' bytes)' : (preg_match_all('/D(?:TSTART|TEND)[^\r\n]*/', $inFeed, $d) > 0 ? implode(' ', $d[0]) : 'no DTSTART')
-            . '; the file declares ' . (preg_match('/X-WR-TIMEZONE:[^\r\n]*/', $feedText, $x) === 1 ? $x[0] : 'no zone')
+        $inFeed === '' ? 'the event is not in the feed (' . strlen($feedText) . ' bytes)' : (tz_findAll('/D(?:TSTART|TEND)[^\r\n]*/', $inFeed, $d) > 0 ? implode(' ', $d[0]) : 'no DTSTART')
+            . '; the file declares ' . (tz_find('/X-WR-TIMEZONE:[^\r\n]*/', $feedText, $x) === 1 ? $x[0] : 'no zone')
     );
     // The export of the one event.
     $export = str_replace("\r\n ", '', req($adminJar, 'GET', '/calendar/export?id=' . $eventId)['body']);
     ok(
         'R the export, for an event made by ' . $label . ': DTSTART;TZID=' . $want . ':' . $local . ' and ' . $wantEnd,
         str_contains($export, 'DTSTART;TZID=' . $want . ':' . $local) === true && str_contains($export, $wantEnd) === true,
-        preg_match('/BEGIN:VEVENT.*?(DTSTART[^\r\n]*).*?(DTEND[^\r\n]*)/s', $export, $d) === 1 ? $d[1] . ' ' . $d[2] : 'no event with a start and an end in ' . strlen($export) . ' bytes'
+        tz_find('/BEGIN:VEVENT.*?(DTSTART[^\r\n]*).*?(DTEND[^\r\n]*)/s', $export, $d) === 1 ? $d[1] . ' ' . $d[2] : 'no event with a start and an end in ' . strlen($export) . ' bytes'
     );
     // The events API's detail answer: one zone field, the right one, and no second one.
     $detail = json_decode(req('', 'GET', '/api/events/detail?id=' . $eventId, null, ['bearer' => $apiKey])['body'], true);
@@ -1673,26 +1764,26 @@ $oneDayAfter = (new DateTimeImmutable($oneDay, new DateTimeZone('UTC')))->modify
 $dayAfter   = (new DateTimeImmutable($day, new DateTimeZone('UTC')))->modify('+1 day')->format('Ymd');
 $feedAgain  = str_replace("\r\n ", '', req('', 'GET', '/calendar.ics?token=' . $feedToken . '&days=120')['body']);
 $exportDay  = str_replace("\r\n ", '', req($adminJar, 'GET', '/calendar/export?id=' . $allDayId)['body']);
-$feedBlock  = preg_match('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:Selftest zones all day(?:(?!END:VEVENT).)*END:VEVENT/s', $feedAgain, $block) === 1 ? $block[0] : '';
+$feedBlock  = tz_find('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:Selftest zones all day(?:(?!END:VEVENT).)*END:VEVENT/s', $feedAgain, $block) === 1 ? $block[0] : '';
 $wantStart  = 'DTSTART;VALUE=DATE:' . str_replace('-', '', $day);
 $wantEnd    = 'DTEND;VALUE=DATE:' . $dayAfter;
-$oneDayFeed   = preg_match('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:Selftest zones one day(?:(?!END:VEVENT).)*END:VEVENT/s', $feedAgain, $block) === 1 ? $block[0] : '';
+$oneDayFeed   = tz_find('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:Selftest zones one day(?:(?!END:VEVENT).)*END:VEVENT/s', $feedAgain, $block) === 1 ? $block[0] : '';
 $oneDayExport = str_replace("\r\n ", '', req($adminJar, 'GET', '/calendar/export?id=960451')['body']);
 $oneDayRight  = static fn (string $text): bool => str_contains($text, 'DTSTART;VALUE=DATE:' . str_replace('-', '', $oneDay)) === true && str_contains($text, 'DTEND;VALUE=DATE:' . $oneDayAfter) === true;
 ok(
     'R an ALL-DAY event keeps its own date in the calendar feed and in the export: it starts on ' . $day . ' and ends before the day after (east of Greenwich, and in London in summer, it used to go out a day early); and so does one whose end is stored at the start of its own day',
     str_contains($feedBlock, $wantStart) === true && str_contains($feedBlock, $wantEnd) === true && str_contains($exportDay, $wantStart) === true && str_contains($exportDay, $wantEnd) === true
         && $oneDayRight($oneDayFeed) === true && $oneDayRight($oneDayExport) === true,
-    'the feed: ' . (preg_match_all('/D(?:TSTART|TEND)[^\r\n]*/', $feedBlock, $d) > 0 ? implode(' ', $d[0]) : 'the event is not in it')
-        . '; the export: ' . (preg_match('/BEGIN:VEVENT.*?(DTSTART[^\r\n]*).*?(DTEND[^\r\n]*)/s', $exportDay, $x) === 1 ? $x[1] . ' ' . $x[2] : 'no event')
-        . '; the one-day event, feed: ' . (preg_match_all('/D(?:TSTART|TEND)[^\r\n]*/', $oneDayFeed, $d) > 0 ? implode(' ', $d[0]) : 'not in it')
-        . ', export: ' . (preg_match('/BEGIN:VEVENT.*?(DTSTART[^\r\n]*).*?(DTEND[^\r\n]*)/s', $oneDayExport, $x) === 1 ? $x[1] . ' ' . $x[2] : 'no event') . '; looked for the end ' . $oneDayAfter
+    'the feed: ' . (tz_findAll('/D(?:TSTART|TEND)[^\r\n]*/', $feedBlock, $d) > 0 ? implode(' ', $d[0]) : 'the event is not in it')
+        . '; the export: ' . (tz_find('/BEGIN:VEVENT.*?(DTSTART[^\r\n]*).*?(DTEND[^\r\n]*)/s', $exportDay, $x) === 1 ? $x[1] . ' ' . $x[2] : 'no event')
+        . '; the one-day event, feed: ' . (tz_findAll('/D(?:TSTART|TEND)[^\r\n]*/', $oneDayFeed, $d) > 0 ? implode(' ', $d[0]) : 'not in it')
+        . ', export: ' . (tz_find('/BEGIN:VEVENT.*?(DTSTART[^\r\n]*).*?(DTEND[^\r\n]*)/s', $oneDayExport, $x) === 1 ? $x[1] . ' ' . $x[2] : 'no event') . '; looked for the end ' . $oneDayAfter
 );
 ok(
     'R the calendar feed and the export each declare the ORGANISATION\'s zone as the file\'s own (it was "Europe/London" for every customer, written into the code)',
     str_contains($feedAgain, 'X-WR-TIMEZONE:' . ORG_ZONE) === true && str_contains($feedAgain, 'TZID:' . ORG_ZONE) === true
         && str_contains($exportDay, 'X-WR-TIMEZONE:' . ORG_ZONE) === true && str_contains($feedAgain . $exportDay, 'Europe/London') === false,
-    'the feed: ' . (preg_match('/X-WR-TIMEZONE:[^\r\n]*/', $feedAgain, $x) === 1 ? $x[0] : 'none') . '; the export: ' . (preg_match('/X-WR-TIMEZONE:[^\r\n]*/', $exportDay, $x) === 1 ? $x[0] : 'none')
+    'the feed: ' . (tz_find('/X-WR-TIMEZONE:[^\r\n]*/', $feedAgain, $x) === 1 ? $x[0] : 'none') . '; the export: ' . (tz_find('/X-WR-TIMEZONE:[^\r\n]*/', $exportDay, $x) === 1 ? $x[0] : 'none')
 );
 
 // A member of the SECOND organisation only. A feed is asked for with a token and no sign-in, so the request
@@ -1709,8 +1800,8 @@ ok(
     'R the calendar feed of a member of a SECOND organisation is on THAT organisation\'s clock (' . zoneOfOrg(ORG_TWO) . '), not the default organisation\'s: the file declares it, and their 09:30 rota duty goes out as 09:30 there',
     zoneOfOrg(ORG_TWO) === 'America/Santiago' && str_contains($otherFeed, 'X-WR-TIMEZONE:America/Santiago') === true
         && str_contains($otherFeed, 'DTSTART;TZID=America/Santiago:' . str_replace('-', '', $dutyDay) . 'T093000') === true && str_contains($otherFeed, ORG_ZONE) === false,
-    (preg_match('/X-WR-TIMEZONE:[^\r\n]*/', $otherFeed, $x) === 1 ? $x[0] : 'the file declares no zone') . '; the duty: '
-        . (preg_match('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:Duty(?:(?!END:VEVENT).)*END:VEVENT/s', $otherFeed, $b) === 1 && preg_match('/DTSTART[^\r\n]*/', $b[0], $d) === 1 ? $d[0] : 'not in the file (' . strlen($otherFeed) . ' bytes)')
+    (tz_find('/X-WR-TIMEZONE:[^\r\n]*/', $otherFeed, $x) === 1 ? $x[0] : 'the file declares no zone') . '; the duty: '
+        . (tz_find('/BEGIN:VEVENT(?:(?!END:VEVENT).)*SUMMARY:Duty(?:(?!END:VEVENT).)*END:VEVENT/s', $otherFeed, $b) === 1 && tz_find('/DTSTART[^\r\n]*/', $b[0], $d) === 1 ? $d[0] : 'not in the file (' . strlen($otherFeed) . ' bytes)')
 );
 
 // =============================================================================
@@ -1719,7 +1810,7 @@ ok(
 head('U. Text that is not a zone: found, counted and listed for an administrator, and refused where it could be stored');
 // ---- events -------------------------------------------------------------------
 $listPage = req($adminJar, 'GET', '/calendar/manage')['body'];
-preg_match('#<div class="alert alert-warning" role="alert" id="events-unknown-zone" data-count="(\d+)">(.*?)</div>#s', $listPage, $listed);
+tz_find('#<div class="alert alert-warning" role="alert" id="events-unknown-zone" data-count="(\d+)">(.*?)</div>#s', $listPage, $listed);
 ok(
     'U01 Manage Events lists the event stored with text that is not a zone ("London") and the two whose zone box was emptied on the old form, says how many there are (3), and does NOT list one stored with an old name PHP still opens ("US/Eastern")',
     ($listed[1] ?? '') === '3' && str_contains($listed[2] ?? '', 'Selftest older event 960403') === true && str_contains($listed[2] ?? '', 'saved as "London"') === true
@@ -1737,7 +1828,7 @@ ok(
     'stored ' . json_encode($stillLondon) . '; the page said: ' . $refusedSay
 );
 post($adminJar, '/calendar/manage?edit=960403', '/calendar/manage/save', $update(960403, ['timezone' => 'Europe/Paris']));
-$listAfter = preg_match('#id="events-unknown-zone" data-count="(\d+)">(.*?)</div>#s', req($adminJar, 'GET', '/calendar/manage')['body'], $left) === 1 ? $left : ['', '', ''];
+$listAfter = tz_find('#id="events-unknown-zone" data-count="(\d+)">(.*?)</div>#s', req($adminJar, 'GET', '/calendar/manage')['body'], $left) === 1 ? $left : ['', '', ''];
 ok(
     'U03 once an administrator chooses a real zone it is saved, and that event leaves the list (the other two stay on it)',
     zoneOfEvent(960403) === 'Europe/Paris' && $listAfter[1] === '2' && str_contains($listAfter[2], '960403') === false && str_contains($listAfter[2], '960404') === true,
@@ -1750,7 +1841,7 @@ orgZone(ORG_TWO, 'US/Eastern');
 $orgs = req($adminJar, 'GET', '/admin/sites')['body'];
 ok(
     'U04 Admin, Organisations says so on the card of an organisation whose stored zone is not a zone name: what is stored, that UTC is used, and (because PHP could still open it) that its zone-less outside calendars are not imported',
-    preg_match('#data-zone-problem="in-doubt">(.*?)</span>#s', $orgs, $card) === 1 && str_contains(words($card[1]), 'Stored as "US/Eastern", which is not a time zone name the portal knows. UTC is used.') === true
+    tz_find('#data-zone-problem="in-doubt">(.*?)</span>#s', $orgs, $card) === 1 && str_contains(words($card[1]), 'Stored as "US/Eastern", which is not a time zone name the portal knows. UTC is used.') === true
         && str_contains(words($card[1]), 'outside calendars with no time zone of their own are not imported') === true,
     isset($card[1]) === true ? words($card[1]) : 'no such warning on the page'
 );
@@ -1871,7 +1962,7 @@ foreach ($londonEvents as [$id, $name, $days, $before, $imported, $ofSite]) {
 $londonNotice = static function () use ($adminJar): array {
     $html = req($adminJar, 'GET', '/calendar/manage')['body'];
 
-    return preg_match('#id="events-marked-london" data-count="(\d+)" data-coming="(\d+)">(.*?)</div>#s', $html, $m) === 1 ? [$m[1], $m[2], $m[3]] : ['none', 'none', ''];
+    return tz_find('#id="events-marked-london" data-count="(\d+)" data-coming="(\d+)">(.*?)</div>#s', $html, $m) === 1 ? [$m[1], $m[2], $m[3]] : ['none', 'none', ''];
 };
 $notice = $londonNotice();
 ok(
@@ -2610,8 +2701,8 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
     ok(
         'X02 the month grid puts it in the 24th\'s cell at 02:30',
         $month['status'] === 200
-            && preg_match('#data-date|portal-cal-month-cell#', $month['body']) === 1
-            && preg_match('#pill-time">02:30</span>\s*<span class="portal-cal-month-pill-name">\s*' . preg_quote($skipName, '#') . '#', $month['body']) === 1,
+            && tz_find('#data-date|portal-cal-month-cell#', $month['body']) === 1
+            && tz_find('#pill-time">02:30</span>\s*<span class="portal-cal-month-pill-name">\s*' . preg_quote($skipName, '#') . '#', $month['body']) === 1,
         said($month)
     );
     $day = req($adminJar, 'GET', '/calendar?view=day&date=2028-09-24');
@@ -2661,7 +2752,7 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         'X03e the attendance register offers 27 March for the Nuuk event at 23:30, and not the 28th the old moment-then-midnight gave',
         $register['status'] === 200 && str_contains($register['body'], 'option value="2027-03-27"') === true
             && str_contains($register['body'], 'option value="2027-03-28"') === false,
-        said($register) . '; ' . (preg_match_all('#option value="(\d{4}-\d{2}-\d{2})"#', $register['body'], $offered) > 0 ? implode(', ', $offered[1]) : 'no day offered')
+        said($register) . '; ' . (tz_findAll('#option value="(\d{4}-\d{2}-\d{2})"#', $register['body'], $offered) > 0 ? implode(', ', $offered[1]) : 'no day offered')
     );
     $list     = req($adminJar, 'GET', '/calendar?view=list&q=' . rawurlencode($skipName));
     $listText = words($list['body']);
@@ -2672,7 +2763,7 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         said($list) . '; ' . substr($listText, max(0, (int) strpos($listText, $skipName) - 10), 200)
     );
     $landing = req('', 'GET', '/e/' . $landSlug);
-    preg_match('#data-target="([^"]*)"#', $landing['body'], $target);
+    tz_find('#data-target="([^"]*)"#', $landing['body'], $target);
     ok(
         'X05 the public landing page counts down to NEW YORK\'s instant (2028-03-12T03:30:00-04:00, the skipped 02:30 resolved forward), not Auckland\'s',
         $landing['status'] === 200 && ($target[1] ?? '') === '2028-03-12T03:30:00-04:00'
@@ -3109,7 +3200,7 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
     $weekCount = static function () use ($adminJar): ?int {
         $page = req($adminJar, 'GET', '/dashboard');
         if ($page['status'] !== 200
-            || preg_match('#fw-bold">(\d+)</div>\s*<small class="text-muted">Events This Week</small>#', $page['body'], $m) !== 1
+            || tz_find('#fw-bold">(\d+)</div>\s*<small class="text-muted">Events This Week</small>#', $page['body'], $m) !== 1
         ) {
             return null;
         }
@@ -3183,7 +3274,7 @@ orgZone(1, $xOrgZoneWas === null ? null : (string) $xOrgZoneWas);
 // 🏁 The end
 // =============================================================================
 $errors = is_file($child . $sep . 'php-errors.log') === true ? trim((string) file_get_contents($child . $sep . 'php-errors.log')) : '';
-$fatal  = preg_match_all('/PHP (Fatal error|Parse error|Warning|Deprecated).*$/m', $errors, $lines);
+$fatal  = tz_findAll('/PHP (Fatal error|Parse error|Warning|Deprecated).*$/m', $errors, $lines);
 ok(
     'Z01 nothing the portal did in this run wrote a PHP error, warning or deprecation to its log',
     $fatal === 0,

@@ -4,6 +4,35 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Tests that could pass without reading the page, and two translation cases nothing tested (#829, #831)
+- **A pattern search that could not run is no longer read as "not there" (#829).**
+  Four self-tests (`access-pages`, `gdpr-coverage`, `go-live-button`, `time-zones`)
+  read every `preg_match()` / `preg_match_all()` answer with `=== 1`, `!== 1`,
+  `> 0` or by its filled-in matches, so `false` (the search could not run: PCRE's
+  JIT stack or backtracking limit) gave the same answer as "found nothing", and a
+  check asking for ABSENCE passed on a page it never read. Each test now routes
+  its searches through `<prefix>_find()` / `_findAll()`, which answer exactly what
+  PHP answers when the search runs and, when it cannot, record a red check naming
+  the pattern, the size of the text and PHP's reason, then stop. `preg_replace()`
+  and `preg_split()` in the same four files go through `_replace()` / `_split()`
+  for the same reason: their failure was being cast to empty text or an empty
+  list, and empty text "contains nothing". Measured: with the regex engine
+  starved (`-d pcre.jit=0 -d pcre.backtrack_limit=1500`) the OLD go-live test
+  reported 51 passes including six "the console does NOT draw the button"
+  checks it had never been able to answer; the new one stops at the first search
+  with a red line naming `#<form\b([^>]*)>(.*?)</form>#s` over 50,515 bytes.
+- **Translation stored as `'true'`, and a withdrawal made while translation is
+  off, are tested now (#831).** Section E2 of `tools/content-translation-selftest.php`
+  (13 checks) stores `translation.enabled = 'true'` — which the router counts as on
+  and the engine as off — and requires that no Translate control is drawn, the
+  member's page says translation is off, a press is refused by the HANDLER (403,
+  "Translation is switched off for this organisation.") with `meta.csrfToken`
+  handed back, and nothing is sent, counted or cached; then that the handed-back
+  token works once the switch says `'1'` and that press IS sent and counted (so
+  the "nothing sent" checks can fail). It also posts a member's withdrawal while
+  the app is off and reads the stored choice back as withdrawn. Five plants, each
+  caught by the checks meant to catch it.
+
 ### The top bar no longer makes every page scroll sideways (#822)
 
 - **The apps are one "Apps" menu on the top bar instead of one entry each.** Signed in as a
