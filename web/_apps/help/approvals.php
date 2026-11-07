@@ -65,7 +65,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
                 <strong>Navigate to Expenses</strong>
-                <p class="mb-0 small text-secondary">Click <strong>Expenses</strong> in the top navigation bar.</p>
+                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the top navigation bar and choose <strong>Expense Claims</strong>.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">

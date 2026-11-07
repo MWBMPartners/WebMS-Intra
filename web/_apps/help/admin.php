@@ -80,8 +80,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="list-group-item d-flex gap-3 align-items-start">
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
-                <strong>Click "Settings" in the navigation bar</strong>
-                <p class="mb-0 small text-secondary">The <i class="fa-solid fa-gear"></i> Settings link appears in the top navigation bar only for admin users.</p>
+                <strong>Open the "Admin" menu in the navigation bar and choose "Settings"</strong>
+                <p class="mb-0 small text-secondary">The <i class="fa-solid fa-shield-halved"></i> Admin menu, and the <i class="fa-solid fa-gear"></i> Settings entry in it, appear only for admin users.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">

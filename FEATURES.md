@@ -2137,6 +2137,12 @@ reads as reassurance. Run the loop above — it takes seconds.
 
 ---
 
+## Top navigation bar (#822)
+
+| Feature | Issue | Status |
+|---|---|---|
+| Dashboard, an **Apps** menu holding every app the person may open (sorted by name, a grid on wide screens), the Admin menu for administrators, then language, display options and the account menu. Fits every width from 320px up, including a root administrator with every app switched on. The menus open on a click or a key press where Bootstrap's script works, and on hover and keyboard focus where it does not (scripts off, or both copies of Bootstrap failing). Guarded by `tools/top-bar-selftest.php` in a real browser. | #822 | ✅ |
+
 ## Infrastructure helpers (`tools/`)
 
 | Path | Purpose |

@@ -37,6 +37,9 @@ return [
     'nav.settings'          => 'Settings',
     'nav.audit_trail'       => 'Audit Trail',
     'nav.apps'              => 'Apps',
+    // The top bar's menu of every app (#822). 'nav.apps' above is the Admin
+    // menu's link to /admin/apps; the two say the same word for different things.
+    'nav.apps_menu'         => 'Apps',
     'nav.reports'           => 'Reports',
     'nav.workflows'         => 'Workflows',
     'nav.sms'               => 'SMS',

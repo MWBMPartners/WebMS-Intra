@@ -606,7 +606,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1329,3 +1329,28 @@ jobs:
         run: |
           mkdir -p "$SELFTEST_WEB_DIR"
           php -d memory_limit=512M tools/offsite-settings-selftest.php
+
+      # 🧭 The top bar fits the screen, with every app on (#822). A real browser
+      #    loads real pages signed in as a root administrator and an ordinary
+      #    member, with one organisation and then several, at six widths; it
+      #    also drives the Apps menu with the keyboard and, with scripts off,
+      #    with the mouse. It needs Chrome — on GitHub's Ubuntu image that is
+      #    /usr/bin/google-chrome, which the test finds by itself (CHROME_PATH
+      #    would override it) — and node 22 or newer for the built-in
+      #    WebSocket. Node is set LAST in this job on purpose: setting it
+      #    earlier would change the node every test above runs with.
+      #    Without a browser it REFUSES (exit 2), so this step goes red rather
+      #    than passing on nothing.
+      - name: 'Node for the top-bar browser test (#822)'
+        id: node_topbar
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 'Top bar fits the screen, in a browser (#822)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' && steps.node_topbar.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_topbar
+          SELFTEST_WEB_PORT: '9682'
+        run: php -d memory_limit=512M tools/top-bar-selftest.php

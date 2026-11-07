@@ -23,7 +23,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.0.1
  * @see       https://github.com/MWBMPartners/WebMS-Intra/issues/141
  */
 (function () {
@@ -79,14 +79,14 @@
     }
 
     function showBanner(banner) {
-        // 📋 Nudge the banner above the cookie-consent banner if both
-        // happen to be visible at once (rare in practice — a browser only
-        // fires beforeinstallprompt after some engagement heuristic, by
-        // which point the cookie banner has usually already been decided).
-        var cookieBanner = document.getElementById('portal-cookie-banner');
-        if (cookieBanner && cookieBanner.classList.contains('d-none') === false) {
-            banner.style.bottom = (cookieBanner.offsetHeight + 24) + 'px';
-        }
+        // 📚 Nothing to move out of the way (#822). This used to lift the
+        // banner above the cookie banner by setting `style.bottom`, and it
+        // never worked: both boxes carried Bootstrap's `bottom-0`, which is
+        // `bottom: 0 !important`, so the inline value lost and the two sat
+        // on exactly the same pixels whenever both showed (measured in Edge,
+        // 7 November 2026, at every width). Both now sit in one stacking
+        // column in footer.php (`.portal-bottom-notices` in portal.css), so
+        // showing this one is all there is to do.
         banner.classList.remove('d-none');
     }
 

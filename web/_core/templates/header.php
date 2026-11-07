@@ -311,6 +311,14 @@ header("Content-Security-Policy: default-src 'self'; "
     <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
     (function(){
         var html = document.documentElement;
+        // 🧩 The top bar's "menus work" mark (`data-portal-menus`) is NOT set
+        // here (#822 round 2). It used to be, and this script running proves
+        // only that inline scripts run — not that Bootstrap's dropdown code
+        // arrived. With Bootstrap blocked (the CDN copy AND the local copy
+        // failing) the mark switched the hover/focus fallback off while no
+        // button could open its menu, so no app, no Admin page and no Sign
+        // out could be reached from the bar (measured in Edge). portal.js
+        // sets it once `bootstrap.Dropdown` exists.
         // Theme: 'light' / 'dark' / 'auto' (or null/missing = 'auto' default).
         var t = localStorage.getItem('portal-theme');
         if (t === 'auto' || t === null) {

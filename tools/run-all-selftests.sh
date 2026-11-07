@@ -51,6 +51,8 @@
 #     suffers, and the run goes on. This is a reduced set, so the warning says
 #     what it costs: without node the site-addresses test FAILS, while the
 #     go-live and live-chat tests PASS WITHOUT RUNNING the page's script;
+#     without node, or without Chrome, Chromium or Edge, the top-bar and
+#     csrf-carriers browser tests REFUSE (exit 2, shown red) — never skip;
 #     without rclone the off-site test refuses (exit 2, shown red); without
 #     qrencode the QR test skips the part that reads its pictures with an
 #     independent encoder.
@@ -255,6 +257,7 @@ db-strict-mode|tools/db-strict-mode-selftest.php|-|web:db-strict SELFTEST_DB_POR
 feed-importer|tools/feed-importer-selftest.php|selftest_importer|FEED
 backup-restore|tools/backup-restore-selftest.php|BACKUPUSER:class|
 backup-page|tools/backup-page-selftest.php|BACKUPUSER:pages|web:backup-page SELFTEST_WEB_PORT=9480
+top-bar|tools/top-bar-selftest.php|selftest_topbar|SELFTEST_WEB_PORT=9682
 access-pages|tools/access-pages-selftest.php|selftest_accesspages|ALONE web:access-pages SELFTEST_WEB_PORT=9068
 LIST
 )
@@ -291,6 +294,7 @@ fi
 if ! command -v node > /dev/null 2>&1; then
     echo "WARNING: node is not on this machine. The site addresses' test will FAIL without it," >&2
     echo "         and the live chat and go-live tests will PASS with the page's script NOT run." >&2
+    echo "         The top-bar and csrf-carriers browser tests will REFUSE (shown red)." >&2
 fi
 for program in openssl tar rclone qrencode; do
     command -v "$program" > /dev/null 2>&1 || case "$program" in

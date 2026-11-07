@@ -59,7 +59,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-success rounded-pill mt-1">1</span>
             <div>
                 <strong>Navigate to the Expenses app</strong>
-                <p class="mb-0 small text-secondary">Click <strong>Expenses</strong> in the navigation bar, or click the Expenses card on the dashboard.</p>
+                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the navigation bar and choose <strong>Expense Claims</strong>, or click the Expense Claims card on the dashboard.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -272,7 +272,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
                 <strong>Navigate to the Expenses section</strong>
-                <p class="mb-0 small text-secondary">Click <strong>Expenses</strong> in the navigation bar.</p>
+                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the navigation bar and choose <strong>Expense Claims</strong>.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -375,7 +375,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-warning rounded-pill mt-1">1</span>
             <div>
                 <strong>Navigate to your claims list</strong>
-                <p class="mb-0 small text-secondary">Click <strong>Expenses</strong> in the navigation bar to view your submitted claims.</p>
+                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the navigation bar and choose <strong>Expense Claims</strong> to view your submitted claims.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">

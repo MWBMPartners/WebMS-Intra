@@ -28,6 +28,40 @@
     'use strict';
 
     /**
+     * 🧩 Say "the top bar's menus work here" (#822).
+     *
+     * portal.css opens the top bar's menus on hover and on keyboard focus ONLY
+     * while `data-portal-menus` is missing from <html>. That is the fallback,
+     * and the only way into those menus when their buttons cannot open them.
+     * Where the buttons DO work, the fallback does harm: focusing a button
+     * showed its menu while it said aria-expanded="false", and Escape could
+     * not dismiss it (WCAG 1.4.13 and 4.1.2).
+     *
+     * ⚠️ So the mark means "Bootstrap's dropdown code is here", and is set
+     *    only once `bootstrap.Dropdown` exists. Round 1 set it from the head
+     *    script, which proves only that inline scripts run: with Bootstrap
+     *    blocked every menu on the bar was dead (#822 round 2, measured).
+     *    Bootstrap's own tag comes before this deferred file, so it is
+     *    normally here already; when the CDN fails, the local copy is added
+     *    afterwards by Asset's fallback listener and may arrive later, and a
+     *    script added before the page's `load` event delays that event, so
+     *    looking once more at `load` covers it. If neither copy ever arrives
+     *    the mark is never set and the menus open on hover and focus.
+     *
+     * @returns {boolean} whether the mark was set
+     */
+    function markMenusWork() {
+        if (window.bootstrap && typeof window.bootstrap.Dropdown === 'function') {
+            document.documentElement.setAttribute('data-portal-menus', 'on');
+            return true;
+        }
+        return false;
+    }
+    if (markMenusWork() === false) {
+        window.addEventListener('load', markMenusWork);
+    }
+
+    /**
      * Initialise the theme toggle button(s).
      *
      * Three-state cycle: light → dark → auto → light. The actual data-bs-theme

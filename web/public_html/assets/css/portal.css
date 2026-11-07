@@ -340,6 +340,16 @@ textarea:focus-visible,
     /* Sticky-friendly backdrop for when pages opt into position: sticky later */
     -webkit-backdrop-filter: saturate(180%) blur(8px);
     backdrop-filter: saturate(180%) blur(8px);
+    /* ⚠️ `backdrop-filter` makes the bar a stacking context of its own, so
+       its menus can rise no higher than the bar itself — and with no z-index
+       the bar sat at the bottom, under anything positioned later in the page.
+       Measured (#822): with the Apps menu open over /calendar, the calendar's
+       Day/Week/Month buttons were drawn ON TOP of the menu. The Admin and
+       account menus had the same fault on any page with such buttons. 1020 is
+       Bootstrap's own level for a bar that stays at the top: above the page,
+       below the cookie notices (1080), dialogs (1055) and tooltips. */
+    position: relative;
+    z-index: 1020;
 }
 
 /* ----- Brand (logo + wordmark) ----- */
@@ -458,6 +468,169 @@ textarea:focus-visible,
         border-top: 1px solid var(--portal-border);
     }
     .portal-navbar .navbar-nav .nav-link { padding-block: 0.625rem; }
+}
+
+/* ----- Keeping the bar inside the screen (#822) -----
+   Signed in as a root administrator with every app switched on, the bar was
+   5,091px wide on a 1024px screen, and a long organisation name alone made a
+   phone 826px wide. Three things put it right, all measured in Edge at 320,
+   390, 768, 1024 and 1440 for a root administrator and an ordinary member:
+
+   1. The apps are one "Apps" menu (nav.php) instead of one entry each.
+   2. The organisation's name, and the signed-in person's, are cut short with
+      "…" instead of widening the bar. Bootstrap's brand is `nowrap` and a
+      flex item will not shrink below its content unless told `min-width: 0`,
+      which is the whole trick here. The cut is visual only: a screen reader
+      reads the whole name, and the brand's `title` shows it on pointing.
+   3. The Apps menu is a grid that fits the screen and scrolls inside itself
+      when it is taller than the window, rather than a 41-row list. */
+.portal-navbar .navbar-brand {
+    min-width: 0;
+    /* Leave room for the menu button beside it on a narrow screen. 4.5rem is
+       the button (about 3.5rem) plus the gap Bootstrap puts between them. */
+    max-width: calc(100% - 4.5rem);
+}
+.portal-navbar .navbar-brand img { flex-shrink: 0; }
+.portal-navbar .portal-navbar-name,
+.portal-navbar .portal-navbar-user {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.portal-navbar .portal-navbar-user { max-width: 10rem; }
+/* With the organisation switcher on the bar, its button names the
+   organisation, so on a wide screen the brand shows only the logo rather than
+   a sliver of the same name (nav.php explains; measured 0-4px at 992-1439). */
+@media (min-width: 992px) {
+    .portal-navbar .portal-navbar-name-beside-switcher { display: none; }
+}
+
+/* A bar entry is one line. Without this, a squeezed bar broke "Dashboard"
+   under its own icon and made the bar twice as tall (measured at 1024 and
+   1440 before this rule), while the brand beside it still had room to give. */
+.portal-navbar .navbar-nav .nav-link { white-space: nowrap; }
+
+/* The two menus ON the bar (Apps and Admin) look like the links beside them.
+   `.portal-navbar .dropdown-toggle` above is for the avatar button and gives
+   a smaller padding and a brighter colour, so the Admin menu used to sit
+   3px higher than "Dashboard" and in a different colour; with Apps beside
+   it that difference was on show twice. The colour is left alone when the
+   entry is active, so the active colour still wins. */
+.portal-navbar .navbar-nav .nav-link.dropdown-toggle { padding: 0.4375rem 0.75rem; }
+.portal-navbar .navbar-nav .nav-link.dropdown-toggle:not(.active) { color: var(--portal-text-muted); }
+.portal-navbar .navbar-nav .nav-link.dropdown-toggle:not(.active):hover { color: var(--portal-text); }
+
+/* On a wide screen the brand is the one thing that gives way: at most 18rem
+   (about the width of thirty characters), and less when the bar is full, down
+   to the logo alone. Every other entry keeps its full width, because those
+   are the controls. */
+@media (min-width: 992px) {
+    .portal-navbar .navbar-brand {
+        max-width: 18rem;
+        flex: 0 1 auto;
+    }
+    .portal-navbar .navbar-collapse { flex-shrink: 0; }
+}
+
+/* The Apps menu's entries, as a grid: as many 13rem columns as fit, and
+   never a column wider than the menu (`min(13rem, 100%)`). 13rem holds the
+   longest app name in the registry, "Discipleship Pathways", with its icon,
+   at the menu's own font size. A name that does not fit — a longer name an
+   administrator has typed, or a larger text size — WRAPS onto a second line
+   rather than being cut short, because a cut-off app name can be impossible
+   to tell from another. Measured: one column at 320 and 390, three at 768
+   (inside the opened menu button), four at 1024 and 1440. The
+   `display` rules repeat Bootstrap's own `.show`, and the "open on hover"
+   rule in section 12 below, because both say `display: block` and a grid
+   needs `display: grid`; the `.navbar` in each selector makes them win
+   whichever comes first in the file. */
+.navbar.portal-navbar .portal-nav-apps-menu.show {
+    display: grid;
+}
+@media (hover: hover) {
+    html:not([data-portal-menus]) .navbar.portal-navbar .portal-nav-apps:hover > .portal-nav-apps-menu,
+    html:not([data-portal-menus]) .navbar.portal-navbar .portal-nav-apps:focus-within > .portal-nav-apps-menu {
+        display: grid;
+    }
+}
+.portal-navbar .portal-nav-apps-menu {
+    grid-template-columns: repeat(auto-fill, minmax(min(13rem, 100%), 1fr));
+    gap: 0.125rem 0.375rem;
+}
+.portal-navbar .portal-nav-apps-menu > li { min-width: 0; }
+.portal-navbar .portal-nav-apps-menu .dropdown-item {
+    white-space: normal;        /* Bootstrap says nowrap; see above */
+    overflow-wrap: anywhere;    /* even one very long word cannot widen it */
+}
+
+/* On a wide screen the menu is laid out under the WHOLE bar, centred and at
+   most 60rem wide, instead of hanging from its button: hung from the button,
+   a grid of four columns would run off the right-hand side at 1024. The menu
+   is placed against `.navbar` (which Bootstrap makes `position: relative`)
+   because its own list item is made `position: static` here. It scrolls
+   inside itself when it is taller than the window, so no entry is ever out
+   of reach. */
+/* 🌉 THE BRIDGE, for opening the Apps menu by hover without JavaScript.
+   On a wide screen the menu hangs from the bottom of the whole bar, while its
+   button is only as tall as itself, so a 13-14px gap lay between them; the
+   pointer left the menu's list item crossing it and the menu closed —
+   measured in Edge with scripts off, at 1024 and 1440: no app could be
+   reached with a mouse. The bridge is an invisible extension of the BUTTON,
+   hanging below it while it is hovered, so the pointer never leaves the item.
+   3rem is deliberately more than the gap: the open menu (z-index 1000) is
+   drawn above it, so the part that reaches into the menu is never hit. */
+@media (min-width: 992px) and (hover: hover) {
+    html:not([data-portal-menus]) .portal-navbar .portal-nav-apps > .dropdown-toggle { position: relative; }
+    html:not([data-portal-menus]) .portal-navbar .portal-nav-apps:hover > .dropdown-toggle::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 100%;
+        height: 3rem;
+    }
+}
+
+@media (min-width: 992px) {
+    .portal-navbar .portal-nav-apps { position: static; }
+    .portal-navbar .portal-nav-apps-menu,
+    .portal-navbar .portal-nav-apps-menu[data-bs-popper] {
+        top: 100%;
+        left: max(1rem, calc(50% - 30rem));
+        right: max(1rem, calc(50% - 30rem));
+        width: auto;
+        max-height: calc(100vh - 6rem);
+        overflow-y: auto;
+        margin-top: 0;
+    }
+}
+
+/* ----- The notices at the foot of the screen (#822) -----
+   The cookie banner and the "Install app" prompt (footer.php) used to be two
+   separate `position-fixed bottom-0` boxes and, when both showed, they sat on
+   exactly the same pixels. They now live in this one fixed column, which
+   stacks them with a gap, so neither can cover the other however tall it
+   grows. The column itself lets every click through (`pointer-events: none`)
+   so that, empty or not, it never blocks the page behind its own margins;
+   each notice takes clicks again. z-index 1080 is what both boxes had. */
+.portal-bottom-notices {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 1080;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem;
+    pointer-events: none;
+}
+.portal-bottom-notice {
+    pointer-events: auto;
+    width: 100%;
+    background: var(--portal-surface);
+    border: 1px solid var(--portal-border);
 }
 
 /* ============================================================================
@@ -957,10 +1130,22 @@ textarea:focus-visible,
    When JavaScript is disabled, ensure critical UI remains functional.
    ============================================================================ */
 
-/* Nav dropdowns: open on hover when JS is unavailable */
+/* Nav dropdowns: open on hover, and on keyboard focus, ONLY when JavaScript
+   is unavailable (#822). Without scripts a menu button does nothing, so this
+   is the only way into the menus. It used to apply with scripts too, and then
+   it did harm: focusing a menu button showed its menu while the button still
+   said `aria-expanded="false"`, and Escape — which closes the menu and puts
+   focus back on the button — left it on screen, because the returned focus
+   matched `:focus-within` again (WCAG 1.4.13 and 4.1.2; measured in Edge on
+   the Apps menu, and the Admin and account menus had the same rule). It also
+   popped menus open under a passing pointer. `data-portal-menus` is set on
+   <html> by portal.js, and only once Bootstrap's dropdown code exists — so
+   where it is missing, the buttons cannot open their menus and this is the
+   way in. (Round 1 set it from header.php's head script, which proves only
+   that scripts run: with Bootstrap blocked every menu was dead.) */
 @media (hover: hover) {
-    .navbar .dropdown:hover > .dropdown-menu,
-    .navbar .dropdown:focus-within > .dropdown-menu {
+    html:not([data-portal-menus]) .navbar .dropdown:hover > .dropdown-menu,
+    html:not([data-portal-menus]) .navbar .dropdown:focus-within > .dropdown-menu {
         display: block;
         margin-top: 0;
     }

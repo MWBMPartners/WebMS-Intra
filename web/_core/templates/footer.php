@@ -112,6 +112,22 @@ $productName   = Site::productName();
 // 🐛 Debug panel (only renders for admins with ?debug=true)
 echo Debug::renderPanel();
 
+// 📚 ONE PLACE AT THE FOOT OF THE SCREEN FOR BOTH NOTICES (#822). The cookie
+//    banner and the "Install app" prompt were each `position-fixed bottom-0`,
+//    so when both were showing they sat exactly on top of each other —
+//    measured in Edge at every width, the two boxes occupying the same pixels.
+//    pwa-install.js did try to lift the prompt above the banner, by setting
+//    `style.bottom`; it never worked, because Bootstrap's `bottom-0` is
+//    `bottom: 0 !important` and an inline style without `!important` loses
+//    to it. Rather than fight that with a sharper rule (it would still have
+//    been wrong the moment the banner's height changed with the screen
+//    width, or the banner was answered and removed), the two now sit inside
+//    one fixed column that stacks them: `.portal-bottom-notices` in
+//    portal.css. Neither can cover the other however tall it is, and when one
+//    goes the other simply moves down.
+?>
+<div class="portal-bottom-notices">
+<?php
 // 🍪 Cookie consent banner — only renders when:
 //   • The privacy.cookieBannerEnabled setting is 'true' (default), AND
 //   • The visitor has no existing 'portal_consent_cookies' cookie
@@ -120,8 +136,8 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
     $bannerCsrf = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
 ?>
 <aside id="portal-cookie-banner"
-       class="position-fixed bottom-0 start-0 end-0 m-3 p-3 shadow-lg rounded-3"
-       style="background: var(--portal-surface); border: 1px solid var(--portal-border); z-index: 1080; max-width: 640px; margin-inline: auto !important;"
+       class="portal-bottom-notice p-3 shadow-lg rounded-3"
+       style="max-width: 640px;"
        role="dialog"
        aria-labelledby="portal-cookie-banner-title"
        aria-describedby="portal-cookie-banner-desc">
@@ -224,8 +240,8 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
      banner never shows there — iOS's own "Add to Home Screen" flow is
      covered by the apple-mobile-web-app-* meta tags in header.php instead. -->
 <aside id="portal-install-prompt"
-       class="position-fixed bottom-0 start-0 end-0 m-3 p-3 shadow-lg rounded-3 d-none"
-       style="background: var(--portal-surface); border: 1px solid var(--portal-border); z-index: 1080; max-width: 420px; margin-inline: auto !important;"
+       class="portal-bottom-notice p-3 shadow-lg rounded-3 d-none"
+       style="max-width: 420px;"
        role="dialog"
        aria-labelledby="portal-install-prompt-title"
        aria-describedby="portal-install-prompt-desc">
@@ -240,6 +256,7 @@ if ($cookieBannerEnabled === true && isset($_COOKIE['portal_consent_cookies']) =
         <button type="button" class="btn btn-sm btn-outline-secondary" data-portal-install="dismiss">Not now</button>
     </div>
 </aside>
+</div><?php // closes .portal-bottom-notices, opened above the cookie banner ?>
 <script defer src="/assets/js/pwa-install.js"></script>
 
 <!-- 📱 PWA: Service Worker registration -->

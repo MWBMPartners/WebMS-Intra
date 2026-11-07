@@ -82,7 +82,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">4</span>
             <div>
                 <strong>You are signed in</strong>
-                <p class="mb-0 small text-secondary">You will be redirected back to the portal dashboard automatically. Your name and avatar will appear in the navigation bar.</p>
+                <p class="mb-0 small text-secondary">You will be redirected back to the portal dashboard automatically. Your avatar will appear in the navigation bar, with your name beside it on a wide screen.</p>
             </div>
         </div>
     </div>
@@ -172,7 +172,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </h2>
             <div id="navNavbar" class="accordion-collapse collapse" data-bs-parent="#navAccordion">
                 <div class="accordion-body">
-                    <p class="mb-1">The top navigation bar contains links to all enabled applications, plus a <strong>Settings</strong> link for administrators. On mobile devices, tap the hamburger menu icon (<i class="fa-solid fa-bars"></i>) to expand the navigation.</p>
+                    <p class="mb-1">The top navigation bar has a <strong>Dashboard</strong> link and an <strong>Apps</strong> menu listing every app you can open. Administrators also have an <strong>Admin</strong> menu, which includes <strong>Settings</strong>. On mobile devices, tap the hamburger menu icon (<i class="fa-solid fa-bars"></i>) to expand the navigation.</p>
                     <p class="mb-0 small text-secondary">The active page is highlighted with bold text so you always know where you are.</p>
                 </div>
             </div>
@@ -202,8 +202,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </h2>
             <div id="navUserMenu" class="accordion-collapse collapse" data-bs-parent="#navAccordion">
                 <div class="accordion-body">
-                    <p class="mb-1">In the top-right corner you will see your <strong>avatar and name</strong>. Click to open a dropdown showing your email and a <strong>Sign Out</strong> option.</p>
-                    <p class="mb-0 small text-secondary">On smaller screens, your name is hidden but your avatar remains visible.</p>
+                    <p class="mb-1">In the top-right corner you will see your <strong>avatar</strong>, with your <strong>name</strong> beside it on a wide screen. Click to open a dropdown showing your email, <strong>My Account</strong> and a <strong>Sign Out</strong> option.</p>
+                    <p class="mb-0 small text-secondary">On screens narrower than about 1,200 pixels your name is hidden, but your avatar remains visible.</p>
                 </div>
             </div>
         </div>

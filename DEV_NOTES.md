@@ -20818,3 +20818,52 @@ ERROR as "absent", which makes a "shows no X" check pass on any page. The same
 checked.
 
 **Review: protected arm (money), two rounds by fresh Claude agents standing in for Codex.** Round 1 found the behaviour right and two untrue comments (the handler's switch test "can never be the one that says no", false for a hand-written `'true'`; and part P "would have passed whatever the dashboard drew", an overstatement) plus an untrue Admin → Apps sentence about who chooses the translation company. Round 2 found the code and spec fixes true and one draft note still untrue, which was corrected without a further round because it is documentation. Codex has NOT reviewed it. Left open: #829, #831.
+
+### The top bar must fit with every app on (#822)
+
+- **The fault needs a crowded bar, which is why nothing found it.** Every earlier layout audit
+  ran signed out, or as an account with few apps. A test world must be built to the WORST
+  case on purpose — every app on, a long organisation name, long personal names — or a
+  layout check of shared furniture proves nothing about it. `tools/top-bar-selftest.php`
+  asserts that premise first (the Apps menu holds at least 30 entries).
+- **Three CSS facts that each caused a fault here:**
+  1. A flex item will not shrink below its content unless it is given `min-width: 0`, and
+     Bootstrap's `.navbar-brand` is `white-space: nowrap`. Together they let one long name
+     widen the page.
+  2. Bootstrap utilities are `!important`. `bottom-0` beat the inline `style.bottom` that
+     pwa-install.js set, so its "lift above the cookie banner" never ran — invisible because
+     the two notices rarely show together.
+  3. `backdrop-filter` creates a stacking context. With no z-index the bar's own dropdowns
+     could rise no higher than the bar, which sat beneath any positioned element later in the
+     page. It is now `position: relative; z-index: 1020` (Bootstrap's sticky-bar level),
+     below the notices (1080) and dialogs (1055).
+- **A grid menu needs its display rule restated.** Bootstrap's `.dropdown-menu.show` and the
+  portal's no-JavaScript hover rule both say `display: block`; the Apps menu needs `grid`, so
+  its rules carry `.navbar` in the selector to win regardless of order.
+- **`minmax(13rem, 1fr)` is not enough on a phone**: the column must also be capped at the
+  menu's width — `minmax(min(13rem, 100%), 1fr)` — and the entries allowed to wrap
+  (`white-space: normal`), or one long app name pushes the menu off a 320px screen.
+- **Keyboard:** Bootstrap's arrow keys move through the entries in document order, so in a
+  four-column grid ArrowDown moves to the entry on the RIGHT. Measured working (Enter opens,
+  arrows move, Escape closes and returns focus); the reading order is alphabetical either way.
+- **A no-JavaScript fallback must be scoped to no-JavaScript.** portal.css's section 12 said
+  "when JS is unavailable" and applied always; the comment described an intent the selector did not
+  implement. The mark is `data-portal-menus` on `<html>`, set by portal.js only once
+  `bootstrap.Dropdown` exists, and looked for again at the page's `load` event because the local
+  fallback copy is added after the CDN fails and may arrive late. **Mark the thing the fallback
+  depends on, not a neighbour of it:** round 1 set `data-portal-js` from header.php's inline head
+  script, which proves that inline scripts run — not that Bootstrap arrived — so with Bootstrap
+  blocked the fallback switched itself off and nothing on the bar could be opened (round 2,
+  measured in Edge; round 3 measured the fix with Bootstrap normal, blocked, and the CDN failing
+  with the local copy present).
+- **Check every instance of the control, not two of them.** Round 1's test checked "focus alone
+  shows nothing" on Apps and Admin and "a resting pointer opens nothing" on Apps only, so a rule
+  opening the account menu on focus passed with exit 0; it now walks every visible
+  `[data-bs-toggle="dropdown"]` on the bar.
+- **Review: presentation arm, three rounds by fresh Claude agents standing in for Codex; round 3
+  CLEAN.** Codex has NOT reviewed it.
+- **A test that checks its own clean-up must not read the clean-up's list.** The put-back check
+  compares against the three snapshots separately; comparing against `$putBack` (the list the
+  restore uses) passed when a value was dropped from it — planted.
+- **How the self-test plants:** `TOP_BAR_SELFTEST_WEB` serves another copy of `web/`, so a
+  fault is planted in a scratch copy and never in the working tree.

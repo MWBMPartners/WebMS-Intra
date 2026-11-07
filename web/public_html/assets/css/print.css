@@ -34,6 +34,7 @@
     .help-tour,
     .cookie-banner,
     .portal-cookie-banner,
+    .portal-bottom-notices,   /* the cookie banner and the "Install app" prompt (#822) */
     .toast {
         display: none !important;
     }

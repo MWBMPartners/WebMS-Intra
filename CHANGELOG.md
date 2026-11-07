@@ -4,6 +4,68 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The top bar no longer makes every page scroll sideways (#822)
+
+- **The apps are one "Apps" menu on the top bar instead of one entry each.** Signed in as a
+  root administrator with every app switched on, the bar held 41 entries (an ordinary member
+  35) and was 5,091px wide on a 1024px screen (4,484px for the member), so every page scrolled
+  sideways on an ordinary desktop. Measured in Edge, 7 November 2026. Every entry is still
+  there, by the same tests as before; they are now sorted by name and laid out as a grid of
+  columns that fits the screen and scrolls inside itself when taller than the window. The entry
+  for the page you are on is marked as current for screen readers.
+- **A long organisation name is cut short with "…" instead of widening the bar.** A
+  75-character name made a 320px phone 826px wide on its own. The full name is still read by
+  screen readers and shown when you point at it. The signed-in person's name is cut the same
+  way and, between 992 and 1199px, left to the avatar (whose picture carries the name).
+- **The cookie banner and the "Install app" prompt no longer sit on top of each other.** Both
+  were pinned to the bottom of the screen; the script that was meant to lift one above the
+  other never worked, because Bootstrap's `bottom-0` is `!important`. They now share one
+  stacking column. They are also now hidden when printing (the print stylesheet names
+  `.portal-cookie-banner`, a class the banner does not carry — it has that only as an id).
+- **The bar's menus are no longer drawn underneath the page.** The bar's blurred background made
+  it a layer of its own at the bottom of the stack, so positioned page elements (the calendar's
+  Day/Week/Month buttons, dashboard cards) were drawn on top of an open menu.
+- In the phone menu, the language menu, display buttons and avatar now wrap onto a second line
+  instead of running 12px off a 320px screen.
+- **The bar's menus no longer open on keyboard focus or under a passing pointer while scripts run**
+  (round 1 of the independent check). A section of portal.css meant only for browsers without
+  JavaScript applied always, so focusing a menu button showed the menu while the button said
+  `aria-expanded="false"`, and Escape left it on screen (WCAG 1.4.13 and 4.1.2). That rule now
+  applies only where the menu buttons cannot open their menus: portal.js sets `data-portal-menus`
+  on `<html>` once Bootstrap's dropdown code exists. This changes the Admin and account menus
+  too: where Bootstrap works they open on a click or a key press, not on hover. **If Bootstrap's
+  script fails to load** (both the CDN copy and the local one), the mark is never set and every
+  menu still opens on hover and keyboard focus — round 2 measured that an earlier version, which
+  set the mark from header.php's head script, left every menu on the bar dead in that case.
+- **Without JavaScript, every app can be reached with a mouse again.** On a wide screen the Apps
+  menu hangs from the whole bar, so a 13-14px gap lay under its button and the menu closed while
+  the pointer crossed it. An invisible extension of the button now bridges the gap (no-JS only).
+- **With several organisations, the brand shows the logo only on a wide screen**, because the
+  organisation switcher beside it names the organisation; the brand's copy used to be squeezed to
+  a 0-4px sliver between 992 and 1439px. On a phone the brand keeps the name.
+- Help: getting-started now says the bar has Dashboard, an Apps menu and (for administrators) an
+  Admin menu containing Settings, and that your name shows beside your avatar only from about
+  1,200 pixels; admin.php says Settings is in the Admin menu.
+- Help: the Expenses and Approvals guides now say to open the Apps menu and choose Expense Claims.
+- New self-test `tools/top-bar-selftest.php` (with `tools/top-bar-selftest.mjs`): builds a
+  crowded bar on purpose — every app on, a long organisation name — signs in a root
+  administrator and an ordinary member, and checks in a real browser at 320, 390, 768, 1024 and
+  1440 that the bar fits closed and with its Apps menu open, that every bar entry is one line,
+  that nothing on the page is drawn over the open menu, and that the two notices do not overlap.
+  It also drives the keyboard (focus alone shows nothing; Enter opens with
+  `aria-expanded="true"`; Escape closes, says `false`, keeps focus), checks a resting pointer opens
+  nothing while scripts run, and with scripts OFF moves the mouse from the Apps button to its first
+  entry in 2px steps, and with Bootstrap's bundle BLOCKED checks the page does not claim its
+  menus work and that focus opens every menu. Focus and resting-pointer checks cover every menu
+  button on the bar. It runs twice — one organisation, then several (switcher on the bar) — at six
+  widths (320, 390, 768, 1024, 1200, 1440), and checks the organisation's name is readable or left
+  to the switcher, never a sliver. It empties the stored secrets for the run, writes them back and
+  CHECKS they are back; it leaves its accounts and, where it had to make one, a second organisation
+  (`top-bar-second`). Six planted faults turned the first version red, and five more the second (each planted in a scratch copy, the working tree never touched). It is in
+  `tools/run-all-selftests.sh` (`top-bar`) and in `portal-selftests.yml`'s database job, which —
+  like that whole workflow — GitHub has never run (#754); it uses the runner image's
+  `/usr/bin/google-chrome` and node 22 set up just before it. Without a browser it refuses (red).
+
 ### Content translation follows its own app switch (#792, D-075)
 
 - **The Translation app's switch in Admin → Apps now closes the translation

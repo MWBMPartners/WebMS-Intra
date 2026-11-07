@@ -78,10 +78,29 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
 
 <nav class="navbar navbar-expand-lg portal-navbar bg-body-tertiary">
     <div class="container">
-        <!-- 🏠 Brand / Logo -->
-        <a class="navbar-brand d-flex align-items-center gap-2" href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>">
+        <?php
+        // 🏠 Brand / Logo.
+        //    A LONG ORGANISATION NAME IS CUT SHORT WITH "…", NEVER ALLOWED TO
+        //    WIDEN THE PAGE (#822). Bootstrap's brand is `white-space: nowrap`,
+        //    so a name such as "The Very Long Named Community Organisation of
+        //    Saint Somewhere-on-the-Marsh" drew an 814px brand and every phone
+        //    scrolled sideways (measured: 826px of page on a 320px screen). The
+        //    cut is made by `.portal-navbar-name` in portal.css, which is visual
+        //    only: a screen reader still reads the whole name, and `title`
+        //    shows it whole to anybody who points at it.
+        //    WHEN THE ORGANISATION SWITCHER IS SHOWING, the name is left out of
+        //    the brand on a wide screen (`.portal-navbar-name-beside-switcher`):
+        //    the switcher a few centimetres to the right already shows the same
+        //    name, and on a full bar the brand's copy was squeezed to a 0-4px
+        //    sliver of text beside the logo between 992 and 1439px, which reads
+        //    as a stray mark. On a phone the switcher is inside the closed menu
+        //    button, so there the brand keeps the name.
+        //    (A PHP comment on purpose: an HTML one would be sent to every
+        //    browser.)
+        ?>
+        <a class="navbar-brand d-flex align-items-center gap-2" href="<?php echo htmlspecialchars(Site::url(''), ENT_QUOTES, 'UTF-8'); ?>" title="<?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?>">
             <img src="<?php echo htmlspecialchars($navSiteLogo, ENT_QUOTES, 'UTF-8'); ?>" alt="" width="28" height="28">
-            <span><?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?></span>
+            <span class="portal-navbar-name<?php echo ($navShowSiteSwitcher === true) ? ' portal-navbar-name-beside-switcher' : ''; ?>"><?php echo htmlspecialchars($navSiteName, ENT_QUOTES, 'UTF-8'); ?></span>
         </a>
 
         <!-- 📱 Mobile toggle -->
@@ -104,7 +123,25 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 </li>
 
                 <?php
-                // 📋 One menu entry per app that is switched on.
+                // 📋 One menu entry per app that is switched on, gathered here
+                //    and drawn below as ONE "Apps" menu (#822).
+                //
+                //    WHY ONE MENU: every app used to be its own entry on the
+                //    bar itself. With every app switched on that is 41 entries
+                //    for a root administrator and 35 for an ordinary member
+                //    (measured in Edge, 7 November 2026), and the bar does not
+                //    wrap, so it was 5,091px wide on a 1024px screen and every
+                //    page scrolled sideways. Earlier audits missed it because
+                //    they ran signed out, or as an account with few apps.
+                //    Collapsing the bar at wider screens alone could not cure
+                //    that: 35 entries do not fit at 1440 either. So the apps
+                //    go into a menu whatever their number, which also keeps
+                //    the bar the same shape for everybody — a menu that is
+                //    sometimes there and sometimes not is harder to learn.
+                //    Nothing is taken away: every entry that used to be drawn
+                //    is in the menu, chosen by exactly the same tests below
+                //    (measured: the same 62 links in the bar for a root
+                //    administrator and 41 for a member, before and after).
                 //
                 //    Two things used to go wrong here, both fixed below.
                 //
@@ -129,6 +166,7 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 //    the list that actually knows it, and any entry whose
                 //    address does not exist is left out rather than drawn as a
                 //    dead link.
+                $navApps     = [];
                 $allSettings = App::settings();
                 if (is_array($allSettings) === true) {
                     $registry = AppRegistry::all();
@@ -174,20 +212,57 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
 
                         $appName = $appConf['displayName'] ?? ($registry[$appKey]['name'] ?? ucfirst($appKey));
                         $appIcon = $appConf['displayIcon'] ?? ($registry[$appKey]['icon'] ?? 'fa-solid fa-cube');
-                        $isActive = ($navSection === $appKey);
-                        ?>
-                        <li class="nav-item">
-                            <a class="nav-link<?php echo $isActive ? ' active' : ''; ?>"
-                               href="<?php echo htmlspecialchars(Router::url($appRoute), ENT_QUOTES, 'UTF-8'); ?>"
-                               <?php echo $isActive ? 'aria-current="page"' : ''; ?>>
-                                <i class="<?php echo htmlspecialchars($appIcon, ENT_QUOTES, 'UTF-8'); ?> me-1"></i>
-                                <?php echo htmlspecialchars($appName, ENT_QUOTES, 'UTF-8'); ?>
-                            </a>
-                        </li>
-                        <?php
+                        $navApps[] = [
+                            'href'   => Router::url($appRoute),
+                            'name'   => (string) $appName,
+                            'icon'   => (string) $appIcon,
+                            'active' => ($navSection === $appKey),
+                        ];
                     }
                 }
+
+                // 🔤 In the order a person looks for them: by name. The old
+                //    order was whatever order the settings happened to load
+                //    in, which nobody could predict. `strnatcasecmp` so that
+                //    capitals do not decide it.
+                usort($navApps, static fn (array $a, array $b): int => strnatcasecmp($a['name'], $b['name']));
+                $navAppsActive = in_array(true, array_column($navApps, 'active'), true);
                 ?>
+
+                <?php
+                // 🧩 The "Apps" menu (#822). A real <button>, not `href="#"`:
+                //    it opens a menu and goes nowhere, and Bootstrap's dropdown
+                //    gives it `aria-expanded`, Enter/Space to open, the arrow
+                //    keys to move through the entries and Escape to close —
+                //    the same keyboard and screen-reader behaviour as the Admin
+                //    menu beside it. The entry for the page you are on carries
+                //    `aria-current="page"`; the button only LOOKS active, because
+                //    the button itself is not the current page.
+                //    Its layout — a grid of columns, centred under the bar on a
+                //    wide screen and scrolling inside itself when it is taller
+                //    than the window — is `.portal-nav-apps-menu` in portal.css.
+                //    Left out entirely when there is no app to list, rather than
+                //    drawn as an empty menu.
+                if ($navApps !== []): ?>
+                <li class="nav-item dropdown portal-nav-apps">
+                    <button type="button" id="portalNavApps"
+                            class="nav-link dropdown-toggle<?php echo ($navAppsActive === true) ? ' active' : ''; ?>"
+                            data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="fa-solid fa-grip me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('nav.apps_menu'), ENT_QUOTES, 'UTF-8'); ?>
+                    </button>
+                    <ul class="dropdown-menu portal-nav-apps-menu" aria-labelledby="portalNavApps">
+                        <?php foreach ($navApps as $navApp): ?>
+                        <li>
+                            <a class="dropdown-item<?php echo ($navApp['active'] === true) ? ' active' : ''; ?>"
+                               href="<?php echo htmlspecialchars($navApp['href'], ENT_QUOTES, 'UTF-8'); ?>"<?php echo ($navApp['active'] === true) ? ' aria-current="page"' : ''; ?>>
+                                <i class="<?php echo htmlspecialchars($navApp['icon'], ENT_QUOTES, 'UTF-8'); ?>" aria-hidden="true"></i>
+                                <span><?php echo htmlspecialchars($navApp['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                            </a>
+                        </li>
+                        <?php endforeach; ?>
+                    </ul>
+                </li>
+                <?php endif; ?>
 
                 <?php if (App::isAdmin() === true): ?>
                 <li class="nav-item dropdown">
@@ -290,8 +365,14 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 <?php endif; ?>
             </ul>
 
-            <!-- 👤 User area (right side) -->
-            <div class="d-flex align-items-center gap-2">
+            <?php
+            // 👤 User area (right side). `flex-wrap` so that, inside the opened
+            //    menu button on a phone, the language menu, the three display
+            //    buttons and the avatar go onto a second line rather than off
+            //    the side of the screen: in one line they are 332px, and a
+            //    320px phone has 296px inside the bar (measured, #822).
+            ?>
+            <div class="d-flex flex-wrap align-items-center gap-2">
                 <!-- 🌐 Language switcher -->
                 <?php echo I18n::languageSwitcher(); ?>
 
@@ -387,7 +468,16 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                             echo '<img src="/assets/images/avatar-placeholder.svg" class="portal-avatar" alt="" width="32" height="32">';
                         }
                         ?>
-                        <span class="d-none d-lg-inline">
+                        <?php
+                        // The person's own name shows from 1200px up, and is cut with "…" by
+                        // `.portal-navbar-user` when long (#822). Between 992 and 1199 it used
+                        // to show too, and on a full bar it took the room the ORGANISATION's
+                        // name needed — measured at 1024, the brand was squeezed to "The …".
+                        // Nothing is lost by hiding it there: the picture beside it carries
+                        // the person's name as its alternative text, so a screen reader
+                        // still announces whose menu this is.
+                        ?>
+                        <span class="d-none d-xl-inline portal-navbar-user">
                             <?php echo htmlspecialchars($_SESSION['user_name'] ?? 'User', ENT_QUOTES, 'UTF-8'); ?>
                         </span>
                     </a>
