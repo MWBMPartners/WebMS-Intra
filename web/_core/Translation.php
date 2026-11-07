@@ -4,8 +4,11 @@
  * -----------------------------------------------------------------------------
  * User-content translation + provider abstraction 🌐
  * -----------------------------------------------------------------------------
- * Auto-translate user-generated content (prayer requests, announcements,
- * praise reports, …) via a pluggable provider:
+ * Translate the organisation's own published words — an announcement's body,
+ * a project's description and a project update's content, the three entries
+ * in ContentTranslation::SOURCES — via a pluggable provider. (This line used
+ * to say "prayer requests, announcements, praise reports"; a prayer request is
+ * never translated, D-049, and SOURCES names no praise report either — #830.)
  *
  *   translation.provider = anthropic | openai | google | deepl | libre
  *
