@@ -4,6 +4,32 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The general settings page cannot delete a protected setting; two tests no longer clash (#836, #842)
+
+- **Fixed (#836):** the general settings editor (`/settings`) now refuses to
+  DELETE how long transcripts are kept (`transcription.retentionDays`), as it
+  already refused to change or add it. Before, a global administrator could
+  delete the installation's row or an organisation's from `/settings`; the
+  clear-out then fell back to its built-in period with nothing on the
+  transcription pages to say so, and nothing recorded who removed it. The
+  giving-records refusal on delete now asks
+  `GivingRetention::lockedInGeneralEditor()` instead of keeping its own copy of
+  the prefix test (same answer: every `giving.retention.` row, for everybody).
+  New test `tools/settings-locks-selftest.php` presses Delete, Save (change)
+  and Add over real HTTP for every key any lock method locks (25 on a fresh
+  install, counted by the run itself), at both levels, as a global
+  administrator. Before it, nothing in `tools/` posted
+  `transcription.retentionDays` to the editor at all, so the change and add
+  refusals of #722 were guarded by nothing (found by round 1 of the check).
+- **Fixed (#842, tests only):** `tools/expense-edit-selftest.php` no longer
+  empties `tblSites`, `tblUsers` and four expense tables (`DELETE … WHERE 1=1`);
+  it removes only its own numbered rows, before and after, and a new section E
+  checks it left nothing of its own and touched nothing else.
+  `tools/page-scripts-selftest.php` puts its made-up rows into the organisation
+  the portal really serves (`Site::preDetect()`), not `MIN(siteID)`, and
+  refuses when that organisation is missing. The pair now passes in both orders
+  on one database.
+
 ### A member can now find their own expense claims (#834)
 
 - **A member can now find their own expense claims (#834).** The Expenses page (`/expenses/submit`, reached from the

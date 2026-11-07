@@ -132,7 +132,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             $lockedKey = $lookup->get_result()->fetch_assoc();
             $lookup->close();
         }
-        if ($lockedKey !== null && strncasecmp((string) $lockedKey['settingKey'], 'giving.retention.', 17) === 0) {
+        // 🔑 #836: asked of GivingRetention::lockedInGeneralEditor(), the same
+        //    method the save handler asks, rather than a copy of its prefix
+        //    test kept here. `false` for "the installation's row" on purpose:
+        //    that method's one exception (a global administrator may CHANGE
+        //    the installation-wide hold) is an exception for changing it, and
+        //    deleting the hold switches it off, so no delete is ever the
+        //    exception. With `false` it answers exactly what the old prefix
+        //    test answered: every `giving.retention.` row, for everybody.
+        if ($lockedKey !== null && GivingRetention::lockedInGeneralEditor((string) $lockedKey['settingKey'], false, $isRoot) === true) {
             Logger::activity(
                 'SettingsDeleteRefused',
                 'Refused: "' . (string) $lockedKey['settingKey'] . '" is part of the giving-records rule and cannot be deleted here',
@@ -259,6 +267,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
                 $_SESSION['user_id'] ?? null
             );
             $_SESSION['flash_msg']  = \Portal\Core\RegistrationRetention::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+
+        // 🎙️ #836: nor how long transcripts are kept (#722). The save handler
+        //    refused to change or add it, and this delete did not ask, so a
+        //    global administrator could delete the installation's row or an
+        //    organisation's here: the clear-out then fell back to its built-in
+        //    period with nothing on the transcription pages to say a figure had
+        //    gone, and no record of who removed it. A delete is not a smaller
+        //    act than a change. Its own pages (/admin/settings/transcription and
+        //    /admin/transcription) are where it is set and recorded. See
+        //    TranscriptRetention::lockedInGeneralEditor().
+        //    tools/settings-locks-selftest.php asks this delete about EVERY key
+        //    any of these methods locks, so the next method added to the save
+        //    handler and not here goes red there.
+        if ($lockedKey !== null && \Portal\Core\TranscriptRetention::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is how long transcripts are kept and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\TranscriptRetention::LOCKED_MESSAGE;
             $_SESSION['flash_type'] = 'danger';
             header('Location: ' . Site::url('settings'));
             exit();

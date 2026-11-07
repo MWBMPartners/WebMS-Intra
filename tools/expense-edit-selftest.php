@@ -38,7 +38,10 @@
  *      asked on real rows with a real approval landing between the two asks.
  *      It does NOT load the handler (that needs a web server and a session),
  *      so it proves the RULE answers correctly at both moments; section C is
- *      what proves the handler still asks it and acts on the answer.
+ *      what proves the handler still asks it and acts on the answer;
+ *   E. it removes its own rows, by their numbers, and touches nobody else's
+ *      (#842: it used to empty tblSites and tblUsers outright, which broke
+ *      the next test run on the same database).
  *
  * WHY C READS THE PAGES AS TEXT
  * -----------------------------
@@ -72,7 +75,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 61;
+const EXPECTED_CHECKS = 64;
 
 const SITE_ID   = 916801;
 const CLAIMANT  = 916802;
@@ -315,11 +318,129 @@ check(
 head('Section B — the approval count, against a real database');
 // =============================================================================
 
-$db->query('SET FOREIGN_KEY_CHECKS = 0');
-foreach (['tblExpenseClaimApprovals', 'tblExpenseClaimItems', 'tblExpenseClaims', 'tblDepts', 'tblUsers', 'tblSites'] as $t) {
-    $db->query('DELETE FROM `' . $t . '` WHERE 1=1');
+// 🧹 ONLY THIS TEST'S OWN ROWS ARE REMOVED (#842).
+//    WHAT WAS HERE: `DELETE FROM … WHERE 1=1` on all six tables, tblSites and
+//    tblUsers included, with the link checks switched off. On a database shared
+//    with another test that removed organisation 1 and every person in it, and
+//    this test then left organisation 916801 behind — so
+//    tools/page-scripts-selftest.php, run next on the same database, put its
+//    made-up rows into 916801 while the portal went on serving organisation 1,
+//    and 17 of its 88 checks failed (measured 7 November 2026). Nothing in this
+//    file needs an EMPTY table: every question it asks names one of its own
+//    claim numbers. So it removes rows by its own numbers before it starts
+//    (a run that was stopped part-way leaves them behind) and again at the end,
+//    and section E checks both halves: nothing of its own is left, and every
+//    row it did not make is still there.
+/** The numbers this test gives its rows, by table and column, children first. */
+const OWN_ROWS = [
+    ['tblExpenseClaimApprovals', 'claimID', [CLAIM_OPEN, CLAIM_DECIDED, CLAIM_APPROVED, CLAIM_FRAUD]],
+    ['tblExpenseClaimItems', 'claimID', [CLAIM_OPEN, CLAIM_DECIDED, CLAIM_APPROVED, CLAIM_FRAUD]],
+    ['tblExpenseClaims', 'claimID', [CLAIM_OPEN, CLAIM_DECIDED, CLAIM_APPROVED, CLAIM_FRAUD]],
+    ['tblDepts', 'deptID', [DEPT_ID]],
+    ['tblUsers', 'userID', [CLAIMANT, OTHER, APPROVER]],
+    ['tblSites', 'siteID', [SITE_ID]],
+];
+
+/** 🧹 Remove this test's own rows, by their numbers, and nothing else. */
+function removeOwnRows(mysqli $db): void
+{
+    // The link checks are off only so that the children-first order above
+    // never has to be perfect; every statement still names one of this test's
+    // own numbers, so nothing belonging to anybody else can be reached.
+    $db->query('SET FOREIGN_KEY_CHECKS = 0');
+    foreach (OWN_ROWS as [$table, $column, $ids]) {
+        q(
+            $db,
+            'DELETE FROM `' . $table . '` WHERE `' . $column . '` IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            str_repeat('i', count($ids)),
+            $ids
+        );
+    }
+    $db->query('SET FOREIGN_KEY_CHECKS = 1');
 }
-$db->query('SET FOREIGN_KEY_CHECKS = 1');
+
+/**
+ * How many rows of each of the six tables are NOT this test's own. Section E
+ * compares the answer before and after, which is what proves the clean-up no
+ * longer reaches anybody else's rows.
+ *
+ * @return array<string, int>
+ */
+function othersRows(mysqli $db): array
+{
+    $counts = [];
+    foreach (OWN_ROWS as [$table, $column, $ids]) {
+        $row = q(
+            $db,
+            'SELECT COUNT(*) AS `n` FROM `' . $table . '` WHERE `' . $column . '` NOT IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            str_repeat('i', count($ids)),
+            $ids
+        )->get_result()->fetch_assoc();
+        $counts[$table] = (int) ($row['n'] ?? 0);
+    }
+
+    return $counts;
+}
+
+/** How many of this test's own rows are still in the database. */
+function ownRowsLeft(mysqli $db): int
+{
+    $left = 0;
+    foreach (OWN_ROWS as [$table, $column, $ids]) {
+        $row = q(
+            $db,
+            'SELECT COUNT(*) AS `n` FROM `' . $table . '` WHERE `' . $column . '` IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            str_repeat('i', count($ids)),
+            $ids
+        )->get_result()->fetch_assoc();
+        $left += (int) ($row['n'] ?? 0);
+    }
+
+    return $left;
+}
+
+// 📏 Counted BEFORE the first clean-up, never after it. Counted after, a
+//    clean-up that emptied whole tables (the #842 fault itself) would already
+//    have run, and E2 would compare an emptied table with an emptied table and
+//    pass. Planted to prove it: `WHERE 1=1` put back into removeOwnRows() turns
+//    E2 red only because this line comes first.
+// 🧍 BYSTANDERS: one row of somebody else's in EVERY table this test cleans
+//    (round 2 of the check). On a freshly loaded database five of the six
+//    tables are empty, so E2's "the others are still there" had nothing to
+//    lose in them: an emptying clean-up of tblUsers would have compared 0 with
+//    0 and passed. These rows are numbered OUTSIDE OWN_ROWS, so to the clean-up
+//    they are other people's; E3 requires every one to survive it, and they are
+//    removed by their own numbers only after E3 has looked.
+const BYSTANDER_SITE  = 916891;
+const BYSTANDER_USER  = 916892;
+const BYSTANDER_DEPT  = 916893;
+const BYSTANDER_CLAIM = 916894;
+/** The bystander rows, by table and column, children first (as OWN_ROWS). */
+const BYSTANDER_ROWS = [
+    ['tblExpenseClaimApprovals', 'claimID', BYSTANDER_CLAIM],
+    ['tblExpenseClaimItems', 'claimID', BYSTANDER_CLAIM],
+    ['tblExpenseClaims', 'claimID', BYSTANDER_CLAIM],
+    ['tblDepts', 'deptID', BYSTANDER_DEPT],
+    ['tblUsers', 'userID', BYSTANDER_USER],
+    ['tblSites', 'siteID', BYSTANDER_SITE],
+];
+function removeBystanders(mysqli $db): void
+{
+    foreach (BYSTANDER_ROWS as [$table, $column, $id]) {
+        q($db, 'DELETE FROM `' . $table . '` WHERE `' . $column . '` = ?', 'i', [$id]);
+    }
+}
+removeBystanders($db);
+q($db, 'INSERT INTO `tblSites` (`siteID`, `siteName`, `siteKey`) VALUES (?, ?, ?)', 'iss', [BYSTANDER_SITE, 'Somebody Else\'s Org', 'editorg-bystander']);
+q($db, 'INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`) VALUES (?, ?, ?)', 'iss', [BYSTANDER_USER, 'Somebody Else', 'u' . BYSTANDER_USER . '@example.invalid']);
+q($db, 'INSERT INTO `tblDepts` (`deptID`, `siteID`, `deptName`, `isActive`) VALUES (?, ?, ?, 1)', 'iis', [BYSTANDER_DEPT, BYSTANDER_SITE, 'Somebody Else\'s Dept']);
+q($db, 'INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) '
+    . "VALUES (?, ?, ?, ?, 'Somebody else\'s claim', CURDATE(), 5.00, 'Pending')", 'iiii', [BYSTANDER_CLAIM, BYSTANDER_SITE, BYSTANDER_USER, BYSTANDER_DEPT]);
+q($db, "INSERT INTO `tblExpenseClaimItems` (`claimID`, `itemName`) VALUES (?, 'Somebody else\'s item')", 'i', [BYSTANDER_CLAIM]);
+q($db, "INSERT INTO `tblExpenseClaimApprovals` (`claimID`, `userID`, `decision`, `approverRole`) VALUES (?, ?, 'Approved', 'dept_approver')", 'ii', [BYSTANDER_CLAIM, BYSTANDER_USER]);
+
+$othersBefore = othersRows($db);
+removeOwnRows($db);
 
 q($db, 'INSERT INTO tblSites (siteID, siteName, siteKey) VALUES (?, ?, ?)', 'iss', [SITE_ID, 'Edit Org', 'editorg']);
 foreach ([CLAIMANT => 'The Claimant', OTHER => 'Someone Else', APPROVER => 'An Approver'] as $id => $name) {
@@ -782,6 +903,35 @@ check(
     'D4. and the person is told what to do instead',
     ExpenseRules::editRefusalWords($savedWith) === ExpenseRules::MSG_EDIT_ALREADY_DECIDED
 );
+
+// =============================================================================
+head('Section E — it tidies up after itself, and only after itself (#842)');
+// =============================================================================
+removeOwnRows($db);
+check(
+    'E1. none of this test\'s own rows is left behind',
+    ownRowsLeft($db) === 0,
+    ownRowsLeft($db) . ' row(s) with this test\'s numbers are still there'
+);
+$othersAfter = othersRows($db);
+check(
+    'E2. every row this test did not make is still there, organisations and people included',
+    $othersAfter === $othersBefore,
+    'before ' . json_encode($othersBefore) . ', after ' . json_encode($othersAfter)
+);
+$bystandersLost = [];
+foreach (BYSTANDER_ROWS as [$table, $column, $id]) {
+    $row = q($db, 'SELECT COUNT(*) AS `n` FROM `' . $table . '` WHERE `' . $column . '` = ?', 'i', [$id])->get_result()->fetch_assoc();
+    if ((int) ($row['n'] ?? 0) !== 1) {
+        $bystandersLost[] = $table;
+    }
+}
+check(
+    'E3. the one row of somebody else\'s placed in EACH of the six tables survived the clean-up',
+    $bystandersLost === [],
+    'gone from: ' . implode(', ', $bystandersLost)
+);
+removeBystanders($db);
 
 // -----------------------------------------------------------------------------
 printf("\n%d passed, %d failed, %d ran of %d expected\n", $passes, $failures, $passes + $failures, EXPECTED_CHECKS);

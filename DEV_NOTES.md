@@ -20929,3 +20929,32 @@ and the usage row really do move on the same press once the switch says `'1'`.
 - **How it was found:** #834 began as "check one help sentence" (#822's Found list). Checking it showed no page listed a member's claims and `ExpenseMailer` sends the claimant nothing on `submitted`, so a pending claim could not be reached at all (#841 is the e-mail). The dashboard card's comment asserted the opposite.
 
 **Review: protected arm (a member's financial claims), two rounds by fresh Claude agents standing in for Codex; round 2's one finding was a check number in a test comment, corrected as documentation.** Codex has NOT reviewed it. Also found: #842 (two self-tests clash on one database).
+
+### Locked settings, and a test that empties a shared table (#836, #842)
+
+**A refusal list kept in three places goes out of step one path at a time.**
+The general settings editor refuses keys that have their own page on three
+paths — change, add (both in `settings/save.php`) and delete (in
+`settings/index.php`). #502 found the delete missing two keys; #836 found it
+missing `transcription.retentionDays` (#722 added the refusal to change and add
+only). The ONE list is the set of `public static function …LockedInGeneralEditor()`
+methods in `web/_core`; `tools/settings-locks-selftest.php` reads that set with
+PHP's tokeniser, requires every method to be asked on every path (section S),
+and drives the delete, change and add over HTTP for every key any method locks (section B).
+A new lock method added to the save handler and not the delete now goes red
+there without anybody remembering to add a case. The three paths still carry
+one block per method rather than one loop, because existing tests pin those
+blocks' exact text (capabilities-selftest, gdpr-coverage-selftest and
+registration-retention-selftest at least); collapsing them into a loop is possible but means rewriting those
+pins together.
+
+**A test that empties a shared table breaks the NEXT test, not itself.**
+`expense-edit-selftest.php` ran `DELETE FROM tblSites WHERE 1=1`; it passed,
+and `page-scripts-selftest.php` run next on the same database failed 17 of 88
+(it seeded into `MIN(siteID)`, by then the other test's leftover 916801, while
+the portal served organisation 1). Delete by your own numbers; and seed into
+what the portal will serve, asked of the portal's own rule.
+
+**Three check rounds found only tests that could not fail, and each is the same shape:** the expense-edit test counted the rows it must not touch AFTER its own clean-up had already emptied them; the giving-records hold check saved the value already stored, so a silently dropped save passed; and the settings-locks header claimed other tests drove change and add for `transcription.retentionDays` when no file in `tools/` posted that key at all. **A check that compares before with after must take 'before' before anything can change it, and a check that an action was accepted must make the action change something.**
+
+**Review: protected arm (retention settings), three rounds by fresh Claude agents standing in for Codex; every finding was in tests (D-064); round 3 CLEAN.** Codex has NOT reviewed it. Left open: #845, #846. The new test is wired into the runner and workflow in a following commit, because those two files carry another package's uncommitted changes.

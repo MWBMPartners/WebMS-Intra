@@ -495,9 +495,38 @@ $state['started'] = true;
 if (removeWorld() > 0) {
     refuse('rows with this test\'s numbers (925000 to 925999) are in the database and could not be removed');
 }
-$site = (int) (one('SELECT MIN(siteID) AS s FROM tblSites WHERE isActive = 1')['s'] ?? 0);
-if ($site <= 0) {
-    refuse('the database has no organisation: load web/_sql/full_schema.sql first');
+// 🏢 THE ORGANISATION THE PORTAL WILL REALLY SERVE, asked of the portal's own
+//    rule (#842). WHAT WAS HERE: `MIN(siteID)` of the active organisations.
+//    That is only the organisation the pages show when nothing has disturbed
+//    the table: after tools/expense-edit-selftest.php had emptied tblSites on
+//    the same database and left its own organisation 916801 behind, MIN(siteID)
+//    was 916801, every made-up row went there, the portal went on serving
+//    organisation 1, and 17 of the 88 checks failed for a reason that had
+//    nothing to do with scripts (measured 7 November 2026). Fixing that test is
+//    half of it; this half stops ANY earlier test's leftovers doing the same.
+//    `Site::preDetect()` is the ONE place a request's organisation is decided,
+//    so it is asked here, from the repository's own copy of the class, with no
+//    sign-in and no organisation in the address — the shape of every request
+//    this test makes before it signs in. If it cannot decide, or names an
+//    organisation that is not there and switched on, the run REFUSES: seeding
+//    rows somewhere else would be testing a page against somebody else's
+//    organisation and calling the empty result a fault.
+spl_autoload_register(static function (string $class) use ($webSrc, $sep): void {
+    if (str_starts_with($class, 'Portal\\Core\\') === false) {
+        return;
+    }
+    $file = $webSrc . $sep . '_core' . $sep . substr($class, strlen('Portal\\Core\\')) . '.php';
+    if (is_file($file) === true) {
+        require_once $file;
+    }
+});
+$site = \Portal\Core\Site::preDetect($db);
+if (\Portal\Core\Site::detectionFailed() === true) {
+    refuse('the portal could not say which organisation it serves (Site::preDetect() failed), so there is nowhere to put the made-up rows');
+}
+if (one('SELECT siteID FROM tblSites WHERE siteID = ? AND isActive = 1', 'i', [$site]) === null) {
+    refuse("the portal serves organisation {$site}, and the database has no such organisation switched on: "
+        . 'load web/_sql/full_schema.sql into a fresh database (an earlier test may have removed it)');
 }
 // The organisation's own zone, for the made-up rows that need one. A test must not choose a zone of its own.
 $zone = (string) (one('SELECT timezone FROM tblSites WHERE siteID = ?', 'i', [$site])['timezone'] ?? '');
