@@ -129,7 +129,10 @@ appended with its real date and a note that it was added later.
 | [D-071](071-a-job-with-no-record-is-nothing-known.md) | 2026-11-06 | A job with no record says "nothing is known yet", not a warning | in force |
 | [D-072](072-home-maps-are-covered-and-both-people-must-allow.md) | 2026-11-06 | Maps of a member's home are covered, and both people must allow them | in force |
 | [D-073](073-silhouettes-are-accepted-and-uploads-come-later.md) | 2026-11-06 | Silhouettes are accepted, and a photo upload comes later | in force |
+| [D-074](074-registrations-get-an-optional-installation-ceiling.md) | 2026-11-07 | Registrations get an optional installation ceiling, off by default | in force |
+| [D-075](075-content-translation-gets-an-app-switch.md) | 2026-11-07 | Content translation gets its own app switch | in force |
+| [D-076](076-frequent-jobs-get-allowances-from-their-own-timing.md) | 2026-11-07 | Frequent scheduled jobs get allowances from their own timing (supersedes part of D-070) | in force |
 
-*73 decisions. This index is checked against the folder by
+*76 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
