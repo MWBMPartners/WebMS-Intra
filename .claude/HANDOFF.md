@@ -1,46 +1,40 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only. 6 November 2026.*
+*Overwritten, never appended. Current state only. 7 November 2026.*
 
 ## Branch
 
-`claude/alpha-wip` at `e66507f`, pushed. Standing approval (owner, 2 November
+`claude/alpha-wip` at `45406be`, pushed. Standing approval (owner, 2 November
 2026) to push this branch after each commit — never a release or protected
 branch, never a force push, no pull request until the Codex review (D-035, D-007).
 
-## Just landed
+## Landed today (all pushed, issues closed)
 
-**#775 — every scheduled job records that it ran (migration 253, D-070, D-071).**
-Review closed at round 7 under D-064/D-066 (`e66507f`): round 7's findings were
-all in the gate, its test or the documents; the fifteen token gates are driven
-over HTTP and correct. Left on issues: #794, #795, #789, #793.
-
-**#777 rounds 20-22** (`d9f66f0`, `57aae2e`, `f9851c5`): the CSV import's output
-guard (`$fmtStore` over `$fmtClockRaw`), section K of `clock-change-selftest.php`.
+#812/#819 `1e49d48` · #799 `4f43cfa` · #830 (comment) · #792 `b7872c3` (D-075)
+· #822 `45406be`. Earlier the same day: #775, #777 p2a, #797, #762, #804-806,
+#810, #793 (D-076), #569 part, #778 (D-058/072/073).
 
 ## In flight (side by side — they share no files, D-012)
 
 | Package | State |
 |---|---|
-| #777 round 23 | Independent check of round 22's #777 changes. Report lands at `scratchpad/r23-report.md`. Protected arm (stored data), so rounds continue until clean; the first all-tooling round is the last (D-066). |
-| #762 | Being built (D-059: count translations as well as money). Builder must not touch #777's files or the shared documents; its document entries land at `scratchpad/762-doc-entries.md`, to be added by the commissioning session at commit. Protected arm (money). Needs its own independent check after the build. |
+| #816 | Being built (D-074: optional registration-retention ceiling, off by default, D-032 approach). Protected arm. Notes to `scratchpad/816-doc-entries.md`; it must not edit `portal-selftests.yml` or `run-all-selftests.sh` itself — the lines to add are in its notes. Its in-progress files are in the working tree (retention sweep, settings pages, schema, `RegistrationRetention.php`) — stage nothing of them with another package. |
+| #831 + #829 | Being built (test-only: the `'true'` translation switch and withdrawal-while-off; failed `preg_match()` read as "absent" in four tests). Notes to `scratchpad/829-831-doc-entries.md`. |
+
+Each needs an independent check after the build.
 
 ## Next, in this order
 
-1. #777 part two — `tools/audit-checks/clock_wall_clock_datetime_pending.txt`, with #783, #784, #785, #787.
-2. #778 — outside services in three tiers (D-058); the gravatar leak is still live.
-3. #493 — portal content on the public website, in full (D-052, D-056, D-057). The largest item.
-4. #569 — the page findings left.
-5. The whole backlog (D-055).
-6. #754 — the six workflows GitHub has never registered (last, D-054).
-7. The comprehensive Codex review (D-007), then the merge.
+1. #493 — portal content on the public website, in full (D-052, D-056, D-057). The largest item.
+2. #569 — the page findings left; #832, #833, #834 from #822.
+3. The whole backlog (D-055).
+4. #754 — the six workflows GitHub has never registered (last, D-054).
+5. The comprehensive Codex review (D-007), then the merge.
 
 ## Blocked on the owner
 
 | What | Why |
 |---|---|
-| #792 | Two self-tests red: should the translation app be switchable off, and the dashboard's not-strict alert. Pre-existing. |
-| #793 | D-070's 36-hour allowance is too loose for six frequent jobs — a re-ask with the measured fact. |
 | Dangling volume `293105ed…` | A checker's leftover; only the owner can remove it (D-067). Count is 1. |
 | SIGNula.id | Five local commits waiting for the owner's push approval. |
 
@@ -65,7 +59,7 @@ guard (`$fmtStore` over `$fmtClockRaw`), section K of `clock-change-selftest.php
 
 ## Decisions in force
 
-Every decision lives once, in `docs/decisions/`, one file each (D-027). 71 on file; read the README index there. **Codex has reviewed none of this work.**
+Every decision lives once, in `docs/decisions/`, one file each (D-027). 76 on file; read the README index there. **Codex has reviewed none of this work.**
 
 ## Open, unscheduled, each with an issue
 
