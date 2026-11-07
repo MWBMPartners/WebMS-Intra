@@ -31,3 +31,5 @@ do, and the reason written beside each.
 *One decision per file, under `docs/decisions/`, so that every assistant and
 every person reads the same record. Never edited — a decision taken again is
 a NEW file that names the one it supersedes. See `docs/decisions/README.md`.*
+
+**Note, 7 November 2026 (#793 build):** a SEVENTH job also left 36 hours under this decision: `cron/health`, whose header is silent but which the portal tells customers to call hourly (`0 * * * *` on the staff health page), now has 3 hours — exactly the case this decision's **Where** foresaw ("judged from what they do"). `discipleship-sweep` stays at 36 hours (called once a day). So "six" above means the six whose headers state a frequency; seven moved in all.

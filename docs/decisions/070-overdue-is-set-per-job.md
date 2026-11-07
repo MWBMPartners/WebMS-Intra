@@ -39,3 +39,5 @@ what a customer loses without each job — **but note a token is NOT a job**:
 and the retention sweep, so the new record is keyed by JOB.
 
 **Superseded in part by D-076** (7 November 2026): the "everything else → 36 hours" row no longer applies to the six jobs whose own headers say they run every few minutes or hourly (`push-golive`, `webhook-retry`, `user-reminders`, `asset-reminders`, `venue-reminders`, `workflow-timeouts`); each gets an allowance from its own timing. Everything else in this decision stands.
+
+**Note, 7 November 2026 (#793 build):** a SEVENTH job also left 36 hours under this decision: `cron/health`, whose header is silent but which the portal tells customers to call hourly (`0 * * * *` on the staff health page), now has 3 hours — exactly the case this decision's **Where** foresaw ("judged from what they do"). `discipleship-sweep` stays at 36 hours (called once a day). So "six" above means the six whose headers state a frequency; seven moved in all.
