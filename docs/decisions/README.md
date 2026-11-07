@@ -132,7 +132,11 @@ appended with its real date and a note that it was added later.
 | [D-074](074-registrations-get-an-optional-installation-ceiling.md) | 2026-11-07 | Registrations get an optional installation ceiling, off by default | in force |
 | [D-075](075-content-translation-gets-an-app-switch.md) | 2026-11-07 | Content translation gets its own app switch | in force |
 | [D-076](076-frequent-jobs-get-allowances-from-their-own-timing.md) | 2026-11-07 | Frequent scheduled jobs get allowances from their own timing (supersedes part of D-070) | in force |
+| [D-077](077-a-new-permission-decides-who-may-publish-to-the-public-website.md) | 2026-11-07 | A new permission decides who may put an item on the public website | in force |
+| [D-078](078-public-website-items-get-a-switch-and-optional-dates.md) | 2026-11-07 | An item on the public website gets an on/off switch AND optional dates | in force |
+| [D-079](079-a-new-event-starts-members-only.md) | 2026-11-07 | A new event starts members-only | in force |
+| [D-080](080-copied-in-events-follow-a-chosen-rule.md) | 2026-11-07 | Copied-in events reach the public website by a rule each level chooses | in force |
 
-*76 decisions. This index is checked against the folder by
+*80 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
