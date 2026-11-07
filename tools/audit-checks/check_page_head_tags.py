@@ -39,10 +39,16 @@ WHAT THIS CHECK CANNOT SEE — read this before trusting a pass
    requires head-meta.php inside an `if` that rarely runs passes, even though
    most visitors get a <head> without the tags. Every page was read by hand
    for #569, so none does this today.
-3. It says nothing about a page outside `web/_apps/`, and nothing about
-   `header.php` itself — if the require were deleted from there, every
-   ordinary page would lose its tags and this check would stay green, because
-   those pages do not write a <title> of their own.
+3. It reads `web/_apps/` and, since 7 November 2026, the PHP files in the
+   web root `web/public_html/` (see WEBROOT below) — nothing else. `header.php`
+   itself is checked separately, first, because the ordinary pages that depend
+   on it write no <title> of their own and the loop would never notice.
+   Before the web root was read, `/api-docs` drew its own <head> with no
+   description and no icon link, so every visitor's browser asked for
+   /favicon.ico and got a 404 — reported by the browser audit as "a JavaScript
+   error", and invisible here because this check looked only in `web/_apps/`.
+   (An issue comment described that page as "on the exemption list"; it was
+   never on it. It was simply out of reach.)
 4. It cannot see a <title> built by a function called from elsewhere, nor one
    written inside a heredoc.
 5. THE ICON GUARD (#680) proves only that a `rel="icon"` link is PRESENT in the
@@ -83,6 +89,14 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 APPS = REPO / "web" / "_apps"
+
+# 🌐 THE WEB ROOT, read too (#569). Three PHP addresses there are answered by
+#    the web server directly, with none of the portal's page furniture, so a
+#    page in this folder that prints a <title> draws its own <head> by
+#    definition. Keys in EXEMPT for these files start "../public_html/" — the
+#    path relative to APPS — so the one exemption list serves both folders and
+#    its stale-entry check covers both.
+WEBROOT = REPO / "web" / "public_html"
 
 # A PHP string literal, single- or double-quoted, with backslash escapes.
 PHP_OPEN = re.compile(r"<\?php\b|<\?=")
@@ -129,6 +143,13 @@ EXEMPT = {
     # 🧩 Embedded in somebody ELSE'S website, so its <head> is never used as a
     #    page head. Its route was removed on purpose in migration 189 (#478).
     "calendar/widget.php": "embedded in other sites; its route was removed in migration 189",
+    # 📵 The page the service worker shows when there is no network. It loads
+    #    NONE of the portal on purpose — it has to draw with no database and no
+    #    server — and the service worker keeps ONE copy of it for everybody,
+    #    whichever organisation they were in, so an organisation's description
+    #    or preview card written into it would be whoever fetched it first.
+    #    head-meta.php reads the settings, so it cannot be required here.
+    "../public_html/offline/index.php": "the no-network page; loads none of the portal and is cached once for everybody",
 }
 
 SHARED_PARTIAL = "head-meta.php"
@@ -347,8 +368,15 @@ def main() -> int:
             "nothing answers that address (#680)"
         )
 
-    for path in sorted(APPS.rglob("*.php")):
-        rel = path.relative_to(APPS).as_posix()
+    # The web root's PHP files are read with the same rules. Only its own
+    # .php files: nothing under it but those is a page PHP prints.
+    pages = sorted(APPS.rglob("*.php")) + sorted(WEBROOT.rglob("*.php"))
+    for path in pages:
+        rel = (
+            path.relative_to(APPS).as_posix()
+            if path.is_relative_to(APPS)
+            else "../public_html/" + path.relative_to(WEBROOT).as_posix()
+        )
         text = path.read_text(encoding="utf-8", errors="replace")
 
         if "<title" not in printed_markup(text).lower():
@@ -383,7 +411,7 @@ def main() -> int:
         print()
         print("\u2717 Pages with no preview tags (#569):")
         for rel, why in missing:
-            print(f"    web/_apps/{rel}")
+            print("    " + ("web/" + rel[3:] if rel.startswith("../") else "web/_apps/" + rel))
             print(f"        {why}")
         print()
         print("  Fix: inside the page's <head>, add")

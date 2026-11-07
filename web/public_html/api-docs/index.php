@@ -66,7 +66,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * -----------------------------------------------------------------------------
  */
 
@@ -169,15 +169,76 @@ header('Referrer-Policy: strict-origin-when-cross-origin');
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
     <meta name="csrf-token" content="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
-    <title>WebMS Intra REST API — Documentation</title>
+<?php
+// 🔗 THE SHARED HEAD TAGS: a description, the browser-tab icon, and the
+//    canonical address and preview card (#569). This page draws its own <head>,
+//    so it never reaches header.php, and until 7 November 2026 it carried none
+//    of them.
+//
+//    THE ICON IS THE ONE THAT SHOWED. With no `<link rel="icon">` a browser
+//    falls back to /favicon.ico by convention, nothing answers that address,
+//    and the request 404s — which the browser reports as a console error. The
+//    browser audit (tools/layout-audit.mjs) flagged it as "a JavaScript error
+//    at 320px", and it was only ever at 320px because that is the first width
+//    the audit loads: the browser remembers the failed icon for the rest of
+//    the run. Measured with a probe that printed the failing address, NOT
+//    assumed: it was /favicon.ico, and neither the content-security-policy nor
+//    the nonce on the fallback script was refused (the browser logged no
+//    policy violation at all). #680 fixed exactly this on the sign-in page by
+//    moving the icon links into head-meta.php, which is why requiring that one
+//    file is the whole fix here and not a third copy of the icon lines.
+//
+//    WHY IT IS SAFE HERE. head-meta.php needs PORTAL_CORE, PORTAL_WEBROOT and
+//    the settings, and both ways into this file have them: the direct path
+//    above loaded start-up and defined PORTAL_WEBROOT, and the router path
+//    went through index.php, which did the same.
+//
+//    The page stays `noindex`. It still gets a canonical address where one can
+//    be trusted, because the checklist the owner set on 4 October 2026 covers
+//    every page, and a developer pasting this address into a chat should get a
+//    proper preview card rather than a bare link.
+//
+//    The <title> comes AFTER the require on purpose: head-meta.php works out
+//    $siteName (it uses `??=`), and the title is built from it the same way
+//    header.php builds every other page's — "<page> - <organisation>". It used
+//    to say "WebMS Intra REST API", a product name typed into the page, which
+//    is wrong on any installation that chose another name at install (#296).
+$pageTitle       = 'API documentation';
+// One canonical address whichever way the page was reached — `/api-docs`,
+// `/api-docs/` or `/api-docs/index.php` (#569 round 1: the last gave a `.php`
+// canonical address before this was set).
+$pageCanonicalPath = 'api-docs';
+$pageDescription = 'Every endpoint of this portal\'s REST API — what each one accepts and returns — with a way to try it out.';
+require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'head-meta.php';
+?>
+    <title><?php echo htmlspecialchars($pageTitle . ' - ' . $siteName, ENT_QUOTES, 'UTF-8'); ?></title>
     <?php echo $cssTag; ?>
     <style>
         body { margin: 0; background: #fafafa; }
         .topbar { display: none !important; }
         .swagger-ui .info { margin: 24px 0; }
+        /* 🏷️ The page's own heading. Swagger UI draws the API's name as an
+           <h2>, so without this the page had no <h1> at all, which leaves a
+           screen reader with no top-level heading to jump to. It is sized and
+           spaced to sit on the same column as Swagger UI's own content (that
+           wrapper is max-width 1460px with 20px either side), so the two read
+           as one page. */
+        .api-docs-head {
+            max-width: 1460px; margin: 0 auto; padding: 24px 20px 0;
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+            color: #3b4151;
+        }
+        .api-docs-head h1 { font-size: 1.5rem; margin: 0 0 .25rem; overflow-wrap: anywhere; }
+        .api-docs-head p { margin: 0; color: #6b7280; overflow-wrap: anywhere; }
     </style>
 </head>
 <body>
+
+<header class="api-docs-head">
+    <h1>API documentation</h1>
+    <p><?php echo htmlspecialchars($siteName, ENT_QUOTES, 'UTF-8'); ?> &middot; read and try out every endpoint of the REST API.</p>
+</header>
 
 <div id="swagger-ui"></div>
 

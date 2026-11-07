@@ -29,6 +29,10 @@
  *   E. PLANTED FAULTS: with the require taken out of a page, this test must
  *      FAIL. A test that cannot see the fault it exists to catch proves
  *      nothing, and this project has shipped three such checks already.
+ *   F. The browser-tab icon on a page that draws its own <head> (#680).
+ *   G. /api-docs, on both ways in, and the kiosk screen — the pages that draw
+ *      their own <head> outside web/_apps' ordinary pattern — with a planted
+ *      fault on /api-docs.
  *
  * WHAT IT CANNOT DO
  *   - It does not judge how a preview card LOOKS, only what the page says.
@@ -541,6 +545,109 @@ if ($signIn === '') {
     } else {
         bad('F04', 'an ordinary page has LOST its icon: moving the links into head-meta.php broke the ordinary path');
     }
+}
+
+echo "\n=== G. /api-docs and the kiosk, which draw their own <head> outside the router's pages (#569) ===\n";
+// -----------------------------------------------------------------------------
+// WHY THIS IS HERE. `/api-docs` is answered by the web server directly and
+// draws its own <head>; until 7 November 2026 it carried no description, no
+// <h1> and NO ICON LINK, so the browser fell back to /favicon.ico, got a 404,
+// and the browser audit reported it as "a JavaScript error at 320px". The
+// static check (check_page_head_tags.py) now reads the web root as well, but
+// it proves only that the require is THERE; this proves the tags come OUT,
+// on BOTH ways in — through the router (`/api-docs`) and straight from the
+// web server (`/api-docs/index.php`, which the test router serves directly
+// with nothing loaded, as Apache does).
+//
+// The kiosk is on the static check's EXEMPT list (its address is never
+// shared), so nothing else here looks at it: G05 pins its hand-written
+// description and its deliberately EMPTY icon, which is what stops the same
+// /favicon.ico 404 on a kiosk tablet.
+//
+// WHAT IT CANNOT DO: say whether the browser reports a console error. That
+// needs a browser; `tools/layout-audit.mjs` is the tool for it. What it CAN
+// say is the cause that error had — a page with no `rel="icon"` link.
+$iconOn = static fn (string $html): bool
+    => preg_match('#<link[^>]*\brel\s*=\s*"icon"[^>]*>#i', $html) === 1;
+foreach (['G01' => '/api-docs', 'G02' => '/api-docs/index.php'] as $id => $path) {
+    $html = $get($path);
+    if ($html === '' || str_contains($html, 'id="swagger-ui"') === false) {
+        bad($id, "{$path} did not answer the API documentation page at all", substr($html, 0, 300));
+        continue;
+    }
+    $miss = [];
+    $desc = $tag($html, 'name', 'description');
+    if ($desc === null || trim($desc) === '') {
+        $miss[] = 'a description';
+    }
+    if ($iconOn($html) === false) {
+        $miss[] = 'an icon link (so the browser asks /favicon.ico and gets a 404)';
+    }
+    if (preg_match('#<h1\b[^>]*>\s*\S#i', $html) !== 1) {
+        $miss[] = 'an <h1>';
+    }
+    if ($tag($html, 'property', 'og:title') === null) {
+        $miss[] = 'a preview card (site.url is set, so one is expected)';
+    }
+    // ONE canonical address whichever way the page was reached, and never a
+    // `.php` one (#569 round 1: `/api-docs/index.php` gave itself
+    // `…/api-docs/index.php` before the page named its own canonical path).
+    $ogUrl = (string) ($tag($html, 'property', 'og:url') ?? '');
+    if (preg_match('#/api-docs$#', $ogUrl) !== 1) {
+        $miss[] = 'og:url ending exactly /api-docs (got "' . $ogUrl . '")';
+    }
+    if (preg_match('#<link[^>]*\brel\s*=\s*"canonical"[^>]*href\s*=\s*"([^"]*)"#i', $html, $cm) !== 1
+        || preg_match('#/api-docs$#', $cm[1]) !== 1) {
+        $miss[] = 'a canonical link ending exactly /api-docs';
+    }
+    if ($miss === []) {
+        ok($id, "{$path} carries a description, an icon link, an <h1>, a preview card and the one canonical address /api-docs");
+    } else {
+        bad($id, "{$path} is missing: " . implode('; ', $miss));
+    }
+}
+
+// G03/G04: PLANT the fault on the direct path. Without the require, the
+// description and the icon must both be gone — or G02 proves nothing.
+//
+// The require is REPLACED by the one variable the page still needs from it
+// (`$siteName`, which head-meta.php works out and the <title> and the heading
+// use), rather than deleted. Deleted, the page would die on an undefined
+// variable half way through, the tags would be "missing" because NOTHING was
+// printed, and Z01 would go red for a reason that is not the fault being
+// planted. A plant has to leave the page working and remove only the thing
+// under test.
+$plantDocs  = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'api-docs' . $sep . 'index.php';
+$docsBefore = (string) file_get_contents($plantDocs);
+$docsAfter  = preg_replace('#^require PORTAL_CORE[^\n]*head-meta\.php[^\n]*$#m', "\$siteName = 'Portal';", $docsBefore);
+if ($docsAfter === null || $docsAfter === $docsBefore) {
+    bad('G03', 'could not plant the fault: no head-meta.php require found in the copied /api-docs page');
+} else {
+    file_put_contents($plantDocs, $docsAfter);
+    $html = $get('/api-docs/index.php');
+    if (str_contains($html, 'id="swagger-ui"') === false) {
+        bad('G03', 'the planted /api-docs page did not draw at all, so the plant broke more than the tags', substr($html, 0, 300));
+    } elseif ($tag($html, 'name', 'description') === null && $iconOn($html) === false) {
+        ok('G03', 'with the require taken out of /api-docs, the description and the icon are gone — G02 can see the fault');
+    } else {
+        bad('G03', 'with the require taken out of /api-docs, a description or an icon was STILL found, so G02 proves nothing');
+    }
+    file_put_contents($plantDocs, $docsBefore);
+    $html = $get('/api-docs/index.php');
+    if ($tag($html, 'name', 'description') !== null && $iconOn($html) === true) {
+        ok('G04', 'and /api-docs is whole again once the fault is taken out');
+    } else {
+        bad('G04', '/api-docs did not recover after the planted fault was removed');
+    }
+}
+
+// G05: the kiosk's "unavailable" screen — what a request with no token gets.
+$html = $get('/assets/kiosk');
+$desc = $tag($html, 'name', 'description');
+if ($html !== '' && $desc !== null && trim($desc) !== '' && preg_match('#<link[^>]*\brel="icon"\s+href="data:,"#i', $html) === 1) {
+    ok('G05', 'the kiosk screen carries a description and an explicitly empty icon, so no /favicon.ico request is made');
+} else {
+    bad('G05', 'the kiosk screen is missing its description or its empty icon link', substr($html, 0, 400));
 }
 
 echo "\n=== Z. Clean-up ===\n";

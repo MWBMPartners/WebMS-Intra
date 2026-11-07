@@ -18,6 +18,10 @@
  *     require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates'
  *           . DIRECTORY_SEPARATOR . 'head-meta.php';
  *
+ * A page reachable at MORE THAN ONE ADDRESS also sets $pageCanonicalPath (a
+ * clean route, no `.php`, no leading slash) so it has one canonical address
+ * whichever way it was reached — see the comment above `$canonicalAddress`.
+ *
  * WHY IT IS ITS OWN FILE, AND NOT PART OF header.php
  * -----------------------------------------------------------------------------
  * `header.php` draws the whole page furniture — navbar, breadcrumbs, the
@@ -104,8 +108,21 @@ if ($pageDescription === '') {
 // to us. No tag is better than a tag pointing somewhere else.
 // PortalAddress::visitorCanChooseHost() is the one place that answers this; it
 // is deliberately not worked out again here (#500).
+//
+// A PAGE REACHABLE AT MORE THAN ONE ADDRESS names its own canonical path in
+// `$pageCanonicalPath` (a clean route, no `.php`, no leading slash). The first
+// to set it is `/api-docs`, which the web server also answers at
+// `/api-docs/index.php` — and building from the request path gave that page a
+// `.php` canonical address, two "one true addresses" for one page, and a `.php`
+// address in a link that leaves the portal (#569 round 1). It is NOT the only
+// page reachable twice: `/settings` and `/admin/settings`, and `/` and
+// `/dashboard`, each still give one page two canonical addresses (#823). A page
+// that leaves this unset keeps the request path.
+$canonicalPathForPage = (isset($pageCanonicalPath) === true && is_string($pageCanonicalPath) === true)
+    ? $pageCanonicalPath
+    : \Portal\Core\Router::extractPath();
 $canonicalAddress = \Portal\Core\PortalAddress::visitorCanChooseHost() === false
-    ? \Portal\Core\PortalAddress::absolute(\Portal\Core\Router::extractPath())
+    ? \Portal\Core\PortalAddress::absolute($canonicalPathForPage)
     : '';
 
 // 🖼️ The picture in the preview card.

@@ -77,6 +77,31 @@ $renderUnavailable = static function (): never {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Kiosk</title>
+    <!-- 📝 What this screen is, in one line (#569). Written here by hand
+         rather than through head-meta.php, on purpose: this file is on the
+         EXEMPT list in tools/audit-checks/check_page_head_tags.py because a
+         kiosk tablet's address is never shared, so a canonical address and a
+         preview card would describe nothing. A description is different — it
+         is part of the checklist the owner set for every page on 4 October
+         2026, and it costs nothing. It names no organisation and nothing
+         about why the terminal is unavailable, because this page is
+         deliberately identical whichever check failed (see the header). -->
+    <meta name="description" content="A self-service check-in and check-out terminal for borrowed equipment.">
+    <!-- 🔖 "THIS PAGE HAS NO ICON", SAID OUT LOUD (#569). With no icon link
+         at all a browser falls back to /favicon.ico by convention; nothing
+         answers that address, so every kiosk load cost a 404 that the browser
+         reports as a console error. Measured with the browser audit on
+         7 November 2026, once /api-docs stopped hiding it by asking first.
+
+         Why an EMPTY icon and not the portal's own: the portal's icon comes
+         from head-meta.php, which this file deliberately does not use (see
+         the description above), and the organisation's own icon would make
+         this "unavailable" screen differ between an unknown token and a
+         known one — the header's rule is that it must look the same whichever
+         check failed. `data:,` is a picture with nothing in it: the browser
+         asks nobody, and shows its own plain tab icon. The standard policy
+         allows `data:` pictures; this page sends none of its own. -->
+    <link rel="icon" href="data:,">
     <!-- 🤖 Never index a kiosk terminal page. -->
     <meta name="robots" content="noindex, nofollow, noai, noimageai">
     <?php echo Asset::bootstrapCss(); ?>
@@ -170,6 +195,11 @@ $remainingSeconds = $identified === true ? max(0, (int) ($_SESSION['kiosk_expire
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Kiosk check-in/out</title>
+    <!-- 📝 The same one line as the "unavailable" screen above, and for the
+         same reason it is written by hand (#569). -->
+    <meta name="description" content="A self-service check-in and check-out terminal for borrowed equipment.">
+    <!-- 🔖 An empty icon, for the reason given on the "unavailable" screen above. -->
+    <link rel="icon" href="data:,">
     <!-- 🤖 Never index a kiosk terminal page. -->
     <meta name="robots" content="noindex, nofollow, noai, noimageai">
     <?php echo Asset::bootstrapCss(); ?>

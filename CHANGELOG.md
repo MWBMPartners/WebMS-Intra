@@ -4,6 +4,22 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Pages that looked unfinished: the API documentation, the admin help on a phone, the kiosk (#569)
+
+- **`/api-docs` no longer reports a console error, and has a heading and a description (#569).**
+  The "JavaScript error at 320px" was not Swagger UI and not the content-security
+  policy: the page drew its own `<head>` with no icon link, so every browser asked
+  for `/favicon.ico`, which nothing answers, and logged the 404. It now requires
+  `head-meta.php` like every other own-head page, so it gets the icon, a description,
+  a canonical address and a preview card; it gains a visible `<h1>`; and its title is
+  built from the organisation's name instead of the product name typed into the page.
+- **`/help/admin` no longer scrolls sideways on a phone (#569).** Two lists of setting
+  keys stack the key above its description or value below 576px, and the long
+  password-setting keys break only at a dot.
+- **The kiosk screens have a description and an explicitly empty icon (#569)**, so a
+  kiosk tablet no longer requests `/favicon.ico` on every load.
+- **`/api-docs` has ONE canonical address however it is reached** — `/api-docs`, `/api-docs/` or `/api-docs/index.php` (#569 round 1: the last gave itself a `.php` address). A page reachable at more than one address now names its own canonical path (`$pageCanonicalPath`).
+
 ### A scheduled job called every few minutes now counts as stopped within the hour (#793, D-076)
 
 - **A scheduled job called every few minutes now counts as stopped within the hour, not after a day and a half (#793, D-076).**

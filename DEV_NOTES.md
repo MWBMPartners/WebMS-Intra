@@ -20494,3 +20494,24 @@ because a customer following that page may choose it.
 ---
 
 **Round 3 (the last under the three-round cap, D-051) found the job's WHERE clause is not its whole selection**: `cron/giving-statements` calls `Site::forceContext()` per row, which refuses an inactive organisation, so a statement queued for one is never sent — and counting it made the page report a PROBLEM that could never clear, on the very set-up the guide recommends. `PortalCheck::JOB_WORK_WAITING_ACTIVE_ONLY` now adds that condition; Q8 compares the job's WHERE with everything before it and Q8b pins it; Q9c/Q9d drive it (planted out, both go red). That fix and the guide's giving row were made by the commissioning session AFTER the capped review, and were not independently checked. Left on #820: Q8 is a text comparison a JOIN or an extra condition can slip past; two schedule sentences (DbBackup, the retention page) are not held; and the giving job's own skipped rows and unretried failures. Review: three rounds by fresh Claude agents; Codex has not reviewed it.
+
+### Page findings left from the widened audit (#569)
+
+- **A "JavaScript error" in the browser audit can be a missing icon link.** With no
+  `<link rel="icon">` the browser asks `/favicon.ico`, gets a 404 and logs it as a
+  console error. It shows only on the FIRST page in a run that lacks the link, because
+  the browser remembers the failure — so fixing one page moves the error to the next
+  (fixing `/api-docs` exposed it on `/assets/kiosk`). Find the address before guessing:
+  the audit prints only the text, so a probe that logs `Network.responseReceived` with
+  status >= 400 is what named it.
+- **`check_page_head_tags.py` now reads `web/public_html/` too.** It used to read only
+  `web/_apps/`, so `/api-docs` was never examined (an issue comment called it
+  "exempt"; it was out of reach). The web-root no-network page
+  `offline/index.php` is exempt with a reason. Section G of
+  `tools/page-head-selftest.php` checks `/api-docs` over both ways in (router and
+  direct) and the kiosk screen, with a planted fault.
+- **A long dotted setting key in a flex row cannot shrink**, so it widens the page.
+  `<wbr>` after each dot gives it break points without changing the copied text;
+  `text-break` alone cut "requireUppe / rcase".
+- **A page reachable at more than one address names its own canonical path** (`$pageCanonicalPath` in `head-meta.php`): building it from the request path gave `/api-docs/index.php` a `.php` canonical address. `/settings` vs `/admin/settings` and `/` vs `/dashboard` still give one page two (#823).
+- **Review:** two rounds by fresh Claude agents (three-round cap). Round 1 found the `.php` canonical; round 2 confirmed the fix across 15 pages and in multi-organisation path mode (the organisation's part never printed twice), and found only an untrue comment (corrected). Left on #821, #822 (the top bar over 3,000px wide for a root administrator with every app on), #823. Codex has not reviewed it.

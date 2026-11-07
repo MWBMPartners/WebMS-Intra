@@ -185,24 +185,31 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <h5 class="mt-4 mb-3">Common setting keys</h5>
 
+    <?php /* 📱 THE KEY STACKS ABOVE ITS DESCRIPTION ON A PHONE (#569). Each key
+             is `text-nowrap` so it is never split at a dot, which is right —
+             but beside a description in one row it left too little room, and
+             at 320px the alpha/beta rows below pushed the whole page to 391px
+             wide, so the visitor had to scroll sideways. `flex-column
+             flex-sm-row` keeps the two side by side from 576px up and puts
+             the key on its own line below that. Nothing is hidden or cut. */ ?>
     <div class="list-group list-group-flush">
-        <div class="list-group-item d-flex gap-2">
+        <div class="list-group-item d-flex flex-column flex-sm-row gap-1 gap-sm-2">
             <code class="text-nowrap">site.name</code>
             <span class="text-secondary">-- The portal name shown in the browser tab and navigation bar.</span>
         </div>
-        <div class="list-group-item d-flex gap-2">
+        <div class="list-group-item d-flex flex-column flex-sm-row gap-1 gap-sm-2">
             <code class="text-nowrap">site.copyrightOrg</code>
             <span class="text-secondary">-- Organisation name shown in the footer copyright notice.</span>
         </div>
-        <div class="list-group-item d-flex gap-2">
+        <div class="list-group-item d-flex flex-column flex-sm-row gap-1 gap-sm-2">
             <code class="text-nowrap">expenses.enabled</code>
             <span class="text-secondary">-- Set to <code>true</code> to enable the Expenses app in navigation.</span>
         </div>
-        <div class="list-group-item d-flex gap-2">
+        <div class="list-group-item d-flex flex-column flex-sm-row gap-1 gap-sm-2">
             <code class="text-nowrap">expenses.displayName</code>
             <span class="text-secondary">-- The label shown in the nav bar for the Expenses app.</span>
         </div>
-        <div class="list-group-item d-flex gap-2">
+        <div class="list-group-item d-flex flex-column flex-sm-row gap-1 gap-sm-2">
             <code class="text-nowrap">expenses.displayIcon</code>
             <span class="text-secondary">-- The Font Awesome icon class used for the app (e.g., <code>fa-solid fa-receipt</code>).</span>
         </div>
@@ -376,13 +383,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
+    <?php /* 📱 A SETTING AND ITS VALUE, WRAPPING ON A PHONE (#569). These were
+             one row each with no way to wrap, and a long key such as
+             `auth.password.requireUppercase` has no place to break, so the
+             value was pushed past the right-hand edge at 320px. `flex-wrap`
+             moves the value onto the next line only when the two do not fit.
+             `<wbr>` after each dot lets a key break at a DOT and nowhere
+             else — a first version used `text-break` alone, and the screenshot
+             at 320px showed "requireUppe / rcase", a setting name cut in the
+             middle of a word, which reads as broken. `<wbr>` adds no character,
+             so a key copied off the page is still the exact setting name.
+             `text-break` stays only as the last resort on a screen narrower
+             still, rather than widening the page. */ ?>
     <div class="list-group list-group-flush">
-        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.minLength</code></span><strong>12</strong></div>
-        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.maxLength</code></span><strong>128</strong></div>
-        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireUppercase</code></span><strong>true</strong></div>
-        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireLowercase</code></span><strong>true</strong></div>
-        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireNumber</code></span><strong>true</strong></div>
-        <div class="list-group-item d-flex justify-content-between"><span><code>auth.password.requireSpecial</code></span><strong>true</strong></div>
+        <div class="list-group-item d-flex flex-wrap justify-content-between column-gap-3"><span class="text-break"><code>auth.<wbr>password.<wbr>minLength</code></span><strong>12</strong></div>
+        <div class="list-group-item d-flex flex-wrap justify-content-between column-gap-3"><span class="text-break"><code>auth.<wbr>password.<wbr>maxLength</code></span><strong>128</strong></div>
+        <div class="list-group-item d-flex flex-wrap justify-content-between column-gap-3"><span class="text-break"><code>auth.<wbr>password.<wbr>requireUppercase</code></span><strong>true</strong></div>
+        <div class="list-group-item d-flex flex-wrap justify-content-between column-gap-3"><span class="text-break"><code>auth.<wbr>password.<wbr>requireLowercase</code></span><strong>true</strong></div>
+        <div class="list-group-item d-flex flex-wrap justify-content-between column-gap-3"><span class="text-break"><code>auth.<wbr>password.<wbr>requireNumber</code></span><strong>true</strong></div>
+        <div class="list-group-item d-flex flex-wrap justify-content-between column-gap-3"><span class="text-break"><code>auth.<wbr>password.<wbr>requireSpecial</code></span><strong>true</strong></div>
     </div>
 
     <p class="mt-3 mb-0 text-muted small">
@@ -618,11 +637,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p>You can allow non-admin users to access alpha or beta sites by adding their roles to the relevant settings:</p>
 
     <div class="list-group list-group-flush mb-3">
-        <div class="list-group-item d-flex gap-2">
+        <div class="list-group-item d-flex flex-column flex-sm-row gap-1 gap-sm-2">
             <code class="text-nowrap">portal.alphaAccessRoles</code>
             <span class="text-secondary">-- Comma-separated role keys that can access the alpha site (e.g., <code>Admin,Developer</code>).</span>
         </div>
-        <div class="list-group-item d-flex gap-2">
+        <div class="list-group-item d-flex flex-column flex-sm-row gap-1 gap-sm-2">
             <code class="text-nowrap">portal.betaAccessRoles</code>
             <span class="text-secondary">-- Comma-separated role keys that can access the beta site (e.g., <code>Admin,Tester</code>).</span>
         </div>
