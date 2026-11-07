@@ -37,3 +37,5 @@ switched off (#483)**, which this project has already paid for once.
 what a customer loses without each job — **but note a token is NOT a job**:
 `maintenance.cronToken` alone covers backups, the health check, the mail queue
 and the retention sweep, so the new record is keyed by JOB.
+
+**Superseded in part by D-076** (7 November 2026): the "everything else → 36 hours" row no longer applies to the six jobs whose own headers say they run every few minutes or hourly (`push-golive`, `webhook-retry`, `user-reminders`, `asset-reminders`, `venue-reminders`, `workflow-timeouts`); each gets an allowance from its own timing. Everything else in this decision stands.
