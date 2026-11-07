@@ -40,6 +40,35 @@ class Discipleship
     }
 
     /**
+     * 🎛️ The same switch, for ONE NAMED organisation rather than the one the
+     *    request happens to be in (#819).
+     *
+     * `isEnabled()` reads the merged settings start-up built for the
+     * request's own organisation. That is right for a page, and wrong for the
+     * scheduled sweep, which is one request working through EVERY
+     * organisation: it used to ask `isEnabled()` once and then sweep them
+     * all, so an organisation that had switched Discipleship off was swept
+     * whenever the organisation the request landed on had it on, and the
+     * reverse refused everybody.
+     *
+     * It ASKS `AppRegistry::isEnabledForSite()`, which is how every app's
+     * switch is read for one named organisation, rather than keeping a second
+     * copy of that rule here (#819 round 1). The rule: the organisation's own
+     * row, else the installation-wide one (`App::settingForSite()`); exactly
+     * `'1'` or `'true'` is on; anything else -- and no row at all -- is off,
+     * as `isEnabled()`'s default `'false'` is. The two were measured to agree
+     * before this was made a call: X18i-X18j of `tools/time-zones-selftest.php`
+     * drive the real scheduled sweep over ten stored values and over no row,
+     * and gave the same answers with the old copy and with this call.
+     *
+     * @param int $siteId The organisation to ask about.
+     */
+    public static function isEnabledFor(int $siteId): bool
+    {
+        return AppRegistry::isEnabledForSite('discipleship', $siteId);
+    }
+
+    /**
      * 🤖 Auto-completion sweep. Three set-based `INSERT IGNORE … SELECT`
      * statements — one per `tblPathwaySteps.autoRule` value — each joining
      * active pathways × active enrolments × the matching per-user evidence
@@ -105,11 +134,36 @@ class Discipleship
         //    one in Auckland it waited up to thirteen hours after. The zones
         //    read are this organisation's events' (a step names one of its own
         //    events), and a zone PHP cannot open falls back to this
-        //    organisation's clock. (Unlike rules 1 and 2, this rule's join does
-        //    not ALSO require `ev.siteID = p.siteID`; an event of another
-        //    organisation named here would be judged on this one's clock if its
-        //    zone were one this organisation never uses. Found while fixing
-        //    #804 and deliberately not changed here.)
+        //    organisation's clock.
+        //
+        // 🏢 THE EVENT MUST BELONG TO THE PATHWAY'S ORGANISATION (#812), as in
+        //    rules 1 and 2. This join used to lack `ev.siteID = p.siteID`, so a
+        //    step naming ANOTHER organisation's event could be completed by an
+        //    RSVP to it, writing a permanent progress row this organisation's
+        //    leaders see -- evidence from an organisation that never meant it
+        //    to count here. (It also made the clock above wrong for such an
+        //    event: its zone is read from THIS organisation's events only.)
+        //
+        //    How far it reached, measured rather than assumed: no page writes
+        //    either half of it. `admin/discipleship/step-save.php` refuses a
+        //    step naming an event of another organisation, and
+        //    `calendar/rsvp.php` -- the only writer of an RSVP row -- stores
+        //    the RSVP under the organisation the event belongs to, so
+        //    `r.siteID = p.siteID` already ruled such an event out for every
+        //    row the portal writes. It took a row written by hand, by a
+        //    restore, or by some future writer. The guard is here anyway
+        //    because the row this writes is permanent, and because the RSVP
+        //    row's own `siteID` is not the same fact as the EVENT's
+        //    organisation -- one is a copy of the other, made once, and rule 3
+        //    was the only rule trusting the copy.
+        //
+        //    Nothing else in this join can cross organisations: the enrolment
+        //    is reached through the pathway itself (`e.pathwayID =
+        //    p.pathwayID`), the step through its pathway, and the pathway is
+        //    this organisation's by `p.siteID = ?`. Like rules 1 and 2, the
+        //    sweep does NOT ask whether the person is still a MEMBER of this
+        //    organisation; that is a different question from whose event it
+        //    was, and is left as it is.
         $nowOnClock = Events::nowOnItsOwnClock($db, 'ev', $siteId);
         $sql = 'INSERT IGNORE INTO tblPathwayProgress '
              . '(siteID, stepID, userID, source, autoRef, completedAt) '
@@ -120,7 +174,8 @@ class Discipleship
              . 'JOIN tblPathwayEnrolments e ON e.pathwayID = p.pathwayID AND e.status = \'active\' '
              . 'JOIN tblEventRSVPs r ON r.eventID = s.autoRefID AND r.userID = e.userID '
              . '  AND r.siteID = p.siteID AND r.response = \'going\' AND r.status = \'confirmed\' '
-             . 'JOIN tblEvents ev ON ev.eventID = s.autoRefID AND `ev`.`startDateTime` <= ' . $nowOnClock['sql'] . ' '
+             . 'JOIN tblEvents ev ON ev.eventID = s.autoRefID AND `ev`.`siteID` = `p`.`siteID` '
+             . '  AND `ev`.`startDateTime` <= ' . $nowOnClock['sql'] . ' '
              . 'WHERE s.autoRule = \'rsvpd_event\' AND s.autoRefID IS NOT NULL AND p.siteID = ?';
         $inserted += self::runSweepRule($db, $sql, $siteId, $pathwayId, $nowOnClock['types'], $nowOnClock['params']);
 

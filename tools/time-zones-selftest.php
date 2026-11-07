@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 175;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19)
+const EXPECTED_CHECKS = 186;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -2834,6 +2834,271 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
     q('DELETE FROM tblPathwaySteps WHERE pathwayID = ?', 'i', [$pathId]);
     q('DELETE FROM tblPathways WHERE pathwayID = ?', 'i', [$pathId]);
     q('DELETE FROM tblEventRSVPs WHERE eventID IN (960906, 960907)');
+
+    // ---- #812: rule 3 counted an event of ANOTHER organisation -------------
+    // Rules 1 and 2 of the sweep require the event to belong to the pathway's
+    // organisation; rule 3 ("RSVP'd going to this event") did not. Its only
+    // organisation test was the RSVP row's own `siteID`, a COPY of the event's
+    // organisation made once by `calendar/rsvp.php`. So a step of organisation
+    // 1's pathway naming organisation two's event, with an RSVP row stored
+    // under organisation 1, was completed -- a permanent progress row
+    // organisation 1's leaders see, from an event that was never theirs.
+    //
+    // NEITHER HALF IS WRITTEN BY ANY PAGE, and that is said rather than
+    // hidden: `admin/discipleship/step-save.php` refuses a step naming another
+    // organisation's event, and `calendar/rsvp.php` stores an RSVP under the
+    // event's own organisation. Both rows are therefore written by hand here,
+    // as a restore or a hand-written row would leave them. The person is a
+    // member of BOTH organisations, the ordinary case for somebody who can
+    // RSVP to either.
+    //
+    // The same pathway holds a step naming organisation 1's OWN event that has
+    // begun (960907, X18's), so the check cannot pass by the sweep simply not
+    // running: it must complete that one and not the other.
+    $ev812Zone  = 'America/Santiago';
+    $ev812Start = (new DateTimeImmutable('now', new DateTimeZone($ev812Zone)))->modify('-6 hours')->format('Y-m-d H:i:00');
+    q(
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960908, ?, 'selftest-zones-812-960908', 'Selftest zones 812 other organisation', ?, DATE_ADD(?, INTERVAL 1 HOUR), ?, 'published', 1, 0)",
+        'isss', [ORG_TWO, $ev812Start, $ev812Start, $ev812Zone]
+    );
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [MEMBER, ORG_TWO]);
+    q("INSERT INTO tblPathways (siteID, name, isActive) VALUES (1, 'Selftest zones pathway 812 one', 1)");
+    $path812One = (int) one("SELECT pathwayID FROM tblPathways WHERE name = 'Selftest zones pathway 812 one'")['pathwayID'];
+    q("INSERT INTO tblPathwaySteps (pathwayID, sortOrder, name, autoRule, autoRefID) VALUES (?, 1, 'Selftest 812 own organisation', 'rsvpd_event', 960907), (?, 2, 'Selftest 812 other organisation', 'rsvpd_event', 960908)", 'ii', [$path812One, $path812One]);
+    q("INSERT INTO tblPathwayEnrolments (siteID, pathwayID, userID, status) VALUES (1, ?, ?, 'active')", 'ii', [$path812One, MEMBER]);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (960907, ?, 1, 'going', 'confirmed'), (960908, ?, 1, 'going', 'confirmed')", 'ii', [MEMBER, MEMBER]);
+
+    $orgOneZone812 = (string) (one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? 'UTC');
+    $nowThere      = static fn (string $zone): string => (new DateTimeImmutable('now', new DateTimeZone($zone)))->format('Y-m-d H:i:s');
+    $ev812Row      = one('SELECT siteID FROM tblEvents WHERE eventID = 960908');
+    $rsvp812Row    = one('SELECT siteID FROM tblEventRSVPs WHERE eventID = 960908 AND userID = ?', 'i', [MEMBER]);
+    $memberOfBoth  = (int) (one('SELECT COUNT(*) AS n FROM tblUserSites WHERE userID = ? AND siteID IN (1, ?) AND isActive = 1', 'ii', [MEMBER, ORG_TWO])['n'] ?? 0);
+    ok(
+        'X18b premise (#812): event 960908 is organisation two\'s, it has begun on its own clock AND on organisation 1\'s (the clock the old rule judged it on), its RSVP row is stored under organisation 1, and the person is a member of both -- so the old rule 3, which asked nothing about the EVENT\'s organisation, completes the step and the check below is not vacuous',
+        (int) ($ev812Row['siteID'] ?? 0) === ORG_TWO && (int) ($rsvp812Row['siteID'] ?? 0) === 1 && $memberOfBoth === 2
+            && strcmp($ev812Start, $nowThere($ev812Zone)) < 0 && strcmp($ev812Start, $nowThere($orgOneZone812)) < 0 && strcmp($ev812Start, $nowThere('UTC')) < 0,
+        'event organisation ' . json_encode($ev812Row['siteID'] ?? null) . ', RSVP organisation ' . json_encode($rsvp812Row['siteID'] ?? null)
+            . ', memberships ' . $memberOfBoth . ', start ' . $ev812Start . ' against now ' . $nowThere($ev812Zone) . ' (' . $ev812Zone . '), '
+            . $nowThere($orgOneZone812) . ' (' . $orgOneZone812 . '), ' . $nowThere('UTC') . ' (UTC)'
+    );
+    $doneIn = static fn (int $pathwayId, int $userId): array => array_column(q(
+        'SELECT s.name FROM tblPathwayProgress pr JOIN tblPathwaySteps s ON s.stepID = pr.stepID WHERE s.pathwayID = ? AND pr.userID = ? ORDER BY s.name',
+        'ii', [$pathwayId, $userId]
+    ), 'name');
+    $sweep812 = req($xMemberJar, 'GET', '/discipleship');
+    $done812  = $doneIn($path812One, MEMBER);
+    ok(
+        'X18c the discipleship sweep completes organisation 1\'s step for organisation 1\'s OWN event, and NOT the step naming organisation two\'s event the person RSVP\'d to (#812: rule 3 completed both, and the row is permanent)',
+        $sweep812['status'] === 200 && $done812 === ['Selftest 812 own organisation'],
+        said($sweep812) . '; completed: ' . json_encode($done812) . ' (the old rule 3 gives ["Selftest 812 other organisation","Selftest 812 own organisation"])'
+    );
+
+    // ---- #819: the scheduled sweep decides PER ORGANISATION ----------------
+    // `cron/discipleship-sweep` used to ask once, for the organisation the
+    // scheduler's request lands on (organisation 1 here: the request names
+    // none), and sweep every organisation on that answer. The first two
+    // arrangements below are the ones the old page gets WRONG, one in each
+    // direction:
+    //   (a) on for organisation 1 alone -- the old page swept organisation two
+    //       as well, which had it off;
+    //   (b) on for organisation two alone -- the old page refused, because
+    //       organisation 1 had it off, and organisation two got nothing.
+    // The rest, (c)-(i), pin what the NEW page must keep doing -- the
+    // ordinary installation-wide state, an organisation's own "no", which
+    // values count as on, a missing switch, an inactive organisation, no
+    // pathway at all, and the outcome every run records -- several of which
+    // the old page also got right.
+    // Organisation two has a pathway of its own, with a step for its OWN event
+    // and an RSVP stored the way `calendar/rsvp.php` stores one, held by a
+    // member of organisation two only.
+    q("INSERT INTO tblPathways (siteID, name, isActive) VALUES (?, 'Selftest zones pathway 812 two', 1)", 'i', [ORG_TWO]);
+    $path812Two = (int) one("SELECT pathwayID FROM tblPathways WHERE name = 'Selftest zones pathway 812 two'")['pathwayID'];
+    q("INSERT INTO tblPathwaySteps (pathwayID, sortOrder, name, autoRule, autoRefID) VALUES (?, 1, 'Selftest 819 organisation two', 'rsvpd_event', 960908)", 'i', [$path812Two]);
+    q("INSERT INTO tblPathwayEnrolments (siteID, pathwayID, userID, status) VALUES (?, ?, ?, 'active')", 'iii', [ORG_TWO, $path812Two, OTHER]);
+    q("INSERT INTO tblEventRSVPs (eventID, userID, siteID, response, status) VALUES (960908, ?, ?, 'going', 'confirmed')", 'ii', [OTHER, ORG_TWO]);
+    // Clearing the progress is not enough on its own: a sweep that completes
+    // EVERY step of a pathway also marks the enrolment `completed`, and the
+    // sweep only looks at `active` enrolments -- so after a run that wrongly
+    // completed both of organisation 1's steps, the next arrangement would see
+    // nothing to sweep and fail for the wrong reason (found by planting #812's
+    // fault back: X18d went red on a fixture left behind by X18c).
+    $clearProgress = static function () use ($path812One, $path812Two): void {
+        q('DELETE FROM tblPathwayProgress WHERE stepID IN (SELECT stepID FROM tblPathwaySteps WHERE pathwayID IN (?, ?))', 'ii', [$path812One, $path812Two]);
+        q("UPDATE tblPathwayEnrolments SET status = 'active', completedAt = NULL WHERE pathwayID IN (?, ?)", 'ii', [$path812One, $path812Two]);
+    };
+    $ownSwitch = static function (?int $site): void {
+        q("DELETE FROM tblSettings WHERE settingKey = 'discipleship.enabled' AND siteID IS NOT NULL");
+        if ($site !== null) {
+            q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'discipleship.enabled', 'true', 'true', 0)", 'i', [$site]);
+        }
+    };
+    $sweepTokenWas = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'discipleship.cron_token' AND siteID IS NULL")['settingValue'] ?? '';
+    $enabledWas    = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'discipleship.enabled' AND siteID IS NULL")['settingValue'] ?? 'true';
+    $ownRowsBefore = (int) (one("SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey = 'discipleship.enabled' AND siteID IS NOT NULL")['n'] ?? -1);
+    $orgTwoActiveWas = (int) (one('SELECT isActive FROM tblSites WHERE siteID = ?', 'i', [ORG_TWO])['isActive'] ?? 1);
+    $sweepToken    = bin2hex(random_bytes(16));
+    setting('discipleship.cron_token', $sweepToken);
+    $otherIsTwos = one('SELECT userID FROM tblUserSites WHERE userID = ? AND siteID = ? AND isActive = 1', 'ii', [OTHER, ORG_TWO]) !== null
+        && one('SELECT userID FROM tblUserSites WHERE userID = ? AND siteID = 1', 'i', [OTHER]) === null;
+
+    // One run of the real job, from a clean slate: progress and enrolments put
+    // back, and the job's own record DELETED first, so the outcome read
+    // afterwards can only have been written by THIS run (#819 round 1: the
+    // outcome the "Check this portal" page reads was pinned by nothing).
+    $sweepOnce = static function () use ($clearProgress, $sweepToken, $doneIn, $path812One, $path812Two): array {
+        $clearProgress();
+        q("DELETE FROM tblScheduledJobRun WHERE jobKey = 'cron/discipleship-sweep'");
+        $answer = req('', 'GET', '/cron/discipleship-sweep?key=' . $sweepToken);
+        $record = one("SELECT lastOutcome, finishedAtUtc FROM tblScheduledJobRun WHERE jobKey = 'cron/discipleship-sweep'");
+
+        return [
+            'answer'  => $answer,
+            'said'    => trim($answer['body']),
+            'outcome' => $record === null ? '(no record)' : ($record['finishedAtUtc'] === null ? '(no finish)' : (string) $record['lastOutcome']),
+            'one'     => $doneIn($path812One, MEMBER),
+            'two'     => $doneIn($path812Two, OTHER),
+        ];
+    };
+    $bothSwept   = static fn (array $run): bool => $run['one'] === ['Selftest 812 own organisation'] && $run['two'] === ['Selftest 819 organisation two'];
+    $refusedRun  = static fn (array $run): bool => $run['answer']['status'] === 200
+        && $run['said'] === 'Discipleship is switched off for every active organisation that has an active pathway, so nothing was swept'
+        && $run['outcome'] === 'refused' && $run['one'] === [] && $run['two'] === [];
+    // The two counts the job prints, so a run that swept one organisation
+    // cannot report two (#819 round 2: `count($siteIds)` in place of
+    // `count($stats)` printed "sitesSwept 2" for a one-of-two run with every
+    // check green). [-1, -1] when the answer is not an OK line.
+    $counts      = static function (array $run): array {
+        $said = str_starts_with($run['said'], 'OK ') === true ? json_decode(substr($run['said'], 3), true) : null;
+
+        return is_array($said) === true ? [$said['sitesSwept'] ?? -1, $said['sitesSwitchedOff'] ?? -1] : [-1, -1];
+    };
+    $tell        = static fn (array $run): string => said($run['answer']) . ' "' . substr($run['said'], 0, 160) . '", recorded ' . $run['outcome']
+        . '; organisation 1 completed ' . json_encode($run['one']) . ', organisation two completed ' . json_encode($run['two']);
+    $okRun       = static fn (array $run): bool => $run['answer']['status'] === 200 && str_starts_with($run['said'], 'OK ') === true && $run['outcome'] === 'ok';
+
+    // ---- (a) and (b): on for ONE organisation through its own row ----------
+    setting('discipleship.enabled', 'false');
+    $ownSwitch(1);
+    $runA = $sweepOnce();
+    ok(
+        'X18d (#819) with Discipleship on for organisation 1 ALONE (its own row) and off installation-wide, the scheduled sweep sweeps organisation 1 and NOT organisation two, and says so (swept 1, switched off 1) (the old page asked organisation 1 once and swept both)',
+        $ownRowsBefore === 0 && $otherIsTwos === true && $okRun($runA) === true && $counts($runA) === [1, 1]
+            && $runA['one'] === ['Selftest 812 own organisation'] && $runA['two'] === [],
+        'own rows before ' . $ownRowsBefore . ', the second person in organisation two only: ' . json_encode($otherIsTwos) . '; ' . $tell($runA)
+    );
+    $ownSwitch(ORG_TWO);
+    $runB = $sweepOnce();
+    ok(
+        'X18e (#819) with Discipleship on for organisation two ALONE, the scheduled sweep sweeps organisation two and NOT organisation 1, and says so (swept 1, switched off 1) (the old page answered "Discipleship disabled", because the request landed on organisation 1, and swept nobody)',
+        $okRun($runB) === true && $counts($runB) === [1, 1] && $runB['one'] === [] && $runB['two'] === ['Selftest 819 organisation two'],
+        $tell($runB)
+    );
+
+    // ---- (c) off everywhere: the words AND the recorded outcome ------------
+    $ownSwitch(null);
+    $runC = $sweepOnce();
+    ok(
+        'X18f (#819) with Discipleship off for every organisation, the scheduled sweep says so, completes nothing, and RECORDS the run as refused (what the "Check this portal" page reads)',
+        $refusedRun($runC) === true,
+        $tell($runC)
+    );
+
+    // ---- (d) THE ORDINARY STATE: installation-wide on, no own rows ---------
+    // Admin, Apps and the install script write ONLY the installation-wide row
+    // (no page can write an organisation's own `discipleship.enabled`), so
+    // this is the state of every real installation. (a)-(c) never drove it,
+    // and a switch that ignored the installation-wide row passed all three
+    // (#819 round 1) while skipping every organisation on every portal.
+    setting('discipleship.enabled', 'true');
+    $runD = $sweepOnce();
+    ok(
+        'X18g (#819) in the ORDINARY state -- Discipleship on installation-wide, no organisation with a row of its own -- the scheduled sweep sweeps BOTH organisations, says so (swept 2, switched off 0) and records ok',
+        $okRun($runD) === true && $counts($runD) === [2, 0] && $bothSwept($runD) === true,
+        $tell($runD)
+    );
+
+    // ---- (e) an organisation's own "no" beats the installation's "yes" -----
+    q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (1, 'discipleship.enabled', '0', '0', 0)");
+    $runE = $sweepOnce();
+    $ownSwitch(null);
+    ok(
+        'X18h (#819) with Discipleship on installation-wide and an own row of "0" for organisation 1, the scheduled sweep skips organisation 1 and sweeps organisation two, and says so (swept 1, switched off 1)',
+        $okRun($runE) === true && $counts($runE) === [1, 1] && $runE['one'] === [] && $runE['two'] === ['Selftest 819 organisation two'],
+        $tell($runE)
+    );
+
+    // ---- (f) which values count as ON, installation-wide -------------------
+    // Exactly '1' and 'true', as Admin, Apps and every page read it
+    // (`AppRegistry::isEnabledForSite()`): anything else is off, capitals and
+    // spaces included. Each value is one real run of the job.
+    $valueTable = [];
+    $valuesRight = true;
+    foreach (['1' => true, 'true' => true, '0' => false, 'false' => false, '' => false, 'TRUE' => false, 'yes' => false, 'on' => false, ' 1' => false, '1 ' => false] as $value => $isOn) {
+        setting('discipleship.enabled', (string) $value);
+        $run = $sweepOnce();
+        $right = $isOn === true ? ($okRun($run) === true && $bothSwept($run) === true) : $refusedRun($run);
+        $valueTable[] = json_encode((string) $value) . ' => ' . ($isOn === true ? 'on' : 'off') . ($right === true ? ' ok' : ' WRONG: ' . $tell($run));
+        $valuesRight = $valuesRight && $right;
+    }
+    ok(
+        'X18i (#819) installation-wide, the scheduled sweep counts exactly "1" and "true" as on, and every other value ("0", "false", "", "TRUE", "yes", "on", " 1", "1 ") as off',
+        $valuesRight === true,
+        implode('; ', $valueTable)
+    );
+
+    // ---- (g) NO switch at all counts as OFF --------------------------------
+    // The installation-wide row is moved aside under another name (and moved
+    // back), so the row itself -- its default and every other column -- is
+    // kept exactly, rather than deleted and remade. The name it is moved to
+    // must NOT begin `discipleship.enabled.`: setting names are a dotted tree,
+    // so that would turn `discipleship.enabled` into a BRANCH holding a child
+    // rather than a missing value (planting the old page found it: its
+    // `isEnabled()` warned "Array to string conversion").
+    q("UPDATE tblSettings SET settingKey = 'held812.discipleship.enabled' WHERE settingKey = 'discipleship.enabled' AND siteID IS NULL");
+    $noRows = (int) (one("SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey = 'discipleship.enabled'")['n'] ?? -1);
+    $runG   = $sweepOnce();
+    q("UPDATE tblSettings SET settingKey = 'discipleship.enabled' WHERE settingKey = 'held812.discipleship.enabled' AND siteID IS NULL");
+    ok(
+        'X18j (#819) with NO discipleship.enabled row anywhere, the scheduled sweep counts the switch as OFF: nothing swept, recorded refused',
+        $noRows === 0 && $refusedRun($runG) === true,
+        'rows left with that name: ' . $noRows . '; ' . $tell($runG)
+    );
+
+    // ---- (h) an organisation that is switched off itself is not swept ------
+    setting('discipleship.enabled', 'true');
+    q('UPDATE tblSites SET isActive = 0 WHERE siteID = ?', 'i', [ORG_TWO]);
+    $runH = $sweepOnce();
+    q('UPDATE tblSites SET isActive = ? WHERE siteID = ?', 'ii', [$orgTwoActiveWas, ORG_TWO]);
+    ok(
+        'X18k (#819) with organisation two itself switched off (tblSites.isActive = 0) and Discipleship on, the scheduled sweep sweeps organisation 1 and NOT organisation two',
+        $orgTwoActiveWas === 1 && $okRun($runH) === true && $runH['one'] === ['Selftest 812 own organisation'] && $runH['two'] === [],
+        'organisation two was active: ' . $orgTwoActiveWas . '; ' . $tell($runH)
+    );
+
+    // ---- (i) no active pathway anywhere: nothing to do, which is NOT "off" --
+    q('UPDATE tblPathways SET isActive = 0 WHERE pathwayID IN (?, ?)', 'ii', [$path812One, $path812Two]);
+    $activeElsewhere = (int) (one('SELECT COUNT(*) AS n FROM tblPathways WHERE isActive = 1')['n'] ?? -1);
+    $runI = $sweepOnce();
+    q('UPDATE tblPathways SET isActive = 1 WHERE pathwayID IN (?, ?)', 'ii', [$path812One, $path812Two]);
+    $sweptI = json_decode(substr($runI['said'], 3), true);
+    ok(
+        'X18l (#819) with no active pathway anywhere, the scheduled sweep finishes normally -- OK, swept 0, recorded ok -- rather than calling itself switched off',
+        $activeElsewhere === 0 && $okRun($runI) === true && is_array($sweptI) === true && ($sweptI['sitesSwept'] ?? null) === 0,
+        'other active pathways: ' . $activeElsewhere . '; ' . $tell($runI)
+    );
+    q("DELETE FROM tblScheduledJobRun WHERE jobKey = 'cron/discipleship-sweep'");
+
+    // Put everything back. Nothing below reads these rows; event 960908 goes
+    // so organisation two's calendar is as it was.
+    setting('discipleship.enabled', (string) $enabledWas);
+    setting('discipleship.cron_token', (string) $sweepTokenWas);
+    $clearProgress();
+    q('DELETE FROM tblPathwayEnrolments WHERE pathwayID IN (?, ?)', 'ii', [$path812One, $path812Two]);
+    q('DELETE FROM tblPathwaySteps WHERE pathwayID IN (?, ?)', 'ii', [$path812One, $path812Two]);
+    q('DELETE FROM tblPathways WHERE pathwayID IN (?, ?)', 'ii', [$path812One, $path812Two]);
+    q('DELETE FROM tblEventRSVPs WHERE eventID IN (960907, 960908)');
+    q('DELETE FROM tblUserSites WHERE userID = ? AND siteID = ?', 'ii', [MEMBER, ORG_TWO]);
+    q('DELETE FROM tblEvents WHERE eventID = 960908');
 
     // The dashboard's "Events This Week" -- loaded as a page, because its count
     // is the statement that answered HTTP 500 for every organisation with no

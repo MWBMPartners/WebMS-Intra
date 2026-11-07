@@ -181,9 +181,10 @@ final class PortalCheck
      * section Q holds the two conditions together, so a change to the job's
      * selection that is not made here fails there.
      *
-     * `cron/discipleship-sweep` has no entry on purpose: it refuses outright
-     * while `Discipleship::isEnabled()` is false, so with the app off it has
-     * no work whatever is in its tables.
+     * `cron/discipleship-sweep` has no entry on purpose: it skips every
+     * organisation whose own switch is off (`Discipleship::isEnabledFor()`,
+     * asked per organisation since #819), so with the app off everywhere it
+     * has no work whatever is in its tables.
      *
      * @var array<string, string> job address => a query answering `howMany`
      */

@@ -4,6 +4,11 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A discipleship pathway no longer counts another organisation's events (#812, #819)
+
+- **Fixed (#812):** the Discipleship sweep's third rule ("RSVP'd going to this event") now requires the event to belong to the pathway's own organisation, as the other two rules always did. Before, a step naming another organisation's event could be completed by an RSVP to it, writing a permanent progress row. No page could write the rows needed to reach it (the step form refuses another organisation's event, and the RSVP page stores an RSVP under the event's own organisation), so it took a hand-written or restored row.
+- **Fixed (#819):** the scheduled sweep (`/cron/discipleship-sweep`) now asks each organisation whether Discipleship is switched on for it, and skips one that has it off. It used to ask only the organisation the scheduler's request landed on and apply that answer to every organisation, so it either swept organisations that had switched it off or swept nobody. It also skips an organisation that is itself switched off (`tblSites.isActive = 0`), as the giving-statements job does. Its summary line gains a `sitesSwitchedOff` count. When every active organisation with an active pathway has Discipleship off it says exactly that ("Discipleship is switched off for every active organisation that has an active pathway, so nothing was swept", replacing "Discipleship disabled") and records the run as refused; with no active pathway anywhere it finishes normally with a count of 0, recorded ok.
+
 ### Outside services: what a member's browser may tell another company (#778; D-058, D-072, D-073)
 
 - **Gravatar pictures, a sign-in provider's photo and maps of a member's home are now off by

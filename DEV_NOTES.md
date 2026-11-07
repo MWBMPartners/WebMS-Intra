@@ -20687,3 +20687,23 @@ because a customer following that page may choose it.
   never from here.
 
 **Review: nine rounds by fresh Claude agents; round 9 CLEAN** (protected arm — what outside companies learn about a member). Rounds 1–5 found portal faults (maps on by default, untrue help, a deactivated account escaping another organisation's 'no', withdrawals lost in mixed or concurrent saves); round 6 found round 5's own lock causing deadlocks between DIFFERENT members; rounds 7–8 found only tests that could not fail. Codex has NOT reviewed it.
+
+### Discipleship sweep: the event's organisation, and the switch, per organisation (#812, #819)
+
+- Rule 3 trusted the RSVP row's own `siteID` as its organisation test. That column is a COPY of the event's organisation, made once by `calendar/rsvp.php`; rules 1 and 2 ask the event itself (`ev.siteID = p.siteID`). Rule 3 now does too. Nothing else in the join crosses organisations: the enrolment is reached through the pathway, the step through its pathway, the pathway by `p.siteID = ?`. None of the three rules asks whether the person is still a member of the organisation; that is a different question and was left alone.
+- `Discipleship::isEnabledFor($siteId)` ASKS `AppRegistry::isEnabledForSite('discipleship', $siteId)` — own row, else installation-wide; exactly `'1'`/`'true'` is on; no row is off — so there is one rule. It was a copy at first; X18i/X18j drove the real job over ten stored values and over no row with the copy and with the call, and both gave the same answers. `Discipleship::isEnabled()` stays for pages, which are about their own organisation.
+- Round-1 lesson: the first tests turned the switch on only through an organisation's OWN row, a state no page can produce; a switch that ignored the installation-wide row — the only row Admin, Apps writes — passed them all. The ordinary state (installation-wide on, no own rows) is X18g. And the outcome the job RECORDS (`tblScheduledJobRun.lastOutcome`, which the Check page reads) was pinned by nothing; each run now deletes the job's record first and reads it back.
+- Testing trap: to make a setting MISSING, do not rename it to `discipleship.enabled.<x>` — setting names are a dotted tree, so that turns the key into a branch, and `Settings::get()` then returns an array (`isEnabled()` warned "Array to string conversion").
+- Testing trap found by planting: a sweep that completes EVERY step of a pathway also marks the enrolment `completed`, and the sweep only reads `active` enrolments, so a fixture reused across arrangements must put the enrolment back to `active` as well as deleting the progress rows — otherwise a later check fails for the wrong reason.
+- To find progress rows already written across organisations (none exist on any installation, since none is live; nothing deletes them):
+  ```sql
+  SELECT `pr`.`progressID`, `pr`.`siteID` AS `pathwayOrganisation`, `ev`.`siteID` AS `eventOrganisation`,
+         `pr`.`userID`, `pr`.`stepID`, `pr`.`autoRef`, `pr`.`completedAt`, `pr`.`revokedAt`
+  FROM `tblPathwayProgress` `pr`
+  JOIN `tblEvents` `ev` ON `ev`.`eventID` = CAST(SUBSTRING(`pr`.`autoRef`, 6) AS UNSIGNED)
+  WHERE `pr`.`source` = 'auto' AND `pr`.`autoRef` LIKE 'rsvp:%' AND `ev`.`siteID` <> `pr`.`siteID`;
+  ```
+  It joins on the event the row's own evidence names (`autoRef`), not on the step's current event, because a step's event can be edited after the row was written.
+- Tests: X18b-X18l of `tools/time-zones-selftest.php` (EXPECTED_CHECKS 175 → 186).
+
+**Review: three rounds by fresh Claude agents; round 3 CLEAN** (protected arm — the sweep writes permanent progress rows). Rounds 1 and 2 found only tests that could not fail (the ordinary installation-wide switch state, the recorded outcome, the printed counts); the portal code was correct in every state driven on MySQL 8.0.36 and MariaDB 11.4. Codex has NOT reviewed it. Left on #824 (departed members still count), #825, #827.
