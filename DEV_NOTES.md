@@ -20515,3 +20515,175 @@ because a customer following that page may choose it.
   `text-break` alone cut "requireUppe / rcase".
 - **A page reachable at more than one address names its own canonical path** (`$pageCanonicalPath` in `head-meta.php`): building it from the request path gave `/api-docs/index.php` a `.php` canonical address. `/settings` vs `/admin/settings` and `/` vs `/dashboard` still give one page two (#823).
 - **Review:** two rounds by fresh Claude agents (three-round cap). Round 1 found the `.php` canonical; round 2 confirmed the fix across 15 pages and in multi-organisation path mode (the organisation's part never printed twice), and found only an untrue comment (corrected). Left on #821, #822 (the top bar over 3,000px wide for a root administrator with every app on), #823. Codex has not reviewed it.
+
+### Outside services in three tiers (#778)
+
+- **`Portal\Core\OutsideServices` is the ONE place** the answer is worked out and the ONLY file
+  under `web/` that may hold the Gravatar or Google-photo host in code. `Avatar` asks
+  `gravatarUrlIfAllowed()` / `providerPhotoIfAllowed()`, which return null rather than an address
+  when the answer is no, so an outside address cannot exist without the decision. `header.php`
+  widens `img-src` only from `cspImgSources()`; with everything off it answers '' and the header is
+  byte-identical to before #778 (pinned by C14 of the self-test).
+- **Values per level:** `no` < `off` < `on`; anything else, missing or unreadable is `no`. An
+  organisation with no row follows the installation; with a row it can only lower the answer (a
+  minimum). A member's `off` always wins; `on` counts only where the ceiling is not `no`; with no
+  choice the service is on only if the ceiling is `on`.
+- **Point 4 is why `$SETTINGS` is never read here.** It holds the open organisation only, merged.
+  The facts reader takes the installation from `InstallationSettings::layerOrNull()` and EVERY
+  organisation in `{Site::id()} ∪ OutsideServices::membershipsOf($user)` from its own rows, in one
+  statement.
+- **`membershipsOf()`, NOT `Site::organisationsFor()` — round 1 of the independent check.**
+  `organisationsFor()` answers "which organisations may this person USE", so it requires
+  `tblUsers.isActive = 1` and returns nothing for a switched-off account. `admin/users/save.php`
+  switches `isActive` alone and the directory still shows such a person, so organisation B's "no"
+  was dropped for exactly that person (measured: 0 rows against 1 on the profile query). For this
+  rule every membership row still switched on counts (`tblUserSites.isActive = 1`), whether or not
+  the account or the organisation is; a switched-off membership row still means "no longer a
+  member". A global administrator counts as a member of every organisation, so their own picture is
+  held to the strictest on the installation — the conservative reading, stated rather than hidden.
+  Pinned by G09/G10 (a switched-off member of A and B, B saying no, with a control); the
+  global-administrator clause by H01/H02.
+- **Maps are capped by the SERVICE, not only by the levels (D-072, round 1).** `SERVICES[...]
+  ['maxLevel']` is `off` for maps: `levelValuesFor()` is what both admin cards offer, both writers
+  refuse anything else with the reason (recorded), and `decide()` reads every stored level through
+  `capFor()`, so a hand-written or restored "on" cannot put a member's home on a map before that
+  member chose it. The organisation writer has TWO guards here (the service limit, and the
+  installation's value read through `capFor()`); removing either alone is caught by the other, so
+  the plant that proves D17 removes both. An organisation going looser than the installation for
+  maps ("off" under "no") is refused at the writer (H13). The pure `effectiveFrom()` knows nothing of
+  services.
+- **Who touches `tblUserOutsideServicePref`:** written only by `OutsideServices`; also read by the
+  member's own data download and deleted by an erasure (`GdprEraser`). The table comment says so
+  (round 2 corrected "read and written only by").
+- **Any read that throws makes the whole answer "unreadable", which is `no`**, never "not chosen"
+  (which for a ceiling of `on` would be yes). Section B renames `tblUserSites`, `tblSettings` and the
+  preference table away to prove it, each with a positive control.
+- **D-072 asks two DIFFERENT questions**, by the owner's words: the member shown, the ordinary rule;
+  the person looking, only "allowed for them and not switched off". `allows($service, $subject)` is
+  the one place both are asked. The plan said "both must allow" and implied the full rule for both;
+  D-072's own text ("the viewer has not switched it off") is what was built.
+- **The writers judge only what CHANGED (#687).** A value an organisation stored before the
+  installation tightened is offered, selected and labelled "held down", and an untouched Save keeps
+  it without a refusal; the reader holds it down. A `<select>` with no selected option is a vote for
+  its first option (#763), which here would delete the organisation's row.
+- **The reader is the enforcement; the writers give the honest refusal.** A looser organisation
+  value is refused with the reason, never clamped (#668), with the installation's rows read live and
+  `FOR UPDATE` inside the writing transaction (#647, #687), using `siteScope = -1` so the lock is on
+  the unique key. A member's `on` row that outlives a later "no" is ignored by the reader (E05c).
+- **Member choices are one row per service** (`tblUserOutsideServicePref`), upserted or deleted one
+  at a time; never a rebuilt list (#667, pinned by E02).
+- **"You can always switch it off" is kept true (round 2).** A member who chose "on" and whose
+  organisation then said "no" used to get NO control, so the recorded choice could not be withdrawn
+  and came back by itself when the organisation relaxed. Whenever a choice is stored, the member
+  page now draws a control offering "Off" and "Follow my organisations" (never "On" above what is
+  allowed), whose first, selected option is "Keep my earlier choice" (`OutsideServices::KEEP`),
+  which the writer reads as "leave alone" — a `<select>` with no selected option is a vote for its
+  first option (#763). Pinned end to end by H14-H19, including that an "off" set while not allowed
+  holds after the organisation relaxes.
+- **The member writer judges only what CHANGED too (round 3).** A page drawn before an
+  organisation said "no" still holds the member's earlier "on", and the browser re-posts it
+  untouched; refusing that refused the WHOLE save, so switching another service OFF in the same
+  press was lost with a message about switching Gravatar ON. An "on" equal to the stored choice is
+  now neither refused nor written (the reader holds it down). So "switching off is never refused" is
+  true in the writer, the handler's header and on the page. Pinned by H20-H23, which draw the page,
+  tighten B, then post.
+- **A withdrawal of consent is never lost (round 4; the stronger reading of D-058, chosen by the
+  coordinator).** A member's press is no longer all-or-nothing: every "off" and every "follow" is
+  applied, and only a real change to "on" above the ceiling is refused — that service is left exactly
+  as it was. The message says what was saved and what was refused and why; a mixed press records
+  both `OutsideServicePrefsUpdated` and `OutsideServicePrefsRefused`. "Is this a change?" is read
+  from the member's STORED choices on their own (`memberChoices()`), so it is still answered when
+  the ceiling cannot be read — then withdrawals are applied, every real "on" is refused, and the
+  message says the settings could not be read. An untouched "on" is in no activity record (a record
+  of it would be a false consent record). The refusal sentence names EVERY refusing level, and the
+  member page says "if those changed" when more than one refuses. Pinned by H22b and H24-H30.
+- **Two saves at once are serialised (rounds 5 and 6; the #728 shape).** The member writer used
+  to read the stored choices OUTSIDE any transaction and skip writing an "off" it believed was
+  already stored, so two tabs saving at once could end with BOTH services on while each was told
+  "saved" — measured by the independent check. Now: ONE transaction whose first act is
+  `SELECT … FROM tblUsers WHERE userID = ? FOR UPDATE` (the PARENT row, because the preference rows
+  may not exist yet); the stored choices are then read with an ORDINARY read, which is fresh because
+  of the ORDER — InnoDB takes a transaction's snapshot at its first plain read, and that comes after
+  the lock; and, as a belt, an "off" is ALWAYS written (listed as a change only when it was not
+  already stored).
+- **Round 5 first used a LOCKING read there, and it was wrong (round 6, measured).** A locking read
+  of "every row for this member", and a DELETE of a row that does not exist, both take GAP locks
+  reaching the NEXT member's rows, so two DIFFERENT members saving at once deadlocked 36-40 times in
+  40 and one member's withdrawal was refused because of somebody else. The read is ordinary now and
+  the DELETE is skipped when nothing is stored. **Lesson: a lock taken to serialise ONE member must
+  not be a range lock that reaches OTHER members.**
+- A lock wait that runs out (1205, or a deadlock 1213) is rolled back and told plainly: "Another
+  change to your account was being saved at the same moment … try again" — "your account", because
+  the other writer may be a profile edit rather than another save of these choices. Refused "on"
+  lines are kept in that message when the wait happens at a write.
+- Pinned by section T of the self-test, which uses REAL SEPARATE PROCESSES (one process cannot block
+  itself): T01 (premise: tab A really was held), T03 (the one order T01 proves, on/off), T07 (tab B
+  read what A stored — its record lists its withdrawal), T04-T06 (the lock-wait message; the parent
+  lock is taken first), T08 (refused lines kept), T09 (after a failure the SAME connection's next
+  write is committed — the rollback, because `Logger::db()` shares the connection), T10 (two
+  adjacent members withdrawing at once, 12 runs in two shapes, no refusal). With the lock in place
+  the belt is not observable on its own (plant V03 stays green) — a second defence, said so.
+- **Round 7 pinned the three things the fix depends on.** T11: two tabs of ONE member released
+  together BEFORE either has written — the window T07 cannot reach, because there a write's
+  foreign-key check already holds the member's row — must end in one serial order with exactly one
+  tab's record naming both services (a lock taken outside the transaction gave off/off in 16-18 of
+  20). T12: a failure AFTER an "on" was written is ROLLED BACK, so "Nothing was saved" is true
+  (committing in the catch left Gravatar on). And the "both were held" premises of T01, T10 and T11
+  now ASK THE DATABASE — rows in `information_schema.innodb_trx` with `trx_state = 'LOCK WAIT'` —
+  because "the process is still running" passed with a wait of 0.
+- **And round 7's version of that premise read a STALE CACHE (round 8, measured).** InnoDB rebuilds
+  `innodb_trx` only when nobody has read it for 0.1 s, and every read resets that clock; the helper
+  read FIRST and slept after, so its first read returned the previous call's snapshot — 17 of 18
+  calls answered true at once from T10's FIRST run, a T11 with no hold at all stayed green, and on
+  MariaDB T10b stopped catching round 6's deadlock. Now it sleeps 0.15 s BEFORE every read and counts
+  only connections (`trx_mysql_thread_id`) not seen by any earlier call. **A premise read from a
+  cache is only a premise if you know when the cache was filled.** T10 now runs 24 times — and even so, on MariaDB T10b catches round 6's deadlock in MOST runs, not every one (5 of 6 and 4 of 6 measured in rounds 8 and 9), because there it is a matter of timing; on MySQL it caught 3 of 3. T12 gained
+  a premise too: while the save waits it has already modified a row (`trx_rows_modified >= 1`), so
+  the rollback really has something to undo.
+- `memberChoices()` is read only by the writer (its docblock had said the member page too), and its
+  unused `$lock` parameter is gone, with the reason written beside the method.
+- The read's freshness holds at REPEATABLE READ and READ COMMITTED (for different reasons, both
+  written beside the code), measured by the independent check on MySQL 8.0/8.4 and MariaDB
+  11.4/12.3. Under SERIALIZABLE, which the portal promises nothing about, one neighbour deadlock in
+  60 was measured on MySQL 8.0; the docblock says so.
+- **A database failure keeps the refused lines in the member's message**, as the Refused record
+  does. Not covered by a test: no test here can make the write fail part-way.
+- Also pinned in round 5: a "follow" beside a refused "on" is applied and listed (H32-H34); the
+  stored-choices read failing is said exactly and never reported as saved (H35-H36); the Refused
+  record's text (H26b); a mixed press shown as a warning (H25b).
+- **"Did it change" is asked of the value as the card SHOWS it (round 2).** Both admin cards fill
+  their boxes through `capFor()`, so both writers now compare `capFor($service, $stored)` with the
+  posted value. Comparing the raw row made a stored map "on" (shown as "off") read as changed on an
+  untouched Save, judged against an installation "no", and refused the WHOLE save, losing a picture
+  change made on the same form. The card now says what was STORED and what it counts as, instead of
+  claiming the organisation chose what it shows. Pinned by H05-H12.
+- **`Avatar::localPath()` is an allow-list (round 2).** A stored value is a local path only if it is
+  an optional single `/`, then `[A-Za-z0-9_]`, then only `[A-Za-z0-9_./-]`, never `//`. Everything
+  else is another website and goes to the decision (an https:// address on the photo hosts, or the
+  silhouette). The old "starts with http(s):// or //" test, a list of bad spellings, missed
+  `/\host/x`, `\\host/x` and `/<TAB>/host/x`, all of which a browser reads as another host — and
+  `/\lh3.googleusercontent.com/…` would have skipped the decision while the page rule allowed that
+  host. Pinned by C15 and H03/H04.
+- **The sign-in photo is drawn only from `https://…googleusercontent.com`**, because the page rule
+  is widened only for that family; any other stored outside address now draws the silhouette instead
+  of a picture the browser would refuse. (Microsoft ID tokens carry no `picture` claim in practice;
+  a stored Graph address would have needed a token anyway.)
+- **The OSM tile host stays named on four pages whose map is of a BUILDING** (venue, event venue,
+  organisation address, small-group meeting place) and in the shared map script, each counted in
+  `check_outside_services_gated.py`; only the member directory had to change. A small group's meeting
+  place may be a host's home — that is #809, not covered.
+- **Two known, fail-safe imperfections, left as notes (round 1):** (1) capitals — the settings
+  layer is read case-SENSITIVELY by key while `storedAt()` and the organisation reader compare
+  case-insensitively, so a hand-written installation row in different capitals can make the admin
+  card show "on" while the reader says "no" (only hand-written SQL reaches it; the reader is the
+  stricter side); (2) `saveMemberChoice()` reads the member's ceiling without a lock, so a member
+  "on" can race an organisation tightening to "no" — harmless, because the reader ignores such a row
+  (E05c).
+- **The data download carries the choices** (`outsideServiceChoices`), pinned by E07, which reads
+  the real download. `tblUserTranslationPref` is still not in the download — noted, not changed.
+- Guards: `tools/audit-checks/check_outside_services_gated.py` (hard gate in `pr-security.yml`;
+  presence and counts only, D-065) and `tools/outside-services-selftest.php` (real HTTP; in
+  `portal-selftests.yml` and `tools/run-all-selftests.sh`). Count the checks from the file's output,
+  never from here.
+
+**Review: nine rounds by fresh Claude agents; round 9 CLEAN** (protected arm — what outside companies learn about a member). Rounds 1–5 found portal faults (maps on by default, untrue help, a deactivated account escaping another organisation's 'no', withdrawals lost in mixed or concurrent saves); round 6 found round 5's own lock causing deadlocks between DIFFERENT members; rounds 7–8 found only tests that could not fail. Codex has NOT reviewed it.

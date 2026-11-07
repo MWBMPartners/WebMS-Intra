@@ -201,6 +201,27 @@ $cspExtSanitise = static function ($raw): string {
 //    the hard-coded `connect-src 'self'` below never allowed for. Unset
 //    (every existing page) ⇒ empty string ⇒ byte-identical header.
 $cspImgExtra     = $cspExtSanitise($cspImgExtra     ?? null);
+// 🛂 #778 — the picture hosts of the OUTSIDE SERVICES the person signed in is
+//    allowed to use (their Gravatar picture, their sign-in provider's photo),
+//    and nothing else. `OutsideServices::cspImgSources()` is the ONLY place a
+//    member-identifying host reaches this rule: no page may name one in
+//    `$cspImgExtra` (`tools/audit-checks/check_outside_services_gated.py`
+//    fails if one does). With every service off — the default — it answers ''
+//    and the header is byte-identical to what it was before #778.
+//
+//    This is the SECOND defence. The first is that the address is never built
+//    at all unless the service is allowed (Avatar asks the same class), so a
+//    refused picture is a silhouette, not a broken image the browser refused.
+//
+//    WRAPPED, because this runs on every page and files reach a shared host one
+//    at a time: if the class is not there yet, the page must still draw, with
+//    no outside host allowed — the safe direction.
+try {
+    $cspImgExtra .= $cspExtSanitise(\Portal\Core\OutsideServices::cspImgSources());
+} catch (\Throwable $outsideServicesError) {
+    error_log('[WebMS-Intra] header.php: the outside-services picture hosts could not be worked out, so none are allowed: '
+        . $outsideServicesError->getMessage());
+}
 $cspMediaExtra   = $cspExtSanitise($cspMediaExtra   ?? null);
 $cspFrameExtra   = $cspExtSanitise($cspFrameExtra   ?? null);
 $cspConnectExtra = $cspExtSanitise($cspConnectExtra ?? null);

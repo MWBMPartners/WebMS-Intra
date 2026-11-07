@@ -463,6 +463,25 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🛂 #778: and what outside companies may be sent about a member. Its own
+    //    page holds an organisation to what the installation allows (D-058: an
+    //    organisation may tighten, never loosen) and RECORDS each change; this
+    //    editor does neither, so a looser value typed here would be a number
+    //    nobody judged. The reader holds such a row down anyway, but an
+    //    unrecorded change is indistinguishable from none. See
+    //    OutsideServices::lockedInGeneralEditor().
+    if (\Portal\Core\OutsideServices::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" decides what outside companies may be sent about a member and is written only by its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\OutsideServices::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if ($isPortalWideRow === true && $isGlobalAdmin === false) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -878,6 +897,21 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\TranscriptRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🛂 #778, the same refusal on the ADD path: an organisation's row of one of
+    //    these keys is exactly what its own page refuses when it is looser than
+    //    the installation, so adding one here would step round that refusal.
+    if (\Portal\Core\OutsideServices::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" decides what outside companies may be sent about a member and is written only by its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\OutsideServices::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

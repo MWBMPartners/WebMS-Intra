@@ -3167,6 +3167,16 @@ tell whether a page RENDERS in the chosen language** — that needs HTTP
 and a seeded installation, and both say so in their own output. The
 technical record is DEV_NOTES.md, "A question asked too early (#763)".
 
+- **Outside services (#778; D-058, D-072, D-073).** `Portal\Core\OutsideServices` is the ONE place
+  that decides whether a member's details may go to an outside company (Gravatar, a sign-in
+  provider's photo, an OpenStreetMap map of a member's home), and the ONLY file under `web/` that may
+  hold those hosts in code. Never build such an address elsewhere, never read `$SETTINGS` for it,
+  and never widen `$cspImgExtra` with a member-identifying host on a page: ask `allows()` or a
+  builder. Strictest of installation, EVERY organisation the member belongs to, and their own
+  choice; for a map, both people. Unreadable is `no`. Guards:
+  `check_outside_services_gated.py` (presence) and `tools/outside-services-selftest.php` (behaviour).
+  The technical record is DEV_NOTES.md, "Outside services in three tiers (#778)".
+
 ## A time on a clock is not a moment, and the test for it cannot work (#777 part one)
 
 `I18n::formatClockTime()` is the ONE place a stored clock reading

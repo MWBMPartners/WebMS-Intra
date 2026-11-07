@@ -7,10 +7,29 @@
  * Resolves the best available avatar image for a user by walking a priority
  * cascade:
  *
- *   1. External URL (MS365 / any https:// path stored in avatarPath)
+ *   1. The sign-in provider's photo (an https:// address stored in avatarPath)
+ *      — ONLY when OutsideServices allows it for this person (#778)
  *   2. Local file   (a relative path in avatarPath, e.g. "uploads/avatars/42.jpg")
- *   3. Gravatar     (md5 of lowercased, trimmed emailAddress, mystery-person default)
+ *   3. Gravatar     — ONLY when OutsideServices allows it for this person (#778)
  *   4. Placeholder  (static SVG shipped with the portal)
+ *
+ * WHAT CHANGED WITH #778, AND WHY THIS FILE HOLDS NO OUTSIDE ADDRESS ANY MORE
+ * ---------------------------------------------------------------------------
+ * Steps 1 and 3 send something about the member to another company: a Gravatar
+ * address is a scramble of their e-mail that Gravatar matches to them, and a
+ * sign-in photo is an address on Google's servers that is theirs alone. This
+ * file used to build the Gravatar address itself (`GRAVATAR_BASE`,
+ * `gravatarUrl()`) and return a stored outside address as it was, with nothing
+ * anybody could switch off. Both are now asked of
+ * `Portal\Core\OutsideServices`, which applies the owner's rule (D-058: the
+ * strictest of the installation, every organisation the member belongs to, and
+ * the member's own choice) and BUILDS the address only after deciding. So an
+ * outside address cannot be produced here without that decision, and
+ * `tools/audit-checks/check_outside_services_gated.py` fails if an outside host
+ * name ever appears in this file again or the two builders stop being called.
+ *
+ * With both off — the default (D-073 accepts this) — a member with no local
+ * photo gets the placeholder silhouette.
  *
  * The class exposes two public methods:
  *   Avatar::url($user, $size)            raw URL string
@@ -24,7 +43,7 @@
  * @author     MWBM Partners Ltd (t/a MWservices)
  * @copyright  2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version    0.1.0
+ * @version    0.2.0
  * @link       https://github.com/MWBMPartners/WebMS-Intra
  * -----------------------------------------------------------------------------
  */
@@ -42,12 +61,6 @@ class Avatar
     /** @var string Web-root-relative path to the static placeholder SVG */
     private const PLACEHOLDER_PATH = '/assets/images/avatar-placeholder.svg';
 
-    /** @var string Gravatar base URL (HTTPS) */
-    private const GRAVATAR_BASE = 'https://www.gravatar.com/avatar/';
-
-    /** @var string Gravatar default style parameter (mystery person silhouette) */
-    private const GRAVATAR_DEFAULT = 'mp';
-
     // 🌐 ===========================================================================
     // Public API
     // ===========================================================================
@@ -56,18 +69,20 @@ class Avatar
      * Resolve the best available avatar URL for a user.
      *
      * Priority cascade:
-     *   1. If avatarPath starts with http:// or https:// it is treated as an
-     *      external URL (typically the MS365 photo endpoint) and returned as-is.
-     *   2. If avatarPath is a non-empty string that does not look like a URL,
-     *      it is treated as a web-root-relative local file path.  A leading
-     *      slash is prepended if missing.
-     *   3. If an emailAddress is available, a Gravatar URL is constructed using
-     *      the md5 hash of the lowercased, trimmed address.  The mystery-person
-     *      silhouette is used as the Gravatar default so the service itself
-     *      provides a fallback if no Gravatar is registered.
-     *   4. As a last resort, the static placeholder SVG is returned.
+     *   1. A value that is plainly a path on THIS portal (localPath(), a strict
+     *      allow-list) is used as it is. Nothing leaves the portal.
+     *   2. Anything else in avatarPath is treated as another website: it is used
+     *      only if `OutsideServices::providerPhotoIfAllowed()` hands it back (an
+     *      https:// address on the permitted photo hosts, and allowed). If it
+     *      does not, the cascade goes on to Gravatar and then the placeholder.
+     *   3. Gravatar, only if `OutsideServices::gravatarUrlIfAllowed()` builds an
+     *      address for this person.
+     *   4. The static placeholder SVG.
      *
-     * @param array $user User data array with keys: emailAddress, avatarPath, fullName
+     * The person is `$user['userID']`: OutsideServices refuses a row without
+     * one, because it would not know whose permission it was using.
+     *
+     * @param array $user User data array with keys: userID, emailAddress, avatarPath, fullName
      * @param int   $size Desired avatar dimension in pixels (width = height)
      *
      * @return string Absolute or root-relative URL to the avatar image
@@ -75,26 +90,29 @@ class Avatar
     public static function url(array $user, int $size = 40): string
     {
         // 📷 Extract the avatar path from the user array (may be empty or absent)
-        $avatarPath = trim($user['avatarPath'] ?? '');
+        $avatarPath = trim((string) ($user['avatarPath'] ?? ''));
 
-        // 🔗 Priority 1: External URL (MS365 photo or any https:// source)
-        if ($avatarPath !== '' && self::isExternalUrl($avatarPath) === true) {
-            return $avatarPath;
-        }
-
-        // 📂 Priority 2: Local file path (relative to web root)
         if ($avatarPath !== '') {
-            // Ensure a leading slash so the browser resolves from the web root
-            if (str_starts_with($avatarPath, '/') === false) {
-                $avatarPath = '/' . $avatarPath;
+            // 📂 Priority 2 (asked FIRST): a path on THIS portal, by a strict
+            //    allow-list. Anything that is not plainly one is another website
+            //    as far as a browser is concerned — see localPath().
+            $local = self::localPath($avatarPath);
+            if ($local !== null) {
+                return $local;
             }
-            return $avatarPath;
+            // 🔗 Priority 1: the sign-in provider's photo — only if allowed
+            //    (#778), and only an https:// address on its photo hosts.
+            //    Anything else that is not local draws the silhouette.
+            $photo = OutsideServices::providerPhotoIfAllowed($user);
+            if ($photo !== null) {
+                return $photo;
+            }
         }
 
-        // 🌐 Priority 3: Gravatar (requires an email address)
-        $email = trim($user['emailAddress'] ?? '');
-        if ($email !== '') {
-            return self::gravatarUrl($email, $size);
+        // 🌐 Priority 3: Gravatar — only if allowed for this person (#778).
+        $gravatar = OutsideServices::gravatarUrlIfAllowed($user, $size);
+        if ($gravatar !== null) {
+            return $gravatar;
         }
 
         // 🎭 Priority 4: Static placeholder SVG
@@ -150,45 +168,35 @@ class Avatar
     // ===========================================================================
 
     /**
-     * Check whether a path looks like an external (absolute) URL.
+     * 📂 The stored value as a path on THIS portal, or null when it is not
+     * plainly one.
      *
-     * @param string $path The path or URL to test
+     * AN ALLOW-LIST, NOT A LIST OF WHAT IS EXTERNAL (#778, rounds 1 and 2 of
+     * the independent check). The old test asked "does it start with http://
+     * or https://", and round 1 added "//". Each left spellings a browser reads
+     * as ANOTHER HOST while this file returned them as a local `src`: `/\host/x`
+     * (a browser treats a backslash as a slash), `\\host/x`, `/<TAB>/host/x`
+     * (a browser removes a tab inside an address). The worst,
+     * a backslash followed by Google's photo host (its name is deliberately not written here: only OutsideServices may name it, and the audit check counts it), would have skipped the outside-services
+     * decision entirely while the page rule allowed that host. Listing bad
+     * spellings is the shape that keeps losing; listing the one good shape is
+     * not.
      *
-     * @return bool True if the path starts with http:// or https://
+     * Local means: an optional single leading `/`, then a letter, digit or
+     * underscore, then only letters, digits, `_`, `.`, `/` and `-`, and never
+     * `//`. No backslash, no whitespace or control character, no `:` (so no
+     * scheme), no `?`, `#` or `%`. A relative path gets its leading slash, as
+     * before. Everything else goes to the decision, which accepts only an
+     * https:// address on the permitted photo hosts, or draws the silhouette.
      */
-    private static function isExternalUrl(string $path): bool
+    private static function localPath(string $path): ?string
     {
-        if (str_starts_with($path, 'https://') === true) {
-            return true;
+        $body = str_starts_with($path, '/') === true ? substr($path, 1) : $path;
+        if (preg_match('#^[A-Za-z0-9_][A-Za-z0-9_./-]*$#D', $body) !== 1 || str_contains($body, '//') === true) {
+            return null;
         }
-        if (str_starts_with($path, 'http://') === true) {
-            return true;
-        }
-        return false;
-    }
 
-    /**
-     * Build a Gravatar URL for the given email address.
-     *
-     * Gravatar uses the md5 hash of the lowercased, trimmed email address as the
-     * lookup key.  The `d=mp` parameter requests the "mystery person" silhouette
-     * as the default when no Gravatar is registered for the address.  The `s`
-     * parameter controls the returned image dimensions.
-     *
-     * @param string $email User's email address
-     * @param int    $size  Desired image dimension in pixels (1-2048)
-     *
-     * @return string Full Gravatar HTTPS URL
-     */
-    private static function gravatarUrl(string $email, int $size): string
-    {
-        // 🔑 Hash: lowercase, trim whitespace, then md5
-        $hash = md5(strtolower(trim($email)));
-
-        // 🌐 Build URL with size and default parameters
-        return self::GRAVATAR_BASE . $hash
-            . '?s=' . $size
-            . '&d=' . self::GRAVATAR_DEFAULT;
+        return '/' . $body;
     }
 
     /**

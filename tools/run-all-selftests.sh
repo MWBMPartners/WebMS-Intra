@@ -228,6 +228,7 @@ portal-address|tools/portal-address-selftest.php|selftest_portaladdress|web:port
 site-addresses|tools/site-addresses-selftest.php|selftest_siteaddresses|web:site-addresses SELFTEST_WEB_PORT=9650
 page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scripts SELFTEST_WEB_PORT=9651
 help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFTEST_WEB_PORT=9663
+outside-services|tools/outside-services-selftest.php|selftest_outside|SELFTEST_WEB_PORT=9778
 content-translation|tools/content-translation-selftest.php|selftest_cttrans|web:content-translation SELFTEST_WEB_PORT=9671
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
 admin-password|tools/admin-password-selftest.php|selftest_adminpwd|web:admin-password SELFTEST_WEB_PORT=9086

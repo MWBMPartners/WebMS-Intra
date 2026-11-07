@@ -1041,8 +1041,11 @@ ok('A2 the key is the same when the page is opened again (the person\'s app may 
 $pictures = picturesOn($setup['body']);
 $rule     = preg_match('/^Content-Security-Policy:.*$/mi', $setup['head'], $m) === 1 ? $m[0] : '';
 // A picture asked of another website that has anything to do with a QR code
-// or with the key. (The page's top bar asks gravatar.com for the person's
-// own photograph; that is not this test's business and is left alone.)
+// or with the key. (Until #778 the page's top bar asked gravatar.com for the
+// person's own photograph. Since #778 it does so only where the person and
+// every organisation they belong to allow it — off by default — and that is
+// tools/outside-services-selftest.php's business, not this test's. Whatever
+// else is asked of another website is left alone here.)
 $qrElsewhere = array_values(array_filter($pictures['outside'], static fn (string $u): bool => preg_match('#qr|chart|otpauth|secret#i', $u) === 1 || ($key !== '' && stripos($u, $key) !== false)));
 ok('A2b the set-up page carries ONE picture written into the page itself, asks no other website for a QR picture, and its own rule still refuses pictures from other websites (so one could not appear anyway)',
     count($pictures['written']) === 1 && str_starts_with((string) ($pictures['written'][0] ?? ''), 'data:image/svg+xml;base64,') === true && $qrElsewhere === []

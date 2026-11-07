@@ -104,12 +104,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </h2>
         <div id="faqLogin3" class="accordion-collapse collapse" data-bs-parent="#accordionLogin">
             <div class="accordion-body">
-                <p>Your display name and avatar are pulled from your Microsoft 365 profile each time you sign in. To update them:</p>
+                <p>Your display name is pulled from the account you sign in with each time you sign in. To update it:</p>
                 <ol>
-                    <li>Update your name and photo in your <strong>Microsoft 365 account settings</strong>.</li>
+                    <li>Update your name in that account's settings (for example <strong>Microsoft 365</strong> or Google).</li>
                     <li><strong>Sign out</strong> of the portal.</li>
                     <li><strong>Sign back in</strong> -- the portal will fetch your updated profile information.</li>
                 </ol>
+                <?php /* 🛂 #778: a picture from an outside company is shown only where it is allowed. */ ?>
+                <p class="mb-0"><strong>A grey silhouette instead of your photo can be expected.</strong> A photo kept by the
+                company you sign in with, or by Gravatar, is fetched from that company's servers, which tells it who is
+                looking and when. So it is shown only where it is allowed. Whoever runs this portal and your
+                organisations decide whether it is allowed, and whether it starts switched on or off; if you belong to
+                several organisations, the strictest of them decides. You can always switch it off for yourself, and
+                switch it on where it is allowed, under <strong>My account, Outside services</strong>, which also says
+                what is in force for you now.</p>
             </div>
         </div>
     </div>

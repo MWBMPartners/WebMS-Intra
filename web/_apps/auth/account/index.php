@@ -327,6 +327,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         echo '<img src="/assets/images/avatar-placeholder.svg" class="portal-avatar portal-avatar-xl" alt="" width="96" height="96">';
                     }
                     ?>
+                    <?php
+                    // 🛂 #778: a picture from Gravatar or the sign-in provider is
+                    //    shown only where it is allowed. It ships off, so most members
+                    //    see a silhouette (D-073), but an administrator may make it on
+                    //    by default — so the words must not promise either. Say where
+                    //    it is decided.
+                    ?>
+                    <div class="small text-secondary mt-1">
+                        A picture from an outside company is shown only where it is allowed, and may start on or off;
+                        see or change yours at
+                        <a href="<?php echo htmlspecialchars(Site::url('account/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Outside services</a>.
+                    </div>
                 </div>
 
                 <form method="post" action="<?php echo htmlspecialchars(Site::url('account/save'), ENT_QUOTES, 'UTF-8'); ?>" novalidate>
@@ -1264,6 +1276,9 @@ $accAllowDelete = (\Portal\Core\App::settings('privacy.allowAccountDelete') ?? '
                 <div class="d-flex flex-wrap gap-2">
                     <a href="<?php echo htmlspecialchars(Site::url('account/notifications'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-bell me-1"></i> Notification preferences
+                    </a>
+                    <a href="<?php echo htmlspecialchars(Site::url('account/outside-services'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
+                        <i class="fa-solid fa-shield-halved me-1"></i> Outside services
                     </a>
                     <a href="<?php echo htmlspecialchars(Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-sm btn-outline-primary">
                         <i class="fa-solid fa-download me-1"></i> Download my data (JSON)

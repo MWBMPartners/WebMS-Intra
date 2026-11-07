@@ -446,6 +446,9 @@ class GdprEraser
             // connection is kept, and only their number is taken off it.
             ['table' => 'tblZoomAccount',      'userCol' => 'userID', 'action' => 'delete', 'reason' => 'the person\'s own connection to Zoom. The meetings made through it are rooms in their Zoom account and are deleted with it; a meeting they made through somebody else\'s connection is kept'],
             ['table' => 'tblUserTranslationPref','userCol' => 'userID', 'action' => 'delete'],
+            // 🛂 #778: the person's own choices about outside services. Theirs,
+            //    and meaningless once they are gone, so deleted.
+            ['table' => 'tblUserOutsideServicePref','userCol' => 'userID', 'action' => 'delete'],
             // #322 Web Push — endpoint URL + p256dh/auth keys are device
             // credentials tied to a specific browser install, not history
             // worth retaining once their owner is erased. Hard delete

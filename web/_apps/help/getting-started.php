@@ -129,13 +129,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <ul class="list-group list-group-flush mb-3">
         <li class="list-group-item"><i class="fa-solid fa-user me-2 text-primary"></i><strong>Display name</strong> -- pulled from your Microsoft 365 profile</li>
         <li class="list-group-item"><i class="fa-solid fa-envelope me-2 text-primary"></i><strong>Email address</strong> -- your organisational email</li>
-        <li class="list-group-item"><i class="fa-solid fa-image me-2 text-primary"></i><strong>Avatar</strong> -- your Microsoft profile picture (if available)</li>
+        <li class="list-group-item"><i class="fa-solid fa-image me-2 text-primary"></i><strong>Avatar</strong> -- a picture kept by an outside company (your sign-in account's photo, or Gravatar) is shown only where it is allowed, otherwise a plain silhouette. Whoever runs this portal and your organisations decide whether it is allowed and whether it starts on or off; you can switch it off for yourself, or on where it is allowed, under <strong>My account, Outside services</strong></li>
     </ul>
 
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
-            <strong>Tip:</strong> If your name or avatar is incorrect, update your Microsoft 365 profile. The changes will be reflected in the portal the next time you sign in.
+            <strong>Tip:</strong> If your name is incorrect, update your Microsoft 365 profile. The change will be reflected in the portal the next time you sign in.
         </div>
     </div>
 </div>

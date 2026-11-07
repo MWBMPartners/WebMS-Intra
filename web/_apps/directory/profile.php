@@ -11,7 +11,9 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\GeoLocation;
 use Portal\Core\Markdown;
+use Portal\Core\OutsideServices;
 use Portal\Core\Site;
 
 // 📍 #456 Chunk B — coords display (gated + coarsened, see the `$can`
@@ -80,10 +82,24 @@ $isOwnerOrAdmin  = ($viewer === $id || $isAdmin === true);
 $hasCoords       = $u['latitude'] !== null && $u['longitude'] !== null;
 $showCoordsBlock = $can($u['visibilityCoords']) === true && $hasCoords === true;
 
+// 🛂 #778, D-072 — A MAP IS AN OUTSIDE SERVICE WITH TWO PEOPLE IN IT. Drawing
+// it asks OpenStreetMap for the map squares around where this member lives,
+// together with the internet address of whoever is looking. So it is drawn
+// only when BOTH allow it: the member shown (the ordinary rule — the strictest
+// of the installation, every organisation they belong to, and their own
+// choice; off until they switch it on) AND the person looking (allowed for
+// them, and not switched off). `OutsideServices::allows()` with a subject is
+// the ONE place both are asked. Otherwise the location is shown as text.
+//
+// The tile host comes from OutsideServices too, and only after that decision:
+// this page must never name it itself
+// (`tools/audit-checks/check_outside_services_gated.py`).
+$showMap = $showCoordsBlock === true && OutsideServices::allows(OutsideServices::MEMBER_MAP, $id) === true;
+
 // 🗺️ Page-scoped CSP widening for OSM tiles, ONLY when a map will
 // actually render (#386 precedent) — must be set BEFORE header.php.
-if ($showCoordsBlock === true) {
-    $cspImgExtra = 'https://*.tile.openstreetmap.org';
+if ($showMap === true) {
+    $cspImgExtra = OutsideServices::mapTileSource();
 }
 
 $pageTitle   = $u['fullName'];
@@ -129,10 +145,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 'lng'     => (float) $u['longitude'],
                 'w3w'     => $isOwnerOrAdmin === true ? $u['what3words'] : null,
                 'coarsen' => $isOwnerOrAdmin === false,
-                'showMap' => true,
+                'showMap' => $showMap,
                 'mapId'   => 'profileMap',
                 'visible' => true,
             ]);
+            if ($showMap === false) {
+                // 📝 The location as TEXT (D-072). The same precision rule as
+                //    the map: full for the member and administrators, coarsened
+                //    to about 110 metres for anybody else.
+                $shownLat = (float) $u['latitude'];
+                $shownLng = (float) $u['longitude'];
+                if ($isOwnerOrAdmin === false) {
+                    $coarse   = GeoLocation::coarsenCoords($shownLat, $shownLng);
+                    $shownLat = (float) $coarse['lat'];
+                    $shownLng = (float) $coarse['lng'];
+                }
+                echo '<p class="mb-1 small portal-location-text">Location: '
+                    . htmlspecialchars(rtrim(rtrim(number_format($shownLat, 6, '.', ''), '0'), '.') . ', '
+                        . rtrim(rtrim(number_format($shownLng, 6, '.', ''), '0'), '.'), ENT_QUOTES, 'UTF-8')
+                    . '</p>';
+                echo '<p class="mb-1 small text-secondary">No map is shown: a map is drawn by OpenStreetMap, an outside '
+                    . 'company, and appears only when both this member and you allow it. '
+                    . '<a href="' . htmlspecialchars(Site::url('account/outside-services'), ENT_QUOTES, 'UTF-8') . '">Your choice</a>.</p>';
+            }
             ?>
         <?php endif; ?>
         <?php if ($viewer === $id): ?>
@@ -142,7 +177,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 
 <?php
-if ($showCoordsBlock === true) {
+if ($showMap === true) {
     require_once PORTAL_CORE . DIRECTORY_SEPARATOR . 'partials' . DIRECTORY_SEPARATOR . 'location-map-assets.php';
     portal_location_map_assets(App::cspNonce());
 }

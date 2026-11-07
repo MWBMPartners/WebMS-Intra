@@ -61,6 +61,7 @@
  *   tblEmailLog           (the portal's record of e-mail sent, or tried, to
  *                          your address: the subject, when, and what became
  *                          of it — #592)
+ *   tblUserOutsideServicePref (your own choices about outside services — #778)
  *
  * Sensitive fields (password hashes, TOTP secret, tokenHash etc.) are
  * EXCLUDED — exporting them would be a security regression, not a feature.
@@ -214,6 +215,12 @@ $payload = [
         ),
         'trustedDevices' => $fetchUserRows(
             'SELECT deviceID, label, createdIP, lastSeenAt, expiresAt, revokedAt, createdAt FROM tblTrustedDevices WHERE userID = ?'
+        ),
+        // 🛂 #778 — your own choices about outside services (which outside
+        //    companies may be sent something about you). Export↔erasure parity
+        //    with the GdprEraser instruction added alongside it.
+        'outsideServiceChoices' => $fetchUserRows(
+            'SELECT `serviceKey`, `choice`, `updatedAt` FROM `tblUserOutsideServicePref` WHERE `userID` = ?'
         ),
         // 🏷️ Roles (#516) — export↔erasure parity with the GdprEraser
         // catalogue entries added alongside this block. `grantedByID` is

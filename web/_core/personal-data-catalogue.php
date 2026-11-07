@@ -1248,6 +1248,14 @@ return [
         'reason'   => 'Holds information about the person themselves',
         'columns'  => ['userID'],
     ],
+    // 🛂 #778: a member's own choice about each outside service (Gravatar, a
+    //    sign-in provider's photo, a map of their home). It says nothing but
+    //    "this person allowed or refused that company", which is about them.
+    'tblUserOutsideServicePref' => [
+        'decision' => 'erase',
+        'reason'   => 'A member\'s own choices about which outside companies may be sent something about them. Holds information about the person themselves',
+        'columns'  => ['userID'],
+    ],
     'tblRecording' => [
         'decision' => 'unlink',
         // The columns were listed as `createdByID`, which this table does not

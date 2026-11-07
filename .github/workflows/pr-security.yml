@@ -1335,6 +1335,18 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_no_outside_qr_service.py
 
+      # #778 (D-058, D-072): nothing under web/ names a member-identifying
+      # outside host (Gravatar, Google's photo hosts, OpenStreetMap's tiles on
+      # a member's map) except where it is listed, counted and explained, and
+      # Avatar, the page rule and the directory map all go through
+      # Portal\Core\OutsideServices. Presence only; the self-test
+      # tools/outside-services-selftest.php drives the pages. Needs php for
+      # the tokeniser (the runner image ships it) and refuses without it.
+      - name: 'Outside services go through OutsideServices (hard gate, #778)'
+        id: outside_services_gated
+        if: always()
+        run: python3 tools/audit-checks/check_outside_services_gated.py
+
       # Every page that writes its own <head> must also write the description,
       # canonical address and preview card (#569). Those pages are the ones a
       # stranger sees — the sign-in page and the public forms — and before #569

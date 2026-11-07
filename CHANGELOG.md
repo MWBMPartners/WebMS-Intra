@@ -4,6 +4,36 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Outside services: what a member's browser may tell another company (#778; D-058, D-072, D-073)
+
+- **Gravatar pictures, a sign-in provider's photo and maps of a member's home are now off by
+  default, and each can be allowed in three tiers.** The installation decides what is allowed at
+  all and the default; each organisation may allow less, never more; each member may switch a
+  service off, or on where it is allowed. A member who belongs to several organisations is held to
+  the strictest of ALL of them, whichever organisation's pages they are reading (D-058 point 4).
+- New pages: **Admin, Outside services** (`/admin/settings/outside-services`; the installation's
+  card for a global administrator only) and **My account, Outside services**
+  (`/account/outside-services`).
+- **Maps of a member's home** on a directory profile are drawn only when the member shown has
+  switched maps on AND the person looking has not switched them off (D-072). **A map can never be
+  made on by default:** for maps an administrator may choose only "not allowed" or "off until a
+  member switches it on"; both writers refuse "on" and the reader treats a stored "on" as "off". Otherwise the location
+  is shown as text, coarsened as before for anybody but the member and administrators, and the
+  Leaflet library is no longer loaded on that page.
+- **What members will notice:** a plain silhouette where a Gravatar or Google picture used to be
+  asked for (D-073; a photo upload is #798). Before this, every page that draws the top bar sent
+  `img-src 'self' data:`, so the browser REFUSED the Gravatar picture and drew it broken; only on
+  `/noticeboard`, whose rule is `img-src https:`, did the request really go out. An administrator
+  may make the two picture services on by default; maps never.
+- Migration **255** (`255_outside_services.sql`): three `privacy.outside.*` settings seeded `off`,
+  the table `tblUserOutsideServicePref`, four addresses. The general settings editor refuses these
+  keys on change, add and delete.
+- Personal data: `tblUserOutsideServicePref` is in the catalogue (`erase`), deleted by an erasure,
+  and included in the member's own data download.
+- Help: the FAQ and Getting started no longer say the avatar is the Microsoft 365 picture, and say
+  truthfully that a picture may start on or off depending on what the portal's and the member's
+  organisations choose.
+
 ### Pages that looked unfinished: the API documentation, the admin help on a phone, the kiosk (#569)
 
 - **`/api-docs` no longer reports a console error, and has a heading and a description (#569).**

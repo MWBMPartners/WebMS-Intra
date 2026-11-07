@@ -347,6 +347,12 @@ async function main() {
       //    "problems" across 445 pages, of which 1,980 were one condition —
       //    `www.gravatar.com` being unreachable. A reader seeing that number
       //    learns nothing and stops reading, which is #483 at scale.
+      //    (That count was taken BEFORE #778. Since #778 the top bar asks
+      //    Gravatar only where the member and every organisation they belong
+      //    to allow it, off by default, so a default install asks it nothing.
+      //    Most of those 1,980 were probably requests the page's own rule had
+      //    already refused — Chrome reports a refused picture as a failed
+      //    load too — which was inferred, never confirmed in a browser.)
       //
       //    They are separated rather than filtered, because the outside ones
       //    are worth knowing in their own right: a page that asks an outside

@@ -5256,6 +5256,53 @@ CREATE TABLE IF NOT EXISTS `tblUserTranslationPref` (
     CONSTRAINT `fk_utp_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers`(`userID`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- 🛂 Outside services (#778, migration 255; the owner's decisions D-058, D-072,
+-- D-073). What a member's browser may tell an OUTSIDE COMPANY about them: a
+-- Gravatar picture (a scramble of the e-mail address Gravatar matches to the
+-- person), the photo a sign-in provider left on its own servers, and a map of a
+-- member's home drawn from OpenStreetMap. The answer is the STRICTEST of the
+-- installation's value below, the value of EVERY organisation the member belongs
+-- to (its own row, when it has one), and the member's own choice in the table
+-- below. `Portal\Core\OutsideServices` is the one place it is worked out.
+--
+-- Values: 'no' (not allowed), 'off' (allowed, off until a member switches it
+-- on), 'on' (allowed, on until a member switches it off); anything else counts
+-- as 'no'. All three ship 'off': nothing is sent about anybody until they
+-- choose it themselves, and the recoverable direction is a silhouette.
+-- For `memberMap` a level is 'no' or 'off' ONLY (D-072: a member's map appears
+-- only once that member has switched it on); a stored 'on' reads as 'off'.
+-- Changed only on /admin/settings/outside-services; the general settings editor
+-- refuses these keys (OutsideServices::lockedInGeneralEditor()).
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'privacy.outside.gravatar',      'off', 'off', 0),
+    (NULL, 'privacy.outside.providerPhoto', 'off', 'off', 0),
+    (NULL, 'privacy.outside.memberMap',     'off', 'off', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- A member's own choice per outside service. One row per service, written and
+-- deleted one at a time — never a rebuilt list (#667). No row means "follow my
+-- organisations". Erased with the person (personal-data-catalogue.php) and in
+-- their own data download.
+CREATE TABLE IF NOT EXISTS `tblUserOutsideServicePref` (
+    `userID`     INT                NOT NULL COMMENT 'The member whose choice this is',
+    `serviceKey` VARCHAR(40)        NOT NULL COMMENT 'Which outside service: a key of OutsideServices::SERVICES (gravatar, providerPhoto, memberMap)',
+    `choice`     ENUM('on', 'off')  NOT NULL COMMENT 'The member''s own choice. It can only tighten what their organisations allow: on is refused where they do not allow the service at all, and ignored by the reader if they stop allowing it later',
+    `updatedAt`  DATETIME           NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'A moment, on the database server''s clock: when the choice was last changed',
+    PRIMARY KEY (`userID`, `serviceKey`),
+    CONSTRAINT `fk_uosp_user` FOREIGN KEY (`userID`) REFERENCES `tblUsers` (`userID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='A member''s own choice about each outside service (#778). Written only by Portal\\Core\\OutsideServices; also read by the member''s own data download (auth/account/data-export.php) and deleted by an erasure (GdprEraser).';
+
+-- The two pages: an administrator's (the installation's and the organisation's
+-- values) and a member's own. All four protected; each page checks again who
+-- may use it.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/outside-services',      'admin/settings/outside-services/index.php', 1),
+    ('admin/settings/outside-services/save', 'admin/settings/outside-services/save.php',  1),
+    ('account/outside-services',             'auth/account/outside-services.php',         1),
+    ('account/outside-services-save',        'auth/account/outside-services-save.php',    1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
+
 -- Translation requests and reported spend, per organisation per month (#762,
 -- migration 254). Both monthly limits are counted HERE, at the moment a request
 -- is made, and not from `tblContentTranslation` above: that table is a cache
@@ -11215,6 +11262,14 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('253_scheduled_jobs_record_thei
 -- cache, which is empty on a fresh install, so there is nothing to carry here.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('254_translation_counts_requests.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 255_outside_services.sql (#778) ────────────────────────────────────
+-- The three `privacy.outside.*` settings, `tblUserOutsideServicePref` and the
+-- four addresses are declared above, beside the member's translation choice.
+-- A fresh install has no member and no organisation row to carry.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('255_outside_services.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
