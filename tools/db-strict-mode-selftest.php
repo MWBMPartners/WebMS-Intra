@@ -978,15 +978,61 @@ function sm_rowValue(string $html, string $label): ?string
  * It is told from the page's other alerts by its last line, which no other
  * alert has.
  *
+ * ⚠️ THIS USED TO BE ONE REGULAR EXPRESSION, AND IT STOPPED WORKING WITHOUT
+ *    ANYTHING ON THE PAGE CHANGING (#792). It was
+ *    `<div class="alert alert-(\w+)" role="alert">…(?:(?!<div class="alert ).)*shows the setting…`,
+ *    and that middle part walks forward one character at a time to the END of
+ *    the page and then back. Each step costs PCRE's JIT a little stack, so once
+ *    the page after the alert grew past roughly 20-30 KB — measured on the real
+ *    page: 20,000 bytes matched, 30,000 did not — `preg_match()` answered
+ *    `false` with "JIT stack limit exhausted". The alert's markup and this
+ *    function both came from `04eb374` and neither had changed; the dashboard
+ *    around them grew (its source went from 39 KB at `21a8935` to 57 KB at
+ *    `0e15afd`). The portal was right all along: the dashboard drew the red
+ *    alert, and the test could not read it.
+ *
+ *    AND `false` WAS READ AS "NO ALERT", which made it worse than a red check:
+ *    part P asks for NO alert on a strict connection, so on a page this size
+ *    its alert half would have PASSED whatever the dashboard drew. Be exact
+ *    about how far that reached: part P ALSO requires that the words "NOT
+ *    strict" appear nowhere on the page, so a real strict-mode alert would
+ *    still have failed it; what got through was any OTHER alert, one without
+ *    those words. (An earlier version of this sentence said part P would have
+ *    passed "whatever the dashboard drew", which overstated it — #792 round 1.)
+ *    A search that could not run must never answer the question it was asked.
+ *
+ * So now: the alerts are found with a pattern that cannot backtrack (one fixed
+ * opening tag), each alert is cut out up to the next one with `strpos()`, and
+ * only that short piece is searched. Any search that fails is returned as
+ * colour `unreadable`, which neither part P's "no alert" nor part E1's "a red
+ * alert" accepts, so both go red and say why.
+ *
  * @return array{colour: string, headline: string}|null
  */
 function sm_dashboardAlert(string $html): ?array
 {
-    if (preg_match('~<div class="alert alert-(\w+)" role="alert">\s*<h2[^>]*>((?:(?!</h2>).)*)</h2>(?:(?!<div class="alert ).)*shows the setting this connection is running under~s', $html, $m) !== 1) {
-        return null;
+    $openings = preg_match_all('~<div class="alert alert-(\w+)" role="alert">~', $html, $found, PREG_OFFSET_CAPTURE | PREG_SET_ORDER);
+    if ($openings === false) {
+        return ['colour' => 'unreadable', 'headline' => 'the page could not be searched for alerts: ' . preg_last_error_msg()];
+    }
+    foreach ($found as $one) {
+        $start = (int) $one[0][1];
+        // The alert runs to the next alert of ANY kind, or to the end of the
+        // page; the same boundary the old pattern used.
+        $next  = strpos($html, '<div class="alert ', $start + 1);
+        $piece = substr($html, $start, $next === false ? null : $next - $start);
+        if (str_contains($piece, 'shows the setting this connection is running under') === false) {
+            continue;
+        }
+        $heading = preg_match('~<h2[^>]*>(.*?)</h2>~s', $piece, $h);
+        if ($heading === false) {
+            return ['colour' => 'unreadable', 'headline' => 'the strictness alert could not be searched: ' . preg_last_error_msg()];
+        }
+
+        return ['colour' => (string) $one[1][0], 'headline' => $heading === 1 ? sm_words($h[1]) : '(the alert has no heading)'];
     }
 
-    return ['colour' => $m[1], 'headline' => sm_words($m[2])];
+    return null;
 }
 
 // ---- Part B: the installer's connection ----------------------------------------

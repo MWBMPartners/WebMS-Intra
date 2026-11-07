@@ -4,6 +4,38 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Content translation follows its own app switch (#792, D-075)
+
+- **The Translation app's switch in Admin → Apps now closes the translation
+  endpoint at the door, like every other app.** `api/translation/…` was tied to
+  no app in `AppRegistry::API_FOLDER_APPS`, so a press with translation switched
+  off got past the router, had its form token replaced, and was only then
+  refused by the handler. It is now refused before the handler loads, with the
+  sentence every switched-off app gives: "The Translation app is switched off
+  for this organisation." The switch itself is not new — `translation.enabled`,
+  seeded off — and nothing that was off has come on.
+- **The Translate control, the handler and the member's Translation page ask one
+  method, `ContentTranslation::isSwitchedOn()`,** instead of each reading the
+  setting for itself. It counts the feature as on only where both the router
+  and the translation engine would.
+- **A member's own Translation page now says when the organisation has switched
+  translation off**, instead of promising a Translate button that cannot
+  appear. The page stays open so a member can always withdraw their permission,
+  and their choice is kept.
+- **The Translation admin page explains that its "Enable translation" tick-box
+  is the same switch as Admin → Apps**, and that switching it off closes that
+  page too.
+- **The Translation app's description on Admin → Apps no longer says it
+  translates prayer requests.** It never has (D-049).
+- **Test fix: `tools/db-strict-mode-selftest.php` could no longer read the admin
+  dashboard's strictness alert.** The dashboard was right; the test's regular
+  expression ran out of PCRE stack ("JIT stack limit exhausted") once the page
+  grew, and the failure was read as "no alert" — which also meant part P's
+  "shows no alert" check would have passed on any alert NOT containing the
+  words "NOT strict" (it also looks for those words, so a real strict-mode
+  alert would still have failed it). The
+  extractor no longer backtracks, and a failed search now fails both checks.
+
 ### A translation of edited words is no longer shown as current (#799, migration 256)
 
 - **An edited announcement, project description or project update no longer

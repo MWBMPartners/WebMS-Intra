@@ -51,7 +51,6 @@ $trTable = isset($trTable) === true ? (string) $trTable : '';
 $trId    = isset($trId) === true ? (int) $trId : 0;
 
 $trUserId   = (int) (App::user()['userID'] ?? 0);
-$trSettings = App::settings()['translation'] ?? [];
 // 🗣️ The member's OWN stored language, not the interface's, and
 //    `ContentTranslation::readerLanguage()` is the ONE place that decides it.
 //    ⚠️ This comment used to say "for why those are different on this portal
@@ -65,7 +64,12 @@ $trLanguage = ContentTranslation::readerLanguage(App::db(), $trUserId);
 
 $trWhyNot = ContentTranslation::whyNotOffered([
     'signedIn'       => $trUserId > 0,
-    'enabled'        => (string) ($trSettings['enabled'] ?? '0') === '1',
+    // 🔌 The Translation app's own switch, asked through the ONE method the
+    //    handler asks too, and the same switch the router refuses
+    //    `api/translation/…` on (D-075, #792). This used to read
+    //    `App::settings()['translation']['enabled']` here and compare it with
+    //    '1' — a second reading that could disagree with the router's.
+    'enabled'        => ContentTranslation::isSwitchedOn(),
     'optedIn'        => ContentTranslation::readerOptedIn($trUserId),
     'sourceTable'    => $trTable,
     'targetLanguage' => $trLanguage,

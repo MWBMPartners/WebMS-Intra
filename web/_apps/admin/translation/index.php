@@ -311,6 +311,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="form-check">
                     <input type="checkbox" class="form-check-input" id="trEnabled" name="enabled" value="1" <?php echo $enabled === true ? 'checked' : ''; ?>>
                     <label class="form-check-label" for="trEnabled">Enable translation</label>
+                    <?php
+                    // 🔌 THIS IS THE SAME SWITCH AS "Translation" IN ADMIN → APPS
+                    //    (D-075, #792): both write `translation.enabled`. This
+                    //    page belongs to the Translation app, so the router
+                    //    closes it while the app is off — untick this and Save,
+                    //    and the next visit here is the "Translation is
+                    //    disabled" page. Saying so is the difference between a
+                    //    deliberate act and an administrator who thinks the
+                    //    page has broken. Both places need a global
+                    //    administrator, so whoever can untick it here can
+                    //    switch it back on there.
+                    ?>
+                    <div class="form-text">The same switch as Translation in <a href="<?php echo htmlspecialchars(Site::url('admin/apps'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Apps</a>. Switched off, nothing is translated, no Translate button is shown, and this page closes too: switch it back on from Admin &rarr; Apps.</div>
                 </div>
             </div>
             <hr>

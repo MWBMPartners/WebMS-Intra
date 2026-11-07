@@ -90,10 +90,25 @@ $targetLang  = (string) ($body['targetLanguage'] ?? '');
 // ❓ ONE gate, the same one the page asked before drawing the control. The
 //    page and this handler cannot disagree, because neither holds a copy of
 //    the rule (#647).
-$settings = App::settings()['translation'] ?? [];
+//
+//    🔌 SWITCHED OFF IS REFUSED TWICE, ON PURPOSE (D-075, #792). `ApiRouter`
+//    refuses this whole folder while the Translation app is switched off —
+//    "The Translation app is switched off for this organisation." — before
+//    this file is loaded and before the form token is replaced. So for a
+//    request that arrives through the router, the test below says no in ONE
+//    case only: a switch stored as `'true'`. The router counts `'1'` and
+//    `'true'` as on; `isSwitchedOn()` asks for exactly `'1'`, which is what
+//    the pinned engine accepts, so such a request passes the router and is
+//    refused HERE — after the form token was replaced — rather than reaching
+//    an engine that would answer 503. Only a hand-written value produces it,
+//    and no money is spent either way. (An earlier version of this comment
+//    said this test "can never be the one that says no"; that was untrue for
+//    that case, #792 round 1.) It also stays because it is the same rule the
+//    control asks, and a caller reaching this file some other way would
+//    otherwise meet no switch at all.
 $why = ContentTranslation::whyNotOffered([
     'signedIn'       => $userId > 0,
-    'enabled'        => (string) ($settings['enabled'] ?? '0') === '1',
+    'enabled'        => ContentTranslation::isSwitchedOn(),
     'optedIn'        => ContentTranslation::readerOptedIn($userId),
     'sourceTable'    => $sourceTable,
     'targetLanguage' => $targetLang,

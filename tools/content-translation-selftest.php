@@ -78,11 +78,14 @@
  *     `tools/audit-checks/check_translation_text_from_db.py`, which reads the
  *     script as text. **Said plainly rather than implied: no test in this
  *     repository runs that script.**
- *   • **It cannot tell the ENGINE's order from the HANDLER's gate.** Both ask
- *     the same `translation.enabled` setting, and the handler asks first, so
- *     no request can show whether `Translation::translate()` reads its cache
- *     before or after that test. E02 proves what a member meets; the engine's
- *     own order is defence in depth and is exercised by nothing here.
+ *   • **It cannot tell the ENGINE's order from the HANDLER's gate, nor the
+ *     handler's gate from the ROUTER's.** All three ask the same
+ *     `translation.enabled` switch, and since D-075 (#792) the ROUTER asks
+ *     first — `ApiRouter` refuses `api/translation/…` while the Translation app
+ *     is off, before the handler is loaded. So with the app switched off, no
+ *     request reaches the handler's own test or the engine's, and neither can
+ *     be exercised here. E02 proves what a member meets and that the router is
+ *     what refused it; the two later tests are defence in depth.
  *   • **It runs ONE worker** (`PHP_CLI_SERVER_WORKERS` is unset), so two
  *     presses never overlap. A test of two members translating the same piece
  *     at the same moment would pass on broken code and is not written.
@@ -260,7 +263,11 @@ function portAnswers(int $port): bool
 
 $state = ['started' => false, 'cleaned' => false, 'proc' => null, 'stub' => null, 'child' => '',
           'token' => bin2hex(random_bytes(16)), 'left' => -1, 'settings' => [],
-          'usageRows' => null, 'usageRenamed' => false, 'usageTrigger' => false];
+          'usageRows' => null, 'usageRenamed' => false, 'usageTrigger' => false,
+          // #792: the organisation's OWN `translation.enabled` row that section
+          // E writes for one check, so the clean-up can remove it if the run
+          // stops part way. 0 = none written.
+          'orgSwitchSite' => 0];
 
 /**
  * Put back everything this run changed, ONCE. Also a shutdown function.
@@ -330,6 +337,11 @@ function cleanup(): void
                 q('INSERT INTO `tblTranslationUsage` (`siteID`, `monthStartUtc`, `calls`, `costPence`) VALUES (?, ?, ?, ?)',
                     'isii', [(int) $row['siteID'], (string) $row['monthStartUtc'], (int) $row['calls'], (int) $row['costPence']]);
             }
+        }
+        if ((int) $state['orgSwitchSite'] > 0) {
+            q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?',
+                'si', ['translation.enabled', (int) $state['orgSwitchSite']]);
+            $state['orgSwitchSite'] = 0;
         }
         foreach ($state['settings'] as $key => $was) {
             if ($was === null) {
@@ -1173,7 +1185,56 @@ $answer = press($jarA, 'tblAnnouncements', $annA, 'cy', $tokA);
 ok('E02 with translation switched off, even an ALREADY CACHED piece is refused',
     $answer['status'] === 403,
     'got HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 300));
+// 🔌 D-075 (#792): THE REFUSAL MUST COME FROM THE ROUTER, IN EVERY OTHER
+//    SWITCHED-OFF APP'S WORDS. E02 alone cannot tell, because the handler's own
+//    test also answers 403 ("Translation is switched off for this
+//    organisation." — no "app"). Planted: with `api/translation` tied back to
+//    null in `AppRegistry::API_FOLDER_APPS`, E02 stays GREEN and E02b goes red.
+$routerSentence = 'The Translation app is switched off for this organisation.';
+ok('E02b and the ROUTER refused it, with the sentence every switched-off app gives (D-075)',
+    $answer['status'] === 403 && str_contains($answer['body'], $routerSentence) === true,
+    'expected "' . $routerSentence . '"; got HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 300)
+    . '. If this is the handler\'s own sentence, api/translation is not tied to the Translation app\'s switch.');
+ok('E02c nothing reached the translation company while it was off',
+    count(stubCalls()) === $before,
+    'calls before ' . $before . ', after ' . count(stubCalls()));
+// 🔑 Refused BEFORE the form token is replaced, so the token the page holds is
+//    still good. Before #792 the handler refused AFTER `requireWrite()` had
+//    replaced it. Proved by using the SAME token again once it is back on.
+ok('E02d the refusal carries no replacement token, because none was made',
+    str_contains($answer['body'], 'csrfToken') === false,
+    substr($answer['body'], 0, 300));
 setSetting('translation.enabled', '1');
+$answer = press($jarA, 'tblAnnouncements', $annA, 'cy', $tokA);
+ok('E02e switched back on, the SAME form token works: the refusal had not used it up',
+    $answer['status'] === 200,
+    'got HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 300));
+
+// 🏢 ONE ORGANISATION SWITCHING IT OFF FOR ITSELF. The installation says on and
+//    organisation A's own row says off; the merged settings let A's row win, as
+//    they do for every app, so A's members must be refused while the
+//    installation-wide switch is untouched. Written with SQL because no page
+//    writes a per-organisation app switch today (Admin → Apps writes the
+//    installation's row) — said plainly, it tests the rule, not a control.
+if (one('SELECT `settingID` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?',
+        'si', ['translation.enabled', $siteA]) !== null) {
+    refuse('organisation A already holds its own translation.enabled row, which this test would overwrite');
+}
+q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, ?, 0)',
+    'isss', [$siteA, 'translation.enabled', '0', '0']);
+$state['orgSwitchSite'] = $siteA;
+$before = count(stubCalls());
+$tokA   = freshToken($jarA);
+$answer = press($jarA, 'tblAnnouncements', $annA, 'cy', $tokA);
+ok('E02f switched off by the ORGANISATION alone (the installation says on): refused at the router',
+    $answer['status'] === 403 && str_contains($answer['body'], $routerSentence) === true && count(stubCalls()) === $before,
+    'got HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 300));
+$page = req($jarA, 'GET', '/announcements/view?slug=ct-ann-a');
+ok('E02g …and the Translate control is not drawn for that organisation',
+    $page['status'] === 200 && str_contains($page['body'], 'data-portal-translate') === false,
+    'the control was drawn although the organisation has switched translation off');
+q('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?', 'si', ['translation.enabled', $siteA]);
+$state['orgSwitchSite'] = 0;
 
 // =============================================================================
 // E3. AN EDITED ORIGINAL IS TRANSLATED AFRESH (#799)
@@ -1825,7 +1886,28 @@ $answer = req($jarA, 'GET', '/announcements/view?slug=ct-ann-a');
 ok('G04 with translation switched off the control is gone too',
     $answer['status'] === 200 && str_contains($answer['body'], 'data-portal-translate') === false,
     'the control was drawn although translation is off for the organisation');
+// 🔌 D-075 (#792): what the member's own page and the admin page do while the
+//    app is off. The account page stays OPEN (a member must always be able to
+//    withdraw their permission) and says the switch is off; the admin page
+//    belongs to the app and is closed by the router, like any other app page.
+$answer = req($jarA, 'GET', '/account/translation');
+ok('G04b the member\'s own Translation page still opens, and says translation is switched off here',
+    $answer['status'] === 200 && str_contains($answer['body'], 'id="translation-switched-off"') === true
+    && str_contains($answer['body'], '</html>') === true,
+    'HTTP ' . $answer['status'] . '; a member reading "a Translate button appears" while none can is told something untrue');
+$answer = req($jarAdmin, 'GET', '/admin/translation');
+ok('G04c the Translation admin page is the "Translation is disabled" page (403), as for any app switched off',
+    $answer['status'] === 403 && str_contains($answer['body'], 'Translation is disabled</h1>') === true,
+    'HTTP ' . $answer['status']);
 setSetting('translation.enabled', '1');
+$answer = req($jarA, 'GET', '/account/translation');
+ok('G04d switched back on, the account page no longer says it is off (so G04b can fail)',
+    $answer['status'] === 200 && str_contains($answer['body'], 'id="translation-switched-off"') === false,
+    'the "switched off" notice is shown while translation is on');
+$answer = req($jarAdmin, 'GET', '/admin/translation');
+ok('G04e …and the admin page opens, saying its tick-box is the same switch as Admin → Apps',
+    $answer['status'] === 200 && str_contains($answer['body'], 'The same switch as Translation in') === true,
+    'HTTP ' . $answer['status'] . '; an administrator who unticks it would otherwise think the page had broken');
 
 $logBefore = errorLogSize();
 $answer    = req($jarA, 'GET', '/projects/view?slug=ct-proj-a');

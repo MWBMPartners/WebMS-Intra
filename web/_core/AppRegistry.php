@@ -84,7 +84,7 @@ class AppRegistry
      * @var array<string, string|null>
      */
     public const API_FOLDER_APPS = [
-        // The fourteen folders named after the app they belong to.
+        // The fifteen folders named after the app they belong to.
         'announcements'   => 'announcements',
         'assets'          => 'assets',
         'attendance'      => 'attendance',
@@ -97,6 +97,29 @@ class AppRegistry
         'prayer-requests' => 'prayer-requests',
         'service-plans'   => 'service-plans',
         'tasks'           => 'tasks',
+        // 🌐 Content translation follows its OWN app's switch, `translation.enabled`
+        //    (D-075, #792; the owner, 7 November 2026). It spends the customer's
+        //    money at an outside company, so an organisation must be able to
+        //    turn the whole feature off in ONE place, and that place is the same
+        //    switch every other app has: Admin → Apps.
+        //
+        //    ⚠️ IT USED TO BE `null` HERE ("belongs to the portal itself"), and
+        //    D-075 rules that out. Be exact about what changed, because the
+        //    switch itself is NOT new: `_core/apps/translation.php` has named
+        //    `translation.enabled` as this app's switch since 8625b9e (#285), and
+        //    the handler and the Translate control both asked it. What `null`
+        //    meant was that THIS gate never asked it, so a press with the app
+        //    switched off got past the router, had its form token REPLACED by
+        //    `ApiAuth::requireWrite()`, and only then was refused by the
+        //    handler. Now it is refused at the door with the same sentence as
+        //    every other switched-off app, before the handler is even loaded.
+        //    The handler's own test stays, as the second of two.
+        //
+        //    The shipped value is unchanged: `translation.enabled` is seeded '0',
+        //    like every other app that can spend money (sms, payments, giving,
+        //    zoom, transcription). So nothing that was off comes on, and an
+        //    installation that had switched translation on keeps it on.
+        'translation'     => 'translation',
         'venues'          => 'venues',
         'worship'         => 'worship',
         // Events is the Calendar app: there is no separate "events" app,
@@ -119,13 +142,10 @@ class AppRegistry
         // for administrators only and each has its own per-endpoint switch
         // (two of the three are seeded off).
         'users'           => null,
-        // Content translation belongs to the portal rather than to one app:
-        // the one endpoint translates an announcement, a project's description
-        // or an update posted against a project, and those are three different
-        // apps' content (#485, #761). Whether anything is translated at all is
-        // its own setting, `translation.enabled`, which ships '0' and is asked
-        // on every request — the same arrangement as `push` above.
-        'translation'     => null,
+        // ⛔ Exactly THREE folders belong to no app: push, tours and users.
+        //    `translation` was a fourth until D-075 (see its line above), which
+        //    rules out adding it back here. `tools/app-switch-selftest.php`
+        //    fails if the list of nulls is ever anything but those three.
     ];
 
     /**

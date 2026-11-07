@@ -604,7 +604,10 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `SOURCES` is the allow-list, `whyNotOffered()` takes FACTS so the
     page and the handler cannot disagree, `readSourceText()` is the ONE
     place the words are read, and `readerLanguage()` the one place the
-    reader's language is decided. `_apps/translation/api/content.php` is
+    reader's language is decided. `isSwitchedOn()` is the one question whether
+    the feature is on (D-075, #792), and `api/translation` follows the
+    Translation app's own switch like any other app — it must not join push,
+    tours and users. `_apps/translation/api/content.php` is
     the ONE caller of the engine, at `api/translation/content`;
     `_core/templates/translate-control.php` is the ONE place the control
     is drawn. THREE things may be translated, all of them the

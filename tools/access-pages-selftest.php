@@ -251,7 +251,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 334;
+const EXPECTED_CHECKS = 336; // 334 until #792 added the api/translation row (two checks)
 
 function refuse(string $why): never
 {
@@ -854,6 +854,11 @@ $folders = [
     'service-plans'   => ['service-plans', 'hymn-search'],
     'tasks'           => ['tasks', 'list'],
     'tours'           => [null, 'active'],
+    // D-075 (#792): translation follows its own app's switch. Its one endpoint
+    // takes POST only, so a GET here is answered "Method not allowed" (405)
+    // while the app is ON — which is still "not refused as switched off" —
+    // and nothing is ever translated or charged by this table.
+    'translation'     => ['translation', 'content'],
     'users'           => [null, 'list'],
     'venues'          => ['venues', 'availability'],
     'worship'         => ['worship', 'state'],
@@ -1031,13 +1036,13 @@ $nobody = $child . $sep . 'jar-nobody.txt';
 // =============================================================================
 head('A. #478 — one row per api folder: only that folder\'s app off, then every app on');
 // =============================================================================
-ok('the table below has a row for each of the 19 api folders on disk, and no other', (static function () use ($folders, $webSrc): bool {
+ok('the table below has a row for each of the 20 api folders on disk, and no other', (static function () use ($folders, $webSrc): bool {
     $onDisk = array_map(static fn (string $dir): string => basename(dirname($dir)), (array) glob($webSrc . '/_apps/*/api', GLOB_ONLYDIR));
     sort($onDisk);
     $rows = array_keys($folders);
     sort($rows);
 
-    return $onDisk === $rows && count($rows) === 19;
+    return $onDisk === $rows && count($rows) === 20;
 })(), 'A new api folder needs a row here as well as a line in AppRegistry::API_FOLDER_APPS.');
 foreach ($folders as $folder => [$slug, $action]) {
     $path = ADDR_A . '/api/' . $folder . '/' . $action;

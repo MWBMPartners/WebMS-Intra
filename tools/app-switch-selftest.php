@@ -15,7 +15,8 @@
  *      names THAT app; and the whole list is exactly the one written out by
  *      hand here;
  *   3. the exceptions are exactly the documented ones: the `push`, `tours`
- *      and `users` folders, and the `unsubscribe` page;
+ *      and `users` folders, and the `unsubscribe` page; and `translation`,
+ *      which spends money, is NOT one of them (D-075, #792);
  *   4. `appForRoute()` gives the right app for every address in
  *      `ROUTES_OUTSIDE_PREFIX`, none for `unsubscribe`, and the answers it
  *      gave before are unchanged;
@@ -110,7 +111,7 @@ use Portal\Core\App;
 use Portal\Core\AppRegistry;
 
 /** How many checks a run without a database makes, and how many more with one. */
-const EXPECTED_WITHOUT_DB = 76;
+const EXPECTED_WITHOUT_DB = 78;
 const EXPECTED_DB_ONLY    = 10;
 
 $failures = 0;
@@ -503,6 +504,9 @@ $expectedFolderApps = [
     'service-plans'   => 'service-plans',
     'tasks'           => 'tasks',
     'tours'           => null,
+    // D-075 (#792): translation spends money, so it follows its own app's
+    // switch. It was null — "belongs to the portal" — until 7 November 2026.
+    'translation'     => 'translation',
     'users'           => null,
     'venues'          => 'venues',
     'worship'         => 'worship',
@@ -545,6 +549,18 @@ check(
     'the folders no switch applies to are exactly push, tours and users',
     $alwaysOn === ['push', 'tours', 'users'],
     'Found: ' . ($alwaysOn === [] ? '(none)' : implode(', ', $alwaysOn))
+);
+// 🌐 Named on its own so that the failure says WHY, not just "differs". The
+//    owner decided this (D-075, 7 November 2026): translation spends the
+//    customer's money with an outside company, so it must be possible to turn
+//    the whole feature off in one place, and it must NOT join the three above.
+check(
+    'api/translation follows the Translation app\'s own switch (D-075), and is not an always-on exception',
+    ($folderApps['translation'] ?? 'no line') === 'translation'
+        && (string) ($registered['translation']['settingKey'] ?? '') === 'translation.enabled',
+    'API_FOLDER_APPS[\'translation\'] is ' . var_export($folderApps['translation'] ?? 'no line', true)
+        . ' and the app\'s switch is ' . var_export($registered['translation']['settingKey'] ?? null, true)
+        . '. D-075 rules out null here: set it to \'translation\' in AppRegistry::API_FOLDER_APPS.'
 );
 check(
     'the unsubscribe page is a real seeded address, in the Newsletter app\'s folder',
@@ -671,7 +687,8 @@ check(
 echo "\n6. With an app's switch off, its api folder's app reads as off\n";
 
 $switchable = array_filter($folderApps, static fn ($slug): bool => $slug !== null);
-check('there are sixteen folders that follow an app\'s switch', count($switchable) === 16, 'Found ' . count($switchable) . '.');
+// Seventeen since D-075 (#792) tied `translation` to its own app's switch.
+check('there are seventeen folders that follow an app\'s switch', count($switchable) === 17, 'Found ' . count($switchable) . '.');
 foreach ($switchable as $folder => $slug) {
     $key = (string) ($registered[$slug]['settingKey'] ?? '');
     useSettings(settingsWith($key, 'true'));

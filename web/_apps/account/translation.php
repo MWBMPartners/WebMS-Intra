@@ -69,6 +69,20 @@ $on = $row !== null && (int) $row['autoTranslate'] === 1;
 //    be wrong once.
 $readerLanguage = ContentTranslation::readerLanguage($db, $userId);
 
+// 🔌 IS THE ORGANISATION'S OWN SWITCH ON? (D-075, #792) The Translation app can
+//    be switched off in Admin → Apps, and then no Translate button is drawn
+//    and nothing is sent, whatever this member chooses. This page stays OPEN
+//    while it is off, on purpose:
+//      • the choice is the member's own permission, and switching the app off
+//        must not take it away — an organisation that switches translation
+//        back on next month should not have silently reset everybody's answer;
+//      • and the member must still be able to WITHDRAW their permission at
+//        any time, which a closed page would stop.
+//    What it must not do is go on saying "With this on, a Translate button
+//    appears" while none can, so it says the switch is off instead. Asked of
+//    the ONE method the control and the handler ask, never read here.
+$appSwitchedOn = ContentTranslation::isSwitchedOn();
+
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
@@ -85,6 +99,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-language me-2"></i>Translation preferences</h1>
+
+<?php if ($appSwitchedOn === false): ?>
+    <div class="alert alert-info" role="status" id="translation-switched-off">
+        <strong>Translation is switched off for this organisation at the moment.</strong>
+        No Translate button appears and nothing is sent to a translation company,
+        whatever you choose below. Your choice is kept, and applies if your
+        organisation switches translation on again.
+    </div>
+<?php endif; ?>
 
 <form method="post" class="card"><div class="card-body">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">

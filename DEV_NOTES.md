@@ -20761,3 +20761,60 @@ Tests: section E3 of `tools/content-translation-selftest.php` (real HTTP, real
 MySQL, the stub provider). Plants and their results are in the commit message.
 
 **Review: protected arm (money), two rounds by fresh Claude agents standing in for Codex; round 2 CLEAN.** Round 1 found the engine, migration and tests sound (seven builder plants plus five of its own, each caught) and ONE untrue sentence: `help/translations.php` still said anything already translated keeps working, which the admin page and `api-spec.json` had been corrected for in the same package. **A correction applied to two of the three places a claim lives is the recurring shape** — search for the sentence, not the file you remember it in. Still true and stated rather than fixed: "pieces already translated from their current words keep working" does not hold for a copy made before migration 256, which has no fingerprint; no installation exists, so nothing is affected. Codex has NOT reviewed it.
+
+### Content translation follows its own app switch (#792, D-075)
+
+`AppRegistry::API_FOLDER_APPS['translation']` was `null` ("belongs to the
+portal") from e54fa7f. The app definition `_core/apps/translation.php` has named
+`translation.enabled` as its switch since 8625b9e (#285), so the switch existed;
+only the router's app gate did not ask it. Effects of `null`, now gone: a press
+reached `ApiAuth::requireWrite()` and had its form token replaced before the
+handler refused it, and the answer used the handler's own words rather than the
+router's.
+
+- **`ContentTranslation::isSwitchedOn()` is the one question**, asked by
+  `translate-control.php`, `translation/api/content.php` and
+  `account/translation.php`. It requires BOTH readings: `AppRegistry::isEnabled()`
+  (the router's, `'1'` or `'true'`) AND the stored value being exactly `'1'`
+  (the engine's, in the pinned `Translation.php`). Asking only the router would
+  draw a button that 503s on a hand-written `'true'`.
+- **The handler's own switch test is reached through the router in ONE case
+  only:** a switch stored by hand as `'true'`, which the router counts as on and
+  `isSwitchedOn()` as off — refused there, after the form token was replaced,
+  with nothing sent or charged. No fixture stores `'true'`, so that branch and
+  the `=== '1'` half of `isSwitchedOn()` are guarded by no test (round 1 planted
+  it out and everything stayed green). Round 1 caught an earlier version of
+  this note, and of the handler's comment, saying it was unreachable.
+- **The account page stays open while the app is off**, because it is where a
+  member withdraws permission; it shows `#translation-switched-off`.
+- **The admin page is closed by the router while the app is off**, as it always
+  was (`admin/translation` is the app's `route`). Both it and Admin → Apps need
+  a global administrator, so whoever can untick its box can switch it back on.
+- No database change: `translation.enabled` was already seeded `'0'`, like
+  sms, payments, giving, zoom and transcription.
+- **The earlier section "What the tests cannot do, said once here as well"
+  (#485) is now out of date on ORDER**: it says the handler asks first. Since
+  #792 the router asks first. The handler's switch test is reached over HTTP
+  only for a hand-written `'true'`, and the engine's is not reached over HTTP at
+  all, because the handler applies the same exact-`'1'` test and refuses first.
+  (Round 1 of the check caught an earlier draft of this note saying neither was
+  reachable.)
+
+### A regular expression that runs out of stack answers "not found" (#792)
+
+`sm_dashboardAlert()` in `tools/db-strict-mode-selftest.php` used
+`(?:(?!<div class="alert ).)*` between an alert's heading and its last line.
+That walks to the end of the page and back; PCRE's JIT stack ran out once the
+page after the alert exceeded about 20-30 KB (measured on the real page: 20,000
+bytes matched, 30,000 did not), and `preg_match()` returned `false`, which the
+`!== 1 → return null` read as "no alert". The alert markup and the extractor
+both date from 04eb374 and never changed; the dashboard source grew from 39 KB
+(21a8935) to 57 KB (0e15afd). **Two lessons:** a tempered greedy token over a
+whole page has a size limit nobody sees; and `preg_match() !== 1` treats an
+ERROR as "absent", which makes a "shows no X" check pass on any page. The same
+`=== 1 ? … : ''` shape with tempered tokens is in `access-pages-selftest.php`,
+`gdpr-coverage-selftest.php`, `go-live-button-selftest.php` and
+`time-zones-selftest.php` — each bounded by one element, so lower risk, but not
+checked.
+
+**Review: protected arm (money), two rounds by fresh Claude agents standing in for Codex.** Round 1 found the behaviour right and two untrue comments (the handler's switch test "can never be the one that says no", false for a hand-written `'true'`; and part P "would have passed whatever the dashboard drew", an overstatement) plus an untrue Admin → Apps sentence about who chooses the translation company. Round 2 found the code and spec fixes true and one draft note still untrue, which was corrected without a further round because it is documentation. Codex has NOT reviewed it. Left open: #829, #831.

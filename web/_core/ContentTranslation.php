@@ -110,6 +110,59 @@ class ContentTranslation
     private static array $language = [];
 
     /**
+     * 🔌 The app whose Admin → Apps switch turns content translation on and off
+     *    (D-075, #792). It is the slug of `web/_core/apps/translation.php`, and
+     *    `AppRegistry::API_FOLDER_APPS` ties the `api/translation` folder to the
+     *    same slug, so the router and this class ask about ONE switch.
+     */
+    public const APP_SLUG = 'translation';
+
+    /**
+     * 🔌 Is content translation switched on for the organisation this request
+     *    is for?
+     *
+     * THE ONE QUESTION, asked by the Translate control, by the handler and by
+     * the member's own Translation page. Before #792 each of those read
+     * `App::settings()['translation']['enabled']` for itself.
+     *
+     * IT IS ON ONLY WHERE BOTH OF THE PORTAL'S TWO READINGS OF THE SWITCH SAY
+     * SO, and that is deliberate. Two pieces of code decide whether a press
+     * can succeed, and they read the same stored value differently:
+     *
+     *   • `ApiRouter`, through `AppRegistry::isEnabled()` (the same test every
+     *     app's switch gets), counts `'1'` OR `'true'` as on;
+     *   • the engine, `Translation::translate()`, counts only `'1'` — and that
+     *     file is pinned whole by `check_translation_engine_pinned.py`, so it
+     *     is not changed to agree.
+     *
+     * Admin → Apps and the Translation admin page both store `'1'` or `'0'`,
+     * so the two agree on everything the portal writes. A `'true'` written by
+     * hand would be "on" to the router and "off" to the engine; asking only
+     * the router here would draw a button whose every press then fails with
+     * 503, and asking only the stored value would let this method disagree
+     * with the router in the other direction. So the control is offered only
+     * where the router WILL let the press through AND the engine WILL act on
+     * it, and a press in the gap is refused by the handler with the true
+     * reason ("switched off").
+     *
+     * It reads the MERGED settings, so an organisation's own row wins over the
+     * installation's, exactly as it does for every other app. Admin → Apps
+     * writes the installation-wide row only.
+     *
+     * WHAT IT CANNOT DO: answer for an API key's own organisation. The router
+     * uses `isEnabledForSite()` for a key; this class never needs to, because
+     * the handler refuses every API key before anything else (D-049).
+     */
+    public static function isSwitchedOn(): bool
+    {
+        if (AppRegistry::isEnabled(self::APP_SLUG) === false) {
+            return false;
+        }
+
+        return (string) (App::settings()['translation']['enabled'] ?? '0') === '1';
+    }
+
+    /**
      * 📋 THE ONE ALLOW-LIST: what may be translated, and how its words are
      *    found.
      *
@@ -204,7 +257,12 @@ class ContentTranslation
      *   1. **Signed in.** `projects/view.php` is a PUBLIC page, so without
      *      this a passer-by could spend the customer's money. The old handler
      *      had `Auth::requireLogin()` and that much was right.
-     *   2. **The feature is on.** `translation.enabled` ships `'0'`.
+     *   2. **The feature is on.** The Translation app's own switch,
+     *      `translation.enabled`, which ships `'0'`. Callers pass
+     *      `isSwitchedOn()` — never their own reading of the setting — and
+     *      `ApiRouter` refuses `api/translation/…` on the same switch before
+     *      the handler is loaded (D-075, #792), so for the handler this test
+     *      is the second of two.
      *   3. **This reader has opted in.** D-049: *"the member's own opt-in is
      *      what permits it, so nothing may be sent for somebody who has not
      *      opted in"*. It gates the explicit press as well as any automatic
