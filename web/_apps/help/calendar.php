@@ -413,6 +413,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
 </section>
 
+<!-- 🧒 #816: how long event registrations are kept. Its link comes from
+     Site::url(), so it keeps the organisation's own address prefix. -->
+<section id="registration-retention" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-child-reaching me-2"></i>For admins &mdash; how long registrations are kept</h2>
+    <p>
+        When somebody registers for an event, the details they give &mdash; which can include a child's
+        allergies and medical notes and a parent's telephone number &mdash; are deleted a set number of days
+        after the event. Your organisation follows the period this installation sets (90 days unless
+        whoever runs the installation has changed it), unless it chooses a period of its own. An
+        administrator sets your organisation's period at
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Registration retention</a>,
+        which also shows the period in force and whether the nightly clear-out is switched on for your
+        organisation. While it is switched off, nothing is deleted at all.
+    </p>
+    <p>
+        Whoever runs the installation may set a ceiling on that period. If they have, you cannot choose a
+        longer one, and the page says so. A ceiling never shortens a period your organisation has already
+        chosen: it is refused instead, because a period like this can be a legal requirement.
+    </p>
+</section>
+
 <!-- 📥 Imported calendars (#514 part 8, chunk P8-4). Its links come from
      Site::url(), so they keep the organisation's own address prefix. -->
 <section id="imported" class="mb-5">

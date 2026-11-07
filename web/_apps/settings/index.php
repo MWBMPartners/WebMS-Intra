@@ -245,6 +245,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             exit();
         }
 
+        // 🧒 #816: nor how long event registrations are kept, nor the
+        //    installation's ceiling on it. Deleting the ceiling's row would
+        //    remove the ceiling with no check; deleting the installation's
+        //    period would drop every organisation following it to 90 days,
+        //    which may be above the ceiling; deleting an organisation's own
+        //    row is "follow the installation", which the Registrations page
+        //    offers and records. See RegistrationRetention::lockedInGeneralEditor().
+        if ($lockedKey !== null && \Portal\Core\RegistrationRetention::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is how long event registrations are kept and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\RegistrationRetention::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+
         // 🛂 #778: nor what outside companies may be sent about a member.
         //    Deleting the INSTALLATION's row would make every service read as
         //    "not allowed" (a missing value is `no`), silently; deleting an
@@ -653,6 +672,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    administrator can open (the installation's row only a global
                                     //    administrator can change there).
                                     $outsideLocked = \Portal\Core\OutsideServices::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And for how long event registrations are kept, with the
+                                    //    installation's optional ceiling (#816): set at Admin,
+                                    //    Registration retention (the installation's rows only a
+                                    //    global administrator can change there).
+                                    $registrationsLocked = \Portal\Core\RegistrationRetention::lockedInGeneralEditor((string) $row['settingKey']);
                                     ?>
                                     <?php if ($zoneLocked === true && Site::timezoneFacts()['inRow'] === false): ?>
                                         <?php // Before migration 217 has run, neither page takes a zone: the way on is the upgrade. ?>
@@ -677,6 +701,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <span class="small text-secondary">Changed by a global administrator, at Admin, Organisations</span>
                                     <?php elseif ($outsideLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Outside services</a>
+                                    <?php elseif ($registrationsLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Registration retention</a>
                                     <?php elseif ($givingLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/giving-records'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Giving records</a>
                                     <?php else: ?>
@@ -692,7 +718,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php /* 🔒 `$capabilityLocksLocked` joined this list with #727: the delete handler
                                              refuses the row anyway, so drawing the button would offer a
                                              control that cannot work. */ ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false && $outsideLocked === false): ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false && $outsideLocked === false && $registrationsLocked === false): ?>
                                         <form method="post" action="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

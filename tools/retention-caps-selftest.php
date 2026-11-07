@@ -136,6 +136,9 @@ require_once $rcCore . 'App.php';
 require_once $rcCore . 'SettingLimit.php';
 require_once $rcCore . 'AnonymousCheckins.php';
 require_once $rcCore . 'TranscriptRetention.php';
+// 🧒 #816: section G drives the registrations clear-out, which reads each
+//    organisation's period through RegistrationRetention.
+require_once $rcCore . 'RegistrationRetention.php';
 
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;

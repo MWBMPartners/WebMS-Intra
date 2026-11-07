@@ -63,6 +63,10 @@ declare(strict_types=1);
 //   InstallationSettings -> SettingLimit -> TranscriptRetention (#714),
 //   Pdf (#721 — it has no dependencies of its own; dompdf is only loaded by
 //   create(), and sweepPartFiles() never reaches it),
+//   InstallationSettings -> App -> SettingLimit -> RegistrationRetention
+//   (#816 — the registrations clear-out reads each organisation's period
+//   through it; it loads SettingLimit itself if nothing has, but App must be
+//   there because `daysForSite()` asks `App::settingForSite()`),
 //   Site -> I18n -> Events (#810 — the registrations clear-out asks
 //   `Events::nowForADeletionDeadline()` for each event's deadline reading,
 //   which reads the zones through `Site` and the clock through `I18n`; anybody
@@ -81,6 +85,7 @@ use Portal\Core\GdprEraser;
 use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\Pdf;
+use Portal\Core\RegistrationRetention;
 use Portal\Core\SettingLimit;
 use Portal\Core\TranscriptRetention;
 use Portal\Core\WebhookRetention;
@@ -484,20 +489,30 @@ function registration_sweep_sites(): array
     while ($row = $result->fetch_assoc()) {
         $siteId = (int) $row['siteID'];
 
-        $run = (string) (App::settingForSite('events.registrationRetentionRun', $siteId) ?? 'true');
-        if ($run !== 'true') {
+        // 🔛 Read in ONE place since #816, so the two pages that say what
+        //    happens to registrations ask the same question the job does. The
+        //    reading is unchanged: no row is ON, anything but `true` is OFF.
+        if (RegistrationRetention::clearOutRunsForSite($siteId) === false) {
             continue;
         }
 
-        $days = (int) (App::settingForSite('events.registrationRetentionDays', $siteId) ?? '90');
-        if ($days < 0) {
-            // A negative number is meaningless here. Treated as the ordinary
-            // default rather than as "keep indefinitely", because somebody
-            // typing "-1" has made a mistake, not expressed an intention.
-            $days = 90;
-        }
-
-        $out[$siteId] = $days;
+        // 🧒 The organisation's period, read in ONE place (#816). The reading
+        //    is exactly what this loop did inline until then — no row is 90
+        //    days, a negative number is 90 days (somebody typing "-1" has made
+        //    a mistake, not expressed an intention), anything else is PHP's
+        //    `(int)` of the text — and it moved so that the installation's
+        //    optional ceiling judges a stored period exactly as this job acts
+        //    on it.
+        //
+        //    ⚠️ IT IS NOT CAPPED BY THAT CEILING, and that is the owner's
+        //       decision (D-074, following D-032), not an omission. Two
+        //       save-time gates keep every period at or under the ceiling; a
+        //       period above it can only be written by hand in SQL or brought
+        //       back by a restored backup, and then this job keeps the details
+        //       LONGER rather than deleting them early — a registration period
+        //       can be a legal requirement, and an early deletion cannot be
+        //       undone. See Portal\Core\RegistrationRetention's header.
+        $out[$siteId] = RegistrationRetention::daysForSite($siteId);
     }
     $result->free();
 

@@ -98,6 +98,8 @@ require_once $core . 'App.php';
 require_once $core . 'SettingLimit.php';
 require_once $core . 'WebhookRetention.php';
 require_once $core . 'TranscriptRetention.php';
+// 🧒 #816: named in `_retention-sweep.php`'s list of what it needs.
+require_once $core . 'RegistrationRetention.php';
 
 use Portal\Core\App;
 use Portal\Core\InstallationSettings;

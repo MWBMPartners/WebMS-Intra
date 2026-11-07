@@ -604,6 +604,9 @@ require_once $coreDir . 'InstallationSettings.php';
 require_once $coreDir . 'SettingLimit.php';
 require_once $coreDir . 'WebhookRetention.php';
 require_once $coreDir . 'TranscriptRetention.php';
+// 🧒 #816: the registrations clear-out reads each organisation's period through
+//    RegistrationRetention, which needs App and SettingLimit (both above).
+require_once $coreDir . 'RegistrationRetention.php';
 // 🧹 #721: the retention sweep removes part-written PDFs, and this test reads
 //    `Pdf::PART_MARK` to build a fixture the way the real writer builds a name.
 //    It has no dependencies of its own — dompdf is only touched by create().

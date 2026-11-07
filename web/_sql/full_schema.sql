@@ -9932,6 +9932,14 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'events.registrationRetentionRun',  'true', 'true', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+-- 🛑 #816 (migration 257): the OPTIONAL installation ceiling on both periods
+-- above. '0' is "no ceiling", which is how it ships (the owner, D-074): a
+-- registration period can be a legal requirement, so nothing changes until a
+-- global administrator sets one, on Admin, Registration retention.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'events.registrationRetentionMaxDays', '0', '0', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
 INSERT INTO `tblMigrations` (`filename`) VALUES ('191_event_registration_privacy.sql')
 ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
@@ -11279,6 +11287,19 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('255_outside_services.sql')
 -- itself. A fresh install has no cached translation, so nothing is carried.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('256_translation_cache_knows_its_source.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 257_registration_retention_ceiling.sql (#816) ──────────────────────
+-- The `events.registrationRetentionMaxDays` setting is seeded above, beside the
+-- registration period it bounds (the "from 191" block). The page that sets
+-- both is reached at these two addresses.
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/settings/registrations',      'admin/settings/registrations/index.php', 1),
+    ('admin/settings/registrations/save', 'admin/settings/registrations/save.php',  1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('257_registration_retention_ceiling.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

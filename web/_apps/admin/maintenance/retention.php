@@ -349,10 +349,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <h2 class="h6"><i class="fa-solid fa-child-reaching me-1"></i>Event Registrations (<code>tblEventRegistrations</code>)</h2>
                 <p class="text-muted small mb-2">
-                    Kept for <strong><?php echo (int) (App::settings('events.registrationRetentionDays') ?? 90); ?> days</strong>
-                    after the event by default (setting: <code>events.registrationRetentionDays</code>).
-                    A single event can set its own number of days, which wins over this one.
-                    Each site uses its own setting.
+                    <?php // 🧒 #816: asked of the one reader the clear-out uses, so this
+                          //    card and the job cannot disagree about this organisation's period. ?>
+                    <?php $regDays = \Portal\Core\RegistrationRetention::daysForSite(\Portal\Core\Site::id()); ?>
+                    <?php $regRuns = \Portal\Core\RegistrationRetention::clearOutRunsForSite(\Portal\Core\Site::id()); ?>
+                    <?php if ($regRuns === false): ?>
+                        <strong data-registration-clear-out-off="1">The clear-out is switched off for your organisation, so none are deleted</strong>
+                        (setting: <code>events.registrationRetentionRun</code>). When it is on, they are
+                    <?php endif; ?>
+                    <?php echo $regDays === 0 ? '<strong>kept indefinitely</strong> for your organisation' : '<strong>kept for ' . $regDays . ' days</strong> after the event for your organisation'; ?>
+                    (set at
+                    <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Registration retention</a>).
+                    A single event can have its own number of days, which wins over this one.
+                    Each organisation uses its own period.
                 </p>
                 <p class="mb-2">Registrations currently eligible for deletion: <strong><?php echo number_format($preview['registrations']); ?></strong></p>
                 <p class="small text-muted mb-0">

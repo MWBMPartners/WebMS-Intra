@@ -2137,6 +2137,12 @@ reads as reassurance. Run the loop above — it takes seconds.
 
 ---
 
+## Event registrations: how long their details are kept (#816)
+
+| Feature | Issue | Migration | Status |
+|---|---|---|---|
+| Kept N days after the event (installation default 90), set per organisation on Admin, Registration retention (`/admin/settings/registrations`) — an organisation could not set its own before. An OPTIONAL installation ceiling (D-074), off by default: a period above it is refused, and a ceiling below a period already held is refused and the holders named; removing the ceiling is always allowed. The nightly clear-out never caps a stored period (it keeps longer rather than deleting early), and nothing is deleted while its switch is off. | #816 | 257 | ✅ |
+
 ## Top navigation bar (#822)
 
 | Feature | Issue | Status |

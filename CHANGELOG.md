@@ -4,6 +4,13 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An optional ceiling on how long event registrations are kept (#816, migration 257; D-074)
+
+- **An optional ceiling on how long event registrations are kept (#816, migration 257; D-074).** A global administrator can set, on the new page Admin, Registration retention (`/admin/settings/registrations`), the longest period any organisation or any single event may keep a registration's details (a child's name, date of birth, allergies and medical notes, a parent's contact details). **It ships switched off and nothing changes until somebody sets one**, because a registration period can be a legal requirement. A period above the ceiling is refused with the reason; a ceiling below a period an organisation, an event, or the installation itself already holds is refused and they are named — whether the ceiling is being raised or lowered, as the giving-records ceiling does. Removing the ceiling is always allowed. The same page lets an organisation choose its own period for the first time (the general settings editor could never add one) and lets a global administrator change the installation's own period.
+- The general settings editor (`/settings`) now refuses `events.registrationRetentionDays` and the new `events.registrationRetentionMaxDays`, to change, add or delete, for everybody; they are written on the new page.
+- The nightly registrations clear-out reads each organisation's period through `Portal\Core\RegistrationRetention::daysForSite()`. The reading is unchanged (no row = 90 days, a negative number = 90 days, otherwise PHP's `(int)` of the text — so an EMPTY stored value still means "keep indefinitely"). It deliberately does NOT apply the ceiling: a period above it can only come from SQL or a restore, and then the details are kept longer rather than deleted early (D-032's reasoning, which D-074 follows).
+- **The registrations clear-out switch is honoured on the pages too:** while `events.registrationRetentionRun` is off, the new page and the Retention page say nothing is deleted, rather than quoting a period.
+
 ### Tests that could pass without reading the page, and two translation cases nothing tested (#829, #831)
 - **A pattern search that could not run is no longer read as "not there" (#829).**
   Four self-tests (`access-pages`, `gdpr-coverage`, `go-live-button`, `time-zones`)

@@ -918,6 +918,15 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                 </a>
             </div>
             <div class="col-6 col-md-4 col-lg-2">
+                <!-- 🧒 #816: how long the details given when somebody registers
+                     for an event are kept, and the installation's optional
+                     ceiling on it. Beside the other personal-details settings. -->
+                <a href="<?php echo htmlspecialchars(Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-child-reaching fa-lg"></i>
+                    <span class="small">Registration retention</span>
+                </a>
+            </div>
+            <div class="col-6 col-md-4 col-lg-2">
                 <a href="<?php echo htmlspecialchars(Site::url('admin/system-info'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
                     <i class="fa-solid fa-server fa-lg"></i>
                     <span class="small">Server Info</span>

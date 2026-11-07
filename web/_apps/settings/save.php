@@ -451,6 +451,27 @@ if ($settingId > 0) {
     //    number nobody judged and nobody recorded, which the clear-out then
     //    silently holds down. An unrecorded refusal is indistinguishable from
     //    no refusal to whoever reads the log afterwards.
+    // 🧒 #816: and how long event registrations are kept, with the
+    //    installation's optional ceiling. Both are written only on Admin,
+    //    Registration retention, where a period above the ceiling is refused
+    //    and a ceiling below a period somebody already holds is refused and
+    //    named (D-074, following D-032). Here neither gate exists, so a number
+    //    typed here would be one nobody judged — and the clear-out keeps a
+    //    period above the ceiling rather than shortening it, so nothing would
+    //    ever hold it down. Refused for everybody, a global administrator
+    //    included. See RegistrationRetention::lockedInGeneralEditor().
+    if (\Portal\Core\RegistrationRetention::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is how long event registrations are kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\RegistrationRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if (\Portal\Core\TranscriptRetention::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -890,6 +911,20 @@ if ($settingId > 0) {
 
     // 🎙️ #722, the same refusal on the ADD path. Both paths are needed: a key
     //    refused on update and allowed on insert is a key anybody can set once.
+    // 🧒 #816, the same refusal on the ADD path: a key refused on update and
+    //    allowed on insert is a key anybody can set once.
+    if (\Portal\Core\RegistrationRetention::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" is how long event registrations are kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\RegistrationRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if (\Portal\Core\TranscriptRetention::lockedInGeneralEditor($settingKey) === true) {
         Logger::activity(
             'SettingsInsertRefused',

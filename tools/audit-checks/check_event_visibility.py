@@ -177,6 +177,12 @@ FILE_ALLOWLIST: dict[str, str] = {
     # be joined to it for scoping, never to show an event's own content
     # to a viewer.
     "_core/Discipleship.php": "counts/joins tblEvents only to auto-complete a formation step from attendance; shows no event detail",
+    # 🧒 #816: lists the events whose OWN registration period is longer than a
+    # ceiling a global administrator is trying to set, so the refusal can name
+    # them. Imported and soft-deleted events are included ON PURPOSE, because the
+    # nightly clear-out deletes their registrations by the same period; and the
+    # reader is the installation's own administrator, never a member.
+    "_core/RegistrationRetention.php": "names events whose own registration period blocks a ceiling, to a global administrator only; must include imported rows because the clear-out does",
     "_apps/cron/_retention-sweep.php": "deletes expired REGISTRATIONS by their event's retention window; shows no event detail",
     "_core/GdprEraser.php": "erasure catalogue; removes a person's own data, never reads or shows an event",
     "_core/personal-data-catalogue.php": "documents what GdprEraser erases; no live query reads an event",
