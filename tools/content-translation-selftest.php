@@ -31,6 +31,17 @@
  *     while everything else about the feature still works** — the button
  *     translates, something comes back, the cache fills.
  *
+ *   • **Serving the translation of words a piece no longer says (#799).**
+ *     The cache was found by which piece it was, never by what it said, so
+ *     an edited announcement went on being answered with its OLD words'
+ *     translation. Section E3 edits a real row between two presses and
+ *     requires the second answer to translate the NEW words, with one more
+ *     provider call and one more request counted; it also requires an
+ *     unchanged piece to cost nothing, a row with no fingerprint never to be
+ *     served, and an edited piece to be REFUSED, not answered with the old
+ *     words, once the month's limit is reached. Before the fix E3-02 to E3-04
+ *     were red over real HTTP (measured 7 November 2026).
+ *
  * NO OUTSIDE COMPANY IS CALLED. The run starts a SECOND tiny server of its
  * own, points `translation.libre.baseUrl` at it, and that stub answers in
  * LibreTranslate's shape. It also RECORDS what it was asked to translate and
@@ -92,6 +103,7 @@
  * @version   1.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/485
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/761
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/799
  * -----------------------------------------------------------------------------
  */
 
@@ -641,6 +653,24 @@ q('INSERT INTO `tblAnnouncements` (`announcementID`, `siteID`, `title`, `slug`, 
     'iisss', [$annLater, $siteA, 'CT embargoed', 'ct-ann-embargoed',
               'An embargoed notice about the new minister, not to be seen until tomorrow.']);
 
+// ✏️ TWO PIECES THAT SECTION E3 EDITS (#799), and nothing else touches. They
+//    are their own rows on purpose: E3 changes their words part-way through
+//    the run, and every other section compares an answer with the words its
+//    fixture was given, so editing a shared fixture would make those checks
+//    compare against text that is no longer in the row.
+$annEdit      = CT_LOW + 24;   // organisation A, published, edited during E3
+$updEdit      = CT_LOW + 38;   // an update on project A, edited during E3
+$editFirst    = 'The harvest supper is on Saturday the tenth, in the church hall.';
+$editSecond   = 'The harvest supper has moved to Saturday the seventeenth, in the church hall.';
+$editThird    = 'The harvest supper is cancelled this year because the hall kitchen is closed.';
+$updEditFirst = 'Thank you: the scaffolding goes up on Monday morning.';
+$updEditNext  = 'Thank you: the scaffolding now goes up on Thursday morning instead.';
+q('INSERT INTO `tblAnnouncements` (`announcementID`, `siteID`, `title`, `slug`, `body`, `isPublished`, `isDeleted`) '
+  . 'VALUES (?, ?, ?, ?, ?, 1, 0)',
+    'iisss', [$annEdit, $siteA, 'CT edited notice', 'ct-ann-edited', $editFirst]);
+q('INSERT INTO `tblProjectUpdate` (`updateID`, `projectID`, `content`) VALUES (?, ?, ?)',
+    'iis', [$updEdit, $projA, $updEditFirst]);
+
 // A prayer request, so section B refuses a row that really exists rather than
 // one that happens to be missing. A refusal on a missing row would pass on
 // code that had no allow-list at all.
@@ -714,7 +744,7 @@ if (($_SERVER['HTTP_X_CT_PROBE'] ?? '') !== '__TOKEN__') {
 $settle = new ReflectionMethod(\Portal\Core\Translation::class, 'settle');
 $words  = $settle->invoke(null, (int) $_GET['site'], (string) $_GET['month'],
     ['text' => 'probe words', 'costPence' => (int) $_GET['cost']],
-    'tblAnnouncements', (int) $_GET['source'], 'body', 'en', 'fr', 'probe');
+    'tblAnnouncements', (int) $_GET['source'], 'body', 'en', 'fr', 'probe', hash('sha256', 'probe source words'));
 echo json_encode(['words' => $words]);
 PROBE;
 file_put_contents($child . $sep . 'web' . $sep . 'public_html' . $sep . 'ct-probe.php', str_replace('__TOKEN__', $state['token'], $probe));
@@ -1028,9 +1058,13 @@ head('D. Another organisation\'s words, and rows nobody may see');
 // because nobody in this run is SERVED as organisation B (see the note beside
 // the world above) — but it is a state production reaches the moment B's own
 // member presses the button, which is what makes it a fair fixture.
+// 🔏 WITH THE FINGERPRINT OF B's REAL WORDS (#799), so the row is one the cache
+//    would really answer from. Written without it, the row would be "stale" and
+//    never served, and D02 would then be testing the fingerprint rather than the
+//    organisation test it exists for.
 q('INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, `sourceLanguage`, '
-  . '`targetLanguage`, `translatedContent`, `provider`, `costPence`) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
-    'sisssss', ['tblAnnouncements', $annB, 'body', 'en', 'cy', '[[CY]] ' . $bodyB, 'libre']);
+  . '`targetLanguage`, `translatedContent`, `sourceHash`, `provider`, `costPence`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)',
+    'sissssss', ['tblAnnouncements', $annB, 'body', 'en', 'cy', '[[CY]] ' . $bodyB, hash('sha256', $bodyB), 'libre']);
 $cachedB = one('SELECT `translatedContent` AS t FROM `tblContentTranslation` WHERE `sourceID` = ? LIMIT 1', 'i', [$annB]);
 ok('D01 organisation B\'s translated words really are in the cache, which is what makes D02 decisive',
     $cachedB !== null && str_contains((string) $cachedB['t'], 'car park') === true,
@@ -1140,6 +1174,151 @@ ok('E02 with translation switched off, even an ALREADY CACHED piece is refused',
     $answer['status'] === 403,
     'got HTTP ' . $answer['status'] . ': ' . substr($answer['body'], 0, 300));
 setSetting('translation.enabled', '1');
+
+// =============================================================================
+// E3. AN EDITED ORIGINAL IS TRANSLATED AFRESH (#799)
+// =============================================================================
+// 🧾 THE FAULT THIS SECTION EXISTS FOR. The cache was keyed on the source row,
+//    field and language and nothing else, and nothing ever cleared a row, so
+//    once a piece had been translated into a language every later reader of
+//    that language was handed the translation of the words it USED to say —
+//    after a corrected date, a moved event, a cancellation. Since #799 each
+//    cached translation carries a fingerprint of the exact words it was made
+//    from, and a cached row whose fingerprint does not match the words in the
+//    row NOW is a miss: translated again, through the same limits and the same
+//    count as any other request.
+//
+//    The decisive pair is E3-02 and E3-01: E3-02 fails on the old code (the
+//    answer is the OLD words' translation and the provider is never asked),
+//    and E3-01 fails on any version that "fixes" it by never using the cache,
+//    which would pay for every press.
+head('E3. An edited original is translated afresh, and paid for like any request (#799)');
+
+/** The words a cached row holds, its fingerprint, and how many rows the key has. */
+$cacheRow = static function (string $table, int $id, string $lang): array {
+    $rows = q('SELECT `translatedContent` AS t, `sourceHash` AS h FROM `tblContentTranslation` '
+        . 'WHERE `sourceTable` = ? AND `sourceID` = ? AND `targetLanguage` = ?', 'sis', [$table, $id, $lang]);
+    return ['count' => count($rows), 'text' => (string) ($rows[0]['t'] ?? ''),
+            'hash' => $rows[0]['h'] ?? null];
+};
+$callsNow = static fn (): int => (int) (usageOf($siteA)['calls'] ?? 0);
+
+// The premise: the piece is translated once, the ordinary way.
+$beforeStub  = count(stubCalls());
+$beforeCount = $callsNow();
+$answer      = press($jarA, 'tblAnnouncements', $annEdit, 'cy', freshToken($jarA));
+ok('E3-00 the piece is translated the first time, which every check below builds on',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $editFirst
+    && count(stubCalls()) === $beforeStub + 1 && $callsNow() === $beforeCount + 1,
+    'HTTP ' . $answer['status'] . ': ' . (string) ($answer['json']['data']['translation'] ?? '')
+    . '; provider calls ' . (count(stubCalls()) - $beforeStub) . ', counted ' . ($callsNow() - $beforeCount));
+
+// Unchanged words: the cache answers, nothing is sent, nothing is counted.
+$beforeStub  = count(stubCalls());
+$beforeCount = $callsNow();
+$answer      = press($jarA, 'tblAnnouncements', $annEdit, 'cy', freshToken($jarA));
+ok('E3-01 while the words are unchanged the cache answers: no provider call, nothing counted',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $editFirst
+    && count(stubCalls()) === $beforeStub && $callsNow() === $beforeCount,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $beforeStub)
+    . ', counted ' . ($callsNow() - $beforeCount) . ' — a fix that never reads the cache pays for every press');
+
+// The organisation corrects its announcement, as its own editor would.
+q('UPDATE `tblAnnouncements` SET `body` = ? WHERE `announcementID` = ?', 'si', [$editSecond, $annEdit]);
+$beforeStub  = count(stubCalls());
+$beforeCount = $callsNow();
+$answer      = press($jarA, 'tblAnnouncements', $annEdit, 'cy', freshToken($jarA));
+ok('E3-02 after the original is edited, the answer is a translation of the NEW words',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $editSecond,
+    'HTTP ' . $answer['status'] . ': ' . (string) ($answer['json']['data']['translation'] ?? '(nothing)')
+    . ' — the translation of the old words, served after the original changed, is #799');
+$calls = stubCalls();
+ok('E3-03 the provider was asked exactly once more, for the new words',
+    count($calls) === $beforeStub + 1 && (string) ($calls[count($calls) - 1]['q'] ?? '') === $editSecond,
+    'provider calls ' . (count($calls) - $beforeStub) . '; last asked: ' . json_encode($calls[count($calls) - 1] ?? null));
+ok('E3-04 and the month\'s count of requests rose by exactly one, like any other request',
+    $callsNow() === $beforeCount + 1, 'counted ' . ($callsNow() - $beforeCount));
+$row = $cacheRow('tblAnnouncements', $annEdit, 'cy');
+ok('E3-05 the cache holds ONE row for this piece and language: the old translation was replaced, not kept',
+    $row['count'] === 1 && $row['text'] === '[[CY]] ' . $editSecond,
+    json_encode($row));
+ok('E3-05b and its fingerprint is SHA-256 of exactly the words now in the row',
+    is_string($row['hash']) === true && hash_equals(hash('sha256', $editSecond), (string) $row['hash']),
+    'stored ' . var_export($row['hash'], true) . ', expected ' . hash('sha256', $editSecond)
+    . ' — a fingerprint of anything else cannot tell an edited original from an unchanged one');
+$providerStored = (string) (one('SELECT `provider` AS p FROM `tblContentTranslation` WHERE `sourceTable` = ? AND `sourceID` = ? '
+    . 'AND `targetLanguage` = ?', 'sis', ['tblAnnouncements', $annEdit, 'cy'])['p'] ?? '');
+ok('E3-05c and the row records the provider by NAME — the store bound it as a number until #799, so every row said 0',
+    $providerStored === 'libre', 'stored provider: ' . var_export($providerStored, true));
+
+// The new fingerprint was stored: the next press is a cache hit again. Fails if
+// the update clause of the upsert forgets the fingerprint, which would make
+// every press of an edited piece a paid call for ever.
+$beforeStub  = count(stubCalls());
+$beforeCount = $callsNow();
+$answer      = press($jarA, 'tblAnnouncements', $annEdit, 'cy', freshToken($jarA));
+ok('E3-06 the re-translation is itself cached: the next press sends nothing and counts nothing',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $editSecond
+    && count(stubCalls()) === $beforeStub && $callsNow() === $beforeCount,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $beforeStub)
+    . ', counted ' . ($callsNow() - $beforeCount));
+
+// 🕳️ A ROW WITH NO FINGERPRINT — every row cached before migration 256 — is
+//    treated as STALE: nobody can tell which words it was made from, so it is
+//    translated again on the next press rather than shown as current. The row
+//    below holds words that are in no source anywhere, so an answer carrying
+//    them could only have come from serving it.
+q('UPDATE `tblContentTranslation` SET `translatedContent` = ?, `sourceHash` = NULL '
+  . 'WHERE `sourceTable` = ? AND `sourceID` = ? AND `targetLanguage` = ?',
+    'ssis', ['[[STALE]] words cached before fingerprints existed', 'tblAnnouncements', $annEdit, 'cy']);
+$beforeStub  = count(stubCalls());
+$beforeCount = $callsNow();
+$answer      = press($jarA, 'tblAnnouncements', $annEdit, 'cy', freshToken($jarA));
+ok('E3-07 a cached row with NO fingerprint is never served: it is translated afresh',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $editSecond
+    && str_contains($answer['body'], 'STALE') === false,
+    'HTTP ' . $answer['status'] . ': ' . (string) ($answer['json']['data']['translation'] ?? ''));
+ok('E3-07b and that costs one request, counted like any other',
+    count(stubCalls()) === $beforeStub + 1 && $callsNow() === $beforeCount + 1,
+    'provider calls ' . (count(stubCalls()) - $beforeStub) . ', counted ' . ($callsNow() - $beforeCount));
+$row = $cacheRow('tblAnnouncements', $annEdit, 'cy');
+ok('E3-07c and the row now carries the fingerprint, so it is a cache hit from here on',
+    $row['count'] === 1 && is_string($row['hash']) === true && hash_equals(hash('sha256', $editSecond), (string) $row['hash']),
+    json_encode($row));
+
+// ⛔ AN EDIT DOES NOT GET ROUND THE LIMITS, AND A REFUSAL DOES NOT FALL BACK
+//    TO THE OLD WORDS. With the month's number of requests used up, the edited
+//    piece needs a new request and is refused — and the answer must not carry
+//    the previous translation, which is now a translation of words the
+//    organisation no longer says.
+$usageSaved = usageOf($siteA) ?? ['calls' => 0, 'pence' => 0];
+setUsage($siteA, 1000, $usageSaved['pence']);   // translation.monthCallCap is 1000 in this run
+q('UPDATE `tblAnnouncements` SET `body` = ? WHERE `announcementID` = ?', 'si', [$editThird, $annEdit]);
+$beforeStub = count(stubCalls());
+$answer     = press($jarA, 'tblAnnouncements', $annEdit, 'cy', freshToken($jarA));
+ok('E3-08 with the month\'s limit reached, an edited piece is refused rather than translated',
+    $answer['status'] === 503 && count(stubCalls()) === $beforeStub,
+    'HTTP ' . $answer['status'] . '; provider calls ' . (count(stubCalls()) - $beforeStub));
+ok('E3-08b and the refusal carries neither the old translation nor the old words',
+    str_contains($answer['body'], 'seventeenth') === false && str_contains($answer['body'], '[[CY]]') === false,
+    'the answer was: ' . substr($answer['body'], 0, 300));
+ok('E3-08c and a refused request is not counted', $callsNow() === 1000, 'record says ' . $callsNow());
+setUsage($siteA, $usageSaved['calls'], $usageSaved['pence']);
+
+// The same rule on a second kind of source, whose words live in another column
+// of another table — the fingerprint belongs to the engine, not to one page.
+$answer = press($jarA, 'tblProjectUpdate', $updEdit, 'cy', freshToken($jarA));
+ok('E3-09 a project update is translated the first time',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $updEditFirst,
+    'HTTP ' . $answer['status'] . ': ' . (string) ($answer['json']['data']['translation'] ?? ''));
+q('UPDATE `tblProjectUpdate` SET `content` = ? WHERE `updateID` = ?', 'si', [$updEditNext, $updEdit]);
+$beforeStub = count(stubCalls());
+$answer     = press($jarA, 'tblProjectUpdate', $updEdit, 'cy', freshToken($jarA));
+ok('E3-09b after the update is edited, the answer translates its new words, with one more provider call',
+    $answer['status'] === 200 && (string) ($answer['json']['data']['translation'] ?? '') === '[[CY]] ' . $updEditNext
+    && count(stubCalls()) === $beforeStub + 1,
+    'HTTP ' . $answer['status'] . ': ' . (string) ($answer['json']['data']['translation'] ?? '')
+    . '; provider calls ' . (count(stubCalls()) - $beforeStub));
 
 // =============================================================================
 // F. THE MONTHLY LIMIT

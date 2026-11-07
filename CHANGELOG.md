@@ -4,6 +4,30 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A translation of edited words is no longer shown as current (#799, migration 256)
+
+- **An edited announcement, project description or project update no longer
+  keeps showing the translation of its OLD words (#799, migration 256).** The
+  translation cache was found by which piece it was and which language, and
+  nothing else, and nothing ever cleared it, so once a piece had been
+  translated into a language every later reader of that language saw the
+  translation of what it used to say — after a corrected date, a moved event
+  or a cancellation. Each cached translation now carries a fingerprint
+  (SHA-256) of the exact words it was made from and is shown only while those
+  are the words in the original now. An edited piece is translated again on
+  the next press, checked against both monthly limits and counted like any
+  other request, and the new translation replaces the old one. When a limit is
+  reached, an edited piece is refused rather than answered with the old words.
+- **Translations cached before this release are translated once more.** They
+  have no fingerprint, so nobody can tell which words they were made from;
+  each is translated again (and paid for and counted) the first time anybody
+  asks for it in that language. Filling the fingerprint in from the current
+  words would have marked every old translation as matching, edited or not.
+- **The cache recorded every translation's provider as `0`.** The statement
+  that stores a translation bound the provider's name as a number, which it
+  had done since the table was first built (`8625b9e`). Nothing reads that
+  column, so nothing showed it. It now records the name.
+
 ### A discipleship pathway no longer counts another organisation's events (#812, #819)
 
 - **Fixed (#812):** the Discipleship sweep's third rule ("RSVP'd going to this event") now requires the event to belong to the pathway's own organisation, as the other two rules always did. Before, a step naming another organisation's event could be completed by an RSVP to it, writing a permanent progress row. No page could write the rows needed to reach it (the step form refuses another organisation's event, and the RSVP page stores an RSVP under the event's own organisation), so it took a hand-written or restored row.

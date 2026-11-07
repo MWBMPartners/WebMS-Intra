@@ -12,9 +12,15 @@
  * This is DYNAMIC content translation, distinct from the portal's static
  * UI strings under web/_lang/*.php (which are human-translated).
  *
- * Translations are cached forever (until content edited) keyed on
- * (sourceTable, sourceID, sourceField, targetLanguage). Translating the
- * same prayer request into Welsh twice hits cache the second time.
+ * Translations are cached, one row per (sourceTable, sourceID, sourceField,
+ * targetLanguage), together with a fingerprint of the exact words each was
+ * made from (#799, migration 256). Translating the same announcement into
+ * Welsh twice is answered from the cache the second time; translating it
+ * after its words were EDITED is a new request, counted against both limits
+ * below, and its answer replaces the old one. Until #799 the header said the
+ * cache lasted "until content edited", which nothing implemented: an edited
+ * piece kept its old words' translation for ever. (The example here used to
+ * be a prayer request, which is never translated — D-049.)
  *
  * TWO monthly limits, per organisation, stop new provider calls once either
  * is reached; cached lookups still serve (#762, D-059):
@@ -146,7 +152,9 @@ class Translation
      * provider/cap failure.
      *
      * Callers tag a `sourceTable + sourceID + sourceField` triple so the
-     * cache is content-addressable.
+     * cache can find the piece again. That triple says WHICH piece, never
+     * WHAT IT SAYS, so since #799 the cache also checks the words themselves:
+     * see `sourceFingerprint()`.
      */
     public static function translate(
         string $sourceTable,
@@ -182,7 +190,16 @@ class Translation
             return false;
         }
 
-        $cached = self::lookupCached($sourceTable, $sourceID, $sourceField, $targetLang);
+        // 🔏 WORKED OUT ONCE, and used for both the look-up and the store
+        //    (#799), so the two can never fingerprint different things. Before
+        //    #799 the cache was found by which piece it was and nothing else,
+        //    so an edited announcement kept being answered with the
+        //    translation of its OLD words, for ever. A cached row now answers
+        //    only while its fingerprint matches the words being asked about
+        //    NOW; otherwise it is a miss, and the fresh request goes through
+        //    every limit below exactly like any other.
+        $fingerprint = self::sourceFingerprint($text);
+        $cached = self::lookupCached($sourceTable, $sourceID, $sourceField, $targetLang, $fingerprint);
         if ($cached !== null) {
             return $cached;
         }
@@ -213,8 +230,8 @@ class Translation
         //
         //    🧾 BOTH ARE READ FROM `tblTranslationUsage`, NOT FROM THE CACHE.
         //    See `monthUsage()`: counting cache rows would count PIECES, not
-        //    CALLS, and the difference is real today and would grow the day
-        //    anybody makes an edited announcement translate afresh.
+        //    CALLS, and the difference is real today and grew when #799 made
+        //    an edited announcement translate afresh into the SAME row.
         //
         //    ⛔ AND "COULD NOT READ" REFUSES. `monthSpendPence()` used to answer
         //    0 when its statement could not be prepared — on a money path that
@@ -278,7 +295,7 @@ class Translation
         // 💷 The text is RETURNED by `settle()`, which is also what records the
         //    cost, so the two cannot come apart: removing the call removes the
         //    translation as well, and every test that translates anything fails.
-        return self::settle($siteId, $month, $result, $sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, $provider);
+        return self::settle($siteId, $month, $result, $sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, $provider, $fingerprint);
     }
 
     /**
@@ -293,13 +310,16 @@ class Translation
      * back THROUGH this method, so the translation path cannot skip it, and
      * the self-test drives this method directly with a cost above 0.
      *
-     * @param array{text:string, costPence:int} $result What the provider answered.
+     * @param array{text:string, costPence:int} $result      What the provider answered.
+     * @param string                             $fingerprint `sourceFingerprint()` of the words that were
+     *                                                        sent, stored so the cache knows them (#799).
      */
     private static function settle(int $siteId, string $month, array $result, string $sourceTable, int $sourceID,
-                                   string $sourceField, string $sourceLang, string $targetLang, string $provider): string
+                                   string $sourceField, string $sourceLang, string $targetLang, string $provider,
+                                   string $fingerprint): string
     {
         self::recordSpend($siteId, $month, (int) $result['costPence']);
-        self::persist($sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, (string) $result['text'], $provider, (int) $result['costPence']);
+        self::persist($sourceTable, $sourceID, $sourceField, $sourceLang, $targetLang, (string) $result['text'], $provider, (int) $result['costPence'], $fingerprint);
         return (string) $result['text'];
     }
 
@@ -513,15 +533,14 @@ class Translation
      *     carrying the second call's cost;
      *   • a call that fails, or answers something unusable, writes no row at
      *     all, though it may have been billed (see `provider-failed`); and
-     *   • NOTHING invalidates a cached row when its source is edited:
-     *     `grep -rn tblContentTranslation web/` (6 November 2026) finds no
-     *     DELETE anywhere, and the only writers are migration 250's backfill
-     *     and `persist()`, which runs only after `lookupCached()` found
-     *     nothing. So an edited announcement keeps showing the translation of
-     *     its OLD words (a fault of its own, reported with #762). The day somebody
-     *     fixes that by translating afresh, every re-translation would cost
-     *     money and leave still one row — so a figure read from the cache
-     *     would quietly start under-counting a money path.
+     *   • an EDITED piece is translated afresh into the SAME row (#799,
+     *     migration 256: a cached row answers only while its fingerprint
+     *     matches the words now in the source), so every re-translation costs
+     *     a request and leaves still one row. On 6 November 2026, when this
+     *     was written, nothing refreshed a row at all and an edited
+     *     announcement kept showing its OLD words' translation; this note
+     *     predicted that the fix would make a count of cache rows fall behind
+     *     the bill, and it does.
      *
      * So both limits are counted here, at the moment a call is made, one row
      * per organisation per month, and the cache is only a cache.
@@ -880,17 +899,49 @@ class Translation
     // Cache + helpers
     // -------------------------------------------------------------------------
 
-    private static function lookupCached(string $table, int $id, string $field, string $target): ?string
+    /**
+     * 🔏 The fingerprint of the exact words a translation is made from (#799):
+     *    SHA-256 of the text, as 64 lower-case hexadecimal characters.
+     *
+     * The text is the one `translate()` was given, which is the one sent to the
+     * provider and, from the one caller, exactly what
+     * `ContentTranslation::readSourceText()` read out of the row. It is NOT
+     * trimmed or tidied first, deliberately: a translation is of exactly these
+     * words, so any change to them — a corrected spelling included — is
+     * translated afresh. Tidying would mean judging which changes "do not
+     * count", and the one that turns out to matter would be served wrong.
+     *
+     * Not a secret and not a security check: it only has to change when the
+     * words change, which SHA-256 does with no realistic exception.
+     */
+    private static function sourceFingerprint(string $text): string
+    {
+        return \hash('sha256', $text);
+    }
+
+    /**
+     * The cached translation of this piece into this language, but ONLY while
+     * it was made from the words being asked about now (#799).
+     *
+     * The fingerprint is compared in the statement itself, so a row made from
+     * other words is never even read. A row with NO fingerprint — every row
+     * cached before migration 256 — never matches either, because `NULL = ?`
+     * is never true: nothing records which words such a row was made from, so
+     * it is treated as stale and translated again rather than shown as
+     * current. Migration 256's header says why, and what that costs.
+     */
+    private static function lookupCached(string $table, int $id, string $field, string $target, string $fingerprint): ?string
     {
         $db = App::db();
         $stmt = $db->prepare(
-            'SELECT translatedContent FROM tblContentTranslation '
-            . 'WHERE sourceTable = ? AND sourceID = ? AND sourceField = ? AND targetLanguage = ? LIMIT 1'
+            'SELECT `translatedContent` FROM `tblContentTranslation` '
+            . 'WHERE `sourceTable` = ? AND `sourceID` = ? AND `sourceField` = ? AND `targetLanguage` = ? '
+            . 'AND `sourceHash` = ? LIMIT 1'
         );
         if ($stmt === false) {
             return null;
         }
-        $stmt->bind_param('siss', $table, $id, $field, $target);
+        $stmt->bind_param('sisss', $table, $id, $field, $target, $fingerprint);
         $stmt->execute();
         $stmt->bind_result($content);
         $hit = $stmt->fetch() === true;
@@ -898,7 +949,8 @@ class Translation
         return $hit === true ? (string) $content : null;
     }
 
-    private static function persist(string $table, int $id, string $field, string $source, string $target, string $content, string $provider, int $cost): void
+    private static function persist(string $table, int $id, string $field, string $source, string $target, string $content,
+                                    string $provider, int $cost, string $fingerprint): void
     {
         $db = App::db();
         // 🏢 THE ORGANISATION IS RECORDED, so its spending can be told apart
@@ -916,20 +968,37 @@ class Translation
         //    cannot count calls). `costPence` and `siteID` are still written
         //    here as a record of what each cached piece cost and whose it was;
         //    nothing sums them any more, and nothing should start to.
+        //
+        //    🔏 THE FINGERPRINT IS WRITTEN ON A DUPLICATE TOO (#799), and that
+        //    is the half that is easy to forget. A re-translation of an edited
+        //    original lands here as a DUPLICATE of the old row (same piece,
+        //    same language), so it REPLACES the old translation rather than
+        //    keeping it beside it — and if the update clause left `sourceHash`
+        //    alone, the row would go on carrying the OLD words' fingerprint,
+        //    never match again, and every press after an edit would be a paid
+        //    request for ever. `sourceLanguage` is refreshed for the same
+        //    reason: an edit can change the language the original is in.
         $siteId = Site::id();
         $stmt = $db->prepare(
             'INSERT INTO `tblContentTranslation` (`sourceTable`, `sourceID`, `sourceField`, '
-            . '`sourceLanguage`, `targetLanguage`, `translatedContent`, `provider`, `costPence`, '
+            . '`sourceLanguage`, `targetLanguage`, `translatedContent`, `sourceHash`, `provider`, `costPence`, '
             . '`siteID`) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) '
             . 'ON DUPLICATE KEY UPDATE `translatedContent` = VALUES(`translatedContent`), '
+            . '    `sourceHash` = VALUES(`sourceHash`), `sourceLanguage` = VALUES(`sourceLanguage`), '
             . '    `provider` = VALUES(`provider`), `costPence` = VALUES(`costPence`), '
             . '    `siteID` = VALUES(`siteID`), `translatedAt` = NOW()'
         );
         if ($stmt === false) {
             return;
         }
-        $stmt->bind_param('sissssisi', $table, $id, $field, $source, $target, $content, $provider, $cost, $siteId);
+        // 🔤 TEN VALUES, TEN TYPES, IN ORDER: two `i` at the END (cost, then
+        //    organisation) and none before them but the row number. Until #799
+        //    this read `'sissssisi'`, which bound the PROVIDER as a number, so
+        //    every cached row since the table was built (`8625b9e`) recorded
+        //    its provider as `0` — measured on MySQL 8.0.36 on 7 November 2026.
+        //    Nothing reads the column, so nothing showed it.
+        $stmt->bind_param('sissssssii', $table, $id, $field, $source, $target, $content, $fingerprint, $provider, $cost, $siteId);
         $stmt->execute();
         $stmt->close();
     }

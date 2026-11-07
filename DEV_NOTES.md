@@ -20707,3 +20707,57 @@ because a customer following that page may choose it.
 - Tests: X18b-X18l of `tools/time-zones-selftest.php` (EXPECTED_CHECKS 175 → 186).
 
 **Review: three rounds by fresh Claude agents; round 3 CLEAN** (protected arm — the sweep writes permanent progress rows). Rounds 1 and 2 found only tests that could not fail (the ordinary installation-wide switch state, the recorded outcome, the printed counts); the portal code was correct in every state driven on MySQL 8.0.36 and MariaDB 11.4. Codex has NOT reviewed it. Left on #824 (departed members still count), #825, #827.
+
+### A cache must know what it is a cache OF (#799)
+
+`tblContentTranslation` was keyed on (table, row, field, target language). That
+says WHICH piece, never WHAT IT SAYS, so the key matched after the words had
+changed and the cache went on answering. `Translation::sourceFingerprint()`
+(SHA-256 of the exact text `translate()` was given — the text sent to the
+provider, which the one caller reads with `ContentTranslation::readSourceText()`)
+is computed ONCE in `translate()` and used for both the look-up and the store,
+so the two cannot fingerprint different things. `lookupCached()` compares it in
+the statement (`AND sourceHash = ?`), so a row made from other words is never
+read.
+
+Four things worth keeping:
+
+- **Fingerprint, not delete-on-save.** Deleting rows in every editor would need
+  every page and API that can change those words to remember, and the first
+  that forgot would bring the fault back invisibly. The fingerprint is checked
+  at the one place a translation is served.
+- **The update clause of the upsert must write the fingerprint too.** A
+  re-translation is a DUPLICATE of the old row, so if `ON DUPLICATE KEY UPDATE`
+  left `sourceHash` alone the row would carry the old words' fingerprint, never
+  match again, and every press after an edit would be a paid request for ever.
+  Check E3-06 exists for exactly that.
+- **NULL is stale, not fresh.** Rows from before migration 256 have no
+  fingerprint and `NULL = ?` never matches. Backfilling from each source's
+  current words was rejected because it would stamp every old translation as
+  matching its original whether or not the original had been edited — the
+  fault written into the data. The cost is one more paid request per piece and
+  language, and a press refused (rather than served) while a month's limit is
+  reached.
+- **Not tidied before fingerprinting.** A translation is of exactly these
+  words; deciding which edits "do not count" would mean the one that matters
+  gets served wrong.
+
+**And a second fault on the same line:** `persist()`'s `bind_param` types were
+`'sissssisi'` (and `'sissssis'` before `e7afab2`), binding the PROVIDER as `i`,
+so every row since `8625b9e` stored `0`. Measured on MySQL 8.0.36 by binding
+`'libre'` with the original types. Nothing reads the column, which is why it
+survived; E3-05c pins it now. **Count a types string against its values, one
+per argument, whenever a statement gains a column** — `e7afab2` added one and
+kept the shape.
+
+What the fix does NOT do, said plainly: a translation of an edited original is
+not deleted, only never shown again and replaced on the next request in that
+language; a translation of a DELETED original is never shown (it can only be
+asked for through the original, which then answers "not found") and is never
+removed. Two presses of an edited piece at the same moment both pay, as two
+presses of a new piece always have (#766).
+
+Tests: section E3 of `tools/content-translation-selftest.php` (real HTTP, real
+MySQL, the stub provider). Plants and their results are in the commit message.
+
+**Review: protected arm (money), two rounds by fresh Claude agents standing in for Codex; round 2 CLEAN.** Round 1 found the engine, migration and tests sound (seven builder plants plus five of its own, each caught) and ONE untrue sentence: `help/translations.php` still said anything already translated keeps working, which the admin page and `api-spec.json` had been corrected for in the same package. **A correction applied to two of the three places a claim lives is the recurring shape** — search for the sentence, not the file you remember it in. Still true and stated rather than fixed: "pieces already translated from their current words keep working" does not hold for a copy made before migration 256, which has no fingerprint; no installation exists, so nothing is affected. Codex has NOT reviewed it.

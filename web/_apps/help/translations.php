@@ -113,13 +113,24 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             hospital, say &mdash; who has no way to agree to their circumstances being sent to
             another company. So the button does not appear on them, and that is deliberate.
         </li>
+        <?php
+        // ⚠️ THIS BULLET SAID "anything already translated keeps working" AND THAT
+        //    STOPPED BEING TRUE WITH #799 (migration 256): a stored translation is
+        //    now served only while the source's words are the ones it was made
+        //    from, so an edited piece is paid for again and is REFUSED at a limit.
+        //    The admin page and api-spec.json were corrected in the same package;
+        //    this page, the one an end user reads, was missed until the check.
+        ?>
         <li>
             <strong>It costs your organisation money.</strong> The first time a piece is put
             into a particular language it is paid for. After that everyone who asks for the
-            same piece in the same language gets the stored copy, which costs nothing. Your
-            organisation has monthly limits &mdash; on the money spent and on the number of
-            translations; once either is reached, nothing new is translated until the next
-            month, and anything already translated keeps working.
+            same piece in the same language gets the stored copy, which costs nothing &mdash;
+            until somebody <em>edits</em> the piece: the stored copy is of the old words, so
+            the next request is translated, and paid for, again. Your organisation has monthly
+            limits &mdash; on the money spent and on the number of translations; once either
+            is reached, nothing new is translated until the next month. Pieces already
+            translated from their current words keep working; a piece edited since it was
+            translated is not translated again until the limit resets.
         </li>
         <li>
             <strong>It is a machine translation.</strong> It is usually good enough to follow,

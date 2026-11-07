@@ -2779,6 +2779,10 @@ return [
         //    was "empty on every installation". #485/#761 made it reachable
         //    on 4 November 2026, so both halves had become untrue, in the file
         //    a request for somebody's information is answered from (#800).
+        // ⚠️ AND UNTIL 7 NOVEMBER 2026 IT SAID nothing ever refreshed a row, citing
+        //    #800 for that — #800 was about this entry's OTHER sentence. #799
+        //    made an edited original translate afresh into the same row, so
+        //    the period is "replaced on the next request", not "never".
         'reason'   => 'A machine translation of the organisation\'s OWN published words, kept so the same text '
                     . 'is not paid for twice. Only three things can be translated (ContentTranslation::SOURCES): '
                     . 'an announcement, a project\'s description and an update posted on a project. A prayer '
@@ -2788,11 +2792,16 @@ return [
                     . 'Nothing on the row links it to an account (it names the table, row and field it came '
                     . 'from, and the organisation), so an erasure request cannot reach it. The words are the '
                     . 'organisation\'s, and changing or removing the original is how a name is taken out of '
-                    . 'them; note that nothing yet removes or refreshes a translation when its original is '
-                    . 'edited or deleted (#800), so an old translation can outlive the words it was made from',
-        'period'   => 'no time limit: nothing removes a row, not even when its original is edited or deleted '
-                    . '(#800). The cached row is served instead of translating again, so in practice a row '
-                    . 'is never replaced either',
+                    . 'them. Each row carries a fingerprint of the exact words it was made from (#799, '
+                    . 'migration 256), and is shown only while those are the words in the original now. So '
+                    . 'once the original is EDITED its old translation is never shown again, and it is '
+                    . 'REPLACED in its row the next time anybody asks for that piece in that language; until '
+                    . 'then the old translated words stay stored although nothing shows them. Once the '
+                    . 'original is DELETED or stops being shown, its translation is not shown either (it can '
+                    . 'only be asked for through the original), but nothing removes the row',
+        'period'   => 'no time limit: nothing removes a row. A row is REPLACED the next time its piece is '
+                    . 'translated into the same language after the original was edited (#799); a row whose '
+                    . 'original is deleted, or never asked for again, is kept indefinitely though never shown',
         'columns'  => ['translatedContent'],
     ],
     'tblTranslationUsage' => [

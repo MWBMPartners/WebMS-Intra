@@ -161,9 +161,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <br>
         <strong>Every translation costs money.</strong> The first time a piece is
         translated into a language it is paid for; after that it is served from the cache
-        below and costs nothing. <strong>There are two monthly limits</strong>, and
-        whichever is reached first stops new translations until the next month &mdash;
-        already-translated pieces keep working. One is the money each translation company
+        below and costs nothing &mdash; until somebody edits the piece. An edited piece is
+        translated (and paid for) again the next time it is asked for, so nobody is shown
+        a translation of words it no longer says. <strong>There are two monthly
+        limits</strong>, and whichever is reached first stops new translations until the
+        next month &mdash; pieces already translated from their current words keep
+        working, and an edited piece waits for the next month like a new one. One is the money each translation company
         <em>reports</em> charging; the other is the <em>number</em> of translations sent to
         it, which works whatever the company reports.
     </div>

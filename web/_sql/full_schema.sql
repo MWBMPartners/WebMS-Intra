@@ -5236,6 +5236,8 @@ CREATE TABLE IF NOT EXISTS `tblContentTranslation` (
     `sourceLanguage`    VARCHAR(10)  NOT NULL,
     `targetLanguage`    VARCHAR(10)  NOT NULL,
     `translatedContent` MEDIUMTEXT   NOT NULL,
+    `sourceHash`        CHAR(64)     DEFAULT NULL
+                        COMMENT 'SHA-256 of the exact original words this translation was made from (#799, migration 256). A cached row is served only while this matches the words in the source row now, so an edited original is translated afresh. NULL means the words are unknown (a row cached before migration 256), and such a row is never served.',
     `provider`          VARCHAR(30)  NOT NULL DEFAULT 'anthropic',
     `qualityScore`      TINYINT      DEFAULT NULL,
     `costPence`         INT          DEFAULT NULL,
@@ -11270,6 +11272,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('254_translation_counts_request
 -- A fresh install has no member and no organisation row to carry.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('255_outside_services.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 256_translation_cache_knows_its_source.sql (#799) ──────────────────
+-- The `sourceHash` column is declared above, on `tblContentTranslation`
+-- itself. A fresh install has no cached translation, so nothing is carried.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('256_translation_cache_knows_its_source.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
