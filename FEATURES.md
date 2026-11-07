@@ -2137,6 +2137,12 @@ reads as reassurance. Run the loop above — it takes seconds.
 
 ---
 
+## Expense claims: a member's own list (#834)
+
+| Feature | Issue | Status |
+|---|---|---|
+| **Your claims**, on the Expenses page (`/expenses/submit`): the claimant's own claims in this organisation, newest first, ten per page, each linking to the claim. Change and Withdraw stay on the claim's own page, which asks `ExpenseRules::whyNotEditable()`; the list asks nothing about editability. | #834 | ✅ |
+
 ## Event registrations: how long their details are kept (#816)
 
 | Feature | Issue | Migration | Status |

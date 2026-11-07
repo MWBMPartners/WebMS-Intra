@@ -187,7 +187,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </h2>
             <div id="navBreadcrumbs" class="accordion-collapse collapse" data-bs-parent="#navAccordion">
                 <div class="accordion-body">
-                    <p class="mb-1">Below the navigation bar, a <strong>breadcrumb trail</strong> shows your current location in the portal hierarchy (e.g., <code>Dashboard &gt; Expenses &gt; Submit Claim</code>).</p>
+                    <p class="mb-1">Below the navigation bar, a <strong>breadcrumb trail</strong> shows your current location in the portal hierarchy (e.g., <code>Dashboard &gt; Expense Claims &gt; Claim #12</code>).</p>
                     <p class="mb-0 small text-secondary">Click any earlier breadcrumb to navigate back to that level.</p>
                 </div>
             </div>

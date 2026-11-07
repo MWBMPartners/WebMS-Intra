@@ -125,6 +125,14 @@
  *      is E-MAILED or PUSHED, and when, is
  *      `tools/import-notifier-selftest.php`'s subject.
  *
+ * #834 (7 November 2026) added part P:
+ *   P. A member's own claims, listed on the Expenses page: their own claims
+ *      in THIS organisation, newest submitted first, ten to a page; never
+ *      another member's, nor their own in another organisation they belong
+ *      to; each linking to the claim's own page inside the organisation's
+ *      address; a plain sentence for somebody with none; a page number that
+ *      is not a positive whole number shows page 1; and no error row.
+ *
  * Roll-out package F2 (12 October 2026, #511) put ONE gate in front of every
  * page: a signed-in person who is not a member of the organisation an
  * address opens is refused there (HTTP 403) before any page runs. So the
@@ -251,7 +259,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 336; // 334 until #792 added the api/translation row (two checks)
+const EXPECTED_CHECKS = 348; // 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -3063,6 +3071,171 @@ foreach (array_keys($installRowsBefore) as $key) {
     }
 }
 ok('clean-up: the four installation-wide rows this part borrowed are back exactly as they were', $putBack === 4, $putBack . ' of 4 match');
+
+// =============================================================================
+head('P. #834 — a member\'s own claims, listed on the Expenses page');
+// =============================================================================
+/**
+ * Until #834 nothing listed a member's claims: `/expenses/submit` was a form
+ * only, so the claim's own page — the only place a pending claim can be
+ * changed or withdrawn — could not be reached by an ordinary member.
+ *
+ * The world for this part is its own, made here so nothing earlier can have
+ * changed it: three new accounts, and claims with SUBMITTED times set by hand
+ * so that "newest first" and "highest number first" give different orders
+ * (the oldest claim has the lowest number, the newest the middle one).
+ *   PC1 — a member of A AND of B: twelve claims in A (so the list has two
+ *         pages) and one in B.
+ *   PC2 — a member of A with one claim of their own: somebody else's claim,
+ *         as far as PC1 is concerned.
+ *   PC0 — a member of A with no claims at all.
+ * Each condition of the page's query has a check that fails without it:
+ * P2 and P10 without `userID`, P3 and P8 without `siteID`.
+ */
+const PC1 = 916041;
+const PC2 = 916042;
+const PC0 = 916043;
+/** A department of A whose name needs escaping, so the list's department column is checked as text. */
+const DEPT_P      = 916103;
+const DEPT_P_NAME = 'ACCESS-P dept <b>Hall & "Grounds"</b>';
+/**
+ * Every error row written from here on is part P's: P12 counts rows above
+ * this mark for either organisation. It must NOT filter by account, because
+ * `Logger::exception()` — what the list's failed read calls — records no
+ * account at all (round 1 of the check found the first version did, so it
+ * could not fail on this page's own errors).
+ */
+$pErrorMark = (int) (one('SELECT COALESCE(MAX(errorID), 0) AS m FROM tblErrors')['m'] ?? 0);
+q('INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, ?, \'SAP\', 1)', 'iis', [DEPT_P, ORG_A, DEPT_P_NAME]);
+foreach ([PC1 => 'P claimant', PC2 => 'P other claimant', PC0 => 'P no claims'] as $id => $name) {
+    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, 'Selftest access ' . $name, 'u' . $id . '.access@selftest.invalid']);
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+}
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [PC1, ORG_B]);
+foreach (['pc1' => PC1, 'pc2' => PC2, 'pc0' => PC0] as $who => $id) {
+    q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-access-' . $who, $hash]);
+}
+/** One claim for this part, submitted `$daysAgo` days ago. */
+$pClaim = static function (int $id, int $by, string $title, string $status, int $daysAgo, string $total, int $site = ORG_A, int $dept = DEPT): void {
+    q(
+        'INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status, createdAt) '
+        . 'VALUES (?, ?, ?, ?, ?, CURDATE(), ?, ?, DATE_SUB(NOW(), INTERVAL ? DAY))',
+        'iiiisssi', [$id, $site, $by, $dept, $title, $total, $status, $daysAgo]
+    );
+};
+$pTitle = 'ACCESS-P newest & "quoted" <i>claim</i>';
+$pClaim(916341, PC1, 'ACCESS-P oldest of the three', 'Approved', 3, '45.10');
+$pClaim(916342, PC1, $pTitle, 'Pending', 1, '1234.50', ORG_A, DEPT_P);
+$pClaim(916343, PC1, 'ACCESS-P withdrawn one', 'Withdrawn', 2, '7.00');
+for ($k = 1; $k <= 9; $k++) {
+    $pClaim(916350 + $k, PC1, 'ACCESS-P filler ' . $k, 'Reimbursed', 10 + $k, '1.00');
+}
+$pClaim(916344, PC1, 'ACCESS-P mine in organisation B', 'Pending', 1, '9.99', ORG_B, DEPT_B);
+$pClaim(916345, PC2, 'ACCESS-P somebody else\'s claim', 'Pending', 1, '5.00');
+foreach (['pc1', 'pc2', 'pc0'] as $who) {
+    $jar[$who] = signIn($who, ADDR_A);
+}
+/** The claim numbers the "Your claims" list shows, in the order it shows them. */
+$listed = static function (string $body): array {
+    ap_findAll('#<div class="portal-data-row" data-claim-id="(\d+)">#', $body, $found);
+
+    return array_map('intval', $found[1]);
+};
+/** The HTML of one listed claim's row, from its marker to the next row (or the end of the list). */
+$rowOf = static function (string $body, int $id): string {
+    $start = strpos($body, 'data-claim-id="' . $id . '"');
+    if ($start === false) {
+        return '';
+    }
+    $end = strpos($body, 'data-claim-id="', $start + 20);
+
+    return substr($body, $start, ($end === false ? strlen($body) : $end) - $start);
+};
+
+$pageOne = req($jar['pc1'], 'GET', ADDR_A . '/expenses/submit');
+$ids     = $listed($pageOne['body']);
+ok(
+    'P1. a member sees their own claims in this organisation, newest SUBMITTED first, ten to a page',
+    $pageOne['status'] === 200 && $ids === [916342, 916343, 916341, 916351, 916352, 916353, 916354, 916355, 916356, 916357],
+    'HTTP ' . $pageOne['status'] . '; listed: ' . json_encode($ids)
+);
+ok(
+    'P2. …and NOT another member\'s claim in the same organisation',
+    str_contains($pageOne['body'], 'somebody else') === false && str_contains($pageOne['body'], 'data-claim-id="916345"') === false
+);
+ok(
+    'P3. …nor their OWN claim in the other organisation they belong to',
+    str_contains($pageOne['body'], 'ACCESS-P mine in organisation B') === false && str_contains($pageOne['body'], 'data-claim-id="916344"') === false
+);
+$row = $rowOf($pageOne['body'], 916342);
+ok(
+    'P4. a listed claim shows its total as the claim\'s page writes money, its status badge in the claim page\'s colour, and its title and department written as text',
+    str_contains($row, '&pound;1,234.50') === true && str_contains($row, 'class="badge bg-warning">Pending</span>') === true
+        && str_contains($row, htmlspecialchars($pTitle, ENT_QUOTES, 'UTF-8')) === true && str_contains($pageOne['body'], '<i>claim</i>') === false
+        && str_contains($row, htmlspecialchars(DEPT_P_NAME, ENT_QUOTES, 'UTF-8')) === true && str_contains($pageOne['body'], DEPT_P_NAME) === false
+        && str_contains($rowOf($pageOne['body'], 916343), 'class="badge bg-secondary">Withdrawn</span>') === true,
+    'the row: ' . mb_substr(trim(ap_replace('/\s+/', ' ', strip_tags($row))), 0, 160)
+);
+$href = ADDR_A . '/expenses/view?id=916342';
+$view = req($jar['pc1'], 'GET', $href);
+ok(
+    'P5. each claim links to its own page inside A\'s address, and the link opens the claim (with its Withdraw button, since it is pending and the visitor\'s own)',
+    str_contains($row, 'href="' . $href . '"') === true && $view['status'] === 200
+        && str_contains($view['body'], htmlspecialchars($pTitle, ENT_QUOTES, 'UTF-8')) === true && str_contains($view['body'], 'Withdraw Claim') === true,
+    'link ' . (str_contains($row, 'href="' . $href . '"') === true ? 'found' : 'NOT found') . '; the claim page answered HTTP ' . $view['status']
+);
+$pageTwo = req($jar['pc1'], 'GET', ADDR_A . '/expenses/submit?page=2');
+ok(
+    'P6. the older claims are on page 2, the two pages link to each other inside A\'s address, and page 1 has no "Newer" link',
+    $listed($pageTwo['body']) === [916358, 916359]
+        && str_contains($pageOne['body'], 'href="' . ADDR_A . '/expenses/submit?page=2"') === true && str_contains($pageOne['body'], 'Newer claims') === false
+        && str_contains($pageTwo['body'], 'href="' . ADDR_A . '/expenses/submit?page=1"') === true && str_contains($pageTwo['body'], 'Older claims') === false,
+    'page 2 listed ' . json_encode($listed($pageTwo['body']))
+);
+$pastEnd = req($jar['pc1'], 'GET', ADDR_A . '/expenses/submit?page=999');
+$oddPage = req($jar['pc1'], 'GET', ADDR_A . '/expenses/submit?page[]=2');
+ok(
+    'P7. a page past the end shows the LAST page (not "no claims"), and a page number sent as a list is page 1, not an error',
+    $listed($pastEnd['body']) === [916358, 916359] && $oddPage['status'] === 200 && $listed($oddPage['body']) === $ids,
+    'past the end: ' . json_encode($listed($pastEnd['body'])) . '; as a list: HTTP ' . $oddPage['status'] . ' ' . json_encode($listed($oddPage['body']))
+);
+$onB = req($jar['pc1'], 'GET', ADDR_B . '/expenses/submit');
+ok(
+    'P8. the same member on B\'s own address sees B\'s claim, and none of A\'s',
+    $onB['status'] === 200 && $listed($onB['body']) === [916344] && str_contains($onB['body'], 'href="' . ADDR_B . '/expenses/view?id=916344"') === true,
+    'HTTP ' . $onB['status'] . '; listed: ' . json_encode($listed($onB['body']))
+);
+$none = req($jar['pc0'], 'GET', ADDR_A . '/expenses/submit');
+ok(
+    'P9. a member with no claims is told so in a plain sentence, with no list, and the form is still there',
+    $none['status'] === 200 && str_contains($none['body'], 'You have not made any expense claims here yet.') === true
+        && $listed($none['body']) === [] && str_contains($none['body'], 'id="your-claims-list"') === false
+        && str_contains($none['body'], 'action="' . ADDR_A . '/expenses/submit/save"') === true,
+    'HTTP ' . $none['status'] . '; listed: ' . json_encode($listed($none['body']))
+);
+$other = req($jar['pc2'], 'GET', ADDR_A . '/expenses/submit');
+ok(
+    'P10. the other member sees their own one claim, and none of the first member\'s',
+    $listed($other['body']) === [916345] && str_contains($other['body'], 'ACCESS-P oldest') === false,
+    'listed: ' . json_encode($listed($other['body']))
+);
+// Round 1 of the check: replacing the page-number test with a bare `(int)`
+// left every check above green, while these four made the list say "could
+// not be read" (a negative OFFSET is an SQL error) and wrote an error row.
+$badPages = [];
+foreach (['0', '-1', 'abc', ''] as $asked) {
+    $answer = req($jar['pc1'], 'GET', ADDR_A . '/expenses/submit?page=' . rawurlencode($asked));
+    if ($answer['status'] !== 200 || $listed($answer['body']) !== $ids || str_contains($answer['body'], 'could not be read') === true) {
+        $badPages[] = "page='{$asked}': HTTP {$answer['status']}, listed " . json_encode($listed($answer['body'])) . (str_contains($answer['body'], 'could not be read') === true ? ', said "could not be read"' : '');
+    }
+}
+ok('P11. a page number of 0, -1, "abc" or nothing at all shows page 1, and never "could not be read"', $badPages === [], implode('; ', $badPages));
+$pErrors = q('SELECT errorTitle FROM tblErrors WHERE errorID > ? AND siteID IN (?, ?)', 'iii', [$pErrorMark, ORG_A, ORG_B]);
+ok(
+    'P12. nothing went wrong behind any page of this part: no error row was written for organisation A or B since it began',
+    $pErrors === [],
+    count($pErrors) . ' row(s): ' . implode(' | ', array_map(static fn (array $r): string => mb_substr((string) $r['errorTitle'], 0, 120), array_slice($pErrors, 0, 3)))
+);
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

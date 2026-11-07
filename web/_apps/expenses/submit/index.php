@@ -14,6 +14,35 @@
  * refusals ("Total must be greater than zero", for one). Until 12 October
  * 2026 this page showed none of them: the form simply came back empty, and
  * the words turned up later on some other page.
+ *
+ * YOUR CLAIMS (#834, 7 November 2026)
+ * -----------------------------------
+ * Above the form, this page lists the signed-in person's OWN claims in the
+ * organisation they are in, newest first, ten to a page, each linking to the
+ * claim's own page. Until then nothing anywhere listed a member's claims:
+ * this page was a form only, the dashboard's "My Pending Claims" card and the
+ * Apps menu both led here, the help told people to find their claims here,
+ * and `ExpenseMailer::notify()` mails the approvers, not the claimant, when a
+ * claim is submitted. So withdrawing or changing a pending claim — both
+ * offered only on the claim's own page — could not be reached by an ordinary
+ * member through any page at all.
+ *
+ * WHY ABOVE THE FORM: the dashboard card that brings people here is a count
+ * of their claims waiting for a decision, and the help sends people here to
+ * look one up. Below a form of unknown length the list would be off screen
+ * for exactly the people sent to find it. Ten to a page keeps it short for
+ * somebody who only wants the form.
+ *
+ * WHY ONLY A LINK, AND NO WITHDRAW OR CHANGE BUTTON IN THE LIST: whether a
+ * claim may still be changed is decided by `ExpenseRules::whyNotEditable()`,
+ * which needs the claim's approval count, and the claim's own page already
+ * asks it and offers both buttons. Asking it here too would be a second place
+ * drawing those buttons (#651, #647) and one more query per row. So the list
+ * shows the status and leaves the decision to the page that already makes it.
+ *
+ * WHAT IT CANNOT DO: it lists only this organisation's claims, on purpose. A
+ * member of two organisations sees each one's claims on that organisation's
+ * own address, and nowhere a list of both.
  * -----------------------------------------------------------------------------
  */
 
@@ -25,9 +54,11 @@ use Portal\Core\Router;
 use Portal\Core\Site;
 
 // 📌 Page metadata for the template system
-$pageTitle   = 'Submit Expense Claim';
+$pageTitle   = 'Expense Claims';
 $pageSection = 'expenses';
-$breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/submit'), 'Submit Claim' => ''];
+// The page now holds the person's claims AND the form, so it is named after
+// the app (the name the Apps menu gives it), not after the form alone (#834).
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Expense Claims' => ''];
 
 // 📋 The one-off message another page left for this person, read and cleared
 //    exactly as the approvals page does (approve/index.php).
@@ -51,6 +82,93 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+/* -------------------------------------------------------------------------- */
+/* 🧾 Your claims (#834)                                                      */
+/* -------------------------------------------------------------------------- */
+// The signed-in person's OWN claims in THIS organisation. Both conditions are
+// load-bearing and each is pinned by its own check in part P of
+// tools/access-pages-selftest.php: without `userID` a member would see
+// everybody's claims, with names of what they were for and how much; without
+// `siteID` a member of two organisations would see the other one's claims on
+// this one's address. The index `idx_claims_site_user_created` is exactly
+// (siteID, userID, createdAt), so this costs one index range read.
+//
+// Newest first by when the claim was SUBMITTED (`createdAt`, the date the
+// claim's own page shows as "Submitted"), and by claim number after that, so
+// two claims made in the same second always come out in the same order.
+$ownPerPage     = 10;
+$ownUserId      = (int) ($_SESSION['user_id'] ?? 0);
+$ownClaims      = [];
+$ownClaimsTotal = 0;
+// "Could not be read" is its own answer, never "you have no claims": telling
+// somebody they have no claims when the list simply failed would send them to
+// submit the same claim twice.
+$ownClaimsUnreadable = false;
+$ownPage             = 1;
+$ownPages            = 1;
+// A page number arrives from the address, so it is only ever an integer of 1
+// or more; anything else (a list, text, nothing) is page 1. Do NOT shorten
+// this to `(int) $_GET['page']`: 0, -1, "abc" and an empty value would then
+// give a negative OFFSET, which the database refuses, so the list would say
+// "could not be read" and write an error row. Check P11 of
+// tools/access-pages-selftest.php sends exactly those four.
+$pageAsked = $_GET['page'] ?? '1';
+if (is_string($pageAsked) === true && preg_match('/^[1-9][0-9]{0,5}$/', $pageAsked) === 1) {
+    $ownPage = (int) $pageAsked;
+}
+if ($ownUserId > 0) {
+    try {
+        $count = $mysqli->prepare('SELECT COUNT(*) AS n FROM tblExpenseClaims WHERE siteID = ? AND userID = ?');
+        $count->bind_param('ii', $siteId, $ownUserId);
+        $count->execute();
+        $ownClaimsTotal = (int) ($count->get_result()->fetch_assoc()['n'] ?? 0);
+        $count->close();
+
+        // A page past the end shows the last page, not an empty list that
+        // reads as "you have no claims".
+        $ownPages = max(1, (int) ceil($ownClaimsTotal / $ownPerPage));
+        $ownPage  = min($ownPage, $ownPages);
+        $limit    = $ownPerPage;
+        $offset   = ($ownPage - 1) * $ownPerPage;
+
+        $list = $mysqli->prepare(
+            'SELECT EC.claimID, EC.claimTitle, EC.totalAmount, EC.status, EC.createdAt, D.deptName '
+            . 'FROM tblExpenseClaims EC '
+            . 'LEFT JOIN tblDepts D ON D.deptID = EC.deptID '
+            . 'WHERE EC.siteID = ? AND EC.userID = ? '
+            . 'ORDER BY EC.createdAt DESC, EC.claimID DESC '
+            . 'LIMIT ? OFFSET ?'
+        );
+        $list->bind_param('iiii', $siteId, $ownUserId, $limit, $offset);
+        $list->execute();
+        $res = $list->get_result();
+        while ($row = $res->fetch_assoc()) {
+            $ownClaims[] = $row;
+        }
+        $list->close();
+    } catch (\Throwable $e) {
+        // Recorded for the administrator, and said plainly on the page; the
+        // form below still works, so nobody is stopped from claiming.
+        \Portal\Core\Logger::exception($e);
+        $ownClaims           = [];
+        $ownClaimsUnreadable = true;
+    }
+}
+
+/**
+ * The badge colour for a claim's status: the SAME colours the claim's own
+ * page uses (expenses/view/index.php), so a claim looks the same in the list
+ * and when opened. Change both together.
+ */
+$ownStatusClass = static fn (string $status): string => match ($status) {
+    'Pending'    => 'warning',
+    'Approved'   => 'info',
+    'Rejected'   => 'danger',
+    'Reimbursed' => 'success',
+    'Withdrawn'  => 'secondary',
+    default      => 'secondary',
+};
+
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -62,8 +180,72 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 <?php endif; ?>
 
+<h1 class="mb-4">Expense Claims</h1>
+
+<!-- 🧾 Your claims (#834): this person's own claims in this organisation -->
+<section class="mb-5" id="your-claims" aria-labelledby="your-claims-heading">
+    <h2 class="h4 mb-3" id="your-claims-heading">Your claims</h2>
+    <?php if ($ownClaimsUnreadable === true): ?>
+        <p class="text-danger" id="your-claims-unreadable">Your claims could not be read just now. Please try again in a moment. The form below still works.</p>
+    <?php elseif ($ownClaimsTotal === 0): ?>
+        <p class="text-muted" id="your-claims-none">You have not made any expense claims here yet. When you submit one with the form below, it will be listed here.</p>
+    <?php else: ?>
+        <p class="small text-secondary mb-2">
+            Open a claim to see its receipts, approvals and any comments. From a claim's own page you can change it while nobody has decided on it, and withdraw it while it is still pending.
+        </p>
+        <div class="portal-data-list" id="your-claims-list">
+            <div class="portal-data-row portal-data-header d-none d-md-flex">
+                <div class="col-md-4">Claim</div>
+                <div class="col-md-2">Department</div>
+                <div class="col-md-2">Submitted</div>
+                <div class="col-md-2 text-md-end">Total</div>
+                <div class="col-md-2 text-md-end">Status</div>
+            </div>
+            <?php foreach ($ownClaims as $own): ?>
+                <div class="portal-data-row" data-claim-id="<?php echo (int) $own['claimID']; ?>">
+                    <div class="col-12 col-md-4">
+                        <a href="<?php echo htmlspecialchars(Router::url('expenses/view') . '?id=' . (int) $own['claimID'], ENT_QUOTES, 'UTF-8'); ?>">
+                            #<?php echo (int) $own['claimID']; ?> &mdash; <?php echo htmlspecialchars((string) ($own['claimTitle'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>
+                        </a>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <span class="d-md-none fw-semibold">Department: </span>
+                        <?php echo htmlspecialchars((string) ($own['deptName'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <span class="d-md-none fw-semibold">Submitted: </span>
+                        <?php echo htmlspecialchars(\Portal\Core\I18n::formatDate((string) ($own['createdAt'] ?? '')), ENT_QUOTES, 'UTF-8'); ?>
+                    </div>
+                    <div class="col-12 col-md-2 text-md-end">
+                        <span class="d-md-none fw-semibold">Total: </span>
+                        &pound;<?php echo number_format((float) $own['totalAmount'], 2); ?>
+                    </div>
+                    <div class="col-12 col-md-2 text-md-end">
+                        <span class="badge bg-<?php echo $ownStatusClass((string) $own['status']); ?>"><?php echo htmlspecialchars((string) $own['status'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <?php if ($ownPages > 1): ?>
+            <nav class="d-flex justify-content-between align-items-center mt-2" aria-label="Pages of your claims">
+                <span>
+                    <?php if ($ownPage > 1): ?>
+                        <a href="<?php echo htmlspecialchars(Router::url('expenses/submit') . '?page=' . ($ownPage - 1), ENT_QUOTES, 'UTF-8'); ?>">&laquo; Newer claims</a>
+                    <?php endif; ?>
+                </span>
+                <small class="text-secondary">Page <?php echo $ownPage; ?> of <?php echo $ownPages; ?> (<?php echo $ownClaimsTotal; ?> claims)</small>
+                <span>
+                    <?php if ($ownPage < $ownPages): ?>
+                        <a href="<?php echo htmlspecialchars(Router::url('expenses/submit') . '?page=' . ($ownPage + 1), ENT_QUOTES, 'UTF-8'); ?>">Older claims &raquo;</a>
+                    <?php endif; ?>
+                </span>
+            </nav>
+        <?php endif; ?>
+    <?php endif; ?>
+</section>
+
 <!-- 💸 Expense Claim Submission Form -->
-<h1 class="mb-4">Submit Expense Claim</h1>
+<h2 class="h4 mb-3" id="submit-a-claim">Submit a new claim</h2>
 
 <form method="post" action="<?php echo htmlspecialchars(Router::url('expenses/submit/save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" novalidate>
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
@@ -94,7 +276,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endif; ?>
     </div>
 
-    <h4 class="mt-4">Items</h4>
+    <h3 class="h5 mt-4">Items</h3>
 
     <!-- 📊 Column headings for >= md screens -->
     <div class="d-none d-md-flex fw-semibold border-bottom py-1 mb-2 small text-secondary">
@@ -136,7 +318,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <input type="hidden" name="totalAmount" id="totalAmount">
     </div>
 
-    <h4 class="mt-4">Supporting Files</h4>
+    <h3 class="h5 mt-4">Supporting Files</h3>
     <div class="mb-3">
         <div class="dropzone" id="filesDropzone" role="button" tabindex="0">Drop files here or click to upload</div>
         <input type="file" name="files[]" id="files" class="form-control d-none" multiple accept="image/*,application/pdf">

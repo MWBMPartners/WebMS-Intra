@@ -20909,3 +20909,23 @@ and the usage row really do move on the same press once the switch says `'1'`.
 - **A raised ceiling is refused too while a period above it exists** (D-032's rule). Round 1 briefly allowed raising — reverted in round 2, because D-074 says follow D-032 unless a measured fact makes it unworkable, and the case is reachable only by hand-written SQL. Removing the ceiling is always allowed and is the way out.
 
 **Review: protected arm (personal data), three rounds by fresh Claude agents standing in for Codex; round 3 CLEAN.** 14 plants in the test, each red. Codex has NOT reviewed it. Left open: #835, #836, #840.
+
+### A member's own claims (#834)
+
+- The list is ONE read-only query in `web/_apps/expenses/submit/index.php`, scoped by `siteID = Site::id()` AND
+  `userID = $_SESSION['user_id']`, ordered `createdAt DESC, claimID DESC` (the index
+  `idx_claims_site_user_created` is exactly that). Both scopes are pinned by part P of
+  `tools/access-pages-selftest.php`: planted out, removing the user condition turned P1, P2, P4-P8, P10 red;
+  removing the organisation condition turned P1, P3, P6-P8 red; ordering by claim number instead of submitted time
+  turned P1, P4-P7 red. The fixture gives "newest submitted" and "highest number" different orders on purpose.
+- No Withdraw/Change button in the list, deliberately: that decision needs the approval count and belongs to
+  `ExpenseRules::whyNotEditable()`, which the claim's page already asks (#651). A second place drawing those buttons
+  is the drift the rule exists to prevent.
+- A failed read says "could not be read just now" and records the exception; it never says "no claims yet", which
+  would invite a duplicate claim. That branch is exercised by no automatic test; round 1 broke a column by hand to confirm it.
+- The status-badge colours are a second copy of `expenses/view/index.php`'s `match` (comment in both says change
+  together). Presentation only.
+- **Round 1 found two checks that could not fail.** The error-row check filtered by `userID`, and `Logger::exception()` records no user — so the page's own errors were invisible to it (now P12: rows for organisations A and B above a mark taken at the start of part P). And nothing guarded the page-number validation: a bare `(int)` passed every check while `?page=0`, `-1`, `abc` or an empty value made the list say "could not be read" (now P11). **A check filtered on a column the writer never fills is a clause that cannot fail.**
+- **How it was found:** #834 began as "check one help sentence" (#822's Found list). Checking it showed no page listed a member's claims and `ExpenseMailer` sends the claimant nothing on `submitted`, so a pending claim could not be reached at all (#841 is the e-mail). The dashboard card's comment asserted the opposite.
+
+**Review: protected arm (a member's financial claims), two rounds by fresh Claude agents standing in for Codex; round 2's one finding was a check number in a test comment, corrected as documentation.** Codex has NOT reviewed it. Also found: #842 (two self-tests clash on one database).

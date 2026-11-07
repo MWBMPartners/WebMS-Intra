@@ -1819,7 +1819,9 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     is `!== 0` and never `> 0` (the count answers -1 when it could not be read,
     and "we could not tell whether anybody has decided" must never become
     "nobody has, go ahead"); and ownership is answered BEFORE the status, so a
-    stranger is never told that a claim exists or where it has got to. Only the
+    stranger is never told that a claim exists or where it has got to.
+    `/expenses/submit` lists the claimant's own claims (#834); editability is
+    still asked only on the claim's own page. Only the
     claimant may change a claim — not an administrator, for the same reason as
     #545.
 

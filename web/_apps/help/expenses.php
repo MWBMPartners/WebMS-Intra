@@ -272,21 +272,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
                 <strong>Navigate to the Expenses section</strong>
-                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the navigation bar and choose <strong>Expense Claims</strong>.</p>
+                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the navigation bar and choose <strong>Expense Claims</strong>. Your claims are listed under <strong>Your claims</strong>, above the form for a new one. If you have a claim waiting for a decision, the <strong>My Pending Claims</strong> card on your dashboard also leads to this page (administrators see a <strong>Pending Claims</strong> card instead, which leads to the approvals page).</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
             <span class="badge text-bg-primary rounded-pill mt-1">2</span>
             <div>
                 <strong>Review the claims list</strong>
-                <p class="mb-0 small text-secondary">Each claim shows its title, department, total amount, date submitted, and current status badge.</p>
+                <p class="mb-0 small text-secondary">Each claim shows its number and title, department, date submitted, total amount, and current status badge, newest first. Only your own claims in the organisation you are in are listed. Ten are shown at a time: use <strong>Older claims</strong> to see earlier ones.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
             <span class="badge text-bg-primary rounded-pill mt-1">3</span>
             <div>
-                <strong>Check for approver comments</strong>
-                <p class="mb-0 small text-secondary">If your claim was rejected, look for the approver's comments to understand what needs to be corrected.</p>
+                <strong>Open a claim for the details</strong>
+                <p class="mb-0 small text-secondary">Click a claim's title to open it. Its page shows the line items, receipts, approvals and payment. If your claim was rejected, look there for the approver's comments to understand what needs to be corrected.</p>
             </div>
         </div>
     </div>
@@ -294,7 +294,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-info d-flex gap-2" role="alert">
         <i class="fa-solid fa-circle-info mt-1"></i>
         <div>
-            <strong>Tip:</strong> On mobile devices the claims list adapts to a stacked card layout for easy reading. Scroll down to see all your claims.
+            <strong>Tip:</strong> On mobile devices the claims list adapts to a stacked card layout for easy reading. If you belong to more than one organisation, each one's claims are listed on that organisation's own Expenses page.
         </div>
     </div>
 </div>
@@ -375,21 +375,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-warning rounded-pill mt-1">1</span>
             <div>
                 <strong>Navigate to your claims list</strong>
-                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the navigation bar and choose <strong>Expense Claims</strong> to view your submitted claims.</p>
+                <p class="mb-0 small text-secondary">Open the <strong>Apps</strong> menu in the navigation bar and choose <strong>Expense Claims</strong>. Your submitted claims are listed under <strong>Your claims</strong>.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
             <span class="badge text-bg-warning rounded-pill mt-1">2</span>
             <div>
-                <strong>Find the pending claim</strong>
-                <p class="mb-0 small text-secondary">Look for the claim you wish to withdraw. It must still have a <span class="portal-badge portal-badge-pending"><i class="fa-solid fa-clock"></i> Pending</span> status.</p>
+                <strong>Find the pending claim, and open it</strong>
+                <p class="mb-0 small text-secondary">Look for the claim you wish to withdraw and click its title. It must still have a <span class="portal-badge portal-badge-pending"><i class="fa-solid fa-clock"></i> Pending</span> status.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
             <span class="badge text-bg-warning rounded-pill mt-1">3</span>
             <div>
-                <strong>Click "Withdraw"</strong>
-                <p class="mb-0 small text-secondary">Click the <strong>Withdraw</strong> button on the claim. You will be asked to confirm your decision.</p>
+                <strong>Click "Withdraw Claim"</strong>
+                <p class="mb-0 small text-secondary">On the claim's own page, click the <strong>Withdraw Claim</strong> button. You will be asked to confirm your decision.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -404,7 +404,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="alert alert-warning d-flex gap-2" role="alert">
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
         <div>
-            <strong>Important:</strong> You can only withdraw your own claims, and only while they are still <strong>Pending</strong>. Once a claim has been approved, rejected, or reimbursed, it cannot be withdrawn. If you need to correct a claim that nobody has decided on yet, <a href="#changing">change it</a> instead. Once an approver has decided, it can be neither changed nor withdrawn: submit a new claim, and ask your administrator what to do about the old one. A withdrawn claim cannot be reopened: submit a new claim instead. The withdrawn claim, its receipts and any approvals already given stay on record.
+            <strong>Important:</strong> You can only withdraw your own claims, and only while they are still <strong>Pending</strong>. Once a claim has been approved, rejected, or reimbursed, it cannot be withdrawn. If you need to correct a claim that nobody has decided on yet, <a href="#changing">change it</a> instead. As soon as any approver has approved it, it can no longer be changed &mdash; but while it still shows as <strong>Pending</strong> (which happens when its department needs more than one approval and not all have been given) you can still withdraw it. Once it is approved, rejected or reimbursed it can be neither changed nor withdrawn: submit a new claim, and ask your administrator what to do about the old one. A withdrawn claim cannot be reopened: submit a new claim instead. The withdrawn claim, its receipts and any approvals already given stay on record.
         </div>
     </div>
 </div>

@@ -132,7 +132,9 @@ if ($isClaimant === true && $claim['status'] === 'Pending') {
 }
 
 $pageTitle   = 'Claim #' . $claimID . ' — ' . $claim['claimTitle'];
-$breadcrumbs = ['Dashboard' => Router::url(''), 'Expenses' => Router::url('expenses/submit'), 'Claim #' . $claimID => ''];
+// "Expense Claims" is the Expenses page's own name since #834, which lists
+// the claimant's claims above the form; the back button below says the same.
+$breadcrumbs = ['Dashboard' => Router::url(''), 'Expense Claims' => Router::url('expenses/submit'), 'Claim #' . $claimID => ''];
 
 // -----------------------------------------------------------------------------
 // 📋 Fetch line items
@@ -541,7 +543,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 🔗 Action Buttons -->
 <div class="d-flex gap-2 mb-4">
     <a href="<?php echo htmlspecialchars(Router::url('expenses/submit'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
-        <i class="fa-solid fa-arrow-left me-1"></i> Back to Submit
+        <?php // #834: "your claims" only when it is the viewer's own claim; an approver or treasurer reading somebody else's claim is going back to the Expenses page, where it is not listed. ?>
+        <i class="fa-solid fa-arrow-left me-1"></i> <?php echo $isClaimant === true ? 'Back to your claims' : 'Back to Expense Claims'; ?>
     </a>
     <?php
     // #545: neither button is offered on a person's OWN claim. Nobody

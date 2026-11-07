@@ -93,8 +93,15 @@ if (isset($SETTINGS['expenses']['enabled']) === true && $SETTINGS['expenses']['e
                     'icon'  => 'fa-solid fa-file-invoice-dollar',
                     'color' => 'warning',
                     // There is no /expenses page — this used to lead to
-                    // "page not found". Submit is where a claimant sees
-                    // and raises their own claims.
+                    // "page not found". The Expenses page lists the
+                    // person's own claims in this organisation (each
+                    // linking to the claim, where a pending one can be
+                    // withdrawn, and changed only while nobody has decided
+                    // on it — ExpenseRules::whyNotEditable()) above the
+                    // form for a new one.
+                    // Until #834 (7 November 2026) it was the form ONLY,
+                    // and this comment said a claimant "sees" their claims
+                    // there, which was untrue: nothing listed them anywhere.
                     'url'   => Site::url('expenses/submit'),
                 ];
             }

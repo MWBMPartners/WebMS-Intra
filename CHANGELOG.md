@@ -4,6 +4,18 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A member can now find their own expense claims (#834)
+
+- **A member can now find their own expense claims (#834).** The Expenses page (`/expenses/submit`, reached from the
+  Apps menu and the dashboard's "My Pending Claims" card) now lists the signed-in person's own claims in the
+  organisation they are in, above the form for a new one: newest submitted first, ten to a page, with number and
+  title, department, date submitted, total and status, each linking to the claim's own page. Until now the page was a
+  form only and nothing listed a member's claims anywhere, so changing or withdrawing a pending claim — offered only on
+  the claim's own page — could not be reached by an ordinary member. The page is now called "Expense Claims"; the
+  claim page's back button reads "Back to your claims". The in-app help's "Viewing Your Claims" and "Withdrawing a
+  Claim" steps now describe the list that exists, and the dashboard card's comment no longer claims something untrue.
+- **Two help sentences that were untrue are corrected**: the withdraw note said a claim could be neither changed nor withdrawn once an approver had decided — a claim one of several approvers has approved stays Pending and can still be withdrawn, though no longer changed; and the dashboard card is shown only when you have a claim waiting.
+
 ### An optional ceiling on how long event registrations are kept (#816, migration 257; D-074)
 
 - **An optional ceiling on how long event registrations are kept (#816, migration 257; D-074).** A global administrator can set, on the new page Admin, Registration retention (`/admin/settings/registrations`), the longest period any organisation or any single event may keep a registration's details (a child's name, date of birth, allergies and medical notes, a parent's contact details). **It ships switched off and nothing changes until somebody sets one**, because a registration period can be a legal requirement. A period above the ceiling is refused with the reason; a ceiling below a period an organisation, an event, or the installation itself already holds is refused and they are named — whether the ceiling is being raised or lowered, as the giving-records ceiling does. Removing the ceiling is always allowed. The same page lets an organisation choose its own period for the first time (the general settings editor could never add one) and lets a global administrator change the installation's own period.
