@@ -136,7 +136,11 @@ appended with its real date and a note that it was added later.
 | [D-078](078-public-website-items-get-a-switch-and-optional-dates.md) | 2026-11-07 | An item on the public website gets an on/off switch AND optional dates | in force |
 | [D-079](079-a-new-event-starts-members-only.md) | 2026-11-07 | A new event starts members-only | in force |
 | [D-080](080-copied-in-events-follow-a-chosen-rule.md) | 2026-11-07 | Copied-in events reach the public website by a rule each level chooses | in force |
+| [D-081](081-the-installations-copied-events-rule-caps-an-organisations.md) | 2026-11-07 | The installation's rule for copied-in events caps an organisation's | in force |
+| [D-082](082-only-listed-websites-may-frame-public-pages.md) | 2026-11-07 | Only websites an organisation lists may show its public pages in a frame | in force |
+| [D-083](083-the-first-release-shows-the-noticeboard-and-events.md) | 2026-11-07 | The first release puts the noticeboard and events on the public website | in force |
+| [D-084](084-the-old-widget-folder-may-be-deleted.md) | 2026-11-07 | The old web-root widget folder may be deleted | in force |
 
-*80 decisions. This index is checked against the folder by
+*84 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
