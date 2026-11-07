@@ -110,6 +110,21 @@ function check(string $name, $got, $want): void
     echo '      got:    ' . var_export($got, true) . "\n";
 }
 
+/**
+ * Set an app's installation-wide switch. Used for `giving.enabled` and
+ * `discipleship.enabled`; tidyUp() puts both back to their seeded values.
+ */
+function setSwitch(mysqli $db, string $key, string $value): void
+{
+    $stmt = $db->prepare(
+        'INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`) VALUES (NULL, ?, ?) '
+        . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)'
+    );
+    $stmt->bind_param('ss', $key, $value);
+    $stmt->execute();
+    $stmt->close();
+}
+
 /** The findings for one area, by the area's name. */
 function inArea(array $findings, string $area): array
 {
@@ -190,6 +205,34 @@ function tidyUp(mysqli $db): void
     $db->query("UPDATE `tblSettings` SET `settingValue` = '' "
         . "WHERE `settingValue` = 'zz-selftest-token' AND `siteID` IS NULL");
     $db->query("DELETE FROM `tblRoutes` WHERE `routeKey` LIKE 'zz-selftest%'");
+    // Section P writes a run for every scheduled job; a fresh install has none.
+    $db->query('DELETE FROM `tblScheduledJobRun`');
+    // Section Q renames two tables away to break a read; put them back first.
+    foreach (['zz_selftest_793_sites' => 'tblSites', 'zz_selftest_793_gsl' => 'tblGivingStatementLog'] as $away => $home) {
+        $there = $db->query("SHOW TABLES LIKE '" . $away . "'");
+        if ($there->num_rows > 0) {
+            $db->query('RENAME TABLE `' . $away . '` TO `' . $home . '`');
+        }
+        $there->free();
+    }
+    // Section Q's donor (its statement goes with it, ON DELETE CASCADE) and
+    // its retired organisation.
+    $db->query("DELETE FROM `tblUsers` WHERE `emailAddress` LIKE 'zz-selftest-793%'");
+    $retired = $db->query("SELECT `siteID` FROM `tblSites` WHERE `siteKey` = 'zz-selftest-793'");
+    while (($row = $retired->fetch_assoc()) !== null) {
+        $db->query('DELETE FROM `tblSettings` WHERE `siteID` = ' . (int) $row['siteID']);
+        $db->query('DELETE FROM `tblSites` WHERE `siteID` = ' . (int) $row['siteID']);
+    }
+    $retired->free();
+    // Sections O and Q switch Giving and Discipleship on and off, and Q gives
+    // Giving a per-organisation row. Put back what `full_schema.sql` seeds
+    // (`giving.enabled` '0', `discipleship.enabled` 'true'), because O3's
+    // figure of 14 depends on a fresh install having Giving off.
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` IN ('giving.enabled', 'discipleship.enabled') "
+        . "AND `siteID` IS NOT NULL");
+    $db->query("UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'giving.enabled' AND `siteID` IS NULL");
+    $db->query("UPDATE `tblSettings` SET `settingValue` = 'true' WHERE `settingKey` = 'discipleship.enabled' "
+        . "AND `siteID` IS NULL");
     // Section K points the calendar's page at a file that is not there and puts
     // it back; a run that died in between would leave the app unopenable.
     $db->query("UPDATE `tblRoutes` SET `targetFile` = 'calendar/index.php' "
@@ -565,10 +608,22 @@ $silentFinding = static function (array $f): ?array {
 //    has its own table, and the number an administrator needs is how many
 //    JOBS are dead.
 $fresh = $silentFinding(PortalCheck::run($db, ORG));
-check('O3 a fresh install reports every JOB as unable to run, not every token',
-    $fresh === null ? -1 : (int) $fresh['count'], count(ScheduledJobs::JOBS));
+// ⚠️ FOURTEEN, NOT FIFTEEN, AND THAT IS #793 ROUND 1's RULE. `full_schema.sql`
+//    seeds `giving.enabled` as '0', so on a fresh install Giving is off for
+//    every organisation and its statements job has nothing to do
+//    (`PortalCheck::JOB_NEEDS_FEATURE`). Typed, not counted from the class.
+check('O3 a fresh install reports every JOB it needs as unable to run, not every token — 14, '
+    . 'because Giving ships switched off and its job is not needed',
+    $fresh === null ? -1 : (int) $fresh['count'], 14);
 check('O4 and it is a PROBLEM, not a note',
     $fresh === null ? '' : $fresh['severity'], PortalCheck::PROBLEM);
+// Switch Giving on, as a portal that uses it has it: now all fifteen are
+// needed. Left on through sections O and P; section Q switches it off again
+// and tidyUp() puts the seeded value back.
+setSwitch($db, 'giving.enabled', '1');
+$freshGiving = $silentFinding(PortalCheck::run($db, ORG));
+check('O3b with Giving switched on, all 15 jobs are reported as unable to run',
+    $freshGiving === null ? -1 : (int) $freshGiving['count'], 15);
 
 // Give every job a token and the finding must go entirely.
 foreach (array_keys($jobs) as $key) {
@@ -637,6 +692,280 @@ foreach (PortalCheck::run($db, ORG) as $finding) {
     }
 }
 check('O8 no token value appears anywhere on the page', $leaked, false);
+
+echo "P. A job called every few minutes is not given a night's grace (#793, D-076)\n";
+// ⚠️ THE MEASURED FAULT, ON THE PAGE. Under D-070's "everything else, 36 hours"
+//    row the webhook retry — called every 5 to 15 minutes — could stop
+//    for a day and a half while this page said every job had run in time and
+//    there was nothing to do. D-076 gives it 45 minutes. Two hours late, it
+//    must now be a PROBLEM on the page, while the nightly retention sweep, two
+//    hours since its last run, must not be.
+//
+//    Every expected sentence is typed out here rather than asked of
+//    `ScheduledJobs`, because a test that asks the code under test what it
+//    should say agrees with it however wrong it is (#795).
+foreach (array_keys($jobs) as $key) {
+    $stmt = $db->prepare(
+        'INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`) VALUES (NULL, ?, ?) '
+        . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)'
+    );
+    $value = 'zz-selftest-token';
+    $stmt->bind_param('ss', $key, $value);
+    $stmt->execute();
+    $stmt->close();
+}
+$db->query('DELETE FROM `tblScheduledJobRun`');
+ScheduledJobs::forgetTableCheck();
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+$db->query(
+    'UPDATE `tblScheduledJobRun` SET `startedAtUtc` = UTC_TIMESTAMP() - INTERVAL 7200 SECOND, '
+    . '`finishedAtUtc` = UTC_TIMESTAMP() - INTERVAL 7200 SECOND '
+    . "WHERE `jobKey` IN ('cron/webhook-retry', 'cron/retention-sweep')"
+);
+$lateFinding = null;
+$allClear    = null;
+foreach (inArea(PortalCheck::run($db, ORG), 'Scheduled jobs') as $one) {
+    if (str_contains($one['what'], 'have not run for longer') === true) {
+        $lateFinding = $one;
+    }
+    if (str_contains($one['what'], 'has run recently enough') === true) {
+        $allClear = $one;
+    }
+}
+check('P1 the retry sweep two hours late is a PROBLEM on the page',
+    $lateFinding === null ? '' : $lateFinding['severity'], PortalCheck::PROBLEM);
+check('P2 and it is the ONLY job listed — the nightly sweep, equally two hours since it ran, is not',
+    $lateFinding === null ? [] : $lateFinding['examples'],
+    ['Sending again the messages this portal sends to other systems (its webhooks) that failed first time — last ran 2 hours ago']);
+check('P3 and the page does not also say every job has run recently enough', $allClear, null);
+
+// Back to every job just finished: the all-clear, word for word.
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+$allClear = null;
+foreach (inArea(PortalCheck::run($db, ORG), 'Scheduled jobs') as $one) {
+    if (str_contains($one['what'], 'has run recently enough') === true) {
+        $allClear = $one;
+    }
+}
+check('P4 with every job just finished, the all-clear gives every allowance, as typed here',
+    $allClear === null ? '' : $allClear['why'],
+    '15 of the 15 recorded a FINISH inside the time allowed for it. '
+    . 'That allowance is set for each job from what it is for and how often it is meant to run: '
+    . '15 minutes (the mail queue), 30 minutes (the live-stream push), 45 minutes (2 jobs), '
+    . '2 hours (event reminders), 3 hours (4 jobs), 6 hours (feed imports), 36 hours (4 jobs) '
+    . 'and 8 days (giving statements).');
+$db->query('DELETE FROM `tblScheduledJobRun`');
+
+echo "Q. A job whose app is switched off everywhere is neither a problem nor counted (#793 round 1)\n";
+// ⚠️ THE STATE THE SETUP GUIDE RECOMMENDS MUST NOT BE REPORTED AS A FAULT.
+//    `docs/INSTALL.md` step 6 says the giving-statements and reading-plan jobs
+//    may be left out, token and all, while their app is switched off for every
+//    organisation. Before `PortalCheck::JOB_NEEDS_FEATURE` the page then said
+//    "Some scheduled jobs can never run" — a check crying wolf on advice the
+//    portal itself gives (#483). Both states are driven: off (not reported,
+//    not counted) and on, including on for ONE organisation through its own
+//    row (reported).
+$putToken = static function (mysqli $db, string $key, string $value): void {
+    $stmt = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+    $stmt->bind_param('ss', $value, $key);
+    $stmt->execute();
+    $stmt->close();
+};
+$pageFor = static function (mysqli $db): array {
+    return inArea(PortalCheck::run($db, ORG), 'Scheduled jobs');
+};
+$named = static function (array $found, string $needle): ?array {
+    foreach ($found as $one) {
+        if (str_contains($one['what'], $needle) === true) {
+            return $one;
+        }
+    }
+    return null;
+};
+foreach (array_keys(ScheduledJobs::JOBS) as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+}
+setSwitch($db, 'giving.enabled', '0');
+$putToken($db, 'giving.cron_token', '');
+$found = $pageFor($db);
+check('Q1 Giving off everywhere and its token empty: NOT reported as unable to run',
+    $named($found, 'can never run'), null);
+$clear = $named($found, 'has run recently enough');
+check('Q2 and the all-clear says it can speak only for the jobs it counts',
+    $clear === null ? '' : $clear['what'],
+    'Every scheduled job this page can speak for has run recently enough.');
+check('Q2b and says, word for word, which job it left out and why',
+    $clear === null ? '' : $clear['why'],
+    '14 of the 15 recorded a FINISH inside the time allowed for it. '
+    . 'That allowance is set for each job from what it is for and how often it is meant to run: '
+    . '15 minutes (the mail queue), 30 minutes (the live-stream push), 45 minutes (2 jobs), '
+    . '2 hours (event reminders), 3 hours (4 jobs), 6 hours (feed imports) and 36 hours (4 jobs). '
+    . 'Also not counted, because the feature it serves is switched off for every active '
+    . 'organisation here and none of its work is waiting, so there is nothing for it to do: '
+    . 'Sending giving statements.');
+$db->query(
+    "UPDATE `tblScheduledJobRun` SET `startedAtUtc` = UTC_TIMESTAMP() - INTERVAL 10 DAY, "
+    . "`finishedAtUtc` = UTC_TIMESTAMP() - INTERVAL 10 DAY WHERE `jobKey` = 'cron/giving-statements'"
+);
+check('Q3 with Giving off, its job ten days quiet (past its 8 days) is NOT reported as overdue either',
+    $named($pageFor($db), 'have not run for longer'), null);
+
+// On for ONE organisation, through its own row, while the installation-wide
+// switch stays off: the job serves that organisation, so it is needed.
+$stmt = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`) VALUES (?, 'giving.enabled', '1')");
+$org = ORG;
+$stmt->bind_param('i', $org);
+$stmt->execute();
+$stmt->close();
+$found = $pageFor($db);
+$dead = $named($found, 'can never run');
+check('Q4 Giving switched on for ONE organisation by its own row: the empty token IS a problem again',
+    $dead === null ? [] : [$dead['severity'], $dead['examples']],
+    [PortalCheck::PROBLEM, ['Sending giving statements']]);
+// With its token set again, the same quiet job is overdue again. (While the
+// token is empty it is deliberately left out of the overdue finding: the
+// no-token problem above already covers it, and listing it twice once said a
+// job both could and could not run.)
+$putToken($db, 'giving.cron_token', 'zz-selftest-token');
+$late = $named($pageFor($db), 'have not run for longer');
+check('Q4b and with its token set, the job ten days quiet is overdue again',
+    $late === null ? [] : $late['examples'],
+    ['Sending giving statements — last ran 10 days ago']);
+$db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'giving.enabled' AND `siteID` IS NOT NULL");
+
+// The second job on the list, both ways.
+$putToken($db, 'discipleship.cron_token', '');
+setSwitch($db, 'discipleship.enabled', 'false');
+check('Q5 Discipleship off everywhere and its token empty: NOT reported',
+    $named($pageFor($db), 'can never run'), null);
+setSwitch($db, 'discipleship.enabled', 'true');
+$dead = $named($pageFor($db), 'can never run');
+check('Q6 Discipleship on: its empty token IS reported, and nothing else is',
+    $dead === null ? [] : $dead['examples'],
+    ['Moving people on through their reading plans']);
+
+// ── Q7. Giving off, but a statement still waiting: the job is NEEDED ────
+// ⚠️ ROUND 2 OF #793's CHECK MEASURED THIS STATE HIDDEN. `cron/giving-statements`
+//    never asks `giving.enabled`: it sends every statement a treasurer queued.
+//    With Giving switched off after a run was queued, the page said "there is
+//    nothing for it to do" about a job ten days quiet with a statement nine
+//    days in the queue — a dead job, hidden by an untrue sentence.
+$putToken($db, 'discipleship.cron_token', 'zz-selftest-token');   // Q5/Q6 left it empty
+$putToken($db, 'giving.cron_token', 'zz-selftest-token');
+$db->query("INSERT INTO `tblUsers` (`emailAddress`) VALUES ('zz-selftest-793-donor@example.invalid')");
+$donor = (int) $db->insert_id;
+$stmt  = $db->prepare(
+    'INSERT INTO `tblGivingStatementLog` (`siteID`, `donorID`, `periodKey`, `fromDate`, `toDate`, `queuedAt`) '
+    . "VALUES (?, ?, 'zz-selftest-793', '2026-01-01', '2026-03-31', UTC_TIMESTAMP() - INTERVAL 9 DAY)"
+);
+$stmt->bind_param('ii', $org, $donor);
+$stmt->execute();
+$stmt->close();
+$db->query(
+    "UPDATE `tblScheduledJobRun` SET `startedAtUtc` = UTC_TIMESTAMP() - INTERVAL 10 DAY, "
+    . "`finishedAtUtc` = UTC_TIMESTAMP() - INTERVAL 10 DAY WHERE `jobKey` = 'cron/giving-statements'"
+);
+$late = $named($pageFor($db), 'have not run for longer');
+check('Q7 Giving off but a statement waiting to be sent: the job ten days quiet IS overdue',
+    $late === null ? [] : $late['examples'],
+    ['Sending giving statements — last ran 10 days ago']);
+$putToken($db, 'giving.cron_token', '');
+$dead = $named($pageFor($db), 'can never run');
+check('Q7b and with its token empty, it IS reported as unable to run — it has work it cannot do',
+    $dead === null ? [] : $dead['examples'],
+    ['Sending giving statements']);
+$db->query("UPDATE `tblGivingStatementLog` SET `emailedAt` = UTC_TIMESTAMP() WHERE `periodKey` = 'zz-selftest-793'");
+check('Q7c once that statement has gone, Giving off means nothing to do again: not reported',
+    $named($pageFor($db), 'can never run'), null);
+
+// The work-waiting query must be the JOB's own selection. Two copies of one
+// condition drift (the round-2 fault was exactly a page and a job disagreeing
+// about what the job would do), so the job's WHERE clause and the class's are
+// compared as text, backticks aside.
+$jobPage = (string) file_get_contents(PORTAL_APPS . DIRECTORY_SEPARATOR . 'cron' . DIRECTORY_SEPARATOR
+    . 'giving-statements.php');
+$jobWhere = preg_match("/'WHERE (queuedAt[^']*?) '/", $jobPage, $m) === 1 ? $m[1] : '(not found)';
+// The class adds ONE condition the job's WHERE clause does not carry — that
+// the organisation is active — because the job skips such rows a step later
+// (`Site::forceContext()` refuses them). It is taken off before comparing, and
+// Q8b requires it to be there; Q9c/Q9d drive it.
+$classFull  = str_replace('`', '', PortalCheck::JOB_WORK_WAITING['cron/giving-statements']);
+$activeOnly = str_replace('`', '', PortalCheck::JOB_WORK_WAITING_ACTIVE_ONLY);
+$classWhere = preg_match('/WHERE (.*)$/', str_replace($activeOnly, '', $classFull), $m) === 1
+    ? $m[1] : '(not found)';
+check('Q8 the page counts waiting statements by exactly the condition the giving job sends them by',
+    [$classWhere, $jobWhere],
+    ['queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL',
+     'queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL']);
+check('Q8b and the class adds exactly one condition beyond it: the organisation is active',
+    str_ends_with($classFull, $activeOnly) && $activeOnly === ' AND siteID IN (SELECT siteID FROM tblSites WHERE isActive = 1)',
+    true);
+
+// ── Q9. An INACTIVE organisation using Giving does not make the job needed ──
+// `featureInUse()` asks only about active organisations: a retired one keeps
+// its rows, and its own switch must not keep a job alive for nobody.
+$db->query("INSERT INTO `tblSites` (`siteName`, `siteKey`, `isActive`) VALUES ('zz selftest 793', 'zz-selftest-793', 0)");
+$retired = (int) $db->insert_id;
+$stmt = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`) VALUES (?, 'giving.enabled', '1')");
+$stmt->bind_param('i', $retired);
+$stmt->execute();
+$stmt->close();
+check('Q9 Giving on only for a RETIRED organisation: the job is not needed, so its empty token is not reported',
+    $named($pageFor($db), 'can never run'), null);
+$db->query("UPDATE `tblSites` SET `isActive` = 1 WHERE `siteID` = " . $retired);
+$dead = $named($pageFor($db), 'can never run');
+check('Q9b and the same organisation made active again: it IS reported',
+    $dead === null ? [] : $dead['examples'], ['Sending giving statements']);
+
+// ── Q9c, Q9d. A statement queued for a RETIRED organisation is not work ──
+// The job skips it (`Site::forceContext()` refuses an inactive organisation),
+// so it must not make the job needed — before #793 round 3 it did, and the
+// page reported a problem that could never clear.
+$db->query("UPDATE `tblSites` SET `isActive` = 0 WHERE `siteID` = " . $retired);
+$db->query("DELETE FROM `tblSettings` WHERE `siteID` = " . $retired);
+$stmt = $db->prepare(
+    'INSERT INTO `tblGivingStatementLog` (`siteID`, `donorID`, `periodKey`, `fromDate`, `toDate`, `queuedAt`) '
+    . "VALUES (?, ?, 'zz-selftest-793b', '2026-01-01', '2026-03-31', UTC_TIMESTAMP() - INTERVAL 9 DAY)"
+);
+$stmt->bind_param('ii', $retired, $donor);
+$stmt->execute();
+$stmt->close();
+check('Q9c a statement queued for a RETIRED organisation is not work: Giving off, empty token, not reported',
+    $named($pageFor($db), 'can never run'), null);
+$db->query("UPDATE `tblSites` SET `isActive` = 1 WHERE `siteID` = " . $retired);
+$dead = $named($pageFor($db), 'can never run');
+check('Q9d and the same organisation made active again: its statement IS work, so the empty token IS reported',
+    $dead === null ? [] : $dead['examples'], ['Sending giving statements']);
+$db->query("DELETE FROM `tblGivingStatementLog` WHERE `periodKey` = 'zz-selftest-793b'");
+$db->query("DELETE FROM `tblSettings` WHERE `siteID` = " . $retired);
+$db->query("DELETE FROM `tblSites` WHERE `siteID` = " . $retired);
+
+// ── Q10, Q11. A read that FAILS answers "needed", never "nothing to do" ───
+// ⚠️ THE DIRECTION IS THE POINT. Answering "not needed" on a failed read would
+//    hide a dead job behind a database fault. Each read is broken by renaming
+//    its table away; tidyUp() renames it back if a run dies in between.
+check('Q10-0 premise: with both reads working, Giving off and no work waiting, the job is not reported',
+    $named($pageFor($db), 'can never run'), null);
+$db->query('RENAME TABLE `tblSites` TO `zz_selftest_793_sites`');
+$dead = $named($pageFor($db), 'can never run');
+$db->query('RENAME TABLE `zz_selftest_793_sites` TO `tblSites`');
+check('Q10 when the organisations cannot be read, the job counts as needed and its empty token IS reported',
+    $dead === null ? [] : $dead['examples'], ['Sending giving statements']);
+$db->query('RENAME TABLE `tblGivingStatementLog` TO `zz_selftest_793_gsl`');
+$dead = $named($pageFor($db), 'can never run');
+$db->query('RENAME TABLE `zz_selftest_793_gsl` TO `tblGivingStatementLog`');
+check('Q11 when the waiting statements cannot be counted, the job counts as needed and its empty token IS reported',
+    $dead === null ? [] : $dead['examples'], ['Sending giving statements']);
+$db->query("DELETE FROM `tblUsers` WHERE `emailAddress` = 'zz-selftest-793-donor@example.invalid'");
+$db->query('DELETE FROM `tblScheduledJobRun`');
 
 echo "I. The tally matches the findings\n";
 $final = PortalCheck::run($db, ORG);

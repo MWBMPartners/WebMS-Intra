@@ -15,9 +15,12 @@
 --
 --   * sending event reminders and the morning summary;
 --   * clearing out personal data past its retention period;
---   * taking off-site backups;
+--   * taking the scheduled backup on the server (cron/backup-run; the off-site
+--     copy is a separate script, tools/offsite-backup/, not one of these jobs);
 --   * sending text messages held for quiet hours;
---   * retrying payment messages that failed;
+--   * re-sending the webhooks this portal sends to other systems, when one
+--     failed (cron/webhook-retry, over tblWebhookDeliveries; this said
+--     "payment messages", which that job never reads -- #793);
 --
 -- and nothing anywhere would show it. No error, no log line, no badge. The
 -- jobs simply did not run, and the first sign was somebody asking why their

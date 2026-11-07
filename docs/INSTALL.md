@@ -316,6 +316,43 @@ portal's own address with a few words after it: `/admin/settings/organisation` m
    Guide, "The mail queue: mail that cannot go at once".
    **The `/cron/mail-queue` job also sends text messages that were held because the person was inside their
    Sabbath quiet hours. Without it, a held text is never sent** — its record is corrected to "not sent" instead.
+
+   **Every job, how often to call it, and when it counts as stopped.** Once a job has run, Admin, Check this
+   portal reports it as not having run when it has been quiet for longer than the last column, so call each one
+   at least as often as the second column says. Each address takes its token as shown: the value of the setting
+   named, set in Admin, Settings or on that app's own settings page. A job whose token is empty refuses every
+   call.
+
+   Two of these jobs may be left out while the app they serve is not in use: `/cron/discipleship-sweep`
+   (Discipleship Pathways) and `/cron/giving-statements` (Giving). **While that app is switched off for every
+   active organisation (Admin, Apps) and none of the job's work is waiting, the job has nothing to do: you may
+   leave its token empty and not schedule it, and Check this portal neither reports it nor counts it.** For
+   Giving, "work waiting" means statements a treasurer has already started e-mailing: the job sends those even
+   after Giving is switched off, so until they have gone it is needed and is reported like any other job. While
+   the app is switched on for any active organisation, an empty token is reported as a problem.
+
+   Other jobs serve one app too — venue, equipment and approval reminders, the webhooks this portal sends, and
+   the live-stream push — but Check this portal asks about those whether or not their app is switched on: an
+   empty token is reported as a problem, and a job with a token that is never called is listed as one it knows
+   nothing about yet.
+
+   | Address | Call it | Token | Reported as stopped after |
+   | --- | --- | --- | --- |
+   | `/cron/mail-queue` | every 5 minutes | `?token=`, `maintenance.cronToken` | 15 minutes |
+   | `/cron/push-golive` | every 5 minutes | `?key=`, `push.cron_token` | 30 minutes |
+   | `/cron/webhook-retry` | every 5 to 15 minutes | `?key=`, `webhooks.cron_token` | 45 minutes |
+   | `/cron/user-reminders` | every 15 minutes | `?key=`, `user_reminders.cron_token` | 45 minutes |
+   | `/cron/event-reminders` | every 15 minutes | `?key=`, `reminders.cron_token` | 2 hours |
+   | `/cron/asset-reminders` | every 15 to 60 minutes | `?key=`, `assets.cron_token` | 3 hours |
+   | `/cron/venue-reminders` | every 30 to 60 minutes | `?key=`, `venues.cron_token` | 3 hours |
+   | `/cron/workflow-timeouts` | every hour | `?key=`, `workflows.cron_token` | 3 hours |
+   | `/cron/health` | every hour | `?token=`, `maintenance.cronToken` | 3 hours |
+   | `/cron/import-feeds` | every 15 minutes | `?key=`, `feeds.cron_token` | 6 hours |
+   | `/cron/retention-sweep` | once a night | `?token=`, `maintenance.cronToken` | 36 hours |
+   | `/cron/backup-run` | once a day | `?token=`, `maintenance.cronToken` | 36 hours |
+   | `/cron/backup-check` | once a day | `?token=`, `maintenance.cronToken` | 36 hours |
+   | `/cron/discipleship-sweep` | once a day, while Discipleship Pathways is switched on | `?key=`, `discipleship.cron_token` | 36 hours |
+   | `/cron/giving-statements` | at least once a week, while Giving is switched on or statements are waiting to be sent | `?key=`, `giving.cron_token` | 8 days |
 7. **Add the people** who will use the portal: Admin, then User Management.
 
 The installer has locked itself. It cannot be run again by anybody who only has the portal's address.

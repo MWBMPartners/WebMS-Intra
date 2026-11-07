@@ -112,8 +112,99 @@ final class PortalCheck
         'giving.cron_token' => 'Giving statements',
         'discipleship.cron_token' => 'The discipleship sweep',
         'push.cron_token' => 'The "We are live" push',
-        'webhooks.cron_token' => 'Retrying payment webhooks that failed',
+        // Outgoing webhooks, not payments: see the note on `cron/webhook-retry`
+        // in `ScheduledJobs::JOBS`. This said "Retrying payment webhooks".
+        'webhooks.cron_token' => 'Retrying the webhooks this portal sends, when one failed',
         'workflows.cron_token' => 'Chasing approvals that have timed out',
+    ];
+
+    /**
+     * 🧩 Jobs that serve ONE feature which can be switched off (#793 round 1).
+     *
+     * THE RULE: **a job listed here is NOT needed only while its feature is
+     * switched off for every active organisation AND none of its work is
+     * waiting** (`JOB_WORK_WAITING`). Then the job has nothing to do, so an
+     * empty token is NOT a problem and the job is not counted anywhere on this
+     * page — not as unable to run, not as overdue, not in the all-clear's
+     * number or its list of allowances; the all-clear names it as set aside
+     * instead. While the feature is on for any active organisation, or any of
+     * its work is waiting, it is judged like every other job, and an empty
+     * token IS the problem it always was.
+     *
+     * ⚠️ "SWITCHED OFF" ALONE WAS NOT ENOUGH, and round 2 of #793's check
+     *    measured why: `cron/giving-statements` never asks `giving.enabled`.
+     *    It sends every statement a treasurer queued, whatever the switch now
+     *    says. So a run queued and then Giving switched off left real work for
+     *    the job, while this page said "there is nothing for it to do" and
+     *    stopped reporting it overdue — a dead job hidden behind an untrue
+     *    sentence. What decides "nothing to do" is what the JOB would do, so
+     *    the work-waiting test is the job's own selection.
+     *
+     * WHY "ANY ORGANISATION" AND NOT "THE ORGANISATION BEING CHECKED". The
+     * token is installation-wide and one run of the job serves every
+     * organisation (both pages loop over all of them), so the job is needed
+     * if ANYBODY uses the feature. Asking only about the organisation this
+     * page was opened for would hide a dead job from a global administrator
+     * who happened to be looking at the one organisation that does not use it.
+     *
+     * WHY THESE TWO AND NO OTHERS. `docs/INSTALL.md` step 6 tells a customer
+     * that these two may be left out while their feature is off, and before
+     * this list the page then reported a PROBLEM — "Some scheduled jobs can
+     * never run" — about a state the guide recommends. A check that cries wolf
+     * gets switched off (#483). Several other jobs serve a feature that can be
+     * switched off too (venues, equipment, workflows, outgoing webhooks, the
+     * live-stream push), and the same reasoning would apply to them; they are
+     * NOT on this list, so an empty token for one of them is still reported
+     * whatever its feature says. Adding one means checking what its page
+     * really tests before doing any work, and adding a test for both states.
+     *
+     * The value is the app's own switch (`settingKey` in
+     * `web/_core/apps/{slug}.php`), read the way `App::settingForSite()`
+     * reads it: the organisation's own row, else the installation-wide one.
+     * Admin, Apps writes the installation-wide one.
+     *
+     * @var array<string, string> job address => the setting that switches its feature on
+     */
+    public const JOB_NEEDS_FEATURE = [
+        'cron/giving-statements'  => 'giving.enabled',
+        'cron/discipleship-sweep' => 'discipleship.enabled',
+    ];
+
+    /**
+     * 📬 For a job in JOB_NEEDS_FEATURE: how to count the work it would still
+     * do with its feature switched off.
+     *
+     * Each is the job's OWN selection, copied from its page:
+     * `cron/giving-statements` sends every `tblGivingStatementLog` row with
+     * `queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL`, and
+     * never looks at `giving.enabled`. `tools/portal-check-selftest.php`
+     * section Q holds the two conditions together, so a change to the job's
+     * selection that is not made here fails there.
+     *
+     * `cron/discipleship-sweep` has no entry on purpose: it refuses outright
+     * while `Discipleship::isEnabled()` is false, so with the app off it has
+     * no work whatever is in its tables.
+     *
+     * @var array<string, string> job address => a query answering `howMany`
+     */
+    //
+    // ⚠️ THE JOB'S WHERE CLAUSE IS NOT THE WHOLE OF ITS SELECTION (#793 round
+    //    3). For each row `cron/giving-statements` calls
+    //    `Site::forceContext($siteId)`, which refuses an organisation that is
+    //    not active, and the job then skips the row — so a statement queued for
+    //    an organisation that has since been switched off is never sent. Counted
+    //    here anyway, it made the page report a PROBLEM that never cleared (the
+    //    rows never go), on the very set-up the guide recommends. So only rows
+    //    whose organisation is ACTIVE count. Q8 compares the job's WHERE clause
+    //    with everything here before that last condition; Q9c/Q9d drive the
+    //    condition itself. (With multisite switched off `forceContext` also
+    //    refuses any organisation but the current one; such rows cannot be
+    //    queued through any page, so that case is left to the job's own skip.)
+    public const JOB_WORK_WAITING_ACTIVE_ONLY = ' AND `siteID` IN (SELECT `siteID` FROM `tblSites` WHERE `isActive` = 1)';
+    public const JOB_WORK_WAITING = [
+        'cron/giving-statements' => 'SELECT COUNT(*) AS `howMany` FROM `tblGivingStatementLog` '
+            . 'WHERE `queuedAt` IS NOT NULL AND `emailedAt` IS NULL AND `errorMsg` IS NULL'
+            . self::JOB_WORK_WAITING_ACTIVE_ONLY,
     ];
 
     /**
@@ -698,6 +789,16 @@ final class PortalCheck
     {
         $findings = [];
 
+        // 🧩 Jobs whose feature is switched off everywhere have nothing to do
+        //    and are left out of every finding below (JOB_NEEDS_FEATURE).
+        $notNeeded = [];
+        foreach (self::JOB_NEEDS_FEATURE as $jobKey => $settingKey) {
+            if (self::featureInUse($db, $settingKey) === false
+                && self::workWaiting($db, $jobKey) === false) {
+                $notNeeded[$jobKey] = ScheduledJobs::JOBS[$jobKey]['whatStops'];
+            }
+        }
+
         // 🚨 A JOB WITH NO TOKEN HAS NEVER RUN AND NEVER WILL. Every one of
         //    these pages refuses when its stored token is empty, so this is
         //    knowable from the database whether or not the job ever recorded
@@ -734,6 +835,9 @@ final class PortalCheck
         //    jobs are dead, not how many secrets are unset.
         $silent = [];
         foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
+            if (array_key_exists($jobKey, $notNeeded) === true) {
+                continue;
+            }
             if (array_key_exists($facts['token'], $emptyTokens) === true) {
                 $silent[] = $facts['whatStops'];
             }
@@ -782,6 +886,9 @@ final class PortalCheck
         //    anything, so that is all there is now.
         $noToken = [];
         foreach (ScheduledJobs::JOBS as $jobKey => $facts) {
+            if (array_key_exists($jobKey, $notNeeded) === true) {
+                continue;
+            }
             if (array_key_exists($facts['token'], $emptyTokens) === true) {
                 $noToken[$jobKey] = true;
             }
@@ -805,7 +912,8 @@ final class PortalCheck
         $mailStopped = [];
         $running   = [];
         foreach ($state as $jobKey => $facts) {
-            if (array_key_exists($jobKey, $noToken) === true) {
+            if (array_key_exists($jobKey, $noToken) === true
+                || array_key_exists($jobKey, $notNeeded) === true) {
                 continue;
             }
             $words = $facts['whatStops'];
@@ -1163,6 +1271,14 @@ final class PortalCheck
         //    with fourteen jobs `ok` and the backup `refused`: the all-clear
         //    prints, correctly.
         //
+        //    `$notNeeded` is a THIRD kind (#793 round 1): a job whose feature is
+        //    switched off everywhere has nothing to do, so it is SUBTRACTED from
+        //    the count (the page cannot speak for it) and must NOT suppress the
+        //    all-clear (nothing is wrong). Suppressing on it would remove the
+        //    all-clear from every portal that does not use Giving, which on a
+        //    fresh installation is every portal — `giving.enabled` is seeded
+        //    '0'.
+        //
         //    SUPPRESSION DOES THE WORK, NOT A SUBTRACTION. The obvious fix was
         //    to do both, and the subtraction is unreachable — but **the reason
         //    first given for that was false** and is worth correcting rather
@@ -1173,7 +1289,7 @@ final class PortalCheck
         //    while `$mailStopped` is non-empty, because that clause says so.
         //    A reader who checked the old reason would have found it false and
         //    might have restored the subtraction.
-        $finishedWell = count($state) - count($running) - count($noToken);
+        $finishedWell = count($state) - count($running) - count($noToken) - count($notNeeded);
         if (count($overdue) === 0 && count($diedPart) === 0 && count($notKnown) === 0
             && count($broke) === 0 && count($unreadable) === 0 && count($mailStopped) === 0
             && $finishedWell > 0) {
@@ -1197,60 +1313,134 @@ final class PortalCheck
             //    The headline now names what it covers, and the reason says
             //    where its number comes from. An unexplained "8 of them" on a
             //    portal with fifteen jobs is its own small untruth.
+            // ⚠️ THE VERB AGREES WITH THE NUMBER. It said "the 1 part-way
+            //    through, which have not recorded a finish" (#793 round 1).
             $setAside = [];
             if (count($noToken) > 0) {
                 $setAside[] = 'the ' . count($noToken) . ' with no token, which cannot run at all';
             }
             if (count($running) > 0) {
-                $setAside[] = 'the ' . count($running) . ' part-way through, which have not '
-                    . 'recorded a finish';
+                $setAside[] = 'the ' . count($running) . ' part-way through, which '
+                    . (count($running) === 1 ? 'has' : 'have') . ' not recorded a finish';
             }
+            $reportedAbove = count($noToken) + count($running);
+            // A job whose feature is off everywhere is NOT reported above —
+            // nothing is wrong with it — so it gets its own sentence rather
+            // than joining "each is reported above", which would be untrue.
+            $offEverywhere = count($notNeeded) === 0 ? '' : ' Also not counted, because '
+                . (count($notNeeded) === 1
+                    ? 'the feature it serves is'
+                    : 'the features they serve are')
+                . ' switched off for every active organisation here and none of '
+                . (count($notNeeded) === 1 ? 'its' : 'their') . ' work is waiting, so there is nothing for '
+                . (count($notNeeded) === 1 ? 'it' : 'them') . ' to do: '
+                . implode(', and ', array_values($notNeeded)) . '.';
             $findings[] = [
                 'severity' => self::NOTE,
-                'what'     => count($setAside) > 0
+                'what'     => count($setAside) > 0 || count($notNeeded) > 0
                     ? 'Every scheduled job this page can speak for has run recently enough.'
                     : 'Every scheduled job has run recently enough.',
-                // ⚠️ DO NOT SAY "the time expected for that job". It was untrue for
-                //    six of the fifteen: their own page headers say they are
-                //    called every 5 to 60 minutes (push-golive every 5,
-                //    webhook-retry every 5-15, user-reminders every 15,
-                //    asset-reminders 15-60, venue-reminders 30-60,
-                //    workflow-timeouts hourly) and they carry the 36-hour
-                //    default. Measured: with three of them last finished 35
-                //    hours ago the page said "15 of the 15 recorded a FINISH
-                //    inside the time expected for that job" with todo
-                //    "Nothing" — so a customer could drop webhook-retry from
-                //    their scheduler and the payment-webhook retry sweep would
-                //    be dead for a day and a half behind that sentence.
-                //
-                //    The 36 hours is the owner's figure (D-070) and is not
-                //    changed here; what is corrected is the CLAIM, and #793
-                //    puts the measured fact to the owner against D-070's row.
+                // ⚠️ THE ALLOWANCE IS SET PER JOB, AND THIS SENTENCE MUST NOT
+                //    CLAIM MORE OR LESS THAN THAT. It once said "inside the time
+                //    expected for that job" while six jobs called every 5 to 60
+                //    minutes carried a 36-hour default; the next version, true at
+                //    the time, warned that "a job called every few minutes can be
+                //    many hours late and still count here". D-076 (#793) gave
+                //    seven of them figures of their own — three times their
+                //    stated gap, never under 30 minutes — and that warning was
+                //    dropped as untrue. **IT WAS NOT UNTRUE, and round 1 of
+                //    #793's check caught the reason given:** feed imports are
+                //    called every 15 minutes and keep D-070's 6 hours (24 missed
+                //    runs before anything is said), and event reminders, also
+                //    every 15 minutes, keep 2 hours. Those figures are the
+                //    owner's and stay. So the sentence now NAMES the job behind
+                //    each figure only one job has — "6 hours (feed imports)" —
+                //    which lets an administrator see that for themselves,
+                //    instead of a general warning that would read as true of
+                //    every frequent job.
                 //
                 // ⚠️ THE FIGURES ARE DERIVED, NOT TYPED, because typing them was
                 //    wrong twice in two rounds. Round 4's version claimed the
                 //    allowance matched each job's own cadence. Round 5's named
-                //    FOUR figures when there are FIVE — `cron/import-feeds` has
+                //    FOUR figures when there were FIVE — `cron/import-feeds` has
                 //    six hours and fell under "36 hours for the rest", so the
                 //    page told an administrator its allowance was SIX TIMES
                 //    what it is — and called 36 hours "the longest of them"
                 //    when eight days is. `ScheduledJobs::allowancesInWords()`
                 //    reads them out of JOBS, so a changed constant or a new job
-                //    cannot leave this sentence stale.
+                //    cannot leave this sentence stale. The TEST, though, holds
+                //    the sentence written out by hand (#795), because a test
+                //    that asks the method for its own answer agrees with it
+                //    however wrong it is.
                 'why'      => $finishedWell . ' of the ' . count($state) . ' recorded a FINISH '
-                    . 'inside the time allowed for it. That allowance differs by job and is '
-                    . 'generous — ' . ScheduledJobs::allowancesInWords() . ' — so a job called '
-                    . 'every few minutes can be many hours late and still count here.'
+                    . 'inside the time allowed for it. That allowance is set for each job from '
+                    . 'what it is for and how often it is meant to run: '
+                    . ScheduledJobs::allowancesInWords(array_keys($notNeeded)) . '.'
                     . (count($setAside) > 0
                         ? ' Not counted here: ' . implode(', and ', $setAside)
-                            . ' — each is reported above.'
-                        : ''),
+                            . ($reportedAbove === 1 ? ' — it is reported above.' : ' — each is reported above.')
+                        : '')
+                    . $offEverywhere,
                 'todo'     => 'Nothing.',
                 'examples' => [],
             ];
         }
 
         return $findings;
+    }
+
+    /**
+     * Is this feature switched on for at least one active organisation?
+     *
+     * ⚠️ "CANNOT TELL" ANSWERS YES. A failed read must not make a job vanish
+     *    from the page: answering no would hide a dead job behind a database
+     *    fault, which is the reassuring direction this page exists to avoid.
+     *    Answering yes only means the job is judged as it always was.
+     *
+     * '1' and 'true' are the two words `AppRegistry::isEnabledForSite()`
+     * accepts, so the two cannot disagree about what "on" means.
+     */
+    private static function featureInUse(mysqli $db, string $settingKey): bool
+    {
+        try {
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) AS `howMany` FROM `tblSites` AS `s` '
+                . 'LEFT JOIN `tblSettings` AS `own` ON `own`.`settingKey` = ? AND `own`.`siteID` = `s`.`siteID` '
+                . 'LEFT JOIN `tblSettings` AS `wide` ON `wide`.`settingKey` = ? AND `wide`.`siteID` IS NULL '
+                . 'WHERE `s`.`isActive` = 1 '
+                . "AND COALESCE(`own`.`settingValue`, `wide`.`settingValue`) IN ('1', 'true')"
+            );
+            $stmt->bind_param('ss', $settingKey, $settingKey);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            return (int) ($row['howMany'] ?? 1) > 0;
+        } catch (Throwable $e) {
+            return true;
+        }
+    }
+
+    /**
+     * Is any of this job's work still waiting, by the job's own selection?
+     *
+     * ⚠️ "CANNOT TELL" ANSWERS YES, for the reason `featureInUse()` gives: a
+     *    failed read must never make a job vanish from the page.
+     */
+    private static function workWaiting(mysqli $db, string $jobKey): bool
+    {
+        if (array_key_exists($jobKey, self::JOB_WORK_WAITING) === false) {
+            return false;
+        }
+        try {
+            $result = $db->query(self::JOB_WORK_WAITING[$jobKey]);
+            $row    = $result->fetch_assoc();
+            $result->free();
+
+            return (int) ($row['howMany'] ?? 1) > 0;
+        } catch (Throwable $e) {
+            return true;
+        }
     }
 
     /** How many findings of each severity, for the summary line. */

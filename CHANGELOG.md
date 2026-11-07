@@ -4,6 +4,68 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A scheduled job called every few minutes now counts as stopped within the hour (#793, D-076)
+
+- **A scheduled job called every few minutes now counts as stopped within the hour, not after a day and a half (#793, D-076).**
+  The "Check this portal" page gave eleven of the fifteen scheduled jobs 36 hours before calling them overdue, on the
+  premise that they were nightly. Six of them say in their own page headers that they are called every 5 to 60
+  minutes, so the retry for this portal's own outgoing webhooks could stop for a day and a half while the page said every job had run in
+  time. Each of those six now has an allowance of **three times the longest gap its own page states, and never under
+  30 minutes**: the "We're live" push 30 minutes, the webhook retry and task and personal reminders 45
+  minutes, and asset reminders, venue reminders and approval chasing 3 hours. The health check, whose page header
+  states no timing, is judged hourly from the line the staff health page tells customers to schedule (`0 * * * *`),
+  so it also gets 3 hours. The discipleship sweep, also silent, is optional and works by the day, so it keeps 36
+  hours with the retention sweep and both backup jobs. The mail queue (15 minutes), event reminders (2 hours), feed
+  imports (6 hours) and giving statements (8 days) are unchanged (D-070).
+  - **The setup guide now says how often to call every job and when each counts as stopped** — `INSTALL.md` step 6
+    has a table of all fifteen. Before this, nothing a customer reads gave a timing for most of them, so a customer
+    who chose an hourly schedule for a 5-minute job would have been told every day that it had stopped.
+  - **The Venues settings page said "on a daily schedule"** for the venue reminders job, whose own page has always
+    said every 30-60 minutes (both written in `37bf418`). It now says every 30 to 60 minutes; under the new 3-hour
+    allowance, "daily" would have produced a false "stopped" report every day.
+  - The page's all-clear lists each allowance, NAMING the job when only one job has it — "6 hours (feed imports)",
+    "2 hours (event reminders)" — and otherwise how many jobs share it ("45 minutes (2 jobs)"). Feed imports are
+    called every 15 minutes and keep D-070's 6 hours, so naming them lets an administrator see that a job called
+    often can still be hours late without being reported; the old general warning to that effect was dropped.
+  - **A job serving one app is no longer reported or counted while that app is off for every active organisation
+    AND none of its work is waiting (#793 rounds 1 and 2).** Round 2 found the first version hid a dead job:
+    `cron/giving-statements` never checks `giving.enabled` and sends every statement a treasurer queued, so with
+    Giving switched off after a run was queued the page said "there is nothing for it to do" about a job with
+    statements nine days in the queue. Giving now counts as needed while any statement is waiting by the job's own
+    selection (`queuedAt IS NOT NULL AND emailedAt IS NULL AND errorMsg IS NULL`, held equal to the job's page by
+    check Q8). Inactive organisations do not count, and a read that fails counts as needed, never as "nothing to
+    do" (checks Q9-Q11). The allowance list leaves out a job it says is not counted.
+  - (Round 1's wording, superseded by the line above:) **A job whose app is switched off for every organisation is no longer reported or counted (#793 round 1).**
+    `PortalCheck::JOB_NEEDS_FEATURE` lists the two jobs that serve one app each — giving statements (Giving) and
+    the reading-plan sweep (Discipleship Pathways). While that app is off for every active organisation, an empty
+    token is not a problem and the job is left out of every finding and of the all-clear's count, which names it
+    as set aside; while the app is on for ANY organisation (its own row included), an empty token is the problem it
+    always was. Before this, a fresh installation — where Giving ships switched off — was told "Some scheduled jobs
+    can never run" about a job with nothing to do, and the setup guide's advice to leave those two out produced the
+    same false problem.
+  - **The webhook-retry job was described as retrying "payment messages from Stripe or GoCardless".** It retries the
+    webhooks THIS portal sends (`WebhookDispatcher::retryDue()` over `tblWebhookDeliveries`), as FEATURES.md's #324
+    entry has always said. The description on the Check this portal page is corrected; any document repeating the
+    payment wording (#793's own issue text, the #775 bullet in the instruction files) is wrong the same way.
+  - The all-clear's "the 1 part-way through, which have not recorded a finish" now agrees with its number.
+  - Tests (rounds 1 and 2): every job's cadence is typed once and held to the setup guide's "Call it" column
+    (E9), to each job's own page header (E11), and to every other schedule printed for a customer that a stated
+    search finds — fourteen places across the Venues settings page, the health, backup and backup-check pages,
+    the calendar reminders page, two help pages and README (E12, E12c); each typed wording is held to its typed
+    gap (E9b), and every allowance is held to its gap — at least three times for D-076's seven, longer than one
+    gap for D-070's (E10). Section Q of `tools/portal-check-selftest.php` drives the switched-off and switched-on
+    states for both apps, including Giving on for one organisation by its own row.
+  - Tests: every job's figure is now typed out by hand in `tools/scheduled-jobs-selftest.php` and compared (it used
+    to assert only that the figures differed); a job called every few minutes reads overdue at two hours while a
+    nightly one does not, on the class and on the page (`tools/portal-check-selftest.php` section P); each new
+    figure is tested a minute either side of its boundary; the setup guide's table is held to the same figures; and
+    the all-clear's sentence is compared with a sentence written out by hand rather than with the method that builds
+    it, which closes the first item of #795.
+
+---
+  - **A statement queued for an organisation that has since been switched off is not counted as waiting work**, because the
+    job never sends it (it refuses an inactive organisation); counting it made the page report a problem that could never clear.
+
 ### The nightly clear-out no longer deletes event registrations before their time is up (#810)
 
 - **The nightly clear-out no longer deletes event registrations before their time is up (#810).**
@@ -225,15 +287,11 @@ finished**, and the "Check this portal" page reads it. It tells you:
 timetable. One figure for all fifteen would either let the mail task sit dead
 for a week, or complain about the nightly backup every single day.
 
-**The allowances are generous, and it is worth knowing by how much.** Fifteen
-minutes for the mail task, two hours for event reminders, six hours for
-importing outside calendars, eight days for giving statements, and 36 hours for
-the other eleven. **So a task that your scheduler calls every few minutes can
-be well over a day late and still be reported as having run recently enough.**
-That is deliberate — a stricter figure would complain every time a host paused
-its scheduler for an hour — but it means this page tells you a task has
-*stopped*, not that it is *late*. Whether those figures should be tighter is
-being looked at.
+**How late counts as stopped is set for each task from how often it is meant
+to run** (tightened by #793, see the entry above). It is meant to tell you a
+task has *stopped*, not that one run was a little late, so each allowance is
+several of that task's own gaps — a stricter figure would complain every time a
+host paused its scheduler for a few minutes.
 
 **Straight after this update almost every task will say "nothing is known yet",
 and that is expected.** Each one starts being watched the first time it runs,

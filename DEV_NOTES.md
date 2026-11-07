@@ -236,7 +236,7 @@ gate's own. Measured: the hard gate said OK while the self-test went three red
 **It is worse than the fault it restored.** Round 1's bypass only forged the
 record. Here an unauthenticated request gets its 403 header and then RUNS ON —
 writing `began()` and executing `WebhookDispatcher::retryDue()`, the
-payment-webhook retry sweep.
+outgoing-webhook retry sweep.
 
 **That guard has now been wrong in both directions twice**, and each version was
 "verified by planting" the shapes its author had thought of:
@@ -362,7 +362,7 @@ a false red here stops all work.
 the time expected for that job", and six of the eleven jobs on the 36-hour
 default say in their own headers that they are called every 5 to 60 minutes —
 so three of them 35 hours late read as "15 of the 15 recorded a FINISH", with
-todo "Nothing", while the payment-webhook retry sweep was dead. The sentence now
+todo "Nothing", while the outgoing-webhook retry sweep was dead. The sentence now
 names the four figures and says a job called every few minutes can be hours late
 and still count. **The figure is the owner's (D-070) and is unchanged; the
 measured fact is put to them as #793**, which is the register's route for a fact
@@ -384,7 +384,7 @@ decides whether to apply:
     }
 
 Every committed guard stayed green, and over real HTTP a request carrying
-`?debug=1` was not refused, wrote `began()`, and ran the payment-webhook retry
+`?debug=1` was not refused, wrote `began()`, and ran the outgoing-webhook retry
 sweep.
 
 **And driving it does not catch that either** — measured, not assumed: with the
@@ -20453,3 +20453,44 @@ Where the expression is written twice in one statement (dashboard, reminder prev
   moved 491/492 -> 681/682 and their text is now `SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` …`.
 
 **Review: three rounds by fresh Claude agents, the third CLEAN** (protected arm — it deletes personal data). Round 3 drove the real method over 5.67 million cases in all 598 zones, 2008–2028, on PHP 8.4, 8.5 and 8.6, with zero early deletions — and showed the simulation can fail (151,225 early deletions with the extra days removed); `CAST(... AS BINARY)` was measured on MySQL 8.0, 8.4 and 9.7 and MariaDB 11.4 and 12.3. Left open: the race where an event's own figure is raised between the longest-period read and the delete, and the installation ceiling on the figures themselves (#816, D-074).
+
+### Frequent jobs get allowances from their own timing (#793, D-076)
+
+**The rule, written once beside the constants in `web/_core/ScheduledJobs.php`:** three times the longest gap the
+job's own page header states, never under 30 minutes. Where a header gives a range, the longer end is the gap,
+because a customer following that page may choose it.
+
+| job | its own words | allowance |
+|---|---|---|
+| `cron/push-golive` | "every 5 minutes" | 30 minutes (the floor; 3 × 5 = 15) |
+| `cron/webhook-retry` | "every 5-15 minutes" | 45 minutes |
+| `cron/user-reminders` | "every 15 minutes" | 45 minutes |
+| `cron/asset-reminders` | "every 15-60 minutes" | 3 hours |
+| `cron/venue-reminders` | "every 30-60 minutes" | 3 hours |
+| `cron/workflow-timeouts` | "called hourly" | 3 hours |
+| `cron/health` | silent; the staff health page prints `0 * * * *` | 3 hours |
+| `cron/discipleship-sweep` | silent; "a convenience, not a dependency" | 36 hours (nightly) |
+
+- **Why three times:** a job is reported only after two missed runs in a row, so one slow or skipped run on a busy
+  shared host says nothing (#483), while a stopped job is still reported the same morning.
+- **Why the 30-minute floor:** it is the owner's own example for a five-minute job in D-076, and a shared-hosting
+  scheduler can run several minutes late. The mail queue keeps 15 minutes although it too runs every five, because
+  that figure is `MailQueue::jobIsRunning()`'s window, which decides how mail is SENT; the page must agree with it.
+- **One constant per job, not per figure**, so changing one job's allowance cannot move another's.
+- **An allowance a customer is never told is a false alarm waiting to happen.** The new figures assume each job is
+  called as often as its header says, and until this change nothing a customer reads said so for most of them — and
+  the one place that did (`venues/settings.php`) said "daily" for a job whose header says every 30-60 minutes, both
+  written in `37bf418` (`git log -S"daily schedule" -- web/_apps/venues/settings.php` and
+  `git log -S"every 30-60 minutes" -- web/_apps/cron/venue-reminders.php` each answer only that commit). So
+  `docs/INSTALL.md` step 6 now carries a table of all fifteen, and check E8 of `scheduled-jobs-selftest.php` holds its
+  last column to the hand-typed figures.
+- **The test types the figures, never asks for them (#795).** E4 compares every job's `overdue` with a literal map,
+  and H0c3 (scheduled-jobs) and P4 (portal-check) compare the all-clear's reason with a sentence written out by hand.
+  The old H0c3 looked for `allowancesInWords()`'s own answer on the page, so the page and the test agreed whatever
+  that method said; planted, doubling every minute figure inside `lengthInWords()` now turns H0c3 and P4 red.
+- `allowancesInWords()` now writes "45 minutes (2 jobs)" rather than "45 minutes for 2 of them": with eight figures
+  the old form said "for one job" five times in one sentence.
+
+---
+
+**Round 3 (the last under the three-round cap, D-051) found the job's WHERE clause is not its whole selection**: `cron/giving-statements` calls `Site::forceContext()` per row, which refuses an inactive organisation, so a statement queued for one is never sent — and counting it made the page report a PROBLEM that could never clear, on the very set-up the guide recommends. `PortalCheck::JOB_WORK_WAITING_ACTIVE_ONLY` now adds that condition; Q8 compares the job's WHERE with everything before it and Q8b pins it; Q9c/Q9d drive it (planted out, both go red). That fix and the guide's giving row were made by the commissioning session AFTER the capped review, and were not independently checked. Left on #820: Q8 is a text comparison a JOIN or an extra condition can slip past; two schedule sentences (DbBackup, the retention page) are not held; and the giving job's own skipped rows and unretried failures. Review: three rounds by fresh Claude agents; Codex has not reviewed it.

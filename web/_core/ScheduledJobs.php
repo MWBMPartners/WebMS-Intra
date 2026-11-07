@@ -46,6 +46,14 @@
  *
  * Each threshold is ONE constant below, so changing one later is one line.
  *
+ * D-076 (the owner, 7 November 2026) replaced D-070's "everything else, 36
+ * hours" row for the SEVEN jobs that are called every few minutes or hourly —
+ * the six whose own headers say so, and `cron/health`, whose header is silent
+ * and which D-076 left to be judged from what it does (it is hourly, by the
+ * health page's own scheduler line). Each now has an allowance of three times
+ * its own stated gap, never under 30 minutes. The rule and every figure's
+ * source sit beside the constants.
+ *
  * -----------------------------------------------------------------------------
  * NO RECORD MEANS "NOTHING IS KNOWN YET" (D-071, the owner, 6 November 2026)
  * -----------------------------------------------------------------------------
@@ -126,31 +134,93 @@ final class ScheduledJobs
     public const OVERDUE_GIVING_STATEMENTS = 691200; // 8 days
 
     /**
-     * 36 hours: a night plus a day's grace. **THE DEFAULT, NOT A STATEMENT
-     * THAT THESE JOBS ARE NIGHTLY** — and the name says "nightly" because
-     * D-070's table calls this row "everything else | 36 hours | nightly, plus
-     * a day's grace", which was decided on that premise.
+     * 📏 THE FREQUENT JOBS (D-076, the owner, 7 November 2026)
      *
-     * ⚠️ THE PREMISE IS MEASURABLY FALSE FOR SIX OF THE ELEVEN JOBS THAT USE
-     *    IT, and their own page headers say so:
+     * THE RULE, WRITTEN ONCE: **three times the longest gap the job's own page
+     * says it is called at, and never less than 30 minutes.** Where a page
+     * states a RANGE ("every 15-60 minutes") the LONGER end is the normal gap,
+     * because a customer following that page may choose it.
      *
-     *      cron/push-golive        "every 5 minutes"
-     *      cron/webhook-retry      "every 5-15 minutes"
-     *      cron/user-reminders     "every 15 minutes"
-     *      cron/asset-reminders    "every 15-60 minutes"
-     *      cron/venue-reminders    "every 30-60 minutes"
-     *      cron/workflow-timeouts  "called hourly"
+     *   job                      the page's own words      × 3       allowance
+     *   cron/push-golive         "every 5 minutes"         15 min    30 minutes (the floor)
+     *   cron/webhook-retry       "every 5-15 minutes"      45 min    45 minutes
+     *   cron/user-reminders      "every 15 minutes"        45 min    45 minutes
+     *   cron/asset-reminders     "every 15-60 minutes"     3 hours   3 hours
+     *   cron/venue-reminders     "every 30-60 minutes"     3 hours   3 hours
+     *   cron/workflow-timeouts   "called hourly"           3 hours   3 hours
+     *   cron/health              silent — hourly, below    3 hours   3 hours
      *
-     *    The other five are genuinely nightly or state no cadence
-     *    (retention-sweep "once a night", backup-run and backup-check
-     *    "daily", health and discipleship-sweep silent).
+     * The words are each page's own header in `web/_apps/cron/`, and they are
+     * what `docs/INSTALL.md` step 6 tells a customer. **An allowance the
+     * customer was never told about is a false alarm waiting for whoever
+     * schedules the job less often**, which is why the guide carries them.
      *
-     *    So a job called every five minutes can be 35 hours late and still
-     *    count as healthy. **The figure is the owner's and is NOT changed
-     *    here**; the measured fact is put to them against D-070's row as #793,
-     *    which is the register's own route for a fact that unsettles a
-     *    recorded answer, and which quotes the row and the fact. Until that is decided, this comment is the warning
-     *    and the page no longer claims the allowance matches each job.
+     * WHY THREE TIMES. A job is reported only once it has missed two runs in a
+     * row, so one skipped or slow run — a busy shared host, a scheduler being
+     * restarted — never says anything: a check that cries wolf gets switched
+     * off (#483), and this project has paid for that once. A job that has
+     * really stopped is still reported the same morning: inside the hour for
+     * the jobs called every few minutes, inside three hours for the hourly
+     * ones. Under D-070's 36 hours a five-minute job could be a day and a half
+     * dead and read as healthy (#793, measured), which is what D-076 ended.
+     *
+     * WHY THE 30-MINUTE FLOOR. Three times five minutes is fifteen, and the
+     * owner's own example for a five-minute job was "about 30 minutes". A
+     * scheduler on shared hosting can run several minutes late, so fifteen
+     * would report a portal for one sluggish run. **The mail queue keeps its
+     * fifteen minutes (D-070)** although it too is called every five, because
+     * that figure is not a reporting choice: it is the window
+     * `MailQueue::jobIsRunning()` already uses to decide how mail is SENT, and
+     * this page must agree with it.
+     *
+     * WHY `cron/health` IS HOURLY. Its own header names no timing. The staff
+     * health page (`/admin/maintenance/health`) prints the scheduler line a
+     * customer copies, `0 * * * *` — once an hour — so it is an hourly job by
+     * the portal's own instruction. An uptime monitor usually calls it more
+     * often than that, which only makes three hours safer.
+     *
+     * One constant per JOB, not per figure, so that changing one job's
+     * allowance later is one line and cannot move another's with it.
+     */
+    public const OVERDUE_PUSH_GOLIVE = 1800;        // 30 minutes
+    public const OVERDUE_WEBHOOK_RETRY = 2700;      // 45 minutes
+    public const OVERDUE_USER_REMINDERS = 2700;     // 45 minutes
+    public const OVERDUE_ASSET_REMINDERS = 10800;   // 3 hours
+    public const OVERDUE_VENUE_REMINDERS = 10800;   // 3 hours
+    public const OVERDUE_WORKFLOW_TIMEOUTS = 10800; // 3 hours
+    public const OVERDUE_HEALTH = 10800;            // 3 hours
+
+    /**
+     * 36 hours: a night plus a day's grace (D-070), for the jobs that really
+     * run once a day and no more often:
+     *
+     *   cron/retention-sweep     "meant to be called once a night"
+     *   cron/backup-run          "Meant for a daily call", and "CALL IT DAILY
+     *                            WHATEVER THE SETTING SAYS"
+     *   cron/backup-check        "Meant for a daily call"
+     *   cron/discipleship-sweep  silent — judged below
+     *
+     * WHY `cron/discipleship-sweep` IS NIGHTLY. Its own header states no
+     * timing, and until #793 nothing told a customer how often to call it;
+     * `docs/INSTALL.md` step 6 now says "once a day", and that instruction
+     * follows from this judgement rather than the other way round. Judged
+     * from what it does: its own header calls it "a convenience, not a
+     * dependency", because
+     * the same sweep already runs on every discipleship page view, and what it
+     * does — moving people on through their reading plans — happens by the
+     * DAY. Nothing it does is worse for running once a night, so a shorter
+     * figure would report a portal for calling an optional job once a day,
+     * which is a perfectly sensible thing to do.
+     *
+     * ⚠️ THIS USED TO BE "everything else", AND THAT PREMISE WAS FALSE. Until
+     *    D-076 eleven jobs carried this figure, and six of them say in their own
+     *    headers that they run every few minutes or hourly — so a job called
+     *    every five minutes could be 35 hours late and still count as healthy
+     *    (#793: with three such jobs last finished 35 hours ago, the page said
+     *    all fifteen had finished in time and there was nothing to do). Those
+     *    six have figures of their own above. **A new job is NOT given this
+     *    figure by default**: choose one from what the job is for and how often
+     *    it is called, as D-070 and D-076 did for every other.
      */
     public const OVERDUE_NIGHTLY = 129600;          // 36 hours
 
@@ -195,84 +265,114 @@ final class ScheduledJobs
      *   token      the setting holding its token. SEVERAL JOBS SHARE ONE: see
      *              the note at the top of this file.
      *   overdue    seconds, from the constants above.
+     *   name       what the job IS, in a few words, for a sentence that has
+     *              to say which job a figure belongs to (#793 round 1: "6
+     *              hours (1 job)" left an administrator unable to tell that it
+     *              is the feed import, called every 15 minutes, that may be six
+     *              hours stale). `whatStops` is what is LOST, which reads
+     *              wrongly in that place.
      *
-     * @var array<string, array{whatStops: string, token: string, overdue: int}>
+     * @var array<string, array{whatStops: string, token: string, overdue: int, name: string}>
      */
     public const JOBS = [
         'cron/mail-queue' => [
             'whatStops' => 'Sending mail that could not go out at once, and text messages held for quiet hours',
             'token'     => 'maintenance.cronToken',
             'overdue'   => self::OVERDUE_MAIL_QUEUE,
+            'name'      => 'the mail queue',
         ],
         'cron/event-reminders' => [
             'whatStops' => 'Event reminders the day before and an hour ahead, and the morning summary',
             'token'     => 'reminders.cron_token',
             'overdue'   => self::OVERDUE_EVENT_REMINDERS,
+            'name'      => 'event reminders',
         ],
         'cron/import-feeds' => [
             'whatStops' => 'Importing events from outside calendars',
             'token'     => 'feeds.cron_token',
             'overdue'   => self::OVERDUE_IMPORT_FEEDS,
+            'name'      => 'feed imports',
         ],
         'cron/giving-statements' => [
             'whatStops' => 'Sending giving statements',
             'token'     => 'giving.cron_token',
             'overdue'   => self::OVERDUE_GIVING_STATEMENTS,
+            'name'      => 'giving statements',
         ],
         'cron/retention-sweep' => [
             'whatStops' => 'Clearing out personal data past the period this portal said it would keep it',
             'token'     => 'maintenance.cronToken',
             'overdue'   => self::OVERDUE_NIGHTLY,
+            'name'      => 'the personal-data clear-out',
         ],
         'cron/backup-run' => [
             'whatStops' => 'Taking the nightly backup',
             'token'     => 'maintenance.cronToken',
             'overdue'   => self::OVERDUE_NIGHTLY,
+            'name'      => 'the backup',
         ],
         'cron/backup-check' => [
             'whatStops' => 'Checking that the backups are recent and readable',
             'token'     => 'maintenance.cronToken',
             'overdue'   => self::OVERDUE_NIGHTLY,
+            'name'      => 'the backup check',
         ],
         'cron/health' => [
             'whatStops' => 'The health check this portal reports to whoever watches it',
             'token'     => 'maintenance.cronToken',
-            'overdue'   => self::OVERDUE_NIGHTLY,
+            'overdue'   => self::OVERDUE_HEALTH,
+            'name'      => 'the health check',
         ],
         'cron/user-reminders' => [
             'whatStops' => 'Task and personal reminders',
             'token'     => 'user_reminders.cron_token',
-            'overdue'   => self::OVERDUE_NIGHTLY,
+            'overdue'   => self::OVERDUE_USER_REMINDERS,
+            'name'      => 'task and personal reminders',
         ],
         'cron/asset-reminders' => [
             'whatStops' => 'Reminders that equipment is due back or due a check',
             'token'     => 'assets.cron_token',
-            'overdue'   => self::OVERDUE_NIGHTLY,
+            'overdue'   => self::OVERDUE_ASSET_REMINDERS,
+            'name'      => 'equipment reminders',
         ],
         'cron/venue-reminders' => [
             'whatStops' => 'Reminders that a venue agreement is running out',
             'token'     => 'venues.cron_token',
-            'overdue'   => self::OVERDUE_NIGHTLY,
+            'overdue'   => self::OVERDUE_VENUE_REMINDERS,
+            'name'      => 'venue reminders',
         ],
         'cron/discipleship-sweep' => [
             'whatStops' => 'Moving people on through their reading plans',
             'token'     => 'discipleship.cron_token',
             'overdue'   => self::OVERDUE_NIGHTLY,
+            'name'      => 'the reading-plan sweep',
         ],
         'cron/push-golive' => [
             'whatStops' => 'The "We are live" push when a stream starts',
             'token'     => 'push.cron_token',
-            'overdue'   => self::OVERDUE_NIGHTLY,
+            'overdue'   => self::OVERDUE_PUSH_GOLIVE,
+            'name'      => 'the live-stream push',
         ],
         'cron/webhook-retry' => [
-            'whatStops' => 'Retrying payment messages from Stripe or GoCardless that failed first time',
+            // ⚠️ OUTGOING WEBHOOKS, NOT PAYMENTS. This said "Retrying payment
+            //    messages from Stripe or GoCardless that failed first time"
+            //    (9fda654). The page's own header is "Outbound webhook async
+            //    retry sweep", and all it does is call
+            //    `WebhookDispatcher::retryDue()`, which re-sends failed rows of
+            //    `tblWebhookDeliveries` — the messages THIS portal sends to
+            //    the addresses an administrator registered (FEATURES.md, #324).
+            //    Incoming payment messages are another table (`tblWebhookEvent`)
+            //    and this job never reads it.
+            'whatStops' => 'Sending again the messages this portal sends to other systems (its webhooks) that failed first time',
             'token'     => 'webhooks.cron_token',
-            'overdue'   => self::OVERDUE_NIGHTLY,
+            'overdue'   => self::OVERDUE_WEBHOOK_RETRY,
+            'name'      => 'the webhook retry',
         ],
         'cron/workflow-timeouts' => [
             'whatStops' => 'Chasing approvals that have been waiting too long',
             'token'     => 'workflows.cron_token',
-            'overdue'   => self::OVERDUE_NIGHTLY,
+            'overdue'   => self::OVERDUE_WORKFLOW_TIMEOUTS,
+            'name'      => 'approval chasing',
         ],
     ];
 
@@ -544,30 +644,56 @@ final class ScheduledJobs
      * 🕒 The allowances in words, DERIVED from the list rather than typed.
      *
      * ⚠️ TYPING THEM OUT WAS WRONG TWICE IN TWO ROUNDS. Round 4's wording
-     *    claimed the allowance matched each job's own cadence, which is false
-     *    for six of them. Round 5 replaced it with four figures — and there
-     *    are FIVE: `cron/import-feeds` has six hours, and fell under "36 hours
-     *    for the rest", so the page told an administrator its allowance was
-     *    SIX TIMES what it is. The same comment also called 36 hours "the
+     *    claimed the allowance matched each job's own cadence, which was then
+     *    false for six of them. Round 5 replaced it with four figures — and
+     *    there were FIVE: `cron/import-feeds` has six hours, and fell under "36
+     *    hours for the rest", so the page told an administrator its allowance
+     *    was SIX TIMES what it is. The same comment also called 36 hours "the
      *    longest of them" when eight days is.
      *
      *    So nothing here is typed. The figures and the job counts come out of
      *    JOBS, which means a new job or a changed constant cannot leave this
      *    sentence stale — the shape of mistake that made it wrong both times.
      *
-     * @return string A list ready to drop into a sentence, longest last.
+     * ⚠️ BUT DERIVING IT DOES NOT MAKE IT RIGHT, and the test must not ask this
+     *    method what it should say (#795: a test comparing the page with this
+     *    method's own answer stayed green with every allowance reported at
+     *    double its length). `tools/scheduled-jobs-selftest.php` compares the
+     *    page with the sentence WRITTEN OUT BY HAND.
+     *
+     * Each figure carries, in brackets, the job it belongs to when only one
+     * job has it — "6 hours (feed imports)" — and how many jobs have it
+     * otherwise — "45 minutes (2 jobs)". Naming the lone ones is not
+     * decoration (#793 round 1): feed imports are called every 15 minutes and
+     * event reminders every 15, with D-070's 6 and 2 hours, so a job called
+     * every few minutes CAN still be hours late without being reported, and
+     * "6 hours (1 job)" left an administrator no way to tell which job that
+     * is. It used to read "for one job" five times in one sentence.
+     *
+     * `$leaveOut` names jobs the sentence is not about. The check page passes
+     * the jobs it does not count (their app is switched off and none of their
+     * work is waiting), because listing "8 days (giving statements)" in the
+     * same sentence that says that job is not counted reads as though it were.
+     *
+     * @param list<string> $leaveOut job addresses to leave out of the list
+     * @return string A list ready to drop into a sentence, shortest first.
      */
-    public static function allowancesInWords(): string
+    public static function allowancesInWords(array $leaveOut = []): string
     {
         $byLimit = [];
-        foreach (self::JOBS as $facts) {
+        $nameOf  = [];
+        foreach (self::JOBS as $jobKey => $facts) {
+            if (in_array($jobKey, $leaveOut, true) === true) {
+                continue;
+            }
             $byLimit[$facts['overdue']] = ($byLimit[$facts['overdue']] ?? 0) + 1;
+            $nameOf[$facts['overdue']]  = $facts['name'];
         }
         ksort($byLimit);
         $parts = [];
         foreach ($byLimit as $seconds => $howMany) {
             $parts[] = self::lengthInWords((int) $seconds)
-                . ($howMany === 1 ? ' for one job' : ' for ' . $howMany . ' of them');
+                . ($howMany === 1 ? ' (' . $nameOf[$seconds] . ')' : ' (' . $howMany . ' jobs)');
         }
         $last = array_pop($parts);
 

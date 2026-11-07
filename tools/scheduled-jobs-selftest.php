@@ -28,7 +28,9 @@
  *   E  the thresholds really DIFFER BY JOB (D-070). The same age must be
  *      overdue for the mail queue and perfectly fine for giving statements —
  *      and a single threshold for all fifteen would pass every other check in
- *      this file.
+ *      this file. Every job's figure is also WRITTEN OUT BY HAND here (D-070,
+ *      D-076) and compared, and the jobs called every few minutes are shown
+ *      overdue at two hours while the nightly ones are not (#793).
  *   F  the window between files landing and somebody pressing "Run
  *      migrations": with the table absent, nothing throws and everything reads
  *      as not-known. If this were wrong the mail queue would stop, and this
@@ -367,17 +369,330 @@ $all = ScheduledJobs::state($db);
 check('E1 three hours is OVERDUE for the mail queue (15 minutes)', $all['cron/mail-queue']['status'], ScheduledJobs::OVERDUE);
 check('E2 three hours is OVERDUE for event reminders (2 hours)', $all['cron/event-reminders']['status'], ScheduledJobs::OVERDUE);
 check('E3 the SAME three hours is RECENT for giving statements (8 days)', $all['cron/giving-statements']['status'], ScheduledJobs::RECENT);
-// ⚠️ NAMED FOR THE JOB, NOT A NUMBER. This said "the four thresholds are four
-//    different numbers" while asserting FIVE — a label named after a number is
-//    the shape #739 recorded, and it would have printed "four" on the day a
-//    sixth was added.
-check('E4 every threshold is a distinct number, so none is a copy of another', count(array_unique([
-    ScheduledJobs::OVERDUE_MAIL_QUEUE,
-    ScheduledJobs::OVERDUE_EVENT_REMINDERS,
-    ScheduledJobs::OVERDUE_IMPORT_FEEDS,
-    ScheduledJobs::OVERDUE_GIVING_STATEMENTS,
-    ScheduledJobs::OVERDUE_NIGHTLY,
-])), 5);
+// ⚠️ EVERY FIGURE IS WRITTEN OUT BY HAND HERE, and that is the point (#795).
+//    This used to assert only that the constants were five DIFFERENT numbers,
+//    which a wrong number passes, and it went stale the moment D-076 gave two
+//    jobs the same figure. Asking `ScheduledJobs` what its own figures are
+//    would prove only that the class agrees with itself — so the owner's
+//    figures are typed below, in seconds, with where each comes from:
+//      D-070: mail queue 15 min, event reminders 2 h, import feeds 6 h,
+//             giving statements 8 days, the genuinely nightly jobs 36 h.
+//      D-076: three times each job's own stated gap, never under 30 minutes.
+//    A changed figure must be changed HERE too, deliberately.
+$owners = [
+    'cron/mail-queue'         => 900,      // 15 minutes (D-070)
+    'cron/event-reminders'    => 7200,     // 2 hours (D-070)
+    'cron/import-feeds'       => 21600,    // 6 hours (D-070)
+    'cron/giving-statements'  => 691200,   // 8 days (D-070)
+    'cron/retention-sweep'    => 129600,   // 36 hours (D-070) — "once a night"
+    'cron/backup-run'         => 129600,   // 36 hours (D-070) — "a daily call"
+    'cron/backup-check'       => 129600,   // 36 hours (D-070) — "a daily call"
+    'cron/health'             => 10800,    // 3 hours (D-076) — hourly, by the health page's own line
+    'cron/user-reminders'     => 2700,     // 45 minutes (D-076) — "every 15 minutes"
+    'cron/asset-reminders'    => 10800,    // 3 hours (D-076) — "every 15-60 minutes"
+    'cron/venue-reminders'    => 10800,    // 3 hours (D-076) — "every 30-60 minutes"
+    'cron/discipleship-sweep' => 129600,   // 36 hours (D-076) — optional, works by the day
+    'cron/push-golive'        => 1800,     // 30 minutes (D-076) — "every 5 minutes", the floor
+    'cron/webhook-retry'      => 2700,     // 45 minutes (D-076) — "every 5-15 minutes"
+    'cron/workflow-timeouts'  => 10800,    // 3 hours (D-076) — "called hourly"
+];
+check(
+    'E4 every job\'s allowance is the figure the owner chose (D-070, D-076), as typed in this test',
+    array_map(static fn (array $facts): int => $facts['overdue'], ScheduledJobs::JOBS),
+    $owners
+);
+
+// ── #793 / D-076: a job called every few minutes must not get a NIGHT's grace ──
+// ⚠️ THE MEASURED FAULT, DRIVEN. Under D-070's "everything else" row a job
+//    called every five minutes could be 35 hours late and read as healthy.
+//    Two hours is the age the issue asked about: past every frequent job's
+//    figure under an hour, and nowhere near a nightly one's.
+$db->query('DELETE FROM `tblScheduledJobRun`');
+foreach (['cron/webhook-retry', 'cron/push-golive', 'cron/user-reminders', 'cron/retention-sweep',
+          'cron/discipleship-sweep'] as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+    $age($job, 7200, true);            // two hours ago, for all five
+}
+$all = ScheduledJobs::state($db);
+check('E5 two hours is OVERDUE for the webhook retry (45 minutes)', $all['cron/webhook-retry']['status'], ScheduledJobs::OVERDUE);
+check('E5b and for the "We are live" push (30 minutes)', $all['cron/push-golive']['status'], ScheduledJobs::OVERDUE);
+check('E5c and for task and personal reminders (45 minutes)', $all['cron/user-reminders']['status'], ScheduledJobs::OVERDUE);
+check('E6 the SAME two hours is RECENT for the nightly retention sweep (36 hours)', $all['cron/retention-sweep']['status'], ScheduledJobs::RECENT);
+check('E6b and for the optional discipleship sweep, judged nightly (36 hours)', $all['cron/discipleship-sweep']['status'], ScheduledJobs::RECENT);
+
+// Each figure D-076 introduced, from BOTH sides of its own boundary. A figure
+// that drifted by more than a minute either way turns one of these red, and the
+// boundary used is the literal above, never the class's constant.
+foreach (['cron/push-golive', 'cron/webhook-retry', 'cron/user-reminders', 'cron/asset-reminders',
+          'cron/venue-reminders', 'cron/workflow-timeouts', 'cron/health'] as $job) {
+    ScheduledJobs::began($db, $job);
+    ScheduledJobs::finished($db, $job);
+    $age($job, $owners[$job] - 60, true);
+    $inside = ScheduledJobs::state($db)[$job]['status'];
+    $age($job, $owners[$job] + 60, true);
+    $past = ScheduledJobs::state($db)[$job]['status'];
+    check(
+        'E7 ' . $job . ' is RECENT a minute inside ' . $owners[$job] . ' seconds and OVERDUE a minute past it',
+        [$inside, $past],
+        [ScheduledJobs::RECENT, ScheduledJobs::OVERDUE]
+    );
+}
+
+// ── The setup guide must give the same figures ─────────────────────────────
+// ⚠️ AN ALLOWANCE A CUSTOMER WAS NEVER TOLD ABOUT IS A FALSE ALARM WAITING TO
+//    HAPPEN. D-076's figures assume each job is called as often as its own
+//    page says, and until #793 nothing a customer reads said so for most of
+//    them — the Venues settings page even said "daily" for a job its own
+//    header calls every 30-60 minutes. `docs/INSTALL.md` step 6 now lists
+//    every job, and this holds its last column to the figures typed above, so
+//    a changed figure that is not also changed in the guide turns this red.
+$inWords = [900 => '15 minutes', 1800 => '30 minutes', 2700 => '45 minutes', 7200 => '2 hours',
+            10800 => '3 hours', 21600 => '6 hours', 129600 => '36 hours', 691200 => '8 days'];
+$guide = (string) file_get_contents($repo . $sep . 'docs' . $sep . 'INSTALL.md');
+$guideSays = [];
+foreach (array_keys($owners) as $job) {
+    $guideSays[$job] = preg_match('/^\s*\| `\/' . preg_quote($job, '/') . '` \|.*\| ([^|]+?) \|\s*$/m', $guide, $m) === 1
+        ? $m[1] : '(no row in docs/INSTALL.md)';
+}
+check(
+    'E8 docs/INSTALL.md step 6 tells a customer the same allowance for every job as typed above',
+    $guideSays,
+    array_map(static fn (int $seconds): string => $inWords[$seconds], $owners)
+);
+
+// ── HOW OFTEN each job is called, typed, and tied to its allowance ─────────
+// ⚠️ E8 HELD ONLY THE GUIDE'S LAST COLUMN, so the allowance and the instruction
+//    it depends on could drift apart with everything green: round 1 of #793's
+//    check changed venue reminders to "once a day" in the guide AND put the
+//    Venues settings page back to "on a daily schedule", and both suites and
+//    every audit script stayed green — while a customer following either would
+//    be told every day that the job had stopped. An allowance is only honest
+//    against the gap a customer is TOLD, so the places that tell them are held
+//    here to one typed gap per job:
+//      * the guide's "Call it" column (E9),
+//      * each job's own page header, which ScheduledJobs names as the source
+//        of its figure (E11),
+//      * every other schedule printed for a customer that the search below
+//        finds (E12, E12c),
+//    every allowance is held to its gap (E10), and every typed wording is
+//    held to its typed number (E9b), so a wording and its gap cannot be
+//    edited apart.
+//
+//    ⚠️ "EVERY PLACE" IS A CLAIM ABOUT A SEARCH, AND ROUND 2 OF #793's CHECK
+//       FOUND THE FIRST VERSION OF THIS COMMENT UNTRUE: it named two places
+//       when there were nine. The list in `$printed` is what these two
+//       commands return, outside `web/_apps/cron/` and `docs/decisions/`:
+//         grep -rnE "[0-9*/,]+ [0-9*/,]+ \* \* \*" web/_apps README.md docs/INSTALL.md
+//         grep -rnE "every (five|fifteen|[0-9]+)( to [0-9]+|-[0-9]+)? minutes|every hour|once a (day|night|week)" \
+//             web/_apps README.md docs/INSTALL.md
+//       read by hand for the lines that tell a customer how often to call a
+//       job. It CANNOT see a schedule worded some other way, and it leaves
+//       out `CHANGELOG.md`, whose entries are a record of what shipped, not
+//       an instruction kept current.
+//
+//    'header' is the phrase the job's own page states, or null where it states
+//    none (health — judged from the health page's line — and the jobs D-070
+//    set by purpose, whose headers this test does not lean on).
+$gaps = [
+    'cron/mail-queue'         => ['guide' => 'every 5 minutes', 'header' => null, 'gap' => 300],
+    'cron/push-golive'        => ['guide' => 'every 5 minutes', 'header' => 'every 5 minutes', 'gap' => 300],
+    'cron/webhook-retry'      => ['guide' => 'every 5 to 15 minutes', 'header' => 'every 5-15 minutes', 'gap' => 900],
+    'cron/user-reminders'     => ['guide' => 'every 15 minutes', 'header' => 'every 15 minutes', 'gap' => 900],
+    'cron/event-reminders'    => ['guide' => 'every 15 minutes', 'header' => null, 'gap' => 900],
+    'cron/asset-reminders'    => ['guide' => 'every 15 to 60 minutes', 'header' => 'every 15-60 minutes', 'gap' => 3600],
+    'cron/venue-reminders'    => ['guide' => 'every 30 to 60 minutes', 'header' => 'every 30-60 minutes', 'gap' => 3600],
+    'cron/workflow-timeouts'  => ['guide' => 'every hour', 'header' => 'called hourly', 'gap' => 3600],
+    'cron/health'             => ['guide' => 'every hour', 'header' => null, 'gap' => 3600],
+    'cron/import-feeds'       => ['guide' => 'every 15 minutes', 'header' => null, 'gap' => 900],
+    'cron/retention-sweep'    => ['guide' => 'once a night', 'header' => 'called once a night', 'gap' => 86400],
+    'cron/backup-run'         => ['guide' => 'once a day', 'header' => 'Meant for a daily call', 'gap' => 86400],
+    'cron/backup-check'       => ['guide' => 'once a day', 'header' => 'Meant for a daily call', 'gap' => 86400],
+    'cron/discipleship-sweep' => ['guide' => 'once a day, while Discipleship Pathways is switched on', 'header' => null, 'gap' => 86400],
+    'cron/giving-statements'  => ['guide' => 'at least once a week, while Giving is switched on or statements are waiting to be sent', 'header' => null, 'gap' => 604800],
+];
+$gapJobs   = array_keys($gaps);
+$ownerJobs = array_keys($owners);
+sort($gapJobs);
+sort($ownerJobs);
+check('E9-0 the typed gaps cover exactly the jobs the typed allowances do', $gapJobs, $ownerJobs);
+
+// How long a written schedule means, in seconds. Test code, and deliberately
+// small: it knows only the wordings this repository uses, and answers null for
+// anything else, which fails the checks below rather than passing them.
+$toSeconds = static function (string $said): ?int {
+    $said  = strtolower(trim($said));
+    $words = ['five' => 5, 'ten' => 10, 'fifteen' => 15, 'thirty' => 30];
+    if (preg_match('/^(\S+) (\S+) \* \* \*$/', $said, $m) === 1) {
+        [$minute, $hour] = [$m[1], $m[2]];
+        if ($hour === '*') {
+            if (preg_match('/^\*\/(\d+)$/', $minute, $x) === 1) {
+                return (int) $x[1] * 60;
+            }
+            if (preg_match('/^\d+$/', $minute) === 1) {
+                return 3600;
+            }
+            if (preg_match('/^\d+(,\d+)+$/', $minute) === 1) {
+                $at   = array_map('intval', explode(',', $minute));
+                $long = 60 - $at[count($at) - 1] + $at[0];
+                for ($i = 1; $i < count($at); $i++) {
+                    $long = max($long, $at[$i] - $at[$i - 1]);
+                }
+                return $long * 60;
+            }
+            return null;
+        }
+        return (preg_match('/^\d+$/', $minute) === 1 && preg_match('/^\d+$/', $hour) === 1) ? 86400 : null;
+    }
+    if (preg_match('/every (\w+)(?:(?: to |-)(\w+))? minutes/', $said, $m) === 1) {
+        $longer = $m[2] ?? $m[1];
+        $n = ctype_digit($longer) === true ? (int) $longer : ($words[$longer] ?? null);
+        return $n === null ? null : $n * 60;
+    }
+    if (str_contains($said, 'every hour') === true || str_contains($said, 'hourly') === true) {
+        return 3600;
+    }
+    if (str_contains($said, 'once a week') === true) {
+        return 604800;
+    }
+    if (str_contains($said, 'once a night') === true || str_contains($said, 'once a day') === true
+        || str_contains($said, 'daily') === true) {
+        return 86400;
+    }
+    return null;
+};
+$wordingAgrees = [];
+$wordingWant   = [];
+foreach ($gaps as $job => $g) {
+    foreach (['guide', 'header'] as $which) {
+        if ($g[$which] !== null) {
+            $wordingAgrees[$job . ' ' . $which] = $toSeconds($g[$which]);
+            $wordingWant[$job . ' ' . $which]   = $g['gap'];
+        }
+    }
+}
+check(
+    'E9b every typed wording above means its typed gap, so the two cannot be edited apart',
+    $wordingAgrees,
+    $wordingWant
+);
+
+$guideCalls = [];
+foreach (array_keys($gaps) as $job) {
+    $guideCalls[$job] = preg_match('/^\s*\| `\/' . preg_quote($job, '/') . '` \| ([^|]+?) \|/m', $guide, $m) === 1
+        ? $m[1] : '(no row in docs/INSTALL.md)';
+}
+check(
+    'E9 docs/INSTALL.md\'s "Call it" column says, for every job, exactly the cadence typed here',
+    $guideCalls,
+    array_map(static fn (array $g): string => $g['guide'], $gaps)
+);
+
+// ⚠️ "AT LEAST TWICE THE GAP" CANNOT BE ASKED OF EVERY JOB, and the reason is
+//    the owner's figures, which this test does not get to change. D-076's
+//    seven are three times their gap by rule, so they are held to that. D-070
+//    gave the nightly jobs "a night plus a day's grace" (36 hours over a
+//    24-hour gap, 1.5 times) and giving statements a week plus a day (8 days
+//    over 7). For those the honest requirement is weaker and still worth
+//    having: the allowance must be LONGER than the gap, so that a job called
+//    exactly as the guide says is never reported as stopped.
+$frequent = ['cron/push-golive', 'cron/webhook-retry', 'cron/user-reminders', 'cron/asset-reminders',
+             'cron/venue-reminders', 'cron/workflow-timeouts', 'cron/health'];
+$tooTight = [];
+foreach ($gaps as $job => $g) {
+    $needs = in_array($job, $frequent, true) === true ? 3 * $g['gap'] : $g['gap'] + 1;
+    if ($owners[$job] < $needs) {
+        $tooTight[] = $job . ' (' . $owners[$job] . 's against a gap of ' . $g['gap'] . 's)';
+    }
+}
+check(
+    'E10 every allowance is longer than the gap the guide gives, and D-076\'s seven are at least three times it',
+    $tooTight,
+    []
+);
+
+$headersSay = [];
+$headersWant = [];
+foreach ($gaps as $job => $g) {
+    if ($g['header'] === null) {
+        continue;
+    }
+    $page = (string) file_get_contents($repo . $sep . 'web' . $sep . '_apps' . $sep . 'cron' . $sep
+        . substr($job, strlen('cron/')) . '.php');
+    $headersSay[$job]  = str_contains($page, $g['header']);
+    $headersWant[$job] = true;
+}
+check(
+    'E11 each job\'s own page header still states the cadence its allowance was derived from',
+    $headersSay,
+    $headersWant
+);
+
+// Every other place a customer is told how often to call a job (see the
+// search above). Each row: the file, the exact text it prints, the job, and
+// the cadence in that text. The text must still be there (E12), and its
+// cadence must be the job's typed gap (E12c) — so changing the help page's
+// mail queue to hourly, or the backup page to once a week, fails here.
+$printed = [
+    ['web/_apps/venues/settings.php', 'must call it with <code>?key=&lt;token&gt;</code> every 30 to 60 minutes.',
+     'cron/venue-reminders', 'every 30 to 60 minutes'],
+    ['web/_apps/admin/maintenance/health.php', '<code>0 * * * * curl -fsS "https://',
+     'cron/health', '0 * * * *'],
+    ['web/_apps/admin/maintenance/backup-check.php', '<code>0 9 * * * curl -fsS "https://',
+     'cron/backup-check', '0 9 * * *'],
+    ['web/_apps/admin/maintenance/backup.php',
+     'Set it to call <code>/cron/backup-run?token=&lt;your token&gt;</code> <strong>once a day</strong>',
+     'cron/backup-run', 'once a day'],
+    ['web/_apps/help/admin-first-steps.php',
+     '<code>0 3 * * * curl -fsS "https://YOUR-PORTAL/cron/retention-sweep?token=YOUR_TOKEN"',
+     'cron/retention-sweep', '0 3 * * *'],
+    ['web/_apps/help/admin.php',
+     'add a job that calls the address <code>/cron/mail-queue</code> on your portal every five minutes',
+     'cron/mail-queue', 'every five minutes'],
+    ['web/_apps/help/admin.php',
+     '<code>*/5 * * * * curl -fsS -H "Authorization: Bearer YOUR_TOKEN" "https://YOUR-PORTAL/cron/mail-queue"',
+     'cron/mail-queue', '*/5 * * * *'],
+    ['web/_apps/admin/calendar/reminders.php', 'Schedule recommendation: every 15 minutes.',
+     'cron/event-reminders', 'every 15 minutes'],
+    ['web/_apps/admin/calendar/reminders.php', '<code>0,15,30,45 * * * * curl',
+     'cron/event-reminders', '0,15,30,45 * * * *'],
+    ['web/_apps/help/calendar-imports.php', 'Ask it to visit this address every 15 minutes:',
+     'cron/import-feeds', 'every 15 minutes'],
+    ['README.md', '**Add one scheduled job for waiting mail**, every five minutes',
+     'cron/mail-queue', 'every five minutes'],
+    ['README.md', '`*/5 * * * * curl -fsS -H "Authorization: Bearer YOUR_TOKEN" "https://YOUR-PORTAL/cron/mail-queue"',
+     'cron/mail-queue', '*/5 * * * *'],
+    ['README.md', 'add one scheduled job for them**, every 15 minutes',
+     'cron/import-feeds', 'every 15 minutes'],
+    ['README.md', '`*/15 * * * * curl -fsS "https://YOUR-PORTAL/cron/import-feeds?key=YOUR_KEY"',
+     'cron/import-feeds', '*/15 * * * *'],
+];
+$stillThere = [];
+$cadence    = [];
+$cadenceWant = [];
+foreach ($printed as $i => [$file, $text, $job, $said]) {
+    $label = $i . ' ' . $file . ' (' . $job . ')';
+    $body  = (string) file_get_contents($repo . $sep . str_replace('/', $sep, $file));
+    $stillThere[$label]  = str_contains($body, $text) === true && str_contains($text, $said) === true;
+    $cadence[$label]     = $toSeconds($said);
+    $cadenceWant[$label] = $gaps[$job]['gap'];
+}
+check(
+    'E12 every schedule printed for a customer is still printed as listed (' . count($printed) . ' places)',
+    $stillThere,
+    array_fill_keys(array_keys($stillThere), true)
+);
+check(
+    'E12b and the Venues page no longer says "on a daily schedule" anywhere',
+    str_contains((string) file_get_contents($repo . $sep . 'web' . $sep . '_apps' . $sep . 'venues' . $sep
+        . 'settings.php'), 'on a daily schedule'),
+    false
+);
+check(
+    'E12c each of those places gives the same gap as the guide does for that job',
+    $cadence,
+    $cadenceWant
+);
 
 echo "\n=== F. The window before anybody presses Run migrations ===\n";
 // Files reach a customer's server BEFORE the migration runs (#694), so these
@@ -509,6 +824,12 @@ $token = bin2hex(random_bytes(16));
 foreach (array_keys(\Portal\Core\PortalCheck::JOB_TOKENS) as $tokenKey) {
     $setSetting($tokenKey, $token);
 }
+// ⚠️ GIVING ON, so every job is NEEDED in this world. `full_schema.sql` seeds
+//    `giving.enabled` '0', and since #793 round 1 a job whose app is switched
+//    off everywhere is not counted (`PortalCheck::JOB_NEEDS_FEATURE`), so the
+//    sentences below would otherwise be about fourteen jobs. The off state is
+//    driven in section Q of `tools/portal-check-selftest.php`.
+$setSetting('giving.enabled', '1');
 
 echo "\n=== G. What the Check this portal page actually says ===\n";
 // ⚠️ THE REAL METHOD, reached by reflection because it is private. A copy of
@@ -803,7 +1124,7 @@ check(
     true
 );
 check('H13 recorded as having deliberately done nothing', $r['lastOutcome'] ?? null, 'refused');
-$aged = $age('cron/webhook-retry', ScheduledJobs::OVERDUE_NIGHTLY + 600, true);
+$aged = $age('cron/webhook-retry', 2700 + 600, true);   // past its own 45 minutes (D-076)
 check(
     'H14 and even long afterwards it is OVERDUE at worst, never DIED_PART_WAY — which is the real harm the finish prevents',
     ScheduledJobs::state($db)['cron/webhook-retry']['status'] === ScheduledJobs::DIED_PART_WAY,
@@ -981,26 +1302,39 @@ check(
 );
 check(
     'H0c2 and names WHY that job is not counted, rather than leaving an unexplained number',
-    str_contains($text, 'part-way through, which have not recorded a finish'),
+    str_contains($text, 'the 1 part-way through, which has not recorded a finish'),
     true
 );
-// ⚠️ THE ALLOWANCE SENTENCE IS PINNED, because nothing read a character past
-//    "recorded a FINISH" — so reverting it to round 4's withdrawn wording left
-//    every guard green, and round 5's replacement was wrong about
-//    `cron/import-feeds` (six hours told as 36) with nothing noticing.
+// ⚠️ THE ALLOWANCE SENTENCE IS PINNED, AS TEXT WRITTEN OUT BY HAND (#795).
+//    Nothing used to read a character past "recorded a FINISH", so reverting
+//    the sentence to round 4's withdrawn wording left every guard green, and
+//    round 5's replacement was wrong about `cron/import-feeds` (six hours told
+//    as 36) with nothing noticing.
 //
-//    It asks for EVERY distinct allowance by name, derived the same way the
-//    page derives them, so a figure the page omits fails here. That is the
-//    whole fault: the old sentence named four of five.
-$allowances = [];
-foreach (ScheduledJobs::JOBS as $facts) {
-    $allowances[$facts['overdue']] = true;
+//    The first pin asked `ScheduledJobs::allowancesInWords()` for the figures
+//    and looked for its answer on the page — so the page and the test agreed
+//    on whatever that method said. Measured (#795): making it report every
+//    allowance at DOUBLE its length left the whole suite green. The whole
+//    reason, figures included, is typed below; a change to the wording or to
+//    any figure must be made here too, deliberately.
+$expectedWhy = '14 of the 15 recorded a FINISH inside the time allowed for it. '
+    . 'That allowance is set for each job from what it is for and how often it is meant to run: '
+    . '15 minutes (the mail queue), 30 minutes (the live-stream push), 45 minutes (2 jobs), '
+    . '2 hours (event reminders), 3 hours (4 jobs), 6 hours (feed imports), 36 hours (4 jobs) '
+    . 'and 8 days (giving statements). '
+    . 'Not counted here: the 1 part-way through, which has not recorded a finish '
+    . '— it is reported above.';
+$allClearWhy = null;
+foreach ($found as $finding) {
+    if (str_contains($finding['what'], 'has run recently enough') === true) {
+        $allClearWhy = $finding['why'];
+    }
 }
 check(
-    'H0c3 the sentence names every one of the ' . count($allowances) . ' distinct allowances — '
-    . 'it named four of five, so one job was told six times its real figure',
-    str_contains($text, ScheduledJobs::allowancesInWords()),
-    true
+    'H0c3 the all-clear\'s reason is exactly the sentence written out here, every figure included '
+    . '— it once named four allowances of five, so one job was told six times its real figure',
+    $allClearWhy,
+    $expectedWhy
 );
 check(
     'H0c4 and does NOT carry round 4\'s withdrawn claim that the allowance matches each job',

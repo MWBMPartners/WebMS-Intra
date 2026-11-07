@@ -382,9 +382,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="card">
     <div class="card-body">
         <h2 class="h5">Reminders cron token</h2>
+        <?php
+        // ⚠️ "EVERY 30 TO 60 MINUTES", NOT "DAILY". This said "on a daily
+        //    schedule" since 37bf418, the same commit whose cron page header
+        //    says "every 30-60 minutes" — two instructions for one job. Since
+        //    D-076 (#793) the "Check this portal" page counts this job as
+        //    stopped after THREE HOURS without a run, so a customer following
+        //    "daily" would be told every day that their reminders had stopped.
+        //    The cadence and the allowance are in docs/INSTALL.md step 6 and
+        //    beside the constants in web/_core/ScheduledJobs.php.
+        ?>
         <p class="small text-muted">
             The <code>/cron/venue-reminders</code> endpoint is inert until this token is set — a scheduled job (DreamHost cron tab or similar)
-            must call it with <code>?key=&lt;token&gt;</code> on a daily schedule.
+            must call it with <code>?key=&lt;token&gt;</code> every 30 to 60 minutes.
         </p>
         <p>
             Status:
