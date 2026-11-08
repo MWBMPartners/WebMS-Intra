@@ -502,12 +502,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <i class="fa-solid fa-chevron-left"></i>
                     </a>
                 </li>
+                <?php
+                // ONE "…" for each run of hidden pages (#852 item 1). This used to
+                // print one at page 3 and another at page N-2, so page 1 of 9
+                // showed « 1 2 … … 8 9 ». $inGap says the last thing printed was a "…".
+                $inGap = false;
+                ?>
                 <?php for ($p = 1; $p <= $totalPages; $p++): ?>
                     <?php if ($totalPages > 7 && $p > 2 && $p < $totalPages - 1 && abs($p - $currentPage) > 1): ?>
-                        <?php if ($p === 3 || $p === $totalPages - 2): ?>
+                        <?php if ($inGap === false): $inGap = true; ?>
                             <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
                         <?php endif; ?>
-                    <?php else: ?>
+                    <?php else: $inGap = false; ?>
                         <li class="page-item <?php echo $p === $currentPage ? 'active' : ''; ?>">
                             <a class="page-link" href="?page=<?php echo $p; ?><?php echo $baseQuery; ?>"><?php echo $p; ?></a>
                         </li>

@@ -20982,3 +20982,25 @@ what the portal will serve, asked of the portal's own rule.
   dark-theme figure for the highlighted entry as "about 14.1 to 14.9:1", computed from a colour-mixed
   `--portal-primary-subtle` in an `@supports` block that the later plain dark block overrides. The value
   that applies is `#1f2347`, giving 12.56:1. Round 3 caught it; the same cascade is #852's third item.
+
+### Three older layout faults (#852)
+
+- **Print one marker per gap, not one per position.** The page lists placed "…" at fixed positions (page
+  4 and page N-3; page 3 and page N-2). Near either end of a long list every page between the two is hidden
+  as well, and the two "…" printed side by side; on a middle page they fell in separate gaps and looked
+  right, which is why it went unnoticed. Tracking whether the last thing printed was already a "…" is
+  right whatever the window. The same loop had been copied onto
+  four more pages; the audit check now refuses the shape anywhere.
+- **A check's premise must not be measured from the faulty output.** The first ellipsis check required at
+  least eight entries, a count taken from the list WITH the duplicate; the correct page 1 of /admin/users
+  has seven, so the fix failed its own check. And page 1 has ONE gap, so a loop that drops the SECOND
+  "…" passes there: the check also reads a page from the middle of each list, and counts page numbers that
+  jump with no "…" between them. It names those middle pages exactly — asking for two gaps on any address
+  with `page=` went red on users' page 4, whose list has one.
+- **A later rule of equal weight replaces an earlier one entirely.** `.alert { padding: … }` in portal.css
+  loads after Bootstrap, so it also replaced `.alert-dismissible { padding-right: 3rem }`. Put back as
+  `padding-inline-end`, because Bootstrap's right-to-left build puts the X on the left.
+- **Letting text wrap changes how a flex row shares its width.** A `nowrap` badge made its half of the row
+  as wide as the badge, so only the title shrank. Once badges could wrap, a badge alone in a row's aside
+  shrank too and split over two lines; the aside keeps `nowrap`. And `word-break: break-word` inherited
+  from a `.text-break` cell would split a badge's word once it may wrap, so the badge resets it.

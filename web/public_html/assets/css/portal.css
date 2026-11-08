@@ -798,7 +798,8 @@ textarea:focus-visible,
    Bootstrap's `md`, where the row stacks into a column (none of #833's faults
    existed at 768px or above), and only to cells that span the whole row there
    (`.col-12`, and the component's own `.portal-data-cell`). A
-   fraction-of-a-row cell is not touched at all.
+   fraction-of-a-row cell is not touched by THIS rule at all (a badge's
+   wrapping at its spaces is set for every width by the #852 rule below).
    WHY `break-word` AND NOT `anywhere` — round 2 of the check. Both break a
    word that would otherwise run out of its line. `anywhere` ALSO lets the
    breaks count towards an element's smallest possible width (CSS Text 3,
@@ -809,7 +810,8 @@ textarea:focus-visible,
    too. `break-word` leaves every element's smallest width alone and breaks
    only a word that would overflow, so a word that fits is never broken.
    A badge in such a cell may wrap at its SPACES (a long name becomes two
-   lines) but never inside a word. `overflow-wrap: normal` on it says so
+   lines; since #852 that comes from the every-width rule below) but never
+   inside a word. `overflow-wrap: normal` on it says so
    outright, though an inline-block badge is sized to its longest word anyway.
    A `min-width: 0` here was REMOVED in round 2, with the sentence crediting
    it: on a phone the row is a COLUMN flex box (see "Mobile: stacked layout"
@@ -827,9 +829,35 @@ textarea:focus-visible,
     }
     .portal-data-row > .col-12 .badge,
     .portal-data-row > .portal-data-cell .badge {
-        white-space: normal;
         overflow-wrap: normal;
     }
+}
+
+/* A badge in a list row may wrap at its SPACES, at every width (#852 item 4).
+   Bootstrap makes a badge `white-space: nowrap`, so above the phone widths a
+   long name in a narrow column — /attendance's service type in a col-md-3
+   cell at 768px and wider (measured at 768 and 1024) — ran over the next
+   columns. This was phone-only until then (#833). It does not split a word: `overflow-wrap` and `word-break` are
+   set back to normal on the badge itself, because a `.text-break` cell around
+   it (the outside-calendar pages use one) passes Bootstrap's
+   `word-break: break-word` down, which would otherwise split a long word once
+   the badge may wrap (round 1 of the check). A badge marked `.text-nowrap`
+   keeps Bootstrap's !important. Guarded by tools/top-bar-selftest.mjs at 768
+   and 1024 on /attendance. */
+.portal-data-row .badge {
+    white-space: normal;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+/* …except a badge in a row's ASIDE, which stays on one line as before #852
+   (round 2 of the check). Above the phone widths the row is a flex box and
+   neither half has flex rules, so a badge that may wrap lets the aside shrink
+   beside a long title, and "2/3 reminders sent" (/admin/calendar/reminders)
+   or "12 sessions" (/admin/livestream/dashboard) split over two lines where
+   the title used to wrap instead. Same specificity and later, so this wins.
+   Guarded by tools/top-bar-selftest.mjs at 768 and 1024. */
+.portal-data-row-aside .badge {
+    white-space: nowrap;
 }
 
 /* 📱 A message can quote a setting's name or an address: one long "word"
@@ -1449,6 +1477,18 @@ body.d-flex.min-vh-100 > .card h1 {
     margin-bottom: 1.25rem;
     font-size: var(--portal-font-size-sm);
     line-height: 1.5;
+}
+/* A dismissible alert keeps room for its close button (#852 item 2). The
+   padding above replaces Bootstrap's own, which loads earlier, so it replaced
+   `.alert-dismissible { padding-right: 3rem }` as well and an alert's text
+   could run underneath the X. Same specificity and later, so this wins.
+   `padding-inline-end`, not `padding-right` (round 1 of the check): on a
+   right-to-left page (Arabic, Hebrew, Farsi, Urdu) Bootstrap's RTL build puts
+   the X on the LEFT, and inline-end is whichever side the X is on.
+   Guarded by tools/top-bar-selftest.mjs (the fixture's alert, left-to-right
+   only: no right-to-left page is drawn by any test). */
+.alert-dismissible {
+    padding-inline-end: 3rem;
 }
 .alert-info {
     background-color: #eef2ff;

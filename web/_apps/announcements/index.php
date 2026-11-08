@@ -141,12 +141,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <li class="page-item <?php echo ($page <= 1 ? 'disabled' : ''); ?>">
                     <a class="page-link" href="?page=<?php echo $page - 1; ?>">Previous</a>
                 </li>
+                <?php
+                // ONE "…" per run of hidden pages (#852): this printed one at a fixed
+                // position (4 and N-3), and the two sat side by side when every page
+                // between them was hidden too (near either end of a long list),
+                // giving « 1 2 3 … … 6 7 8 ». tools/audit-checks/check_pagination_one_ellipsis.py
+                // fails if that shape comes back.
+                $inGap = false;
+                ?>
                 <?php for ($p = 1; $p <= $totalPages; $p++): ?>
-                    <?php if ($p <= 3 || $p >= $totalPages - 2 || abs($p - $page) <= 1): ?>
+                    <?php if ($p <= 3 || $p >= $totalPages - 2 || abs($p - $page) <= 1): $inGap = false; ?>
                         <li class="page-item <?php echo ($p === $page ? 'active' : ''); ?>">
                             <a class="page-link" href="?page=<?php echo $p; ?>"><?php echo $p; ?></a>
                         </li>
-                    <?php elseif ($p === 4 || $p === $totalPages - 3): ?>
+                    <?php elseif ($inGap === false): $inGap = true; ?>
                         <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
                     <?php endif; ?>
                 <?php endfor; ?>

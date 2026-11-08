@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Three older layout faults: a doubled "…", text under an alert's close button, a badge at tablet width (#852)
+
+- **Fixed (#852 item 1):** six page lists printed two "…" side by side when a long list was opened at
+  or near either end (« 1 2 3 … … 6 7 8 »), because each placed an ellipsis at a fixed position: /attendance and
+  /admin/users, which the issue named, and four more found by the check — announcements, the calendar's
+  list view, Admin, Activity and Admin, Errors. Each now prints one "…" for each run of hidden pages, and
+  a new hard gate, `tools/audit-checks/check_pagination_one_ellipsis.py`, refuses the fixed-position shape.
+- **Fixed (#852 item 2):** a dismissible alert's words could run underneath its close button: the
+  portal's own alert padding replaced Bootstrap's, including the room it keeps for the X. The room is
+  kept on whichever side the X is, so a right-to-left page is covered too.
+- **Fixed (#852 item 4):** on /attendance, a long service-type name in a badge ran over the next columns
+  from 768px up. A badge in a list row now wraps at its spaces at every width (it never splits a word),
+  except a badge in a row's right-hand part beside its title (such as "2/3 reminders sent"), which stays
+  on one line as before.
+- **Not done:** item 3 (in dark mode an organisation's colour does not tint the hover, active and subtle
+  shades) is a design choice for the owner, since following the comment would visibly change dark mode
+  for every organisation.
+- **Tests:** `tools/top-bar-selftest.mjs` checks one "…" per gap and no unmarked gap (page 1, and a page
+  in the MIDDLE of each list, where the second "…" can go missing), the alert's words clear of its close
+  button, the badge inside its column at 768 and 1024, and a badge beside a long title on one line; each
+  fault planted back turns it red.
+
 ### The top bar's keyboard focus ring can be seen, and four pages fit a phone (#832, #833)
 
 - **Fixed (#832):** a keyboard user tabbing along the top bar could not see where they were: Bootstrap's own

@@ -41,7 +41,7 @@
  *       ones, each a member of EVERY organisation (enough that /admin/users
  *       has eight or more pages, so its page list is long);
  *     * in EVERY organisation — two in the second pass, more on a database
- *       that already has several — an attendance service type with 200
+ *       that already has several — an attendance service type with 300
  *       sessions (the same, for /attendance) and one count, and a photo
  *       album.
  *     These are the rows that make /admin/users, /attendance and /photos look
@@ -247,7 +247,7 @@ echo 'Emptied ' . count($secrets) . " stored secret(s) for the run; they are wri
 //    whatever its rows would do, so these rows are put in on purpose. The rows
 //    that show a value are ordinary ones — a double-barrelled name at a long
 //    organisation domain, a full service name, a named album; the 200 extra
-//    members and 199 extra sessions are deliberately made-up fillers, there
+//    members and 299 extra sessions are deliberately made-up fillers, there
 //    only to make the page lists long (see their own comments). The browser half
 //    is told a piece of each to look for (`--wide-pages`), so a page that came
 //    back empty or refused cannot pass. /settings needs nothing added: the
@@ -349,11 +349,13 @@ $seedSites = static function (mysqli $db) use (&$seeded, $tag, $typeName, $album
         $stmt->execute();
         $sessionId = (int) $db->insert_id;
         $seeded['sessions'][] = $sessionId;
-        // 📄 199 more (#833 round 2): /attendance shows 25 a page, and its page
-        //    list was wider than a 320px phone from seven pages. With one
-        //    session it was never drawn. Each carries the run's tag in its
+        // 📄 299 more (#833 round 2; #852): /attendance shows 25 a page, and its
+        //    page list was wider than a 320px phone from seven pages. With one
+        //    session it was never drawn. 300 gives twelve pages, so page 6
+        //    has hidden pages on BOTH sides — the only place a missing second
+        //    "…" can be seen (#852's check). Each carries the run's tag in its
         //    note, as the first does, so the final count finds every one.
-        for ($i = 2; $i <= 200; $i++) {
+        for ($i = 2; $i <= 300; $i++) {
             $stmt->execute();
             $seeded['sessions'][] = (int) $db->insert_id;
         }
@@ -373,8 +375,9 @@ $seedSites = static function (mysqli $db) use (&$seeded, $tag, $typeName, $album
 };
 $seedSites($db);
 $widePages = '/settings|push.apple.com;/attendance|' . $typeName . ';/photos|' . $albumName
-    . ';/admin/users|northfellowshipregionalpartnership;/admin/users?page=4|' . PAGE_FILLER;
-echo 'Added ' . count($seeded['users']) . " members, and 200 attendance sessions and a photo album in each organisation, for the four whole-page checks; they are removed at the end\n";
+    . ';/attendance?page=6|' . $typeName
+    . ';/admin/users|northfellowshipregionalpartnership;/admin/users?page=4|' . PAGE_FILLER . ';/admin/users?page=5|' . PAGE_FILLER;
+echo 'Added ' . count($seeded['users']) . " members, and 300 attendance sessions and a photo album in each organisation, for the four whole-page checks; they are removed at the end\n";
 
 // 📁 A copy of web/, with throwaway credentials, served by PHP's own server
 //    behind a router that imitates web/public_html/.htaccess.
@@ -632,7 +635,7 @@ $nameNow = (string) ($db->query('SELECT `siteName` FROM `tblSites` WHERE `siteID
 // The rows added for the four whole pages, removed now and counted, for the
 // same reason: a removal that silently did nothing would leave, for ever, 202
 // test members with a membership in every organisation, and in each
-// organisation a service type, 200 sessions, a count and an album. The count never reads the
+// organisation a service type, 300 sessions, a count and an album. The count never reads the
 // rows through the removal's own
 // list of what to remove — the lesson of the settings check above. Each row
 // carries this run's tag (in an e-mail address, a slug or a note), and the

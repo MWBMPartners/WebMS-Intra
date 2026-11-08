@@ -122,12 +122,20 @@ declare(strict_types=1);
                 <li class="page-item <?php echo ($page <= 1) ? 'disabled' : ''; ?>">
                     <a class="page-link" href="<?php echo htmlspecialchars($baseUrl . $sep . 'page=' . ($page - 1), ENT_QUOTES, 'UTF-8'); ?>">&laquo;</a>
                 </li>
+                <?php
+                // ONE "…" per run of hidden pages (#852): this printed one at a fixed
+                // position (4 and N-3), and the two sat side by side when every page
+                // between them was hidden too (near either end of a long list),
+                // giving « 1 2 3 … … 6 7 8 ». tools/audit-checks/check_pagination_one_ellipsis.py
+                // fails if that shape comes back.
+                $inGap = false;
+                ?>
                 <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                    <?php if ($i <= 3 || $i >= $totalPages - 2 || abs($i - $page) <= 1): ?>
+                    <?php if ($i <= 3 || $i >= $totalPages - 2 || abs($i - $page) <= 1): $inGap = false; ?>
                         <li class="page-item <?php echo ($i === $page) ? 'active' : ''; ?>">
                             <a class="page-link" href="<?php echo htmlspecialchars($baseUrl . $sep . 'page=' . $i, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $i; ?></a>
                         </li>
-                    <?php elseif ($i === 4 || $i === $totalPages - 3): ?>
+                    <?php elseif ($inGap === false): $inGap = true; ?>
                         <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
                     <?php endif; ?>
                 <?php endfor; ?>

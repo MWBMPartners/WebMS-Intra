@@ -1806,6 +1806,16 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_decisions_recorded.py
 
+      # 📄 #852. Six pages drew their page list with one copied loop that put a
+      # "…" at FIXED positions, so a long list's first page read « 1 2 3 … … 6 ».
+      # All six now print one "…" per run of hidden pages. This fails if the
+      # fixed-position shape is copied back. It reads one literal shape only;
+      # the behaviour is tested by tools/top-bar-selftest.mjs on two pages.
+      - name: 'A page list prints one "…" per gap, never one per position (hard gate)'
+        id: pagination_one_ellipsis
+        if: always()
+        run: python3 -I tools/audit-checks/check_pagination_one_ellipsis.py
+
       # 🌍 #763. A member could choose their interface language, the choice was
       #    stored, and nothing applied it: the question was asked during
       #    start-up, before their session existed, so the two answers that

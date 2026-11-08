@@ -423,6 +423,15 @@ const ROW_FIXTURE = `(() => {
    + '<input type="text" class="form-control form-control-sm" placeholder="Note (optional)">'
    + '<button type="button" class="btn btn-outline-secondary btn-sm" id="fx-button">Ignore</button></form></div></div>'
    + '</div>'
+   // #852 round 2: a badge alone in a row's ASIDE beside a long title, copied
+   // from /admin/calendar/reminders. Above the phone widths the row is a flex
+   // box, and a badge allowed to wrap there lets the aside shrink and split
+   // "2/3 reminders sent" over two lines; before #852 the title wrapped.
+   + '<div class="portal-data-list mt-3">'
+   + '<div class="portal-data-row"><div class="portal-data-row-main"><strong>Sunday Morning Family Worship and Holy Communion with the Baptism of Several Children and a Shared Lunch Afterwards in the Church Hall for Everyone</strong>'
+   + '<div class="text-muted small">Sunday 8 Nov, 10:30</div></div>'
+   + '<div class="portal-data-row-aside"><span class="badge bg-info text-dark" id="fx-aside-badge">2/3 reminders sent</span></div></div>'
+   + '</div>'
    // #833 round 2: the message /settings shows after saving a setting with a
    // long name — one "word" with nowhere a browser may break it.
    + '<div class="alert alert-success alert-dismissible fade show mt-3" id="fx-alert">'
@@ -430,6 +439,47 @@ const ROW_FIXTURE = `(() => {
    + '<button type="button" class="btn-close" aria-label="Close"></button></div>'
    + '</div>';
   return true;
+})()`;
+// #852: the page list prints ONE "…" per run of hidden pages. Answers how
+// many times two "…" sit side by side (0 when right), and how many "…" there
+// are, so a page whose list hides nothing cannot pass for one that is right.
+// (A first version required at least eight entries, a length taken from the
+// FAULTY list: a correct page 1 of /admin/users has seven, « 1 2 … 8 9 ».)
+// Also how many page numbers jump by more than one with NO "…" between them
+// (round 1 of #852's check): counting doubles alone could not see a loop that
+// dropped the SECOND "…" on a middle page, because page 1 has only one gap.
+const ELLIPSES = `(() => {
+  const items = [...document.querySelectorAll('main .pagination .page-item')].map(li => li.textContent.trim());
+  let doubled = 0, unmarked = 0, last = null, gapSince = false;
+  for (let i = 0; i < items.length; i += 1) {
+    const x = items[i];
+    if (x === '\u2026') { if (i > 0 && items[i - 1] === '\u2026') { doubled += 1; } gapSince = true; continue; }
+    if (x === '' || /^[0-9]+$/.test(x) === false) { continue; }
+    const n = Number(x);
+    if (last !== null && n - last > 1 && gapSince === false) { unmarked += 1; }
+    last = n; gapSince = false;
+  }
+  return { items: items.length, gaps: items.filter(x => x === '\u2026').length, doubled, unmarked };
+})()`;
+// #852: a dismissible alert's words must stay clear of its close button.
+const ALERT_CLEAR = (id) => `(() => {
+  const el = document.getElementById(${JSON.stringify(id)});
+  const close = el === null ? null : el.querySelector('.btn-close');
+  if (el === null || close === null) return null;
+  let textRight = 0;
+  for (const node of el.childNodes) {
+    if (node.nodeType !== 3 || node.textContent.trim() === '') continue;
+    const r = document.createRange(); r.selectNodeContents(node);
+    for (const x of r.getClientRects()) { if (x.width > 0) textRight = Math.max(textRight, x.right); }
+  }
+  return { textRight: Math.round(textRight), closeLeft: Math.round(close.getBoundingClientRect().left) };
+})()`;
+// #852: a badge naming the page's test data must stay inside its own cell.
+const BADGE_IN_CELL = (text) => `(() => {
+  const badge = [...document.querySelectorAll('main .portal-data-row .badge')].find(b => b.textContent.includes(${JSON.stringify(text)}));
+  if (badge === undefined) return null;
+  const cell = badge.parentElement.getBoundingClientRect();
+  return { badgeRight: Math.round(badge.getBoundingClientRect().right), cellRight: Math.round(cell.right) };
 })()`;
 // How far right an element's TEXT reaches, against the screen it must fit
 // (#833 round 2). ⚠️ Not the element's box: a word that will not break spills
@@ -762,6 +812,20 @@ async function main() {
                 check(`${page} @${width}: the whole page, every section opened, is no wider than the screen`,
                     r.doc <= width + 1,
                     `the page is ${r.doc}px wide; sticking out: ${r.culprits.length > 0 ? r.culprits.join('; ') : 'nothing inside <main> — look at the header or footer'}`);
+                if (page.startsWith('/attendance') || page.startsWith('/admin/users')) {
+                    // Page 1 has one run of hidden pages; the two pages chosen as
+                    // the MIDDLE of their list (?page=6 of attendance, ?page=5 of
+                    // users) have two, which is the only place a missing second
+                    // "…" shows. Other pages are named by the address only — users'
+                    // page 4 lists 1-5 and so has ONE run, and asking it for two
+                    // went red on correct code. The middle pages are named
+                    // exactly, never as "any address with page=" (#483).
+                    const e = await evaluate(ELLIPSES);
+                    const wantGaps = (page === '/attendance?page=6' || page === '/admin/users?page=5') ? 2 : 1;
+                    check(`${page} @${width}: the page list prints exactly one "…" per run of hidden pages — none doubled, none missing (#852)`,
+                        e.gaps >= wantGaps && e.doubled === 0 && e.unmarked === 0,
+                        `${e.items} entries, ${e.gaps} "…" (want at least ${wantGaps}), ${e.doubled} doubled, ${e.unmarked} gap(s) with no "…"`);
+                }
             }
         }
 
@@ -782,13 +846,16 @@ async function main() {
                 word: await evaluate(LINES('fx-word')),
                 badge: await evaluate(LINES('fx-badge')),
                 button: await evaluate(LINES('fx-button')),
+                aside: await evaluate(LINES('fx-aside-badge')),
             };
             const alertRight = await evaluate(RIGHT('fx-alert'));
             check(`row rule @${width}: premise — the copied rows are on the page`,
-                lines.money > 0 && lines.word > 0 && lines.badge > 0 && lines.button > 0 && alertRight > 0, JSON.stringify({ ...lines, alertRight }));
+                lines.money > 0 && lines.word > 0 && lines.badge > 0 && lines.button > 0 && lines.aside > 0 && alertRight > 0, JSON.stringify({ ...lines, alertRight }));
             if (width >= 768) {
                 check(`row rule @${width}: a money figure in a narrow list column stays on one line ("£12,345.67")`,
                     lines.money === 1, `it is broken over ${lines.money} lines`);
+                check(`row rule @${width}: a badge alone beside a long title ("2/3 reminders sent") stays on one line; the title wraps instead (#852 round 2)`,
+                    lines.aside === 1, `the badge is on ${lines.aside} line(s)`);
             } else {
                 check(`row rule @${width}: a word ("Leadership") and a one-word badge ("Proposed") in a part-of-the-row cell are not split`,
                     lines.word === 1 && lines.badge === 1, `word on ${lines.word} line(s), badge on ${lines.badge} line(s)`);
@@ -796,6 +863,22 @@ async function main() {
                     lines.button === 1, `the label is on ${lines.button} line(s)`);
                 check(`alert rule @${width}: an alert quoting a long setting name fits the screen (#833 round 2)`,
                     alertRight <= width + 1, `the alert reaches ${alertRight}px on a ${width}px screen`);
+                const clear = await evaluate(ALERT_CLEAR('fx-alert'));
+                check(`alert rule @${width}: the alert's words stay clear of its close button (#852)`,
+                    clear !== null && clear.textRight <= clear.closeLeft, JSON.stringify(clear));
+            }
+        }
+
+        // 📐 #852 item 4: /attendance's long service-type badge stays inside its
+        //    own column above the phone widths, where it used to run over the
+        //    next two (the phone rule never reached it).
+        const attendance = WIDE_PAGES.find((w) => w.page === '/attendance');
+        if (attendance !== undefined) {
+            for (const width of [768, 1024]) {
+                await load('/attendance', width);
+                const b = await evaluate(BADGE_IN_CELL(attendance.premise));
+                check(`/attendance @${width}: the service-type badge stays inside its own column (#852)`,
+                    b !== null && b.badgeRight <= b.cellRight + 1, JSON.stringify(b));
             }
         }
 

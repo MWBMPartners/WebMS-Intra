@@ -405,12 +405,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <li class="page-item <?php echo ($page <= 1) ? 'disabled' : ''; ?>">
                     <a class="page-link" href="<?php echo htmlspecialchars($baseUrl . $sep . 'page=' . ($page - 1), ENT_QUOTES, 'UTF-8'); ?>">&laquo;</a>
                 </li>
+                <?php
+                // ONE "…" for each run of hidden pages (#852 item 1). This used to
+                // print one at page 4 and another at page N-3, so with 8 pages page
+                // 1 showed « 1 2 3 … … 6 7 8 »: both were hidden and next to each
+                // other. $inGap says the last thing printed was already a "…".
+                $inGap = false;
+                ?>
                 <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                    <?php if ($i <= 3 || $i >= $totalPages - 2 || abs($i - $page) <= 1): ?>
+                    <?php if ($i <= 3 || $i >= $totalPages - 2 || abs($i - $page) <= 1): $inGap = false; ?>
                         <li class="page-item <?php echo ($i === $page) ? 'active' : ''; ?>">
                             <a class="page-link" href="<?php echo htmlspecialchars($baseUrl . $sep . 'page=' . $i, ENT_QUOTES, 'UTF-8'); ?>"><?php echo $i; ?></a>
                         </li>
-                    <?php elseif ($i === 4 || $i === $totalPages - 3): ?>
+                    <?php elseif ($inGap === false): $inGap = true; ?>
                         <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
                     <?php endif; ?>
                 <?php endfor; ?>
