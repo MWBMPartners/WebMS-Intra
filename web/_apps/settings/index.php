@@ -528,9 +528,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 
 <!-- ⚙️ Settings Management -->
-<div class="d-flex justify-content-between align-items-center mb-4">
+<?php
+// 📱 #833: the title and its buttons may WRAP onto two lines, and so may the
+//    buttons themselves. This row fitted a 320px phone when measured — the
+//    page was wider because of a setting's value (see `.portal-data-row` in
+//    portal.css) — but it is the row shape that overflowed on /attendance,
+//    /photos and /admin/users, so it is made the same as theirs. Where the
+//    row fits on one line nothing moves; where it does not, the buttons go
+//    onto a line below the title, and `gap-2` keeps 8px between them. (This
+//    used to add "a longer translation would do it here": nothing on this
+//    page is translated.)
+?>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-gear me-2"></i>Settings</h1>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
         <span class="badge bg-secondary align-self-center"><?php echo $settingsCount; ?> settings</span>
         <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#addModal">
             <i class="fa-solid fa-plus me-1"></i> Add Setting

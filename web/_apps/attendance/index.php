@@ -185,9 +185,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 
 <!-- 📋 Attendance Header -->
-<div class="d-flex justify-content-between align-items-center mb-4">
+<?php
+// 📱 #833: the title and its buttons may WRAP onto two lines, and so may the
+//    buttons themselves. On a 320px phone the five buttons alone made a 407px
+//    row and the page 570px wide, so it scrolled sideways (measured in Edge,
+//    7 November 2026). Where the row fits on one
+//    line nothing moves. Where it does not, the buttons go onto a line below
+//    the title instead of squeezing it onto two, and `gap-2` keeps 8px
+//    between them, so a row that only just fitted before may now wrap.
+?>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-clipboard-list me-2"></i>Attendance</h1>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
         <?php if (App::isAdmin() === true): ?>
             <a href="<?php echo htmlspecialchars(Site::url('attendance/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
                class="btn btn-outline-success" title="Export CSV">
@@ -377,8 +386,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
     <!-- 📖 Pagination -->
     <?php if ($totalPages > 1): ?>
+        <?php
+        // 📱 #833 round 2: the page list WRAPS. With seven or more pages of
+        //    sessions it was wider than a 320px phone (about 308px of links in
+        //    296px of space), and the whole page scrolled sideways. The same
+        //    `flex-wrap` as announcements/index.php's.
+        ?>
         <nav aria-label="Attendance pagination" class="mt-4">
-            <ul class="pagination justify-content-center">
+            <ul class="pagination justify-content-center flex-wrap">
                 <?php
                 $baseUrl = Site::url('attendance') . '?' . http_build_query(array_filter([
                     'type' => $filterType,

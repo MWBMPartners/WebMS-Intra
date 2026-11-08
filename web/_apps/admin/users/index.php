@@ -233,9 +233,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 
 <!-- 👥 User Management -->
-<div class="d-flex justify-content-between align-items-center mb-4">
+<?php
+// 📱 #833: the title and its buttons may WRAP onto two lines, and so may the
+//    buttons themselves. On a 320px phone the title beside its three buttons
+//    made the page 343px wide, so it scrolled sideways (measured in Edge,
+//    7 November 2026). Where the row fits on one
+//    line nothing moves. Where it does not, the buttons go onto a line below
+//    the title instead of squeezing it onto two, and `gap-2` keeps 8px
+//    between them, so a row that only just fitted before may now wrap.
+?>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-users me-2"></i>User Management</h1>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
         <a href="<?php echo htmlspecialchars(Site::url('admin/users/import'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary" title="Import CSV">
             <i class="fa-solid fa-file-import"></i>
         </a>
@@ -461,7 +470,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endforeach; ?>
 </div>
 
-<div class="d-flex justify-content-between align-items-center mt-3">
+<?php
+// 📱 #833 round 2: "Showing N of M" and the page list may WRAP, and so may
+//    the page list itself. On a middle page of a long member list (eight or
+//    more pages) the two side by side were wider than a 320px phone, and the
+//    whole page scrolled sideways.
+?>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3">
     <p class="text-muted small mb-0">
         Showing <?php echo count($users); ?> of <?php echo $totalUsers; ?> user<?php echo $totalUsers !== 1 ? 's' : ''; ?>
         <?php if ($search !== ''): ?>
@@ -481,7 +496,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         $baseQuery = count($paginationParams) > 0 ? '&' . http_build_query($paginationParams) : '';
         ?>
         <nav aria-label="User list pagination">
-            <ul class="pagination pagination-sm mb-0">
+            <ul class="pagination pagination-sm flex-wrap mb-0">
                 <li class="page-item <?php echo $currentPage <= 1 ? 'disabled' : ''; ?>">
                     <a class="page-link" href="?page=<?php echo $currentPage - 1; ?><?php echo $baseQuery; ?>">
                         <i class="fa-solid fa-chevron-left"></i>

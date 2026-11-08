@@ -6,7 +6,9 @@
  *              browser at five screen widths and checks that the shared top
  *              bar fits the screen — closed, and with its Apps menu open —
  *              and that the cookie banner and the "Install app" prompt never
- *              sit on top of each other.
+ *              sit on top of each other. Also (#832) that a keyboard user
+ *              can see where they are on the bar, and (#833) that four whole
+ *              pages given with --wide-pages fit a phone.
  * Package:     Portal\Tools
  * Author:      MWBM Partners Ltd (t/a MWservices)
  * Copyright:   2026-present MWBM Partners Ltd (t/a MWservices) - All Rights Reserved
@@ -49,6 +51,13 @@
  *     which is what a screen reader is told — not what one then says.
  *   * Hover without JavaScript on any menu but Apps (the Admin and account
  *     menus hang from their own buttons, with no gap to cross).
+ *   * A focus indicator drawn any other way than an outline or a box-shadow
+ *     (a border, a background, an underline). It would read as "nothing" and
+ *     fail — the safe direction — so a change of style needs this test
+ *     changed with it. It also cannot see the ring's SIZE beyond "at least
+ *     2px", nor whether something else on the bar covers part of it.
+ *   * Whole pages other than the four it is given, or at widths other than
+ *     320 and 390, or with data other than the rows the PHP half adds.
  *
  * WHAT IT DOES DRIVE, beyond widths (#822 round 1 found both faults below by
  * hand, and the first version of this test passed on them):
@@ -63,6 +72,15 @@
  *     the page must not claim its menus work, and focus must open every menu
  *     (round 2: the mark was set by the head script whatever happened next,
  *     so every menu was dead).
+ *   * The focus ring (#832): Tab along the bar in the light and dark themes,
+ *     each with and without the colour-blind palette, at 1440 and 390; every
+ *     focused entry must show a ring at least 3:1 against the bar and against
+ *     its own background. A mouse click must show no ring. It measures the
+ *     colours the browser computed; it cannot see an organisation's own
+ *     primary colour, which the ring deliberately does not use.
+ *   * Whole pages (#833): each --wide-pages page at 320 and 390, with every
+ *     collapsed section opened, must be no wider than the screen — and must
+ *     show the test data, so an empty or refused page cannot pass.
  *   * With scripts OFF, a mouse moved straight down from the Apps button in
  *     2px steps must keep the menu open all the way to its first entry — the
  *     13-14px gap under the button used to close it, so no app was reachable.
@@ -98,6 +116,16 @@ const WIDTHS = [320, 390, 768, 1024, 1200, 1440];
 // which is what was drawn ON TOP of the open menu before the bar was given a
 // z-index (#822). A page without such elements could not show that fault.
 const PAGES = (arg('pages', '/dashboard,/calendar')).split(',').filter(Boolean);
+// --wide-pages=/a|text;/b|text (#833): pages whose WHOLE BODY must fit a phone,
+// each with a piece of text that must be on it — the real-looking data the
+// PHP half put there, so a page that came back empty or refused cannot pass
+// for one that fits. tools/top-bar-selftest.php passes these for the
+// administrator runs only: /settings and /admin/users are administrators'
+// pages, and a member's /attendance and /photos are not measured (#851).
+const WIDE_PAGES = (arg('wide-pages', '')).split(';').filter(Boolean).map((p) => {
+    const bar = p.indexOf('|');
+    return bar === -1 ? { page: p, premise: '' } : { page: p.slice(0, bar), premise: p.slice(bar + 1) };
+});
 if (!BASE || !COOKIE) {
     console.error('REFUSED: --base and --cookie are both needed (see the header).');
     process.exit(2);
@@ -274,6 +302,156 @@ const TOGGLE_STATE = (i, doFocus) => `(() => {
 const MARK = `(() => ({ mark: document.documentElement.getAttribute('data-portal-menus'),
   bootstrap: typeof window.bootstrap !== 'undefined' && typeof window.bootstrap.Dropdown === 'function' }))()`;
 
+// 🎯 THE FOCUS RING ON THE FOCUSED ENTRY (#832). What a keyboard user sees
+//    around the entry they have tabbed to, and its contrast (WCAG 2.x's
+//    relative-luminance formula) against the bar behind it and against the
+//    entry's own background (the current page's entry is highlighted).
+//    * Every colour goes through a 1x1 canvas, which turns ANY CSS colour the
+//      browser computes — `rgb()`, `rgba()`, and the `color(srgb …)` that
+//      color-mix() produces — into the same four bytes. Parsing the text
+//      ourselves would miss whichever form we did not think of.
+//    * The ring is the OUTLINE when one is drawn at least 2px wide; failing
+//      that, the first box-shadow colour (Bootstrap's own focus style, which
+//      is what the bar showed before #832 — so the "before" state measures as
+//      a real, low, number rather than as "no ring"); failing both, nothing,
+//      which counts as 1:1.
+//    * A see-through colour is laid over the bar first, because that is the
+//      colour a person sees.
+const FOCUS_RING = `(() => {
+  const a = document.activeElement, nav = document.querySelector('nav.portal-navbar');
+  if (!a || !nav || !nav.contains(a)) return { inNav: false };
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const bytes = (css) => { ctx.clearRect(0, 0, 1, 1); ctx.fillStyle = '#000'; ctx.fillStyle = css; ctx.fillRect(0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255]; };
+  const over = (top, under) => [0, 1, 2].map(i => top[i] * top[3] + under[i] * (1 - top[3])).concat(1);
+  const lum = (c) => { const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+  const ratio = (x, y) => { const p = lum(x), q = lum(y); return (Math.max(p, q) + 0.05) / (Math.min(p, q) + 0.05); };
+  const cs = getComputedStyle(a);
+  const bar = over(bytes(getComputedStyle(nav).backgroundColor), [255, 255, 255, 1]);
+  const own = over(bytes(cs.backgroundColor), bar);
+  let ring = null, how = 'nothing';
+  if (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) >= 2) { ring = bytes(cs.outlineColor); how = 'outline ' + cs.outlineWidth; }
+  else if (cs.boxShadow !== 'none') { const m = cs.boxShadow.match(/(rgba?\\([^)]*\\)|color\\([^)]*\\))/); if (m) { ring = bytes(m[1]); how = 'shadow'; } }
+  const seen = ring === null ? bar : over(ring, bar);
+  return { inNav: true, focusVisible: a.matches(':focus-visible'),
+    label: (a.id || a.getAttribute('aria-label') || a.textContent.trim()).replace(/\\s+/g, ' ').slice(0, 32),
+    how, vsBar: Math.round(ratio(seen, bar) * 100) / 100, vsOwn: Math.round(ratio(seen, own) * 100) / 100,
+    theme: document.documentElement.getAttribute('data-bs-theme'), cb: document.documentElement.getAttribute('data-portal-cb') };
+})()`;
+
+// 📏 THE WIDEST THING ON A PAGE (#833). Every section a person could open is
+//    opened first (the settings page keeps most of its rows in closed
+//    accordion sections, and a closed section is not measured at all), then
+//    the page's width is read and, when it is too wide, the OUTERMOST element
+//    sticking out past the screen is named — its parent fits, it does not —
+//    so a failure says where to look. The cookie banner and the install
+//    prompt are left out of the naming: they are fixed to the screen and grow
+//    WITH an over-wide page, so they are a symptom, never the cause.
+const PAGE_WIDTH = (asked, premise) => `(async () => {
+  document.querySelectorAll('main .collapse').forEach(e => e.classList.add('show'));
+  await new Promise(r => setTimeout(r, 150));
+  const W = ${asked};
+  const culprits = [];
+  for (const el of document.querySelectorAll('main *')) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.right <= W + 1) continue;
+    const p = el.parentElement;
+    if (p !== null && p.getBoundingClientRect().right > W + 1) continue;
+    const chain = []; let e = el;
+    for (let i = 0; i < 4 && e !== null && e.tagName !== 'MAIN'; i += 1) {
+      chain.unshift(e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className.trim() !== '' ? '.' + e.className.trim().split(/\\s+/).slice(0, 2).join('.') : ''));
+      e = e.parentElement;
+    }
+    culprits.push(chain.join(' > ') + ' (' + Math.round(r.right) + 'px: "' + el.textContent.trim().replace(/\\s+/g, ' ').slice(0, 40) + '")');
+  }
+  return {
+    doc: document.documentElement.scrollWidth,
+    culprits: culprits.slice(0, 3),
+    // ⚠️ Looked for INSIDE a list row or a card, never in the whole page:
+    //    /attendance prints every service type in its filter drop-down too,
+    //    so with the whole body searched an attendance page with NO row
+    //    passed this premise (#833 round 1, planted: an emptied list stayed
+    //    green). A row or a card is where the data the width depends on is.
+    premise: [...document.querySelectorAll('main .portal-data-row:not(.portal-data-header), main .card')]
+      .some(e => e.textContent.includes(${JSON.stringify(premise)})),
+    title: document.title,
+  };
+})()`;
+
+// 🧩 WHAT THE ROW RULE MUST NOT DO (#833 round 1). The first version of the
+//    data-list rule broke words that fit their ROW but not a narrow CELL:
+//    "£12,345.6" / "7" in a desktop money column at 1024px, and "Leadershi/p"
+//    and the badge "Propo/sed" in a phone's fraction-of-a-row cell. These two
+//    rows are copied from the pages that showed it — expenses/treasury
+//    (`col-12 col-md-1` money column) and venues/statuses (bare `col-3`,
+//    `col-2` cells) — and placed inside a REAL portal page, so the real
+//    stylesheet and Bootstrap lay them out. A FIXTURE rather than the real
+//    pages on purpose: the property is the stylesheet's, and seeding a paid
+//    expense claim and a venue status would put rows in money and booking
+//    tables for a test about line breaks. The cost: if those pages change
+//    their markup this copy does not follow; the shapes it holds are the two
+//    that broke.
+//    "Split" is measured, not guessed: a Range over the text gives one
+//    rectangle per line the text sits on, so more than one distinct line top
+//    means the word or figure was broken.
+const ROW_FIXTURE = `(() => {
+  const main = document.querySelector('main');
+  main.innerHTML = '<div class="container">'
+   + '<div class="portal-data-list">'
+   + '<div class="portal-data-row portal-data-header d-none d-md-flex"><div class="col-md-1">ID</div><div class="col-md-3">Title</div><div class="col-md-2">Claimant</div><div class="col-md-2">Department</div><div class="col-md-1 text-end">Total &pound;</div><div class="col-md-2 text-end">Submitted</div><div class="col-md-1 text-end"></div></div>'
+   + '<div class="portal-data-row"><div class="col-12 col-md-1"><span class="d-md-none fw-semibold">ID: </span>#1042</div>'
+   + '<div class="col-12 col-md-3"><span class="d-md-none fw-semibold">Title: </span>Hall heating repair and parts</div>'
+   + '<div class="col-12 col-md-2"><span class="d-md-none fw-semibold">Claimant: </span>Aaliyah Montgomery-Fitzwilliam</div>'
+   + '<div class="col-12 col-md-2"><span class="d-md-none fw-semibold">Dept: </span>Buildings and Grounds</div>'
+   + '<div class="col-12 col-md-1 text-md-end"><span class="d-md-none fw-semibold">Total: </span><span id="fx-money">&pound;12,345.67</span></div>'
+   + '<div class="col-12 col-md-2 text-md-end small text-secondary"><span class="d-md-none fw-semibold">Submitted: </span>7 Nov 2026</div>'
+   + '<div class="col-12 col-md-1 text-md-end mt-2 mt-md-0"><button class="btn btn-sm btn-outline-success">Pay</button></div></div>'
+   + '</div>'
+   + '<div class="portal-data-list mt-3">'
+   + '<div class="portal-data-row align-items-center"><div class="col-3"><span class="badge" style="background-color:#888">&nbsp;&nbsp;</span> <strong class="ms-1" id="fx-word">Leadership</strong></div>'
+   + '<div class="col-2"><span class="badge bg-warning" id="fx-badge">Proposed</span></div>'
+   + '<div class="col-2 small">yes / no</div><div class="col-1"><span class="badge bg-light text-dark border">12</span></div>'
+   + '<div class="col-4 text-end"><button class="btn btn-sm btn-outline-secondary">Edit</button></div></div>'
+   + '</div>'
+   // #833 round 2: a full-row cell holding a note box and a button side by
+   // side, copied from /giving/reconcile/view's "Ignore" form. The rule overflow-wrap:
+   // anywhere let the button be squeezed below its own label and split it.
+   + '<div class="portal-data-list mt-3">'
+   + '<div class="portal-data-row"><div class="col-12 col-md-2"><form class="d-flex gap-1">'
+   + '<input type="text" class="form-control form-control-sm" placeholder="Note (optional)">'
+   + '<button type="button" class="btn btn-outline-secondary btn-sm" id="fx-button">Ignore</button></form></div></div>'
+   + '</div>'
+   // #833 round 2: the message /settings shows after saving a setting with a
+   // long name — one "word" with nowhere a browser may break it.
+   + '<div class="alert alert-success alert-dismissible fade show mt-3" id="fx-alert">'
+   + 'Setting "safeguarding.dbs_required_for_coordinators" updated.'
+   + '<button type="button" class="btn-close" aria-label="Close"></button></div>'
+   + '</div>';
+  return true;
+})()`;
+// How far right an element's TEXT reaches, against the screen it must fit
+// (#833 round 2). ⚠️ Not the element's box: a word that will not break spills
+// out past its box without widening it, so the first version of this measured
+// the box and could never fail — planted, removing the alert rule left it
+// green. A Range over the contents gives one rectangle per line of text, and
+// the furthest right of those is where the words really end.
+const RIGHT = (id) => `(() => {
+  const el = document.getElementById(${JSON.stringify(id)});
+  if (el === null) return -1;
+  const r = document.createRange(); r.selectNodeContents(el);
+  const rights = [...r.getClientRects()].filter(x => x.width > 0).map(x => x.right);
+  return Math.round(Math.max(el.getBoundingClientRect().right, ...rights));
+})()`;
+const LINES = (id) => `(() => {
+  const el = document.getElementById(${JSON.stringify(id)});
+  if (el === null) return -1;
+  const r = document.createRange(); r.selectNodeContents(el);
+  const tops = new Set([...r.getClientRects()].filter(x => x.width > 0).map(x => Math.round(x.top)));
+  return tops.size;
+})()`;
+
 // ---------------------------------------------------------------------------
 // 🧭 The browser
 // ---------------------------------------------------------------------------
@@ -331,15 +509,35 @@ async function main() {
             if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); } else if (m.method) { events.push(m); }
         });
         let session = null;
-        const send = (method, params = {}, inSession = true) => new Promise((resolve) => {
+        // ⏱️ Every command to the browser has a deadline. Without one, a
+        //    command the browser never answers left the whole run waiting for
+        //    ever, printing nothing (see "Keep THIS tab" below). A stall is now
+        //    a refusal (exit 2) naming the command — never a pass.
+        const send = (method, params = {}, inSession = true) => new Promise((resolve, reject) => {
             id += 1;
-            waiting.set(id, resolve);
-            socket.send(JSON.stringify({ id, method, params, ...(inSession && session ? { sessionId: session } : {}) }));
+            const mine = id;
+            const timer = setTimeout(() => {
+                waiting.delete(mine);
+                reject(new Error(`the browser did not answer ${method} within 60 seconds`));
+            }, 60000);
+            waiting.set(mine, (m) => { clearTimeout(timer); resolve(m); });
+            socket.send(JSON.stringify({ id: mine, method, params, ...(inSession && session ? { sessionId: session } : {}) }));
         });
         const { targetId } = (await send('Target.createTarget', { url: 'about:blank' }, false)).result;
         session = (await send('Target.attachToTarget', { targetId, flatten: true }, false)).result.sessionId;
         await send('Page.enable');
         await send('Network.enable');
+        /* 👁️ Keep THIS tab the visible, focused one. Edge starts with a tab of
+              its own, and on 7 November 2026 one run found the test's tab
+              reporting `visibilityState: "hidden"` part-way through: a hidden
+              tab's timers are throttled and its key presses were never
+              answered, so the run sat still for minutes with nothing failing
+              (#832's build, measured by attaching to the stalled browser).
+              Focus emulation also makes `:focus-visible` behave as it does in
+              a window a person is looking at, which the focus-ring checks
+              depend on. */
+        await send('Page.bringToFront');
+        await send('Emulation.setFocusEmulationEnabled', { enabled: true });
         const [cookieName, ...cookieValue] = COOKIE.split('=');
         await send('Network.setCookie', { name: cookieName, value: cookieValue.join('='), domain: new URL(BASE).hostname, path: '/' });
 
@@ -487,6 +685,117 @@ async function main() {
                     focusOpened.length === 0, `opened on focus: ${focusOpened.join(', ')}`);
                 check(`pointer @${width}: resting on ANY menu button opens nothing while Bootstrap works`,
                     hoverOpened.length === 0, `opened on hover: ${hoverOpened.join(', ')}`);
+            }
+        }
+
+        // 🎯 THE FOCUS RING (#832). Tab along the bar the way a keyboard user
+        //    does — REAL Tab presses, because `:focus-visible` is decided by
+        //    how focus arrived and a scripted focus() is not the same thing —
+        //    in the light and dark themes, each with and without the
+        //    colour-blind palette, wide and narrow (on a phone the entries are
+        //    inside the opened menu). Every entry focused on the bar must show
+        //    a ring at least 3:1 against the bar AND against its own
+        //    background. The theme is chosen the way the bar's own buttons
+        //    choose it, through localStorage, which header.php reads before
+        //    the page is drawn; it is cleared again afterwards.
+        for (const width of [1440, 390]) {
+            for (const [theme, cb] of [['light', 'off'], ['light', 'on'], ['dark', 'off'], ['dark', 'on']]) {
+                await load(PAGES[0], width);
+                await evaluate(`localStorage.setItem('portal-theme', '${theme}'); localStorage.setItem('portal-cb', '${cb}')`);
+                await load(PAGES[0], width);
+                if (width < 992) {
+                    await evaluate("document.querySelector('nav.portal-navbar .navbar-toggler').click()");
+                    await new Promise((r) => setTimeout(r, 500));
+                }
+                await evaluate('document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0)');
+                const rings = [];
+                let left = false;
+                let premise = null;
+                for (let i = 0; i < 60 && left === false; i += 1) {
+                    await key('Tab', 'Tab', 9);
+                    const r = await evaluate(FOCUS_RING);
+                    if (r.inNav === true) {
+                        rings.push(r);
+                        if (premise === null) { premise = r; }
+                    } else if (rings.length > 0) {
+                        left = true;   // tabbed past the bar's last entry
+                    }
+                }
+                const where = `${theme} theme, colour-blind palette ${cb}, @${width}`;
+                check(`focus ring, ${where}: premise — the theme took, and Tab reached at least 4 entries on the bar (it reached ${rings.length})`,
+                    premise !== null && premise.theme === theme && (premise.cb === 'on') === (cb === 'on') && rings.length >= 4,
+                    premise === null ? 'Tab never reached the bar' : `data-bs-theme ${premise.theme}, data-portal-cb ${premise.cb}`);
+                const faint = rings.filter((r) => r.focusVisible !== true || r.vsBar < 3 || r.vsOwn < 3)
+                    .map((r) => `${r.label} (${r.how}, ${r.vsBar}:1 against the bar, ${r.vsOwn}:1 against itself${r.focusVisible ? '' : ', NOT :focus-visible'})`);
+                const lowest = rings.length > 0 ? Math.min(...rings.map((r) => Math.min(r.vsBar, r.vsOwn))) : 0;
+                check(`focus ring, ${where}: every focused entry shows a ring of at least 3:1 (lowest ${lowest}:1)`,
+                    rings.length > 0 && faint.length === 0, `too faint: ${faint.slice(0, 4).join('; ')}`);
+            }
+        }
+        await evaluate("localStorage.removeItem('portal-theme'); localStorage.removeItem('portal-cb')");
+        // 🖱️ …and a mouse click shows nothing new: the ring is for the
+        //    keyboard (`:focus-visible`), so pressing the Apps button with the
+        //    pointer must leave it without one. A real press, through the
+        //    browser's input pipeline, for the same reason as the Tab presses.
+        await load(PAGES[0], 1440);
+        const appsAt = await evaluate(APPS_STATE);
+        if (appsAt.noMenu !== true) {
+            for (const type of ['mousePressed', 'mouseReleased']) {
+                await send('Input.dispatchMouseEvent', { type, x: appsAt.button.x, y: appsAt.button.y, button: 'left', clickCount: 1 });
+            }
+            await new Promise((r) => setTimeout(r, 250));
+            const clicked = await evaluate(FOCUS_RING);
+            check('focus ring: a mouse click on the Apps button gives it focus but shows no keyboard ring',
+                clicked.inNav === true && clicked.focusVisible === false && clicked.how.startsWith('outline') === false,
+                `focus on the bar ${clicked.inNav}, :focus-visible ${clicked.focusVisible}, drawn: ${clicked.how}`);
+        }
+
+        // 📱 WHOLE PAGES ON A PHONE (#833). Not the bar this time: the body
+        //    of each page named by --wide-pages, at the two phone widths,
+        //    with the real-looking data the PHP half put there.
+        for (const { page, premise } of WIDE_PAGES) {
+            for (const width of [320, 390]) {
+                await load(page, width);
+                const r = await evaluate(PAGE_WIDTH(width, premise));
+                check(`${page} @${width}: premise — the page shows the test data ("${premise}")`, premise !== '' && r.premise === true,
+                    `not found on "${r.title}": the page was refused or empty, so its width proves nothing`);
+                check(`${page} @${width}: the whole page, every section opened, is no wider than the screen`,
+                    r.doc <= width + 1,
+                    `the page is ${r.doc}px wide; sticking out: ${r.culprits.length > 0 ? r.culprits.join('; ') : 'nothing inside <main> — look at the header or footer'}`);
+            }
+        }
+
+        // 🧩 WHAT THE ROW RULE MUST NOT BREAK (#833 round 1): a money figure
+        //    in a narrow desktop column, and a word and a one-word badge in a
+        //    phone's fraction-of-a-row cell; and (round 2) a button's label
+        //    beside a note box in a full-row cell. Plus, from the separate
+        //    `.alert` rule, an alert quoting a long setting name. See
+        //    ROW_FIXTURE for why a copy. ⚠️ The alert check can only FAIL at
+        //    320: at 390 that name fits the screen whether or not the rule
+        //    breaks it (round 3 of the check; #851).
+        for (const width of [1024, 768, 390, 320]) {
+            await load(PAGES[0], width);
+            await evaluate(ROW_FIXTURE);
+            await new Promise((r) => setTimeout(r, 150));
+            const lines = {
+                money: await evaluate(LINES('fx-money')),
+                word: await evaluate(LINES('fx-word')),
+                badge: await evaluate(LINES('fx-badge')),
+                button: await evaluate(LINES('fx-button')),
+            };
+            const alertRight = await evaluate(RIGHT('fx-alert'));
+            check(`row rule @${width}: premise — the copied rows are on the page`,
+                lines.money > 0 && lines.word > 0 && lines.badge > 0 && lines.button > 0 && alertRight > 0, JSON.stringify({ ...lines, alertRight }));
+            if (width >= 768) {
+                check(`row rule @${width}: a money figure in a narrow list column stays on one line ("£12,345.67")`,
+                    lines.money === 1, `it is broken over ${lines.money} lines`);
+            } else {
+                check(`row rule @${width}: a word ("Leadership") and a one-word badge ("Proposed") in a part-of-the-row cell are not split`,
+                    lines.word === 1 && lines.badge === 1, `word on ${lines.word} line(s), badge on ${lines.badge} line(s)`);
+                check(`row rule @${width}: a button's one-word label ("Ignore") beside a note box in a full-row cell is not split (#833 round 2)`,
+                    lines.button === 1, `the label is on ${lines.button} line(s)`);
+                check(`alert rule @${width}: an alert quoting a long setting name fits the screen (#833 round 2)`,
+                    alertRight <= width + 1, `the alert reaches ${alertRight}px on a ${width}px screen`);
             }
         }
 

@@ -4,6 +4,27 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The top bar's keyboard focus ring can be seen, and four pages fit a phone (#832, #833)
+
+- **Fixed (#832):** a keyboard user tabbing along the top bar could not see where they were: Bootstrap's own
+  focus ring is a 25%-opacity blue, about 1.4:1 against the bar (WCAG 2.4.7 and 1.4.11 ask for a visible
+  ring of at least 3:1). The bar now draws a 3px ring in the colour of its own words, which every theme
+  already guarantees against the bar and which no organisation colour or the colour-blind palette changes:
+  at the lowest the test measures, 14.09:1 light and 12.11:1 dark. Only for keyboard focus; a mouse click
+  shows nothing new.
+- **Fixed (#833):** /settings, /attendance, /photos and /admin/users were wider than a 320-390px phone and
+  scrolled sideways. Page titles and their buttons now wrap; on a phone, a cell spanning a list row breaks a
+  word only when it would otherwise run out of the row (a long e-mail address, a comma list with no spaces,
+  a long service name in a badge); the page lists on /attendance and /admin/users wrap; and an alert quoting
+  a long setting name breaks it rather than widening the page. A word that fits is never broken: an earlier
+  version used `overflow-wrap: anywhere`, which split a button's one-word label ("Ignore" on
+  /giving/reconcile/view) and is replaced by `break-word`.
+- **Tests:** `tools/top-bar-selftest.mjs` tabs along the bar in both themes, with and without the
+  colour-blind palette, and fails below 3:1; it loads the four pages at 320 and 390 with real-looking rows,
+  including enough sessions and people that /attendance and /admin/users (page 4) draw a long page list;
+  and it lays out copied rows to prove a money figure, a word, a one-word badge and a button's label are
+  not split, and that the alert fits. Six gaps in that test are #851.
+
 ### The general settings page cannot delete a protected setting; two tests no longer clash (#836, #842)
 
 - **Fixed (#836):** the general settings editor (`/settings`) now refuses to

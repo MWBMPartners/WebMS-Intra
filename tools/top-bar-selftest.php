@@ -8,7 +8,9 @@
  *              check in a real browser that the shared top bar fits the
  *              screen at 320, 390, 768, 1024 and 1440 — closed and with its
  *              Apps menu open — and that the cookie banner and the "Install
- *              app" prompt never sit on top of each other.
+ *              app" prompt never sit on top of each other. Also: that a
+ *              keyboard focus ring on the bar can be seen (#832), and that
+ *              four whole pages fit a phone with real-looking rows (#833).
  * Package:     Portal\Tools
  * Author:      MWBM Partners Ltd (t/a MWservices)
  * Copyright:   2026-present MWBM Partners Ltd (t/a MWservices) - All Rights Reserved
@@ -34,6 +36,17 @@
  *     * every `isSensitive = 1` setting, which is EMPTIED for the run (a fresh
  *       key cannot read a secret encrypted with another, and the portal then
  *       logs a critical error on every page) and written back byte for byte.
+ *   REMOVED at the end, and counted (#833):
+ *     * two members with long e-mail addresses and 200 more with ordinary
+ *       ones, each a member of EVERY organisation (enough that /admin/users
+ *       has eight or more pages, so its page list is long);
+ *     * in EVERY organisation — two in the second pass, more on a database
+ *       that already has several — an attendance service type with 200
+ *       sessions (the same, for /attendance) and one count, and a photo
+ *       album.
+ *     These are the rows that make /admin/users, /attendance and /photos look
+ *     like a real organisation's. (This list used to name one session and to
+ *     put the secrets above under REMOVED: #833 round 2 of the check.)
  *   LEFT BEHIND, on purpose:
  *     * four accounts (two per pass), with their membership and activity
  *       rows: once an account has looked at a page, rows point at it and
@@ -69,7 +82,7 @@ declare(strict_types=1);
 
 $sep   = DIRECTORY_SEPARATOR;
 $repo  = dirname(__DIR__);
-$state = ['proc' => null, 'child' => null, 'restore' => null];
+$state = ['proc' => null, 'child' => null, 'restore' => null, 'unseed' => null];
 
 function refuse(string $why): never
 {
@@ -129,6 +142,10 @@ $cleanUp = static function () use (&$state, $db): void {
     if (is_callable($state['restore']) === true) {
         ($state['restore'])($db);
         $state['restore'] = null;
+    }
+    if (is_callable($state['unseed']) === true) {
+        ($state['unseed'])($db);
+        $state['unseed'] = null;
     }
     if ($state['child'] !== null && is_dir($state['child']) === true) {
         $it = new RecursiveIteratorIterator(
@@ -221,6 +238,143 @@ foreach (array_keys($secrets) as $settingId) {
 }
 $empty->close();
 echo 'Emptied ' . count($secrets) . " stored secret(s) for the run; they are written back at the end\n";
+
+// 📱 REAL-LOOKING DATA FOR FOUR WHOLE PAGES (#833). /settings, /attendance,
+//    /photos and /admin/users were each wider than a phone, and most of the
+//    causes needed DATA to show: a long e-mail address in the user list, a
+//    long service-type name in the attendance list, and (round 2) a page list
+//    long enough to be wider than a phone on both. An empty page fits a phone
+//    whatever its rows would do, so these rows are put in on purpose. The rows
+//    that show a value are ordinary ones — a double-barrelled name at a long
+//    organisation domain, a full service name, a named album; the 200 extra
+//    members and 199 extra sessions are deliberately made-up fillers, there
+//    only to make the page lists long (see their own comments). The browser half
+//    is told a piece of each to look for (`--wide-pages`), so a page that came
+//    back empty or refused cannot pass. /settings needs nothing added: the
+//    install script's own allow-list of push services is one long comma list
+//    with no spaces, and that is what overflowed.
+//    REMOVED at the end, and checked: the sessions (with their counts), the
+//    service types and the albums first, then each member's organisation rows
+//    and then the member, because those rows point at the member.
+$seeded = ['users' => [], 'types' => [], 'sessions' => [], 'albums' => [], 'sites' => []];
+$state['unseed'] = static function (mysqli $db) use (&$seeded): void {
+    try {
+        foreach ($seeded['sessions'] as $sessionId) {
+            $db->query('DELETE FROM `tblAttendanceCounts` WHERE `sessionID` = ' . (int) $sessionId);
+            $db->query('DELETE FROM `tblAttendanceSessions` WHERE `sessionID` = ' . (int) $sessionId);
+        }
+        foreach ($seeded['types'] as $typeId) {
+            $db->query('DELETE FROM `tblAttendanceServiceTypes` WHERE `serviceTypeID` = ' . (int) $typeId);
+        }
+        foreach ($seeded['albums'] as $albumId) {
+            $db->query('DELETE FROM `tblPhotoAlbum` WHERE `albumID` = ' . (int) $albumId);
+        }
+        foreach ($seeded['users'] as $userId) {
+            $db->query('DELETE FROM `tblUserSites` WHERE `userID` = ' . (int) $userId);
+            $db->query('DELETE FROM `tblUsers` WHERE `userID` = ' . (int) $userId);
+        }
+    } catch (\Throwable $e) {
+        fwrite(STDERR, 'NOTE: could not remove the test rows for the four pages: ' . $e->getMessage() . "\n");
+    }
+};
+$tag = bin2hex(random_bytes(3));
+// ⚠️ The names sort FIRST on purpose. /admin/users lists 25 people a page in
+//    name order, and this test leaves its own accounts behind on every run
+//    (see the header) — "Alexandra Root-Administrator Worthington" among them.
+//    The first version used "Bartholomew…" and "Oluwaseun…", and after a dozen
+//    runs on one database both had been pushed to page two: the page then
+//    showed neither address, and the premise check said so. "Aa…" and "Ab…"
+//    stay on page one however many runs a database has seen.
+foreach ([
+    ['Aaliyah Montgomery-Fitzwilliam', 'aaliyah.montgomery-fitzwilliam.' . $tag . '@stmarysparishcommunity.example.org'],
+    ['Abimbola Adebayo-Ogunleye', 'abimbola.adebayo-ogunleye.' . $tag . '@northfellowshipregionalpartnership.example.com'],
+] as [$memberName, $memberEmail]) {
+    $stmt = $db->prepare('INSERT INTO `tblUsers` (`fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, 1, 0, 0)');
+    $stmt->bind_param('ss', $memberName, $memberEmail);
+    $stmt->execute();
+    $seeded['users'][] = (int) $db->insert_id;
+    $stmt->close();
+}
+// 📄 ENOUGH PEOPLE FOR A LONG PAGE LIST (#833 round 2). /admin/users shows 25
+//    a page, and its page list beside "Showing N of M" was wider than a 320px
+//    phone from about eight pages, on a MIDDLE page. With two members the list
+//    was never drawn at all, so nothing could see it. 200 more, named to sort
+//    straight after the two above ("Ac…"), so page 4 is all of them whatever
+//    a database's earlier runs left behind; the browser half reads page 4 and
+//    looks for PAGE_FILLER on it.
+const PAGE_FILLER = 'Pagination Filler';
+const PAGE_FILLERS = 200;
+$stmt = $db->prepare('INSERT INTO `tblUsers` (`fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, 1, 0, 0)');
+for ($i = 1; $i <= PAGE_FILLERS; $i++) {
+    $fillerName  = sprintf('Ac %s %03d', PAGE_FILLER, $i);
+    $fillerEmail = sprintf('ac.filler.%03d.%s@example.org', $i, $tag);
+    $stmt->bind_param('ss', $fillerName, $fillerEmail);
+    $stmt->execute();
+    $seeded['users'][] = (int) $db->insert_id;
+}
+$stmt->close();
+$typeName  = 'Sunday Morning Family Worship and Holy Communion';
+$albumName = 'Harvest Festival Thanksgiving Celebration 2026';
+// ⚠️ EVERY organisation, not just the first: with several organisations the
+//    administrator is sent to the chooser and lands in whichever it lists
+//    first — measured, that was the SECOND one — and attendance and photos
+//    belong to one organisation each. The first version seeded only the
+//    first organisation, and the browser half's premise check is what caught
+//    it (the pages were "no wider than the screen" because they were empty).
+//    So this runs again for each pass, for any organisation not yet given rows.
+$seedSites = static function (mysqli $db) use (&$seeded, $tag, $typeName, $albumName): void {
+    $sites = $db->query('SELECT `siteID` FROM `tblSites` ORDER BY `siteID`');
+    while (($row = $sites->fetch_assoc()) !== null) {
+        $site = (int) $row['siteID'];
+        if (in_array($site, $seeded['sites'], true) === true) {
+            continue;
+        }
+        $seeded['sites'][] = $site;
+        foreach ($seeded['users'] as $memberId) {
+            $stmt = $db->prepare('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`) VALUES (?, ?, 1)');
+            $stmt->bind_param('ii', $memberId, $site);
+            $stmt->execute();
+            $stmt->close();
+        }
+        $typeSlug = 'top-bar-family-worship-' . $tag;
+        $stmt = $db->prepare('INSERT INTO `tblAttendanceServiceTypes` (`siteID`, `typeName`, `typeSlug`, `sortOrder`) VALUES (?, ?, ?, 1)');
+        $stmt->bind_param('iss', $site, $typeName, $typeSlug);
+        $stmt->execute();
+        $typeId = (int) $db->insert_id;
+        $seeded['types'][] = $typeId;
+        $stmt->close();
+        $stmt = $db->prepare("INSERT INTO `tblAttendanceSessions` (`siteID`, `serviceTypeID`, `sessionDate`, `sessionTime`, `notes`) VALUES (?, ?, CURDATE(), '10:30:00', ?)");
+        $notes = 'Harvest festival with a visiting choir (' . $tag . ')';
+        $stmt->bind_param('iis', $site, $typeId, $notes);
+        $stmt->execute();
+        $sessionId = (int) $db->insert_id;
+        $seeded['sessions'][] = $sessionId;
+        // 📄 199 more (#833 round 2): /attendance shows 25 a page, and its page
+        //    list was wider than a 320px phone from seven pages. With one
+        //    session it was never drawn. Each carries the run's tag in its
+        //    note, as the first does, so the final count finds every one.
+        for ($i = 2; $i <= 200; $i++) {
+            $stmt->execute();
+            $seeded['sessions'][] = (int) $db->insert_id;
+        }
+        $stmt->close();
+        $stmt = $db->prepare("INSERT INTO `tblAttendanceCounts` (`sessionID`, `groupLabel`, `headcount`) VALUES (?, 'Adults', 1234)");
+        $stmt->bind_param('i', $sessionId);
+        $stmt->execute();
+        $stmt->close();
+        $albumSlug = 'top-bar-harvest-' . $tag;
+        $stmt = $db->prepare("INSERT INTO `tblPhotoAlbum` (`siteID`, `name`, `slug`, `description`, `visibility`) VALUES (?, ?, ?, 'The service, the bring-and-share lunch and the children''s activities in the hall.', 'public')");
+        $stmt->bind_param('iss', $site, $albumName, $albumSlug);
+        $stmt->execute();
+        $seeded['albums'][] = (int) $db->insert_id;
+        $stmt->close();
+    }
+    $sites->free();
+};
+$seedSites($db);
+$widePages = '/settings|push.apple.com;/attendance|' . $typeName . ';/photos|' . $albumName
+    . ';/admin/users|northfellowshipregionalpartnership;/admin/users?page=4|' . PAGE_FILLER;
+echo 'Added ' . count($seeded['users']) . " members, and 200 attendance sessions and a photo album in each organisation, for the four whole-page checks; they are removed at the end\n";
 
 // 📁 A copy of web/, with throwaway credentials, served by PHP's own server
 //    behind a router that imitates web/public_html/.htaccess.
@@ -410,6 +564,7 @@ foreach (['one organisation' => false, 'several organisations' => true] as $pass
         if ($count < 2) {
             $db->query("INSERT INTO `tblSites` (`siteKey`, `siteName`, `isActive`) VALUES ('top-bar-second', 'North Fellowship of the Wider Regional Partnership', 1)");
         }
+        $seedSites($db);   // the second organisation gets its rows too
         $flip = $db->prepare("UPDATE `tblSettings` SET `settingValue` = 'true' WHERE `settingID` = ?");
         $msId = (int) $multisite['settingID'];
         $flip->bind_param('i', $msId);
@@ -425,9 +580,14 @@ foreach (['one organisation' => false, 'several organisations' => true] as $pass
         // 30 apps: the premise that the bar really is crowded. The fault showed at
         // 1024 with about a dozen; with every switch on the measured menus held 39
         // (root administrator) and 34 (ordinary member) on 7 November 2026.
-        $cmd = sprintf('node %s --base=%s --cookie=%s --label=%s --min-apps=30 --switcher=%s 2>&1',
+        // The four whole pages (#833) for the administrator only. Two of them,
+        // /settings and /admin/users, are administrators' pages, where a member
+        // would be measuring a refusal. /attendance and /photos are open to a
+        // member too, and a member's version of them is NOT measured (#851).
+        $cmd = sprintf('node %s --base=%s --cookie=%s --label=%s --min-apps=30 --switcher=%s --wide-pages=%s 2>&1',
             escapeshellarg($measurer), escapeshellarg('http://127.0.0.1:' . $port), escapeshellarg($cookie),
-            escapeshellarg($label . ', ' . $pass), $several === true ? '1' : '0');
+            escapeshellarg($label . ', ' . $pass), $several === true ? '1' : '0',
+            escapeshellarg($admin === true ? $widePages : ''));
         $lines = [];
         $code  = 0;
         exec($cmd, $lines, $code);
@@ -469,6 +629,29 @@ foreach ($expected as [$settingId, $value]) {
 }
 $read->close();
 $nameNow = (string) ($db->query('SELECT `siteName` FROM `tblSites` WHERE `siteID` = ' . $siteId)->fetch_assoc()['siteName'] ?? '');
+// The rows added for the four whole pages, removed now and counted, for the
+// same reason: a removal that silently did nothing would leave, for ever, 202
+// test members with a membership in every organisation, and in each
+// organisation a service type, 200 sessions, a count and an album. The count never reads the
+// rows through the removal's own
+// list of what to remove — the lesson of the settings check above. Each row
+// carries this run's tag (in an e-mail address, a slug or a note), and the
+// count looks for the TAG, so a row made and never recorded is found too.
+($state['unseed'])($db);
+$state['unseed'] = null;
+$t = $db->real_escape_string($tag);
+$left = (int) ($db->query("SELECT (SELECT COUNT(*) FROM `tblUsers` WHERE `emailAddress` LIKE '%.{$t}@%')"
+    . " + (SELECT COUNT(*) FROM `tblUserSites` `us` INNER JOIN `tblUsers` `u` ON `u`.`userID` = `us`.`userID` WHERE `u`.`emailAddress` LIKE '%.{$t}@%')"
+    . " + (SELECT COUNT(*) FROM `tblAttendanceServiceTypes` WHERE `typeSlug` = 'top-bar-family-worship-{$t}')"
+    . " + (SELECT COUNT(*) FROM `tblAttendanceSessions` WHERE `notes` LIKE '%({$t})')"
+    . " + (SELECT COUNT(*) FROM `tblAttendanceCounts` `c` INNER JOIN `tblAttendanceSessions` `s` ON `s`.`sessionID` = `c`.`sessionID` WHERE `s`.`notes` LIKE '%({$t})')"
+    . " + (SELECT COUNT(*) FROM `tblPhotoAlbum` WHERE `slug` = 'top-bar-harvest-{$t}') AS `n`")->fetch_assoc()['n'] ?? -1);
+if ($left === 0) {
+    echo '  ✓ the ' . count($seeded['users']) . ' members, ' . count($seeded['sessions']) . ' attendance session(s) and ' . count($seeded['albums']) . " photo album(s) added for the four pages are gone again\n";
+} else {
+    echo "  ✗ {$left} row(s) added for the four pages are still there\n";
+    $failures++;
+}
 echo "\n";
 if ($wrong === [] && $nameNow === $originalName) {
     echo '  ✓ the ' . count($expected) . " setting(s) it changed, the secrets among them, and the organisation's name are back as they were\n";
@@ -481,6 +664,10 @@ if ($wrong === [] && $nameNow === $originalName) {
 echo "\n" . ($failures === 0
     ? "PASS: for every account run, with one organisation and with several, the top bar fits the screen closed and open;\n"
       . "      with Bootstrap working, focus or a resting pointer opens no menu on the bar and Enter/Escape work on Apps;\n"
-      . "      with scripts off or Bootstrap blocked, the Apps menu opens on hover and every menu on focus; and the notices do not overlap\n"
+      . "      with scripts off or Bootstrap blocked, the Apps menu opens on hover and every menu on focus; the notices do not overlap;\n"
+      . "      a keyboard focus ring on the bar is at least 3:1 in both themes, with and without the colour-blind palette (#832);\n"
+      . "      and, signed in as the administrator (both passes), /settings, /attendance, /photos and /admin/users fit a\n"
+      . "      320 and a 390px phone with real-looking rows and a long page list, without the list rule splitting a money\n"
+      . "      figure, a word, a badge or a button's label, and an alert quoting a long setting name fits too (#833)\n"
     : "FAIL: {$failures} account run(s) found a fault (the ✗ lines above)\n");
 exit($failures === 0 ? 0 : 1);

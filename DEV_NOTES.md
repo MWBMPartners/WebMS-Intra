@@ -20958,3 +20958,27 @@ what the portal will serve, asked of the portal's own rule.
 **Three check rounds found only tests that could not fail, and each is the same shape:** the expense-edit test counted the rows it must not touch AFTER its own clean-up had already emptied them; the giving-records hold check saved the value already stored, so a silently dropped save passed; and the settings-locks header claimed other tests drove change and add for `transcription.retentionDays` when no file in `tools/` posted that key at all. **A check that compares before with after must take 'before' before anything can change it, and a check that an action was accepted must make the action change something.**
 
 **Review: protected arm (retention settings), three rounds by fresh Claude agents standing in for Codex; every finding was in tests (D-064); round 3 CLEAN.** Codex has NOT reviewed it. Left open: #845, #846. The new test is wired into the runner and workflow in a following commit, because those two files carry another package's uncommitted changes.
+
+### A focus ring, phone widths, and `overflow-wrap: anywhere` (#832, #833)
+
+- **`overflow-wrap: anywhere` is not a stronger `break-word`; it changes layout.** Both break a word that
+  would overflow its line, but `anywhere` also lets those breaks count towards an element's min-content
+  width (CSS Text 3). The property is inherited, so every flex item inside the cell could then shrink below
+  its own one-word label: a button beside a `width: 100%` input took its share of the negative free space
+  and split "Ignore". `break-word` leaves min-content alone. Use `anywhere` only where shrinking below a
+  word is the point.
+- **`min-width: 0` does nothing on a column flex item's width.** On a phone `.portal-data-row` is
+  `flex-direction: column`, where a flex item's automatic minimum applies to the main axis (its height).
+  A comment crediting `min-width: 0` with letting the cell give way was untrue and the line is gone.
+- **A page list is only measured if it is drawn.** The test seeded one session and two members, so neither
+  page's pagination ever appeared and both could be wider than a phone unseen. It now seeds 200 of each,
+  and reads /admin/users?page=4, because the widest pagination is on a MIDDLE page.
+- **The contrast figure for "the lowest" must name what it is measured against.** The comment named the
+  highlighted current-page entry; the figures were for `--portal-surface-hover`, the background Bootstrap
+  gives a FOCUSED outline button (`.btn:focus-visible` paints `--bs-btn-hover-bg`).
+- **Specificity of `:is()` is its most specific argument.** `[tabindex]` in the list is what makes the rule
+  (0,3,0) and lets it beat `.btn.show:focus-visible`; without it the rule is (0,2,1).
+- **Work out a contrast from the value that APPLIES, after the cascade.** A round-2 correction gave the
+  dark-theme figure for the highlighted entry as "about 14.1 to 14.9:1", computed from a colour-mixed
+  `--portal-primary-subtle` in an `@supports` block that the later plain dark block overrides. The value
+  that applies is `#1f2347`, giving 12.56:1. Round 3 caught it; the same cascade is #852's third item.

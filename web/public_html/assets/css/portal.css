@@ -460,6 +460,52 @@ textarea:focus-visible,
     margin: 0.375rem 0;
 }
 
+/* ----- Keyboard focus on the bar (#832) -----
+   A keyboard user tabbing along the bar must be able to see where they are
+   (WCAG 2.4.7) with a ring at least 3:1 against what is beside it (1.4.11).
+   Measured in Edge on 7 November 2026, before this rule:
+   * the bar's links (Dashboard, Apps, Admin) showed Bootstrap's own
+     `.nav-link:focus-visible` — `outline: 0` and a 25%-opacity blue shadow,
+     1.4:1 against the white bar and 1.3:1 against the dark one;
+   * the language button showed the portal's 25%/40% primary shadow, 1.4:1
+     and 1.6:1;
+   * the rest showed the portal's 3px `--portal-primary` outline, which is the
+     ORGANISATION'S chosen colour (header.php writes it on <html>, and it then
+     wins over the dark theme's lighter primary) — 3.7:1 on the dark bar with
+     the default indigo, but unknown for any other colour an organisation picks.
+   So the ring is drawn in `--portal-text`, the colour the bar's own words
+   are drawn in: the one colour each theme already guarantees against
+   `--portal-surface` (15.8:1 light, 14.5:1 dark), and one no organisation
+   setting or the colour-blind palette changes. The lowest the self-test
+   measures is 14.09:1 light and 12.11:1 dark, against
+   `--portal-surface-hover`: the background a FOCUSED outline button takes,
+   because Bootstrap's `.btn:focus-visible` paints `--bs-btn-hover-bg`, and the
+   language and organisation buttons are such buttons. (This used to say the
+   lowest was against the highlighted current-page entry, which gives 14.28:1
+   light and 12.56:1 dark, worked out from this stylesheet's own values; round
+   2 of the check put the dark figure at "about 14.1 to 14.9:1" from a mixed
+   colour that is overridden in dark mode and never applies, and round 3
+   corrected it.) `:focus-visible`
+   only, so a mouse click shows nothing new.
+   SPECIFICITY: `:is()` weighs as its most specific argument, the attribute
+   selector `[tabindex]`, so the rule is one class, one attribute and one
+   pseudo-class, (0,3,0). That beats Bootstrap's `.nav-link:focus-visible`,
+   `.btn:focus-visible` and `.navbar-toggler:focus` (each (0,2,0)), and ties
+   `.btn.show:focus-visible`, which it wins by being loaded later. Take
+   `[tabindex]` out of the list and it drops to (0,2,1) and loses its
+   `box-shadow: none` to that rule while the language menu is open. While a
+   bar button is physically PRESSED, Bootstrap's `:active:focus-visible` rules
+   (0,4,0) bring their faint shadow back for that moment; they set no outline,
+   so the ring stays. The shadow is removed so the faint one does not sit
+   beside the real ring.
+   tools/top-bar-selftest.mjs tabs along the bar in both themes, with and
+   without the colour-blind palette, and fails below 3:1. */
+.portal-navbar :is(a, button, input, select, [tabindex]):focus-visible {
+    outline: 3px solid var(--portal-text);
+    outline-offset: 2px;
+    box-shadow: none;
+}
+
 /* ----- Mobile menu collapse ----- */
 @media (max-width: 991.98px) {
     .portal-navbar .navbar-collapse {
@@ -734,6 +780,66 @@ textarea:focus-visible,
 
 .portal-data-row:hover {
     background-color: var(--portal-surface-hover);
+}
+
+/* 📱 On a phone, a cell that spans the row must never be wider than it (#833).
+   Three shapes of ordinary data made whole pages wider than a phone, measured
+   in Edge at 320 and 390px with real-looking rows: a long e-mail address on
+   /admin/users (434px wide), a setting whose value is a comma list with no
+   spaces on /settings (603px), and a long service-type name in a badge on
+   /attendance (356px). None has a space a browser may break at in the right
+   place, and a badge is `white-space: nowrap` in Bootstrap, so the text ran
+   out of the row and the page scrolled sideways.
+   WHY SO NARROW — round 1 of the check. The first version applied to every
+   cell of every list at every width, and broke "£12,345.6" / "7" in a narrow
+   DESKTOP money column at 1024px, and "Leadershi/p" and a one-word badge
+   "Propo/sed" in a phone's FRACTION-of-a-row cell (a bare `col-3`, as
+   /venues/statuses and /admin/workflows use). So it applies only below
+   Bootstrap's `md`, where the row stacks into a column (none of #833's faults
+   existed at 768px or above), and only to cells that span the whole row there
+   (`.col-12`, and the component's own `.portal-data-cell`). A
+   fraction-of-a-row cell is not touched at all.
+   WHY `break-word` AND NOT `anywhere` — round 2 of the check. Both break a
+   word that would otherwise run out of its line. `anywhere` ALSO lets the
+   breaks count towards an element's smallest possible width (CSS Text 3,
+   "min-content"), and the property is inherited by everything in the cell,
+   so a flex item inside it could be squeezed below its own one-word label:
+   on /giving/reconcile/view the "Ignore" button beside a note box was split
+   mid-word on a phone, and the "Match" buttons beside long text would be
+   too. `break-word` leaves every element's smallest width alone and breaks
+   only a word that would overflow, so a word that fits is never broken.
+   A badge in such a cell may wrap at its SPACES (a long name becomes two
+   lines) but never inside a word. `overflow-wrap: normal` on it says so
+   outright, though an inline-block badge is sized to its longest word anyway.
+   A `min-width: 0` here was REMOVED in round 2, with the sentence crediting
+   it: on a phone the row is a COLUMN flex box (see "Mobile: stacked layout"
+   below), and a flex item's automatic minimum applies along the main axis,
+   its height, so it changed nothing.
+   Guarded by tools/top-bar-selftest.mjs: the four pages at 320 and 390, with
+   enough rows that /attendance and /admin/users draw a long page list; a
+   money figure in a narrow column at 768 and 1024; and, at 390 and 320, a
+   word and a one-word badge in a fraction cell and a button beside a note
+   box in a full-row cell. */
+@media (max-width: 767.98px) {
+    .portal-data-row > .col-12,
+    .portal-data-row > .portal-data-cell {
+        overflow-wrap: break-word;
+    }
+    .portal-data-row > .col-12 .badge,
+    .portal-data-row > .portal-data-cell .badge {
+        white-space: normal;
+        overflow-wrap: normal;
+    }
+}
+
+/* 📱 A message can quote a setting's name or an address: one long "word"
+   with nowhere a browser may break it, and an alert wider than the screen
+   makes the whole page scroll sideways (#833 round 2: /settings after saving
+   `safeguarding.dbs_required_for_coordinators` on a 320px phone). Breaking
+   such a word only where it would overflow leaves every ordinary message as
+   it was. Guarded by the same browser test (an alert in its fixture). */
+.alert {
+    overflow-wrap: break-word;
 }
 
 /* Mobile: stacked layout with data-label */

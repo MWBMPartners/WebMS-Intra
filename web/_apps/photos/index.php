@@ -40,9 +40,18 @@ $breadcrumbs = ['Dashboard' => Site::url(''), 'Photos' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<?php
+// 📱 #833: the title and its buttons may WRAP onto two lines, and so may the
+//    buttons themselves. On a 320px phone the title beside Upload, Moderation
+//    queue and Albums made the page 351px wide, so it scrolled sideways
+//    (measured in Edge, 7 November 2026). Where the row fits on one
+//    line nothing moves. Where it does not, the buttons go onto a line below
+//    the title instead of squeezing it onto two, and `gap-2` keeps 8px
+//    between them, so a row that only just fitted before may now wrap.
+?>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
     <h1 class="mb-0"><i class="fa-solid fa-images me-2"></i>Photos</h1>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
         <?php if (Auth::check() === true): ?>
             <a class="btn btn-outline-primary btn-sm" href="<?php echo htmlspecialchars(Site::url('photos/upload'), ENT_QUOTES, 'UTF-8'); ?>"><i class="fa-solid fa-upload me-1"></i>Upload</a>
         <?php endif; ?>
