@@ -4,6 +4,30 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Notification choices are no longer lost between two pages (#667)
+
+- The Notification preferences page used to rebuild a member's whole set of
+  notification choices from its own list and write it over the top, so any
+  choice it did not list was thrown away the next time the member pressed Save
+  — including the one the small card on the Account page owned. Both pages now
+  change only the switches they actually show and keep every other choice
+  exactly as it was.
+- Two saves at the same moment can no longer lose each other's change: the
+  save now holds the member's row while it reads and writes.
+- A page left open from before an update, or a request that does not say which
+  switches it showed, now changes nothing and tells the member so, instead of
+  switching everything it did not see off.
+- Saving the Notification preferences page while the organisation has the
+  Sabbath quiet-hours feature switched off no longer resets the member's own
+  Sabbath choice to "inherit".
+- The Account page's notification card now shows "saved" (or why not) after
+  Save. Its message used to be put somewhere that page never reads.
+- Retired: the `emailDigest` and `expenseUpdates` keys the Account card used to
+  write. Nothing has ever read either (#662), and `expenseUpdates` was a second
+  name for `expenseStatusUpdates`. Values members already have are left in
+  place and still read by nothing.
+- **Tests:** new `tools/notify-prefs-selftest.php`, 44 checks over real HTTP, including a race between two real saves and a measurement that the save's own transaction holds the row; eleven planted faults, each caught. Four check rounds by fresh Claude agents (protected arm); round 3 found the behaviour clean. Raised from it: #874, #875.
+
 ### Admin → Public website, and only a global administrator hands the job out (#493, package P3, migration 262)
 
 - **Admin → Public website** (`/admin/public-website`, #493 package P3; D-085,

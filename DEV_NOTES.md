@@ -21180,6 +21180,106 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### One writer for a member's notification choices (#667)
+
+- `Portal\Core\NotifyPrefs` is the one writer of a member's choices (an
+  erasure empties `tblUsers.notifyPrefs` — `GdprEraser`'s `nullCols` — and a
+  whole-database restore replaces it; neither writes a choice).
+  `NotifyPrefs::SETTABLE` is the ONE list of choices a page may set; there is
+  no second list in a handler. `WebPush::notifyPrefAllows()` is still the ONE
+  test of a choice when sending.
+- A form says which switches it drew with a hidden, KEYED marker beside each
+  one: `prefsShown[<key>] = 1` (`NotifyPrefs::shownMarker()`), and the switch
+  is `prefs[<key>] = 1` (exactly '1'; "on" counts as off). Marked and unticked
+  = OFF; unmarked = NOT TOUCHED; no `prefsShown` at all, OR markers naming
+  only keys nobody may set = change nothing and say the page was out of date
+  (#677) — the second half matters because answering "saved" also wrote the
+  newsletter choice from a checkbox the post never carried (unsubscribing). Keyed rather than `prefsShown[]`
+  so a test that reads a form into a name → value map cannot collapse them.
+- `merge()` opens its transaction FIRST and reads `FOR UPDATE` inside it
+  (#647, #694 round 2). It never throws for a database fault (answers
+  `FAILED`, rolled back), and does throw for a programming mistake (a key not
+  on `SETTABLE`).
+- The stored value is decoded as an OBJECT, not an array, so a nested `{}` under
+  an unknown key is not turned into `[]`.
+- A stored value that is valid JSON but not an object (a list, a number) is
+  REPLACED by the keys just saved and recorded in `tblErrors` as
+  `NOTIFY_PREFS_UNREADABLE`. Why that is safe: every reader (`WebPush`,
+  `Workflow`, `cron/user-reminders.php`, `Giving`, both pages) already reads an
+  unreadable value as "everything on", and a missing key also reads as on, so
+  no answer changes except the keys just chosen. Refusing would have locked the
+  member out of their own choices for ever. Invalid TEXT cannot be stored in
+  this column on MySQL (JSON type) or MariaDB (JSON_VALID check), so that branch
+  is defensive only.
+- The push switches' hidden "carry" fields on the Notification preferences page
+  are REMOVED: they existed only because the old save wrote "off" for every key
+  it did not receive. With nothing drawn and nothing marked, the push choices
+  are simply left alone.
+- Lesson worth keeping: the full-page handler's comment already said, in
+  capitals, that it rebuilt the column and dropped keys — the fault was
+  documented for two packages and lived on because a documented fault reads as
+  a decision.
+- Test: `tools/notify-prefs-selftest.php` — both real pages over HTTP, the real
+  `merge()` raced from a second process while the test holds the row (one web
+  worker cannot run two saves at once), a real refusal by the database (a
+  scratch trigger) on both pages, and eleven plants in a copy of `web/`, each
+  caught by the check meant to catch it. Needs a database account with the
+  PROCESS privilege that may create triggers — on MySQL 8 with binary
+  logging on (the default) that also needs SUPER or
+  `log_bin_trust_function_creators = 1`, so in practice the root account,
+  which is what the workflow uses.
+- LESSON, from the independent check's round 1: the race check (F2) PASSED
+  with `begin_transaction()` removed, because the worker's `FOR UPDATE` read
+  still blocks behind the test's lock, autocommits, and then reads the
+  committed value — the lock vanished between read and write but this
+  interleaving could not exploit it. F3 now MEASURES the transaction: a
+  scratch BEFORE UPDATE trigger records `INNODB_TRX.trx_started` for the
+  writing connection; with the transaction it began at the blocked read
+  (about 3 s before the write), without it at the write (under 1 s).
+- AND THE FIRST VERSION OF THAT MEASUREMENT PASSED ON THE PLANT TOO:
+  `INFORMATION_SCHEMA.INNODB_TRX` is served from a cache refreshed only when it
+  has not been read for 0.1 s. The trigger fired for the test's own write a
+  moment before the worker's, so the worker's lookup was answered from that
+  cache, which still showed its transaction from the blocked read. The trigger
+  now reads INNODB_TRX only for the worker's write. Measure the instrument as
+  well as the code.
+- ROUND 2 found the TEST could hang for a year instead of failing: if anything
+  threw while its second connection held the row lock, the `finally` dropped
+  a trigger on `tblUsers` first, and DROP TRIGGER waits for every open
+  transaction on that table — held by the same blocked process — under
+  MySQL's default `lock_wait_timeout` of 31,536,000 seconds. Reached simply by
+  running as an account without the PROCESS privilege. Now: the PROCESS
+  privilege and trigger creation are asked UP FRONT (a clean REFUSED);
+  every `finally` and the one clean-up end the locking connection and the
+  workers BEFORE dropping anything; the test's own connections wait at most
+  15 s for a lock; Ctrl-C/SIGTERM/SIGHUP run the same clean-up (pcntl),
+  which removes the triggers, scratch table, web server, workers and copy of
+  web/ but NOT the test member and their rows (the next run removes those
+  first); and what a `kill -9` still leaves is listed beside it (the next run
+  drops the two triggers and reuses the scratch table). Measured: a planted
+  throw while the row is held exits in 2 s with no trigger, table, server,
+  worker or copy of web/ left; SIGINT during section F exits 3 likewise.
+- Also from round 2: F1-F3 pass with the lock made SHARED, because only one
+  save waits there; in F4/F5 two real saves are both WAITING at their read
+  before either writes — an exclusive lock then lets them read one after the
+  other, while a shared one lets both read at once and deadlocks, losing one. The premise now
+  asks about each worker's OWN connection rather than any lock wait on the
+  server. `merge()` checks every `execute()` answer, so "never throws, answers
+  failed" does not depend on strict error reporting (that path is read, not
+  run: every page runs with strict reporting).
+- Checked, not assumed: nothing on the request path before `merge()` leaves a
+  transaction open on the page's connection (`grep -rn "autocommit(\|START
+  TRANSACTION" web/` finds only DbBackup's read-only snapshot; the
+  `begin_transaction` callers reachable before the handler — none in
+  bootstrap, Site detection, SiteGate, Auth::ensureSession/requireLogin/
+  verifyCsrf, App::user — and `Auth::createUser()` runs only in a single-sign-on
+  callback and commits or rolls back on every path). A guard inside `merge()`
+  was rejected: asking the server whether a transaction is open needs
+  INNODB_TRX, i.e. the PROCESS privilege, which shared hosting does not give. Section F of
+  `tools/go-live-button-selftest.php` still proves #612; section N of
+  `tools/access-pages-selftest.php` now pins that undrawn push choices are left
+  as stored.
+
 ### Setting up the public website (#493 P3)
 
 - `Portal\Core\PublicWebsiteSetup` is the ONE place: the page gate
