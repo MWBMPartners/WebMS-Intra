@@ -340,13 +340,18 @@ class Router
             return true;
         }
 
-        // 🚪 'w' is the public door's (#493 P4a). A door address is answered
-        //    by web/public_html/index.php long before the router, so this is
-        //    reached only by a /w/ address the door did not recognise — one
-        //    behind a path-mode organisation prefix, say (/cambridge/w/…). It
-        //    gets the door's own 404, never a page: 'w' must never fall
-        //    through to tblRoutes, and reserving it here also reserves it as
-        //    an organisation key (ReservedKeys).
+        // 🚪 'w' is the public door's (#493 P4a). A door address — and, since
+        //    round 1 of P4a's check, one behind a path-mode organisation
+        //    prefix (/cambridge/w/…) — is answered by web/public_html/index.php
+        //    long before the router, so this is only a BACKSTOP for a /w/
+        //    address nothing earlier recognised. It must never fall through
+        //    to tblRoutes, and reserving 'w' here also reserves it as an
+        //    organisation key (ReservedKeys).
+        //    ⚠️ It is NOT the door's identical 404 in one respect, said rather
+        //    than hidden: by the time the router runs, Auth::ensureSession()
+        //    has started a session, so a session file exists and a new
+        //    visitor may be sent a session cookie. notFound() still removes
+        //    the headers it can (X-Offline-Copy among them).
         if ($path === 'w' || str_starts_with($path, 'w/') === true) {
             PublicDoor::notFound();
         }

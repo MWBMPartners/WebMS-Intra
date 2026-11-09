@@ -1877,6 +1877,33 @@ class Site
             return 'door';
         }
 
+        // 1b. "Own path each": /{organisation key}/w/... is a door address
+        //     behind an organisation's prefix. Door addresses are never built
+        //     that way (PublicDoor::addressFor()), so it is REFUSED — but here,
+        //     as a door request, rather than by the router, which runs after
+        //     the session has started and so would answer with a session
+        //     cookie and a session file (round 1 of P4a's check). Only a real
+        //     ACTIVE organisation key counts, so no ordinary address whose
+        //     second part happens to be "w" is taken from the router.
+        if ($isW === false && $multi === true && $mode === self::MODE_PATH
+            && preg_match('#^/([^/]+)/w(/|$)#i', $path, $prefixed) === 1) {
+            try {
+                $stmt = $db->prepare('SELECT 1 FROM `tblSites` WHERE `siteKey` = ? AND `isActive` = 1 LIMIT 1');
+                $stmt->bind_param('s', $prefixed[1]);
+                $stmt->execute();
+                $isKey = $stmt->get_result()->fetch_row() !== null;
+                $stmt->close();
+            } catch (\Throwable $e) {
+                error_log('[WebMS-Intra] Site::preDetect could not look an organisation key up: ' . $e->getMessage());
+                $isKey = true;
+            }
+            if ($isKey === true) {
+                self::$doorRequest = true;
+
+                return 'door';
+            }
+        }
+
         // 2. A /w/{name}/{what} address on any other host?
         if ($isW === false) {
             return 'not';

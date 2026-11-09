@@ -104,6 +104,17 @@ if (defined('PORTAL_ROOT') === false) {
     // Start-up switches error text ON for a pre-release copy; off again.
     ini_set('display_errors', '0');
 
+    // 🚪 ON AN ORGANISATION'S PUBLIC ADDRESS (or under /w/) THIS PAGE DOES NOT
+    //    EXIST (#493 P4a, D-098): a public address answers the public door's
+    //    requests and nothing else. The web server runs this file by itself,
+    //    so index.php's own hand-off never sees it; the door's identical 404
+    //    is answered here instead, BEFORE the session start below — it sets
+    //    no cookie and makes no session file. Found by round 1 of P4a's check:
+    //    this page answered 200 with a session cookie on a public address.
+    if (\Portal\Core\Site::isDoorRequest() === true) {
+        \Portal\Core\PublicDoor::notFound();
+    }
+
     // 🚧 The same two gates, in the same order, as index.php: closed for an
     //    upgrade, then the staff gate on a pre-release copy. Without them
     //    this page would be a way round both.

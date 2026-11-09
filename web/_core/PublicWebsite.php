@@ -87,6 +87,20 @@ final class PublicWebsite
     public const FRAME_ORIGINS_KEY   = 'public.frame.origins';
     public const FRAME_PERMITTED_KEY = 'public.frame.permitted';
 
+    /**
+     * D-087's two settings for the public door on a TEST copy (#493 P4a):
+     * the installation's limit ('testers' or 'either', installation row
+     * only) and the organisation's own choice ('testers' or 'anybody', its
+     * own row only). Locked out of the general settings editor HERE, beside
+     * the others, for the same reason: round 1 of P4a's check found that a
+     * global administrator could otherwise add or change them on Admin,
+     * Settings and open a test copy's door to anybody with no card, no check
+     * and no record of the decision. `PublicWebsiteSetup` reads them; the
+     * card that writes them is package P4d.
+     */
+    public const DOOR_TEST_PERMITTED_KEY = 'public.door.testCopies.permitted';
+    public const DOOR_TEST_OPEN_KEY      = 'public.door.testCopies.open';
+
     /** An organisation's "follow the installation": its own row is deleted. */
     public const INHERIT = 'inherit';
 
@@ -426,7 +440,8 @@ final class PublicWebsite
      *
      * @var list<string>
      */
-    public const LOCKED_KEYS = [self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY];
+    public const LOCKED_KEYS = [self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY,
+        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY];
 
     /**
      * 🧭 WHICH PAGE a locked key is changed on — the ONE place that decides
@@ -460,9 +475,16 @@ final class PublicWebsite
             return ['route' => 'admin/calendar/feeds', 'name' => 'Admin, Outside calendars',
                 'who' => 'an administrator of this organisation', 'installationOnly' => false];
         }
-        if (strcasecmp($key, self::FRAME_PERMITTED_KEY) === 0) {
+        if (strcasecmp($key, self::FRAME_PERMITTED_KEY) === 0 || strcasecmp($key, self::DOOR_TEST_PERMITTED_KEY) === 0) {
             return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',
                 'who' => 'the installation\'s global administrator', 'installationOnly' => true];
+        }
+        if (strcasecmp($key, self::DOOR_TEST_OPEN_KEY) === 0) {
+            // D-087 names the organisation's GLOBAL administrator, not
+            // somebody given "Set up the public website". The card itself is
+            // P4d; until it exists nothing changes this setting anywhere.
+            return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',
+                'who' => 'a global administrator of this organisation', 'installationOnly' => false];
         }
 
         return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',

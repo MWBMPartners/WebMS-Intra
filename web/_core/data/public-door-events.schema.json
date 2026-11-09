@@ -60,7 +60,7 @@
       "required": ["id", "title", "startsAt", "endsAt", "allDay", "timezone", "detailsLimited", "description", "location"],
       "properties": {
         "id": {
-          "description": "The event's short name in the portal's own addresses (its slug), which stays the same while the event exists. Not a database number.",
+          "description": "The event's short name in the portal's own addresses (its slug), which stays the same while the event exists. It is not the event's database number as a field, but a slug the portal made for itself can END in that number (to keep two slugs apart), so do not treat it as hiding one.",
           "type": "string",
           "minLength": 1,
           "maxLength": 200

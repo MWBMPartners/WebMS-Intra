@@ -96,6 +96,13 @@ if ($action === 'frame_add_main') {
 //    it changes nothing — asked HERE, because anything can be posted.
 if ($action === 'door_on' || $action === 'door_replace' || $action === 'door_off') {
     if ($action !== 'door_on' && ($_POST['understood'] ?? null) !== '1') {
+        // Recorded like every other refusal on this page (round 1 of P4a's check).
+        Logger::activity(
+            'PublicWebsiteSetupRefused',
+            'Refused: a change to organisation #' . $siteId . '\'s public door (' . ($action === 'door_off' ? 'switch off' : 'replace the name')
+            . '): the "I understand" tick was not given. Nothing was changed.',
+            $actorId
+        );
         $finish('Nothing was changed: tick the box to say you understand that every copy pasted into a website will stop working.', 'danger');
     }
     $out = match ($action) {

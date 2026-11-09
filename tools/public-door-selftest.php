@@ -45,12 +45,16 @@
  *      Set-Cookie, and no session file made by any door request.
  *   S  every captured feed answer satisfies its schema
  *      (`tools/audit-checks/check_public_door_schema.py --answers`).
+ *   E  error.php and the API description, which start the portal WITHOUT
+ *      index.php: on a public address both give the door's 404 (D-098).
  *   T  a test copy (PORTAL_ENV=alpha, D-087): no sign-in, a member who may
- *      not use the test copy, a made-up cookie — all refused; a tester
+ *      not use the test copy, a made-up cookie, a tester whose session has
+ *      outlived PHP's session lifetime — all refused; a tester
  *      served with `private, no-store` and `Vary: Cookie`; every answer
  *      `noindex, nofollow, noarchive`; "open to anybody" only when BOTH the
  *      installation's limit and the organisation's choice say so (written
- *      straight into the database: no page writes either until P4d); no
+ *      straight into the database: the general settings editor refuses both,
+ *      PublicWebsite::LOCKED_KEYS, and the card is P4d); no
  *      session file made, even for a made-up cookie.
  *   P  the plants: each gate and each header taken out of a COPY of the
  *      portal, and the scenario that should catch it re-run. The expected
@@ -95,7 +99,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 101;
+const PDS_EXPECTED_CHECKS = 118;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -618,7 +622,13 @@ $eShown = $makeEvent('PDS A shown', $siteA, $zoneA, $at($later), $at($later->mod
     'locationEmail' => 'pds-hall-secret@selftest.invalid', 'locationGeoLat' => '51.1234567', 'locationGeoLng' => '-1.7654321',
     'locationW3W' => 'pds.secret.words', 'hostOrgName' => 'PDS HOST ORG', 'capacity' => '77',
 ]);
-$eRunning   = $makeEvent('PDS A running now', $siteA, $zoneA, $at($nowA->modify('-1 hour')), $at($nowA->modify('+2 hours')));
+$eRunning   = $makeEvent('PDS A running now', $siteA, $zoneA, $at($nowA->modify('-1 hour')), $at($nowA->modify('+2 hours')),
+    ['description' => '<b>"Tom & Jerry\'s"</b></script>']);
+// Two all-day events with no end time, OFF the website until C18 ticks them, so
+// they change no other check's list: one today (kept all of today), one
+// yesterday (gone).
+$eAllDayToday = $makeEvent('PDS A all day today', $siteA, $zoneA, $todayA . ' 00:00:00', null, ['isAllDay' => '1', 'showOnWebsite' => '0']);
+$eAllDayPast  = $makeEvent('PDS A all day yesterday', $siteA, $zoneA, $yesterA . ' 00:00:00', null, ['isAllDay' => '1', 'showOnWebsite' => '0']);
 $eUnticked  = $makeEvent('PDS A unticked', $siteA, $zoneA, $at($later), null, ['showOnWebsite' => '0']);
 $eUntil     = $makeEvent('PDS A until yesterday', $siteA, $zoneA, $at($later), null, ['websiteUntil' => $yesterA]);
 $eFrom      = $makeEvent('PDS A from tomorrow', $siteA, $zoneA, $at($later), null, ['websiteFrom' => $tomorA]);
@@ -720,7 +730,8 @@ check('K03 turning it on again changes nothing and says so', [$doorName($siteA),
 $k4 = $card('root', 'door_replace');
 check('K04 "Replace the name" without the "I understand" tick changes nothing', [$doorName($siteA), str_contains($k4['page'], 'tick the box')], [$nameA1, true]);
 $k5 = $card('root', 'door_off');
-check('K05 "Switch the public door off" without the tick changes nothing', $doorName($siteA), $nameA1);
+check('K05 "Switch the public door off" without the tick changes nothing, and both refusals are recorded (PublicWebsiteSetupRefused)',
+    [$doorName($siteA), $logged('PublicWebsiteSetupRefused', $people['root']['id'])], [$nameA1, 2]);
 check('K06 the card warns, before the buttons are pressed, that replacing or switching off stops every pasted copy',
     [str_contains($k1['page'], 'Every copy pasted into a website with the old name stops working at once'),
         str_contains($k1['page'], 'Every copy pasted into a website stops working, and turning the door on again gives it a new name')],
@@ -806,6 +817,36 @@ $refusals['a public address, its root'] = $http('GET', '/', ['host' => $hostA]);
 check('G11 a public address answers door requests ONLY (D-098): /login and / there are the door\'s 404, never a portal page',
     [$refusals['a public address, path not a door address']['status'], $refusals['a public address, its root']['status']], [404, 404]);
 
+// Round 1 of P4a's check: "Replace the name" stops nothing on a public address,
+// which carries no name. The card and the message must say so.
+$kBefore = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+$k8 = $card('root', 'door_replace', ['understood' => '1']);
+$refusals['the old name after a replace with a public address set'] = $http('GET', '/w/' . $nameA . '/events.json');
+$nameA = (string) $doorName($siteA);
+check('K08 with a public address set, replacing the name stops the old /w/ name but NOT the public address, and the card and the message say exactly that',
+    [$refusals['the old name after a replace with a public address set']['status'], $http('GET', '/events.json', ['host' => $hostA])['status'],
+        str_contains($kBefore, 'data-door-replace-public="1"'), str_contains($kBefore, 'Every copy pasted into a website with the old name stops working at once'),
+        str_contains($k8['page'], 'is NOT affected by the name'), $feedA()['status']],
+    [404, 200, true, false, true, 200]);
+
+// Round 1 of P4a's check (D-098): error.php and api-docs start the portal
+// WITHOUT index.php, and on a real server .htaccess sends every refused .php,
+// dotfile and 403/404/500/503 to error.php. On a public address both must give
+// the door's identical 404, with no cookie and no session file.
+$eBefore = $sessionFiles();
+$refusals['error.php on a public address'] = $http('GET', '/error.php?code=404', ['host' => $hostA]);
+$refusals['error.php (500) on a public address'] = $http('GET', '/error.php?code=500', ['host' => $hostA]);
+$refusals['api-docs on a public address'] = $http('GET', '/api-docs/index.php', ['host' => $hostA]);
+$refusals['error.php on a switched-off organisation\'s public address'] = $http('GET', '/error.php?code=404', ['host' => $hostC]);
+check('E01 on a public address error.php (404 and 500) and the API description answer the door\'s 404 — no portal page, no menu, no cookie, no session file — and on the inactive C\'s address too',
+    [$refusals['error.php on a public address']['status'], $refusals['error.php (500) on a public address']['status'],
+        $refusals['api-docs on a public address']['status'], $refusals['error.php on a switched-off organisation\'s public address']['status'],
+        $refusals['api-docs on a public address']['headers']['set-cookie'] ?? '', $sessionFiles() - $eBefore],
+    [404, 404, 404, 404, '', 0]);
+$eMembers = $http('GET', '/error.php?code=404');
+check('E02 on the members\' own address error.php still draws the portal\'s own error page (the hand-off reaches door requests only)',
+    [$eMembers['status'], str_contains($eMembers['body'], '<html'), $eMembers['body'] === "Not found.\n"], [404, true, false]);
+
 $setOwn($siteA, 'calendar.enabled', 'false');
 $refusals['Calendar switched off'] = $feedA();
 check('G12 with Calendar switched off for A, events.json is refused while posters.json still answers',
@@ -870,6 +911,12 @@ $refusals['B\'s name with multi-organisation off'] = $http('GET', '/w/' . $nameB
 check('X06 with multi-organisation switched off only organisation 1\'s name is honoured',
     [$refusals['B\'s name with multi-organisation off']['status'], $feedA()['status']], [404, 200]);
 $setInstallation('multisite.enabled', 'true');
+$setInstallation('multisite.detectionMode', 'path');
+$xBefore = $sessionFiles();
+$refusals['a door address behind an organisation prefix'] = $http('GET', '/selftest-door-b/w/' . $nameB . '/events.json');
+check('X07 in "own path each" mode, /{B\'s key}/w/{B\'s name}/events.json is the door\'s 404 — decided before the session, so no session file',
+    [$refusals['a door address behind an organisation prefix']['status'], $sessionFiles() - $xBefore], [404, 0]);
+$setInstallation('multisite.detectionMode', 'session');
 
 // =============================================================================
 echo "C. What the door gives out\n";
@@ -965,6 +1012,27 @@ check('C16 the moment its poster is unticked, the media stops answering and the 
     [$refusals['media the moment its poster is unticked']['status'], in_array('PDS poster shown', $titles($feedA('posters.json'), 'posters') ?? [], true)], [404, false]);
 $db->query("UPDATE `tblNoticeboardPosters` SET `showOnWebsite` = 1 WHERE `posterID` = {$pShown}");
 check('C17 ticked again, it answers again', $feedA('media/' . $upA)['status'], 200);
+$allDayShown = static function () use ($setEv, $eAllDayToday, $eAllDayPast, $titles, $feedA): array {
+    $setEv($eAllDayToday, ['showOnWebsite' => '1']);
+    $setEv($eAllDayPast, ['showOnWebsite' => '1']);
+    $t = array_values(array_intersect(['PDS A all day today', 'PDS A all day yesterday'], $titles($feedA('events.json?limit=50'), 'events') ?? []));
+    $setEv($eAllDayToday, ['showOnWebsite' => '0']);
+    $setEv($eAllDayPast, ['showOnWebsite' => '0']);
+    return $t;
+};
+check('C18 an all-day event with no end time is kept through the whole of its own day, and gone the day after', $allDayShown(), ['PDS A all day today']);
+$hexBody = $feedA('events.json?limit=50')['body'];
+check('C19 markup and quotes inside a value are written as \\u escapes: no live <b>, </script>, & or \' in the answer, and the value still reads back exactly',
+    [str_contains($hexBody, '<b>'), str_contains($hexBody, '</script>'), str_contains($hexBody, '&'), str_contains($hexBody, "'"),
+        (static function () use ($hexBody): ?string {
+            foreach (json_decode($hexBody, true)['events'] ?? [] as $one) {
+                if ($one['title'] === 'PDS A running now') {
+                    return $one['description'];
+                }
+            }
+            return null;
+        })()],
+    [false, false, false, false, '<b>"Tom & Jerry\'s"</b></script>']);
 
 // =============================================================================
 echo "H. Headers on the live portal\n";
@@ -1071,9 +1139,44 @@ $setOwn($siteA, 'public.door.testCopies.open', null);
 $jarRoot = $signIn('root');
 $tCard = $http('GET', '/admin/public-website', ['jar' => $jarRoot])['body'];
 check('T08 on the test copy the card says the door answers signed-in testers only, and why a real website shows nothing', str_contains($tCard, 'data-door-testers-only="1"'), true);
+$testerFile = $sessions . DIRECTORY_SEPARATOR . 'sess_' . substr($cookieOf($people['tester']['jar']), strlen('PHPSESSID='));
+$ageOut = static function (bool $stale) use ($testerFile): void {
+    clearstatcache();
+    touch($testerFile, $stale === true ? time() - ((int) ini_get('session.gc_maxlifetime') + 600) : time());
+};
+$ageOut(true);
+$tStale = $feedA('events.json', ['cookie' => $cookieOf($people['tester']['jar'])]);
+$ageOut(false);
+check('T09 a tester whose session file is older than PHP\'s session lifetime is nobody: refused (the file is still there, as it is until PHP\'s clear-out runs)',
+    [is_file($testerFile), $tStale['status'], $feedA('events.json', ['cookie' => $cookieOf($people['tester']['jar'])])['status']], [true, 404, 200]);
 $channel = 'prod';
 $startServer();
 $waitForServer();
+
+/**
+ * Round 1 of P4a's check: D-087's two settings must be refused by the general
+ * settings editor, or a global administrator could open a test copy's door
+ * there with no card and no check. Asked of the REAL lock in the COPY, in a
+ * separate PHP process, so a plant made in the copy is what answers. (The
+ * settings-locks self-test drives the editor itself, but it finds its keys BY
+ * READING this lock, so a key taken out of it is simply no longer tested
+ * there — which is why this check exists.)
+ */
+$askLocks = static function () use ($child, $sep): mixed {
+    $file = $child . $sep . 'web' . $sep . '_core' . $sep . 'PublicWebsite.php';
+    $code = 'require ' . var_export($file, true) . ';'
+        . '$o = [];'
+        . 'foreach (["public.door.testCopies.permitted", "public.door.testCopies.open"] as $k) {'
+        . '  $pg = \\Portal\\Core\\PublicWebsite::lockedPageFor($k);'
+        . '  $o[$k] = [\\Portal\\Core\\PublicWebsite::lockedInGeneralEditor($k), $pg["route"] ?? null, $pg["installationOnly"] ?? null];'
+        . '}'
+        . 'echo json_encode($o);';
+    $out = shell_exec(escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($code) . ' 2>&1');
+    return json_decode((string) $out, true) ?? (string) $out;
+};
+check('L01 the general settings editor refuses both of D-087\'s settings and sends them to Admin, Public website (the installation\'s limit for the installation\'s global administrator alone)',
+    $askLocks(), ['public.door.testCopies.permitted' => [true, 'admin/public-website', true],
+        'public.door.testCopies.open' => [true, 'admin/public-website', false]]);
 
 // =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario re-run\n";
@@ -1218,7 +1321,7 @@ $p = $plant('_core/PublicDoor.php', "e.`isDeleted` = 0 AND e.`status` = \\'publi
     static fn (): array => array_values(array_intersect(['PDS A deleted', 'PDS A draft', 'PDS A cancelled'], $titles($feedA('events.json?limit=50'), 'events') ?? [])));
 check('P15 with "published and not deleted" taken out, the deleted, draft and cancelled events are given out', [$p['applied'], $p['result']],
     [true, ['PDS A deleted', 'PDS A draft', 'PDS A cancelled']]);
-$p = $plant('_core/PublicDoor.php', "AND COALESCE(e.`endDateTime`, e.`startDateTime`) >= ' . \$now['sql']", "AND COALESCE(e.`endDateTime`, e.`startDateTime`) >= ' . \$now['sql'] . ' - INTERVAL 30 DAY'",
+$p = $plant('_core/PublicDoor.php', "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql']", "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql'] . ' - INTERVAL 30 DAY'",
     static fn (): bool => in_array('PDS A finished', $titles($feedA('events.json?limit=50'), 'events') ?? [], true));
 check('P16 with "not finished yet" loosened, a finished event is given out', [$p['applied'], $p['result']], [true, true]);
 $p = $plant('_core/PublicDoor.php', '$row  = EventVisibility::redact($row, (int) $row[\'canSeeFull\'] === 1);', '$row  = EventVisibility::redact($row, true);',
@@ -1316,6 +1419,70 @@ $p = $plant('_core/PublicDoor.php', "'id'             => (string) \$row['eventSl
         return $out;
     });
 check('P36 with a database number added to each event, the schema check over the captured answer fails', [$p['applied'], $p['result']], [true, 1]);
+
+// Round 1 of P4a's check: the new hand-offs and guards, each planted out.
+$p = $plant('public_html/error.php', "if (class_exists('Portal\\\\Core\\\\Site', false) === true && \\Portal\\Core\\Site::isDoorRequest() === true) {",
+    'if (false) {', static fn (): bool => $signature($http('GET', '/error.php?code=404', ['host' => 'door-a.selftest.test'])) === $ref);
+check('P37 with error.php\'s hand-off taken out, a public address draws something other than the door\'s 404', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('public_html/api-docs/index.php', 'if (\\Portal\\Core\\Site::isDoorRequest() === true) {', 'if (false) {',
+    static fn (): int => $http('GET', '/api-docs/index.php', ['host' => 'door-a.selftest.test'])['status']);
+check('P38 with the API description\'s hand-off taken out, it answers 200 on a public address', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', "if (\$lifetime > 0 && (\$touched === false || \$touched + \$lifetime < time())) {", 'if (false) {',
+    static function () use ($ageOut, $feedA, $cookieOf, $people): int {
+        $ageOut(true);
+        $s = $feedA('events.json', ['cookie' => $cookieOf($people['tester']['jar'])])['status'];
+        $ageOut(false);
+        return $s;
+    }, 'alpha');
+check('P39 with the session-lifetime question taken out, an expired tester session is served on a test copy', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql']",
+    "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql'] . ' AND COALESCE(e.`endDateTime`, e.`startDateTime`) >= CAST(NOW() AS DATETIME)'",
+    $allDayShown);
+check('P40 judging an all-day event by its stored midnight again, it vanishes at the start of its own day', [$p['applied'], $p['result']], [true, []]);
+$p = $plant('_core/PublicDoor.php', '| JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT', '',
+    static fn (): bool => str_contains($feedA('events.json?limit=50')['body'], '</script>'));
+check('P41 with the JSON_HEX_ flags taken out, a live </script> reaches the answer', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_core/Site.php', "if (\$isW === false && \$multi === true && \$mode === self::MODE_PATH", "if (false && \$isW === false && \$multi === true && \$mode === self::MODE_PATH",
+    static function () use ($setInstallation, $http, $nameB, $sessionFiles): int {
+        $setInstallation('multisite.detectionMode', 'path');
+        $before = $sessionFiles();
+        $http('GET', '/selftest-door-b/w/' . $nameB . '/events.json');
+        $setInstallation('multisite.detectionMode', 'session');
+        return $sessionFiles() - $before;
+    });
+check('P42 with the prefixed /w/ form left to the router, the refusal comes after the session start and leaves a session file', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
+$hostFault = ["SELECT h.`siteID`, h.`hostName`, s.`isActive` FROM", "SELECT h.`siteID`, h.`hostNameX`, s.`isActive` FROM"];
+$p = $plant('_core/PublicWebsiteSetup.php', $hostFault[0], $hostFault[1],
+    static fn (): array => [$http('GET', '/login', ['host' => 'door-a.selftest.test'])['status'],
+        str_contains($http('GET', '/login', ['host' => 'door-a.selftest.test'])['body'], 'Please try again'), $feedA()['status']]);
+check('P43 with the public-address look-up FAILING (a planted database fault), an ordinary request fails closed — "Please try again", never the sign-in page — and the door refuses',
+    [$p['applied'], $p['result']], [true, [503, true, 404]]);
+$p = (static function () use ($child, $sep, $hostFault, $startServer, $waitForServer, $http): array {
+    $site  = $child . $sep . 'web' . $sep . '_core' . $sep . 'Site.php';
+    $setup = $child . $sep . 'web' . $sep . '_core' . $sep . 'PublicWebsiteSetup.php';
+    $was   = [file_get_contents($site), file_get_contents($setup)];
+    $one   = "\$doorLookupFailed = \$door === 'failed';";
+    if (substr_count($was[0], $one) !== 1 || substr_count($was[1], $hostFault[0]) !== 1) {
+        echo "      ! PLANT NOT APPLIED: P44's text was not found exactly once\n";
+        return ['applied' => false, 'result' => null];
+    }
+    file_put_contents($site, str_replace($one, "\$doorLookupFailed = false;", $was[0]));
+    file_put_contents($setup, str_replace($hostFault[0], $hostFault[1], $was[1]));
+    $startServer();
+    $waitForServer();
+    $r = $http('GET', '/login', ['host' => 'door-a.selftest.test']);
+    file_put_contents($site, $was[0]);
+    file_put_contents($setup, $was[1]);
+    $startServer();
+    $waitForServer();
+    return ['applied' => true, 'result' => [$r['status'], str_contains($r['body'], 'name="password"')]];
+})();
+check('P44 with the fail-closed rule taken out as well, the same fault puts the sign-in page on a public address', [$p['applied'], $p['result']], [true, [200, true]]);
+
+$p = $plant('_core/PublicWebsite.php', "self::FRAME_PERMITTED_KEY,\n        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY];", 'self::FRAME_PERMITTED_KEY];',
+    static fn (): array => array_map(static fn (array $one): bool => $one[0], (array) $askLocks()));
+check('P45 with D-087\'s two settings taken out of the editor lock, the general settings editor would store them', [$p['applied'], $p['result']],
+    [true, ['public.door.testCopies.permitted' => false, 'public.door.testCopies.open' => false]]);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

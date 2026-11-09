@@ -303,7 +303,14 @@ self.addEventListener('fetch', function (event) {
     //    poster's picture after the poster was taken off the public website.
     //    The door is for other websites; this worker has nothing to add to
     //    it, so it never touches one.
-    if (url.pathname.indexOf('/w/') === 0) {
+    //    The same addresses at the TOP of an organisation's public address
+    //    (/events.json, /posters.json, /media/…) are skipped too (round 1 of
+    //    P4a's check). Nothing a public address answers registers this worker
+    //    any more — every answer there is the door's, and the door draws no
+    //    page — so this is the second line, for a worker registered there
+    //    before. None of the three is a portal page on the members' address.
+    if (url.pathname.indexOf('/w/') === 0 || url.pathname === '/events.json'
+        || url.pathname === '/posters.json' || url.pathname.indexOf('/media/') === 0) {
         return;
     }
 

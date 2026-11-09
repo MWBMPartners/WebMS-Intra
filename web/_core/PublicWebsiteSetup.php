@@ -109,11 +109,13 @@ final class PublicWebsiteSetup
      * D-087's two settings. The installation's limit ('testers' or 'either',
      * installation row only, seeded 'testers' by migration 263) and the
      * organisation's own choice ('testers' or 'anybody', its own row only, not
-     * seeded). Read by `testCopyDoorOpenToAnybody()`; written by nothing in
-     * this version (package P4d adds the card).
+     * seeded). Read by `testCopyDoorOpenToAnybody()`. No page writes either in
+     * this version: the general settings editor refuses both
+     * (`PublicWebsite::LOCKED_KEYS`), and the card that writes them is package
+     * P4d. Declared on `PublicWebsite`, which locks them.
      */
-    public const KEY_DOOR_TEST_PERMITTED = 'public.door.testCopies.permitted';
-    public const KEY_DOOR_TEST_OPEN      = 'public.door.testCopies.open';
+    public const KEY_DOOR_TEST_PERMITTED = PublicWebsite::DOOR_TEST_PERMITTED_KEY;
+    public const KEY_DOOR_TEST_OPEN      = PublicWebsite::DOOR_TEST_OPEN_KEY;
 
     /**
      * The most websites one organisation may list as allowed to frame its
@@ -856,9 +858,18 @@ final class PublicWebsiteSetup
     }
 
     /**
-     * Give the organisation's public door a NEW name. Every copy pasted into
-     * another website with the old name stops at once, and the page warns so
-     * before the button is pressed. Recorded with both names.
+     * Give the organisation's public door a NEW name. Every copy that uses
+     * the portal's own address with the old name (/w/{old name}/...) stops at
+     * once, and the page warns so before the button is pressed. Recorded with
+     * both names.
+     *
+     * ⚠️ IT DOES NOT TOUCH THE ORGANISATION'S PUBLIC ADDRESS (D-095). Copies
+     *    that use the public address (https://events.example.org/events.json)
+     *    carry no name, so they go on working; to stop those, the door is
+     *    switched off or the public address is changed or removed. Round 1 of
+     *    P4a's check measured the first version promising "every copy stops"
+     *    while the public address went on answering, and the message, the
+     *    card and the record all say so now.
      *
      * @return array{saved:bool, type:string, message:string}
      */
@@ -890,9 +901,18 @@ final class PublicWebsiteSetup
             return self::refusedAndRecorded('public door', $siteId, 'Somebody switched the public door off at the same moment. '
                 . 'Nothing was changed; look at the page again.', $actorId);
         }
+        $publicHost = self::publicHostFor($db, $siteId);
         Logger::activity('PublicDoorNameReplaced', 'Organisation #' . $siteId . '\'s public door name was replaced: '
             . ($now['name'] === '' ? '(a name the portal would not make)' : $now['name']) . ' → ' . $name
-            . '. Every copy using the old name stopped working.', $actorId);
+            . '. Every copy using the old name on the portal\'s own address stopped working'
+            . ($publicHost === '' ? '.' : '; copies using the public address ' . $publicHost . ' are NOT affected.'), $actorId);
+
+        if ($publicHost !== '') {
+            return ['saved' => true, 'type' => 'warning', 'message' => 'The public door has a new name. Copies that use the '
+                . 'portal\'s own address with the old name have stopped working. Your public address, ' . $publicHost
+                . ', is NOT affected by the name: copies that use it go on working. To stop those, switch the public door '
+                . 'off, or change or remove the public address.'];
+        }
 
         return ['saved' => true, 'type' => 'warning', 'message' => 'The public door has a new name. Every copy pasted into a '
             . 'website with the old name has stopped working; paste the new addresses shown below wherever you use them.'];
@@ -948,12 +968,14 @@ final class PublicWebsiteSetup
      * saved, and a database that cannot be asked, is 'testers' — the stricter.
      * Never throws.
      *
-     * ⚠️ NOTHING WRITES EITHER SETTING YET. The card that does is package P4d.
-     *    Until it exists no page can store an organisation's 'anybody'
-     *    (Admin, Settings refuses to add an organisation's row for a key the
-     *    installation already holds, and migration 263 seeds the installation's
-     *    row), so in this version every test copy's door is for signed-in
-     *    testers only. On the live portal nothing asks this at all.
+     * ⚠️ NO PAGE WRITES EITHER SETTING YET. The card that does is package P4d.
+     *    The general settings editor refuses to add, change or delete either
+     *    (`PublicWebsite::LOCKED_KEYS`, since round 1 of P4a's check: before
+     *    that, a global administrator COULD add or change them there, which
+     *    an earlier version of this note denied). So in this version every
+     *    test copy's door is for signed-in testers only, unless somebody
+     *    writes the rows straight into the database. On the live portal
+     *    nothing asks this at all.
      */
     public static function testCopyDoorOpenToAnybody(\mysqli $db, int $siteId): bool
     {
@@ -1370,7 +1392,7 @@ final class PublicWebsiteSetup
             $eventsAt  = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);
             $postersAt = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_POSTERS);
             $rows[] = ['label' => 'The public door', 'state' => 'note', 'words' => $eventsAt === ''
-                ? 'Switched on, but the portal cannot build its addresses: the portal\'s own address is not set. Until it is, the door answers nothing.'
+                ? 'Switched on, but the portal cannot build its addresses. ' . PublicDoor::whyNoAddress($db, $siteId)
                 : 'Switched on. Its events are read from ' . $eventsAt . ' and its posters from ' . $postersAt . '.'];
         } else {
             $rows[] = ['label' => 'The public door', 'state' => 'note', 'words' => $door['state'] === 'unreadable'

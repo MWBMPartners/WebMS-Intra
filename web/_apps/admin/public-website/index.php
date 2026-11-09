@@ -136,7 +136,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php if ($door['state'] === 'on'): ?>
                 <p><span class="badge text-bg-success me-1">On</span> Your website can read:</p>
                 <?php if ($doorEvents === ''): ?>
-                    <div class="alert alert-warning" data-door-no-address="1">The door is on, but the portal cannot build its addresses because the portal's own address is not set, so it answers nothing yet. A global administrator sets it on Admin, Settings, Organisation.</div>
+                    <div class="alert alert-warning" data-door-no-address="1">The door is on, but the portal cannot build its addresses. <?php echo $esc(PublicDoor::whyNoAddress($mysqli, $siteId)); ?></div>
                 <?php else: ?>
                     <ul class="mb-2">
                         <li>Events: <code data-door-address="events"><?php echo $esc($doorEvents); ?></code></li>
@@ -150,8 +150,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-2" data-door-form="replace">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                     <input type="hidden" name="action" value="door_replace">
-                    <p class="small mb-1"><strong>Replace the name</strong> if the addresses have gone somewhere they should not. Every copy pasted into a website with the old name stops working at once, and you will need to paste the new addresses in again.</p>
-                    <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-replace-ok" required><label class="form-check-label" for="pw-door-replace-ok">I understand every copy using the old name will stop working</label></div>
+                    <?php if ($publicHost !== ''): ?>
+                        <?php // Round 1 of P4a's check: the public address carries no name, so replacing the name does NOT stop it. Said plainly, and the replace advice is not offered as the remedy. ?>
+                        <p class="small mb-1" data-door-replace-public="1"><strong>Replace the name</strong> stops only copies that use the portal's own address, with <code>/w/</code> and the name in it. Your public address, <?php echo $esc($publicHost); ?>, carries no name, so copies that use it are <strong>not</strong> affected. To stop those, switch the door off below, or change or remove the public address.</p>
+                        <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-replace-ok" required><label class="form-check-label" for="pw-door-replace-ok">I understand copies using the old name on the portal's own address will stop working, and copies using the public address will not</label></div>
+                    <?php else: ?>
+                        <p class="small mb-1"><strong>Replace the name</strong> if the addresses have gone somewhere they should not. Every copy pasted into a website with the old name stops working at once, and you will need to paste the new addresses in again.</p>
+                        <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-replace-ok" required><label class="form-check-label" for="pw-door-replace-ok">I understand every copy using the old name will stop working</label></div>
+                    <?php endif; ?>
                     <button type="submit" class="btn btn-outline-warning btn-sm mt-1">Replace the name</button>
                 </form>
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-3" data-door-form="off">

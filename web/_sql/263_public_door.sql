@@ -30,9 +30,10 @@
 --                              that changes it, and the organisation's own
 --                              choice (`public.door.testCopies.open`, which is
 --                              NOT seeded — no row means 'testers'), arrive in
---                              package P4d. Until then every test copy's door
---                              answers signed-in testers only. On the live
---                              portal nothing reads either setting.
+--                              package P4d. The general settings editor refuses
+--                              both (PublicWebsite::LOCKED_KEYS), so until then
+--                              every test copy's door answers signed-in testers
+--                              only. On the live portal nothing reads either.
 --
 -- NO PERSONAL DETAILS: tblPublicDoorNames holds an organisation, a random name
 -- and a moment. Who turned the door on, replaced its name or switched it off is

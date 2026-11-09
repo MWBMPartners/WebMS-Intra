@@ -55,6 +55,19 @@ define('PORTAL_WEBROOT', __DIR__);
 if (is_readable($bootstrap) === true) {
     try {
         require_once $bootstrap;
+        // 🚪 ON AN ORGANISATION'S PUBLIC ADDRESS (or under /w/), the public
+        //    door's identical 404 and nothing else (#493 P4a, D-098). On a
+        //    real server .htaccess sends every refused *.php, every dotfile
+        //    and every 403/404/500/503 HERE, so without this a public address
+        //    drew a full portal page — menu, sign-in link, a session cookie
+        //    and a session file — and, on a switched-off organisation's
+        //    address, organisation 1's page (round 1 of P4a's check). Asked
+        //    straight after start-up and BEFORE the session start below.
+        //    Start-up failing is the one case it cannot see: the plain page
+        //    at the bottom then names no organisation and sets no cookie.
+        if (class_exists('Portal\\Core\\Site', false) === true && \Portal\Core\Site::isDoorRequest() === true) {
+            \Portal\Core\PublicDoor::notFound();
+        }
         if (class_exists('Portal\\Core\\Router') === true) {
             // 🚪 Ask the organisation gate before drawing anything with a
             //    menu (see the note at the top of this file). The session is

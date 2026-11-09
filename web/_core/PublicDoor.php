@@ -149,7 +149,7 @@ final class PublicDoor
         'Set-Cookie', 'X-Frame-Options', 'Cross-Origin-Opener-Policy', 'Cross-Origin-Resource-Policy',
         'Cross-Origin-Embedder-Policy', 'X-Robots-Tag', 'Referrer-Policy', 'Content-Security-Policy',
         'Cache-Control', 'Expires', 'Pragma', 'Vary', 'Last-Modified', 'Access-Control-Allow-Origin',
-        'Access-Control-Allow-Credentials', 'Access-Control-Allow-Methods',
+        'Access-Control-Allow-Credentials', 'Access-Control-Allow-Methods', 'X-Offline-Copy',
     ];
 
     // =========================================================================
@@ -308,7 +308,19 @@ final class PublicDoor
             $semi = strrpos($path, ';');
             $path = $semi === false ? $path : substr($path, $semi + 1);
             $path = $path === '' ? sys_get_temp_dir() : $path;
-            if (is_file($path . DIRECTORY_SEPARATOR . 'sess_' . $cookie) === false) {
+            $file = $path . DIRECTORY_SEPARATOR . 'sess_' . $cookie;
+            if (is_file($file) === false) {
+                return 0;
+            }
+            // ⏳ EXPIRED is nobody. The portal sets no idle limit of its own:
+            //    a session ends when PHP's clear-out deletes a file untouched
+            //    for `session.gc_maxlifetime` seconds. That clear-out runs only
+            //    now and then, so a stale file can outlive its lifetime; the
+            //    door does not honour one (round 1 of P4a's check), which is
+            //    the stricter reading of the same expiry.
+            $lifetime = (int) ini_get('session.gc_maxlifetime');
+            $touched  = filemtime($file);
+            if ($lifetime > 0 && ($touched === false || $touched + $lifetime < time())) {
                 return 0;
             }
         }
@@ -323,6 +335,11 @@ final class PublicDoor
     /**
      * The organisation's events on the public website that have not finished
      * yet on their OWN clock (`Events::nowOnItsOwnClock()`), soonest first,
+     * at most `$limit`. An ALL-DAY event lasts until the end of its last day
+     * on that clock — its stored times are only the day's midnight, so
+     * judged by them it vanished at the START of its own day (round 1 of
+     * P4a's check). The arithmetic is on the clock readings themselves, so it
+     * needs no zone.
      * at most `$limit`. Website mode with the copied-in rule in force for the
      * organisation; published only; full detail only where the rule allows it,
      * cut with `EventVisibility::redact()` otherwise.
@@ -340,7 +357,8 @@ final class PublicDoor
             'SELECT e.`eventSlug`, e.`eventName`, e.`description`, e.`startDateTime`, e.`endDateTime`, e.`timezone`, '
             . 'e.`isAllDay`, e.`locationName`, e.`locationAddress`, e.`locationWebURL`, ' . $full['sql'] . ' '
             . 'FROM `tblEvents` e WHERE e.`siteID` = ? AND e.`isDeleted` = 0 AND e.`status` = \'published\' '
-            . 'AND COALESCE(e.`endDateTime`, e.`startDateTime`) >= ' . $now['sql']
+            . 'AND (CASE WHEN e.`isAllDay` = 1 THEN DATE_ADD(DATE(COALESCE(e.`endDateTime`, e.`startDateTime`)), INTERVAL 1 DAY) - INTERVAL 1 SECOND '
+            . 'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . $now['sql']
             . $vis['sql'] . ' ORDER BY e.`startDateTime` ASC, e.`eventID` ASC LIMIT ?'
         );
         $stmt->bind_param(
@@ -614,6 +632,36 @@ final class PublicDoor
         return $base . '/w/' . $door['name'] . '/' . $what;
     }
 
+    /**
+     * Why `addressFor()` cannot build an address for this organisation, in
+     * words for the card and the set-up check — '' when it can. The ONE
+     * place this is said, because the first version blamed the portal's own
+     * address in every case, which is untrue in "own address each" mode
+     * (round 1 of P4a's check): there the portal's address can be set and
+     * this organisation still have no address of its own.
+     */
+    public static function whyNoAddress(\mysqli $db, int $siteId): string
+    {
+        if (PublicWebsiteSetup::doorStateFor($db, $siteId)['state'] !== 'on'
+            || PublicWebsiteSetup::publicHostFor($db, $siteId) !== '') {
+            return '';
+        }
+        if (PortalAddress::state() === PortalAddress::STATE_UNREADABLE) {
+            return 'The portal\'s own address could not be read, so the door answers nothing on it yet.';
+        }
+        if (PortalAddress::visitorCanChooseHost() === true) {
+            return 'The portal\'s own address is not set, so the door answers nothing on it yet. A global administrator sets it '
+                . 'on Admin, Settings, Organisation (or give this organisation a public address below).';
+        }
+        if (PortalAddress::base($siteId) === '') {
+            return 'This installation gives each organisation its own address, and this organisation has none, so the door '
+                . 'answers nothing yet. A global administrator gives it one on Admin, Organisations (or give it a public '
+                . 'address below).';
+        }
+
+        return '';
+    }
+
     // =========================================================================
     // 📤 Answers and headers
     // =========================================================================
@@ -784,6 +832,12 @@ final class PublicDoor
 
     private static function json(array $data): string
     {
-        return json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR) . "\n";
+        // JSON_HEX_*: `<`, `>`, `&`, `'` and `"` inside a value are written as
+        // \u escapes, so an answer that somebody pastes into a page, or a
+        // browser that sniffs it as HTML despite nosniff, can never meet a
+        // live `</script>` or a quote that ends an attribute (round 1 of P4a's
+        // check). The JSON means exactly the same to any reader.
+        return json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE
+            | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR) . "\n";
     }
 }
