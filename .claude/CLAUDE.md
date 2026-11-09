@@ -159,6 +159,11 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > `e2e-migrations.yml`'s matrix now. Keep writing SQL to the MySQL 8.0 ∩
 > MariaDB convention below: following a convention is still not the same as
 > proving compatibility, and the convention is what makes five engines pass.
+> **MySQL 9.7 has no `SHA1()`, `SHA()` or `MD5()` SQL functions (#887,
+> measured on 9.7.4: ERROR 1305)**: every named lock was built with `SHA1()`,
+> so on 9.7 nobody could sign in with a password. Write `LEFT(SHA2(…, 256),
+> 40)`; `tools/audit-checks/check_no_removed_sql_functions.py` is the hard
+> gate. Still open: on 9.7 a BOUND impossible date reads as a real one (#892).
 >
 > **MySQL 8.0 AND MariaDB 10.6 STAY ACCEPTED, WITH A WARNING — the owner's
 > decision, 3 November 2026. DO NOT "TIDY" `MIN_MYSQL` OR `MIN_MARIADB`
@@ -431,6 +436,15 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   D-094, D-095): its gate `maySetUp()` (an ordinary administrator does not pass), the D-093 hand-out rule,
   the stored addresses and framing list (re-checked on every read), and `frameAncestorsFor()`, which the public
   door must send rather than building its own. Test: section W of `tools/public-website-tick-selftest.php`.
+  `Portal\Core\PublicDoor` is the ONE gate for the public door's feeds and media (#493 P4a; D-056, D-097,
+  D-098): it reads only `Site::doorSiteId()`, which `Site::preDetect()` decides from the address alone before
+  any session, and `PublicDoor::addressFor()` is the ONE place a door address is built. Every web-root file
+  that loads start-up hands a door request over straight after it (`Site::isDoorRequest()`,
+  `Site::publicAddressUnknown()`; hard gate `check_webroot_door_handoff.py`). A public address is the door's
+  only once the installation's global administrator approves it (D-101); `PublicWebsiteSetup::publicHostStatus()`
+  is the ONE answer to where it stands. `.htaccess`'s deny rule is driven on a real Apache by
+  `tools/htaccess-apache-selftest.php` (D-065). Test: `tools/public-door-selftest.php`; the record is
+  DEV_NOTES.md, "The public door (#493, package P4a)".
   The technical record is DEV_NOTES.md, "Show on the public website, for events (#493, package P1)".
 - **Calendar, Events and the Preaching Plan are ONE app ("Events").** `/calendar` covers viewing, listing and subscribing; the manage pages handle preaching-plan and worship event types and series.
 - **Outside calendars (#514).** `EventVisibility::where()` is the ONE place that decides who may see an event. Every place that reads `tblEvents` for a viewer uses it, or refuses imported events (`externalFeedID IS NULL`); `tools/audit-checks/check_event_visibility.py` enforces that only by finding one of those near the word `tblEvents`, so it cannot see a query built far from it. `FeedImporter` is the ONE writer of an imported event; nothing else may edit one. An address a person typed is fetched only through `SafeFetch`, and an address is never logged or printed. Every writer of a calendar takes the calendar's row lock first (`FeedAdmin::inFeedLock()`, `FeedImporter::lockFeed()`), and an incomplete download never removes anything. **A new kind of "who may see it" entry changes four places together** (the rule in `EventVisibility`, its fast copy `FeedAdmin::whoCanSee()`, `ExternalAudience`, and the picker `admin/calendar/_audience-picker.php`) and needs people of that kind in the made-up worlds of both `tools/event-visibility-selftest.php` and `tools/feed-admin-selftest.php`, or the tripwire cannot see a copy that ignores it. `Portal\Core\ImportNotifier` is the ONE place that decides who is told that imported events are waiting, and what they are told. A person is told only if `EventVisibility::isAdminOfSite()` says yes, and the events in the e-mail come from `FeedAdmin::pendingApprovals()`: do not write a second rule. Its only memory is `tblExternalApprovalNotices`; `emailLocalDate` there is a date on the organisation's own calendar, never a UTC date. The push goes before the e-mails, and a push claim is always followed by its call. Quiet hours hold nothing (owner, 13 October 2026). Nothing it logs or pushes may name a person, a calendar or an event, and a fault's own words are never logged. A notification switch is added to `notifications.php` and `notifications-save.php` together. The guide `/help/calendar-imports` is pinned by check W50 of `tools/feed-admin-selftest.php`: change both together. Tests: `tools/event-visibility-selftest.php`, `feed-resolver-selftest.php`, `feed-importer-selftest.php`, `feed-admin-selftest.php`, `ics-reader-selftest.php`, `safefetch-selftest.php` and `import-notifier-selftest.php`. The technical record is DEV_NOTES.md, "Outside calendars (#514)".

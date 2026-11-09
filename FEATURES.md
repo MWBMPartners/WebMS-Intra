@@ -223,7 +223,20 @@ screens and didn't say what it meant.
   public address for the portal's own public pages (one organisation each, D-095), which outside websites may
   frame its public pages (D-082), the installation's framing switch (D-094), and "Check my set-up". Gate:
   `website.setup` (D-085), held out of the box by global administrators only; only a global administrator may
-  hand it out (D-093). Not yet used by any public page — that is the public door (P4).
+  hand it out (D-093). An organisation's public address does nothing until the installation's global
+  administrator approves it on the same page, which lists every organisation's address with Approve and
+  Withdraw approval (D-101, #493 P4a); the organisation's card says Waiting, Approved, Approved but not in use
+  (members sign in at it), or Approved but not checked.
+- **The public door** (#493 P4a; D-056, D-097, D-098): a card at the top of Admin → Public website turns an
+  organisation's door on, replaces its name and switches it off (each recorded; every door starts off). Once
+  on, the organisation's own website can read `events.json` (published, Public, ticked for the website,
+  inside its website dates, not finished on its own clock — an all-day event lasts its whole day; full
+  details only where the copied-in rule and the calendar allow) and `posters.json` (ticked, in-date,
+  undeleted posters; their uploads served through the door only while a ticked poster uses them), at
+  `/w/{name}/…` on the portal's address or at `/…` on the organisation's approved public address, which
+  answers nothing else. Replacing the name does not affect the public address. Every refusal is one
+  identical "not found"; no cookie, no session. On a test copy the door answers signed-in testers only
+  (D-087; its card is P4d). Still to come: the pasted-in script (P4b) and the frameable page (P4c).
 - **Admin → Server Information** (`/admin/system-info`, any
   administrator): PHP version, the database verdict, connection facts
   asked of the live connection itself rather than read from the
@@ -866,6 +879,7 @@ Visual poster wall — pinboard of event posters. Distinct from the text-based A
 - QR share panel — links to poster's deep-link URL, server-encoded via `Portal\Core\Qr` and pinned to the current host
 - Site-admin gated writes; any authenticated user can view
 - Posters on the public website (#493 P2a): a per-poster "Show on the public website" switch with optional first/last day, set on `/noticeboard/website` by whoever holds `website.publish` (D-077). Every poster starts off (migration 260); the board's own editor never puts one on, and deleting a poster takes it off. One rule, `PublicWebsite::posterWhere()`, decides which posters are on the website
+- Posters on the public website are also given to the organisation's own website through the public door's `posters.json` (#493 P4a), once the organisation has turned its door on (Admin → Public website)
 - Foyer screen (#493 P2b, D-086): `/noticeboard/foyer?token=<secret>` plays the posters full-screen with no sign-in; the link (one per organisation, `tblNoticeboardFoyer`, migration 261) is made, replaced and shown with its QR code on `/noticeboard/foyer/setup`. Public posters only, unless the installation permits a choice (`noticeboard.foyer.permitted`) and the organisation's global administrator chose every poster (`noticeboard.foyer.shows`). `NoticeboardFoyer` is the one place for all of it
 - Real media upload pipeline (#363) — finfo-sniffed, size-capped (`noticeboard.upload.maxBytes`, default 15 MB), server-generated filename; served back publicly (no login) via `/noticeboard/media?f=<token>` so posters keep rendering for an anonymous QR scanner. Orphaned uploads (abandoned in the editor, or whose poster was later soft-deleted) are purged automatically after each save.
 

@@ -21180,6 +21180,195 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### MySQL 9.7 removed MD5(), SHA1() and SHA() (#887)
+
+- **Measured, 9 November 2026, on mysql:9.7.4:** `SELECT SHA1('x')`, `SELECT MD5('x')` and `SELECT
+  SHA('x')` each answer `ERROR 1305 (42000): FUNCTION <db>.SHA1 does not exist`; `SHA2('x', 256)` works.
+  Found by trying every upper-case `NAME(` in `web/` and `tools/` against 9.7.4: only `MD5` and `SHA1` were
+  SQL functions that no longer exist. Every named lock (`GET_LOCK()`) was built with `SHA1(DATABASE())`: the
+  sign-in lock (`Auth::SIGN_IN_LOCK_SQL`), the mail queue's (three places in `MailQueue`), the held texts'
+  (`Sms`), the activity-log cleaner's and the event broadcast's. Commits `5f9b369f`, `e945a133`, `f0bd3096`.
+- **The replacement is `LEFT(SHA2(x, 256), 40)`** — forty hex characters, exactly as long as `SHA1()`'s
+  answer, so no lock name grows past MySQL's 64-character limit (`SHA2(…, 256)` alone would make
+  `portal-mail-queue:` plus 64 = 82). Measured on MySQL 8.0.36, 8.4.11, 9.7.4 and MariaDB 11.4.13, 12.3.3.
+- **Why it hid, and the lesson:** `Auth::signInLock()` caught EVERY error and answered "no lock", and a
+  refusal for "no lock" reads exactly like the limiter working. Every test that signs in with a password ran
+  on 8.0/8.4 only; the migration harness runs on 9.7 but never signs in, and the calendar self-tests were the
+  first to sign in there. **A catch-all that turns "could not ask" into "the answer is no" makes a fault look
+  like a feature.** It is now `takeSignInLock()`, answering taken, busy (`GET_LOCK()` answered 0) or fault
+  (an exception, or `NULL`). A fault is still refused, but writes a Critical error record (`Auth` /
+  `SIGN_IN_LOCK`, the exception's class and code; Critical because the seeded alert levels are
+  "Critical,Fatal") and a `LoginUnavailable` activity line, and the login page asks
+  `Auth::localSignInUnavailable()` for its words. The record's title and detail, the alert e-mail and the
+  outside error monitor never carry the visitor's address; its `visitorIP` column does, as every error
+  record's does (round 2 found a comment and a check label saying "never" without that qualifier).
+- **Guards.** `tools/audit-checks/check_no_removed_sql_functions.py` reads only string literals in PHP (so
+  PHP's own `md5()` and `sha1()` are fine), `.sql` files with comments removed, and `tools/*.sh`; its
+  `--selftest` has must-find and must-pass cases with both counts pinned, and runs first in the same hard-gate
+  step of `pr-security.yml`. Section 0 of `tools/sign-in-limits-selftest.php` reads `Auth::SIGN_IN_LOCK_SQL`
+  out of the class, takes and lets go of the lock on the server in front of it, and requires the first
+  sign-in try to be CHECKED — red on 9.7 with the old line put back, and able to go red ONLY on an engine
+  lacking a function the lock uses, which is why the text check exists too. Section 0b plants an unknown
+  function into the lock's SQL in its SCRATCH copy of `web/` for one request (the test's portal servers now
+  start with `opcache.enable_cli=0`, so a changed file is re-read) and separately holds the real lock from its
+  own connection: putting the swallow back turns the fault checks red, and reporting a held lock as a fault
+  turns the busy check red. `calendar-selftests.yml` runs this test on all five of its engines, so section 0
+  runs where it can fail — but that workflow has never run on GitHub (#754).
+- **Upgrade note, said so the release notes carry it:** the lock NAMES changed, so during a deploy a request
+  on the old code and one on the new take different locks and do not exclude each other, once — one
+  mail-queue run could overlap another, the held-texts limits could be overshot once, a log clean-up could
+  run twice, a broadcast pressed twice could both get in, two sign-in tries from one address could be checked
+  side by side. Each settles at the next run. On 9.7 the old code could take none of the locks.
+- **A second 9.7 difference, in a TEST:** mysql:9.7.4 runs with `gtid_mode = ON` and
+  `enforce_gtid_consistency = ON` (measured), which refuses any statement that could write a
+  non-transactional table and a transactional one (error 1785) — judged on the statement's SHAPE.
+  `calendar-import-selftest.php`'s trigger on `tblEvents` wrote a MEMORY table, so every insert into
+  `tblEvents` was refused on 9.7, not just the race rows. The counter is now one InnoDB table per race name,
+  counted by AUTO_INCREMENT, the one thing a refused statement does not give back (measured identical on all
+  five engines). Nothing in the portal has that shape: no non-InnoDB table, no `CREATE TEMPORARY TABLE`, no
+  `CREATE TABLE … SELECT`.
+- **Not fixed, open as #892:** as a BOUND PARAMETER, MySQL 9.7 reads an impossible date as a real one —
+  `TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), ?)` with `'2027-02-31 10:00:00'` answers the seconds to 3 March,
+  where MySQL 8.0, 8.4 and MariaDB 11.4, 12.3 answer NULL, and `CAST(? AS DATETIME)` returns the impossible
+  text unchanged. As a literal all five answer NULL. `Sms::hold()` relies on the NULL, so on 9.7 a held text
+  whose use-by date does not exist is kept (for at most 48 hours) instead of refused; check C7 of
+  `tools/held-texts-selftest.php` is red on 9.7 for this.
+
+### The public door (#493, package P4a)
+
+`Portal\Core\PublicDoor` is the ONE gate for the door's feeds and media (`events.json`, `posters.json`, a
+poster's upload). It reads only `Site::doorSiteId()`, never `Site::id()`; its readers go only through
+`EventVisibility` website mode with `PublicWebsite::copiedRuleFor()` and `PublicWebsite::posterWhere()`, and
+its renderers are handed arrays. `PublicDoor::addressFor()` is the ONE place a door address is built.
+Decisions: D-056, D-087 (reader only), D-097, D-098, D-101; the lesson that settled two of its guards is
+D-065. Commits `af3af710` (the build) to `0a2796be` (round 9 of the check).
+
+- **The organisation is decided from the address alone, before any session is looked at.**
+  `Site::preDetect()` gained `detectDoor()`, run after the two multi-organisation settings are read. A
+  request is a door request when its host is an APPROVED public address (then every path is one, and a
+  `/w/` path there is never read as a name, so A's address can never serve B), when its path begins `/w/`,
+  or, in path mode, when it is `/{active organisation key}/w/…` — refused, but as a door request, so before
+  the session starts. Only active organisations count. The router's own `w` branch is a backstop and is NOT
+  the identical 404: it runs after the session has started, and the session start's header callback adds
+  `X-Offline-Copy` after `notFound()` clears headers.
+- **Every way into start-up must hand a door request over, and `index.php` is not the only way.**
+  `web/public_html/error.php` (Apache's error page for every refused `.php`, dotfile and 403/404/500/503) and
+  the standalone branch of `api-docs/index.php` start the portal without `index.php`. Round 1 of the check
+  found both drawing a full portal page with a session cookie on a public address — and organisation 1's
+  page on a switched-off organisation's address. In every web-root file that loads start-up, the two
+  hand-offs (`Site::isDoorRequest()` → PublicDoor; `Site::publicAddressUnknown()` → `PublicDoor::tryAgain()`)
+  are the first statements after the require. `check_webroot_door_handoff.py` checks that they are WRITTEN
+  there (PHP's tokeniser, positional). **Whether anything RUNS before them is driven, not read:** four rounds
+  of sharper patterns each lost to the next spelling (a session started above the require, a call inside the
+  hand-off's condition, a path built by interpolation), so section F of `tools/public-door-selftest.php`
+  walks the web root and runs EVERY PHP-ending file directly, as a server ignoring `.htaccess` would — GET,
+  HEAD, POST with a body and GET with a query string, each with and without a stale session cookie, on a
+  public address, on a switched-off organisation's, and in the failure state — and requires no cookie, no
+  session file and nobody named. It cannot reach a branch keyed on a particular parameter VALUE, a method
+  other than those three, or a header it does not send, and says so.
+- **The failure state is its own answer.** When the public-address look-up fails, nobody can tell whether the
+  host is a public address, so every way in answers a plain 503 that names nobody, BEFORE any session — and
+  `preDetect()` returns before its session peek, or a stale cookie made an empty session file there.
+  `/logout` is not let through in that state: signing out needs a session. A missing table (error 1146)
+  counts as "no such address".
+- **Reading a request's path is two traps.** `parse_url()` reads a path beginning `//` as a HOST
+  (`parse_url('//w/x/events.json')` answers host `w`), so `//w/…` was not a door request; cutting at `?`
+  instead then broke an ABSOLUTE-FORM request line (`GET http://host/w/{name}/…`, which servers must accept).
+  `detectDoor()` now takes off a leading scheme and host, cuts at `?`, and counts repeated slashes as one;
+  R02 sends the absolute form over a raw socket, because curl cannot. `Router::extractPath()` still uses
+  `parse_url()`, so the two are NOT the same rule yet, and a percent-encoded path (`/%77/{name}/…`) is not
+  recognised by `detectDoor()`: both #884.
+- **One identical 404, and what a data answer carries.** R01 compares every refusal kind by status, every
+  header but `Date` and `Host`, and body. A fault inside the door is the same 404, logged to PHP's error log
+  only. Data answers send `Access-Control-Allow-Origin: *` (never a credentials header),
+  `Cross-Origin-Resource-Policy: cross-origin`, `Content-Security-Policy: default-src 'none';
+  frame-ancestors 'none'; sandbox` (data is never framed, whatever the organisation lists —
+  `frameAncestorsFor()` is for P4c's page), `Referrer-Policy: no-referrer`, `public, max-age=60` (`private,
+  no-store` with `Vary: Cookie` on a testers-only test copy) and `X-Robots-Tag: noindex`. Start-up's own
+  headers, PHP's session cache headers and any `Set-Cookie` are removed first. JSON is encoded with
+  `JSON_HEX_TAG|AMP|APOS|QUOT`, so a value can never meet a live `</script>` in a page somebody pastes it into.
+- **A list of addresses the portal knows can never be complete, so a person approves a public address
+  (D-101).** Round 6 found the guards against an organisation saving an address members sign in at compared
+  only with addresses the portal KNOWS (`site.url`, every organisation's host pattern, the request's own
+  host); an alias, a `www.` form, or the members' address itself while `site.url` was empty got past, and
+  then every page there, sign-in included, was the door's 404. `PublicWebsiteSetup::approvePublicHost()` is
+  for the installation's global administrator only, asked in the class (the handler passes
+  `App::isRootAdmin()` and asks nothing itself), and approves only the address still stored, spelled EXACTLY
+  as stored, because MySQL compares names ignoring capitals and trailing spaces. Saving or changing clears
+  approval; saving and approving are both refused while `PortalAddress::visitorCanChooseHost()` is true.
+  `publicHostRow()` reads error 1054 as "no address" ONLY when the approval column itself is missing (files
+  arrive before the migration runs); any other unknown column is thrown, and the door fails closed.
+- **"Is this the door's address?" is ONE question.** `PublicWebsiteSetup::publicHostStatus()` is the one
+  answer (none / waiting / approved / members' address / not checked) and `publicHostInEffect()` the one
+  "is it the door's"; the card, `addressFor()`, `whyNoAddress()`, the Replace advice, the missing-tick
+  refusal, the replace-name record and the set-up check all ask it. Before round 7 three of them asked three
+  different questions, and with an unapproved address the card and the refusal disagreed. **The
+  installation's approval list does NOT ask it**: it works its state out from `allPublicHosts()`, so a
+  hand-edited stored address the page would refuse still reads "Approved" there. `allPublicHosts()` answers
+  null, never `[]`, when it cannot read, because an empty list reads as "nobody has entered one" exactly when
+  the list is needed.
+- **A check that matches words anywhere on a page is not checking the part it names.** D18 looked for
+  "Waiting for the installation…" on the whole page, the card prints those words itself, and turning the
+  set-up check's own waiting row into an "ok" row left every check green (round 9). It now reads only the
+  set-up check's results block and compares state and words exactly in all three states.
+- **`.htaccess` is driven on a real Apache now, because three static readings lost (D-065).** The deny rule
+  matched only addresses ENDING in `.php`, so `/robots.php/x` ran the file with extra path information
+  (round 6, measured on Apache 2.4); it is now `\.(php[0-9]?|phtml|phar)(/|$)` with `[NC]`. A static check
+  of the rule's conditions passed a dead rule four ways (round 7); pinning the text passed three more (round
+  8), each measured on Apache 2.4.69: a rule ABOVE `RewriteEngine On` still runs (Apache collects rules in
+  file order), and a comment line ending in a backslash CONTINUES onto the next line and swallows whatever is
+  there — the deny rule or `RewriteEngine On`. **Never end a comment line in `.htaccess` with a backslash**;
+  the file's header says so. `tools/htaccess-apache-selftest.php` serves the repository's real `.htaccess`
+  from the `php:8.4-apache` image in Docker (AllowOverride All, mod_rewrite on, `.php5`/`.php7`/`.phtml`/
+  `.phar` run as PHP as many hosts do), with every PHP file a stub that prints its own name, sends requests
+  raw so no client tidies the path, and requires every refused form to be refused with no stub run (output
+  AND source looked for). It plants each known dead rule and keeps one control green. It REFUSES (exit 2)
+  without Docker. `check_htaccess_php_denied.py` stays as a cheap early warning that needs no Docker; its
+  docstring says the Apache test is the guard.
+- **`php:8.4-apache` is a MOVING tag, and that is the Apache test's main limit.** Docker Hub replaces the
+  image behind it as PHP 8.4 and Debian's Apache are updated, so two passing runs a month apart may be on
+  different Apache builds, and a change in Apache's behaviour would show as a test going red with no change in
+  this repository. It also says nothing about a customer's own Apache, its modules or its server-wide
+  settings (`AllowOverride None`, a server-level `RewriteOptions`), nor about a server that is not Apache.
+  The image is pulled the first time, so the first run needs the network.
+- **What Apache does before `.htaccess` runs** (measured while building that test, all older than P4a):
+  `/offline`, `/assets` and `/api-docs` are FOLDERS, so Apache's own DirectorySlash answers 301 to the same
+  address with `/` first. So the `^assets/?$` rule's bare `/assets` case never fires (the Asset Tracker is
+  reached at `/assets/`), and `/offline/` runs `offline/index.php` DIRECTLY through the folder's
+  DirectoryIndex — the deny rule sees `/offline/`. It is the static offline page and section F finds no
+  session and nobody named. The Apache test pins today's behaviour, and `.htaccess`'s header now lists what
+  really runs (round 9 found it saying only three files did).
+- **D-087's peek never makes a session file, and honours expiry.** With PHP's "files" store, a cookie naming
+  no session file is "nobody" without starting PHP's session, and a file older than
+  `session.gc_maxlifetime` is "nobody" too — the portal has no idle limit of its own, so its sessions end when
+  PHP's clear-out removes such a file, and the door does not honour one the clear-out has merely not reached.
+  Any other session store is not guarded. `Gatekeeper::mayUseTestCopy()` is the test-copy rule moved out of
+  `enforce()`, with one addition: an account switched off, or gone, is nobody. Both D-087 keys are in
+  `PublicWebsite::LOCKED_KEYS`; round 1 found a comment claiming "nothing writes either" while the general
+  settings editor could.
+- **A second guard on the same fact makes the first untestable.** A second "is the organisation active?" in
+  the reader was taken out: with both present, removing either left the other standing and no plant could go
+  red. The real guard is in `Site`.
+- **A test that renames shared data must record the original where the NEXT run can trust it.**
+  Organisation 1 is given a distinctive name for section F (the seeded "Portal" is a word the offline page
+  uses on its own); its real name is written to a file in the system temp folder named after the database,
+  and put back from that file — never from "whatever is there now" — on exit, Ctrl-C or SIGTERM.
+- **What is asked for is kept whether or not the name is known**, so during an upgrade an unknown name and a
+  real one both answer 503 rather than 404 and 503 (G15).
+- **Not driven by any test, said plainly:** the "not checked" state of a public address (it needs the
+  settings or organisations table to fail while the page still renders), and `whyNoAddress()` in "own address
+  each" mode. Files the web server serves straight from disk (`/assets/…`, `/sw.js`, `/sitemap.xsd`, the
+  countdown script until P4b) still answer on a public address; closing them would need a host-conditional
+  `.htaccess` rule naming the public addresses, which a product cannot ship (#500). Media is served whole (no
+  byte ranges). The four new audit checks are hard gates in `pr-security.yml` but have no line in its summary
+  step, deliberately: that step's script is near the 21,000-character ceiling (#745).
+- Tests: `tools/public-door-selftest.php` (real HTTP, its total pinned in the file) and
+  `tools/htaccess-apache-selftest.php` (real Apache in Docker, its total pinned); both in
+  `tools/run-all-selftests.sh`. The first is wired into `portal-selftests.yml`, which GitHub has never run
+  (#754); the second is the `htaccess-apache` job in `pr-security.yml`, which is registered. Hard gates:
+  `check_public_door_schema.py`, `check_public_door_reads.py` (a text match: another spelling of a read walks
+  past it), `check_webroot_door_handoff.py`, `check_htaccess_php_denied.py`.
+
 ### One place makes an event's web address (#883)
 
 - `Events::saveUnderFreeSlug($db, $siteId, $stem, $save)` is the ONE loop that saves a new event

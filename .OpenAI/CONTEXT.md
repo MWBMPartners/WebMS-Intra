@@ -2703,7 +2703,11 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     re-read, and wrong only against the world. Print the WHOLE sentence: a first look truncated to 96 characters
     produced a confident finding about MariaDB 10.6 that was false. **MySQL 9.7.4 and MariaDB 12.3.3 now pass all
     seven phases and all 42 checks** (the same 42 as the other three engines, counted), where nothing here had ever
-    been run on MySQL 9.x or MariaDB 12.x before. **MySQL 8.0 and MariaDB 10.6 STAY accepted with a warning — the
+    been run on MySQL 9.x or MariaDB 12.x before. **MySQL 9.7 has no `SHA1()`, `SHA()` or `MD5()` SQL functions
+    (#887, measured on 9.7.4: ERROR 1305)**: every named lock was built with `SHA1()`, so on 9.7 nobody could sign
+    in with a password. Write `LEFT(SHA2(…, 256), 40)`; `tools/audit-checks/check_no_removed_sql_functions.py` is
+    the hard gate. Still open: on 9.7 a BOUND impossible date reads as a real one (#892).
+    **MySQL 8.0 and MariaDB 10.6 STAY accepted with a warning — the
     owner's decision; do not tidy `MIN_MYSQL` or `MIN_MARIADB` upwards** — which makes the warning the only
     protection there is. **PHP 8.5 is linted now, and `php-static-analysis.yml` MUST NOT BECOME A MATRIX**: a
     matrix renames the check to `PHP -l lint (8.4)` and the ruleset "Protect main branch" requires `PHP -l lint`
@@ -3202,6 +3206,15 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   D-094, D-095): its gate `maySetUp()` (an ordinary administrator does not pass), the D-093 hand-out rule,
   the stored addresses and framing list (re-checked on every read), and `frameAncestorsFor()`, which the public
   door must send rather than building its own. Test: section W of `tools/public-website-tick-selftest.php`.
+  `Portal\Core\PublicDoor` is the ONE gate for the public door's feeds and media (#493 P4a; D-056, D-097,
+  D-098): it reads only `Site::doorSiteId()`, which `Site::preDetect()` decides from the address alone before
+  any session, and `PublicDoor::addressFor()` is the ONE place a door address is built. Every web-root file
+  that loads start-up hands a door request over straight after it (`Site::isDoorRequest()`,
+  `Site::publicAddressUnknown()`; hard gate `check_webroot_door_handoff.py`). A public address is the door's
+  only once the installation's global administrator approves it (D-101); `PublicWebsiteSetup::publicHostStatus()`
+  is the ONE answer to where it stands. `.htaccess`'s deny rule is driven on a real Apache by
+  `tools/htaccess-apache-selftest.php` (D-065). Test: `tools/public-door-selftest.php`; the record is
+  DEV_NOTES.md, "The public door (#493, package P4a)".
   The technical record is DEV_NOTES.md, "Show on the public website, for events (#493, package P1)".
 
 ## A time on a clock is not a moment, and the test for it cannot work (#777 part one)

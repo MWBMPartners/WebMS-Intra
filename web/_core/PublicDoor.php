@@ -339,8 +339,7 @@ final class PublicDoor
      * on that clock — its stored times are only the day's midnight, so
      * judged by them it vanished at the START of its own day (round 1 of
      * P4a's check). The arithmetic is on the clock readings themselves, so it
-     * needs no zone.
-     * at most `$limit`. Website mode with the copied-in rule in force for the
+     * needs no zone. It reads in website mode, with the copied-in rule in force for the
      * organisation; published only; full detail only where the rule allows it,
      * cut with `EventVisibility::redact()` otherwise.
      *

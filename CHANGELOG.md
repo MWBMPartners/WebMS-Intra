@@ -4,6 +4,108 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### On MySQL 9.7 a password sign-in works again, and a sign-in the database cannot serve says so (#887)
+
+- **Fixed: on MySQL 9.7 nobody could sign in with a password.** MySQL 9.7 has no `SHA1()`, `SHA()` or
+  `MD5()` functions (measured on 9.7.4: ERROR 1305, "function does not exist"). The lock that makes sign-in
+  tries from one address take turns was named with `SHA1()`, so the lock request failed, and the portal
+  treated that as "another try is still being checked": every password sign-in was refused with "Too many
+  failed attempts. Please try again in 1 minute(s)." and no password was checked. Single sign-on was not
+  affected. The same function named four more locks, so on MySQL 9.7 the scheduled mail-queue job (and
+  erasing an address from the queue), the held-texts job, the activity-log clean-up and an event's "send to
+  everyone" press failed too. All five now use `LEFT(SHA2(…, 256), 40)`, the same length as before, measured
+  working on MySQL 8.0.36, 8.4.11 and 9.7.4 and MariaDB 11.4.13 and 12.3.3. Nothing else in the portal calls
+  those functions.
+- **Fixed: a sign-in lock the database will not answer is now said truthfully.** Any failure to take the
+  sign-in lock — a missing function, a refused statement, the lock request answering "no answer" — was
+  reported as "another try is still being checked": the member read "Too many failed attempts", the
+  activity log said the same untrue thing, and nothing reached the error log. The try is still refused
+  (tries from one address must keep taking turns), but the member now reads "Signing in with a password is
+  temporarily unavailable…", the activity log records `LoginUnavailable`, and a Critical error record is
+  written (`Auth` / `SIGN_IN_LOCK`, naming the fault's kind and code), which the default alert settings
+  e-mail. The record's title and detail, the alert e-mail and the outside error monitor never carry the
+  visitor's address; the record's own `visitorIP` column holds it, as every error record's does. A lock
+  genuinely held by another try still says "Too many failed attempts", as before. The new message is in
+  English only for now; Welsh falls back to it.
+- **Upgrade note:** during the deploy, old and new lock names do not exclude each other, once. A request
+  still running the old code and one running the new code take DIFFERENT locks, so for the few seconds both
+  are running one mail-queue run could overlap another, the held-texts job's hourly and daily limits could be
+  overshot once, an activity-log clean-up could run twice, an event broadcast pressed twice at that moment
+  could both get in, and two sign-in tries from one address could be checked side by side. Each settles at
+  the next run. On MySQL 9.7 the old code could take none of these locks, so there it is purely an
+  improvement.
+- **Still open on MySQL 9.7 (#892):** a held text message whose use-by date does not exist (such as 31
+  February) can be kept for up to 48 hours instead of refused, because 9.7 reads a bound impossible date as a
+  real one. Not fixed here.
+- **Tests:** sections 0 and 0b of `tools/sign-in-limits-selftest.php` (its total pinned in the file) take the
+  real lock on the server in front of them, and drive a planted database fault and a genuinely held lock;
+  `calendar-selftests.yml` now runs that test on all five of its engines, MySQL 9.7 included (not a live gate
+  until GitHub has registered the workflow, #754). New hard gate `check_no_removed_sql_functions.py`. Two
+  check rounds by fresh Claude agents (protected arm: sign-in); round 2's only finding, a comment and a check
+  label saying the error record "never" holds the visitor's address, was corrected without a behaviour change.
+  Codex has not reviewed it.
+
+### The public door, part one: an organisation's own website can read its public events and posters (#493, package P4a, migration 263)
+
+- **Added: the public door (D-056, D-097).** An organisation's own website can now read, as data (JSON, a
+  plain text format programs read), the events and noticeboard posters somebody has put on the public
+  website: `events.json` and `posters.json`, each described by a schema file
+  (`web/_core/data/public-door-events.schema.json` and `…-posters.schema.json`). A poster's uploaded
+  picture or video is given at the door's own media address, which answers only while a poster on the
+  public website uses it. Nothing else goes through the door: only items somebody ticked, only while their
+  dates allow, never anything members-only, deleted or a draft, and never an event that has finished on
+  its own clock. An all-day event stays on the feed for the whole of its last day; any other event with no
+  end time leaves it the moment it starts.
+- **Where it answers.** At `/w/{name}/…` on the portal's own address, where the name is 24 random
+  characters the portal makes for each organisation; or at `/…` on the organisation's own public address
+  (D-095), once the installation has approved that address (below). A public address answers door requests
+  only (D-098): the portal's sign-in, pages, error page and API description are not reachable there (files
+  the web server sends straight from disk, such as stylesheets and the service worker, still are).
+- **Every organisation's door starts switched off (D-097).** A new card at the top of Admin → Public website
+  turns it on, replaces its name and switches it off; each is recorded, and replacing or switching off asks
+  for an "I understand" tick. Replacing the name stops every copy that uses the portal's own address with the
+  old name. **It does not stop copies that use the organisation's public address**, which carries no name,
+  and switching the door off and on again does not either: the public address answers again the moment the
+  door is back on. To stop a public address that has gone somewhere it should not, change or remove it. The
+  card and the help page say so.
+- **A public address takes effect only once the installation approves it (D-101).** An organisation's public
+  address does nothing until the installation's global administrator approves it on Admin → Public website,
+  which lists every organisation's address with **Approve** and **Withdraw approval**. Withdrawing takes effect
+  on the next request; saving or changing an address asks again; and no address can be saved or approved while
+  the portal's own address is not set. Before this, an organisation's administrator could save an address
+  members really sign in at that the portal had no record of (an alias, a `www.` form), and every page there,
+  sign-in included, became the door's "not found". The organisation's card says **Waiting**, **Approved**,
+  **Approved, not in use** (members sign in at it, so the door does not answer there) or **Approved, not
+  checked**.
+- **What a visitor's browser and an outside website see.** Every refusal — an unknown name, a door switched
+  off, a switched-off organisation, a page asked for on a public address — is one identical "not found"
+  answer, so nothing can be learnt by comparing them. No cookie is ever set and no session made. While the
+  portal is closed for an upgrade the door answers "closed for maintenance"; if the portal cannot read its
+  list of public addresses, every way in answers a plain "Please try again" naming nobody. Data answers can
+  be read by any website's script and can never be shown in a frame.
+- **On a test copy** (the alpha, beta or dev channel) the door answers signed-in testers only in this
+  version (D-087). The general settings editor now refuses both of D-087's settings; the card that changes
+  them is package P4d.
+- **Fixed: `.htaccess` refused a PHP file run directly only when the address ENDED in `.php`.** On Apache
+  2.4, `/robots.php/x` ran `robots.php` with "/x" as extra path information, and with PHP's error display on
+  printed a fatal error naming the server's file path. It now refuses `.php` and the other endings a host may
+  run as PHP (`.php5` and the like, `.phtml`, `.phar`), followed by `/` or the end, in any capitals; only the
+  three entry points are allowed, exactly.
+- Migration 263 adds `tblPublicDoorNames`, the installation-wide setting `public.door.testCopies.permitted`
+  (seeded `testers`), and `tblPublicHosts.approvedAtUtc` and `.approvedByID`. Every existing public address
+  starts not approved. Not in this package: the script an organisation pastes into its website (P4b, which
+  also removes the countdown widget), the frameable page (P4c), and D-087's card (P4d).
+- **Tests:** new `tools/public-door-selftest.php` (170 checks over real HTTP, the count pinned in the file),
+  which also runs every PHP file in the web root directly, as a server ignoring `.htaccess` would; and new
+  `tools/htaccess-apache-selftest.php` (53 checks, pinned), which serves the real `.htaccess` from a real
+  Apache in Docker and refuses to run without Docker. New hard gates: `check_public_door_schema.py`,
+  `check_public_door_reads.py`, `check_webroot_door_handoff.py` and `check_htaccess_php_denied.py`. Nine
+  check rounds by fresh Claude agents (protected arm, D-051); round 6 reopened the package with D-101. Round 9
+  found the portal correct and its two findings in a test (D18 passed with the waiting row planted as "set and
+  ready") and an untrue `.htaccess` comment; both were fixed, the test fix was confirmed by planting the same
+  fault, and review closed there under D-064. Raised from it: #894, #895, #896, #897. Codex has not
+  reviewed it.
+
 ### An event's web address is made in one place (#883)
 
 - **The events API no longer answers 500 for a name already used.** `POST /api/events/create`
