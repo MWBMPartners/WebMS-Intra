@@ -21180,6 +21180,19 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### An error page has no canonical address, and one page names one (#823)
+
+- `head-meta.php` leaves the canonical address and og:url out when `http_response_code()` is 400 or more —
+  decided by the response code in ONE place rather than a per-page flag, so every error page, including
+  ones written later, is covered. `Router::renderError()` sets the code BEFORE it draws, which is what
+  makes it work. **A code set after the head is drawn is not seen**, and the exception handler does that
+  for a page that throws after its header; where PHP buffers output (`output_buffering = 4096`, common on
+  hosts) that answer goes out as a 500 still carrying the first head's canonical address (round 1 of the
+  check measured it). A first comment said nothing could do that — untrue in the reassuring direction.
+- A page reachable at two addresses sets `$pageCanonicalPath` to the address the PORTAL links to, measured
+  rather than guessed (`grep -rnoE "url(ForScript)?\(\s*'(admin/)?settings'" web`); `''` is valid and
+  means the organisation's front page.
+
 ### A "not found" is not a failed request, and a check must read a page as a browser does (#821)
 
 - **A 404 produces no `Network.loadingFailed` event** — the network part worked — so the only sign is a

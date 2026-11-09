@@ -4,6 +4,20 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### One page, one canonical address; an error page carries none (#823)
+
+- **Fixed:** Settings answers both `/settings` and `/admin/settings`, and the Dashboard both `/` and
+  `/dashboard`; each told search engines and preview cards that its "one true address" was whichever
+  it was reached by. Each now names the address the portal itself links to — `/settings` and `/`. Both
+  addresses keep working.
+- **Fixed:** an error page (any answer of 400 or above whose code is set before the page is drawn, as
+  every error page here does) now carries no canonical address and no preview card; `/index.php` and
+  every unknown address used to call their "page not found" page by the address they failed at. The one
+  exception, said plainly: a page that crashes after drawing its header can, on a host that buffers
+  output, answer 500 still carrying them — no worse than before.
+- **Tests:** part I of `tools/page-head-selftest.php` (eleven checks, three planted faults each caught):
+  49 checks. One check round by a fresh Claude agent; its one finding was an untrue comment, corrected.
+
 ### Three full-screen pages stop asking for an icon that does not exist; the API description file carries no brand (#821)
 
 - **Fixed:** the projector display (`/worship/display`), the page reached by scanning an asset tag and
