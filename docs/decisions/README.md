@@ -143,7 +143,11 @@ appended with its real date and a note that it was added later.
 | [D-085](085-public-website-setup-can-be-handed-to-named-people.md) | 2026-11-07 | Setting up the public website can be handed to named people, in the first release | in force |
 | [D-086](086-the-foyer-slideshow-follows-a-tiered-setting.md) | 2026-11-07 | What the foyer slideshow shows is a tiered setting | in force |
 | [D-087](087-the-public-door-on-test-copies-follows-a-tiered-setting.md) | 2026-11-07 | Whether the public door on test copies is open to anybody is a tiered setting | in force |
+| [D-088](088-pushes-to-the-working-branch-are-allowed-by-the-permission-check.md) | 2026-11-08 | Pushes to the working branch go through the permission check too | in force |
+| [D-089](089-search-engine-markup-also-needs-the-website-tick.md) | 2026-11-08 | An event's search-engine markup also needs the public-website tick | in force |
+| [D-090](090-one-website-yes-covers-every-date-of-a-repeating-copied-event.md) | 2026-11-08 | One website "Yes" for every date of a repeating copied-in event covers all its dates | in force |
+| [D-091](091-dark-mode-shades-follow-the-organisations-colour.md) | 2026-11-09 | In dark mode, the main colour's shades follow the organisation's own colour | in force |
 
-*87 decisions. This index is checked against the folder by
+*91 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
