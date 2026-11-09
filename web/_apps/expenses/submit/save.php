@@ -8,11 +8,41 @@
  * a "Pending" PDF via ExpensePdf helper, sends email notification to approvers,
  * logs activity, and redirects.
  *
+ * A RECEIPT THAT IS NOT ATTACHED IS SAID OUT LOUD (#649, 9 November 2026)
+ * -------------------------------------------------------------------------
+ * Until then a file that was too big, of the wrong kind, refused by the server
+ * before PHP saw it, or that could not be moved into the receipts folder was
+ * skipped with a bare `continue`; the claim was saved anyway and the claimant
+ * sent on as though every receipt had gone. Now:
+ *
+ *  - each file is judged by `ExpenseRules::whyReceiptRefused()` (the ONE rule);
+ *  - a file that is not attached does NOT stop the claim: the claim is saved
+ *    and the claimant is told, by the file's own name, which were not attached
+ *    and why (`ExpenseRules::submittedMessage()`, the ONE place the words are);
+ *  - the ONE case that refuses the whole claim is the portal being unable to
+ *    make its receipts folder, checked BEFORE anything is written;
+ *  - a claim that is rolled back takes the receipt files it had already moved
+ *    with it, so no receipt is left on disk with no claim — a file nothing
+ *    points at could never be reached by an erasure;
+ *  - and once the claim is COMMITTED, nothing after it (the activity record,
+ *    the e-mail to approvers) can make this page say "Error saving claim":
+ *    that sentence used to be reachable for a claim that WAS saved, inviting
+ *    the claimant to submit the same claim twice.
+ *
+ * The claimant's own file name is shown back to them in the one-off message
+ * and NOWHERE else — never the database, the activity log or the error log
+ * (#714). See `ExpenseRules::shownFileName()` for why that is safe.
+ *
+ * WHAT IT STILL CANNOT DO: add a receipt to a claim afterwards. The advice is
+ * to withdraw the claim and submit it again, which is the only route the
+ * portal offers today.
+ *
  * @package   Portal\Expenses
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.4.1
+ * @version   0.5.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/649
  * -----------------------------------------------------------------------------
  */
 
@@ -25,6 +55,7 @@ use Portal\Core\Captcha;
 use Portal\Core\Logger;
 use Portal\Core\ExpensePdf;
 use Portal\Core\ExpenseMailer;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -106,7 +137,63 @@ if ($deptExists === false) {
     exit();
 }
 
+// 📎 JUDGE EVERY FILE FIRST, before anything is written (#649).
+//    `ExpenseRules::whyReceiptRefused()` is the ONE rule. A file it refuses is
+//    REMEMBERED with its reason, never skipped in silence: the claimant is told
+//    by name, once the claim is saved. An empty slot (nothing chosen) is not a
+//    receipt at all and is not reported — the form has two `files[]` inputs,
+//    so an empty one arrives on every ordinary submission.
+//
+//    The claimant's own file name is held here ONLY to be shown back to them
+//    in the one-off message (#714: it is never stored). It is not put in the
+//    activity log, the error log or the database.
+$receiptsToStore = [];
+$notAttached     = [];
+foreach (ExpenseRules::receiptsFromUpload($_FILES['files'] ?? null) as $upload) {
+    $why = ExpenseRules::whyReceiptRefused($upload['error'], $upload['size'], $upload['name']);
+    if ($why === ExpenseRules::RECEIPT_NOTHING_CHOSEN) {
+        continue;
+    }
+    if ($why !== ExpenseRules::RECEIPT_OK) {
+        $notAttached[] = ['name' => $upload['name'], 'reason' => $why];
+        continue;
+    }
+    $receiptsToStore[] = $upload;
+}
+
+// 📂 THE RECEIPTS FOLDER, checked before the claim is written (#649).
+//    `mkdir()`'s answer used to be thrown away, so a folder that could not be
+//    made let the claim save and every receipt then fail to move, silently.
+//    The issue asks for the whole submission to be refused in that case,
+//    because a claim would otherwise reach the approver with none of its
+//    evidence. Checked only when there is a receipt to store: a claim with no
+//    receipts needs no folder, and refusing it would be a fault of our own.
+//
+//    `is_dir()` is asked again after a failed `mkdir()` because two claims
+//    submitted at once may race to make it, and the loser's `mkdir()` answers
+//    false for a folder that now exists — that must not refuse a claim.
+$upDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'expenses';
+if (count($receiptsToStore) > 0 && is_dir($upDir) === false) {
+    if (@mkdir($upDir, 0755, true) === false && is_dir($upDir) === false) {
+        Logger::errorPlatform(
+            'Expenses',
+            'Error',
+            'RECEIPT_FOLDER',
+            'The expense receipts folder could not be made, so a claim was refused',
+            'Folder: ' . $upDir . ' — check that the portal may write to _uploads.'
+        );
+        $_SESSION['flash_msg']  = ExpenseRules::MSG_RECEIPT_FOLDER_MISSING;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Router::url('expenses/submit'));
+        exit();
+    }
+}
+
 // 🔄 Wrap multi-table insert in a transaction for atomicity
+$claimID = 0;
+// Every receipt file this request has put in the folder, so a rollback can
+// take them away again (see the catch below).
+$movedPaths = [];
 App::beginTransaction();
 try {
     // 1. 📋 Insert claim header
@@ -138,12 +225,6 @@ try {
     $itemStmt->close();
 
     // 3. 📎 File uploads
-    $upDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'expenses';
-    if (is_dir($upDir) === false) {
-        mkdir($upDir, 0755, true);
-    }
-    $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv'];
-    $maxFileSize = 10 * 1024 * 1024; // 10 MB
     // 📝 THE UPLOADER'S OWN FILENAME IS NEVER STORED (#714). It used to be,
     //    `basename()`'d and nothing else, so "Jane Smith receipt.pdf" was kept
     //    exactly as given and shown back on the claim. A claim is kept for six
@@ -161,31 +242,23 @@ try {
     //    `ExpensePdf::generate()` already wrote a generated name into this same
     //    column (`Claim_412_Approved.pdf`), so the shape below matches what the
     //    column already held half the time.
-    $fileStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimFiles (claimID, fileLabel, storedFilename, fileSize, fileType) VALUES (?, ?, ?, ?, ?)');
-    if ($fileStmt !== false) {
+    if (count($receiptsToStore) > 0) {
+        // A statement that cannot be prepared used to skip EVERY receipt with
+        // no word (`if ($fileStmt !== false) { … }`). It now stops the claim,
+        // like the two statements above, so the claimant is told it failed.
+        $fileStmt = $mysqli->prepare('INSERT INTO tblExpenseClaimFiles (claimID, fileLabel, storedFilename, fileSize, fileType) VALUES (?, ?, ?, ?, ?)');
+        if ($fileStmt === false) {
+            throw new \RuntimeException('Failed to prepare receipt insert: ' . $mysqli->error);
+        }
         // Counts the receipts actually SAVED, so the numbering has no gaps when
-        // a file is skipped for being too big or the wrong kind.
-        $labelsUsed = [];
-        foreach ($_FILES['files']['error'] ?? [] as $i => $err) {
-            if ($err !== UPLOAD_ERR_OK) {
-                continue;
-            }
+        // a file is not attached.
+        $receiptNo = 0;
+        foreach ($receiptsToStore as $upload) {
+            $tmp  = $upload['tmp'];
+            $size = $upload['size'];
             // The uploader's own name, read ONLY for its extension (#714).
             // It is never stored, in the database or on disk.
-            $orig = basename($_FILES['files']['name'][$i]);
-            $tmp  = $_FILES['files']['tmp_name'][$i];
-            $size = $_FILES['files']['size'][$i];
-
-            // 🛡️ Validate file size
-            if ($size > $maxFileSize) {
-                continue;
-            }
-
-            // 🛡️ Validate file extension against allowlist
-            $ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
-            if (in_array($ext, $allowedExts, true) === false) {
-                continue;
-            }
+            $ext  = strtolower(pathinfo(basename($upload['name']), PATHINFO_EXTENSION));
 
             // 🛡️ Server-side MIME detection (do not trust client-supplied type)
             $type = mime_content_type($tmp) ?: 'application/octet-stream';
@@ -205,15 +278,33 @@ try {
             //    when, and the extension keeps the file openable — which is all
             //    a treasurer needs to tell one receipt from another, and all
             //    HMRC needs beside the figures.
-            $receiptNo = count($labelsUsed) + 1;
-            $label     = 'Claim_' . $claimID . '_Receipt_' . $receiptNo . '_'
-                       . date('Y-m-d') . '.' . $ext;
-            $stored    = $claimID . '_' . time() . '_receipt' . $receiptNo . '.' . $ext;
-            if (move_uploaded_file($tmp, $upDir . DIRECTORY_SEPARATOR . $stored) === true) {
-                $fileStmt->bind_param('issis', $claimID, $label, $stored, $size, $type);
-                $fileStmt->execute();
-                $labelsUsed[] = $label;
+            $nextNo = $receiptNo + 1;
+            $label  = 'Claim_' . $claimID . '_Receipt_' . $nextNo . '_'
+                    . date('Y-m-d') . '.' . $ext;
+            $stored = $claimID . '_' . time() . '_receipt' . $nextNo . '.' . $ext;
+            $path   = $upDir . DIRECTORY_SEPARATOR . $stored;
+
+            // 📦 `move_uploaded_file()` answers a plain true or false (#720).
+            //    A false used to mean "no row, no word". It is now a receipt
+            //    the claimant is told was NOT attached, and a line in the error
+            //    log for the administrator — without the claimant's own file
+            //    name (#714), which is why it names the claim and the receipt
+            //    number instead.
+            if (@move_uploaded_file($tmp, $path) !== true) {
+                $notAttached[] = ['name' => $upload['name'], 'reason' => ExpenseRules::RECEIPT_NOT_STORED];
+                Logger::errorPlatform(
+                    'Expenses',
+                    'Error',
+                    'RECEIPT_NOT_STORED',
+                    'A receipt could not be moved into the receipts folder',
+                    'Claim #' . $claimID . ', receipt ' . $nextNo . ' of this submission. Folder: ' . $upDir
+                );
+                continue;
             }
+            $movedPaths[] = $path;
+            $fileStmt->bind_param('issis', $claimID, $label, $stored, $size, $type);
+            $fileStmt->execute();
+            $receiptNo = $nextNo;
         }
         $fileStmt->close();
     }
@@ -221,25 +312,58 @@ try {
     // 4. 📄 Pending PDF
     ExpensePdf::generate($claimID, 'Pending');
 
-    App::commit();
-
-    // 5. 📓 Log activity
-    Logger::activity('ExpenseSubmit', 'Claim #' . $claimID . ' created (£' . number_format($totalAmt, 2) . ')', $userId);
-
-    // 6. 📧 Send email notification to approvers
-    ExpenseMailer::notify($claimID, 'submitted', [
-        'comments' => '',
-    ]);
-
-    // 7. ✅ Redirect to success view
-    header('Location: ' . Router::url('expenses/submit') . '?success=' . $claimID);
-    exit();
-
+    // A commit that does not happen must not be reported as a saved claim.
+    // Under the portal's strict reporting a failed commit throws; this is the
+    // same answer for a connection that does not.
+    if (App::commit() === false) {
+        throw new \RuntimeException('The claim could not be committed');
+    }
 } catch (\Throwable $ex) {
     App::rollback();
+    // 🧹 A ROLLED-BACK CLAIM TAKES ITS RECEIPT FILES WITH IT (#649). Before,
+    //    a failure after a receipt had been moved (its row refused, the PDF
+    //    step throwing) left the file in the folder with no claim and no row
+    //    pointing at it — a copy of somebody's receipt that nothing lists and
+    //    no erasure could ever find. Only files THIS request moved are named.
+    foreach ($movedPaths as $moved) {
+        if (is_file($moved) === true) {
+            @unlink($moved);
+        }
+    }
     Logger::exception($ex);
     $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Router::url('expenses/submit'));
     exit();
 }
+
+// ✅ THE CLAIM IS SAVED FROM HERE ON. Nothing below may report it as not
+//    saved: the two steps used to sit inside the try above, so a failure in
+//    either "rolled back" a transaction already committed and told the
+//    claimant "Error saving claim. Please try again." about a claim that WAS
+//    saved — an invitation to submit the same money twice. A failure here is
+//    recorded for the administrator and the claimant is told the truth.
+try {
+    // 5. 📓 Log activity — a COUNT of receipts not attached, never their names.
+    Logger::activity(
+        'ExpenseSubmit',
+        'Claim #' . $claimID . ' created (£' . number_format($totalAmt, 2) . ')'
+            . (count($notAttached) > 0 ? '; ' . count($notAttached) . ' file(s) not attached' : ''),
+        $userId
+    );
+
+    // 6. 📧 Send email notification to approvers
+    ExpenseMailer::notify($claimID, 'submitted', [
+        'comments' => '',
+    ]);
+} catch (\Throwable $ex) {
+    Logger::exception($ex);
+}
+
+// 7. ✅ Tell the claimant what happened — including, by name, every file that
+//    was NOT attached (#649) — and go back to the claims page, which prints it.
+$told = ExpenseRules::submittedMessage($claimID, $notAttached, (string) ini_get('upload_max_filesize'));
+$_SESSION['flash_msg']  = $told['message'];
+$_SESSION['flash_type'] = $told['type'];
+header('Location: ' . Router::url('expenses/submit') . '?success=' . $claimID);
+exit();

@@ -234,14 +234,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <span class="badge text-bg-primary rounded-pill mt-1">1</span>
             <div>
                 <strong>Click the upload area</strong>
-                <p class="mb-0 small text-secondary">In the "Supporting Files" section of the claim form, click the dashed dropzone or drag files directly onto it.</p>
+                <p class="mb-0 small text-secondary">In the "Supporting Files" section of the claim form, click the dashed area (or move to it with the keyboard and press Enter) to choose your files. Dropping a file onto the area does not add it.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
             <span class="badge text-bg-primary rounded-pill mt-1">2</span>
             <div>
                 <strong>Select your files</strong>
-                <p class="mb-0 small text-secondary">You can select multiple files at once. Accepted formats include images (JPEG, PNG) and PDF documents.</p>
+                <p class="mb-0 small text-secondary">You can select multiple files at once. A receipt may be a photo or picture (JPG, PNG, GIF, or HEIC, which is what an iPhone camera saves), a PDF, or a Word, Excel or CSV file, and each file may be up to 10 MB. Your server may set a lower limit for one file; if it does, the message after you submit says so.</p>
             </div>
         </div>
         <div class="list-group-item d-flex gap-3 align-items-start">
@@ -249,6 +249,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div>
                 <strong>Files upload on submission</strong>
                 <p class="mb-0 small text-secondary">Your files will be uploaded together with the claim when you click "Submit Claim".</p>
+            </div>
+        </div>
+        <div class="list-group-item d-flex gap-3 align-items-start">
+            <span class="badge text-bg-primary rounded-pill mt-1">4</span>
+            <div>
+                <strong>Read the message after you submit</strong>
+                <p class="mb-0 small text-secondary">If a file could not be attached &mdash; because it is too large, is not one of the kinds above, is empty, or the portal could not store it &mdash; your claim is still saved, and the message at the top of the page names each file that was not attached and why. A receipt cannot be added to a claim afterwards, so to include it, withdraw the claim from its own page while it is still pending and submit it again with the file.</p>
             </div>
         </div>
     </div>

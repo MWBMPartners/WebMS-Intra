@@ -535,4 +535,297 @@ final class ExpenseRules
 
         return App::can(Capabilities::EXPENSES_APPROVE);
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* 📎 Receipts attached to a new claim (#649)                              */
+    /* ---------------------------------------------------------------------- */
+    //
+    // WHAT WAS WRONG. `expenses/submit/save.php` skipped a receipt it would not
+    // keep with a bare `continue` — a file over 10 MB, a kind of file not on
+    // the list, a file the server refused before PHP saw it, and a file the
+    // portal could not move into its folder — and then saved the claim and
+    // sent the claimant on as though everything had gone. In an expenses
+    // system the receipt IS the evidence: the claimant believed it was
+    // attached, and the approver saw a claim with nothing behind it. The
+    // checks themselves were right and are kept exactly; the fault was only
+    // that a refusal said nothing.
+    //
+    // WHY IT LIVES HERE. The rule (what may be attached) and the words (what
+    // the claimant is told) are decided once, in this class, so the handler
+    // and its self-test (`tools/expense-receipts-selftest.php`) cannot hold two
+    // copies that drift (#647: a test holding its own copy tests nothing).
+    //
+    // WHAT IT DECIDED, and what it rules out. A file that cannot be attached
+    // does NOT refuse the whole claim — the claim is saved, and the claimant
+    // is told by name which files were not attached and why. That is the
+    // recommendation in #649 itself: losing a typed claim is worse than a
+    // claim saved without one receipt, and the claimant can withdraw it and
+    // submit it again. The ONE case that refuses the whole claim is the
+    // portal being unable to make its receipts folder at all (also #649's own
+    // wording), because then every receipt would fail and the claim would
+    // reach the approver with none of them.
+
+    /**
+     * The kinds of file a receipt may be, by the end of its name.
+     *
+     * `heic` and `heif` were added for #649: they are what an iPhone's camera
+     * saves by default, and the issue asked whether they should be accepted.
+     * They are accepted because a receipt is evidence somebody keeps, not a
+     * picture the portal shows — the portal never draws a receipt on a page or
+     * puts one in a generated PDF (`ExpensePdf` prints the claim's figures
+     * only), and the file is stored outside the web root under a name the
+     * portal makes up. A computer without a HEIC viewer will not open one,
+     * which is the cost of accepting it; refusing it would turn the commonest
+     * phone photo into a refusal. Change this list here and nowhere else.
+     */
+    public const RECEIPT_TYPES = [
+        'jpg', 'jpeg', 'png', 'gif', 'heic', 'heif',
+        'pdf', 'doc', 'docx', 'xls', 'xlsx', 'csv',
+    ];
+
+    /** The most one receipt may be, in bytes: 10 MB, as it always was. */
+    public const RECEIPT_MAX_BYTES = 10 * 1024 * 1024;
+
+    /** The receipt may be attached. */
+    public const RECEIPT_OK = 'ok';
+
+    /** The slot was empty — nothing was chosen. Not a receipt at all, so never reported. */
+    public const RECEIPT_NOTHING_CHOSEN = 'nothing-chosen';
+
+    /** Over RECEIPT_MAX_BYTES. */
+    public const RECEIPT_TOO_BIG = 'too-big';
+
+    /** Over the server's own limit for one file, so PHP refused it before the portal saw it. */
+    public const RECEIPT_TOO_BIG_FOR_SERVER = 'too-big-for-server';
+
+    /** Only part of the file arrived. */
+    public const RECEIPT_PARTIAL = 'partial';
+
+    /** A file with nothing in it — an empty file is no evidence. */
+    public const RECEIPT_EMPTY = 'empty';
+
+    /** The end of its name is not on RECEIPT_TYPES. */
+    public const RECEIPT_WRONG_TYPE = 'wrong-type';
+
+    /**
+     * The portal could not store it: PHP had nowhere to put it, could not
+     * write it, an extension stopped it, or moving it into the receipts
+     * folder failed. A fault on the server, not in the claimant's file.
+     */
+    public const RECEIPT_NOT_STORED = 'not-stored';
+
+    /**
+     * Shown when the portal cannot make its receipts folder, so the claim is
+     * NOT saved. The one case #649 asks to refuse the whole submission: every
+     * receipt would fail, and a claim would reach the approver with none.
+     * It says the form must be filled in again, because the form page does
+     * not keep what was typed.
+     */
+    public const MSG_RECEIPT_FOLDER_MISSING = 'Your claim was NOT saved, because the portal could not make the folder it keeps receipts in. This is a fault on the server, not in your claim, and it has been recorded for your administrator. Please tell them, and submit the claim again once it is fixed: nothing you typed was kept.';
+
+    /**
+     * The upload field, as a plain list of one entry per file.
+     *
+     * A request chooses the TYPE of what it sends as well as the value (#642).
+     * The form posts `files[]`, which PHP turns into parallel arrays; a
+     * request posting `files` once (no brackets) gives single values instead,
+     * and anything else may arrive. The old loop iterated
+     * `$_FILES['files']['error']` directly, so a single value was not a list
+     * to walk. Both shapes are read here; anything else is an empty list.
+     *
+     * @param mixed $field `$_FILES['files'] ?? null`.
+     *
+     * @return list<array{error:int,name:string,tmp:string,size:int}>
+     */
+    public static function receiptsFromUpload(mixed $field): array
+    {
+        if (is_array($field) === false || isset($field['error']) === false) {
+            return [];
+        }
+        $one = static fn (mixed $error, mixed $name, mixed $tmp, mixed $size): array => [
+            'error' => is_int($error) === true ? $error : UPLOAD_ERR_NO_FILE,
+            'name'  => is_string($name) === true ? $name : '',
+            'tmp'   => is_string($tmp) === true ? $tmp : '',
+            'size'  => is_int($size) === true ? $size : 0,
+        ];
+        if (is_array($field['error']) === false) {
+            return [$one($field['error'], $field['name'] ?? '', $field['tmp_name'] ?? '', $field['size'] ?? 0)];
+        }
+        $names = is_array($field['name'] ?? null) === true ? $field['name'] : [];
+        $tmps  = is_array($field['tmp_name'] ?? null) === true ? $field['tmp_name'] : [];
+        $sizes = is_array($field['size'] ?? null) === true ? $field['size'] : [];
+        $list  = [];
+        foreach ($field['error'] as $i => $error) {
+            $list[] = $one($error, $names[$i] ?? '', $tmps[$i] ?? '', $sizes[$i] ?? 0);
+        }
+
+        return $list;
+    }
+
+    /**
+     * Why a file may NOT be attached as a receipt, or RECEIPT_OK.
+     *
+     * Takes FACTS, so the handler and the self-test ask the same question.
+     * The order matters: what PHP said about the upload comes first, because
+     * a file PHP refused has no size or contents worth judging.
+     *
+     * It does NOT cover the last step — moving the file into the receipts
+     * folder — because that is an action, not a fact the request carries. The
+     * handler reports a failed move as RECEIPT_NOT_STORED itself.
+     *
+     * @param int    $uploadError PHP's `UPLOAD_ERR_*` code for this file.
+     * @param int    $size        Its size in bytes, as PHP reported it.
+     * @param string $clientName  The name the claimant's computer gave it. Read
+     *                            ONLY for the end of the name; never stored (#714).
+     *
+     * @return string One of the RECEIPT_* constants.
+     */
+    public static function whyReceiptRefused(int $uploadError, int $size, string $clientName): string
+    {
+        if ($uploadError === UPLOAD_ERR_NO_FILE) {
+            return self::RECEIPT_NOTHING_CHOSEN;
+        }
+        if ($uploadError === UPLOAD_ERR_INI_SIZE || $uploadError === UPLOAD_ERR_FORM_SIZE) {
+            return self::RECEIPT_TOO_BIG_FOR_SERVER;
+        }
+        if ($uploadError === UPLOAD_ERR_PARTIAL) {
+            return self::RECEIPT_PARTIAL;
+        }
+        if ($uploadError !== UPLOAD_ERR_OK) {
+            // UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION,
+            // and any code a later PHP adds: none is the claimant's doing.
+            return self::RECEIPT_NOT_STORED;
+        }
+        if ($size > self::RECEIPT_MAX_BYTES) {
+            return self::RECEIPT_TOO_BIG;
+        }
+        if ($size <= 0) {
+            return self::RECEIPT_EMPTY;
+        }
+        $ext = strtolower(pathinfo(basename($clientName), PATHINFO_EXTENSION));
+        if (in_array($ext, self::RECEIPT_TYPES, true) === false) {
+            return self::RECEIPT_WRONG_TYPE;
+        }
+
+        return self::RECEIPT_OK;
+    }
+
+    /**
+     * The reason, as the end of a sentence the claimant reads.
+     *
+     * THE ONE PLACE a refusal becomes words. An unknown reason gets the
+     * "could not store it" words rather than nothing, because a blank reason
+     * tells the claimant nothing and a new reason added without words here
+     * must still say SOMETHING true: the file was not attached.
+     *
+     * @param string $reason      One of the RECEIPT_* refusals.
+     * @param string $serverLimit The server's own limit for one file, as PHP
+     *                            states it (`upload_max_filesize`, e.g. "8M"),
+     *                            or '' when it is not known. Used only for
+     *                            RECEIPT_TOO_BIG_FOR_SERVER.
+     *
+     * @return string
+     */
+    public static function receiptRefusalWords(string $reason, string $serverLimit = ''): string
+    {
+        $limit = trim($serverLimit);
+        if (preg_match('/^(\d+)\s*([KMG])$/i', $limit, $m) === 1) {
+            $limit = $m[1] . ' ' . strtoupper($m[2]) . 'B';
+        }
+
+        return match ($reason) {
+            self::RECEIPT_TOO_BIG            => 'it is larger than 10 MB, the most one receipt may be',
+            self::RECEIPT_TOO_BIG_FOR_SERVER => $limit !== ''
+                ? 'it is larger than this server accepts for one file (' . $limit . ')'
+                : 'it is larger than this server accepts for one file',
+            self::RECEIPT_PARTIAL            => 'only part of it arrived, so it was not kept',
+            self::RECEIPT_EMPTY              => 'the file is empty',
+            self::RECEIPT_WRONG_TYPE         => 'it is not a kind of file a receipt may be (a photo or picture in JPG, PNG, GIF or HEIC, a PDF, or a Word, Excel or CSV file)',
+            default                          => 'the portal could not store it, which is a fault on the server rather than in your file, and it has been recorded for your administrator',
+        };
+    }
+
+    /**
+     * A file's own name, made safe to show back to the claimant.
+     *
+     * ⚠️ WHY SHOWING IT IS NOT #714 COMING BACK. #714 stopped the claimant's
+     *    own file name being STORED — in the database and as the file's name on
+     *    disk — because a claim is kept six years and no erasure could reach
+     *    it. Here the name goes only into the one-off message on the very next
+     *    page, which that page reads and deletes from the session as it draws
+     *    it. It is never written to the database, the activity log or the error
+     *    log. Without it the claimant could not tell WHICH of their files was
+     *    not attached, which is the whole point of #649.
+     *
+     * Control characters are removed and a long name is shortened, so a
+     * crafted name cannot flood the message. The page escapes the result.
+     *
+     * @param string $clientName The name the claimant's computer gave the file.
+     *
+     * @return string The name in double quotes, or a description when it has none.
+     */
+    public static function shownFileName(string $clientName): string
+    {
+        $name = basename(str_replace('\\', '/', $clientName));
+        $name = (string) preg_replace('/[\x00-\x1F\x7F]+/', '', $name);
+        if ($name === '') {
+            return 'a file with no name';
+        }
+        if (mb_strlen($name, 'UTF-8') > 80) {
+            $name = mb_substr($name, 0, 77, 'UTF-8') . '...';
+        }
+
+        return '"' . $name . '"';
+    }
+
+    /**
+     * What the claimant is told once their claim is saved.
+     *
+     * THREE COMPLETE SENTENCES, one per case, written out whole on purpose
+     * (#694: a sentence assembled from branches had wording faults no check
+     * could see): nothing left out; one file not attached; several not
+     * attached. The advice is the only route the portal offers today: a
+     * receipt cannot be added to a claim after it is made (`edit/save.php`
+     * changes the figures only), so the claimant withdraws the claim — which
+     * the claim's own page allows while it is pending — and submits it again.
+     *
+     * @param int                                    $claimId     The new claim's number.
+     * @param list<array{name:string,reason:string}> $notAttached Each file not attached:
+     *                                                            its own name and RECEIPT_* reason.
+     * @param string                                 $serverLimit `upload_max_filesize`, for the words.
+     *
+     * @return array{type:string,message:string} `type` is the alert's colour.
+     */
+    public static function submittedMessage(int $claimId, array $notAttached, string $serverLimit = ''): array
+    {
+        $count = count($notAttached);
+        if ($count === 0) {
+            return [
+                'type'    => 'success',
+                'message' => 'Your claim #' . $claimId . ' has been submitted.',
+            ];
+        }
+
+        $parts = [];
+        foreach ($notAttached as $file) {
+            $parts[] = self::shownFileName((string) ($file['name'] ?? ''))
+                . ', because ' . self::receiptRefusalWords((string) ($file['reason'] ?? ''), $serverLimit);
+        }
+
+        if ($count === 1) {
+            return [
+                'type'    => 'warning',
+                'message' => 'Your claim #' . $claimId . ' has been submitted, but one file you chose was NOT attached to it: '
+                    . $parts[0] . '. Anybody reviewing the claim will see it without that file. '
+                    . 'To add it, withdraw the claim from its own page while it is still pending, and submit it again with the file.',
+            ];
+        }
+
+        return [
+            'type'    => 'warning',
+            'message' => 'Your claim #' . $claimId . ' has been submitted, but ' . $count . ' files you chose were NOT attached to it: '
+                . implode('; ', $parts) . '. Anybody reviewing the claim will see it without those files. '
+                . 'To add them, withdraw the claim from its own page while it is still pending, and submit it again with the files.',
+        ];
+    }
 }

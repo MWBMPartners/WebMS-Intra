@@ -209,6 +209,7 @@ expense-rules|tools/expense-rules-selftest.php|selftest_expenserules|
 expense-withdraw|tools/expense-withdraw-selftest.php|selftest_expensewithdraw|
 expense-payment-race|tools/expense-payment-race-selftest.php|selftest_expensepayrace|
 expense-edit|tools/expense-edit-selftest.php|selftest_expenseedit|
+expense-receipts|tools/expense-receipts-selftest.php|selftest_expreceipts|
 my-volunteering|tools/my-volunteering-selftest.php|selftest_myvolunteering|
 gdpr-eraser|tools/gdpr-eraser-selftest.php|selftest_gdpreraser|web:gdpr-eraser
 erasure-review|tools/erasure-review-selftest.php|selftest_erasurereview|
