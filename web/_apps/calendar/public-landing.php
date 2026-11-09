@@ -130,6 +130,15 @@ $brandName     = method_exists(Site::class, 'productName') === true ? (string) S
 //    returns nothing at all when no site has been loaded.
 $siteName      = (string) (Site::branding('name')  ?? 'Portal');
 $primaryColor  = (string) (Site::branding('color') ?? '#5e6ad2');
+// 🎨 D-091: this page draws its own head, so it does not get header.php's
+//    style block. It asks the same class for readable values: the words on
+//    the colour (white, or dark on a pale colour), a deeper shade for the
+//    hero's gradient that moves AWAY from those words (the old 30% black made
+//    dark words on a pale colour worse), and the colour as words on white.
+$brand         = \Portal\Core\BrandColour::tokens($primaryColor);
+// The countdown boxes tint the hero AWAY from its words too (round 2 of the
+// check: a 15% white panel under white words took the labels below 4.5:1).
+$boxTint       = ($brand['textOnPrimary'] === '#ffffff') ? 'rgba(0,0,0,.18)' : 'rgba(255,255,255,.35)';
 
 // 🕰️ #777 part two. `startDateTime` is a reading on the EVENT's own clock
 //    (`tblEvents.timezone`), and this used to be `strtotime()` of it -- which
@@ -219,19 +228,19 @@ $eventNameSafe = htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF
     <style>
         body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f8f9fa; }
         .landing-hero {
-            background: linear-gradient(135deg, <?php echo htmlspecialchars($primaryColor, ENT_QUOTES, 'UTF-8'); ?> 0%,
-                        color-mix(in srgb, <?php echo htmlspecialchars($primaryColor, ENT_QUOTES, 'UTF-8'); ?> 70%, #000 30%) 100%);
-            color: #fff; padding: 4rem 1rem; text-align: center;
+            background: linear-gradient(135deg, <?php echo htmlspecialchars($brand['primary'], ENT_QUOTES, 'UTF-8'); ?> 0%,
+                        <?php echo htmlspecialchars($brand['active'], ENT_QUOTES, 'UTF-8'); ?> 100%);
+            color: <?php echo htmlspecialchars($brand['textOnPrimary'], ENT_QUOTES, 'UTF-8'); ?>; padding: 4rem 1rem; text-align: center;
         }
         .landing-hero h1 { font-size: clamp(2rem, 6vw, 4rem); margin: 0 0 .5rem; font-weight: 800; }
-        .landing-hero p.tagline { font-size: 1.25rem; opacity: .9; margin: 0 0 2rem; }
+        .landing-hero p.tagline { font-size: 1.25rem; margin: 0 0 2rem; } /* full strength: faded, the words on the colour fell below 4.5:1 (D-091) */
         .countdown { display: flex; gap: 1rem; justify-content: center; margin: 2rem 0; flex-wrap: wrap; }
-        .countdown .box { background: rgba(255,255,255,.15); padding: 1rem 1.5rem; border-radius: 8px; min-width: 80px; }
+        .countdown .box { background: <?php echo htmlspecialchars($boxTint, ENT_QUOTES, 'UTF-8'); ?>; padding: 1rem 1.5rem; border-radius: 8px; min-width: 80px; }
         .countdown .num { font-size: 2.5rem; font-weight: 800; display: block; line-height: 1; }
-        .countdown .label { font-size: .75rem; text-transform: uppercase; letter-spacing: 1px; opacity: .8; }
+        .countdown .label { font-size: .75rem; text-transform: uppercase; letter-spacing: 1px; }
         .cta-btn {
             display: inline-block; background: #fff;
-            color: <?php echo htmlspecialchars($primaryColor, ENT_QUOTES, 'UTF-8'); ?>;
+            color: <?php echo htmlspecialchars($brand['light']['primaryText'], ENT_QUOTES, 'UTF-8'); ?>;
             padding: 1rem 2.5rem; border-radius: 50px; text-decoration: none;
             font-size: 1.25rem; font-weight: 700; margin-top: 1.5rem;
             box-shadow: 0 4px 12px rgba(0,0,0,.15);
@@ -239,7 +248,7 @@ $eventNameSafe = htmlspecialchars((string) $event['eventName'], ENT_QUOTES, 'UTF
         .cta-btn:hover { transform: translateY(-2px); transition: transform .15s; }
         .landing-body { max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
         .info-card { background: #fff; padding: 1.5rem; border-radius: 8px; margin-bottom: 1rem; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
-        .info-card h2 { margin-top: 0; font-size: 1.1rem; color: <?php echo htmlspecialchars($primaryColor, ENT_QUOTES, 'UTF-8'); ?>; }
+        .info-card h2 { margin-top: 0; font-size: 1.1rem; color: <?php echo htmlspecialchars($brand['light']['primaryText'], ENT_QUOTES, 'UTF-8'); ?>; }
         .qr-block { text-align: center; padding: 2rem; }
         .qr-block img { width: 180px; height: 180px; }
         .landing-footer { text-align: center; padding: 2rem 1rem; color: #6c757d; font-size: .85rem; }

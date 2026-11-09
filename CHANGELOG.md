@@ -4,6 +4,34 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Any organisation colour stays readable, in light and dark mode (#852 item 3, D-091)
+
+- **Changed:** in dark mode the hover, pressed and faint-panel shades of an organisation's own colour
+  were always the standard indigo; they now follow the chosen colour, as in light mode.
+- **Fixed — words that could not be read:** the words on a primary button were always white (Bootstrap's
+  own), so on a pale chosen colour they could not be read; in dark mode the words on the colour were a
+  fixed near-black, below the 4.5:1 normal text needs even on the default colour, and unreadable on a
+  dark one; and where the colour itself is used for words (menu links, "current" markers, outlined
+  buttons) a pale colour on white, or a dark one on dark mode's background, could not be read. The
+  portal now works these out from the chosen colour (`Portal\Core\BrandColour`): white or dark words
+  on it, hover and pressed shades that only ever read better, and a darker or lighter shade where the
+  colour is used for words, only as far as needed — light mode's links included; a button-style or menu
+  link's hover only ever reads better, and an ordinary link keeps its colour on hover. A selected outlined button and a "primary" badge now sit on the
+  organisation's colour rather than Bootstrap's own blue, and the remove "x" on the report builder's
+  column chips is white only where the words are. The colour itself is unchanged wherever it is a
+  background. The signed-out event page (`/calendar/public-landing`) uses the same values, and its
+  countdown boxes now tint away from the words rather than towards them. On the
+  default indigo, light mode's coloured words are now very slightly darker (`#5965c8`), because the
+  original falls just short of 4.5:1 on the hover background.
+- **Not covered, said plainly:** borders and other non-text uses of the colour (a ticked box, a progress
+  bar) keep the chosen colour; the coloured times on calendar events (an event category's own colour, on
+  a tint of it) are not adjusted; and a page that draws the colour on a background of its own is not
+  checked.
+- **Tests:** `tools/brand-colour-selftest.php` checks 353 colours in both themes; `tools/brand-colour-
+  selftest.mjs` builds a page from the real stylesheet in a browser, measures every pair a person reads
+  (buttons, outlined and selected buttons, a badge, links and their hover, the colour as words) for eight
+  colours in both themes, and six plants each make it fail.
+
 ### An event's search-engine markup needs the public-website tick too (#850, D-089)
 
 - **Changed:** an event's own page on the portal carries hidden markup that lets Google and others list

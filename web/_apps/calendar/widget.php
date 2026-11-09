@@ -71,6 +71,10 @@ $siteId   = Site::id();
 //    so this threw on every request. This page currently has no address of its
 //    own (migration 189 removed it), so nobody could reach it to find out.
 $primary  = (string) (Site::branding('color') ?? '#5e6ad2');
+// 🎨 D-091: each event is a white card, so its link uses the light-mode shade
+//    of the colour that reads on white (Portal\Core\BrandColour); the card's
+//    edge keeps the chosen colour itself.
+$primaryAsWords = \Portal\Core\BrandColour::tokens($primary)['light']['primaryText'];
 
 header('X-Frame-Options: ALLOWALL'); // explicitly opt-in to embedding
 header_remove('Content-Security-Policy');
@@ -118,7 +122,7 @@ $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' :
     <style>
         body { margin: 0; font-family: system-ui, sans-serif; background: transparent; color: #1a1a1a; }
         .ev { background: #fff; border-left: 4px solid <?php echo htmlspecialchars($primary, ENT_QUOTES, 'UTF-8'); ?>; padding: 12px 16px; margin-bottom: 8px; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-        .ev a { color: <?php echo htmlspecialchars($primary, ENT_QUOTES, 'UTF-8'); ?>; text-decoration: none; font-weight: 600; font-size: 1.1em; }
+        .ev a { color: <?php echo htmlspecialchars($primaryAsWords, ENT_QUOTES, 'UTF-8'); ?>; text-decoration: none; font-weight: 600; font-size: 1.1em; }
         .ev .meta { color: #666; font-size: .85em; margin-top: 4px; }
         .ev .desc { color: #444; font-size: .9em; margin-top: 8px; }
         .empty { padding: 16px; color: #888; text-align: center; }

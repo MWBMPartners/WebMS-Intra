@@ -111,7 +111,7 @@ Foundational classes loaded by every request via `bootstrap.php`. All ✅.
 
 Portal home with brand banner, hero, app card grid.
 
-- Per-site brand colour + favicon drive the visual identity.
+- Per-site brand colour + favicon drive the visual identity. Any colour stays readable in light and dark mode: the words on it, its hover shades and the colour used as words are worked out from it (`Portal\Core\BrandColour`, D-091).
 - App cards link out to every enabled app on the site.
 
 ---

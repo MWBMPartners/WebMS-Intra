@@ -306,6 +306,14 @@ header("Content-Security-Policy: default-src 'self'; "
     <?php echo Asset::fontAwesomeCss(); ?>
 
     <?php echo Asset::portalCss(); ?>
+    <?php
+    // 🎨 D-091 (#852 item 3): readable colours worked out from the organisation's
+    //    own colour, for both themes — the words on it, its hover and pressed
+    //    shades, its faint-panel shade, and the colour used as words. Printed
+    //    AFTER portal.css and with heavier selectors, so these win. See
+    //    Portal\Core\BrandColour for why each is what it is.
+    echo \Portal\Core\BrandColour::styleBlock((string) $siteColor);
+    ?>
 
     <!-- 🌙 Prevent FOUC: apply saved theme + accessibility prefs before paint -->
     <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">

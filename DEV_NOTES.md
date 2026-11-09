@@ -21128,3 +21128,36 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
   'Public' alone (#850)" and that the form, the help page and `api-spec.json` named only the countdown and
   the sitemap. True when written; all three now also name the search-engine markup. The event's page
   itself deliberately still follows "Public" (D-089).
+
+### Readable colours from an organisation's own colour (D-091, #852 item 3)
+
+- **Measure what the browser applies before believing a stylesheet's comment.** portal.css said the
+  colour-mixed shades "shift the whole indigo family automatically". Measured in Edge: the dark half was
+  overridden by a later block of equal weight with fixed indigo, AND dark mode's brighter main colour
+  (`#7b86e8`) never applied for anybody, because header.php writes the colour onto `<html>` and a style on
+  the element beats every stylesheet rule. Neither was visible from reading.
+- **Contrast is a property of PAIRS, so a token needs to know what sits on it.** The fix is not "lighter in
+  dark mode": white words on a lightened hover shade fail. `BrandColour` picks the words first (white
+  where white reaches 4.5:1, else the design's near-black, else pure black — one of white and pure black
+  always reaches about 4.58:1 on any single colour), then moves the hover and pressed shades AWAY from
+  those words, so they can only read better.
+- **A style block's selectors decide whether it wins, not only its position.** `html:root` and
+  `html[data-bs-theme="dark"]` outweigh portal.css's `:root` and `[data-bs-theme="dark"]`; the browser
+  test plants the block early with the plain selectors and goes red.
+- **Count properties, not text matches.** A first count of "28 rules using the colour as text" was
+  `grep "color: var(--portal-primary)"`, which also matches `border-color` and `background-color`; the
+  real figure was 12 text colours plus two pagination tokens.
+- **A fix aimed at a TOKEN misses every place that reaches the colour another way** (round 1 of the check).
+  Links take the colour two ways: an ordinary `<a>` is painted from `--bs-link-color-rgb` (three numbers),
+  while `.btn-link` and nav links read the hex `--bs-link-color`; neither was adjusted. And `.btn-link`
+  and nav links' hover used the button's hover shade, which now moves away from dark words — lighter — so
+  they got worse on hover (an ordinary `<a>` keeps its own colour on hover). Round 2 then found the
+  three-number half was measured by no test at all. A
+  selected outlined button and the `text-bg-primary` badge still sat on Bootstrap's own blue. None was
+  visible to a test whose stand-in for Bootstrap did not model those values: the stand-in now does. The
+  selected outlined button, the badge and an ordinary link's numbers each have a plant (P4, P5, P6); the
+  `.btn-link` and nav links' hex colour and hover are measured by the browser test and guarded by PHP
+  checks 4b and 4c, but have no plant of their own. Before saying "every use", list the uses by the PROPERTY that draws words.
+- **`html:root` matches in dark mode too.** A light-mode value printed under it outweighs
+  `[data-bs-theme="dark"]`, so the dark block has to restate anything it must keep (dark links).
+

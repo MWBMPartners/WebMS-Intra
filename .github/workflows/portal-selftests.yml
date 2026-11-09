@@ -166,6 +166,13 @@ jobs:
         if: ${{ !cancelled() && steps.php.outcome == 'success' }}
         run: php tools/php-runtime-selftest.php
 
+      # 🎨 Readable colours worked out from an organisation's own colour, over
+      #    353 colours in both themes (D-091). Needs no database and no server.
+      #    Its browser half (what a browser really applies) is in pr-security.yml.
+      - name: Brand colour contrast self-test (D-091)
+        if: ${{ !cancelled() && steps.php.outcome == 'success' }}
+        run: php tools/brand-colour-selftest.php
+
       # 🖨️ A PDF that was not written in full is never kept (#711). Needs no
       #    database, no dompdf and no server: the write path answers a REASON
       #    rather than logging, exactly so that it can be tested here, and the

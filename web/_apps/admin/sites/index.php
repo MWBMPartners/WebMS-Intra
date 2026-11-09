@@ -273,7 +273,8 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
                     <div class="col-md-6 mb-3">
                         <label for="formPrimaryColor" class="form-label">Primary Colour</label>
                         <input type="color" class="form-control form-control-color" id="formPrimaryColor"
-                               name="primaryColor" value="#5e6ad2">
+                               name="primaryColor" value="#5e6ad2" aria-describedby="formPrimaryColorHelp">
+                        <div class="form-text" id="formPrimaryColorHelp">Any colour works in light and dark mode: the portal picks white or dark words to go on it, and, where the colour itself is used for words or links, uses a darker or lighter shade of it if that is what it takes for them to be read. (Not adjusted: the coloured times on calendar events, and most marks drawn on the colour, such as the tick in a ticked box.)</div>
                     </div>
                 </div>
                 <div class="mb-3">

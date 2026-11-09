@@ -180,6 +180,7 @@ TESTS=$(cat <<'LIST'
 gdpr-coverage|tools/gdpr-coverage-selftest.php|-|
 giving-retention|tools/giving-retention-selftest.php|-|
 php-runtime|tools/php-runtime-selftest.php|-|
+brand-colour|tools/brand-colour-selftest.php|-|
 clock-change|tools/clock-change-selftest.php|-|
 i18n-member-language|tools/i18n-member-language-selftest.php|-|
 i18n-member-language-http|tools/i18n-member-language-http-selftest.php|selftest_i18nhttp|
@@ -272,6 +273,7 @@ api-spec-check|python3 -I tools/api-spec-check-selftest.py
 scheduled-jobs-gate|python3 -I tools/scheduled-jobs-gate-selftest.py
 document-write-check|python3 -I tools/document-write-check-selftest.py
 csrf-carriers|node tools/csrf-carriers-selftest.mjs
+brand-colour-browser|node tools/brand-colour-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 
 if [ "$LIST_ONLY" -eq 1 ]; then

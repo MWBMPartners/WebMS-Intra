@@ -42,6 +42,11 @@
     --portal-primary-hover:  #4f5bbf;
     --portal-primary-active: #424da5;
     --portal-primary-subtle: #eef0fb;       /* tinted bg for callouts / hover */
+    /* The main colour used AS TEXT, and the words drawn ON it (D-091). On a
+     * page drawn by header.php both are worked out from the organisation's
+     * colour by Portal\Core\BrandColour, per theme, so they always read at
+     * 4.5:1 or better; these are the fallbacks for a page without it. */
+    --portal-primary-text:   var(--portal-primary);
 
     /* ----- Semantic colours ----- */
     --portal-secondary: #6b7280;
@@ -147,7 +152,12 @@
 /* ----------------------------------------------------------------------------
  * Derive primary-hover / primary-active / primary-subtle from --portal-primary
  * so per-site overrides (header.php injects --portal-primary on <html>) shift
- * the whole indigo family automatically. Wrapped in @supports because
+ * the whole indigo family automatically. ⚠️ D-091: on a page drawn by
+ * header.php these are REPLACED by the values Portal\Core\BrandColour works
+ * out (a style block with heavier selectors), because the plain dark block
+ * below overrode the dark half of this with fixed indigo, and neither half
+ * knew what text sits on the result. These stay as the fallback for a page
+ * that draws its own head. Wrapped in @supports because
  * color-mix() lands in Chrome 111 / Safari 16.2 / Firefox 113. Browsers that
  * don't support it fall back to the literal hex values defined inside :root.
  * --------------------------------------------------------------------------*/
@@ -378,7 +388,7 @@ textarea:focus-visible,
     background-color: var(--portal-surface-hover);
 }
 .portal-navbar .nav-link.active {
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
     background-color: var(--portal-primary-subtle);
     font-weight: 600;
 }
@@ -440,11 +450,11 @@ textarea:focus-visible,
 .portal-navbar .dropdown-item:hover,
 .portal-navbar .dropdown-item:focus {
     background-color: var(--portal-primary-subtle);
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
 }
 .portal-navbar .dropdown-item:hover i,
 .portal-navbar .dropdown-item:focus i {
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
 }
 .portal-navbar .dropdown-item.active {
     background-color: var(--portal-primary);
@@ -1057,7 +1067,7 @@ textarea:focus-visible,
     font-size: 6rem;
     font-weight: 800;
     line-height: 1;
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
     opacity: 0.3;
     margin-bottom: var(--portal-spacing-sm);
 }
@@ -1110,7 +1120,7 @@ textarea:focus-visible,
 .portal-cb-toggle[aria-pressed="true"],
 /* Visual cue when dyslexia-friendly reading mode is active */
 .portal-read-toggle[aria-pressed="true"] {
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
     background-color: var(--portal-primary-subtle);
 }
 
@@ -1569,6 +1579,11 @@ body.d-flex.min-vh-100 > .card h1 {
     }
 }
 .btn-primary {
+    /* D-091: the words on the button follow the colour (Bootstrap's own is
+     * always white, unreadable on a pale organisation colour). */
+    --bs-btn-color:               var(--portal-text-on-primary);
+    --bs-btn-hover-color:         var(--portal-text-on-primary);
+    --bs-btn-active-color:        var(--portal-text-on-primary);
     --bs-btn-bg:                  var(--portal-primary);
     --bs-btn-border-color:        var(--portal-primary);
     --bs-btn-hover-bg:            var(--portal-primary-hover);
@@ -1594,7 +1609,16 @@ body.d-flex.min-vh-100 > .card h1 {
     --bs-btn-hover-border-color:  #b91c1c;
 }
 .btn-outline-primary {
-    --bs-btn-color:               var(--portal-primary);
+    /* D-091: outlined, its words are the colour AS text; filled on hover,
+     * they are the words ON the colour. */
+    --bs-btn-color:               var(--portal-primary-text);
+    --bs-btn-hover-color:         var(--portal-text-on-primary);
+    --bs-btn-active-color:        var(--portal-text-on-primary);
+    /* Selected or pressed (the calendar's Day/Week/Month switcher): the
+     * organisation's pressed shade, not Bootstrap's own blue, which the
+     * computed words were never measured against (round 1: 4.20:1). */
+    --bs-btn-active-bg:           var(--portal-primary-active);
+    --bs-btn-active-border-color: var(--portal-primary-active);
     --bs-btn-border-color:        var(--portal-primary);
     --bs-btn-hover-bg:            var(--portal-primary);
     --bs-btn-hover-border-color:  var(--portal-primary);
@@ -1767,10 +1791,10 @@ body.d-flex.min-vh-100 > .card h1 {
     --bs-pagination-color: var(--portal-text);
     --bs-pagination-bg: var(--portal-surface);
     --bs-pagination-border-color: var(--portal-border);
-    --bs-pagination-hover-color: var(--portal-primary);
+    --bs-pagination-hover-color: var(--portal-primary-text);
     --bs-pagination-hover-bg: var(--portal-primary-subtle);
     --bs-pagination-hover-border-color: var(--portal-border-strong);
-    --bs-pagination-focus-color: var(--portal-primary);
+    --bs-pagination-focus-color: var(--portal-primary-text);
     --bs-pagination-focus-bg: var(--portal-primary-subtle);
     --bs-pagination-focus-box-shadow: 0 0 0 3px rgba(var(--portal-primary-rgb), 0.18);
     --bs-pagination-active-color: var(--portal-text-on-primary);
@@ -1823,7 +1847,7 @@ body.d-flex.min-vh-100 > .card h1 {
 .progress-bar.bg-info    { background-color: var(--portal-accent)  !important; }
 
 /* ----- Spinners (Bootstrap .spinner-border) ----- */
-.spinner-border { color: var(--portal-primary); }
+.spinner-border { color: var(--portal-primary-text); }
 .spinner-border.text-success { color: var(--portal-success) !important; }
 .spinner-border.text-danger  { color: var(--portal-danger)  !important; }
 .spinner-border.text-warning { color: var(--portal-warning) !important; }
@@ -1855,7 +1879,7 @@ body.d-flex.min-vh-100 > .card h1 {
     text-decoration: none;
     transition: color var(--portal-transition-fast);
 }
-.portal-breadcrumb .breadcrumb-item a:hover { color: var(--portal-primary); }
+.portal-breadcrumb .breadcrumb-item a:hover { color: var(--portal-primary-text); }
 .portal-breadcrumb .breadcrumb-item.active {
     color: var(--portal-text);
     font-weight: var(--portal-font-weight-medium);
@@ -1872,7 +1896,7 @@ body.d-flex.min-vh-100 > .card h1 {
     text-decoration: none;
     transition: color var(--portal-transition-fast);
 }
-.portal-footer a:hover { color: var(--portal-primary); }
+.portal-footer a:hover { color: var(--portal-primary-text); }
 
 /* "Powered by WebMS Intra" attribution — shown by footer.php when the site
    uses custom branding and the admin hasn't opted out. Subtle by design;
@@ -1987,7 +2011,26 @@ body.d-flex.min-vh-100 > .card h1 {
 .card.border-info    { border-color: var(--portal-accent)  !important; }
 .card.border-danger  { border-color: var(--portal-danger)  !important; }
 
-.text-primary, .text-bg-primary { color: var(--portal-primary) !important; }
+/* D-091 (round 1 of its check): two different pairs. .text-primary is the
+ * colour AS words on the page; .text-bg-primary is words ON the colour, and
+ * used to take the colour as its words on Bootstrap's own blue background
+ * (about 1.1:1 in light mode). */
+.text-primary { color: var(--portal-primary-text) !important; }
+.text-bg-primary {
+    color: var(--portal-text-on-primary) !important;
+    background-color: var(--portal-primary) !important;
+}
+/* Its remove "x" (the report builder's column chips use btn-close-white):
+ * white only under white words, so it never vanishes on a pale colour
+ * (round 2 of D-091's check). Heavier than .btn-close-white, so this wins. */
+.text-bg-primary .btn-close {
+    filter: var(--portal-close-filter-on-primary, invert(1) grayscale(100%) brightness(200%));
+    --bs-btn-close-opacity: .85;
+    /* Full strength on hover: Bootstrap's own hover value (.75) is lower than
+     * .85, so pointing at the x would dim it, below 3:1 on some colours
+     * (round 3 of the check). */
+    --bs-btn-close-hover-opacity: 1;
+}
 .text-success { color: var(--portal-success) !important; }
 .text-warning { color: var(--portal-warning) !important; }
 .text-info    { color: var(--portal-accent)  !important; }
@@ -2108,7 +2151,7 @@ a:focus > .app-card {
 .portal-cal-dayhead:last-child { border-right: none; }
 .portal-cal-dayhead.is-today {
     background: var(--portal-primary-subtle);
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
     font-weight: 600;
 }
 
@@ -2312,7 +2355,7 @@ a:focus > .app-card {
     text-overflow: ellipsis;
 }
 .portal-cal-month-more {
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
     text-decoration: none;
     margin-top: 0.1rem;
 }
@@ -2405,7 +2448,7 @@ a:focus > .app-card {
     border-right: 1px solid var(--portal-border);
 }
 .portal-cal-yearplan-monthhead:hover {
-    color: var(--portal-primary);
+    color: var(--portal-primary-text);
     background: var(--portal-primary-subtle);
 }
 .portal-cal-yearplan-monthhead-name {

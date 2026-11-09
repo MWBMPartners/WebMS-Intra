@@ -1566,6 +1566,16 @@ jobs:
         if: always()
         run: node tools/csrf-carriers-selftest.mjs
 
+      # 🎨 D-091: the colours worked out from an organisation's own colour are
+      #    really the ones a browser applies — the style block outweighs
+      #    portal.css — and every pair a person reads is at least 4.5:1, in
+      #    both themes. Needs a browser and PHP (the runner image has both);
+      #    it REFUSES rather than skipping without them.
+      - name: 'Brand colours read in a real browser (D-091)'
+        id: brand_colour_browser
+        if: always()
+        run: node tools/brand-colour-selftest.mjs
+
       # The test OF both checks above (#641, #646). Adding `and False` to any of
       # their conditions leaves the check itself green - measured on eight
       # separate conditions, not supposed. This plants 26 faults into the real
@@ -1902,6 +1912,7 @@ jobs:
             echo "- One place writes the form token, and writes every carrier: ${{ steps.one_csrf_writer.outcome }} (hard gate, #768)"
             echo "- A day is not always 86,400 seconds: ${{ steps.clock_change_arithmetic.outcome }} (hard gate, #549)"
             echo "- The form token really reaches every carrier, in a browser: ${{ steps.csrf_carriers_browser.outcome }} (#768)"
+            echo "- Brand colours read in a real browser: ${{ steps.brand_colour_browser.outcome }} (D-091)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not
