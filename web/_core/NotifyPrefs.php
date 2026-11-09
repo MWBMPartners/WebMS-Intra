@@ -276,9 +276,27 @@ final class NotifyPrefs
                 $db->rollback();
                 return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
             }
+            // ⚠️ EVERY ANSWER IS CHECKED, not only by relying on strict error
+            //    reporting. Under the portal's `MYSQLI_REPORT_STRICT |
+            //    MYSQLI_REPORT_ERROR` a refused statement throws and the catch
+            //    below answers FAILED; without it (a caller, a tool or a test
+            //    that did not set it), `execute()` answers false and carrying
+            //    on would read "no row" as NO_ACCOUNT, or report a write that
+            //    never happened as SAVED. The promise "never throws, answers
+            //    FAILED" must not depend on a setting made somewhere else.
             $read->bind_param('i', $userId);
-            $read->execute();
-            $row = $read->get_result()->fetch_assoc();
+            if ($read->execute() === false) {
+                $read->close();
+                $db->rollback();
+                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+            }
+            $result = $read->get_result();
+            if ($result === false) {
+                $read->close();
+                $db->rollback();
+                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+            }
+            $row = $result->fetch_assoc();
             $read->close();
             if ($row === null) {
                 $db->rollback();
@@ -300,7 +318,11 @@ final class NotifyPrefs
                 return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
             }
             $write->bind_param('si', $json, $userId);
-            $write->execute();
+            if ($write->execute() === false) {
+                $write->close();
+                $db->rollback();
+                return ['outcome' => self::FAILED, 'replacedUnreadable' => false];
+            }
             $write->close();
 
             if ($db->commit() === false) {

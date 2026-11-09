@@ -1205,8 +1205,11 @@ jobs:
       #    reads the column back, races the real NotifyPrefs::merge() from two
       #    processes (one web worker can never run two saves at once), and
       #    plants faults into its own copy of web/, each of which must go red.
-      #    It CREATEs scratch TRIGGERs on tblUsers (and drops them). Needs curl
-      #    and proc_open, and REFUSES rather than skipping.
+      #    It CREATEs scratch TRIGGERs on tblUsers (and drops them). Needs curl,
+      #    proc_open, and a database account with the PROCESS privilege (it
+      #    reads information_schema.INNODB_TRX) that may create triggers — the
+      #    root account here has both. It asks for both up front and REFUSES
+      #    rather than skipping.
       - name: "Two pages save notification choices and neither loses the other's (#667)"
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
         env:

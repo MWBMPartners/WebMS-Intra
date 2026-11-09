@@ -35,11 +35,19 @@
  *      `erasure-review-selftest.php` section T does it; and F3 MEASURES that
  *      its read and write are one transaction, which no before-and-after
  *      comparison of the keys can see (a scratch trigger records when the
- *      writing connection's transaction began)
+ *      writing connection's transaction began); and F5 has two real saves
+ *      READ before either WRITES, which only an EXCLUSIVE lock survives (a
+ *      shared one deadlocks and loses a save)
  *   G  when the database refuses the save (a scratch trigger refuses it for
  *      real), both pages say so and nothing changes
- *   H  THE PLANTS: ten faults, each put into a COPY of the code, each of which
- *      must turn the check that guards it RED, and all green again after
+ *   H  THE PLANTS: eleven faults, each put into a COPY of the code, each of
+ *      which must turn the check that guards it RED, and all green again after
+ *
+ * NOT DRIVEN: `merge()` also checks each `execute()`'s answer, so that its
+ * "never throws, answers failed" promise does not depend on the portal's
+ * strict error reporting. With strict reporting (how every page runs) a
+ * refused statement throws instead, which section G drives; the
+ * answers-false path needs reporting switched off and is read, not run.
  *
  * WHY SECTION F IS NOT AN HTTP TEST. The page harness runs PHP's built-in
  * server with ONE worker, so two requests never overlap and a race test built
@@ -58,9 +66,13 @@
  *         php tools/notify-prefs-selftest.php
  *
  *         The database must already hold `web/_sql/full_schema.sql`. Needs
- *         PHP's curl extension and `proc_open()`. It REFUSES rather than
- *         skipping when anything is missing, because a skipped test reads
- *         exactly like a passing one.
+ *         PHP's curl extension and `proc_open()`, and a database account that
+ *         may read `information_schema.INNODB_TRX` (the PROCESS privilege) and
+ *         create scratch tables and TRIGGERs — both asked up front. It
+ *         REFUSES rather than skipping when anything is missing, because a
+ *         skipped test reads exactly like a passing one. Stopped with Ctrl-C it
+ *         puts everything back when PHP has pcntl; what a `kill -9` leaves is
+ *         listed beside the clean-up.
  *
  * Exit:   0 only when every check ran and passed.
  *
@@ -80,7 +92,9 @@ $repo = dirname(__DIR__);
 
 $passed = 0;
 $failed = 0;
-$state  = ['proc' => null, 'child' => null, 'worker' => null];
+// Everything the clean-up must undo, in one place, so the shutdown function
+// and a Ctrl-C reach the same list (see "Putting things back" below).
+$state  = ['proc' => null, 'child' => null, 'workers' => [], 'a' => null, 'db' => null, 'newsletterTouched' => false];
 
 function refuse(string $why): never
 {
@@ -129,6 +143,14 @@ try {
     refuse("could not reach {$dbName} on {$dbHost}:{$dbPort}");
 }
 
+$state['db'] = $db;
+// ⏱️ A SHORT WAIT FOR LOCKS on this test's own connection. MySQL's default
+//    for a metadata lock (`lock_wait_timeout`) is 31,536,000 seconds — a
+//    year — so a DROP TRIGGER that ever queued behind a transaction this test
+//    forgot to end did not fail, it HUNG (independent check, round 2). Fifteen
+//    seconds is far more than any step here needs.
+$db->query('SET SESSION lock_wait_timeout = 15, innodb_lock_wait_timeout = 15');
+
 $tables = (int) ($db->query(
     'SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()'
 )->fetch_assoc()['n'] ?? 0);
@@ -136,15 +158,68 @@ if ($tables < 100) {
     refuse("the database holds only {$tables} tables — load web/_sql/full_schema.sql first");
 }
 
-// ── A copy of web/, so a planted fault never touches the repository ─────────
-$child = sys_get_temp_dir() . $sep . 'notify-prefs-' . bin2hex(random_bytes(6));
-$state['child'] = $child;
-
+// ── Putting things back: ONE clean-up, in the only safe ORDER ────────────────
+// Run at the end, on refuse(), on an uncaught error, and on Ctrl-C (SIGINT),
+// SIGTERM or SIGHUP when PHP has the pcntl extension — the handler below only
+// calls exit(), which runs this.
+//
+// ⚠️ THE ORDER IS THE POINT. Section F holds a row lock on a SECOND connection
+//    (`$state['a']`) and starts worker processes that wait on it. Dropping a
+//    trigger on `tblUsers` needs a metadata lock that waits for every open
+//    transaction on that table — so dropping it while `$a` is still open made
+//    this process wait on ITSELF, for a year (see above). So: end `$a` first,
+//    stop the workers, stop the web server, and only then drop the scratch
+//    triggers and table; then delete the copy of web/, which holds the
+//    database password (`auth_creds.php`) and an encryption key.
+//
+// WHAT A HARD KILL (`kill -9`) STILL LEAVES, because nothing can run then:
+//   - two possible scratch triggers on `tblUsers` (`zzNotifyPrefsProbeTrg`,
+//     `zzNotifyPrefsRefuseTrg`) and the table `zzNotifyPrefsProbe` — the
+//     next run drops all three before it uses them, but until then a refusing
+//     trigger would refuse writes to the test member's choices;
+//   - the folder `notify-prefs-<random>` under the system temp folder,
+//     holding the database password and a key — delete it by hand;
+//   - the web server (`php -S 127.0.0.1:103xx`) and any worker, which the
+//     operating system may leave running — stop them by hand;
+//   - `newsletter.enabled` set to '1' if the kill landed inside D8/D9;
+//   - the test member and their rows, which the next run removes first.
 register_shutdown_function(static function () use (&$state): void {
-    foreach (['worker', 'proc'] as $which) {
-        if (is_resource($state[$which]) === true) {
-            proc_terminate($state[$which]);
-            proc_close($state[$which]);
+    if ($state['a'] instanceof mysqli) {
+        try {
+            $state['a']->rollback();
+            $state['a']->close();
+        } catch (Throwable $e) {
+            // Already gone: the server rolls it back when the connection drops.
+        }
+        $state['a'] = null;
+    }
+    foreach ($state['workers'] as $worker) {
+        if (is_resource($worker) === true) {
+            proc_terminate($worker);
+            proc_close($worker);
+        }
+    }
+    $state['workers'] = [];
+    if (is_resource($state['proc']) === true) {
+        proc_terminate($state['proc']);
+        proc_close($state['proc']);
+    }
+    if ($state['db'] instanceof mysqli) {
+        $sqls = [
+            'DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`',
+            'DROP TRIGGER IF EXISTS `zzNotifyPrefsRefuseTrg`',
+            'DROP TRIGGER IF EXISTS `zzNotifyPrefsCanTrg`',
+            'DROP TABLE IF EXISTS `zzNotifyPrefsProbe`',
+        ];
+        if ($state['newsletterTouched'] === true) {
+            $sqls[] = "UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL";
+        }
+        foreach ($sqls as $sql) {
+            try {
+                $state['db']->query($sql);
+            } catch (Throwable $e) {
+                echo "  ! could not put back: {$sql} (" . $e->getMessage() . ")\n";
+            }
         }
     }
     if ($state['child'] !== null && is_dir($state['child']) === true) {
@@ -160,6 +235,49 @@ register_shutdown_function(static function () use (&$state): void {
         @rmdir($state['child']);
     }
 });
+
+// Ctrl-C and a polite kill run the clean-up above (#649's pattern). Without
+// the pcntl extension only the shutdown function is there, which an
+// uncaught signal does NOT run — so on such a PHP, Ctrl-C leaves what a hard
+// kill leaves (listed above). A signal that arrives while PHP is inside a
+// blocking database call is acted on when that call returns, and every lock
+// wait here is capped at fifteen seconds.
+if (function_exists('pcntl_async_signals') === true && function_exists('pcntl_signal') === true) {
+    pcntl_async_signals(true);
+    foreach ([SIGINT, SIGTERM, SIGHUP] as $signal) {
+        pcntl_signal($signal, static function (int $which): void {
+            echo "\nStopped by a signal ({$which}); putting things back.\n";
+            exit(3);
+        });
+    }
+}
+
+// ── The two database rights section F and G need, asked UP FRONT ─────────────
+// ⚠️ ASKED BEFORE ANYTHING HOLDS A LOCK. Section F reads
+//    information_schema.INNODB_TRX, which needs the PROCESS privilege; without
+//    it the read THROWS (error 1227) — and the first version met that throw
+//    while its second connection held a row lock, then hung (above). Asked
+//    here, a missing right is a plain REFUSED with nothing held.
+try {
+    $db->query('SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX')->free();
+} catch (Throwable $e) {
+    refuse("this test reads information_schema.INNODB_TRX (to see that a save is really waiting, and when its transaction began), which needs the PROCESS privilege; '{$dbUser}' does not have it (" . $e->getMessage() . ')');
+}
+try {
+    $db->query('CREATE TABLE IF NOT EXISTS `zzNotifyPrefsProbe` (`probeID` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, `connID` BIGINT NULL, `trxStarted` DATETIME NULL, `seenAt` DATETIME(6) NOT NULL) ENGINE=InnoDB');
+    $db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsCanTrg`');
+    $db->query('CREATE TRIGGER `zzNotifyPrefsCanTrg` BEFORE INSERT ON `zzNotifyPrefsProbe` FOR EACH ROW SET NEW.`connID` = NEW.`connID`');
+    $db->query('DROP TRIGGER `zzNotifyPrefsCanTrg`');
+} catch (Throwable $e) {
+    refuse("this test creates scratch tables and TRIGGERs (sections F and G), which '{$dbUser}' may not do here (" . $e->getMessage() . ')');
+}
+// Anything an earlier, killed run left on tblUsers.
+$db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`');
+$db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsRefuseTrg`');
+
+// ── A copy of web/, so a planted fault never touches the repository ─────────
+$child = sys_get_temp_dir() . $sep . 'notify-prefs-' . bin2hex(random_bytes(6));
+$state['child'] = $child;
 
 mkdir($child, 0700, true);
 $copied = 0;
@@ -224,10 +342,14 @@ $worker = <<<'WORKER'
 <?php
 // Written by tools/notify-prefs-selftest.php for ONE run. Test only.
 declare(strict_types=1);
+// argv: the class file, the account number, the ONE key to switch off, and a
+// file to write this connection's thread id into BEFORE it asks for the row,
+// so the test can see that THIS connection — not some other — is waiting.
 require $argv[1];
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 $db = new mysqli((string) getenv('NP_HOST'), (string) getenv('NP_USER'), (string) getenv('NP_PASS'), (string) getenv('NP_NAME'), (int) getenv('NP_PORT'));
-$answer = \Portal\Core\NotifyPrefs::merge($db, (int) $argv[2], ['taskReminders' => false]);
+file_put_contents($argv[4], (string) $db->thread_id);
+$answer = \Portal\Core\NotifyPrefs::merge($db, (int) $argv[2], [$argv[3] => false]);
 echo json_encode($answer);
 WORKER;
 file_put_contents($child . $sep . 'worker.php', $worker);
@@ -659,18 +781,10 @@ $saveFullPage([]);
 $sabbath = (string) ($db->query("SELECT `sabbathHonour` FROM `tblUsers` WHERE `userID` = {$userId}")->fetch_assoc()['sabbathHonour'] ?? '');
 check('D6 so saving the page leaves the member\'s Sabbath choice ("off") alone — it used to be reset to "inherit"', $sabbath === 'off', 'is ' . $sabbath);
 
-// Whatever happens below, the scratch triggers and the probe table this test
-// makes on `tblUsers` must not outlive the run: a leftover BEFORE UPDATE
-// trigger would refuse or record every later test's writes to that table.
-register_shutdown_function(static function () use ($db): void {
-    foreach (['DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`', 'DROP TRIGGER IF EXISTS `zzNotifyPrefsRefuseTrg`', 'DROP TABLE IF EXISTS `zzNotifyPrefsProbe`'] as $sql) {
-        try {
-            $db->query($sql);
-        } catch (Throwable $e) {
-            // The connection has gone; nothing more can be done from here.
-        }
-    }
-});
+// The scratch triggers and the probe table below are removed by the ONE
+// clean-up near the top ("Putting things back"), which ends any open
+// transaction of this test's first — a second shutdown function here used to
+// drop them on its own, in the wrong order.
 
 /** Create a scratch trigger, refusing loudly when the database will not let us. */
 $makeTrigger = static function (string $sql) use ($db): void {
@@ -702,7 +816,10 @@ check('D7 a marked switch posted as "on" rather than "1" is stored as OFF — on
  *
  * @return array{0:bool, 1:string, 2:bool}  ok, detail, premise (the newsletter box is drawn)
  */
-$scenarioOnlyUnsettable = static function () use ($db, $http, $formOn, $setStored, $stored, $userId, $siteId, $beforeD, $fmt): array {
+$scenarioOnlyUnsettable = static function () use (&$state, $db, $http, $formOn, $setStored, $stored, $userId, $siteId, $beforeD, $fmt): array {
+    // Known to the clean-up, so a Ctrl-C inside this scenario still switches
+    // the newsletter back off (a `finally` does not run on exit()).
+    $state['newsletterTouched'] = true;
     $db->query("UPDATE `tblSettings` SET `settingValue` = '1' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
     $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
     $token = bin2hex(random_bytes(20));
@@ -727,6 +844,7 @@ $scenarioOnlyUnsettable = static function () use ($db, $http, $formOn, $setStore
     } finally {
         $db->query("UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
         $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+        $state['newsletterTouched'] = false;
     }
 };
 [$okUnsettable, $detailUnsettable, $premiseUnsettable] = $scenarioOnlyUnsettable();
@@ -768,12 +886,127 @@ $setStored(null);
 $saveCard(true);
 $quiet = (int) ($db->query("SELECT COUNT(*) AS n FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'")->fetch_assoc()['n'] ?? 0);
 check('E4 an EMPTY column is "nothing chosen yet", saved without any record', $quiet === 0 && $stored() === ['eventReminders' => true], 'rows ' . $quiet . '; stored ' . $fmt($stored()));
-
 // =============================================================================
 echo "\nF. Two saves at once lose nothing\n";
 // =============================================================================
 /**
- * This test's own connection takes the row lock and holds it. The REAL
+ * Start one worker: the REAL `merge()`, from the COPY, in its own process,
+ * switching ONE key off. It is put on `$state['workers']` the moment it
+ * exists, so the clean-up can always stop it.
+ *
+ * @return array{proc:mixed, out:string, idFile:string}
+ */
+$startWorker = static function (string $key) use (&$state, $userId, $child, $sep, $dbHost, $dbUser, $dbPass, $dbName, $dbPort): array {
+    $stem = $child . $sep . 'worker-' . bin2hex(random_bytes(4));
+    $env  = getenv();
+    $env['NP_HOST'] = $dbHost;
+    $env['NP_USER'] = $dbUser;
+    $env['NP_PASS'] = $dbPass;
+    $env['NP_NAME'] = $dbName;
+    $env['NP_PORT'] = (string) $dbPort;
+    $proc = proc_open(
+        [PHP_BINARY, $child . $sep . 'worker.php', $child . $sep . 'web' . $sep . '_core' . $sep . 'NotifyPrefs.php', (string) $userId, $key, $stem . '.id'],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', $stem . '.out', 'w'], 2 => ['file', $stem . '.err', 'w']],
+        $pipes,
+        $child,
+        $env
+    );
+    if (is_resource($proc) === false) {
+        throw new RuntimeException('could not start a worker process');
+    }
+    $state['workers'][] = $proc;
+    return ['proc' => $proc, 'out' => $stem . '.out', 'idFile' => $stem . '.id'];
+};
+
+/**
+ * Wait for a worker to finish (or, with `$stop`, stop it), and answer what
+ * it printed. It is taken off `$state['workers']` either way.
+ *
+ * @param array{proc:mixed, out:string, idFile:string} $worker
+ */
+$finishWorker = static function (array $worker, bool $stop = false) use (&$state): string {
+    if (is_resource($worker['proc']) === true) {
+        for ($i = 0; $stop === false && $i < 300 && proc_get_status($worker['proc'])['running'] === true; $i++) {
+            usleep(100000);
+        }
+        if (proc_get_status($worker['proc'])['running'] === true) {
+            proc_terminate($worker['proc']);
+        }
+        proc_close($worker['proc']);
+    }
+    $state['workers'] = array_values(array_filter($state['workers'], static fn ($p): bool => $p !== $worker['proc']));
+    return trim((string) @file_get_contents($worker['out']) . ' ' . (string) @file_get_contents(substr($worker['out'], 0, -4) . '.err'));
+};
+
+/**
+ * ⚠️ THE PREMISE, ASKED OF EACH WORKER'S OWN CONNECTION. Is every one of these
+ *    workers connected and WAITING for a lock right now? Each writes its
+ *    connection's thread id to a file before it asks for the row, and only a
+ *    lock wait on THAT thread counts — the first version counted any lock wait
+ *    anywhere on the server, which another test sharing the server could
+ *    satisfy (independent check, round 2). A sleep is a hope; this is the
+ *    premise (#735).
+ *
+ * @param list<array{proc:mixed, out:string, idFile:string}> $workers
+ */
+$allWaiting = static function (array $workers) use ($dbHost, $dbUser, $dbPass, $dbName, $dbPort): bool {
+    for ($i = 0; $i < 80; $i++) {
+        usleep(100000);
+        $ids = [];
+        foreach ($workers as $worker) {
+            $ids[] = (int) @file_get_contents($worker['idFile']);
+        }
+        if (in_array(0, $ids, true) === true) {
+            continue;
+        }
+        $probe = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+        $n = (int) ($probe->query(
+            "SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE `trx_state` = 'LOCK WAIT' AND `trx_mysql_thread_id` IN (" . implode(',', $ids) . ')'
+        )->fetch_assoc()['n'] ?? 0);
+        $probe->close();
+        if ($n === count($workers)) {
+            return true;
+        }
+    }
+    return false;
+};
+
+/**
+ * End this test's locking connection FIRST, then stop any worker still
+ * running. Every scenario below calls this from its `finally`, BEFORE it drops
+ * a trigger: a DROP TRIGGER on `tblUsers` waits for every open transaction on
+ * that table, so dropping one while `$a` was still open made this process wait
+ * on itself (round 2 — then for a year, now for at most fifteen seconds).
+ *
+ * @param list<array{proc:mixed, out:string, idFile:string}|null> $workers
+ */
+$endHolders = static function (?mysqli $a, array $workers) use (&$state, $finishWorker): void {
+    if ($a !== null) {
+        try {
+            $a->rollback();
+            $a->close();
+        } catch (Throwable $e) {
+            // Already committed and closed on the normal path, or gone.
+        }
+    }
+    $state['a'] = null;
+    foreach ($workers as $worker) {
+        if ($worker !== null) {
+            $finishWorker($worker, true);
+        }
+    }
+};
+
+/** A second connection for this test, with short lock waits, known to the clean-up. */
+$openHolder = static function () use (&$state, $dbHost, $dbUser, $dbPass, $dbName, $dbPort): mysqli {
+    $a = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+    $state['a'] = $a;
+    $a->query('SET SESSION lock_wait_timeout = 15, innodb_lock_wait_timeout = 15');
+    return $a;
+};
+
+/**
+ * F1-F3. This test's own connection takes the row lock and holds it. The REAL
  * `merge()` then runs in its own process (one process cannot block on
  * itself) and must WAIT; while it waits, this connection changes a
  * different key and commits. With the lock, the worker reads the committed
@@ -787,22 +1020,23 @@ echo "\nF. Two saves at once lose nothing\n";
  *    committed value and writes it — so the keys come out right. The lock
  *    still evaporated between the read and the write; it is just that THIS
  *    interleaving cannot exploit it. So F3 measures the transaction itself:
- *    a scratch BEFORE UPDATE trigger records, for the connection doing the
- *    write, when its InnoDB transaction BEGAN (`INNODB_TRX.trx_started`).
- *    With the transaction, it began at the blocked read — held here for
- *    seconds on purpose — so it began well before the write. Without it, it
- *    began AT the write. `trx_started` has whole seconds only, hence the
- *    2.5-second hold and the 1.5-second threshold.
+ *    a scratch BEFORE UPDATE trigger records, for the worker's write, when
+ *    its InnoDB transaction BEGAN (`INNODB_TRX.trx_started`). With the
+ *    transaction, it began at the blocked read — held here for seconds on
+ *    purpose — so it began well before the write. Without it, it began AT the
+ *    write. `trx_started` has whole seconds only, hence the 2.5-second hold
+ *    and the 1.5-second threshold.
  *
  * @return array{0:bool, 1:string, 2:bool, 3:bool, 4:string}  ok, detail, premise, one transaction, its detail
  */
-$scenarioF = static function () use (&$state, $db, $makeTrigger, $setStored, $stored, $userId, $child, $sep, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $fmt): array {
+$scenarioF = static function () use ($db, $makeTrigger, $setStored, $stored, $userId, $fmt, $startWorker, $finishWorker, $allWaiting, $endHolders, $openHolder): array {
     $setStored('{"rotaReminders": true, "taskReminders": true, "zzFutureChoice": "kept"}');
-    $db->query('CREATE TABLE IF NOT EXISTS `zzNotifyPrefsProbe` (`probeID` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, `connID` BIGINT NULL, `trxStarted` DATETIME NULL, `seenAt` DATETIME(6) NOT NULL) ENGINE=InnoDB');
     $db->query('DELETE FROM `zzNotifyPrefsProbe`');
     $db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`');
+    $a      = null;
+    $worker = null;
     try {
-        $a = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+        $a   = $openHolder();
         $aId = (int) $a->thread_id;
         // ⚠️ THE TRIGGER MUST NOT READ INNODB_TRX FOR THIS TEST'S OWN WRITE.
         //    MySQL serves INNODB_TRX from a cache that is refreshed only when it
@@ -824,31 +1058,8 @@ $scenarioF = static function () use (&$state, $db, $makeTrigger, $setStored, $st
         $a->begin_transaction();
         $held = $a->query("SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = {$userId} FOR UPDATE")->fetch_assoc();
 
-        $out = $child . $sep . 'worker-' . bin2hex(random_bytes(4)) . '.out';
-        $env = getenv();
-        $env['NP_HOST'] = $dbHost;
-        $env['NP_USER'] = $dbUser;
-        $env['NP_PASS'] = $dbPass;
-        $env['NP_NAME'] = $dbName;
-        $env['NP_PORT'] = (string) $dbPort;
-        $state['worker'] = proc_open(
-            [PHP_BINARY, $child . $sep . 'worker.php', $child . $sep . 'web' . $sep . '_core' . $sep . 'NotifyPrefs.php', (string) $userId],
-            [0 => ['file', '/dev/null', 'r'], 1 => ['file', $out, 'w'], 2 => ['file', $out . '.err', 'w']],
-            $pipes,
-            $child,
-            $env
-        );
-        // ⚠️ A SLEEP IS A HOPE; THE CHECK AFTER IT IS THE PREMISE. The worker
-        //    must be connected and waiting on this row before this connection
-        //    writes, or neither version of the code is being tested (#735).
-        $waiting = false;
-        for ($i = 0; $i < 60 && $waiting === false; $i++) {
-            usleep(100000);
-            $probe   = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
-            $waiting = (int) ($probe->query("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE `trx_state` = 'LOCK WAIT'")->fetch_assoc()['n'] ?? 0) > 0;
-            $probe->close();
-        }
-        $running = proc_get_status($state['worker'])['running'] === true;
+        $worker  = $startWorker('taskReminders');
+        $waiting = $allWaiting([$worker]);
         // Hold the row long enough that a transaction begun at the worker's
         // read is measurably older than its write (see F3 above).
         usleep(2500000);
@@ -862,15 +1073,12 @@ $scenarioF = static function () use (&$state, $db, $makeTrigger, $setStored, $st
         $w->close();
         $a->commit();
         $a->close();
+        $a = null;
 
-        for ($i = 0; $i < 300 && proc_get_status($state['worker'])['running'] === true; $i++) {
-            usleep(100000);
-        }
-        proc_close($state['worker']);
-        $state['worker'] = null;
-        $said = (string) @file_get_contents($out);
-        $now  = $stored() ?? [];
-        $ok   = str_contains($said, '"outcome":"saved"') === true
+        $said   = $finishWorker($worker);
+        $worker = null;
+        $now    = $stored() ?? [];
+        $ok     = str_contains($said, '"outcome":"saved"') === true
             && ($now['rotaReminders'] ?? null) === false && ($now['taskReminders'] ?? null) === false && ($now['zzFutureChoice'] ?? null) === 'kept';
 
         $probeRow = $db->query(
@@ -884,17 +1092,64 @@ $scenarioF = static function () use (&$state, $db, $makeTrigger, $setStored, $st
             : 'the worker\'s transaction began ' . ($probeRow['trxStarted'] ?? 'NOT RECORDED') . ', its write ran ' . $probeRow['seenAt']
                 . ($gap === null ? '' : ' (' . number_format($gap, 2) . ' s later)');
 
-        return [$ok, 'worker said ' . $said . ' ' . (string) @file_get_contents($out . '.err') . '; stored ' . $fmt($now), $waiting && $running, $oneTrx, $trxWords];
+        return [$ok, 'worker said ' . $said . '; stored ' . $fmt($now), $waiting, $oneTrx, $trxWords];
     } finally {
+        $endHolders($a, [$worker]);
         $db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`');
     }
 };
+
+/**
+ * F4-F5. BOTH saves READ before EITHER writes. This test's connection holds
+ * the row while two workers start, each switching a different key off, and
+ * both wait at their read; then it lets go. With an EXCLUSIVE lock (`FOR
+ * UPDATE`) only one may hold the row, so the second reads only after the
+ * first has written: both changes land. With a SHARED lock (`LOCK IN SHARE
+ * MODE` / `FOR SHARE`) both read at once, both then need the row to write,
+ * and the database refuses one as a deadlock: one change is lost and that
+ * worker answers "failed". F1-F3 cannot tell the two locks apart, because
+ * there only ONE save is waiting (independent check, round 2).
+ *
+ * @return array{0:bool, 1:string, 2:bool}  ok, detail, premise (both really waited)
+ */
+$scenarioBoth = static function () use ($setStored, $stored, $userId, $fmt, $startWorker, $finishWorker, $allWaiting, $endHolders, $openHolder): array {
+    $setStored('{"rotaReminders": true, "taskReminders": true, "zzFutureChoice": "kept"}');
+    $a = null;
+    $one = null;
+    $two = null;
+    try {
+        $a = $openHolder();
+        $a->begin_transaction();
+        $a->query("SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = {$userId} FOR UPDATE")->free();
+        $one     = $startWorker('taskReminders');
+        $two     = $startWorker('rotaReminders');
+        $waiting = $allWaiting([$one, $two]);
+        $a->rollback();
+        $a->close();
+        $a = null;
+        $saidOne = $finishWorker($one);
+        $one     = null;
+        $saidTwo = $finishWorker($two);
+        $two     = null;
+        $now     = $stored() ?? [];
+        $ok      = str_contains($saidOne, '"outcome":"saved"') === true && str_contains($saidTwo, '"outcome":"saved"') === true
+            && ($now['taskReminders'] ?? null) === false && ($now['rotaReminders'] ?? null) === false && ($now['zzFutureChoice'] ?? null) === 'kept';
+        return [$ok, 'first worker said ' . $saidOne . '; second said ' . $saidTwo . '; stored ' . $fmt($now), $waiting];
+    } finally {
+        $endHolders($a, [$one, $two]);
+    }
+};
+
 [$okF, $detailF, $premiseF, $oneTrxF, $trxDetailF] = $scenarioF();
-check('F1 (the premise) the real merge() was connected and WAITING on the row while this test held it — otherwise F2 and F3 prove nothing', $premiseF);
+check('F1 (the premise) the real merge() was connected and WAITING on the row — its OWN connection — while this test held it; otherwise F2 and F3 prove nothing', $premiseF);
 check('F2 THE LOCK: both saves landed — this connection\'s rotaReminders=off AND the worker\'s taskReminders=off — and the unknown key survived', $okF, $detailF);
 check('F3 THE TRANSACTION: merge()\'s read and write are ONE transaction — it began at the blocked read, well before the write — so its lock is held across both (#647, #694)',
     $oneTrxF, $trxDetailF);
 echo "      ({$trxDetailF})\n";
+[$okBoth, $detailBoth, $premiseBoth] = $scenarioBoth();
+check('F4 (the premise) BOTH workers were connected and waiting at their read at the same moment', $premiseBoth);
+check('F5 THE LOCK IS EXCLUSIVE: when both saves have read before either writes, both still land and both answer "saved" — a shared lock would deadlock and lose one',
+    $okBoth, $detailBoth);
 
 // =============================================================================
 echo "\nG. When the database refuses the save, both pages say so and nothing changes\n";
@@ -1056,6 +1311,16 @@ $plants['H10 markers naming only unsettable keys treated as a save (not as out o
     }
 );
 
+// `LOCK IN SHARE MODE` rather than `FOR SHARE`, because MariaDB knows only
+// the former; on MySQL the two are the same lock. F1-F3 stay GREEN with this
+// plant (one waiting save cannot tell the locks apart); only F5 sees it.
+$plants['H11 the lock made SHARED instead of exclusive turns F5 RED (a deadlock loses one save)'] = $plant(
+    '_core/NotifyPrefs.php',
+    "WHERE `userID` = ? FOR UPDATE'",
+    "WHERE `userID` = ? LOCK IN SHARE MODE'",
+    $scenarioBoth
+);
+
 foreach ($plants as $words => $g) {
     check($words, $g['applied'] === true && $g['red'] === true && $g['restored'] === true,
         ($g['applied'] ? 'applied' : 'NOT applied') . '; ' . $g['detail']);
@@ -1070,8 +1335,9 @@ foreach ($plants as $words => $g) {
 // With every plant taken out, all are green again — so a red above can never
 // be mistaken for a plant left behind.
 $againF = $scenarioF();
-check('H11 with the plants removed, every scenario they broke is green again',
+check('H12 with the plants removed, every scenario they broke is green again',
     $scenarioB()[0] === true && $scenarioC()[0] === true && $scenarioD()[0] === true && $againF[0] === true && $againF[3] === true
+    && $scenarioBoth()[0] === true
     && $scenarioEFull()[0] === true && $scenarioECard()[0] === true && $scenarioRefused()[0] === true && $scenarioTick()[0] === true
     && $scenarioOnlyUnsettable()[0] === true);
 
