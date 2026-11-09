@@ -4,6 +4,37 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An event's web address is made in one place (#883)
+
+- **The events API no longer answers 500 for a name already used.** `POST /api/events/create`
+  (and `/api/v1/events`) made an event's web address from its name alone, and the database allows
+  one address per organisation — a deleted event's included — so the second event of any name was
+  refused as a bare HTTP 500 with nothing created. Measured against the code before this change:
+  the second, third and fourth creates of one name answered 500. The address is now the name and
+  the start date (`sunday-service-2026-06-07`), with `-2`, `-3` … when that is taken, asked of the
+  database at the moment of saving. If another writer takes the address between the question and
+  the save three times running, the API answers **409** (new, documented) and creates nothing.
+- **The Manage Events form** asks the same helper. Its second event of a name on one day is now
+  `-2` (it was `-1`), its uniqueness loop is bounded, and an address taken between asking and saving
+  is asked again instead of showing an error page (measured before: 500, nothing saved).
+- **The dates of a repeating event made by the form** each get their own date in their address
+  (`…-2031-08-10`), asked of the database — except the FIRST date when the form moves it onto
+  the pattern (a Tuesday typed, Thursdays ticked): its address keeps the TYPED date, because the
+  address is made when the event is first saved and the move comes after. An address is a label,
+  never a date to parse; api-spec.json says so, and names the `imp-` + 16 hex characters shape
+  of events copied in from outside calendars. Before, every date was the FIRST date's address plus
+  `-2`, `-3` … and was never asked of the database, so a held address made that date fail to save
+  silently (measured: a three-date series saved two and said "1 more date(s) were added").
+- **The series pattern page** asks the same helper. A date it adds is now `name-date` rather than
+  the template's whole address plus the new date (`…-2031-10-05-2031-10-19`), and an address taken
+  in between is asked again instead of rolling the whole change back.
+- **The public suggestion form** used four random characters (never asked of the database, about a
+  7% chance of a clash among 100 suggestions of one name — worked out, not measured); it now gets
+  `name-date` and `-2` like the rest.
+- No installation exists yet, so no link anybody has kept changes. Existing rows keep their
+  addresses; only new events get the new shape.
+- **Tests:** new `tools/event-address-selftest.php`, 32 checks on MySQL 8.0.36, MariaDB 11.4.13 and 12.3.3, with three real two-writer races; red 17 of 23 on the old code. One check round by a fresh Claude agent; its only finding was an untrue sentence in the API description, corrected. Raised: #885, #887, #888.
+
 ### A calendar file with the same event on several dates imports every row; a row already in the calendar is skipped (#877, D-100)
 
 - **A calendar file holding the same event on several dates now imports every

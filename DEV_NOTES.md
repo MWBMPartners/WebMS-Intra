@@ -21180,6 +21180,35 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### One place makes an event's web address (#883)
+
+- `Events::saveUnderFreeSlug($db, $siteId, $stem, $save)` is the ONE loop that saves a new event
+  under a free address: `freeSlug()` gives the first free of `stem`, `stem-2` … `stem-50`, then a
+  random ending; `$save` binds it and sends the INSERT (and must THROW on refusal — turn an
+  `execute()` that answers false into a `mysqli_sql_exception`); a refusal that
+  `Events::slugWasTaken()` recognises (1062 naming `uq_event_site_slug`) is asked again,
+  `SLUG_SAVE_TRIES` (3) times in all. Used by the events API, the Manage Events form (and its
+  repeating dates), the series pattern page and the public suggestion form. The calendar file
+  import keeps its own loop on purpose (it records whether each INSERT was SENT, #877), with the
+  same stem, the same question and the same three tries.
+- **Inside a transaction the retry needs the list of refused addresses.** `freeSlug()` takes
+  `$refused` and never offers those again. Under REPEATABLE READ "is it free" reads the
+  transaction's snapshot, which cannot see another writer's row committed after the snapshot was
+  taken, so without the list every retry resends the same address. The series pattern page writes
+  in one transaction; with the list removed its real race is rolled back (planted, P6 of
+  `tools/event-address-selftest.php`) while the API's — outside a transaction — still wins (P5).
+  Measured on MySQL 8.0.36, MariaDB 11.4.13 and MariaDB 12.3.3 (which has
+  `innodb_snapshot_isolation` on by default; it still gave 1062, not 1020).
+- **`information_schema.INNODB_TRX` is a cache, and asking it too often keeps it old.** MySQL
+  refreshes it only when more than 0.1 s have passed since it was last READ. The first version of
+  the new test polled faster, was shown the PREVIOUS race's waiting INSERT, committed before the new
+  request reached the database, and so never ran the race — found only because a planted single
+  save attempt still "won". The test now polls at 0.25 s and waits for a "nothing waiting" answer
+  before each race. (`trx_query` is also cut at 1,024 characters, so matching an event's name in it
+  does not work for the series page's long INSERT.) `tools/calendar-import-selftest.php`'s section
+  R polls with `curl_multi_select(…, 0.1)` and runs ONE race, so it is not exposed to the stale
+  previous-race row; noted, not changed.
+
 ### An event's web address, and rows already in the calendar (#877, D-100)
 
 - `Portal\Core\Events::slugStem()` (name + start date, the date SLICED from the

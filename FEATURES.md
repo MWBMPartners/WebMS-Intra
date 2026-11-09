@@ -445,6 +445,9 @@ Events, series, RSVP, exports, and seven view modes.
 
 **Shipped:**
 - Event CRUD with hero images, location, all-day support, public/featured flags.
+- Every way of creating an event (the form, its repeating dates, the series pattern page, the public
+  suggestion form, the events API and the calendar file import) gives it a web address of the name and the
+  start date, with `-2`, `-3` … when that is taken — never refused for a repeated name (#877, #883).
 - Bulk import of events from a spreadsheet file (CSV) on Manage Events: preview, then each row is imported
   on its own — the results list shows every row as imported (with its event number), not imported (with the
   reason), or, if the database connection was lost, not known; the activity log records the counts (#790,
