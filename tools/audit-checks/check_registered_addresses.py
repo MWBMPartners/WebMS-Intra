@@ -163,8 +163,8 @@ ROUTER_PATTERNS = {
     "8004": (re.compile(r"[A-Za-z0-9\-_.]{1,30}"), "an asset's printed code (GS1), /8004/<number>"),
     # #493 P4a: the public door. Recognised by Site::preDetect() and answered
     # by index.php before the router (which gives any other /w/ the door's 404).
-    "w": (re.compile(r"[0-9a-f]{24}/(?:events\.json|posters\.json|media/[a-f0-9]{32}\.[a-z0-9]+)"),
-          "the public door, /w/<name>/events.json, posters.json or media/<file>"),
+    "w": (re.compile(r"[0-9a-f]{24}/(?:events\.json|posters\.json|door\.js|media/[a-f0-9]{32}\.[a-z0-9]+)"),
+          "the public door, /w/<name>/events.json, posters.json, door.js (#493 P4b) or media/<file>"),
 }
 
 # Addresses found by this check on 13 October 2026 that reach nothing and were

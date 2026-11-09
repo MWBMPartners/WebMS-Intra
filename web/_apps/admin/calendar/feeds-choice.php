@@ -605,7 +605,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <label class="form-check-label" for="choice-website">Also show on the public website</label>
             </div>
             <?php endif; ?>
-            <div class="form-text" id="choice-website-help">Adds these dates to the organisation's public website — the countdown widget, the sitemap and the search-engine markup on each date's page — under either rule for copied-in events, because a choice is about this event itself. Two exceptions: a choice cannot put on the website a date the outside calendar lists twice when its calendar's own setting keeps it off (a "No" still takes such a date off), under either rule; and the search-engine markup goes out only where a signed-out visitor sees the date in full (at "Full details"; or on a calendar set to Everyone, unless the outside calendar marks the date private). Only for "Everyone".</div>
+            <div class="form-text" id="choice-website-help">Adds these dates to the organisation's public website — the public door its own website reads from, the sitemap and the search-engine markup on each date's page — under either rule for copied-in events, because a choice is about this event itself. Two exceptions: a choice cannot put on the website a date the outside calendar lists twice when its calendar's own setting keeps it off (a "No" still takes such a date off), under either rule; and the search-engine markup goes out only where a signed-out visitor sees the date in full (at "Full details"; or on a calendar set to Everyone, unless the outside calendar marks the date private). Only for "Everyone".</div>
         </div>
         <div class="col-12">
             <div class="form-check">

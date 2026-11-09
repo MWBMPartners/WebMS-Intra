@@ -1070,7 +1070,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
 </div>
 
-<!-- Section: Setting up the public website (#493 P3 and P4a; D-082, D-085,
+<!-- Section: Setting up the public website (#493 P3, P4a and P4b; D-082, D-085,
      D-093, D-094, D-095, D-097). Every statement here is held true by section
      W of tools/public-website-tick-selftest.php and by
      tools/public-door-selftest.php (the public door). If Admin, Public website
@@ -1089,7 +1089,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <li><strong>Replace the name</strong> if the addresses have gone somewhere they should not: every copy using the old name on the portal&rsquo;s own address stops at once. A public address carries no name, so <strong>replacing the name does not stop copies that use your public address</strong>; to stop those, switch the door off, or change or remove the public address. <strong>Switch the public door off</strong> to stop everything while it is off. Turning it on again gives it a new name, so copies using the old name on the portal&rsquo;s own address stay stopped &mdash; but your public address answers again the moment the door is back on; to stop a public address that has gone somewhere it should not, change or remove it. Each of these is recorded in the activity log.</li>
         <li>If the calendar or the noticeboard is switched off for your organisation, its half of the door answers nothing.</li>
         <li>On a test copy of the portal (alpha, beta or dev), the door answers only people signed in there who may use the test copy. Browsers do not send that sign-in to another website, so trying it from a real website shows nothing; open the addresses in your own browser instead.</li>
-        <li>The pasted-in script and the page you can frame are not part of this version yet.</li>
+        <li><strong>Or paste one line into your website.</strong> Once the door is on, the page also shows a line of script to paste where the list should appear: one for your events, one for your noticeboard posters, and one for a countdown to your next event (it replaces the old countdown widget, whose script is no longer served). It draws only plain text and pictures, in a box of its own, so your website&rsquo;s own styles are not changed, and it shows nothing at all while the door is off. Each event&rsquo;s time is shown on that event&rsquo;s own clock. Its own words, such as &ldquo;No upcoming events.&rdquo;, are in English. Some website builders do not allow scripts; there, whoever builds your website can use the two addresses instead.</li>
+        <li>The page you can show inside a frame on your website is not part of this version yet.</li>
     </ul>
 
     <h3 class="h5 mt-4 mb-3">Who can do it</h3>

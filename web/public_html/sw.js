@@ -309,8 +309,10 @@ self.addEventListener('fetch', function (event) {
     //    any more — every answer there is the door's, and the door draws no
     //    page — so this is the second line, for a worker registered there
     //    before. None of the three is a portal page on the members' address.
+    //    #493 P4b adds the pasted-in script, door.js, on the same terms.
     if (url.pathname.indexOf('/w/') === 0 || url.pathname === '/events.json'
-        || url.pathname === '/posters.json' || url.pathname.indexOf('/media/') === 0) {
+        || url.pathname === '/posters.json' || url.pathname === '/door.js'
+        || url.pathname.indexOf('/media/') === 0) {
         return;
     }
 

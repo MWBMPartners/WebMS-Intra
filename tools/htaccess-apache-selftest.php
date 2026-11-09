@@ -37,7 +37,8 @@
  *   B  every address that must work does, exactly as measured: / and the
  *      clean addresses the router answers (/robots.txt, /sitemap.xml,
  *      /manifest.json, /openapi.json, /assets/, /expenses/submit,
- *      /w/…/events.json) reach index.php; /api-docs/ and /error.php run their
+ *      /w/…/events.json, /w/…/door.js, and — since #493 P4b deleted the
+ *      folder — /widget and /widget/countdown.js) reach index.php; /api-docs/ and /error.php run their
  *      own files; /offline/ runs the static offline page; /index.php, /assets,
  *      /offline and /api-docs redirect where the server sends them (see the
  *      list); and the static files (/assets/js/portal.js, /sw.js,
@@ -74,7 +75,7 @@ declare(strict_types=1);
 
 const HAS_IMAGE = 'php:8.4-apache';
 /** Every check, counted: a probe list that shrinks must fail, not pass quietly. */
-const EXPECTED_CHECKS = 53;
+const EXPECTED_CHECKS = 56; // 53, then three B probes for #493 P4b (door.js, /widget, /widget/countdown.js)
 
 $repo   = dirname(__DIR__);
 $webDir = $repo . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . 'public_html';
@@ -241,6 +242,12 @@ $mustWork = [
     ['/openapi.json', 'index.php'], ['/assets', 'redirect:/assets/'], ['/assets/', 'index.php'],
     ['/offline', 'redirect:/offline/'], ['/offline/', 'offline/index.php'], ['/expenses/submit', 'index.php'],
     ['/w/0123456789abcdef01234567/events.json', 'index.php'],
+    // #493 P4b: the door's script is never a file on disk (it is kept outside
+    // the web root, so only the door's gate serves it), and the old widget
+    // folder is DELETED (D-084): /widget and its old script now reach the
+    // front controller, where the router has no address for them (the real
+    // portal's 404; tools/public-door-selftest.php section W drives that).
+    ['/w/0123456789abcdef01234567/door.js', 'index.php'], ['/widget', 'index.php'], ['/widget/countdown.js', 'index.php'],
     ['/assets/js/portal.js', 'static:assets/js/portal.js'], ['/sw.js', 'static:sw.js'], ['/sitemap.xsd', 'static:sitemap.xsd'],
 ];
 

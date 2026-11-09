@@ -91,7 +91,8 @@
  * API" ticked (the calendar's box is tested live; the rest arrive through
  * the stored `importApiOptOut`). The "Also show on the public website" box
  * no longer matters to keys: it controls only the organisation's public
- * website ("website" mode) — the countdown widget, the sitemap and, since
+ * website ("website" mode) — the public door (#493 P4: the feeds and the
+ * script an organisation's own website reads), the sitemap and, since
  * D-089, the search-engine markup on the event's page. The organisation's OWN events are a different
  * matter and are unchanged: a key receives every published one, members-only
  * ones included, as before #514 (tracked in #127 and #511). Until
@@ -163,7 +164,7 @@ final class EventVisibility
     public const MODE_SESSION = 'session';
     /** A page that never uses a session (`/e/{slug}`, the "all upcoming" download). */
     public const MODE_ANONYMOUS = 'anonymous';
-    /** The organisation's public website: the countdown, the sitemap, and an event page's search-engine markup (D-089). */
+    /** The organisation's public website: the public door (#493 P4), the sitemap, and an event page's search-engine markup (D-089). */
     public const MODE_WEBSITE = 'website';
 
     /**
@@ -720,7 +721,7 @@ final class EventVisibility
         $fresh = $e . '.importRecheckAt IS NULL OR ' . $e . '.importRecheckAt > UTC_TIMESTAMP()';
 
         if ($mode === self::MODE_WEBSITE) {
-            // 🌐 The public website (countdown widget, sitemap, an event page's markup): only events
+            // 🌐 The public website (the public door, the sitemap, an event page's markup): only events
             //    marked public AND ticked for the website (owner decision D4).
             //    The "Don't show via API" box plays no part here: it is about
             //    API keys only, so an event can be on the website and not in

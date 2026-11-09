@@ -122,7 +122,10 @@ const ALWAYS_DISALLOWED = [
     '/leadership/', '/offboarding/', '/small-groups/', '/rota/',
     '/newsletter/track/', '/unsubscribe',
     '/photos/serve', '/noticeboard/media', '/recordings/podcast-media',
-    '/widget/', '/worship/display', '/assets/kiosk',
+    // '/w/' is the public door (#493): data and a script for other websites,
+    // never a page to list. It replaced '/widget/', the old countdown widget's
+    // folder, which #493 P4b deleted (D-084).
+    '/w/', '/worship/display', '/assets/kiosk',
 ];
 
 echo "# =============================================================================\n";

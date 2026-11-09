@@ -481,7 +481,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    below builds that same test, from the same constant, inside its SQL.
 // 🌐 D-089 (the owner, 8 November 2026; #850): the search-engine markup goes
 //    out only for an event that is ON THE PUBLIC WEBSITE — and that is asked of
-//    `EventVisibility::where()` in "website" mode, the ONE rule the countdown
+//    `EventVisibility::where()` in "website" mode, the ONE rule the public door
 //    and the sitemap use, for this one event. So an own event needs "Public",
 //    the "Show on the public website" tick and today inside its website dates
 //    (D-057, D-078); a copied-in event needs what the organisation's copied-in
@@ -492,7 +492,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    description and place; a search engine views signed out, so for it that
 //    is the signed-out answer. (redact() near the top has already emptied
 //    those columns for anybody without full detail — this is a second guard.)
-$websiteToday = date('Y-m-d'); // the organisation's calendar: start-up sets PHP's zone to it, as the countdown relies on
+$websiteToday = date('Y-m-d'); // the organisation's calendar: start-up sets PHP's zone to it (the sitemap relies on the same)
 $websiteRule = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $websiteToday, PublicWebsite::copiedRuleFor($mysqli, $siteId));
 $onWebsite   = $mysqli->prepare('SELECT 1 FROM tblEvents e WHERE e.eventID = ?' . $websiteRule['sql'] . ' LIMIT 1');
 $onWebsiteId = (int) $event['eventID'];

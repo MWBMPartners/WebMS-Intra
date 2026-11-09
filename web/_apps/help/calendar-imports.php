@@ -432,13 +432,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         An API key now receives an event from an outside calendar exactly when a signed-out visitor to your portal
         could see it, and in the same detail: every event from a calendar set to Public, whether or not "Also show on
         the public website" is ticked. That website box now controls only the
-        organisation's public website — the countdown widget, the sitemap and the search-engine markup on the event's own
+        organisation's public website — the public door its own website reads from, the sitemap and the search-engine markup on the event's own
         page — and a calendar's or a rule's box does so only while the organisation's rule for copied-in events is "one box per
         subscribed calendar". To stop a calendar's events being sent through API keys, tick "Don't show via API" on that calendar (you can also
         tick it on a single date, a repeating event or a rule — one tick anywhere is enough).
     </p>
     <ul>
-        <li><strong>Also show on the public website</strong> adds the events to the countdown widget, the sitemap and — where a signed-out visitor sees the event in full, which is at "Full details", or on a calendar set to Everyone unless the outside calendar marks the event private — the search-engine markup on each event's page, and is only for "Everyone".
+        <li><strong>Also show on the public website</strong> adds the events to the public door the organisation's own website reads from, the sitemap and — where a signed-out visitor sees the event in full, which is at "Full details", or on a calendar set to Everyone unless the outside calendar marks the event private — the search-engine markup on each event's page, and is only for "Everyone".
             On a calendar or a rule it works only while your organisation's rule is "one box per subscribed calendar"; on a
             choice about a single date or a repeating event it works under either rule, except that it cannot put on the website a date
             the outside calendar lists twice when the calendar's own setting keeps it off (a "No" still takes such a date

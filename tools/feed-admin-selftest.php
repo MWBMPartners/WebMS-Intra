@@ -5355,7 +5355,9 @@ function pw_run(): void
             // #493 P1 (round 2): the box also governs the event page's search-engine
             // markup, and a calendar's or rule's box counts only under the looser
             // rule. The help page and this pin changed together.
-            . 'organisation\'s public website — the countdown widget, the sitemap and the search-engine markup on the event\'s own page — and a calendar\'s '
+            // #493 P4b: the countdown widget was deleted (D-084); the public
+            // door took its place in the help page and in this pin together.
+            . 'organisation\'s public website — the public door its own website reads from, the sitemap and the search-engine markup on the event\'s own page — and a calendar\'s '
             . 'or a rule\'s box does so only while the organisation\'s rule for copied-in events is "one box per subscribed calendar". '
             . 'To stop a calendar\'s events being sent through API keys, tick "Don\'t show via API" on that calendar (you can '
             . 'also tick it on a single date, a repeating event or a rule — one tick anywhere is enough).';
@@ -8238,7 +8240,7 @@ function pa_full(int $feedId, ?string $today = null): array
     }
     // 🌐 #493 P1: "website" mode is handed the copied-in rule the organisation
     //    is really held to (D-080, D-081), read with the same reader the
-    //    countdown and the sitemap use, so the oracle follows a rule change.
+    //    public door and the sitemap use, so the oracle follows a rule change.
     $ruleSite = (int) (pa_one('SELECT siteID FROM tblExternalFeeds WHERE feedID = ?', 'i', [$feedId])['siteID'] ?? 0);
     $rule     = PublicWebsite::copiedRuleFor($GLOBALS['mysqli'], $ruleSite);
     foreach ($views as $name => [$mode, $viewer]) {

@@ -111,7 +111,7 @@ $idRaw    = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT);
 $feedId   = ($idRaw === false || $idRaw === null || $idRaw <= 0) ? 0 : (int) $idRaw;
 $calendar = ($feedId > 0) ? FeedAdmin::calendar($mysqli, $feedId, $siteId) : null;
 // 🌐 The rule this organisation is held to for copied-in events (#493 P1;
-//    D-080, D-081), read once with the reader the countdown and the sitemap
+//    D-080, D-081), read once with the reader the public door and the sitemap
 //    use. Every "on the public website" word on this page asks it through
 //    EventVisibility::copiedTickCounts(), so no badge claims what the website
 //    does not show.

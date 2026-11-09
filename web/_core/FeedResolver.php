@@ -632,7 +632,7 @@ final class FeedResolver
                 //    is held to for copied-in events (D-080, D-081), read ONCE
                 //    per resolve by the one reader, so isWider() and the stored
                 //    answer (candidateAnswer()) judge a website "yes" as the
-                //    countdown does.
+                //    public door does.
                 'copiedRule'    => PublicWebsite::copiedRuleFor($db, $siteId),
             ],
             'categoryMap' => self::categoryMap($db, $feedId),
@@ -1758,7 +1758,7 @@ final class FeedResolver
             // to count always, so ticking a box the pages call inert under "one
             // tick per event" made a choice's yes "not wider", applied it at
             // once, and released every date waiting for approval onto the
-            // countdown, the sitemap and the search-engine markup.
+            // public door, the sitemap and the search-engine markup.
             $candCounts = (int) $candidate['website'] === 1
                 && EventVisibility::copiedTickCounts((string) ($candidate['source'] ?? ''), $copiedRule) === true;
             $baseCounts = (int) $base['website'] === 1

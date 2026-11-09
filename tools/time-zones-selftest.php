@@ -2859,14 +2859,49 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
         'badge shown: ' . json_encode(str_contains($badgeAfter($pastView['body'], $nyName), '>Today</span>'))
     );
 
-    // The public countdown feed: NO test fetched it before (#805).
-    $feed = req('', 'GET', '/widget/countdown.json');
-    $next = json_decode($feed['body'], true);
-    $want = (new DateTimeImmutable($nySoon, $nyZone))->format('c');
+    // The public feed of events (#805, #804). Until #493 P4b this read the
+    // countdown widget's feed, /widget/countdown.json, which P4b deleted with
+    // the widget (D-084). The public door's events feed replaced it: it lists
+    // every ticked event that has not FINISHED on its own clock, each with its
+    // start as an instant on its own clock, and the door's script picks the
+    // next one by that instant (its "next" mode, driven in a real browser by
+    // tools/public-door-script-selftest.mjs). So what is pinned here is that
+    // the feed tells the truth about BOTH instants: New York's still to come,
+    // Auckland's already past — the fault #804 fixed was the old feed calling
+    // the Auckland one "next". The door is opened for this one request (a name
+    // row and the portal's own address, which the /w/ form needs) and put
+    // back exactly as it was.
+    $xDoorName = bin2hex(random_bytes(12));
+    $xUrlWas   = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'site.url' AND siteID IS NULL");
+    $xDoorWas  = one('SELECT publicName, changedAtUtc FROM tblPublicDoorNames WHERE siteID = 1');
+    q('DELETE FROM tblPublicDoorNames WHERE siteID = 1');
+    q('INSERT INTO tblPublicDoorNames (siteID, publicName, changedAtUtc) VALUES (1, ?, UTC_TIMESTAMP())', 's', [$xDoorName]);
+    q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'site.url', ?, '', 0) "
+        . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)', 's', ['http://127.0.0.1:' . $GLOBALS['port']]);
+    try {
+        $feed = req('', 'GET', '/w/' . $xDoorName . '/events.json?limit=50');
+    } finally {
+        q('DELETE FROM tblPublicDoorNames WHERE siteID = 1');
+        if ($xDoorWas !== null) {
+            q('INSERT INTO tblPublicDoorNames (siteID, publicName, changedAtUtc) VALUES (1, ?, ?)', 'ss', [$xDoorWas['publicName'], $xDoorWas['changedAtUtc']]);
+        }
+        if ($xUrlWas === null) {
+            q("DELETE FROM tblSettings WHERE settingKey = 'site.url' AND siteID IS NULL");
+        } else {
+            q("UPDATE tblSettings SET settingValue = ? WHERE settingKey = 'site.url' AND siteID IS NULL", 's', [(string) $xUrlWas['settingValue']]);
+        }
+    }
+    $listed = [];
+    foreach ((array) (json_decode($feed['body'], true)['events'] ?? []) as $one) {
+        $listed[(string) ($one['id'] ?? '')] = (string) ($one['startsAt'] ?? '');
+    }
+    $want    = (new DateTimeImmutable($nySoon, $nyZone))->format('c');
+    $aklWant = (new DateTimeImmutable($aklBegun, $aklZone))->format('c');
     ok(
-        'X14 the countdown feed publishes the New York event as next, at New York\'s instant (' . $want . '), and NOT the Auckland one that has begun (#804, #805)',
-        $feed['status'] === 200 && is_array($next) === true && (int) ($next['nextEvent']['id'] ?? 0) === 960906
-            && ($next['nextEvent']['startsAt'] ?? null) === $want,
+        'X14 the public door\'s events feed gives the New York event at New York\'s instant (' . $want . '), still to come, and the Auckland one that has begun at Auckland\'s instant (' . $aklWant . '), already past — so the next one by instant is New York\'s (#804, #805)',
+        $feed['status'] === 200 && ($listed['selftest-zones-list-960906'] ?? null) === $want
+            && ($listed['selftest-zones-list-960907'] ?? null) === $aklWant
+            && strtotime($want) > time() && strtotime($aklWant) < time(),
         said($feed) . '; ' . substr($feed['body'], 0, 300)
     );
 

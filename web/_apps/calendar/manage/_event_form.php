@@ -474,7 +474,7 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
     // 🌐 THE PUBLIC WEBSITE (#493 package P1; D-057, D-077, D-078). Separate
     //    from "Public (visible on calendar)" above, on purpose: that box is
     //    about the portal's own calendar; this one is about the organisation's
-    //    public website (the countdown widget, the sitemap and the search-engine markup on the event's page, today), which
+    //    public website (the public door its own website reads from, the sitemap and the search-engine markup on the event's page), which
     //    anybody on the internet can read. An event needs BOTH to get there.
     //
     //    WHO MAY CHANGE IT is `PublicWebsite::mayPublish()` — the ONE answer,
@@ -525,12 +525,13 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
                 //    "Public" box ALONE. So it names what the switch governs, exactly as
                 //    api-spec.json's `showOnWebsite` does. D-089 (#850) added the
                 //    search-engine markup on the event's page to that list; the page
-                //    itself still follows "Public". When #493's public door
-                //    (package P4) ships, it joins this list — change both together.
+                //    itself still follows "Public". #493's public door joined this
+                //    list in package P4b, here, in help/calendar.php and in
+                //    api-spec.json's showOnWebsite — change all three together.
                 ?>
                 <p class="small text-secondary mt-2 mb-0" id="showOnWebsite-help-<?php echo $websiteIdSuffix; ?>">
-                    This decides whether the event goes on the organisation's public website: the countdown widget,
-                    the sitemap, and what the event's page tells search engines. Nothing goes there until this is ticked, and it shows there only while it is
+                    This decides whether the event goes on the organisation's public website: the public door its own
+                    website reads events from (once switched on, on Admin, Public website), the sitemap, and what the event's page tells search engines. Nothing goes there until this is ticked, and it shows there only while it is
                     ticked, the event is also marked "Public" above, and today is between the two dates (both days
                     included; an empty date means no limit). The dates follow this organisation's calendar. Taking it
                     off can take up to an hour to reach every copy, and a copy somebody has already taken cannot be

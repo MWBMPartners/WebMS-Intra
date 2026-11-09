@@ -279,6 +279,7 @@ api-spec-check|python3 -I tools/api-spec-check-selftest.py
 scheduled-jobs-gate|python3 -I tools/scheduled-jobs-gate-selftest.py
 document-write-check|python3 -I tools/document-write-check-selftest.py
 csrf-carriers|node tools/csrf-carriers-selftest.mjs
+public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 

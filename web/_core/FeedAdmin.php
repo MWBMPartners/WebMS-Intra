@@ -3751,7 +3751,7 @@ final class FeedAdmin
         //    the website branch's `? = 'calendar' OR importSource IN (...)`,
         //    asked through EventVisibility::copiedTickCounts(), which is built
         //    from the same constant. Read once for the organisation, with the very reader
-        //    the countdown and the sitemap use, so the two cannot disagree.
+        //    the public door and the sitemap use, so the two cannot disagree.
         //    Without it, under "one tick per event", ticking a calendar's
         //    website box would be counted as changing who can see its events
         //    when the website shows none of them — an untrue "N events changed

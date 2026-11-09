@@ -256,14 +256,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <!-- 🌐 Showing an event on the organisation's public website (#493 package
      P1; D-057, D-077, D-078, D-080, D-081). Change with the form's own words
      in calendar/manage/_event_form.php and api-spec.json's showOnWebsite: all
-     three say what the switch governs, and when #493's public door ships it
-     joins the list in all three. -->
+     three say what the switch governs; #493's public door joined the list in
+     all three in package P4b, replacing the old countdown widget (D-084). -->
 <section id="public-website" class="mb-5">
     <?php // D-079 and D-092 have their own paragraph below, ahead of "Three things to know", which names each box in full. ?>
     <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2"></i>For admins &mdash; the public website</h2>
     <p>
-        Some of what the portal shows is open to anybody on the internet, without signing in: the event
-        countdown that other websites can show, the list of pages the portal gives search engines (its
+        Some of what the portal shows is open to anybody on the internet, without signing in: the public
+        door your own website reads events from (once it is switched on, on Admin, Public website), the list of pages the portal gives search engines (its
         sitemap), and what an event's page tells search engines about the event. An event goes there only when somebody ticks <strong>Show on the public website</strong>
         on the event's form, and then only while the event is also marked <strong>Public</strong> and today
         is between the optional <strong>From</strong> and <strong>Until</strong> dates. Both of those days

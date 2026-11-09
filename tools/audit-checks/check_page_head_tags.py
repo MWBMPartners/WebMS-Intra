@@ -145,9 +145,8 @@ EXEMPT = {
     #    administrator how to reopen the portal. It is also noindex and seen
     #    only by an administrator mid-recovery, so a preview card is pointless.
     "admin/maintenance/backup.php": "a recovery screen that must not touch the database",
-    # 🧩 Embedded in somebody ELSE'S website, so its <head> is never used as a
-    #    page head. Its route was removed on purpose in migration 189 (#478).
-    "calendar/widget.php": "embedded in other sites; its route was removed in migration 189",
+    # (`calendar/widget.php`, the old embeddable widget, was listed here until
+    #  #493 P4b deleted it with the web root's `widget` folder; D-084.)
     # 📵 The page the service worker shows when there is no network. It loads
     #    NONE of the portal on purpose — it has to draw with no database and no
     #    server — and the service worker keeps ONE copy of it for everybody,

@@ -14,7 +14,13 @@
  *   posters.json      its posters on the public website, as JSON
  *                     (`web/_core/data/public-door-posters.schema.json`);
  *   media/{file}      a poster's uploaded picture or video, ONLY while a
- *                     poster on the public website uses it.
+ *                     poster on the public website uses it;
+ *   door.js           (#493 P4b) the script an organisation pastes into its
+ *                     own website, which reads the feeds beside it and draws
+ *                     them as TEXT inside a shadow root
+ *                     (`web/_core/data/public-door.js`, whose header says how).
+ *                     The countdown of the old `widget/countdown.js` (#319)
+ *                     lives on as its "next event" mode (D-084).
  *
  * They are reached at /w/{name}/… on the portal's own address, where {name}
  * is the organisation's random public name (`tblPublicDoorNames`), or at /…
@@ -22,14 +28,15 @@
  * organisation a request is for is decided by `Site::preDetect()` — the ONE
  * place that decides it — before any session is looked at; this class reads
  * ONLY `Site::doorSiteId()`, never `Site::id()`, so a refused request can
- * never fall back to organisation 1. Packages P4b (the script you paste in)
- * and P4c (the page you can frame) add to this class; until then nothing
- * else answers here.
+ * never fall back to organisation 1. Package P4c (the page you can frame)
+ * adds to this class; until then nothing else answers here.
  *
  * THE QUESTIONS, IN THIS ORDER (answer())
  * -----------------------------------------------------------------------------
  *   1. Is the request well formed? GET or HEAD only, one of the addresses
- *      above, and `limit` (feeds only) a whole number from 1 to 50.
+ *      above, and `limit` (feeds only) a whole number from 1 to 50. The
+ *      script takes no parameters, and ignores a query string (websites add
+ *      `?v=2` to make browsers fetch a fresh copy).
  *   2. Is the portal closed for maintenance or an upgrade
  *      (`Maintenance::isActive()`)? Then 503 with Retry-After, the same for
  *      every organisation. The one answer that is not a refusal.
@@ -41,7 +48,8 @@
  *      cache for a minute could point every reader at somebody else's server.
  *   4. Is the app switched on FOR THAT ORGANISATION
  *      (`AppRegistry::isEnabledForSite()`): events need Calendar and Events,
- *      posters and their media need the Noticeboard.
+ *      posters and their media need the Noticeboard, and the script needs at
+ *      least one of the two (with both off there is nothing it could draw).
  *   5. D-087, on a test copy only (`Gatekeeper::shouldEnforce()`): unless the
  *      organisation's door is open to anybody there
  *      (`PublicWebsiteSetup::testCopyDoorOpenToAnybody()`), only somebody the
@@ -109,6 +117,16 @@ final class PublicDoor
 
     /** A poster's media, followed by its stored file name. */
     public const MEDIA_PREFIX = 'media/';
+
+    /** The script a website pastes in (#493 P4b). */
+    public const SURFACE_SCRIPT = 'door.js';
+
+    /**
+     * Where the script's source is kept: outside the web root, so the ONLY way
+     * to reach it is through this gate (a copy under public_html/ would answer
+     * on every address, door switched off or not).
+     */
+    public const SCRIPT_FILE = 'data' . DIRECTORY_SEPARATOR . 'public-door.js';
 
     /** How many items a feed gives when `limit` is not sent. */
     public const DEFAULT_LIMIT = 20;
@@ -193,6 +211,8 @@ final class PublicDoor
             if ($limit === null) {
                 self::notFound();
             }
+        } elseif ($surface === self::SURFACE_SCRIPT) {
+            $limit = 0;
         } elseif (str_starts_with($surface, self::MEDIA_PREFIX) === true) {
             $media = substr($surface, strlen(self::MEDIA_PREFIX));
             if (self::isMediaName($media) === false) {
@@ -220,10 +240,19 @@ final class PublicDoor
             self::notFound();
         }
 
-        // 4️⃣ The app, switched on for THIS organisation.
-        $app = $surface === self::SURFACE_EVENTS ? 'calendar' : 'noticeboard';
-        if (AppRegistry::isEnabledForSite($app, $siteId) === false) {
-            self::notFound();
+        // 4️⃣ The app, switched on for THIS organisation. The script needs
+        //    either: it draws events or posters, and with both off it could
+        //    draw neither, so it is refused like anything else.
+        if ($surface === self::SURFACE_SCRIPT) {
+            if (AppRegistry::isEnabledForSite('calendar', $siteId) === false
+                && AppRegistry::isEnabledForSite('noticeboard', $siteId) === false) {
+                self::notFound();
+            }
+        } else {
+            $app = $surface === self::SURFACE_EVENTS ? 'calendar' : 'noticeboard';
+            if (AppRegistry::isEnabledForSite($app, $siteId) === false) {
+                self::notFound();
+            }
         }
 
         // 5️⃣ D-087: a test copy's door is for signed-in testers only unless
@@ -241,6 +270,17 @@ final class PublicDoor
         }
 
         // 6️⃣ Read, then 7️⃣ answer.
+        if ($surface === self::SURFACE_SCRIPT) {
+            $script = self::script();
+            // `text/javascript` with nosniff: a browser runs it as a script
+            // only because of this type, and never sniffs it as anything
+            // else. The same headers as a feed otherwise (caching for a
+            // minute, so switching the door off reaches websites within one).
+            self::sendDataHeaders('text/javascript; charset=utf-8', $testCopy, $testersOnly);
+            header('Content-Length: ' . (string) strlen($script));
+            echo $script;
+            exit();
+        }
         if ($media !== '') {
             $file = self::media($db, $siteId, $media);
             if ($file === null) {
@@ -531,6 +571,22 @@ final class PublicDoor
     }
 
     /**
+     * The script's source, exactly as kept on disk (`SCRIPT_FILE`). The same
+     * bytes for every organisation: it finds its feed from its own address,
+     * so nothing about an organisation is written into it. A file that cannot
+     * be read is a fault, and so the door's one 404.
+     */
+    public static function script(): string
+    {
+        $text = @file_get_contents(PORTAL_CORE . DIRECTORY_SEPARATOR . self::SCRIPT_FILE);
+        if ($text === false || $text === '') {
+            throw new \RuntimeException('the public door\'s script could not be read');
+        }
+
+        return $text;
+    }
+
+    /**
      * The organisation's name and zone, for the feeds' heading. Read by the
      * readers only.
      *
@@ -609,7 +665,7 @@ final class PublicDoor
      * '' when the door is off, or no address can be built without trusting a
      * host the visitor chose — and then the door answers nothing on /w/.
      *
-     * @param string $what 'events.json', 'posters.json' or 'media/{file}'.
+     * @param string $what 'events.json', 'posters.json', 'door.js' or 'media/{file}'.
      */
     public static function addressFor(\mysqli $db, int $siteId, string $what): string
     {

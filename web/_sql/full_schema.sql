@@ -10,10 +10,11 @@
 --     REMOVED, each explained where it stands. This line used to read "No
 --     DROP, TRUNCATE, or DELETE — existing data is never removed", which was
 --     untrue. Run over an existing database, this file:
---       - removes seeded rows that should not be there (four DELETEs: surplus
+--       - removes seeded rows that should not be there (seven DELETEs: surplus
 --         copies of portal-wide settings, four settings for API actions that
---         have no handler, the old `portal.version` setting, and the `widget`
---         address);
+--         have no handler, the old `portal.version` setting, the `widget`
+--         address, and — since #493 P4b, migration 264 — the old countdown
+--         widget's two addresses and the `widget` address again, in three DELETEs);
 --       - marks the built-in roles as built-in and fills in a description
 --         where one is empty (one UPDATE);
 --       - empties an attendance session's pointer to an event that no longer
@@ -5733,8 +5734,10 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 -- =============================================================================
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
-    ('widget/countdown.json',              'widget/countdown-json.php',            0),
-    ('widget/countdown',                   'widget/countdown-preview.php',         0),
+    -- The countdown widget's two addresses (widget/countdown.json and
+    -- widget/countdown) are deliberately ABSENT: #493 P4b removed them with
+    -- the widget itself (migration 264, D-084). The door's own script,
+    -- /w/{name}/door.js, is the countdown now.
     -- api/push/subscribe + api/push/unsubscribe removed by migration 158
     -- (#373 fold-in): dead tblRoutes config, ApiRouter never consults
     -- tblRoutes for api/* paths; the handlers remain parked pending #322.
@@ -11459,6 +11462,28 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 -- adds them to an existing database with information_schema guards.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('263_public_door.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 264_old_widget_removed.sql (#493, P4b; D-084) ───────────────────────
+-- The old countdown widget's two public addresses are gone (the door's script,
+-- /w/{name}/door.js, is the countdown now), and the `widget` address 189
+-- removed is removed again for a database restored from before 189. Each is
+-- matched on BOTH the address and its target. The seed block for migration
+-- 111 above no longer adds the two countdown rows; this DELETE is for an older
+-- database that already holds them. See the migration for the full reasoning.
+DELETE FROM `tblRoutes`
+WHERE `routeKey` = 'widget/countdown.json'
+  AND `targetFile` = 'widget/countdown-json.php';
+
+DELETE FROM `tblRoutes`
+WHERE `routeKey` = 'widget/countdown'
+  AND `targetFile` = 'widget/countdown-preview.php';
+
+DELETE FROM `tblRoutes`
+WHERE `routeKey` = 'widget'
+  AND `targetFile` = 'calendar/widget.php';
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('264_old_widget_removed.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

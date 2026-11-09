@@ -311,7 +311,8 @@ def scan(source: str, is_script_file: bool = False, pure_template: bool = False)
         # and all. Those lines start with * or //, and are blanked HERE, before
         # tags are looked for. (The first draft blanked them only afterwards, for
         # the handler rule, and reported the word "<script>" in the heading of
-        # web/public_html/widget/countdown.js as a script with no nonce.)
+        # web/public_html/widget/countdown.js, since deleted by #493 P4b, as a
+        # script with no nonce.)
         no_comments = blank_comment_lines(no_comments, 0, len(no_comments))
         work = list(no_comments)
     i = 0

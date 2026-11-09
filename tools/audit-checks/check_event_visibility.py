@@ -268,17 +268,10 @@ FILE_ALLOWLIST: dict[str, str] = {
     # be an imported event's own content.
     "_core/AnonymousCheckins.php": "every statement joins e.siteID = ? and returns counts, or one event name for a title (#525); shows no imported-event detail",
     "_core/AttendanceAccess.php": "a coordinator test joined on e.siteID (#529); decides who may see attendance totals, never shows an event",
-    # 💀 Unreachable dead code (0.4 change S2, step 8). Its own address
-    # was removed by migration 189, and its header explains why: a REAL
-    # folder `public_html/widget/` answers first for the same address,
-    # so the web server never lets a request reach this file at all
-    # (the web-root shadowing trap — see CLAUDE.md). It holds two real,
-    # unrestricted event queries with no marker. #514 deliberately does
-    # NOT touch this file, so it must stay on this list — but it must
-    # NEVER be "tidied up" to remove the address check that keeps it
-    # unreachable, because that would make its two unrestricted queries
-    # live again with no rule and no refusal.
-    "_apps/calendar/widget.php": "UNREACHABLE — shadowed by the real public_html/widget/ folder since migration 189; its own header explains why. Two unrestricted event queries. Must stay unreachable. It has NO access check of its own: what keeps it unreachable is that no address points to it (migration 189 removed the address) plus the real public_html/widget/ folder. Do not re-add an address for it as a 'tidy-up'.",
+    # (`_apps/calendar/widget.php` was listed here as unreachable dead code
+    #  with two unrestricted event queries, kept unreachable only by having no
+    #  address and by the web root's `widget` folder. #493 P4b deleted the
+    #  folder AND the page together (D-084), so neither guard is needed.)
 }
 
 # 📍 One specific line inside a file that is otherwise fully checked.

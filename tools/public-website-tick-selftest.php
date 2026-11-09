@@ -10,12 +10,14 @@
  *
  * It drives the REAL pages — the Manage Events form and its handler, the events
  * API (an API key AND a signed-in session), the public submission form, the
- * countdown feed (`/widget/countdown.json`), `/sitemap.xml`, and the copied-in
+ * public door's events feed (`/w/{name}/events.json`, #493 P4; until P4b the
+ * countdown feed `/widget/countdown.json`, deleted with the widget, D-084),
+ * `/sitemap.xml`, and the copied-in
  * rule's card on /admin/calendar/feeds with its handler — and reads every
  * result back out of the database rather than believing a message.
  *
  * WHAT IT COVERS
- *   C  THE LIVE EXPOSURE THIS PACKAGE CLOSES: the countdown feed shows a
+ *   C  THE LIVE EXPOSURE THIS PACKAGE CLOSES: the door's events feed shows a
  *      published, public event ONLY while it is ticked and today is inside its
  *      dates (both ends inclusive), never a members-only, draft, deleted or
  *      other organisation's one.
@@ -45,7 +47,7 @@
  *   R  the copied-in rule: who gets which form (the stricter rule too, so the
  *      page's own gate is what refuses), a looser organisation choice refused,
  *      the installation's choice capping the organisation's at READ time too,
- *      an unreadable rule counting as the stricter, and the countdown AND the
+ *      an unreadable rule counting as the stricter, and the door feed AND the
  *      sitemap following the rule for a copied-in event.
  *   V  what the calendar's page SAYS: every "on the public website" badge,
  *      label and approval sentence is true under the rule in force.
@@ -81,7 +83,7 @@
  *     the switch at once is not exercised (only CHANGED values are written,
  *     so the last change wins; a non-publisher's unchanged value is never
  *     written at all).
- *   - The countdown is cached for a minute by browsers and anything in
+ *   - The door's feed is cached for a minute by browsers and anything in
  *     between; curl here caches nothing, so that minute is not tested.
  *   - The series-repattern half (a date the pattern ADDS is off the website)
  *     is check S18w of tools/event-repeat-pages-selftest.php, not here.
@@ -129,7 +131,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 240;
+const PWT_EXPECTED_CHECKS = 241; // 240, then Z1 (#493 P4b: every read of the door's feed answered)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -649,11 +651,73 @@ $db->query("DELETE FROM `tblExternalFeeds` WHERE `name` = 'PWT outside calendar'
 $startServer();
 $waitForServer();
 
-/** The countdown's "next event" number, or 0 for none. Asked as nobody. */
-$countdownNext = static function () use ($http): int {
-    $r = $http('GET', '/widget/countdown.json', [], [], false);
+/**
+ * The FIRST event on organisation 1's public door feed (`/w/{name}/events.json`,
+ * #493 P4) — its event number, or 0 when the feed lists nothing. Asked as
+ * nobody, exactly as another website asks.
+ *
+ * #493 P4b: until then this read the old countdown widget's feed,
+ * `/widget/countdown.json`, which P4b deleted with the widget (D-084, migration
+ * 264); the door's events feed asks the same rule (`EventVisibility::where()`
+ * in "website" mode with `PublicWebsite::copiedRuleFor()`, on the
+ * organisation's own date), so every check below keeps its meaning. The
+ * variable keeps its old name so the checks read as they did.
+ *
+ * THE DOOR IS OPENED FOR THE ONE REQUEST AND CLOSED AGAIN: a name row for
+ * organisation 1 and the portal's own address (the /w/ form answers nothing
+ * while a visitor could choose the host, PortalAddress), both put back
+ * exactly as they were — so section W, which tests the public address and
+ * `site.url` itself, never meets a door this helper left open.
+ *
+ * A FEED THAT DID NOT ANSWER is NOT "no event": every "not shown" check below
+ * would pass on a broken door. So each read that is not a 200 JSON answer is
+ * COUNTED, and check Z1 at the end requires the count to be nothing.
+ */
+$doorReadsFailed = 0;
+$doorReads       = 0;
+$countdownNext = static function () use ($http, $db, $port, &$doorReadsFailed, &$doorReads): int {
+    $wasUrl = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL")->fetch_assoc();
+    $wasDoor = $db->query('SELECT `publicName`, `changedAtUtc` FROM `tblPublicDoorNames` WHERE `siteID` = 1')->fetch_assoc();
+    $name = bin2hex(random_bytes(12));
+    $db->query('DELETE FROM `tblPublicDoorNames` WHERE `siteID` = 1');
+    $db->query("INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES (1, '{$name}', UTC_TIMESTAMP())");
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'site.url', 'http://127.0.0.1:{$port}', '', 0) "
+        . 'ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)');
+    try {
+        $r = $http('GET', '/w/' . $name . '/events.json?limit=1', [], [], false);
+    } finally {
+        $db->query('DELETE FROM `tblPublicDoorNames` WHERE `siteID` = 1');
+        if ($wasDoor !== null) {
+            $put = $db->prepare('INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES (1, ?, ?)');
+            $put->bind_param('ss', $wasDoor['publicName'], $wasDoor['changedAtUtc']);
+            $put->execute();
+            $put->close();
+        }
+        if ($wasUrl === null) {
+            $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
+        } else {
+            $put = $db->prepare("UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
+            $put->bind_param('s', $wasUrl['settingValue']);
+            $put->execute();
+            $put->close();
+        }
+    }
+    $doorReads++;
     $j = json_decode($r['body'], true);
-    return (int) ($j['nextEvent']['id'] ?? 0);
+    if ($r['status'] !== 200 || is_array($j) === false || ($j['format'] ?? null) !== 'webms-public-events' || is_array($j['events'] ?? null) === false) {
+        $doorReadsFailed++;
+        return 0;
+    }
+    $slug = (string) ($j['events'][0]['id'] ?? '');
+    if ($slug === '') {
+        return 0;
+    }
+    $find = $db->prepare('SELECT `eventID` FROM `tblEvents` WHERE `siteID` = 1 AND `eventSlug` = ? LIMIT 1');
+    $find->bind_param('s', $slug);
+    $find->execute();
+    $row = $find->get_result()->fetch_assoc();
+    $find->close();
+    return (int) ($row['eventID'] ?? 0);
 };
 $sitemapHas = static function (string $slug) use ($http): bool {
     $r = $http('GET', '/sitemap.xml', [], [], false);
@@ -661,7 +725,7 @@ $sitemapHas = static function (string $slug) use ($http): bool {
 };
 
 // =============================================================================
-echo "C. The countdown feed — the live exposure this package closes\n";
+echo "C. The public door's events feed (the countdown's feed until #493 P4b) — the live exposure this package closes\n";
 // =============================================================================
 // Tomorrow at 10:00 on organisation 1's clock is the soonest thing this test
 // makes, and nothing else in the database is ticked, so whatever the feed
@@ -679,9 +743,9 @@ $scnUntilYesterday = static function () use ($setEv, $cEvent, $countdownNext, $y
     $setEv($cEvent, ['showOnWebsite' => '1', 'websiteFrom' => null, 'websiteUntil' => $yesterday, 'isPublic' => '1', 'status' => 'published', 'isDeleted' => '0']);
     return $countdownNext() !== $cEvent;
 };
-check('C1 a published, PUBLIC event that nobody ticked is NOT on the countdown (until #493 it was)', $scnUnticked(), true);
+check('C1 a published, PUBLIC event that nobody ticked is NOT on the door\'s events feed (until #493 it was on the countdown)', $scnUnticked(), true);
 $setEv($cEvent, ['showOnWebsite' => '1']);
-check('C2 the same event, ticked, IS on the countdown', $countdownNext(), $cEvent);
+check('C2 the same event, ticked, IS on the door\'s events feed', $countdownNext(), $cEvent);
 $setEv($cEvent, ['websiteFrom' => $tomorrow]);
 check('C3 ticked but showing only from tomorrow: not yet', $countdownNext() !== $cEvent, true);
 check('C4 ticked but showing only until yesterday: no longer', $scnUntilYesterday(), true);
@@ -695,7 +759,7 @@ $setEv($cEvent, ['status' => 'published', 'isDeleted' => '1']);
 check('C8 ticked but deleted: not shown', $countdownNext() !== $cEvent, true);
 $setEv($cEvent, ['isDeleted' => '0', 'showOnWebsite' => '0']);
 $other = $makeEvent('PWT other organisation', $siteTwo, $tomorrow . ' 08:00:00', ['showOnWebsite' => '1']);
-check('C9 another organisation\'s ticked event never reaches this organisation\'s countdown', $countdownNext() !== $other, true);
+check('C9 another organisation\'s ticked event never reaches this organisation\'s door feed', $countdownNext() !== $other, true);
 
 // =============================================================================
 echo "M. The sitemap\n";
@@ -723,7 +787,7 @@ $setEv($cEvent, ['showOnWebsite' => '0']);
 echo "D. Whose \"today\" — the website's dates follow the ORGANISATION's calendar\n";
 // =============================================================================
 // ⚠️ WHY THIS SECTION EXISTS (round 3 of the check, 8 November 2026). All
-//    three public readers — the countdown, the sitemap and, since D-089, the
+//    three public readers — the door's events feed (the countdown until P4b), the sitemap and, since D-089, the
 //    event page's search-engine markup — take "today" from `date('Y-m-d')`, which is the
 //    organisation's date only because start-up sets PHP's zone to
 //    `Site::timezone()`. Every check above judges the dates against
@@ -785,7 +849,7 @@ $inZoneApart = static function (callable $probe) use ($db, $siteOne, $zoneOne, $
 };
 /**
  * The ticked, public, published event dated to ONE day only — first the
- * organisation's today, then UTC's today — read on the countdown, in the
+ * organisation's today, then UTC's today — read on the door's events feed, in the
  * sitemap and in the event page's search-engine markup each time. Puts the event back off the website afterwards.
  */
 $scnWhoseToday = static function () use ($inZoneApart, $setEv, $cEvent, $countdownNext, $sitemapHas, $cSlug, $http): mixed {
@@ -807,9 +871,9 @@ $scnWhoseToday = static function () use ($inZoneApart, $setEv, $cEvent, $countdo
 $dr = $scnWhoseToday();
 check('D0 the premise held from before the first request to after the last: the organisation\'s day and UTC\'s were different, and neither moved',
     is_array($dr) === true ? true : $dr, true);
-check('D1 dated to the ORGANISATION\'s today only: on the countdown', is_array($dr) === true ? $dr['org']['countdown'] : $dr, true);
+check('D1 dated to the ORGANISATION\'s today only: on the door\'s events feed', is_array($dr) === true ? $dr['org']['countdown'] : $dr, true);
 check('D2 dated to the ORGANISATION\'s today only: in the sitemap', is_array($dr) === true ? $dr['org']['sitemap'] : $dr, true);
-check('D3 dated to UTC\'s today only, which is not the organisation\'s: NOT on the countdown', is_array($dr) === true ? $dr['utc']['countdown'] : $dr, false);
+check('D3 dated to UTC\'s today only, which is not the organisation\'s: NOT on the door\'s events feed', is_array($dr) === true ? $dr['utc']['countdown'] : $dr, false);
 check('D4 dated to UTC\'s today only, which is not the organisation\'s: NOT in the sitemap', is_array($dr) === true ? $dr['utc']['sitemap'] : $dr, false);
 check('D5 dated to the ORGANISATION\'s today only: the event\'s page carries search-engine markup (D-089)', is_array($dr) === true ? $dr['org']['page'] : $dr, true);
 check('D6 dated to UTC\'s today only, which is not the organisation\'s: the event\'s page carries NO search-engine markup (D-089)', is_array($dr) === true ? $dr['utc']['page'] : $dr, false);
@@ -1072,7 +1136,7 @@ $rulePost('siteroot', 'organisation', 'inherit');
 check('R6 "follow the installation" deletes the organisation\'s own row', $ruleRow($siteOne), null);
 
 // A copied-in event, public with the website box ticked by its CALENDAR, the
-// soonest thing on the countdown when the rule lets it through.
+// soonest thing on the door's events feed when the rule lets it through.
 $db->query("INSERT INTO `tblExternalFeeds` (`siteID`, `name`, `url`, `audienceLevel`, `websiteOptIn`, `isActive`) "
     . "VALUES ({$siteOne}, 'PWT outside calendar', 'https://calendar.selftest.invalid/pwt.ics', 'public', 1, 1)");
 $feedId = (int) $db->insert_id;
@@ -1096,12 +1160,12 @@ $scnReaderCaps = static function () use ($setRule, $countdownNext, $cEvent): boo
     $setRule('event', 'calendar');
     return $countdownNext() === $cEvent;
 };
-check('R7 under "one box per calendar" the calendar-ticked copied-in event is on the countdown', $scnCalendarRule(), true);
+check('R7 under "one box per calendar" the calendar-ticked copied-in event is on the door\'s events feed', $scnCalendarRule(), true);
 check('R8 under "one tick per event" it is not; the organisation\'s own ticked event is', $scnEventRule(), true);
 check('R9 an organisation row looser than the installation is held down when READ too', $scnReaderCaps(), true);
 $db->query("UPDATE `tblEvents` SET `importSource` = 'date' WHERE `eventID` = {$impId}");
 $setRule('event', null);
-check('R10 under "one tick per event", a copied-in event whose "yes" came from a choice about that date IS on the countdown', $countdownNext(), $impId);
+check('R10 under "one tick per event", a copied-in event whose "yes" came from a choice about that date IS on the door\'s events feed', $countdownNext(), $impId);
 $db->query("UPDATE `tblEvents` SET `importSource` = 'calendar' WHERE `eventID` = {$impId}");
 
 // Round 9 of the check: a NEW choice's website question is answered by nobody.
@@ -1342,7 +1406,7 @@ check('R14 the event page gives a calendar-ticked copied-in event search-engine 
 // D-089 (#850): an organisation's OWN event's page carries search-engine
 // markup only while the event is on the public website — "Public" AND the
 // website box AND today inside its dates — asked of the same rule the
-// countdown and the sitemap use. Until D-089 it followed "Public" alone, so
+// door's events feed and the sitemap use. Until D-089 it followed "Public" alone, so
 // the first reading here (Public, box off) is the one that used to be wrong.
 // The page itself is reachable in all three: only the markup changes.
 $ownMarkupOf = static function () use ($http, $cSlug): array {
@@ -2992,7 +3056,7 @@ $plant = static function (string $relPath, string|array $from, string|array $to,
 
 $setEv($cEvent, ['showOnWebsite' => '0']);
 $p = $plant('_core/EventVisibility.php', "'.isPublic = 1 AND ', \$e, '.showOnWebsite = 1',", "'.isPublic = 1',", $scnUnticked);
-check('P1 with the switch dropped from the website rule, the unticked event reaches the countdown again', [$p['applied'], $p['result']], [true, false]);
+check('P1 with the switch dropped from the website rule, the unticked event reaches the door\'s events feed again', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_core/EventVisibility.php', "' AND (', \$e, '.websiteUntil IS NULL OR ', self::add(\$e . '.websiteUntil >= ?', 's', [\$today]), ') )',", "' )',", $scnUntilYesterday);
 check('P2 with the "until" date dropped, an event past its last day is shown', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_core/PublicWebsite.php', 'return Capabilities::allows($db, $userId, $siteId, Capabilities::WEBSITE_PUBLISH, false);', 'return true;',
@@ -3024,9 +3088,11 @@ check('P7 with the submission form copying the posted switch, a submission reach
 $p = $plant('_core/PublicWebsite.php', "if (\$posted === EventVisibility::COPIED_BY_CALENDAR && self::isLooser(\$installation) === false) {", 'if (false) {', $scnLooserRefused);
 check('P8 with the save-time cap gone, an organisation stores the looser rule', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_core/PublicWebsite.php', "        if (self::isLooser(\$installation) === false) {\n            return EventVisibility::COPIED_BY_EVENT;\n        }", '', $scnReaderCaps);
-check('P9 with the READ-time cap gone, the looser organisation row puts the copied-in event on the countdown', [$p['applied'], $p['result']], [true, false]);
-$p = $plant('_apps/widget/countdown-json.php', 'PublicWebsite::copiedRuleFor($mysqli, $siteId)', 'EventVisibility::COPIED_BY_CALENDAR', $scnEventRule);
-check('P10 with the countdown no longer passing the organisation\'s rule, "one tick per event" stops applying there', [$p['applied'], $p['result']], [true, false]);
+check('P9 with the READ-time cap gone, the looser organisation row puts the copied-in event on the door\'s events feed', [$p['applied'], $p['result']], [true, false]);
+// #493 P4b: the countdown's feed was deleted (D-084); the door's events feed,
+// which these checks now read, is planted instead.
+$p = $plant('_core/PublicDoor.php', "PublicWebsite::copiedRuleFor(\$db, \$siteId));\n        \$full", "EventVisibility::COPIED_BY_CALENDAR);\n        \$full", $scnEventRule);
+check('P10 with the public door no longer passing the organisation\'s rule, "one tick per event" stops applying there', [$p['applied'], $p['result']], [true, false]);
 $setEv($cEvent, ['showOnWebsite' => '1']);
 $p = $plant('public_html/sitemap.php', 'PublicWebsite::copiedRuleFor($db, $siteId)', 'EventVisibility::COPIED_BY_CALENDAR', $scnSitemapRule);
 check('P12 with the sitemap passing the looser rule, it lists the copied-in event under "one tick per event"', [$p['applied'], $p['result']], [true, false]);
@@ -3034,7 +3100,7 @@ $p = $plant('_apps/admin/calendar/feeds-website-rule.php', 'PublicWebsite::saveR
     'PublicWebsite::saveRuleForOrganisation($mysqli, $siteId, $posted, true)', $scnStricterByAdmin);
 check('P13 with the handler\'s "organisation\'s global administrator" gate gone, an ordinary administrator stores the organisation\'s rule', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_core/PublicWebsite.php', 'return $stored === EventVisibility::COPIED_BY_CALENDAR;', 'return $stored !== EventVisibility::COPIED_BY_EVENT;', $scnGarbageRule);
-check('P14 with "anything not exactly \'event\' is looser", an unreadable rule lets the copied-in event onto the countdown', [$p['applied'], $p['result']], [true, false]);
+check('P14 with "anything not exactly \'event\' is looser", an unreadable rule lets the copied-in event onto the door\'s events feed', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_apps/admin/calendar/feeds-view.php',
     "<?php if ((int) \$ev['importWebsite'] === 1 && EventVisibility::copiedTickCounts(\$ev['importSource'] === null ? null : (string) \$ev['importSource'], \$copiedRule) === true): ?>",
     "<?php if ((int) \$ev['importWebsite'] === 1): ?>",
@@ -3079,9 +3145,9 @@ $scnWhoseTodayIn = static function (string $reader) use ($scnWhoseToday): mixed 
     $r = $scnWhoseToday();
     return is_array($r) === true ? ($r['org'][$reader] === true && $r['utc'][$reader] === false) : $r;
 };
-$p = $plant('_apps/widget/countdown-json.php', "\$today      = date('Y-m-d');", "\$today      = gmdate('Y-m-d');",
-    static fn (): mixed => $scnWhoseTodayIn('countdown'));
-check('P23 with the countdown taking "today" from UTC, the dates are judged on the wrong calendar', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/PublicDoor.php', "return (new \\DateTimeImmutable('now', new \\DateTimeZone(Site::timezone(\$siteId))))->format('Y-m-d');",
+    "return gmdate('Y-m-d');", static fn (): mixed => $scnWhoseTodayIn('countdown'));
+check('P23 with the public door taking "today" from UTC, the dates are judged on the wrong calendar', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('public_html/sitemap.php', "\$today      = date('Y-m-d');", "\$today      = gmdate('Y-m-d');",
     static fn (): mixed => $scnWhoseTodayIn('sitemap'));
 check('P24 with the sitemap taking "today" from UTC, the dates are judged on the wrong calendar', [$p['applied'], $p['result']], [true, false]);
@@ -3429,7 +3495,13 @@ check('P90 with Website Set-up given the usual sentence, the Roles page tells an
     [$p['applied'], str_starts_with((string) $p['result'], 'WRONG')], [true, true]);
 $foyerWorld();
 $setEv($cEvent, ['showOnWebsite' => '0']);
-check('P11 with every plant removed again, the unticked event is off the countdown once more', $scnUnticked(), true);
+check('P11 with every plant removed again, the unticked event is off the door\'s events feed once more', $scnUnticked(), true);
+
+// 🚪 #493 P4b: every read of the door's events feed must have ANSWERED. A read
+//    that did not is counted as "no event" by $countdownNext, so without this
+//    check every "not shown" check above would pass on a broken door.
+check('Z1 every one of the ' . $doorReads . ' reads of the public door\'s events feed answered 200 in the events format (none of the "not shown" checks passed on a door that answered nothing)',
+    [$doorReads > 20, $doorReadsFailed], [true, 0]);
 
 // 🧾 The server's own error log. A page that throws part-way can still answer
 //    200, so the log is read as well.

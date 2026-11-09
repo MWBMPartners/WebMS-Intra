@@ -4,10 +4,11 @@
  * -----------------------------------------------------------------------------
  * Who may put an event on the PUBLIC WEBSITE, and how a change is judged 🌐
  * -----------------------------------------------------------------------------
- * #493, package P1. The organisation's public website — today the countdown
- * widget (`widget/countdown.json`), the staff door's `sitemap.xml` and the
- * search-engine markup on an event's page (D-089), later the public door of
- * #493's next packages — shows an event only when
+ * #493, package P1. The organisation's public website — the public door
+ * (`Portal\Core\PublicDoor`: its events feed and, since P4b, the script a
+ * website pastes in, which replaced the old countdown widget, D-084), the
+ * staff door's `sitemap.xml` and the search-engine markup on an event's page
+ * (D-089) — shows an event only when
  * `Portal\Core\EventVisibility` says so in its "website" mode. That class is
  * still the ONE place that decides who may SEE an event. This class decides
  * the three things around it that it must not:
@@ -35,8 +36,8 @@
  *
  * WHAT IT CANNOT DO, said plainly
  * -----------------------------------------------------------------------------
- *   - It cannot pull back a copy already taken: the countdown feed is cached
- *     for a minute by anything in between, the sitemap for an hour, and a
+ *   - It cannot pull back a copy already taken: the public door's answers are
+ *     cached for a minute by anything in between, the sitemap for an hour, and a
  *     search engine keeps what it took.
  *   - FOR EVENTS the permission decides almost nothing, and that is a
  *     measured fact, not a design choice: every page that writes an event

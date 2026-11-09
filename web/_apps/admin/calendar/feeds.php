@@ -131,7 +131,7 @@ $inboxOn = AppRegistry::isEnabled('approvals');
 //    never from `$SETTINGS`, which has already merged the organisation's row
 //    over the installation's and so cannot say which level chose what (#674).
 //    The rule IN FORCE is the stricter of the two (`copiedRuleFor()`), the
-//    same answer the countdown widget and the sitemap get.
+//    same answer the public door and the sitemap get.
 $ruleUrl          = Site::url('admin/calendar/feeds/website-rule');
 $ruleInstallation = PublicWebsite::storedRule($mysqli, null, false);
 $ruleOwn          = PublicWebsite::storedRule($mysqli, $siteId, false);

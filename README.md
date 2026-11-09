@@ -110,11 +110,11 @@ WebMS-Intra/                         # Git repository root (NOT deployed)
     │   ├── robots.php               # Answers the /robots.txt address
     │   ├── sitemap.php              # Answers the /sitemap.xml address
     │   ├── sitemap.xsd              # The sitemap's own schema
-    │   ├── widget/                  # countdown.js, embedded by other websites.
-    │   │                            # Do NOT remove: see #478 — the folder hid a
-    │   │                            # sign-in-free address, and deleting it as
-    │   │                            # clutter would have published that page
     │   └── sw.js                    # Service worker
+    │                                # (The old widget/ folder, countdown.js, was
+    │                                # deleted by #493 P4b with the page it hid and
+    │                                # its addresses — D-084, migration 264. The
+    │                                # public door's script replaces it.)
     ├── private_html/                # Private / non-live files
     ├── public_html_landing/         # Pre-launch landing page
     └── public_html_redir/           # Redirect page

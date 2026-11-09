@@ -82,6 +82,16 @@ $isRootAdmin = App::isRootAdmin();
 $door        = PublicWebsiteSetup::doorStateFor($mysqli, $siteId);
 $doorEvents  = $door['state'] === 'on' ? PublicDoor::addressFor($mysqli, $siteId, PublicDoor::SURFACE_EVENTS) : '';
 $doorPosters = $door['state'] === 'on' ? PublicDoor::addressFor($mysqli, $siteId, PublicDoor::SURFACE_POSTERS) : '';
+// #493 P4b: the script a website pastes in, built by the same ONE helper, and
+// the three lines to paste — one per thing it can show. The countdown (the old
+// widget/countdown.js, D-084) is its "next" mode.
+$doorScript  = $door['state'] === 'on' ? PublicDoor::addressFor($mysqli, $siteId, PublicDoor::SURFACE_SCRIPT) : '';
+$doorPastes  = [];
+if ($doorScript !== '') {
+    foreach (['events' => 'Your events, soonest first', 'posters' => 'Your noticeboard posters', 'next' => 'A countdown to your next event'] as $show => $words) {
+        $doorPastes[$show] = ['words' => $words, 'code' => '<script src="' . $doorScript . '" data-show="' . $show . '" defer></script>'];
+    }
+}
 // D-087 on a test copy: the door answers signed-in testers only in this
 // version (nothing can choose "anybody" until package P4d), and the card says
 // what that means for trying it from a real website.
@@ -149,6 +159,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <li>Noticeboard posters: <code data-door-address="posters"><?php echo $esc($doorPosters); ?></code></li>
                     </ul>
                     <p class="small text-muted">Each gives at most <?php echo (int) PublicDoor::DEFAULT_LIMIT; ?> items; add <code>?limit=</code> and a number up to <?php echo (int) PublicDoor::MAX_LIMIT; ?> for more. A change reaches websites within about a minute.</p>
+                    <?php if ($doorPastes !== []): ?>
+                        <?php // #493 P4b: the pasted-in script. The code is printed as TEXT (escaped), never as markup on this page. ?>
+                        <h3 class="h6 mt-3">Or paste one line into your website</h3>
+                        <p class="small">If your website lets you add a script, paste one of these lines where the list should appear. It draws the items as plain text in a box of its own, so your website's styles are not changed.</p>
+                        <?php foreach ($doorPastes as $show => $paste): ?>
+                            <p class="small mb-1"><?php echo $esc($paste['words']); ?>:</p>
+                            <pre class="small bg-body-tertiary border rounded p-2 mb-2" data-door-script="<?php echo $esc($show); ?>"><code><?php echo $esc($paste['code']); ?></code></pre>
+                        <?php endforeach; ?>
+                        <p class="small text-muted">Add <code>data-limit="5"</code> to show fewer (up to <?php echo (int) PublicDoor::MAX_LIMIT; ?>), or <code>data-target="#my-box"</code> to draw inside a part of your page you name. If your website has a content security policy, it must allow this portal's address for scripts, for reading data and for images. Some website builders do not allow scripts at all; the feed addresses above still work for whoever builds your website.</p>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($doorTestersOnly === true): ?>
                     <div class="alert alert-warning" data-door-testers-only="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. Browsers do not send your sign-in to another website, so a copy pasted into a real website shows nothing from this test copy; open the addresses above in this browser instead.</div>

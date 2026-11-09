@@ -119,9 +119,10 @@ off, so it is kept to where it is right.
      `go({ url: '/x' })`;
    - an argument on a line of its own, below the opening bracket;
    - a piece joined onto something: `fetch(ORIGIN + '/api/x')`. The check
-     cannot tell what the thing in front is. In `widget.js` and
-     `widget/countdown.js` it is the portal's address as another website
-     knows it: a whole address, which is `PortalAddress`'s matter. In
+     cannot tell what the thing in front is. In the old `widget.js` and
+     `widget/countdown.js` (both deleted by #493 P4b) it was the portal's
+     address as another website knows it: a whole address, which is
+     `PortalAddress`'s matter. In
      `livechat-widget.js` it is the address of the page the script runs
      on, a page of the portal, so its four requests ARE bare and this
      check does NOT report them. Found on 13 October 2026 and left: that

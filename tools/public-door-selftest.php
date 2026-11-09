@@ -2,8 +2,8 @@
 // Path: tools/public-door-selftest.php
 /**
  * -----------------------------------------------------------------------------
- * The public door, over real HTTP 🚪🧪 (#493 P4a; D-056, D-057, D-087, D-094,
- * D-095, D-097, D-098)
+ * The public door, over real HTTP 🚪🧪 (#493 P4a and P4b; D-056, D-057, D-084,
+ * D-087, D-094, D-095, D-097, D-098)
  * -----------------------------------------------------------------------------
  * Drives the REAL door — `web/public_html/index.php` → `Site::preDetect()` →
  * `Portal\Core\PublicDoor` — in a copy of the portal served by PHP's own web
@@ -38,6 +38,18 @@
  *      https picture passed through, a plain-http link dropped, another
  *      organisation's upload never named; media served only while its poster
  *      is on the public website, and stopping the moment it is unticked.
+ *   J  (#493 P4b) the script a website pastes in, /w/{name}/door.js and
+ *      /door.js on a public address: the file kept outside the web root,
+ *      byte for byte, as text/javascript with its headers; the same gate
+ *      (Calendar OR Noticeboard needed, both off refused), the same 404 and
+ *      503; no session file; the card's three lines to paste, as text. What
+ *      the script DRAWS is driven in a real browser by
+ *      tools/public-door-script-selftest.mjs, not here.
+ *   W  (#493 P4b, D-084) the old widget folder is gone: /widget, its old
+ *      script, feed and embed page each the portal's own 404 on the members'
+ *      address and the door's 404 on a public address; no route row; the
+ *      files gone; migration 264 in the install script too. PJ6-PJ8 put the
+ *      deleted things back into the copy and require W01 to notice.
  *   H  headers on the live portal: CORS, CORP, the content rule
  *      (frame-ancestors 'none' on data even when the organisation lists
  *      websites that may frame its page), Referrer-Policy, caching,
@@ -109,7 +121,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 170;
+const PDS_EXPECTED_CHECKS = 191; // 170 in P4a; #493 P4b adds J01-J08, W01-W04, T10 and PJ1-PJ8
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1421,6 +1433,124 @@ check('C19 markup and quotes inside a value are written as \\u escapes: no live 
     [false, false, false, false, '<b>"Tom & Jerry\'s"</b></script>']);
 
 // =============================================================================
+echo "J. The script a website pastes in (#493 P4b; D-056, D-084)\n";
+// =============================================================================
+// What is SERVED is pinned here, over HTTP: the same gate, the same identical
+// 404, the headers, no cookie and no session file. What the script DRAWS is
+// behaviour in a browser, so it is driven in a real one by
+// tools/public-door-script-selftest.mjs (no claim about drawing is made here).
+$scriptFile   = $child . $sep . 'web' . $sep . '_core' . $sep . 'data' . $sep . 'public-door.js';
+$scriptOnDisk = (string) file_get_contents($scriptFile);
+$j1 = $feedA('door.js');
+check('J01 /w/{name}/door.js answers 200 as text/javascript, byte for byte the file kept OUTSIDE the web root, with its length stated',
+    [$j1['status'], $j1['headers']['content-type'] ?? '', $j1['body'] === $scriptOnDisk && $scriptOnDisk !== '',
+        $j1['headers']['content-length'] ?? '', is_file($child . $sep . 'web' . $sep . 'public_html' . $sep . 'door.js')],
+    [200, 'text/javascript; charset=utf-8', true, (string) strlen($scriptOnDisk), false]);
+$scriptWant = [
+    'access-control-allow-origin' => '*', 'cross-origin-resource-policy' => 'cross-origin',
+    'content-security-policy' => "default-src 'none'; frame-ancestors 'none'; sandbox", 'referrer-policy' => 'no-referrer',
+    'cache-control' => 'public, max-age=60', 'x-robots-tag' => 'noindex', 'x-content-type-options' => 'nosniff',
+];
+$scriptHeaders = static function (array $r) use ($scriptWant): array {
+    $out = [];
+    foreach (array_keys($scriptWant) as $k) {
+        $out[$k] = $r['headers'][$k] ?? '';
+    }
+    foreach (['set-cookie', 'x-frame-options', 'cross-origin-opener-policy', 'access-control-allow-credentials', 'vary'] as $k) {
+        $out['no ' . $k] = $r['headers'][$k] ?? '';
+    }
+    return $out;
+};
+$scriptHeadersWant = $scriptWant + ['no set-cookie' => '', 'no x-frame-options' => '', 'no cross-origin-opener-policy' => '',
+    'no access-control-allow-credentials' => '', 'no vary' => ''];
+check('J02 its headers: loadable by any website (CORS *, CORP cross-origin), nosniff, no Referer, one minute\'s caching, noindex — and no Set-Cookie, X-Frame-Options, COOP, credentials header or Vary',
+    $scriptHeaders($j1), $scriptHeadersWant);
+$j3  = $http('GET', '/door.js', ['host' => $hostA]);
+$j3q = $feedA('door.js?v=2');
+check('J03 the same bytes on A\'s public address (/door.js), and a query string such as ?v=2 (which websites add to fetch a fresh copy) is ignored',
+    [$j3['status'], $j3['body'] === $scriptOnDisk, $j3q['status'], $j3q['body'] === $scriptOnDisk], [200, true, 200, true]);
+$jBefore = $sessionFiles();
+$feedA('door.js', ['cookie' => 'PHPSESSID=' . str_repeat('y', 32)]);
+$http('HEAD', '/w/' . $nameA . '/door.js');
+$http('GET', '/door.js', ['host' => $hostA, 'cookie' => 'PHPSESSID=' . str_repeat('x', 32)]);
+check('J04 no request for the script makes a session file — a made-up cookie and HEAD included', $sessionFiles() - $jBefore, 0);
+$refusals['the script, unknown name']    = $http('GET', '/w/' . str_repeat('ef', 12) . '/door.js');
+$refusals['the script, in capitals']     = $feedA('DOOR.JS');
+$refusals['the script, a trailing slash'] = $feedA('door.js/');
+$refusals['the script, a POST']          = $http('POST', '/w/' . $nameA . '/door.js', ['post' => ['x' => '1']]);
+$refusals['the script, an inactive organisation\'s public address'] = $http('GET', '/door.js', ['host' => $hostC]);
+$refusals['the script, an inactive organisation by name']           = $http('GET', '/w/' . $nameC . '/door.js');
+$setOwn($siteA, 'calendar.enabled', 'false');
+$jCalOff = $feedA('door.js');
+$setOwn($siteA, 'noticeboard.enabled', 'false');
+$refusals['the script with Calendar AND Noticeboard off'] = $feedA('door.js');
+$setOwn($siteA, 'calendar.enabled', null);
+$jNbOff = $feedA('door.js');
+$setOwn($siteA, 'noticeboard.enabled', null);
+check('J05 the script needs only ONE of the two apps: Calendar off, served; Noticeboard off, served; BOTH off, the door\'s 404',
+    [$jCalOff['status'], $jNbOff['status'], $refusals['the script with Calendar AND Noticeboard off']['status']], [200, 200, 404]);
+check('J06 an unknown name, capitals, a trailing slash, a POST and an inactive organisation (by name and by public address) are all the door\'s 404 for the script too',
+    array_values(array_unique(array_map(static fn (string $k): int => $refusals[$k]['status'],
+        ['the script, unknown name', 'the script, in capitals', 'the script, a trailing slash', 'the script, a POST',
+            'the script, an inactive organisation\'s public address', 'the script, an inactive organisation by name']))), [404]);
+$setInstallation('portal.maintenance.active', '1');
+$jClosed        = $feedA('door.js');
+$jClosedUnknown = $http('GET', '/w/' . str_repeat('ef', 12) . '/door.js');
+$setInstallation('portal.maintenance.active', '0');
+check('J07 while closed for maintenance the script is the same 503 as every other door answer, a real name and an unknown one alike',
+    [$jClosed['status'], $signature($jClosed) === $signature($jClosedUnknown)], [503, true]);
+// The card. A's public address is approved from section G on, so the ONE
+// helper (PublicDoor::addressFor()) builds the script's address on it.
+$jCard  = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+$jPaste = static function (string $show) use ($hostA): string {
+    return htmlspecialchars('<script src="https://' . $hostA . '/door.js" data-show="' . $show . '" defer></script>', ENT_QUOTES, 'UTF-8');
+};
+check('J08 with the door on, the card prints the line to paste for each of the three modes — events, posters, and "next" (the countdown, D-084) — on the address the ONE helper builds (A\'s approved public address here), as TEXT, never as a live script on the page',
+    [str_contains($jCard, $jPaste('events')), str_contains($jCard, $jPaste('posters')), str_contains($jCard, $jPaste('next')),
+        str_contains($jCard, '<script src="https://' . $hostA . '/door.js"')],
+    [true, true, true, false]);
+
+// =============================================================================
+echo "W. The old widget folder is gone, and its addresses answer nothing (D-084)\n";
+// =============================================================================
+// D-084: web/public_html/widget/ (countdown.js) is deleted with its two
+// routes (migration 264), and so are the countdown's handlers and the old
+// #336 embeddable page the folder hid. With the folder gone /widget reaches
+// the router — so what is pinned is that the router has NOTHING there: no
+// route row, no file, and the portal's own "page not found". On a public
+// address every one of them is a door request, so the door's identical 404.
+$scnWidgetGone = static function () use ($http, $db): array {
+    $out = [];
+    foreach (['/widget', '/widget/', '/widget/countdown.js', '/widget/countdown.json', '/widget/countdown'] as $path) {
+        $r = $http('GET', $path);
+        $out[$path] = $r['status'] . (($r['status'] === 404 && str_contains($r['body'], '<html') === true
+            && str_contains($r['body'], 'nextEvent') === false && str_contains($r['body'], 'webms-countdown') === false)
+            ? ' portal page' : ' ' . substr($r['body'], 0, 40));
+    }
+    $out['route rows'] = (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblRoutes` WHERE `routeKey` = 'widget' OR `routeKey` LIKE 'widget/%'")->fetch_assoc()['n'] ?? -1);
+    return $out;
+};
+$widgetGoneWant = ['/widget' => '404 portal page', '/widget/' => '404 portal page', '/widget/countdown.js' => '404 portal page',
+    '/widget/countdown.json' => '404 portal page', '/widget/countdown' => '404 portal page', 'route rows' => 0];
+check('W01 /widget, /widget/, /widget/countdown.js, /widget/countdown.json and /widget/countdown each answer the portal\'s own 404 page (no script, no feed, no embed page), and no route row starts "widget"',
+    $scnWidgetGone(), $widgetGoneWant);
+check('W02 the files are gone from the copy served here: the web root\'s widget folder, the countdown\'s handlers, and the old embeddable page (calendar/widget.php) and its loader (assets/js/widget.js)',
+    [is_dir($child . $sep . 'web' . $sep . 'public_html' . $sep . 'widget'), is_dir($child . $sep . 'web' . $sep . '_apps' . $sep . 'widget'),
+        is_file($child . $sep . 'web' . $sep . '_apps' . $sep . 'calendar' . $sep . 'widget.php'),
+        is_file($child . $sep . 'web' . $sep . 'public_html' . $sep . 'assets' . $sep . 'js' . $sep . 'widget.js')],
+    [false, false, false, false]);
+$refusals['the old widget script on a public address'] = $http('GET', '/widget/countdown.js', ['host' => $hostA]);
+$refusals['the old countdown feed on a public address'] = $http('GET', '/widget/countdown.json', ['host' => $hostA]);
+check('W03 on a public address the old widget addresses are door requests, so the door\'s 404 (compared byte for byte in R01)',
+    [$refusals['the old widget script on a public address']['status'], $refusals['the old countdown feed on a public address']['status']], [404, 404]);
+$wMig    = (string) file_get_contents($repo . $sep . 'web' . $sep . '_sql' . $sep . '264_old_widget_removed.sql');
+$wSchema = (string) file_get_contents($repo . $sep . 'web' . $sep . '_sql' . $sep . 'full_schema.sql');
+check('W04 migration 264 is in the install script too (D-003): its record in both, and no seed of either countdown address left in the install script',
+    [str_contains($wSchema, "VALUES ('264_old_widget_removed.sql')"), str_contains($wMig, "VALUES ('264_old_widget_removed.sql')"),
+        preg_match("/\\('widget\\/countdown(\\.json)?',\\s*'widget\\//", $wSchema)],
+    [true, true, 0]);
+
+// =============================================================================
 echo "H. Headers on the live portal\n";
 // =============================================================================
 $setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
@@ -1725,6 +1855,12 @@ $tStale = $feedA('events.json', ['cookie' => $cookieOf($people['tester']['jar'])
 $ageOut(false);
 check('T09 a tester whose session file is older than PHP\'s session lifetime is nobody: refused (the file is still there, as it is until PHP\'s clear-out runs)',
     [is_file($testerFile), $tStale['status'], $feedA('events.json', ['cookie' => $cookieOf($people['tester']['jar'])])['status']], [true, 404, 200]);
+$tScriptNone   = $feedA('door.js');
+$tScriptTester = $feedA('door.js', ['cookie' => $cookieOf($people['tester']['jar'])]);
+check('T10 on a test copy the script follows D-087 exactly as the feeds do: with no sign-in the door\'s 404; for a tester served, private, no-store, Vary: Cookie, noindex, nofollow, noarchive, and no Set-Cookie',
+    [$tScriptNone['status'], $signature($tScriptNone) === $signature($alphaRefusal), $tScriptTester['status'], $tScriptTester['headers']['cache-control'] ?? '',
+        $tScriptTester['headers']['vary'] ?? '', $tScriptTester['headers']['x-robots-tag'] ?? '', $tScriptTester['headers']['set-cookie'] ?? ''],
+    [404, true, 200, 'private, no-store', 'Cookie', 'noindex, nofollow, noarchive', '']);
 $channel = 'prod';
 $startServer();
 $waitForServer();
@@ -2228,6 +2364,66 @@ check('P72 with the set-up check\'s waiting row merely reworded ("Approval pendi
 // P58 and P60 put A's own address back, which (rightly) leaves it waiting:
 // approve it again directly so the tidy-up starts from the state it expects.
 $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+
+// ── #493 P4b: the script's own guards, and the deleted widget ───────────────
+// Each guard taken out of the copy (or, for the widget, the deleted thing put
+// back into it), and the check that must notice re-run. As above, the expected
+// value is the value UNDER the fault.
+$scriptAppGate = "            if (AppRegistry::isEnabledForSite('calendar', \$siteId) === false\n"
+    . "                && AppRegistry::isEnabledForSite('noticeboard', \$siteId) === false) {";
+$p = $plant('_core/PublicDoor.php', $scriptAppGate, '            if (false) {',
+    static function () use ($setOwn, $siteA, $feedA): int {
+        $setOwn($siteA, 'calendar.enabled', 'false');
+        $setOwn($siteA, 'noticeboard.enabled', 'false');
+        $s = $feedA('door.js')['status'];
+        $setOwn($siteA, 'calendar.enabled', null);
+        $setOwn($siteA, 'noticeboard.enabled', null);
+        return $s;
+    });
+check('PJ1 with the script\'s "at least one app" question taken out, the script is served with BOTH apps off (J05 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$scriptSend = "self::sendDataHeaders('text/javascript; charset=utf-8', \$testCopy, \$testersOnly);";
+$p = $plant('_core/PublicDoor.php', $scriptSend, "self::sendDataHeaders('text/plain; charset=utf-8', \$testCopy, \$testersOnly);",
+    static fn (): string => $feedA('door.js')['headers']['content-type'] ?? '');
+check('PJ2 with the script sent as plain text, a browser honouring nosniff would refuse to run it (J01 catches it)', [$p['applied'], $p['result']], [true, 'text/plain; charset=utf-8']);
+$p = $plant('_core/PublicDoor.php', $scriptSend, "header('Content-Type: text/javascript; charset=utf-8');",
+    static fn (): bool => $scriptHeaders($feedA('door.js')) === $scriptHeadersWant);
+check('PJ3 with the script sent WITHOUT the door\'s data headers (start-up\'s X-Frame-Options and COOP left, no CORS, no caching rule), J02 notices', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/PublicDoor.php', 'if (Gatekeeper::mayUseTestCopy($db, self::peekSignedInAccount(), PORTAL_ENV) === false) {', 'if (false) {',
+    static fn (): int => $feedA('door.js')['status'], 'alpha');
+check('PJ4 with D-087\'s tester question taken out, a test copy serves the script to anybody (T10 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('public_html/index.php', ["if (Site::isDoorRequest() === true) {\n    PublicDoor::answer(\$mysqli);\n}", "Auth::ensureSession();\n"],
+    ['', "Auth::ensureSession();\nif (Site::isDoorRequest() === true) {\n    PublicDoor::answer(\$mysqli);\n}\n"],
+    static function () use ($sessionFiles, $feedA): array {
+        $before = $sessionFiles();
+        $r = $feedA('door.js');
+        return [$sessionFiles() - $before > 0, ($r['headers']['set-cookie'] ?? '') !== ''];
+    });
+// MEASURED, not assumed: the session file IS made, but the door's own header
+// clean-up (REMOVED_HEADERS) still strips the Set-Cookie it would carry — so
+// J04's session-file count is the check that catches this, NOT J02. The first
+// version of this plant claimed both and went red on that claim.
+check('PJ5 with the door answered AFTER the session start, a request for the script leaves a session file behind (J04 catches it; the door still strips the cookie header, so J02 alone would not)',
+    [$p['applied'], $p['result']], [true, [true, false]]);
+// The widget: the deleted things put BACK into the copy, one at a time, to
+// prove W01 can tell them apart from "gone".
+$oldPage = $child . $sep . 'web' . $sep . '_apps' . $sep . 'widget' . $sep . 'countdown-preview.php';
+@mkdir(dirname($oldPage), 0700, true);
+file_put_contents($oldPage, "<?php\necho 'PLANTED old countdown embed page';\n");
+$db->query("INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES ('widget/countdown', 'widget/countdown-preview.php', 0)");
+$wRoute = $scnWidgetGone();
+$db->query("DELETE FROM `tblRoutes` WHERE `routeKey` = 'widget/countdown' AND `targetFile` = 'widget/countdown-preview.php'");
+@unlink($oldPage);
+@rmdir(dirname($oldPage));
+check('PJ6 with the old embed page\'s route and file put back, W01 sees /widget/countdown answer and the route row', [$wRoute['/widget/countdown'], $wRoute['route rows']],
+    ['200 PLANTED old countdown embed page', 1]);
+$oldScript = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'widget' . $sep . 'countdown.js';
+@mkdir(dirname($oldScript), 0700, true);
+file_put_contents($oldScript, "/* PLANTED old countdown.js */\n");
+$wFolder = $scnWidgetGone();
+@unlink($oldScript);
+@rmdir(dirname($oldScript));
+check('PJ7 with the web root\'s widget folder put back, W01 sees /widget/countdown.js served from disk again', $wFolder['/widget/countdown.js'], "200 /* PLANTED old countdown.js */\n");
+check('PJ8 with both put away again, W01\'s answer is "gone" once more', $scnWidgetGone(), $widgetGoneWant);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");
