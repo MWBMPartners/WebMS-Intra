@@ -443,8 +443,9 @@ if (Auth::check() === true) {
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 
 // 🌐 Schema.org JSON-LD Event markup (#328) — SEO + rich-snippet eligibility.
-//     Conditional on isPublic + status to avoid leaking unpublished/draft events
-//     into search index. Only emitted on public events.
+//     Conditional on the event being ON THE PUBLIC WEBSITE (D-089, below) and
+//     on its status, so nothing unpublished, draft or unticked reaches a search
+//     index.
 //     ⚠️ WHAT THIS CANNOT DO: it only holds back the search-engine markup.
 //     It does not hide the page. Hiding a draft page is the job of the
 //     visibility rule near the top (#503), which uses the same three statuses
@@ -456,7 +457,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 // 🔢 The isPublic test used to be `($event['isPublic'] ?? '0') === '1'`. The event
 //    is read through a prepared statement, which hands this flag back as the whole
 //    number 1, never the text '1', so the markup was never output for any event.
-//    It now accepts exactly 1 or '1' (a cast would also accept true, '01' and 1.5).
+//    It then accepted exactly 1 or '1' (a cast would also accept true, '01' and
+//    1.5). Since D-089 there is no PHP test of isPublic here at all: the website
+//    rule below reads it in SQL, with the website box and dates.
 //
 // 👁️ #514 part P2 — events copied in from an outside calendar. Their
 //    `isPublic` column says nothing about who may see them (their level is
@@ -473,23 +476,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    Under "one tick per event" a yes that came from the calendar's own box
 //    or a rule's box counts for nothing — this asked `importWebsite` alone,
 //    so the calendar's box still sent the event's markup to search engines
-//    while four sentences elsewhere said that box "does nothing". It asks the
-//    ONE test, `EventVisibility::copiedTickCounts()`, with the rule read by
-//    the same reader the countdown and the sitemap use.
-//    ⚠️ The portal's OWN events below still follow `isPublic` alone here.
-//       The owner has decided they should also need the website switch
-//       (D-089, 8 November 2026; #850); that is built in its own package
-//       straight after #493 P1, which is why this one leaves it alone.
-$eventPublicFlag = $event['isPublic'] ?? null;
-if ($isImported === true) {
-    $jsonLdAllowed = $canSeeFull === true && (int) $event['importWebsite'] === 1
-        && EventVisibility::copiedTickCounts(
-            $event['importSource'] === null ? null : (string) $event['importSource'],
-            PublicWebsite::copiedRuleFor($mysqli, $siteId)
-        ) === true;
-} else {
-    $jsonLdAllowed = $eventPublicFlag === 1 || $eventPublicFlag === '1';
-}
+//    while four sentences elsewhere said that box "does nothing". It then
+//    asked `EventVisibility::copiedTickCounts()`; since D-089 the website rule
+//    below builds that same test, from the same constant, inside its SQL.
+// 🌐 D-089 (the owner, 8 November 2026; #850): the search-engine markup goes
+//    out only for an event that is ON THE PUBLIC WEBSITE — and that is asked of
+//    `EventVisibility::where()` in "website" mode, the ONE rule the countdown
+//    and the sitemap use, for this one event. So an own event needs "Public",
+//    the "Show on the public website" tick and today inside its website dates
+//    (D-057, D-078); a copied-in event needs what the organisation's copied-in
+//    rule lets through (D-080, D-081). Until D-089 an own event's markup
+//    followed "Public" alone. The page itself is untouched: anyone who may
+//    open it still can. A copied-in event also still needs full detail for
+//    the person viewing ($canSeeFull), because the markup carries the
+//    description and place; a search engine views signed out, so for it that
+//    is the signed-out answer. (redact() near the top has already emptied
+//    those columns for anybody without full detail — this is a second guard.)
+$websiteToday = date('Y-m-d'); // the organisation's calendar: start-up sets PHP's zone to it, as the countdown relies on
+$websiteRule = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $websiteToday, PublicWebsite::copiedRuleFor($mysqli, $siteId));
+$onWebsite   = $mysqli->prepare('SELECT 1 FROM tblEvents e WHERE e.eventID = ?' . $websiteRule['sql'] . ' LIMIT 1');
+$onWebsiteId = (int) $event['eventID'];
+$onWebsite->bind_param('i' . $websiteRule['types'], $onWebsiteId, ...$websiteRule['params']);
+$onWebsite->execute();
+$jsonLdAllowed = $onWebsite->get_result()->fetch_row() !== null && ($isImported === false || $canSeeFull === true);
+$onWebsite->close();
 if ($jsonLdAllowed === true && $isVisibleStatus === true):
     $eventStatusSchema = [
         'published' => 'https://schema.org/EventScheduled',

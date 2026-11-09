@@ -5,8 +5,9 @@
  * Who may put an event on the PUBLIC WEBSITE, and how a change is judged 🌐
  * -----------------------------------------------------------------------------
  * #493, package P1. The organisation's public website — today the countdown
- * widget (`widget/countdown.json`) and the staff door's `sitemap.xml`, later
- * the public door of #493's next packages — shows an event only when
+ * widget (`widget/countdown.json`), the staff door's `sitemap.xml` and the
+ * search-engine markup on an event's page (D-089), later the public door of
+ * #493's next packages — shows an event only when
  * `Portal\Core\EventVisibility` says so in its "website" mode. That class is
  * still the ONE place that decides who may SEE an event. This class decides
  * the three things around it that it must not:

@@ -262,8 +262,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2"></i>For admins &mdash; the public website</h2>
     <p>
         Some of what the portal shows is open to anybody on the internet, without signing in: the event
-        countdown that other websites can show, and the list of pages the portal gives search engines (its
-        sitemap). An event goes there only when somebody ticks <strong>Show on the public website</strong>
+        countdown that other websites can show, the list of pages the portal gives search engines (its
+        sitemap), and what an event's page tells search engines about the event. An event goes there only when somebody ticks <strong>Show on the public website</strong>
         on the event's form, and then only while the event is also marked <strong>Public</strong> and today
         is between the optional <strong>From</strong> and <strong>Until</strong> dates. Both of those days
         count, an empty date means no limit, and the dates follow your organisation's calendar.
@@ -279,8 +279,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
     <p class="text-muted small">
         Three things to know. The portal's own pages &mdash; the event's page, the calendar a signed-out
-        visitor sees, and the calendar feed people subscribe to &mdash; and what the event's page tells
-        search engines, follow the &ldquo;Public&rdquo; box, not this one. A repeating series made with the box ticked gives
+        visitor sees, and the calendar feed people subscribe to &mdash; follow the &ldquo;Public&rdquo; box,
+        not this one; but what the event's page tells search engines needs this box too. A repeating series made with the box ticked gives
         every date the same From and Until dates, so leave them empty or set them wide enough for the whole
         series. And taking an event off can take up to an hour to reach every copy; a copy somebody has
         already taken cannot be pulled back.

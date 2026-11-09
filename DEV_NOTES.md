@@ -21114,3 +21114,17 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **A premise checked only when it is certain to hold is no premise.** Section D chose its zone so that the
   two days always differed at the moment of choosing; the real hazard was the clock moving during the
   requests, so the premise is now checked again afterwards.
+
+### An own event's search-engine markup needs the website tick (D-089, #850)
+
+- **The markup now asks the website rule itself.** `calendar/event.php` runs `EventVisibility::where()` in
+  website mode for that one event, the rule the countdown and the sitemap use, instead of keeping its own
+  test (`isPublic` for an own event; `importWebsite` plus `copiedTickCounts()` for a copied-in one). One rule
+  means the page cannot drift from the two lists again. "Today" is `date('Y-m-d')`, because start-up sets
+  PHP's zone to the organisation's, exactly as the countdown relies on. A copied-in event also needs full
+  detail for the viewer; `redact()` near the top of the page has already emptied the description and place
+  for anybody without it, so that test is a second guard.
+- **This supersedes a sentence in the #493 P1 entry above**, which said an own event's markup "follows
+  'Public' alone (#850)" and that the form, the help page and `api-spec.json` named only the countdown and
+  the sitemap. True when written; all three now also name the search-engine markup. The event's page
+  itself deliberately still follows "Public" (D-089).

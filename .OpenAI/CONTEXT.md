@@ -3183,7 +3183,7 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   The technical record is DEV_NOTES.md, "Outside services in three tiers (#778)".
 - **The public website, for events (#493 P1; D-057, D-077, D-078, D-080, D-081).**
   `EventVisibility::where()` in "website" mode is the ONE rule for which events the public website lists
-  (an event page's search-engine markup asks `EventVisibility::copiedTickCounts()`, which shares its constant);
+  (an event page's search-engine markup asks it too, for that one event — D-089);
   `Portal\Core\PublicWebsite` is the ONE place that decides who may change `showOnWebsite` /
   `websiteFrom` / `websiteUntil` (`mayPublish()`), judges a posted change (`judgeEventFields()`, asked by
   the form AND the events API), and works out the copied-in rule (`copiedRuleFor()`, the installation

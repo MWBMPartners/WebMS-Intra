@@ -468,7 +468,7 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
     // 🌐 THE PUBLIC WEBSITE (#493 package P1; D-057, D-077, D-078). Separate
     //    from "Public (visible on calendar)" above, on purpose: that box is
     //    about the portal's own calendar; this one is about the organisation's
-    //    public website (the countdown widget and the sitemap today), which
+    //    public website (the countdown widget, the sitemap and the search-engine markup on the event's page, today), which
     //    anybody on the internet can read. An event needs BOTH to get there.
     //
     //    WHO MAY CHANGE IT is `PublicWebsite::mayPublish()` — the ONE answer,
@@ -515,22 +515,21 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
                 <?php
                 // 🌐 #493 P1, round 3 of the check: this used to open "Nothing goes on
                 //    the public website until this is ticked" — untrue on the one screen
-                //    where the decision is made, because an own event's page, and the
-                //    search-engine markup on it, follow the "Public" box ALONE in this
-                //    package (the owner has since decided the markup should need this
-                //    switch too: D-089, #850, its own package). So it names what the switch governs, exactly as
-                //    api-spec.json's `showOnWebsite` does. When #493's public door
+                //    where the decision is made, because an own event's page followed the
+                //    "Public" box ALONE. So it names what the switch governs, exactly as
+                //    api-spec.json's `showOnWebsite` does. D-089 (#850) added the
+                //    search-engine markup on the event's page to that list; the page
+                //    itself still follows "Public". When #493's public door
                 //    (package P4) ships, it joins this list — change both together.
                 ?>
                 <p class="small text-secondary mt-2 mb-0" id="showOnWebsite-help-<?php echo $websiteIdSuffix; ?>">
-                    This decides whether the event goes on the organisation's public website: the countdown widget
-                    and the sitemap. Nothing goes there until this is ticked, and it shows there only while it is
+                    This decides whether the event goes on the organisation's public website: the countdown widget,
+                    the sitemap, and what the event's page tells search engines. Nothing goes there until this is ticked, and it shows there only while it is
                     ticked, the event is also marked "Public" above, and today is between the two dates (both days
                     included; an empty date means no limit). The dates follow this organisation's calendar. Taking it
                     off can take up to an hour to reach every copy, and a copy somebody has already taken cannot be
                     pulled back. The portal's own pages (the event's page, the calendar a signed-out visitor sees and
-                    the calendar feed people subscribe to), and what the event's page tells search engines,
-                    follow the "Public" box above, not this one.
+                    the calendar feed people subscribe to) follow the "Public" box above, not this one.
                 </p>
             <?php else: ?>
                 <p class="mb-1"><?php

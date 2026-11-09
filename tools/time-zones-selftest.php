@@ -1686,9 +1686,14 @@ ok(
 // =============================================================================
 head('R. Every reader gives the stored zone back: the event page, the calendar feed, the export, the events API, the venue code');
 // Each event is made visible to its readers: the question here is which zone
-// it is read in, not who may see it.
+// it is read in, not who may see it. Since D-089 (#850) the event page's
+// search-engine markup — where the published start below is read — goes out
+// only for an event on the public website, so each is ticked for it too,
+// with no website dates (no limit). Without that the page carries no markup
+// and the check below cannot find the start (it went red on exactly that).
 foreach ($made as $eventId) {
-    q("UPDATE tblEvents SET status = 'published', isPublic = 1, submissionStatus = IF(submissionStatus = 'pending', 'approved', submissionStatus) WHERE eventID = ?", 'i', [$eventId]);
+    q("UPDATE tblEvents SET status = 'published', isPublic = 1, showOnWebsite = 1, websiteFrom = NULL, websiteUntil = NULL, "
+        . "submissionStatus = IF(submissionStatus = 'pending', 'approved', submissionStatus) WHERE eventID = ?", 'i', [$eventId]);
 }
 q("UPDATE tblEvents SET importLevel = 'public', importDetail = 'full', importApiOptOut = 0 WHERE externalFeedID = ?", 'i', [FEED]);
 $feedText = str_replace("\r\n ", '', req('', 'GET', '/calendar.ics?token=' . $feedToken . '&days=120')['body']);

@@ -4,6 +4,21 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An event's search-engine markup needs the public-website tick too (#850, D-089)
+
+- **Changed:** an event's own page on the portal carries hidden markup that lets Google and others list
+  the event in their own results. For the portal's own events it followed the "Public" box alone. It now
+  goes out only for an event that is on the organisation's public website — asked of the same rule the
+  countdown and the sitemap use — so an own event also needs "Show on the public website" ticked and
+  today inside its website dates. The page itself deliberately still follows "Public" (D-089): anybody
+  who may open it still can. A copied-in event also still needs full detail for the person viewing, which
+  for a search engine (it visits signed out) means full detail for a signed-out visitor, because the markup
+  carries the description and the place.
+- **Tests:** `tools/public-website-tick-selftest.php` reads the event's page signed out with the box off,
+  on, and on with today outside its dates, and a plant puts the old "Public alone" test back. Its
+  section D now also checks the page judges the website dates on the organisation's calendar, not UTC's.
+  `tools/time-zones-selftest.php` reads a start time out of that markup, so it now ticks its events.
+
 ### Events go on the public website only when somebody ticks them (#493, package P1)
 
 - **Changed — a live exposure closed (D-057, D-078).** The event countdown that other websites can
@@ -43,10 +58,7 @@
   until its calendar is next re-worked in full. A refresh that finds the calendar's file unchanged skips
   that for up to 20 hours after the last full one (and nothing refreshes while the scheduled feed job is
   not running); saving the rule re-works every calendar at once.
-- **Not yet, each with an issue:** the event's own page on the portal, and the search-engine markup on
-  it, still follow the "Public" box alone, and the form says so. The owner has decided the markup should
-  also need the tick (D-089, #850); that follows in its own package.
-  A repeating series made with the box ticked gives every date the same two dates (#847). The series
+- **Not yet, each with an issue:** a repeating series made with the box ticked gives every date the same two dates (#847). The series
   bulk-edit page has no control for it (#844), and the events API's list and detail do not report it
   (#843). The noticeboard, the portal's own signed-out calendar and the public website "door" are later
   packages of #493.

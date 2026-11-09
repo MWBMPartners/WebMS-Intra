@@ -86,7 +86,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 114;
+const PWT_EXPECTED_CHECKS = 119;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -651,8 +651,9 @@ $setEv($cEvent, ['showOnWebsite' => '0']);
 // =============================================================================
 echo "D. Whose \"today\" — the website's dates follow the ORGANISATION's calendar\n";
 // =============================================================================
-// ⚠️ WHY THIS SECTION EXISTS (round 3 of the check, 8 November 2026). Both
-//    public readers take "today" from `date('Y-m-d')`, which is the
+// ⚠️ WHY THIS SECTION EXISTS (round 3 of the check, 8 November 2026). All
+//    three public readers — the countdown, the sitemap and, since D-089, the
+//    event page's search-engine markup — take "today" from `date('Y-m-d')`, which is the
 //    organisation's date only because start-up sets PHP's zone to
 //    `Site::timezone()`. Every check above judges the dates against
 //    organisation 1's "today" — and organisation 1 is seeded as UTC, the zone
@@ -662,7 +663,7 @@ echo "D. Whose \"today\" — the website's dates follow the ORGANISATION's calen
 //    cannot tell two zones apart proves nothing about which one the code
 //    uses). So this section moves organisation 1, for a few seconds, to a zone
 //    whose date is NOT UTC's right now, ASSERTS that premise first (D0), and
-//    dates the event to each of the two days in turn. P23 and P24 plant
+//    dates the event to each of the two days in turn. P23, P24 and P38 plant
 //    `gmdate()` in each reader and require this to go red.
 //
 //    WHICH ZONE: Pacific/Kiritimati is UTC+14 and Pacific/Pago_Pago is UTC-11,
@@ -713,16 +714,21 @@ $inZoneApart = static function (callable $probe) use ($db, $siteOne, $zoneOne, $
 };
 /**
  * The ticked, public, published event dated to ONE day only — first the
- * organisation's today, then UTC's today — read on the countdown and in the
- * sitemap each time. Puts the event back off the website afterwards.
+ * organisation's today, then UTC's today — read on the countdown, in the
+ * sitemap and in the event page's search-engine markup each time. Puts the event back off the website afterwards.
  */
-$scnWhoseToday = static function () use ($inZoneApart, $setEv, $cEvent, $countdownNext, $sitemapHas, $cSlug): mixed {
-    return $inZoneApart(static function (array $z) use ($setEv, $cEvent, $countdownNext, $sitemapHas, $cSlug): array {
+$scnWhoseToday = static function () use ($inZoneApart, $setEv, $cEvent, $countdownNext, $sitemapHas, $cSlug, $http): mixed {
+    // D-089: the event's own page is the third reader — its search-engine
+    // markup follows the same website dates, on the same calendar.
+    $markup = static function () use ($http, $cSlug): bool {
+        return str_contains($http('GET', '/calendar/event?slug=' . rawurlencode($cSlug), [], [], false)['body'], 'application/ld+json');
+    };
+    return $inZoneApart(static function (array $z) use ($setEv, $cEvent, $countdownNext, $sitemapHas, $cSlug, $markup): array {
         $setEv($cEvent, ['showOnWebsite' => '1', 'websiteFrom' => $z['orgToday'], 'websiteUntil' => $z['orgToday'],
             'isPublic' => '1', 'status' => 'published', 'isDeleted' => '0']);
-        $org = ['countdown' => $countdownNext() === $cEvent, 'sitemap' => $sitemapHas($cSlug)];
+        $org = ['countdown' => $countdownNext() === $cEvent, 'sitemap' => $sitemapHas($cSlug), 'page' => $markup()];
         $setEv($cEvent, ['websiteFrom' => $z['utcToday'], 'websiteUntil' => $z['utcToday']]);
-        $utc = ['countdown' => $countdownNext() === $cEvent, 'sitemap' => $sitemapHas($cSlug)];
+        $utc = ['countdown' => $countdownNext() === $cEvent, 'sitemap' => $sitemapHas($cSlug), 'page' => $markup()];
         $setEv($cEvent, ['showOnWebsite' => '0', 'websiteFrom' => null, 'websiteUntil' => null]);
         return ['org' => $org, 'utc' => $utc];
     });
@@ -734,6 +740,8 @@ check('D1 dated to the ORGANISATION\'s today only: on the countdown', is_array($
 check('D2 dated to the ORGANISATION\'s today only: in the sitemap', is_array($dr) === true ? $dr['org']['sitemap'] : $dr, true);
 check('D3 dated to UTC\'s today only, which is not the organisation\'s: NOT on the countdown', is_array($dr) === true ? $dr['utc']['countdown'] : $dr, false);
 check('D4 dated to UTC\'s today only, which is not the organisation\'s: NOT in the sitemap', is_array($dr) === true ? $dr['utc']['sitemap'] : $dr, false);
+check('D5 dated to the ORGANISATION\'s today only: the event\'s page carries search-engine markup (D-089)', is_array($dr) === true ? $dr['org']['page'] : $dr, true);
+check('D6 dated to UTC\'s today only, which is not the organisation\'s: the event\'s page carries NO search-engine markup (D-089)', is_array($dr) === true ? $dr['utc']['page'] : $dr, false);
 
 // =============================================================================
 echo "F. The Manage Events form\n";
@@ -1239,9 +1247,8 @@ check('R13 an unreadable rule ("Calendar", "whatever") counts as "one tick per e
 
 // The event's OWN PAGE (round 2): its search-engine markup (`application/ld+json`)
 // for a copied-in event follows the same rule. Read signed out, as a search
-// engine reads it. The portal's OWN events are deliberately not asked about
-// here: their markup still follows "Public" alone in this package (D-089,
-// #850, decides it should need the tick too; that package adds its checks).
+// engine reads it. The portal's OWN events are asked about in R14b below
+// (D-089, #850: their markup needs the tick too).
 $markupOf = static function () use ($http, $impSlug): array {
     $r = $http('GET', '/calendar/event?slug=' . rawurlencode($impSlug), [], [], false);
     return [$r['status'], str_contains($r['body'], 'application/ld+json')];
@@ -1261,6 +1268,30 @@ check('R14 the event page gives a calendar-ticked copied-in event search-engine 
     . 'and does under "one tick per event" when the yes came from a choice about that date',
     $scnMarkupRule(),
     ['calendar box, looser rule' => [200, true], 'calendar box, stricter rule' => [200, false], 'date choice, stricter rule' => [200, true]]);
+// D-089 (#850): an organisation's OWN event's page carries search-engine
+// markup only while the event is on the public website — "Public" AND the
+// website box AND today inside its dates — asked of the same rule the
+// countdown and the sitemap use. Until D-089 it followed "Public" alone, so
+// the first reading here (Public, box off) is the one that used to be wrong.
+// The page itself is reachable in all three: only the markup changes.
+$ownMarkupOf = static function () use ($http, $cSlug): array {
+    $r = $http('GET', '/calendar/event?slug=' . rawurlencode($cSlug), [], [], false);
+    return [$r['status'], str_contains($r['body'], 'application/ld+json')];
+};
+$scnOwnMarkup = static function () use ($db, $setEv, $cEvent, $ownMarkupOf): array {
+    $was = $db->query("SELECT `showOnWebsite`, `websiteFrom`, `websiteUntil`, `isPublic`, `status`, `isDeleted` FROM `tblEvents` WHERE `eventID` = {$cEvent}")->fetch_assoc();
+    $setEv($cEvent, ['showOnWebsite' => '0', 'websiteFrom' => null, 'websiteUntil' => null, 'isPublic' => '1', 'status' => 'published', 'isDeleted' => '0']);
+    $off = $ownMarkupOf();
+    $setEv($cEvent, ['showOnWebsite' => '1']);
+    $on = $ownMarkupOf();
+    $setEv($cEvent, ['websiteFrom' => '2099-01-01']);
+    $notYet = $ownMarkupOf();
+    $setEv($cEvent, $was);
+    return ['Public, box off' => $off, 'Public, box on' => $on, 'box on, dates not yet' => $notYet];
+};
+check('R14b an own event\'s page gives search-engine markup only while it is on the public website: not with "Public" alone, yes with the box ticked, not before its "from" date (D-089)',
+    $scnOwnMarkup(),
+    ['Public, box off' => [200, false], 'Public, box on' => [200, true], 'box on, dates not yet' => [200, false]]);
 
 // The Roles page's "nobody holds any of these roles" warning (round 2), drawn
 // for EVERY permission and judged against the registry's own answer about
@@ -1444,12 +1475,13 @@ $p = $plant('_apps/admin/calendar/_approval-rows.php',
     '? (true',
     static fn (): bool => ($scnWordsStrict()['rule approval on'] ?? null) === false);
 check('P18 with the approval row no longer asking the rule, a rule\'s request promises the website under "one tick per event"', [$p['applied'], $p['result']], [true, false]);
-// The OLD line put back exactly: the markup on `importWebsite` alone.
+// Since D-089 the page asks the website rule itself, so "no longer requiring
+// the rule" means handing it the looser rule whatever the organisation chose
+// (before D-089 this plant put back the old line, the markup on
+// `importWebsite` alone, which no longer exists).
 $p = $plant('_apps/calendar/event.php',
-    "    \$jsonLdAllowed = \$canSeeFull === true && (int) \$event['importWebsite'] === 1\n        && EventVisibility::copiedTickCounts(\n"
-    . "            \$event['importSource'] === null ? null : (string) \$event['importSource'],\n"
-    . "            PublicWebsite::copiedRuleFor(\$mysqli, \$siteId)\n        ) === true;",
-    "    \$jsonLdAllowed = \$canSeeFull === true && (int) \$event['importWebsite'] === 1;",
+    "\$websiteRule = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, \$websiteToday, PublicWebsite::copiedRuleFor(\$mysqli, \$siteId));",
+    "\$websiteRule = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, \$websiteToday, EventVisibility::COPIED_BY_CALENDAR);",
     static fn (): bool => ($scnMarkupRule()['calendar box, stricter rule'][1] ?? null) === false);
 check('P19 with the event page no longer requiring the rule, the calendar box puts the markup out under "one tick per event"', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_apps/admin/roles/index.php', '<?php $capFallsOpen = Capabilities::fallsOpenForGlobalAdmin($capKey); ?>', '<?php $capFallsOpen = true; ?>',
@@ -1462,7 +1494,7 @@ check('P21 (measured, expected to stay GREEN) with "active account" dropped from
 $p = $plant('_apps/admin/calendar/feeds-edit.php', "EventVisibility::copiedTickCounts('calendar', \\Portal\\Core\\PublicWebsite::copiedRuleFor(\$mysqli, \$siteId)) === false",
     'false', static fn (): bool => $scnInert() === [true, false]);
 check('P22 with the calendar settings page no longer asking the rule, it stops saying the box does nothing', [$p['applied'], $p['result']], [true, false]);
-// Section D's two readers, each made to take "today" from UTC instead of the
+// Section D's three readers, each made to take "today" from UTC instead of the
 // organisation's calendar. Each scenario answers true only when the event
 // dated to the organisation's today IS shown and the one dated to UTC's is NOT.
 $scnWhoseTodayIn = static function (string $reader) use ($scnWhoseToday): mixed {
@@ -1475,6 +1507,9 @@ check('P23 with the countdown taking "today" from UTC, the dates are judged on t
 $p = $plant('public_html/sitemap.php', "\$today      = date('Y-m-d');", "\$today      = gmdate('Y-m-d');",
     static fn (): mixed => $scnWhoseTodayIn('sitemap'));
 check('P24 with the sitemap taking "today" from UTC, the dates are judged on the wrong calendar', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/calendar/event.php', "\$websiteToday = date('Y-m-d');", "\$websiteToday = gmdate('Y-m-d');",
+    static fn (): mixed => $scnWhoseTodayIn('page'));
+check('P38 with the event page taking "today" from UTC, its markup follows the website dates on the wrong calendar (D-089)', [$p['applied'], $p['result']], [true, false]);
 $p = $plant('_core/PublicWebsite.php', 'public static function mayPublish(\mysqli $db, int $userId, int $siteId): bool',
     'public static function mayPublish(\mysqli $db, int $userId, int $siteId): bool { return false; }' . "\n"
     . '    private static function mayPublishAsShipped(\mysqli $db, int $userId, int $siteId): bool', $scnFormRefuses);
@@ -1520,6 +1555,14 @@ $p = $plant('_apps/admin/calendar/feeds-choice.php',
 check('P34 with only the first ask taken out (where a race leaves it), the ask at drawing time still says a choice appeared, keeps it, and draws THAT choice (round 13)',
     [$p['applied'], $p['result']['told'] ?? null, $p['result']['their answer kept'] ?? null, $p['result']['audience shown'] ?? null, $p['result']['box'] ?? null],
     [true, true, 1, 'public', 'ticked']);
+// D-089: the event page's markup decision put back to "Public alone" for the
+// portal's own events — the box-off reading then carries markup again.
+$p = $plant('_apps/calendar/event.php',
+    "\$jsonLdAllowed = \$onWebsite->get_result()->fetch_row() !== null && (\$isImported === false || \$canSeeFull === true);",
+    "\$jsonLdAllowed = (\$isImported === false) ? ((\$event['isPublic'] ?? null) === 1 || (\$event['isPublic'] ?? null) === '1') : (\$onWebsite->get_result()->fetch_row() !== null && \$canSeeFull === true);",
+    $scnOwnMarkup);
+check('P37 with an own event\'s markup following "Public" alone again (before D-089), the page sends markup with the website box off',
+    [$p['applied'], $p['result']['Public, box off'] ?? null], [true, [200, true]]);
 // Round 15 (a hardening it suggested): only the page's FIRST ask taken out,
 // with the plain stale post — the hand-off ('mustBeNew') must then stop the
 // save under the lock and keep the other administrator's Yes. Round 12

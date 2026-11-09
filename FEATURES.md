@@ -448,8 +448,8 @@ Events, series, RSVP, exports, and seven view modes.
   Website Editor role exists to give it to, though today only administrators can open the pages that
   change an event). Events copied in from outside calendars follow a rule — one
   box per calendar, or one tick per event — chosen by the installation and, no looser, by each
-  organisation (D-080, D-081). Not yet: the event's own page and its search-engine markup still follow
-  "Public" alone (#850). `Portal\Core\PublicWebsite`, migration 258, test
+  organisation (D-080, D-081). The event's own page deliberately still follows "Public"; its search-engine markup needs
+  the website box too (D-089, #850). `Portal\Core\PublicWebsite`, migration 258, test
   `tools/public-website-tick-selftest.php`.
 - Event series with bulk edit (#75).
 - Event categories + types (hierarchical, per-site).
