@@ -58,6 +58,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
 use Portal\Core\InstallationSettings;
+use Portal\Core\PublicWebsiteSetup;
 use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -106,6 +107,19 @@ $capInstallationLayer = InstallationSettings::layerOrNull();
 // offering a Save that could not store anything.
 $capStorageReady = Capabilities::storageExists($mysqli);
 
+// 🛠️ D-093 (#493 P3): only a global administrator of this organisation (or of
+//    the installation) may change which roles open "Set up the public
+//    website". Asked of `PublicWebsiteSetup`, the ONE place the rule is — the
+//    save handler asks it again, because the page is never the boundary. The
+//    viewer's own account number, read from the session the router has
+//    already checked.
+$capViewerId = (int) ($_SESSION['user_id'] ?? 0);
+// The roles that open it now, which this viewer may not delete either (deleting
+// one takes it out of the set). Empty for a global administrator.
+$capSetUpLockedRoles = PublicWebsiteSetup::mayHandOut($mysqli, $capViewerId, $siteId) === true
+    ? []
+    : PublicWebsiteSetup::rolesThatOpenSetUp($mysqli, $siteId);
+
 $capRows = [];
 foreach (Capabilities::keys() as $capKey) {
     $capDefinition = Capabilities::definition($capKey);
@@ -117,7 +131,11 @@ foreach (Capabilities::keys() as $capKey) {
         'definition' => $capDefinition,
         'chosen'     => $capChosen,
         'inForce'    => $capInForce,
-        'whyNot'     => Capabilities::whyNotChangeable($capKey, $capInstallationLayer),
+        // The installation's or the code's own refusal first; then D-093's,
+        // which only ever refuses "Set up the public website".
+        'whyNot'     => Capabilities::whyNotChangeable($capKey, $capInstallationLayer) !== ''
+            ? Capabilities::whyNotChangeable($capKey, $capInstallationLayer)
+            : PublicWebsiteSetup::whyMappingChangeRefused($mysqli, $capViewerId, $siteId, $capKey),
         // People, not holdings: somebody holding two of the roles counts once.
         'holders'    => Capabilities::holderCount($mysqli, $siteId, $capInForce),
     ];
@@ -202,7 +220,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         data-description="<?php echo htmlspecialchars((string) ($role['description'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                     <i class="fa-solid fa-pen me-1"></i>Edit
                 </button>
-                <?php if ($role['isStandard'] === false && $holders === 0): ?>
+                <?php if ($role['isStandard'] === false && $holders === 0
+                    && in_array(strtolower((string) $role['roleKey']), $capSetUpLockedRoles, true) === false): ?>
                     <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/roles/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
                         <input type="hidden" name="action" value="delete">
@@ -325,7 +344,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="alert alert-warning py-2 mb-2" data-no-role-holder="<?php echo htmlspecialchars($capKey, ENT_QUOTES, 'UTF-8'); ?>"
                      data-falls-open="<?php echo $capFallsOpen === true ? '1' : '0'; ?>">
                     <i class="fa-solid fa-triangle-exclamation me-1"></i>
-                    <?php if ($capFallsOpen === true): ?>
+                    <?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>
+                        <?php // #493 P3: this door does NOT let an ordinary administrator in (D-085), so the usual sentence would be untrue here. ?>
+                        Nobody here holds any of these roles yet, so nobody opens this door through a role. Global administrators of this organisation, and of the whole installation, still can; an ordinary administrator cannot.
+                    <?php elseif ($capFallsOpen === true): ?>
                         Nobody here holds any of these roles yet, so nobody opens this door through a role. Administrators of this organisation, and global administrators, still can.
                     <?php else: ?>
                         Nobody here holds any of these roles yet, so nobody can open this door — not even a global administrator.

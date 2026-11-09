@@ -517,6 +517,9 @@ foreach ([
     // #493 P1 (D-077): who may put an event on the public website. Added HERE
     // in the same change that adds it to the registry (#739's rule).
     Capabilities::WEBSITE_PUBLISH    => 'Cap Website',
+    // #493 P3 (D-085): who may set up the public website. Added HERE in the
+    // same change that adds it to the registry (#739's rule).
+    Capabilities::WEBSITE_SETUP      => 'Cap Website Setup',
 ] as $capabilityKey => $personName) {
     $shippedRole = Capabilities::standardRoleKeys($capabilityKey)[0];
     $personId    = $capNewUser($personName, false);
@@ -569,6 +572,8 @@ $OTHERS = [
     Capabilities::PORTAL_CHECK,
     // #493 P1 (D-077): who may put an event on the public website.
     Capabilities::WEBSITE_PUBLISH,
+    // #493 P3 (D-085): who may set up the public website.
+    Capabilities::WEBSITE_SETUP,
 ];
 
 // =============================================================================
@@ -588,7 +593,7 @@ cap_section('A — the registry as declared');
 cap_check(
     'every offered capability is declared, in order, and nothing has been added, '
         . 'dropped or swapped: #724\'s, the five the owner named on 3 November 2026, '
-        . 'the six #739 converted, #756\'s, #477\'s and #493\'s',
+        . 'the six #739 converted, #756\'s, #477\'s and #493\'s two',
     Capabilities::keys() === array_merge([$CAP], $OTHERS),
     implode(',', Capabilities::keys())
 );
@@ -1509,6 +1514,11 @@ $shouldShipWith = [
     // organisation's administrators publish, through the gate in
     // `PublicWebsite::mayPublish()`, not through this role.
     Capabilities::WEBSITE_PUBLISH    => 'website_editor',
+    // #493 P3 (D-085): ships pointing at the new Website Set-up role, which
+    // migration 262 seeds and grants to NOBODY — out of the box only a GLOBAL
+    // administrator sets up the public website, through the gate in
+    // `PublicWebsiteSetup::maySetUp()`, not through this role.
+    Capabilities::WEBSITE_SETUP      => 'website_setup',
 ];
 foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     cap_check(
@@ -1531,12 +1541,28 @@ foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     //    empty set shuts out the role and nothing else. Nothing can judge how
     //    a sentence reads, so what is pinned is that it does not make the
     //    claim that was false.
-    cap_check(
-        $capabilityKey . ' does NOT claim only a global administrator would be left',
-        str_contains(Capabilities::emptyMeans($capabilityKey), 'Only a global administrator') === false
-        && str_contains(Capabilities::emptyMeans($capabilityKey), 'only a global administrator') === false,
-        Capabilities::emptyMeans($capabilityKey)
-    );
+    //
+    // ⚠️ #493 P3: `website.setup` IS THE ONE WHERE THE SENTENCE IS TRUE, and so
+    //    the check is turned round for it rather than skipped. Its gate
+    //    (`PublicWebsiteSetup::maySetUp()`) lets a GLOBAL administrator in and
+    //    deliberately NOT an ordinary one (D-085), so an empty set really does
+    //    leave only the global administrators — and saying "administrators
+    //    still can" there would be the untrue sentence.
+    if ($capabilityKey === Capabilities::WEBSITE_SETUP) {
+        cap_check(
+            $capabilityKey . ' DOES say only a global administrator would be left, and that an ordinary one is not let in',
+            str_contains(Capabilities::emptyMeans($capabilityKey), 'Only a global administrator') === true
+            && str_contains(Capabilities::emptyMeans($capabilityKey), 'an ordinary administrator is not let in') === true,
+            Capabilities::emptyMeans($capabilityKey)
+        );
+    } else {
+        cap_check(
+            $capabilityKey . ' does NOT claim only a global administrator would be left',
+            str_contains(Capabilities::emptyMeans($capabilityKey), 'Only a global administrator') === false
+            && str_contains(Capabilities::emptyMeans($capabilityKey), 'only a global administrator') === false,
+            Capabilities::emptyMeans($capabilityKey)
+        );
+    }
     cap_check(
         $capabilityKey . ' says administrators are unaffected, which is the fact',
         str_contains(Capabilities::emptyMeans($capabilityKey), 'dministrator') === true

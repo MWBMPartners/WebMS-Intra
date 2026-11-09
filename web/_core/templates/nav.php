@@ -264,6 +264,24 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                 </li>
                 <?php endif; ?>
 
+                <?php
+                // 🌐 #493 P3: Admin → Public website is for whoever may set up the
+                //    public website (`PublicWebsiteSetup::maySetUp()`, D-085) —
+                //    a global administrator, or somebody given "Set up the public
+                //    website". That is NOT every administrator, so it is asked on
+                //    its own; and somebody holding it who is not an administrator
+                //    has no Admin menu, so they get a link of their own beside it.
+                //    `maySetUpHere()` never throws and remembers its answer.
+                $navMaySetUpWebsite = \Portal\Core\PublicWebsiteSetup::maySetUpHere();
+                ?>
+                <?php if (App::isAdmin() !== true && $navMaySetUpWebsite === true): ?>
+                <li class="nav-item">
+                    <a class="nav-link" href="<?php echo htmlspecialchars(Site::url('admin/public-website'), ENT_QUOTES, 'UTF-8'); ?>">
+                        <i class="fa-solid fa-globe me-1" aria-hidden="true"></i> <?php echo htmlspecialchars(t('nav.public_website'), ENT_QUOTES, 'UTF-8'); ?>
+                    </a>
+                </li>
+                <?php endif; ?>
+
                 <?php if (App::isAdmin() === true): ?>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle<?php echo ($navSection === 'admin' || $navSection === 'settings') ? ' active' : ''; ?>"
@@ -304,6 +322,13 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                         <li>
                             <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/migrations'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-database me-1"></i> <?php echo htmlspecialchars(t('nav.migrations'), ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                        </li>
+                        <?php endif; ?>
+                        <?php if ($navMaySetUpWebsite === true): ?>
+                        <li>
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/public-website'), ENT_QUOTES, 'UTF-8'); ?>">
+                                <i class="fa-solid fa-globe me-1"></i> <?php echo htmlspecialchars(t('nav.public_website'), ENT_QUOTES, 'UTF-8'); ?>
                             </a>
                         </li>
                         <?php endif; ?>

@@ -59,6 +59,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#logs" class="badge text-bg-secondary text-decoration-none">Viewing Logs</a>
             <a href="#csv-export" class="badge text-bg-secondary text-decoration-none">CSV Export</a>
             <a href="#web-addresses" class="badge text-bg-secondary text-decoration-none">The Portal&rsquo;s Web Address</a>
+            <a href="#public-website-setup" class="badge text-bg-secondary text-decoration-none">Setting Up the Public Website</a>
             <a href="#time-zones" class="badge text-bg-secondary text-decoration-none">Time Zones</a>
             <a href="#smtp-mailbox" class="badge text-bg-secondary text-decoration-none">SMTP Mailbox</a>
             <a href="#ms365-shared-mailbox" class="badge text-bg-secondary text-decoration-none">MS365 Shared Mailbox</a>
@@ -1067,6 +1068,33 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <li>It does not move the portal or change what address reaches it. That is set with your hosting company.</li>
         <li>It does not check that the address works. If it is mistyped, e-mails still go and their links open nothing.</li>
     </ul>
+</div>
+
+<!-- Section: Setting up the public website (#493 P3; D-082, D-085, D-093,
+     D-094, D-095). Every statement here is held true by section W of
+     tools/public-website-tick-selftest.php. If Admin, Public website changes,
+     change this with it. -->
+<div class="portal-card p-4 mb-4" id="public-website-setup">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2 text-primary"></i>Setting Up the Public Website</h2>
+
+    <p><strong>Nothing from the portal is shown on any outside website yet.</strong> The piece you will paste into your own website (the &ldquo;public door&rdquo;) is not part of this version. What you set here is kept ready for it.</p>
+
+    <h3 class="h5 mt-4 mb-3">Who can do it</h3>
+    <ul class="mb-3">
+        <li>A global administrator of your organisation, or of the whole installation. An ordinary administrator cannot open the page.</li>
+        <li>Anybody a global administrator chooses: give them the role <strong>Website Set-up</strong> on the Users page, or point &ldquo;Set up the public website&rdquo; at another role on the <a href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Roles</a> page. Only a global administrator can do either: an ordinary administrator cannot give this job to anybody, themselves included.</li>
+    </ul>
+
+    <h3 class="h5 mt-4 mb-3">What it holds</h3>
+    <ul class="mb-3">
+        <li><strong>Your main website</strong>, such as <code>https://www.ourchurch.org</code> &mdash; the website you already have, which the portal does not run.</li>
+        <li><strong>A public address</strong> for the portal&rsquo;s own public pages, such as <code>events.ourchurch.org</code>. It is optional. You point it at the portal with whoever looks after your domain, so public visitors never reach the address members sign in at. No two organisations can use the same one, and it cannot be an address members already sign in at.</li>
+        <li><strong>The websites allowed to show your public pages in a frame</strong> &mdash; one per line, each beginning <code>https://</code>, at most twenty. With none listed, no website may. A wildcard, a folder or page after the name, or plain <code>http://</code> is refused, and one bad line stops the whole list being saved, so you are told which line to fix.</li>
+        <li>For the installation&rsquo;s global administrator only: whether any organisation may let outside websites frame its pages at all. When this says no, every organisation&rsquo;s list is ignored.</li>
+    </ul>
+
+    <h3 class="h5 mt-4 mb-3">Check my set-up</h3>
+    <p class="mb-0">The button checks what can be known today: whether your main website answers over https, whether your public address&rsquo;s name exists, whether each framing website is valid and allowed, how many events and posters are marked to appear on the public website today, and whether the portal&rsquo;s own address is set. It always says the public door cannot be tested yet, because it is not part of this version. It changes nothing and keeps nothing.</p>
 </div>
 
 <!-- Section: Time zones (#604).

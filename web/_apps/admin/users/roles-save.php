@@ -19,6 +19,17 @@
  * would confirm the account exists in an organisation the caller cannot
  * see into.
  *
+ * AND D-093 (#493 P3): giving or taking away a role that CURRENTLY opens "Set up
+ * the public website" is for a global administrator of this organisation (or of
+ * the installation) only — otherwise an ordinary administrator could give the
+ * job to themselves. Asked of `PublicWebsiteSetup::whyRoleChangeRefused()`, the
+ * ONE place the rule is. A save that would touch such a role is refused WHOLE,
+ * with the reason, and recorded: nothing in it is written, so nobody is left
+ * believing half of it happened. The members page draws those boxes locked for
+ * an ordinary administrator and carries the person's current answer for each in
+ * a hidden field, so an ordinary save of the person's OTHER roles never reads
+ * as taking this one away (a disabled box is not submitted, #667).
+ *
  * WHAT THIS PAGE CANNOT DO: it cannot grant a role belonging to a
  * DIFFERENT organisation — a posted `roleID` that is not in
  * `Roles::forSite()`'s list for the organisation open right now is simply
@@ -45,6 +56,7 @@ use Portal\Core\ApiAuth;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PublicWebsiteSetup;
 use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -101,6 +113,24 @@ $toGrant  = array_values(array_diff($wanted, $current));
 $toRevoke = array_values(array_diff($current, $wanted));
 
 $actorId = ApiAuth::actorUserId();
+
+// 🛠️ D-093: which role KEYS this save would give or take away, asked of the one
+//    rule before anything is written.
+$keysById = array_column(Roles::forSite($mysqli, $siteId), 'roleKey', 'roleID');
+$touched  = [];
+foreach (array_merge($toGrant, $toRevoke) as $roleId) {
+    if (isset($keysById[$roleId]) === true) {
+        $touched[] = (string) $keysById[$roleId];
+    }
+}
+$handOutRefused = PublicWebsiteSetup::whyRoleChangeRefused($mysqli, (int) ($actorId ?? 0), $siteId, $touched);
+if ($handOutRefused !== '') {
+    PublicWebsiteSetup::recordHandOutRefused($actorId, $siteId, 'Users page, roles of account #' . $userId);
+    $_SESSION['flash_msg']  = $handOutRefused;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/users'), true, 302);
+    exit();
+}
 $given   = 0;
 $removed = 0;
 $sawNotFound = false;

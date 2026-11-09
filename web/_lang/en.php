@@ -34,6 +34,7 @@ return [
     'nav.activity_log'      => 'Activity Log',
     'nav.user_management'   => 'User Management',
     'nav.migrations'        => 'Migrations',
+    'nav.public_website'    => 'Public website',
     'nav.settings'          => 'Settings',
     'nav.audit_trail'       => 'Audit Trail',
     'nav.apps'              => 'Apps',

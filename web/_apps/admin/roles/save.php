@@ -29,6 +29,14 @@
  * nobody — which is allowed, but only when somebody has confirmed it in as many
  * words on the page, never as a side effect of a tidy-up.
  *
+ * AND D-093 (#493 P3): only a global administrator of this organisation, or of
+ * the installation, may change which roles open "Set up the public website" —
+ * on `capability` and `capability_reset` for that one capability, and on
+ * `delete` of a role that currently opens it (deleting it takes it out of the
+ * set). Asked of `PublicWebsiteSetup`, the ONE place the rule is; refused with
+ * the reason and recorded. Every other action, and every other capability, is
+ * untouched: an ordinary administrator keeps the rest of this page.
+ *
  * WHY A ROLE'S KEY IS NEVER READ FROM AN UPDATE POST: keys are fixed for
  * life once a role exists, standard or not, because workflow steps,
  * newsletter segments, the pre-release channel gate and settings all name
@@ -52,6 +60,7 @@ use Portal\Core\Auth;
 use Portal\Core\Capabilities;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
+use Portal\Core\PublicWebsiteSetup;
 use Portal\Core\Roles;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -76,6 +85,17 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 $siteId  = Site::id();
 $actorId = ApiAuth::actorUserId();
 $action  = (string) ($_POST['action'] ?? '');
+
+/**
+ * D-093's refusal, said and recorded the same way from every branch below.
+ */
+$refuseHandOut = static function (string $where) use ($actorId, $siteId): never {
+    PublicWebsiteSetup::recordHandOutRefused($actorId, $siteId, $where);
+    $_SESSION['flash_msg']  = PublicWebsiteSetup::HAND_OUT_REFUSED;
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('admin/roles'), true, 302);
+    exit();
+};
 
 if ($action === 'create') {
     $roleKey    = Roles::normaliseKey((string) ($_POST['roleKey'] ?? ''));
@@ -259,6 +279,12 @@ if ($action === 'delete') {
         header('Location: ' . Site::url('admin/roles'), true, 302);
         exit();
     }
+    // 🛠️ D-093: deleting a role that opens "Set up the public website" takes
+    //    it out of that set, which only a global administrator may do.
+    if (PublicWebsiteSetup::whyRoleChangeRefused($mysqli, (int) ($actorId ?? 0), $siteId, [(string) $roleKeyRow['roleKey']]) !== '') {
+        $refuseHandOut('Roles page, deleting role #' . $roleId);
+    }
+
     $wouldEmpty = Capabilities::capabilitiesLeftEmptyByRemoving(
         $mysqli,
         $siteId,
@@ -309,6 +335,12 @@ if ($action === 'delete') {
 
 if ($action === 'capability') {
     $capability = (string) ($_POST['capability'] ?? '');
+
+    // 🛠️ D-093, asked BEFORE anything else so that even the "you ticked
+    //    nothing" message is not shown to somebody who may not change it.
+    if (PublicWebsiteSetup::whyMappingChangeRefused($mysqli, (int) ($actorId ?? 0), $siteId, $capability) !== '') {
+        $refuseHandOut('Roles page, which roles open it');
+    }
 
     // ⚠️ ASK WHETHER THE FIELD ARRIVED, never only what it holds (#677).
     //    Nothing ticked means the boxes were not submitted AT ALL, which is
@@ -379,6 +411,9 @@ if ($action === 'capability') {
 
 if ($action === 'capability_reset') {
     $capability = (string) ($_POST['capability'] ?? '');
+    if (PublicWebsiteSetup::whyMappingChangeRefused($mysqli, (int) ($actorId ?? 0), $siteId, $capability) !== '') {
+        $refuseHandOut('Roles page, back to the role it came with');
+    }
     $outcome    = Capabilities::forget(
         $mysqli,
         $siteId,

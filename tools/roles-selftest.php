@@ -89,7 +89,9 @@ function expectThrows(string $label, callable $fn, string $expectedClass = \Inva
 echo "=== STANDARD — the standard roles every organisation starts with ===\n";
 // 🔁 SIXTEEN SINCE 7 November 2026 (#493, D-077): `website_editor`, the role
 //    `website.publish` ships pointing at, seeded by migration 258.
-assertTrue('STANDARD has exactly 16 keys', count(Roles::STANDARD) === 16);
+// 🔁 SEVENTEEN SINCE 9 November 2026 (#493 P3, D-085): `website_setup`, the
+//    role `website.setup` ships pointing at, seeded by migration 262.
+assertTrue('STANDARD has exactly 17 keys', count(Roles::STANDARD) === 17);
 foreach (Roles::STANDARD as $key => $role) {
     assertTrue(
         "key '{$key}' matches ^[a-z][a-z0-9_]{1,49}\$",
@@ -115,9 +117,11 @@ $expectedKeys = [
     'data_controller',
     // #493 / D-077, 7 November 2026, migration 258. Last, for the same reason.
     'website_editor',
+    // #493 P3 / D-085, 9 November 2026, migration 262. Last, for the same reason.
+    'website_setup',
 ];
 assertTrue(
-    'STANDARD keys are exactly the sixteen expected keys, in order',
+    'STANDARD keys are exactly the seventeen expected keys, in order',
     array_keys(Roles::STANDARD) === $expectedKeys
 );
 

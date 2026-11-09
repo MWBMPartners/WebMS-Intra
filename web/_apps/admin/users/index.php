@@ -164,6 +164,15 @@ $rowFacts    = AccountGuard::facts(array_map(static fn (array $u): int => (int) 
 //    what, here — one query each via Portal\Core\Roles, the single class
 //    that knows the role tables.
 $allRoles  = Roles::forSite($mysqli, Site::id());
+// 🛠️ D-093 (#493 P3): the roles that open "Set up the public website", which
+//    only a global administrator may give or take away. For anybody else their
+//    boxes are drawn LOCKED, with the person's current answer carried in a
+//    hidden field beside each (a disabled box is not submitted, #667), so
+//    saving somebody's other roles never reads as taking this one away. The
+//    save handler asks the same rule again; this page is never the boundary.
+$rolesLockedHere = \Portal\Core\PublicWebsiteSetup::mayHandOut($mysqli, (int) ($_SESSION['user_id'] ?? 0), Site::id()) === true
+    ? []
+    : \Portal\Core\PublicWebsiteSetup::rolesThatOpenSetUp($mysqli, Site::id());
 $roleNamesById = [];
 foreach ($allRoles as $r) {
     $roleNamesById[$r['roleID']] = $r['roleName'];
@@ -738,12 +747,20 @@ editUserModal.addEventListener('show.bs.modal', function (event) {
                         <p class="text-muted mb-0">This organisation has no roles yet. Add one at <a href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Admin &rarr; Roles</a>.</p>
                     <?php else: ?>
                         <?php foreach ($allRoles as $role): ?>
+                            <?php $roleLocked = in_array(strtolower((string) $role['roleKey']), $rolesLockedHere, true); ?>
                             <div class="form-check">
                                 <input class="form-check-input portal-role-checkbox" type="checkbox"
                                        name="roles[]" value="<?php echo (int) $role['roleID']; ?>"
-                                       id="role-<?php echo (int) $role['roleID']; ?>">
+                                       id="role-<?php echo (int) $role['roleID']; ?>"<?php echo $roleLocked === true ? ' disabled data-role-locked="1"' : ''; ?>>
+                                <?php if ($roleLocked === true): ?>
+                                    <?php // Carries the current answer; the script below switches it on only when the person holds the role. ?>
+                                    <input type="hidden" name="roles[]" value="<?php echo (int) $role['roleID']; ?>" class="portal-role-locked-carry" disabled>
+                                <?php endif; ?>
                                 <label class="form-check-label" for="role-<?php echo (int) $role['roleID']; ?>">
                                     <?php echo htmlspecialchars($role['roleName'], ENT_QUOTES, 'UTF-8'); ?>
+                                    <?php if ($roleLocked === true): ?>
+                                        <br><small class="text-muted"><i class="fa-solid fa-lock me-1"></i>Only a global administrator can give or take away this role, because it lets somebody set up the public website.</small>
+                                    <?php endif; ?>
                                     <?php if (($role['description'] ?? null) !== null && $role['description'] !== ''): ?>
                                         <br><small class="text-muted"><?php echo htmlspecialchars($role['description'], ENT_QUOTES, 'UTF-8'); ?></small>
                                     <?php endif; ?>
@@ -772,6 +789,10 @@ rolesModal.addEventListener('show.bs.modal', function (event) {
     var held = heldCsv.split(',').filter(function (v) { return v !== ''; });
     document.querySelectorAll('.portal-role-checkbox').forEach(function (box) {
         box.checked = held.indexOf(box.value) !== -1;
+    });
+    // D-093: a locked role's hidden carrier is sent only when the person holds it.
+    document.querySelectorAll('.portal-role-locked-carry').forEach(function (carry) {
+        carry.disabled = held.indexOf(carry.value) === -1;
     });
 });
 </script>

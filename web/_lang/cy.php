@@ -28,6 +28,7 @@ return [
     'nav.activity_log'      => 'Cofnod Gweithgaredd',
     'nav.user_management'   => 'Rheoli Defnyddwyr',
     'nav.migrations'        => 'Ymfudiadau',
+    'nav.public_website'    => 'Gwefan gyhoeddus',
     'nav.settings'          => 'Gosodiadau',
     'nav.my_account'        => 'Fy Nghyfrif',
     'nav.sign_in'           => 'Mewngofnodi',

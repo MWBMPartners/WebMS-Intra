@@ -56,6 +56,21 @@
  *      organisation chose every poster; who may save each choice; the
  *      headers that keep the secret address out of other websites' logs and
  *      search engines; poster dates on the organisation's own calendar.
+ *   W  Admin → Public website (#493 P3; D-082, D-085, D-093, D-094, D-095):
+ *      who may open it (both global administrators and a Website Set-up
+ *      holder; NOT an ordinary administrator, a flag administrator, a member,
+ *      a Website Editor or a holder in another organisation; nobody by role
+ *      once the permission is emptied); the save handler and the check button
+ *      asking the same gate; every bad main website, framing website and
+ *      public address refused with nothing written and recorded; the framing
+ *      list read from the organisation's own row only, and checked again on
+ *      read; one organisation's values never reaching another's; a public
+ *      address another organisation holds refused without naming it; the
+ *      installation's framing switch at save AND at read; the general editor's
+ *      lock; "Check my set-up" (POST only, the form token, its limit, nothing
+ *      ticked when nothing is set, a loopback main website unreachable, the
+ *      door row never a tick); D-093 on the Roles and Users pages; and the
+ *      menu link and the dashboard tile following the gate.
  *   P  the plants: each guard taken out of a COPY of the portal, and the
  *      scenario that should catch it re-run and required to go red.
  *
@@ -70,12 +85,17 @@
  *     between; curl here caches nothing, so that minute is not tested.
  *   - The series-repattern half (a date the pattern ADDS is off the website)
  *     is check S18w of tools/event-repeat-pages-selftest.php, not here.
+ *   - Section W does not run the Users page's script, so the locked role
+ *     box's hidden carrier being switched on is NOT driven (P86 says so); the
+ *     handler's refusal is what is proved. It cannot test that a main website
+ *     really answers, because this test reaches nothing outside the machine:
+ *     only the "cannot be reached" half is driven, with a loopback address.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_… SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         [SELFTEST_WEB_PORT=9493] php tools/public-website-tick-selftest.php
  *
  *         The database must already hold `web/_sql/full_schema.sql` (with
- *         migration 261). Needs PHP's curl extension and `proc_open()`. It
+ *         migration 262). Needs PHP's curl extension and `proc_open()`. It
  *         REFUSES rather than skipping when anything is missing.
  *
  * Exit:   0 only when every check ran and passed AND the number of checks is
@@ -93,7 +113,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 175;
+const PWT_EXPECTED_CHECKS = 216;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -160,6 +180,10 @@ $hasRule = (int) ($db->query(
 )->fetch_assoc()['n'] ?? 0);
 if ($hasColumn !== 3 || $hasRule !== 1) {
     refuse('this database was not built from the current install script (migration 258 is missing)');
+}
+// Section W needs Admin → Public website's table (#493 P3, migration 262).
+if ((int) ($db->query("SELECT COUNT(*) AS `n` FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblPublicHosts'")->fetch_assoc()['n'] ?? 0) !== 1) {
+    refuse('this database was not built from the current install script (migration 262 is missing)');
 }
 // Section S needs the foyer screen's table (#493 P2b, migration 261).
 if ((int) ($db->query("SELECT COUNT(*) AS `n` FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblNoticeboardFoyer'")->fetch_assoc()['n'] ?? 0) !== 1) {
@@ -394,6 +418,10 @@ foreach ([
     'siteroot'      => ['isAdmin' => 0, 'isRoot' => 0, 'siteAdmin' => 0, 'siteRoot' => 1, 'site' => 'one', 'active' => 1],
     'root'          => ['isAdmin' => 0, 'isRoot' => 1, 'siteAdmin' => 0, 'siteRoot' => 0, 'site' => 'one', 'active' => 1],
     'member'        => ['isAdmin' => 0, 'isRoot' => 0, 'siteAdmin' => 0, 'siteRoot' => 0, 'site' => 'one', 'active' => 1],
+    // #493 P3 (section W): the Website Set-up role holder of organisation 1,
+    // and a member of organisation 1 who holds that role only in organisation 2.
+    'setup'         => ['isAdmin' => 0, 'isRoot' => 0, 'siteAdmin' => 0, 'siteRoot' => 0, 'site' => 'one', 'active' => 1],
+    'setupelsewhere' => ['isAdmin' => 0, 'isRoot' => 0, 'siteAdmin' => 0, 'siteRoot' => 0, 'site' => 'one', 'active' => 1],
 ] as $role => $flags) {
     $email = "pwt.{$role}@selftest.invalid";
     $old   = $db->prepare('SELECT `userID` FROM `tblUsers` WHERE `emailAddress` = ?');
@@ -430,6 +458,20 @@ if ($editorRole <= 0) {
     refuse('organisation 1 has no Website Editor role — migration 258 did not seed it');
 }
 $db->query("INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES ({$people['editor']['id']}, {$editorRole}, {$siteOne})");
+
+// #493 P3 (section W): the Website Set-up role (migration 262), held in
+// organisation 1 by `setup`; organisation 2 is made by this test, so it is
+// given the role here and `setupelsewhere` (a member of BOTH, so the site gate
+// lets them in to organisation 1) holds it THERE only.
+$setupRole = (int) ($db->query("SELECT `roleID` FROM `tblRoles` WHERE `siteID` = {$siteOne} AND `roleKey` = 'website_setup'")->fetch_assoc()['roleID'] ?? 0);
+if ($setupRole <= 0) {
+    refuse('organisation 1 has no Website Set-up role — migration 262 did not seed it');
+}
+$db->query("INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES ({$people['setup']['id']}, {$setupRole}, {$siteOne})");
+$db->query("INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `description`, `isStandard`) VALUES ({$siteTwo}, 'website_setup', 'Website Set-up', 'test copy', 1)");
+$setupRoleTwo = (int) $db->insert_id;
+$db->query("INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES ({$siteTwo}, {$people['setupelsewhere']['id']}, 1, 0, 0)");
+$db->query("INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES ({$people['setupelsewhere']['id']}, {$setupRoleTwo}, {$siteTwo})");
 
 // One API key for the events API.
 $apiKey    = 'wbms_' . bin2hex(random_bytes(16));
@@ -1331,8 +1373,11 @@ $scnRolesPage = static function () use ($signIn, $http, $capList): array {
 $rolesSeen = $scnRolesPage();
 $rolesWant = [];
 foreach ((array) $capList as $key => $unused) {
-    // `website.publish` is the one this world gives a holder (the Website Editor).
-    $rolesWant[$key] = $key === 'website.publish' ? 'no warning drawn' : 'right';
+    // `website.publish` and `website.setup` are the two this world gives a
+    // holder (the Website Editor; and, since #493 P3, the Website Set-up holder
+    // of section W). Section W's W16 takes that holder away for a moment and
+    // reads `website.setup`'s own sentence, which differs from every other's.
+    $rolesWant[$key] = in_array($key, ['website.publish', 'website.setup'], true) === true ? 'no warning drawn' : 'right';
 }
 check('R15 the Roles page\'s "nobody holds these roles" warning, for EVERY permission, says a global administrator still gets in exactly where one does',
     [is_array($capList) && count($capList) > 10 && array_key_exists('erasure.review', $capList), $rolesSeen], [true, $rolesWant]);
@@ -1932,6 +1977,519 @@ check('S13 (script read as text, not run) the screen marks its own answers, asks
 $foyerWorld();
 
 // =============================================================================
+echo "W. Admin → Public website, and who may hand the job out (#493 P3; D-085, D-093, D-094, D-095)\n";
+// =============================================================================
+// Every result is read back from the database (or from the REAL readers in the
+// COPY of the portal, through `ask-setup.php`, so a plant made in the copy is
+// what answers). The organisation-level keys are cleared before each scenario,
+// so a plant re-running one gets the same starting world.
+file_put_contents($child . $sep . 'ask-setup.php', <<<'ASK'
+<?php
+// Written by tools/public-website-tick-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+$core = __DIR__ . '/web/_core/';
+define('PORTAL_CORE', rtrim($core, '/'));
+foreach (['App.php', 'Site.php', 'Logger.php', 'Roles.php', 'InstallationSettings.php', 'Capabilities.php', 'EventVisibility.php',
+    'PublicWebsite.php', 'PortalAddress.php', 'SafeFetch.php', 'PublicWebsiteSetup.php'] as $f) {
+    require_once $core . $f;
+}
+$c = require __DIR__ . '/web/_auth_keys/auth_creds.php';
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$mysqli = new mysqli($c['db_host'], $c['db_user'], $c['db_pass'], $c['db_name'], (int) $c['db_port']);
+$mysqli->set_charset('utf8mb4');
+$site = (int) $argv[1];
+\Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => '']], $site);
+echo json_encode([
+    'frameAncestors' => \Portal\Core\PublicWebsiteSetup::frameAncestorsFor($mysqli, $site),
+    'website'        => \Portal\Core\PublicWebsiteSetup::websiteAddressFor($mysqli, $site),
+    'publicHost'     => \Portal\Core\PublicWebsiteSetup::publicHostFor($mysqli, $site),
+    'permitted'      => \Portal\Core\PublicWebsiteSetup::framingPermitted($mysqli),
+    'locked'         => [
+        \Portal\Core\PublicWebsite::lockedInGeneralEditor('public.website.address'),
+        \Portal\Core\PublicWebsite::lockedInGeneralEditor('public.frame.origins'),
+        \Portal\Core\PublicWebsite::lockedInGeneralEditor('PUBLIC.FRAME.PERMITTED'),
+    ],
+    'pure'           => [
+        'empty'  => \Portal\Core\PublicWebsiteSetup::frameAncestorsValue([]),
+        'two'    => \Portal\Core\PublicWebsiteSetup::frameAncestorsValue(['https://a.example.org', 'https://b.example.org:8443']),
+        'nasty'  => \Portal\Core\PublicWebsiteSetup::frameAncestorsValue(['*', "https://a.example.org; script-src *", "https://x.example.org\nX: y", "'self'", 'http://h.example.org']),
+    ],
+]);
+ASK);
+$askSetup = static function (int $site) use ($child, $sep): array {
+    // The reader's own log lines go to a file, not into the answer: a hand edit
+    // it drops is logged by design, and that line is not part of the JSON.
+    $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -d ' . escapeshellarg('error_log=' . $child . $sep . 'ask-setup.log') . ' '
+        . escapeshellarg($child . $sep . 'ask-setup.php') . ' ' . $site . ' 2>&1');
+    $got = json_decode($raw, true);
+    return is_array($got) === true ? $got : ['could not ask' => $raw];
+};
+
+/** One organisation-level (or installation, $site null) settings row, or null. */
+$pwRow = static function (?int $site, string $key) use ($db): ?string {
+    if ($site === null) {
+        $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
+        $stmt->bind_param('s', $key);
+    } else {
+        $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?');
+        $stmt->bind_param('si', $key, $site);
+    }
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row === null ? null : (string) $row['settingValue'];
+};
+$pwHost = static function (int $site) use ($db): ?string {
+    $row = $db->query("SELECT `hostName` FROM `tblPublicHosts` WHERE `siteID` = {$site}")->fetch_assoc();
+    return $row === null ? null : (string) $row['hostName'];
+};
+/** Clear everything this section writes, so each scenario starts from the same world. */
+$pwClean = static function () use ($db, $siteOne, $siteTwo): void {
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` IN ('public.website.address', 'public.frame.origins') AND (`siteID` IN ({$siteOne}, {$siteTwo}) OR `siteID` IS NULL)");
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'public.frame.permitted' AND `siteID` IS NOT NULL");
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'public.frame.permitted', 'yes', 'yes', 0) "
+        . "ON DUPLICATE KEY UPDATE `settingValue` = 'yes'");
+    $db->query("DELETE FROM `tblPublicHosts` WHERE `siteID` IN ({$siteOne}, {$siteTwo})");
+    $db->query("DELETE FROM `tblApiRateLimits` WHERE `bucket` LIKE 'pwsetup:%'");
+    $db->query("DELETE FROM `tblCapabilityMap` WHERE `siteID` = {$siteOne} AND `capabilityKey` IN ('website.setup', 'website.publish')");
+};
+/** A fresh form token for whoever is signed in (every page carries it in the header). */
+$freshToken = static function () use ($http, $tokenOn): string {
+    return $tokenOn($http('GET', '/')['body']);
+};
+/** Sign in, then post one form to Admin → Public website's save handler. */
+$pwPost = static function (string $role, string $action, ?string $value, string $path = '/admin/public-website/save') use ($signIn, $http, $freshToken): array {
+    $signIn($role);
+    $fields = ['csrf_token' => $freshToken(), 'action' => $action];
+    if ($value !== null) {
+        $fields['value'] = $value;
+    }
+    return $http('POST', $path, $fields);
+};
+$recorded = static function (string $type, int $userId, string $needle) use ($logged): int {
+    return $logged($type, $userId, $needle);
+};
+
+$pwClean();
+
+// W1: who may open the page (D-085). Only the two global administrators and a
+//     holder of the permission in THIS organisation; an ordinary administrator
+//     (by either flag), a plain member, a Website EDITOR (a different
+//     permission) and a holder in another organisation are refused.
+$scnPwGate = static function () use ($signIn, $http): array {
+    $out = [];
+    foreach (['root', 'siteroot', 'setup', 'orgadmin', 'flagadmin', 'member', 'editor', 'setupelsewhere'] as $who) {
+        $signIn($who);
+        $out[$who] = $http('GET', '/admin/public-website')['status'];
+    }
+    return $out;
+};
+check('W1 Admin → Public website opens for the installation\'s and the organisation\'s global administrators and a Website Set-up holder, and refuses an ordinary administrator, a flag administrator, a member, a Website Editor and a holder in another organisation',
+    $scnPwGate(), ['root' => 200, 'siteroot' => 200, 'setup' => 200, 'orgadmin' => 403, 'flagadmin' => 403, 'member' => 403, 'editor' => 403, 'setupelsewhere' => 403]);
+
+// W2: the permission emptied (a deliberate "nobody, by role") — the holder is
+//     refused, the organisation's global administrator still gets in.
+$scnPwEmptied = static function () use ($db, $siteOne, $signIn, $http, $pwClean): array {
+    $db->query("INSERT INTO `tblCapabilityMap` (`siteID`, `capabilityKey`, `decidedAtUtc`) VALUES ({$siteOne}, 'website.setup', UTC_TIMESTAMP())");
+    $signIn('setup');
+    $holder = $http('GET', '/admin/public-website')['status'];
+    $signIn('siteroot');
+    $global = $http('GET', '/admin/public-website')['status'];
+    $pwClean();
+    return ['holder' => $holder, 'organisation global administrator' => $global];
+};
+check('W2 with "Set up the public website" emptied, the role holder is refused and the organisation\'s global administrator still gets in',
+    $scnPwEmptied(), ['holder' => 403, 'organisation global administrator' => 200]);
+
+// W3: the handler asks the same gate; a refused post writes nothing and is recorded.
+$scnPwSaveGate = static function () use ($pwPost, $pwRow, $siteOne, $recorded, $people, $http, $signIn, $freshToken, $pwClean): array {
+    $pwClean();
+    $save  = $pwPost('orgadmin', 'website', 'https://www.pwt-orgadmin.example.org');
+    $signIn('member');
+    $check = $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
+    return [
+        'save answered'  => $save['status'],
+        'nothing stored' => $pwRow($siteOne, 'public.website.address'),
+        'recorded'       => $recorded('PublicWebsiteSetupRefused', $people['orgadmin']['id'], 'Admin, Public website') >= 1,
+        'check answered' => $check['status'],
+    ];
+};
+check('W3 the save handler and the check button refuse an ordinary administrator and a member (403), store nothing, and record the refusal',
+    $scnPwSaveGate(), ['save answered' => 403, 'nothing stored' => null, 'recorded' => true, 'check answered' => 403]);
+
+// W4: the main website — a good one stored tidied, http stored with a warning,
+//     bad ones refused with nothing written and recorded, empty deletes.
+$scnPwWebsite = static function () use ($pwPost, $pwRow, $siteOne, $recorded, $people, $signIn, $http, $pwClean): array {
+    $pwClean();
+    $out = [];
+    $pwPost('setup', 'website', '  HTTPS://WWW.PWT-Church.example.org/ ');
+    $out['tidied'] = $pwRow($siteOne, 'public.website.address');
+    $pwPost('setup', 'website', 'http://plain.pwt.example.org');
+    $page = $http('GET', '/admin/public-website')['body'];
+    $out['http stored'] = $pwRow($siteOne, 'public.website.address');
+    $out['http warned'] = str_contains($page, 'begins http://');
+    foreach (['a path' => 'https://pwt.example.org/church', 'ftp' => 'ftp://pwt.example.org', 'a user' => 'https://me@pwt.example.org',
+        'a space' => 'https://pwt example.org', 'a query' => 'https://pwt.example.org/?a=1'] as $name => $bad) {
+        $before = $pwRow($siteOne, 'public.website.address');
+        $pwPost('setup', 'website', $bad);
+        $out['refused: ' . $name] = $pwRow($siteOne, 'public.website.address') === $before;
+    }
+    $out['refusals recorded'] = $recorded('PublicWebsiteSetupRefused', $people['setup']['id'], 'main website') >= 5;
+    $out['missing field refused'] = $pwPost('setup', 'website', null)['status'] === 302 && $pwRow($siteOne, 'public.website.address') === 'http://plain.pwt.example.org';
+    $pwPost('setup', 'website', '');
+    $out['empty deletes'] = $pwRow($siteOne, 'public.website.address');
+    $out['save recorded'] = $recorded('PublicWebsiteAddressSaved', $people['setup']['id'], 'main website') >= 1;
+    return $out;
+};
+check('W4 the main website: stored tidied, http accepted with a warning, a path, ftp, a user name, a space or a query refused with nothing written and recorded, a post with no value changes nothing, and empty deletes it',
+    $scnPwWebsite(), ['tidied' => 'https://www.pwt-church.example.org', 'http stored' => 'http://plain.pwt.example.org', 'http warned' => true,
+        'refused: a path' => true, 'refused: ftp' => true, 'refused: a user' => true, 'refused: a space' => true, 'refused: a query' => true,
+        'refusals recorded' => true, 'missing field refused' => true, 'empty deletes' => null, 'save recorded' => true]);
+
+// W5: the framing list (D-082). One bad line refuses the WHOLE list, naming it.
+$scnPwFrames = static function () use ($pwPost, $pwRow, $siteOne, $recorded, $people, $signIn, $http, $pwClean): array {
+    $pwClean();
+    $out = [];
+    $pwPost('setup', 'frame_origins', "https://A.pwt.example.org/\nhttps://b.pwt.example.org:8443\n\nhttps://a.pwt.example.org\nb2.pwt.example.org");
+    $out['stored, tidied, duplicate collapsed'] = $pwRow($siteOne, 'public.frame.origins');
+    $good = $out['stored, tidied, duplicate collapsed'];
+    $bad = [
+        'http'      => 'http://x.pwt.example.org',
+        'wildcard'  => 'https://*.pwt.example.org',
+        'bare star' => '*',
+        'keyword'   => "'self'",
+        'bare none' => 'none',
+        'a path'    => 'https://x.pwt.example.org/page',
+        'a query'   => 'https://x.pwt.example.org?a=1',
+        'a number'  => 'https://192.0.2.4',
+        'data'      => 'data:text/html,x',
+        'semicolon' => 'https://x.pwt.example.org; script-src *',
+    ];
+    foreach ($bad as $name => $line) {
+        $r = $pwPost('setup', 'frame_origins', "https://ok.pwt.example.org\n" . $line);
+        $out['refused: ' . $name] = $pwRow($siteOne, 'public.frame.origins') === $good;
+    }
+    $page = $http('GET', '/admin/public-website')['body'];
+    $out['says which line'] = str_contains($page, 'Line 2');
+    $many = [];
+    for ($i = 1; $i <= 21; $i++) {
+        $many[] = 'https://s' . $i . '.pwt.example.org';
+    }
+    $pwPost('setup', 'frame_origins', implode("\n", $many));
+    $out['21 refused'] = $pwRow($siteOne, 'public.frame.origins') === $good;
+    $pwPost('setup', 'frame_origins', implode("\n", array_slice($many, 0, 20)));
+    $out['20 accepted'] = substr_count((string) $pwRow($siteOne, 'public.frame.origins'), "\n") + 1;
+    $out['refusals recorded'] = $recorded('PublicWebsiteSetupRefused', $people['setup']['id'], 'framing list') >= 11;
+    $pwPost('setup', 'frame_origins', '');
+    $out['empty deletes'] = $pwRow($siteOne, 'public.frame.origins');
+    return $out;
+};
+$wFramesWant = ['stored, tidied, duplicate collapsed' => "https://a.pwt.example.org\nhttps://b.pwt.example.org:8443\nhttps://b2.pwt.example.org"];
+foreach (['http', 'wildcard', 'bare star', 'keyword', 'bare none', 'a path', 'a query', 'a number', 'data', 'semicolon'] as $name) {
+    $wFramesWant['refused: ' . $name] = true;
+}
+$wFramesWant += ['says which line' => true, '21 refused' => true, '20 accepted' => 20, 'refusals recorded' => true, 'empty deletes' => null];
+check('W5 the framing list: tidied with duplicates collapsed; one bad line (http, a wildcard, a keyword, a path, a query, a number, data:, a ";") refuses the whole list naming the line; 21 refused and 20 accepted; empty deletes it',
+    $scnPwFrames(), $wFramesWant);
+
+// W6: organisation only. An INSTALLATION row of the list is ignored; the
+//     reader never lets anything a hand edit stored into the header; the pure
+//     builder answers 'none' for nothing and never passes a dangerous value.
+$scnPwOrgOnly = static function () use ($db, $siteOne, $askSetup, $pwClean): array {
+    $pwClean();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'public.frame.origins', 'https://installation.pwt.example.org', '', 0)");
+    $a = $askSetup($siteOne);
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.frame.origins', "
+        . "'https://ok.pwt.example.org\n*\nhttp://plain.pwt.example.org\nhttps://x.pwt.example.org; script-src *', '', 0)");
+    $b = $askSetup($siteOne);
+    $pwClean();
+    return ['installation row ignored' => $a['frameAncestors'] ?? $a, 'hand edit filtered' => $b['frameAncestors'] ?? $b, 'pure' => $b['pure'] ?? null];
+};
+check('W6 an installation row of the framing list is ignored, a hand-edited list keeps only its valid lines, and the pure builder gives \'none\' for nothing and never a "*", ";", quote or line break',
+    $scnPwOrgOnly(), ['installation row ignored' => "'none'", 'hand edit filtered' => 'https://ok.pwt.example.org',
+        'pure' => ['empty' => "'none'", 'two' => 'https://a.example.org https://b.example.org:8443', 'nasty' => "'none'"]]);
+
+// W7: one organisation's values never reach another's.
+$scnPwOtherOrg = static function () use ($db, $siteOne, $siteTwo, $askSetup, $signIn, $http, $pwClean): array {
+    $pwClean();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES "
+        . "({$siteTwo}, 'public.website.address', 'https://two.pwt.example.org', '', 0), ({$siteTwo}, 'public.frame.origins', 'https://twoframe.pwt.example.org', '', 0)");
+    $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteTwo}, 'events.two.pwt.example.org', UTC_TIMESTAMP())");
+    $one = $askSetup($siteOne);
+    $two = $askSetup($siteTwo);
+    $signIn('siteroot');
+    $page = $http('GET', '/admin/public-website')['body'];
+    return [
+        'one' => [$one['website'] ?? null, $one['frameAncestors'] ?? null, $one['publicHost'] ?? null],
+        'two' => [$two['website'] ?? null, $two['frameAncestors'] ?? null, $two['publicHost'] ?? null],
+        'one\'s page shows two\'s values' => str_contains($page, 'two.pwt.example.org'),
+    ];
+};
+check('W7 organisation 2\'s main website, framing list and public address never reach organisation 1, by the readers or on its page',
+    $scnPwOtherOrg(), ['one' => ['', "'none'", ''], 'two' => ['https://two.pwt.example.org', 'https://twoframe.pwt.example.org', 'events.two.pwt.example.org'],
+        'one\'s page shows two\'s values' => false]);
+
+// W8: the public address (D-095). Stored lower case; bad values refused; one
+//     held by ANOTHER organisation refused by the unique key without naming
+//     it; the portal's own address refused; empty deletes.
+$scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $recorded, $people, $signIn, $http, $pwClean): array {
+    $pwClean();
+    $out = [];
+    $pwPost('setup', 'public_host', 'Events.PWT-One.example.org');
+    $out['stored'] = $pwHost($siteOne);
+    foreach (['a scheme' => 'https://e.pwt.example.org', 'a port' => 'e.pwt.example.org:8443', 'a path' => 'e.pwt.example.org/x',
+        'a user' => 'me@e.pwt.example.org', 'no dot' => 'localhost', 'a number' => '192.0.2.9', 'non-ascii' => 'évents.pwt.example.org'] as $name => $bad) {
+        $pwPost('setup', 'public_host', $bad);
+        $out['refused: ' . $name] = $pwHost($siteOne) === 'events.pwt-one.example.org';
+    }
+    $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteTwo}, 'shared.pwt.example.org', UTC_TIMESTAMP())");
+    $pwPost('setup', 'public_host', 'SHARED.pwt.example.org');
+    $page = $http('GET', '/admin/public-website')['body'];
+    $out['another organisation\'s refused'] = $pwHost($siteOne);
+    $out['the refusal says so'] = str_contains($page, 'already used by another organisation');
+    $out['the refusal names nobody'] = str_contains($page, 'Selftest PWT Two') === false;
+    $siteUrl = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL")->fetch_assoc();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'site.url', 'https://portal.pwt.example.org', '', 0) "
+        . "ON DUPLICATE KEY UPDATE `settingValue` = 'https://portal.pwt.example.org'");
+    $pwPost('setup', 'public_host', 'portal.pwt.example.org');
+    $out['the portal\'s own address refused'] = $pwHost($siteOne);
+    $restore = $siteUrl === null ? '' : (string) $siteUrl['settingValue'];
+    $st = $db->prepare("UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
+    $st->bind_param('s', $restore);
+    $st->execute();
+    $st->close();
+    $out['refusals recorded'] = $recorded('PublicWebsiteSetupRefused', $people['setup']['id'], 'public address') >= 9;
+    $pwPost('setup', 'public_host', '');
+    $out['empty deletes'] = $pwHost($siteOne);
+    $out['organisation 2 untouched'] = $pwHost($siteTwo);
+    return $out;
+};
+$wHostWant = ['stored' => 'events.pwt-one.example.org'];
+foreach (['a scheme', 'a port', 'a path', 'a user', 'no dot', 'a number', 'non-ascii'] as $name) {
+    $wHostWant['refused: ' . $name] = true;
+}
+$wHostWant += ['another organisation\'s refused' => 'events.pwt-one.example.org', 'the refusal says so' => true, 'the refusal names nobody' => true,
+    'the portal\'s own address refused' => 'events.pwt-one.example.org', 'refusals recorded' => true, 'empty deletes' => null,
+    'organisation 2 untouched' => 'shared.pwt.example.org'];
+check('W8 the public address: stored lower case; a scheme, port, path, user, single label, number or non-ASCII name refused; another organisation\'s refused without naming it; the portal\'s own address refused; empty deletes',
+    $scnPwHost(), $wHostWant);
+
+// W9: the installation's switch (D-094), at save AND at read.
+$scnPwSwitch = static function () use ($db, $siteOne, $pwPost, $pwRow, $askSetup, $recorded, $people, $signIn, $http, $pwClean): array {
+    $pwClean();
+    $out = [];
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.frame.origins', 'https://kept.pwt.example.org', '', 0)");
+    $signIn('siteroot');
+    $out['switch drawn for the organisation\'s global administrator'] = str_contains($http('GET', '/admin/public-website')['body'], 'data-installation-switch="1"');
+    $pwPost('siteroot', 'frame_permitted', 'no');
+    $out['organisation\'s global administrator cannot switch it'] = $pwRow(null, 'public.frame.permitted');
+    $signIn('root');
+    $out['switch drawn for the installation\'s'] = str_contains($http('GET', '/admin/public-website')['body'], 'data-installation-switch="1"');
+    $pwPost('root', 'frame_permitted', 'maybe');
+    $out['a made-up value refused'] = $pwRow(null, 'public.frame.permitted');
+    $pwPost('root', 'frame_permitted', 'no');
+    $out['installation switched off'] = $pwRow(null, 'public.frame.permitted');
+    $out['read: none whatever the list says'] = $askSetup($siteOne)['frameAncestors'] ?? null;
+    $pwPost('siteroot', 'frame_origins', 'https://new.pwt.example.org');
+    $out['a non-empty list refused while off'] = $pwRow($siteOne, 'public.frame.origins');
+    $pwPost('siteroot', 'frame_origins', '');
+    $out['emptying still allowed'] = $pwRow($siteOne, 'public.frame.origins');
+    $out['recorded'] = $recorded('PublicWebsiteFramingSwitchSaved', $people['root']['id'], 'FORBIDS') >= 1
+        && $recorded('PublicWebsiteSetupRefused', $people['siteroot']['id'], 'framing switch') >= 1;
+    $pwPost('root', 'frame_permitted', 'yes');
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.frame.origins', 'https://kept.pwt.example.org', '', 0)");
+    $out['read: the list again once allowed'] = $askSetup($siteOne)['frameAncestors'] ?? null;
+    $db->query("UPDATE `tblSettings` SET `settingValue` = 'perhaps' WHERE `settingKey` = 'public.frame.permitted' AND `siteID` IS NULL");
+    $out['read: an unknown stored value counts as off'] = $askSetup($siteOne)['frameAncestors'] ?? null;
+    $pwClean();
+    return $out;
+};
+check('W9 the installation\'s framing switch: drawn and saved only for its global administrator, a made-up value refused; while off every list reads \'none\', a non-empty list is refused and emptying is allowed; an unknown stored value counts as off',
+    $scnPwSwitch(), ['switch drawn for the organisation\'s global administrator' => false, 'organisation\'s global administrator cannot switch it' => 'yes',
+        'switch drawn for the installation\'s' => true, 'a made-up value refused' => 'yes', 'installation switched off' => 'no',
+        'read: none whatever the list says' => "'none'", 'a non-empty list refused while off' => 'https://kept.pwt.example.org',
+        'emptying still allowed' => null, 'recorded' => true, 'read: the list again once allowed' => 'https://kept.pwt.example.org',
+        'read: an unknown stored value counts as off' => "'none'"]);
+
+// W10: the general settings editor refuses all three keys (the lock itself is
+//      driven over HTTP by tools/settings-locks-selftest.php, which finds every
+//      lock method's keys by reading it; this pins that these three are there).
+$scnPwLocked = static function () use ($askSetup, $siteOne): mixed {
+    return $askSetup($siteOne)['locked'] ?? null;
+};
+check('W10 the general settings editor\'s lock covers the main website, the framing list and the installation\'s switch (capitals ignored)', $scnPwLocked(), [true, true, true]);
+
+// W11: "Check my set-up" — POST only, the form token, the door row never a
+//      tick, an unreachable (loopback) main website said plainly, nothing
+//      ticked when nothing is set, and the result shown once.
+$scnPwCheck = static function () use ($db, $siteOne, $signIn, $http, $freshToken, $pwPost, $pwClean): array {
+    $pwClean();
+    $out = [];
+    $states = static function (string $body): array {
+        preg_match_all('/data-check-state="([a-z]+)"/', $body, $m);
+        return $m[1];
+    };
+    $signIn('setup');
+    $get = $http('GET', '/admin/public-website/check');
+    $out['a GET runs nothing'] = [$get['status'], $states($http('GET', '/admin/public-website')['body'])];
+    $http('POST', '/admin/public-website/check', ['csrf_token' => 'not-the-token']);
+    $out['no token, nothing run'] = $states($http('GET', '/admin/public-website')['body']);
+    $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
+    $page = $http('GET', '/admin/public-website')['body'];
+    $s = $states($page);
+    $out['nothing set: no row reads fine'] = in_array('ok', $s, true);
+    $out['the door row cannot be tested'] = str_contains($page, 'Not part of this version, so it cannot be tested.') && in_array('untested', $s, true);
+    $out['shown once'] = $states($http('GET', '/admin/public-website')['body']);
+    $pwPost('setup', 'website', 'https://127.0.0.1');
+    $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
+    $page = $http('GET', '/admin/public-website')['body'];
+    $out['a loopback main website is unreachable'] = str_contains($page, 'https://127.0.0.1: It did not answer over https');
+    $out['the door is still not ticked'] = preg_match('/data-check-state="ok"[^>]*>\s*<span[^>]*>[^<]*<\/span>\s*<strong>The public door/', $page) === 1;
+    $pwClean();
+    return $out;
+};
+check('W11 "Check my set-up": a GET and a post without the form token run nothing; with nothing set no row reads "Fine"; the door row says it cannot be tested; the result is shown once; a loopback main website is reported unreachable and the door is never ticked',
+    $scnPwCheck(), ['a GET runs nothing' => [302, []], 'no token, nothing run' => [], 'nothing set: no row reads fine' => false,
+        'the door row cannot be tested' => true, 'shown once' => [], 'a loopback main website is unreachable' => true, 'the door is still not ticked' => false]);
+
+// W12: the check's limit — six in ten minutes for one person, the seventh refused.
+$scnPwCheckLimit = static function () use ($signIn, $http, $freshToken, $pwClean): array {
+    $pwClean();
+    $signIn('setup');
+    $shown = 0;
+    for ($i = 0; $i < 7; $i++) {
+        $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
+        if (str_contains($http('GET', '/admin/public-website')['body'], 'data-setup-check="1"') === true) {
+            $shown++;
+        }
+    }
+    $pwClean();
+    return ['checks that ran' => $shown];
+};
+check('W12 "Check my set-up" runs six times in ten minutes for one person and refuses the seventh', $scnPwCheckLimit(), ['checks that ran' => 6]);
+
+// W13: D-093 on the Roles page. An ordinary administrator may NOT change which
+//      roles open "Set up the public website", nor forget that choice, nor
+//      delete a role that opens it — and may still change another permission.
+//      The organisation's global administrator may.
+$scnPwRolesPage = static function () use ($db, $siteOne, $signIn, $http, $freshToken, $recorded, $people, $pwClean): array {
+    $pwClean();
+    $out = [];
+    $mapped = static function (string $cap) use ($db, $siteOne): ?string {
+        $row = $db->query("SELECT GROUP_CONCAT(r.`roleKey` ORDER BY r.`roleKey`) AS `k`, COUNT(m.`mapID`) AS `n` FROM `tblCapabilityMap` m "
+            . "LEFT JOIN `tblCapabilityMapRole` r ON r.`mapID` = m.`mapID` WHERE m.`siteID` = {$siteOne} AND m.`capabilityKey` = '{$cap}'")->fetch_assoc();
+        return (int) ($row['n'] ?? 0) === 0 ? null : (string) ($row['k'] ?? '');
+    };
+    $db->query("DELETE FROM `tblRoles` WHERE `siteID` = {$siteOne} AND `roleKey` = 'pwt_custom'");
+    $db->query("INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `isStandard`) VALUES ({$siteOne}, 'pwt_custom', 'PWT custom', 0)");
+    $customId = (int) $db->insert_id;
+    $signIn('orgadmin');
+    $page = $http('GET', '/admin/roles')['body'];
+    $out['page shows the reason to an ordinary administrator'] = str_contains($page, 'Only a global administrator of this organisation');
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'capability', 'capability' => 'website.setup', 'roleKeys' => ['website_setup', 'member_role_x']]);
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'capability', 'capability' => 'website.setup', 'roleKeys' => ['volunteer']]);
+    $out['administrator re-points it'] = $mapped('website.setup');
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'capability', 'capability' => 'website.setup', 'confirm_empty' => '1']);
+    $out['administrator empties it'] = $mapped('website.setup');
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'capability', 'capability' => 'website.publish', 'roleKeys' => ['website_editor', 'volunteer']]);
+    $out['administrator still re-points another permission'] = $mapped('website.publish');
+    $out['refusals recorded'] = $recorded('PublicWebsiteSetupHandOutRefused', $people['orgadmin']['id'], 'Roles page') >= 2;
+    $signIn('siteroot');
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'capability', 'capability' => 'website.setup', 'roleKeys' => ['website_setup', 'pwt_custom']]);
+    $out['organisation global administrator re-points it'] = $mapped('website.setup');
+    $signIn('orgadmin');
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'delete', 'roleID' => (string) $customId]);
+    $out['administrator deletes a role that opens it'] = (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblRoles` WHERE `roleID` = {$customId}")->fetch_assoc()['n'] ?? 0);
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'capability_reset', 'capability' => 'website.setup']);
+    $out['administrator forgets the choice'] = $mapped('website.setup');
+    $signIn('siteroot');
+    $http('POST', '/admin/roles/save', ['csrf_token' => $freshToken(), 'action' => 'capability_reset', 'capability' => 'website.setup']);
+    $out['organisation global administrator forgets it'] = $mapped('website.setup');
+    $db->query("DELETE FROM `tblRoles` WHERE `roleID` = {$customId}");
+    $pwClean();
+    return $out;
+};
+check('W13 (D-093) on the Roles page an ordinary administrator cannot re-point, empty or forget "Set up the public website", nor delete a role that opens it, and is told why and recorded, but can still re-point another permission; the organisation\'s global administrator can',
+    $scnPwRolesPage(), ['page shows the reason to an ordinary administrator' => true, 'administrator re-points it' => null, 'administrator empties it' => null,
+        'administrator still re-points another permission' => 'volunteer,website_editor', 'refusals recorded' => true,
+        'organisation global administrator re-points it' => 'pwt_custom,website_setup', 'administrator deletes a role that opens it' => 1,
+        'administrator forgets the choice' => 'pwt_custom,website_setup', 'organisation global administrator forgets it' => null]);
+
+// W14: D-093 on the Users page. An ordinary administrator cannot give or take
+//      away Website Set-up, a save that would is refused WHOLE, and saving a
+//      holder's OTHER roles (the locked box carried by its hidden field)
+//      leaves it alone. The organisation's global administrator can.
+$scnPwUsersPage = static function () use ($db, $siteOne, $signIn, $http, $freshToken, $recorded, $people, $setupRole, $pwClean): array {
+    $pwClean();
+    $out = [];
+    $volunteer = (int) ($db->query("SELECT `roleID` FROM `tblRoles` WHERE `siteID` = {$siteOne} AND `roleKey` = 'volunteer'")->fetch_assoc()['roleID'] ?? 0);
+    $holds = static function (string $who, int $role) use ($db, $siteOne, $people): bool {
+        return (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblUserRoles` WHERE `userID` = {$people[$who]['id']} AND `roleID` = {$role} AND `siteID` = {$siteOne}")->fetch_assoc()['n'] ?? 0) === 1;
+    };
+    $signIn('orgadmin');
+    $page = $http('GET', '/admin/users')['body'];
+    $out['locked box drawn for an ordinary administrator'] = str_contains($page, 'data-role-locked="1"') && str_contains($page, 'portal-role-locked-carry');
+    $http('POST', '/admin/users/roles/save', ['csrf_token' => $freshToken(), 'userID' => (string) $people['member']['id'], 'roles' => [(string) $setupRole, (string) $volunteer]]);
+    $out['administrator gives it (whole save refused)'] = [$holds('member', $setupRole), $holds('member', $volunteer)];
+    $http('POST', '/admin/users/roles/save', ['csrf_token' => $freshToken(), 'userID' => (string) $people['setup']['id'], 'roles' => [(string) $volunteer]]);
+    $out['administrator takes it away (whole save refused)'] = [$holds('setup', $setupRole), $holds('setup', $volunteer)];
+    $http('POST', '/admin/users/roles/save', ['csrf_token' => $freshToken(), 'userID' => (string) $people['setup']['id'], 'roles' => [(string) $setupRole, (string) $volunteer]]);
+    $out['administrator changes a holder\'s other roles'] = [$holds('setup', $setupRole), $holds('setup', $volunteer)];
+    $out['refusals recorded'] = $recorded('PublicWebsiteSetupHandOutRefused', $people['orgadmin']['id'], 'Users page') >= 2;
+    $signIn('siteroot');
+    $out['locked box not drawn for the organisation\'s global administrator'] = str_contains($http('GET', '/admin/users')['body'], 'data-role-locked="1"');
+    $http('POST', '/admin/users/roles/save', ['csrf_token' => $freshToken(), 'userID' => (string) $people['member']['id'], 'roles' => [(string) $setupRole]]);
+    $out['organisation global administrator gives it'] = $holds('member', $setupRole);
+    $http('POST', '/admin/users/roles/save', ['csrf_token' => $freshToken(), 'userID' => (string) $people['member']['id'], 'roles' => []]);
+    $out['and takes it away'] = $holds('member', $setupRole);
+    $http('POST', '/admin/users/roles/save', ['csrf_token' => $freshToken(), 'userID' => (string) $people['setup']['id'], 'roles' => [(string) $setupRole]]);
+    $out['holder put back as they were'] = [$holds('setup', $setupRole), $holds('setup', $volunteer)];
+    $pwClean();
+    return $out;
+};
+check('W14 (D-093) on the Users page an ordinary administrator cannot give or take away Website Set-up (the whole save refused and recorded) but can change a holder\'s other roles; the organisation\'s global administrator can give and take it',
+    $scnPwUsersPage(), ['locked box drawn for an ordinary administrator' => true, 'administrator gives it (whole save refused)' => [false, false],
+        'administrator takes it away (whole save refused)' => [true, false], 'administrator changes a holder\'s other roles' => [true, true],
+        'refusals recorded' => true, 'locked box not drawn for the organisation\'s global administrator' => false,
+        'organisation global administrator gives it' => true, 'and takes it away' => false, 'holder put back as they were' => [true, false]]);
+
+// W15: the menu entry and the admin dashboard's tile follow the same gate.
+$scnPwMenu = static function () use ($signIn, $http): array {
+    $out = [];
+    foreach (['siteroot', 'setup', 'orgadmin', 'member'] as $who) {
+        $signIn($who);
+        $home = $http('GET', '/')['body'];
+        $out[$who] = substr_count($home, '/admin/public-website"');
+    }
+    $signIn('siteroot');
+    $out['tile for the global administrator'] = str_contains($http('GET', '/admin')['body'], 'data-public-website-tile="1"');
+    $signIn('orgadmin');
+    $out['tile for an ordinary administrator'] = str_contains($http('GET', '/admin')['body'], 'data-public-website-tile="1"');
+    return $out;
+};
+check('W15 the menu links to Admin → Public website for whoever may open it and nobody else, and the admin dashboard\'s tile likewise',
+    $scnPwMenu(), ['siteroot' => 1, 'setup' => 1, 'orgadmin' => 0, 'member' => 0, 'tile for the global administrator' => true, 'tile for an ordinary administrator' => false]);
+
+// W16: with nobody holding Website Set-up, the Roles page's warning for it says
+//      what is TRUE of this door — global administrators still get in, an
+//      ordinary administrator does not — and not the sentence every other door
+//      carries ("Administrators of this organisation … still can").
+$scnPwRolesWarning = static function () use ($db, $siteOne, $setupRole, $people, $signIn, $http): string {
+    $db->query("DELETE FROM `tblUserRoles` WHERE `userID` = {$people['setup']['id']} AND `roleID` = {$setupRole}");
+    $signIn('root');
+    $page = $http('GET', '/admin/roles')['body'];
+    $db->query("INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES ({$people['setup']['id']}, {$setupRole}, {$siteOne})");
+    if (preg_match('/<div[^>]*data-no-role-holder="website\.setup"[^>]*>(.*?)<\/div>/s', $page, $m) !== 1) {
+        return 'no warning drawn';
+    }
+    $words = preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8')) ?? '';
+    return str_contains($words, 'Global administrators of this organisation, and of the whole installation, still can; an ordinary administrator cannot.') === true
+        && str_contains($words, 'Administrators of this organisation, and global administrators, still can') === false ? 'right' : 'WRONG: ' . $words;
+};
+check('W16 with nobody holding Website Set-up, the Roles page says global administrators still get in and an ordinary administrator does not', $scnPwRolesWarning(), 'right');
+$pwClean();
+
+// =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario goes red\n";
 // =============================================================================
 $plant = static function (string $relPath, string|array $from, string|array $to, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
@@ -2245,6 +2803,87 @@ check('P65 with "private" dropped, the portal\'s service worker may keep a copy 
 $p = $plant('_apps/noticeboard/foyer.php', "header('X-Portal-Foyer: 1');", '', $scnFoyerReload);
 check('P64 with the page no longer marking its answers, its own 404 cannot be told from anybody else\'s (round 2)',
     [$p['applied'], $p['result']['marks its 404'] ?? null], [true, false]);
+// #493 P3: Admin → Public website's guards, each taken out of the copy. The
+// value each check expects is the value UNDER THE FAULT.
+$p = $plant('_core/PublicWebsiteSetup.php', 'if (self::isGlobalAdministratorOf($db, $userId, $siteId) === true) {
+            return true;
+        }
+
+        return Capabilities::allows(', 'if (EventVisibility::isAdminOfSite($db, $userId, $siteId) === true) {
+            return true;
+        }
+
+        return Capabilities::allows(', $scnPwGate);
+check('P66 with "a global administrator" widened to any administrator of the organisation, an ordinary administrator opens Admin → Public website',
+    [$p['applied'], $p['result']['orgadmin'] ?? null], [true, 200]);
+$p = $plant('_core/PublicWebsiteSetup.php', 'return Capabilities::allows($db, $userId, $siteId, Capabilities::WEBSITE_SETUP, false);', 'return true;', $scnPwGate);
+check('P67 with the permission no longer asked, a plain member opens it', [$p['applied'], $p['result']['member'] ?? null], [true, 200]);
+$p = $plant('_core/PublicWebsiteSetup.php', "'AND s.`isSiteRootAdmin` = 1))'", "'AND (s.`isSiteRootAdmin` = 1 OR s.`isSiteAdmin` = 1)))'", $scnPwGate);
+check('P68 with an organisation\'s ordinary administrator counted as its global administrator, they open it', [$p['applied'], $p['result']['orgadmin'] ?? null], [true, 200]);
+$p = $plant('_apps/admin/public-website/index.php', 'if (PublicWebsiteSetup::maySetUp($mysqli, $userId, $siteId) === false) {', 'if (false) {', $scnPwGate);
+check('P69 with the page\'s own gate gone, a member opens it', [$p['applied'], $p['result']['member'] ?? null], [true, 200]);
+$p = $plant('_apps/admin/public-website/save.php', 'if (PublicWebsiteSetup::maySetUp($mysqli, $userId, $siteId) === false) {', 'if (false) {', $scnPwSaveGate);
+check('P70 with the save handler\'s gate gone, an ordinary administrator stores a main website', [$p['applied'], $p['result']['nothing stored'] ?? null],
+    [true, 'https://www.pwt-orgadmin.example.org']);
+$p = $plant('_apps/admin/public-website/check.php', 'if (PublicWebsiteSetup::maySetUp($mysqli, $userId, $siteId) === false) {', 'if (false) {', $scnPwSaveGate);
+check('P71 with the check button\'s gate gone, a member runs it', [$p['applied'], $p['result']['check answered'] ?? null], [true, 302]);
+$p = $plant('_apps/admin/public-website/check.php', "if (Auth::verifyCsrf(\$_POST['csrf_token'] ?? '') === false) {", 'if (false) {', $scnPwCheck);
+check('P72 with the check button\'s form token no longer asked, a post with a wrong token runs it', [$p['applied'], ($p['result']['no token, nothing run'] ?? []) !== []], [true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', "\$rows[] = ['label' => 'The public door', 'state' => 'untested',", "\$rows[] = ['label' => 'The public door', 'state' => 'ok',", $scnPwCheck);
+check('P73 with the door row ticked, the check would claim the public door works', [$p['applied'], $p['result']['the door is still not ticked'] ?? null], [true, true]);
+$p = $plant('_apps/admin/public-website/check.php',
+    'if (RateLimiter::tooMany($bucket, PublicWebsiteSetup::CHECK_LIMIT, PublicWebsiteSetup::CHECK_WINDOW_SECONDS) === true) {', 'if (false) {', $scnPwCheckLimit);
+check('P74 with the limit gone, the check runs a seventh time', [$p['applied'], $p['result']['checks that ran'] ?? null], [true, 7]);
+$p = $plant('_core/PublicWebsiteSetup.php', ["&& strtolower(\$m[1]) !== 'https') {", "if (str_starts_with(\$checked['address'], 'https://') === false) {"],
+    ["&& false) {", 'if (false) {'], $scnPwFrames);
+check('P75 with "https only" gone, a plain-http framing website is stored', [$p['applied'], $p['result']['refused: http'] ?? null], [true, false]);
+$p = $plant('_core/PublicWebsiteSetup.php', 'if (count($origins) > self::MAX_FRAME_ORIGINS) {', 'if (false) {', $scnPwFrames);
+check('P76 with the cap of twenty gone, twenty-one framing websites are stored', [$p['applied'], $p['result']['21 refused'] ?? null], [true, false]);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$value !== '' && \$permitted !== null && \$permitted !== 'yes') {", 'if (false) {', $scnPwSwitch);
+check('P77 with the installation\'s switch no longer asked at save, a list is stored while framing is forbidden',
+    [$p['applied'], $p['result']['a non-empty list refused while off'] ?? null], [true, 'https://new.pwt.example.org']);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (self::framingPermitted(\$db) === false) {\n            return [];\n        }\n\n        return self::frameOriginsStored(", "        return self::frameOriginsStored(", $scnPwSwitch);
+check('P78 with the installation\'s switch no longer asked at read, a list is in force while framing is forbidden',
+    [$p['applied'], $p['result']['read: none whatever the list says'] ?? null], [true, 'https://kept.pwt.example.org']);
+$p = $plant('_core/PublicWebsiteSetup.php', "'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ? LIMIT 1' . (\$lock === true ? ' FOR UPDATE' : '')",
+    "'SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND (`siteID` = ? OR `siteID` IS NULL) ORDER BY `siteID` IS NULL LIMIT 1' . (\$lock === true ? ' FOR UPDATE' : '')", $scnPwOrgOnly);
+check('P79 with an installation row read as the organisation\'s, the installation\'s framing list is in force for an organisation that chose none',
+    [$p['applied'], $p['result']['installation row ignored'] ?? null], [true, 'https://installation.pwt.example.org']);
+$p = $plant('_core/PublicWebsiteSetup.php', 'if (in_array($host, self::hostsMembersUse($db, $requestHost), true) === true) {', 'if (false) {', $scnPwHost);
+check('P80 with "an address members sign in at" no longer refused, the portal\'s own address is stored as the public address',
+    [$p['applied'], $p['result']['the portal\'s own address refused'] ?? null], [true, 'portal.pwt.example.org']);
+$p = $plant('_apps/admin/public-website/save.php', 'PublicWebsiteSetup::saveFramingPermitted($mysqli, $value, App::isRootAdmin(), $actorId)',
+    'PublicWebsiteSetup::saveFramingPermitted($mysqli, $value, true, $actorId)', $scnPwSwitch);
+check('P81 with the page no longer asking for the installation\'s global administrator, an organisation\'s global administrator forbids framing for everybody',
+    [$p['applied'], $p['result']['organisation\'s global administrator cannot switch it'] ?? null], [true, 'no']);
+$p = $plant('_core/PublicWebsiteSetup.php', "return self::mayHandOut(\$db, \$actorId, \$siteId) === true ? '' : self::HAND_OUT_REFUSED;", "return '';", $scnPwRolesPage);
+check('P82 (D-093) with the Roles page\'s rule gone, an ordinary administrator re-points "Set up the public website" at a role they could hold',
+    [$p['applied'], $p['result']['administrator re-points it'] ?? null], [true, 'volunteer']);
+$p = $plant('_apps/admin/roles/save.php', "if (PublicWebsiteSetup::whyRoleChangeRefused(\$mysqli, (int) (\$actorId ?? 0), \$siteId, [(string) \$roleKeyRow['roleKey']]) !== '') {",
+    'if (false) {', $scnPwRolesPage);
+check('P83 (D-093) with the delete branch\'s rule gone, an ordinary administrator deletes a role that opens it', [$p['applied'], $p['result']['administrator deletes a role that opens it'] ?? null], [true, 0]);
+$p = $plant('_apps/admin/roles/save.php', "if (PublicWebsiteSetup::whyMappingChangeRefused(\$mysqli, (int) (\$actorId ?? 0), \$siteId, \$capability) !== '') {\n        \$refuseHandOut('Roles page, back to the role it came with');",
+    "if (false) {\n        \$refuseHandOut('Roles page, back to the role it came with');", $scnPwRolesPage);
+check('P84 (D-093) with "back to the role it came with" no longer asking, an ordinary administrator forgets the global administrator\'s choice',
+    [$p['applied'], $p['result']['administrator forgets the choice'] ?? null], [true, null]);
+$p = $plant('_apps/admin/users/roles-save.php', "if (\$handOutRefused !== '') {", 'if (false) {', $scnPwUsersPage);
+check('P85 (D-093) with the Users page\'s rule gone, an ordinary administrator gives somebody Website Set-up',
+    [$p['applied'], $p['result']['administrator gives it (whole save refused)'] ?? null], [true, [true, true]]);
+$p = $plant('_apps/admin/users/index.php', "        carry.disabled = held.indexOf(carry.value) === -1;\n", '', $scnPwUsersPage);
+check('P86 (measured, expected to stay GREEN) with the locked box\'s carrier never switched on, the browser would send no answer for it — nothing here runs the page\'s script, so only the handler\'s refusal is proved',
+    [$p['applied'], $p['result']['administrator changes a holder\'s other roles'] ?? null], [true, [true, true]]);
+$p = $plant('_core/PublicWebsite.php', 'foreach ([self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY] as $locked) {',
+    'foreach ([self::RULE_KEY] as $locked) {', $scnPwLocked);
+check('P87 with the three keys taken out of the editor lock, the general settings editor would store them', [$p['applied'], $p['result']], [true, [false, false, false]]);
+$p = $plant('_core/templates/nav.php', '<?php if (App::isAdmin() !== true && $navMaySetUpWebsite === true): ?>', '<?php if (App::isAdmin() !== true): ?>', $scnPwMenu);
+check('P88 with the menu link no longer asking the gate, a member is shown a way to a page that refuses them', [$p['applied'], $p['result']['member'] ?? null], [true, 1]);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$one['problem'] !== '' || \$one['origin'] !== trim(\$line)) {\n                \$dropped++;\n                continue;\n            }",
+    '', $scnPwOrgOnly);
+check('P89 with the stored list no longer checked again on read, a wildcard a hand edit stored is dropped only by the header builder — measured: the builder still holds',
+    [$p['applied'], $p['result']['hand edit filtered'] ?? null], [true, 'https://ok.pwt.example.org']);
+$p = $plant('_apps/admin/roles/index.php', '<?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>', '<?php if (false): ?>', $scnPwRolesWarning);
+check('P90 with Website Set-up given the usual sentence, the Roles page tells an ordinary administrator they still get in, which is untrue for this door',
+    [$p['applied'], str_starts_with((string) $p['result'], 'WRONG')], [true, true]);
 $foyerWorld();
 $setEv($cEvent, ['showOnWebsite' => '0']);
 check('P11 with every plant removed again, the unticked event is off the countdown once more', $scnUnticked(), true);
@@ -2278,6 +2917,10 @@ if ($indexOwn !== null) {
     $io->close();
 }
 
+// Section W's rows (#493 P3): settings, public addresses, the check's limit,
+// capability choices and the test's own custom role.
+$pwClean();
+$db->query("DELETE FROM `tblRoles` WHERE `siteID` = {$siteOne} AND `roleKey` = 'pwt_custom'");
 $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'PWT %' OR `siteID` = {$siteTwo}");
 $db->query("DELETE FROM `tblExternalEventApprovals` WHERE `snapTitle` LIKE 'PWT approval %'");
 $db->query("DELETE FROM `tblExternalFeedRules` WHERE `name` = 'PWT rule'");

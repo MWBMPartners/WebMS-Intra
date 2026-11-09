@@ -754,6 +754,36 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
         </div>
     </div>
     <?php endif; ?>
+
+    <?php
+    // 🌐 #493 P3: Admin → Public website. Shown only to whoever may open it
+    //    (`PublicWebsiteSetup::maySetUp()`, D-085) — a global administrator or
+    //    somebody given "Set up the public website" — because an ordinary
+    //    administrator is refused there, and a card that leads to a refusal is
+    //    a dead end (the Migrations card's reasoning above).
+    ?>
+    <?php if (\Portal\Core\PublicWebsiteSetup::maySetUpHere() === true): ?>
+    <div class="col-12 col-sm-6 col-xl-3" data-public-website-tile="1">
+        <div class="card border-info h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-info">Public website</h6>
+                        <small class="text-muted">Your main website, a public address, and which websites may frame your public pages.</small>
+                    </div>
+                    <div class="fs-1 text-info opacity-25">
+                        <i class="fa-solid fa-globe"></i>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer bg-transparent border-info">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/public-website'), ENT_QUOTES, 'UTF-8'); ?>" class="text-info text-decoration-none small">
+                    Set up the public website <i class="fa-solid fa-arrow-right ms-1"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 </div>
 
 <!-- 🖥️ System Information -->

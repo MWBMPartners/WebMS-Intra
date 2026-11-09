@@ -223,6 +223,17 @@ final class Roles
             'description' => 'Holds "Choose what appears on the public website": can choose which noticeboard '
                 . 'posters are on the public website, and when',
         ],
+        // 🛠️ ADDED 9 November 2026 (#493 P3, D-085), by migration 262. The role
+        //    the permission `website.setup` ships pointing at. Granted to
+        //    NOBODY: out of the box only a global administrator sets up the
+        //    public website, and only a global administrator may give this role
+        //    to somebody (D-093). LAST on purpose — `check_role_keys.py` and
+        //    `tools/roles-selftest.php` compare the order.
+        'website_setup' => [
+            'label'       => 'Website Set-up',
+            'description' => 'Holds "Set up the public website": records the main website and public address, and '
+                . 'chooses which outside websites may show the public pages in a frame',
+        ],
     ];
 
     // =========================================================================

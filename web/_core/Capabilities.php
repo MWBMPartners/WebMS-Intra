@@ -264,6 +264,24 @@ final class Capabilities
     public const WEBSITE_PUBLISH  = 'website.publish';
 
     /**
+     * #493 package P3 (the owner, 7 and 9 November 2026 — D-085, D-093):
+     * who may set up the public website — Admin → Public website, its save
+     * handler and its "Check my set-up" button. Asked in ONE place,
+     * `PublicWebsiteSetup::maySetUp()`. A global administrator of the
+     * installation or of the organisation passes there BEFORE this is asked;
+     * an ORDINARY administrator does not, which is why this is the first
+     * capability whose gate does not let every administrator in. It ships
+     * pointing at `website_setup`, held by nobody (migration 262).
+     *
+     * ⚠️ D-093: only a global administrator may change which roles open this,
+     *    or give or take away a role that opens it — asked of
+     *    `PublicWebsiteSetup::whyMappingChangeRefused()` and
+     *    `whyRoleChangeRefused()` on the Roles and Users pages. Without that an
+     *    ordinary administrator could give the job to themselves.
+     */
+    public const WEBSITE_SETUP    = 'website.setup';
+
+    /**
      * Every field an entry in either list MUST declare, in the order the
      * entries are written.
      *
@@ -921,6 +939,33 @@ final class Capabilities
                 . 'the website is taken off it.',
             'askedAt' => [
                 'web/_core/PublicWebsite.php',
+            ],
+        ],
+
+        // 🛠️ SETTING UP THE PUBLIC WEBSITE (#493 P3, D-085). The organisation's
+        //    main website, an optional public address for the portal's public
+        //    pages, and which outside websites may show those pages in a frame.
+        //    That decides what other websites may do with the organisation's
+        //    pages, so out of the box only a GLOBAL administrator holds it —
+        //    not an ordinary administrator — and only a global administrator
+        //    may hand it to somebody else (D-093).
+        self::WEBSITE_SETUP => [
+            'label' => 'Set up the public website',
+            'opens' => 'Admin, Public website: recording the organisation\'s main website and an optional public address '
+                . 'for its public pages, choosing which outside websites may show those pages in a frame, and the '
+                . '"Check my set-up" button. It does not choose WHAT is on the public website; that is "Choose what '
+                . 'appears on the public website".',
+            'standard' => ['website_setup'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            // ⚠️ SAID AS IT IS: an ordinary administrator is NOT let in by this
+            //    gate (unlike every other capability here), so an empty set
+            //    leaves the page to the global administrators alone.
+            'emptyMeans' => 'No role will open Admin, Public website. Only a global administrator of this organisation, '
+                . 'or of the whole installation, will be able to — an ordinary administrator is not let in by this gate. '
+                . 'Nothing already saved there is changed, and a global administrator can point it at a role again.',
+            'askedAt' => [
+                'web/_core/PublicWebsiteSetup.php',
             ],
         ],
     ];

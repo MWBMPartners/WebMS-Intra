@@ -908,6 +908,13 @@ return [
                     . 'token and the time it was made. Who made or replaced it is recorded in the activity log, not here.',
         'columns'  => [],
     ],
+    'tblPublicHosts' => [
+        'decision' => 'not-personal',
+        'reason'   => 'Each organisation\'s optional public address for its public pages (#493 P3, D-095): an '
+                    . 'organisation, a host name such as events.example.org, and the moment it was set. It names an '
+                    . 'organisation\'s web address, not a person; who set it is recorded in the activity log, not here.',
+        'columns'  => [],
+    ],
     'tblOffboarding' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',

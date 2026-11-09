@@ -75,6 +75,18 @@ final class PublicWebsite
      */
     public const RULE_KEY = 'public.events.copiedRule';
 
+    /**
+     * #493 P3: the three settings Admin → Public website keeps (D-082, D-094,
+     * D-095). Declared HERE, beside `RULE_KEY`, because this class's
+     * `lockedInGeneralEditor()` refuses them in the general settings editor
+     * and the settings-locks self-test finds a lock's keys by reading the
+     * lock method's own `self::` constants. `PublicWebsiteSetup` is the ONE
+     * place that reads and writes them.
+     */
+    public const WEBSITE_ADDRESS_KEY = 'public.website.address';
+    public const FRAME_ORIGINS_KEY   = 'public.frame.origins';
+    public const FRAME_PERMITTED_KEY = 'public.frame.permitted';
+
     /** An organisation's "follow the installation": its own row is deleted. */
     public const INHERIT = 'inherit';
 
@@ -387,12 +399,32 @@ final class PublicWebsite
      */
     public static function lockedInGeneralEditor(string $key): bool
     {
-        return strcasecmp($key, self::RULE_KEY) === 0;
+        // #493 P3: the three settings of Admin → Public website as well. That
+        // page checks every value (a framing list cannot hold a wildcard, the
+        // installation's switch can forbid framing, a main website must be a
+        // real address) and records every change; the general editor would
+        // store anything, for anybody, at either level — including an
+        // INSTALLATION row of `public.frame.origins`, which nothing reads, and
+        // an organisation row of `public.frame.permitted`, which nothing reads
+        // either, so either would read as a setting while doing nothing.
+        foreach ([self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY] as $locked) {
+            if (strcasecmp($key, $locked) === 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    /** What the general settings editor says when it refuses it. */
-    public const LOCKED_MESSAGE = 'How copied-in events reach the public website is changed only at Admin, Outside calendars, '
-        . '"Copied-in events on your public website", which re-works every outside calendar at once. Nothing was changed.';
+    /**
+     * What the general settings editor says when it refuses one of them. It
+     * names both pages, because the editor shows one message for every key
+     * this method locks.
+     */
+    public const LOCKED_MESSAGE = 'Settings for the public website are changed only on their own pages: how copied-in events reach '
+        . 'it at Admin, Outside calendars, "Copied-in events on your public website" (which re-works every outside calendar at '
+        . 'once), and the main website, the websites allowed to frame its pages and whether framing is allowed at all at '
+        . 'Admin, Public website, which checks every value and records every change. Nothing was changed.';
 
     /**
      * The rule in force for one organisation: the STRICTER of the
