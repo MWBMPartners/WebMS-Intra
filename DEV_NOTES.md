@@ -5,6 +5,7 @@
 
 ---
 
+
 ### Every scheduled job records that it ran (#775, migration 253)
 
 **`Portal\Core\ScheduledJobs` is the ONE place a job's run is recorded and the
@@ -21855,3 +21856,33 @@ D-065. Commits `af3af710` (the build) to `0a2796be` (round 9 of the check).
 - **The page asks the judgement on values read under a row lock inside the transaction that writes** (#647),
   so two people saving one poster cannot both be judged against the value from before the other's save.
 
+### A claim's PDF follows the receipts, and a refused claim keeps its typing (#869, #870, #871)
+
+**The PDF follows #649's two halves.** `ExpensePdf::generate()` writes the file BEFORE its rows, inside the
+claim's transaction, so any failure between that and the COMMIT leaves a file for an undone claim. Removing
+whatever is at `ExpensePdf::pathFor($claimID)` before COMMIT is safe rather than merely likely: the name is
+built from the claim number alone, and this request's INSERT has just been given that number, so no saved
+claim can point at it. It is looked for only once the PDF step was reached. After COMMIT is sent it is KEPT.
+
+**Testing it needed a stand-in PDF library.** dompdf is never committed, so `Pdf::create()` returns false on
+every test machine and no claim PDF had ever been written in a test — which is why #649 left #869 open. The
+receipts self-test writes a stand-in `Dompdf\Dompdf` into its own temporary COPY of `web/`; the real
+`ExpensePdf::generate()` and `Pdf::create()` run, and check B20 asserts the premise (a saved claim's PDF is on
+disk with its row and names the claimant). Nothing here tests dompdf itself.
+
+**Kept typing.** `ExpenseRules::claimDraftFrom()` builds it and `draftForForm()` gives it back — only to the
+SAME ACCOUNT in the SAME ORGANISATION, refusing account 0 and a draft that names no account. It must, because
+the session belongs to the BROWSER: a Microsoft or Google sign-in keeps every session value for the next
+person (#900, the wider fault, open). If anybody else opens the form the draft is deleted without being
+shown. Three refusals keep nothing, each for a reason written in `ExpenseRules`: a refused token, a too-large
+post, a commit that could not be confirmed. The script sets each value with `.value`, never as markup, and
+the JSON is written with `JSON_HEX_*`. A check that "typed text comes back as text" must put markup in EVERY
+field it claims to cover: round 1 found R04 green with the title's escaping removed, because only the
+description carried markup.
+
+**The size message.** `postWasTooLarge()` needs all three: a POST, PHP passed on no fields and no files, and a
+declared length over `post_max_size` (read with PHP's own `ini_parse_quantity()`, so `0`, `-1` and junk mean
+no limit exactly as PHP treats them). `sizeShown()` rounds the LIMIT DOWN always and the size sent to the
+nearest, rounding the sent figure up only when it would not otherwise read larger, comparing amounts in bytes.
+Round 1's version rounded both to the nearest and could promise more than the server takes (1500K read "1.5
+MB") — **the figure a person acts on must be rounded in the direction that keeps the advice true.**

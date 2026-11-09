@@ -4,6 +4,40 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Expense claims: a refused claim comes back filled in, and a failed save leaves no PDF behind (#869, #870, #871)
+
+- **A claim that is not saved no longer leaves its PDF behind (#869).** The claim's PDF holds the claimant's
+  name, department and every figure, and is written while the claim is still being saved. When the save then
+  failed and was undone, #649 removed the receipts but left the PDF, with nothing in the database pointing at
+  it, so no erasure could ever find it. It now follows the receipts' rule exactly: before the save is
+  committed it is removed (and if it cannot be, its path is recorded as `CLAIM_PDF_LEFT_BEHIND`); once the
+  commit has been sent it is never deleted, and its path is recorded as `CLAIM_PDF_KEPT_AFTER_FAILED_COMMIT`.
+  `ExpensePdf::pathFor()` is now the one place a claim's PDF path is built.
+- **A refused claim comes back filled in (#870).** Every refusal after the form's security token has been
+  accepted — a missing title, a total of zero, a department that is not one, the receipts folder failing, a
+  save that failed and was undone, a failed captcha — keeps the title, department and item lines, and the
+  form fills itself in from them once. Receipts are never kept (a page cannot choose files for somebody), and
+  the form says so. What was typed is given back only to the same person in the same organisation. Nothing is
+  kept after a refused token (the post may have come from another website), after a submission too large for
+  the server (nothing arrived), or after a save that could not be confirmed (it may be saved, and refilling
+  would invite a second claim for the same money).
+- **A submission larger than the server accepts is told so (#870).** PHP empties the whole post, token
+  included, when it is over the server's `post_max_size`, so the claimant used to be told "Invalid CSRF
+  token." It now says the claim was not saved because everything sent came to more than the server accepts,
+  with both sizes. The server's limit is always rounded DOWN, so the advice never names a size the server
+  would refuse; the size sent always reads larger than the limit.
+- **The file chooser offers every kind of receipt the portal accepts (#871).** Its list was a hand-written
+  `image/*,application/pdf`, which hid the Word, Excel and CSV files the rule and the help page accept. It is
+  now built from `ExpenseRules::RECEIPT_TYPES`, so the two cannot disagree, and it no longer offers picture
+  kinds the rule refuses. Not tested on a real phone: whether a phone still offers its camera with the new
+  list is not established.
+- **Tests:** `tools/expense-receipts-selftest.php`, 201 checks over real HTTP (its total pinned in the
+  file), with 18 planted faults each caught, including a stand-in for the PDF library so the real
+  `ExpensePdf::generate()` runs on a test machine. Three check rounds by fresh Claude agents (protected arm:
+  money and personal details); round 3 was clean after sweeping about a million size pairs through the real
+  message. Raised from it: #900 (a Microsoft or Google sign-in keeps the previous person's session data).
+  Codex has not reviewed it.
+
 ### On MySQL 9.7 a password sign-in works again, and a sign-in the database cannot serve says so (#887)
 
 - **Fixed: on MySQL 9.7 nobody could sign in with a password.** MySQL 9.7 has no `SHA1()`, `SHA()` or

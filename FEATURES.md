@@ -804,7 +804,10 @@ Full claim lifecycle with multi-approver, treasury, PDF, CSV.
   PNG, GIF, HEIC/HEIF (D-096), PDF, Word, Excel or CSV, up to 10 MB each (or the server's lower limit). A
   file that cannot be attached is named to the claimant with the reason and what to change, and the claim is
   still saved; files past the server's per-submission count are reported, unnamed (#649). The rules and words
-  are in `ExpenseRules` (`whyReceiptRefused()`, `submittedMessage()`).
+  are in `ExpenseRules` (`whyReceiptRefused()`, `submittedMessage()`). The file chooser offers exactly
+  these kinds (#871). A refused claim comes back filled in, except its receipts, and only to the person who
+  typed it; a submission bigger than the server accepts says so, with both sizes (#870). A claim that fails
+  to save leaves no PDF behind (#869).
 - Approve (`/expenses/approve`) — multi-approver workflow with comments.
 - **Download every claim as a spreadsheet** — an **Export** button on the approvals page hands back a
   CSV of the organisation's claims (claim number, claimant, department, title, date, amount, status),
