@@ -453,8 +453,14 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
 
     <div class="col-12">
         <div class="form-check form-check-inline">
+            <?php
+            // 👁️ D-079 (the owner, 7 November 2026): a NEW event starts members-only, so the box
+            //    is ticked only when the event's own value is 1. It used to be ticked whenever the
+            //    value was MISSING, which is exactly the new-event form ($ev is empty there; an edit
+            //    is drawn from the stored row, where the value is always present).
+            ?>
             <input class="form-check-input" type="checkbox" name="isPublic" value="1" id="isPublic-<?php echo $isEdit ? 'edit' : 'new'; ?>"
-                   <?php echo (isset($ev['isPublic']) === false || $ev['isPublic'] === '1' || (int) ($ev['isPublic'] ?? 1) === 1) ? 'checked' : ''; ?>>
+                   <?php echo (isset($ev['isPublic']) === true && ((string) $ev['isPublic'] === '1')) ? 'checked' : ''; ?>>
             <label class="form-check-label" for="isPublic-<?php echo $isEdit ? 'edit' : 'new'; ?>">Public (visible on calendar)</label>
         </div>
         <div class="form-check form-check-inline">

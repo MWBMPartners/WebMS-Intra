@@ -4,6 +4,19 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A new event starts members-only (D-079, #493, migration 259)
+
+- **Changed:** an event's "Public" box decides whether somebody who is not signed in sees it on the
+  portal's own pages, and is one of the three things the public website needs. It started ticked, so
+  every event was public unless somebody remembered to untick it. A new event now starts members-only
+  until somebody ticks it: the Manage Events form starts it unticked, the events API treats a missing
+  `isPublic` as false, the CSV import treats an empty `isPublic` cell as members-only, and the database
+  column starts at 0 (migration 259). **Events that already exist keep what they have** — the migration
+  changes nothing stored. Approving an event a member of the public suggested no longer makes it public
+  (D-092; Approve used to make it public at the same moment, with no "Public" choice shown): it stays
+  members-only unless "Public" is ticked on the event, and the moderation page says so. A date a pattern change adds to a series copies the setting
+  of the existing date it is made from.
+
 ### Any organisation colour stays readable, in light and dark mode (#852 item 3, D-091)
 
 - **Changed:** in dark mode the hover, pressed and faint-panel shades of an organisation's own colour

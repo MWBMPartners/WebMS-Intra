@@ -21161,3 +21161,22 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **`html:root` matches in dark mode too.** A light-mode value printed under it outweighs
   `[data-bs-theme="dark"]`, so the dark block has to restate anything it must keep (dark links).
 
+### A new event starts members-only (D-079, migration 259)
+
+- **A column's default is only one of the places a default lives.** `tblEvents.isPublic` started at 1,
+  but so did three writers in code: the Manage Events form (ticked whenever the value was missing), the
+  events API (a missing field meant true) and the CSV import (an empty cell meant public). Changing the
+  column alone would have changed nothing a person does. Every writer is changed, and each has a plant in
+  section N/P of `tools/public-website-tick-selftest.php`.
+- **"Existing events keep what they have" is why the migration changes the column and runs no
+  `UPDATE`.** An update would take public events off the signed-out pages without anybody choosing that.
+  It is a `MODIFY COLUMN` restating the whole definition, not `ALTER COLUMN … SET DEFAULT`: SET DEFAULT
+  left the old comment on an upgraded database, so it no longer matched a fresh install.
+- **A writer can hide in an action that is not "create".** Approving a suggested event on the moderation
+  page set `isPublic = 1`, so a suggestion became public with nobody ever seeing a "Public" choice; the
+  first version of this package listed the submission form as already writing 0 and missed that Approve
+  overwrote it. D-092 settled it: Approve leaves the value alone. When a default changes, search for every
+  statement that WRITES the column, not only the ones that create the row.
+- **No existing test relied on public-by-default** (the whole suite stayed green before section N was
+  written), so the new checks are the only guard; that is why each writer has its own plant.
+

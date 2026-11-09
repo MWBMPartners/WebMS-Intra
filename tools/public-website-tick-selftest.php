@@ -86,7 +86,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 119;
+const PWT_EXPECTED_CHECKS = 128;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1388,6 +1388,70 @@ check('V2 under "one box per calendar" every one of them says it IS on the publi
 $setRule('event', null);
 
 // =============================================================================
+echo "N. A new event starts members-only (D-079)\n";
+// =============================================================================
+// Every way a NEW event is made must start it with "Public" unticked; events
+// that already exist keep what they have (migration 259 changes the column's
+// starting value and nothing stored).
+$publicOf = static function (string $name) use ($db): ?int {
+    $stmt = $db->prepare('SELECT `isPublic` FROM `tblEvents` WHERE `eventName` = ? ORDER BY `eventID` DESC LIMIT 1');
+    $stmt->bind_param('s', $name);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row === null ? null : (int) $row['isPublic'];
+};
+$colDefault = $db->query("SELECT `COLUMN_DEFAULT` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
+    . "AND `TABLE_NAME` = 'tblEvents' AND `COLUMN_NAME` = 'isPublic'")->fetch_assoc();
+check('N1 the column starts at 0 on a fresh install (the install script; migration 259 does the same for an upgrade)', trim((string) ($colDefault['COLUMN_DEFAULT'] ?? ''), "'"), '0');
+$scnFormBox = static function () use ($signIn, $http): ?bool {
+    $signIn('orgadmin');
+    $page = $http('GET', '/calendar/manage')['body'];
+    if (preg_match('/<input[^>]*id="isPublic-new"[^>]*>/', $page, $m) !== 1) {
+        return null; // the form was not drawn: the check fails rather than passing
+    }
+    return preg_match('/\bchecked\b/', $m[0]) === 1;
+};
+check('N2 the Manage Events form starts a NEW event with "Public" unticked', $scnFormBox(), false);
+$scnApiDefault = static function () use ($api, $keyBase, $publicOf, $db): array {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT N api default'");
+    $r = $api('/api/events/create', $keyBase + ['eventName' => 'PWT N api default']);
+    return [$r['status'], $publicOf('PWT N api default')];
+};
+check('N3 the events API treats a missing isPublic as false: created, members-only', $scnApiDefault(), [201, 0]);
+// The CSV import posts a file, which the shared $http (form fields only)
+// cannot, so this sends its own two requests with the same cookie jar.
+$scnImportDefault = static function () use ($signIn, $http, $tokenOn, $publicOf, $db, $port, $jar, $child, $sep): ?int {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT N import default'");
+    $signIn('orgadmin');
+    $csv = $child . $sep . 'n-import.csv';
+    file_put_contents($csv, "eventName,startDateTime,endDateTime,status\n\"PWT N import default\",2030-08-01 10:00:00,2030-08-01 11:00:00,published\n");
+    $page = $http('GET', '/calendar/manage/import')['body'];
+    $handle = curl_init('http://127.0.0.1:' . $port . '/calendar/manage/import');
+    curl_setopt_array($handle, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar,
+        CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_TIMEOUT => 60,
+        CURLOPT_POSTFIELDS => ['csrf_token' => $tokenOn($page), 'action' => 'preview', 'csv_file' => new CURLFile($csv, 'text/csv', 'n.csv')]]);
+    $preview = (string) curl_exec($handle);
+    curl_close($handle);
+    $token = $tokenOn($preview) !== '' ? $tokenOn($preview) : $tokenOn($page);
+    $http('POST', '/calendar/manage/import', ['csrf_token' => $token, 'action' => 'confirm']);
+    return $publicOf('PWT N import default');
+};
+check('N4 the CSV import treats a missing isPublic column as members-only', $scnImportDefault(), 0);
+// D-092: approving an event a member of the public suggested keeps it
+// members-only (Approve used to set isPublic = 1 with no "Public" choice shown).
+$scnApprove = static function () use ($makeEvent, $siteOne, $signIn, $http, $tokenOn, $db): array {
+    $id = $makeEvent('PWT N suggested', $siteOne, '2030-09-01 10:00:00', ['status' => 'draft', 'isPublic' => '0', 'submissionStatus' => 'pending']);
+    $signIn('orgadmin');
+    $page = $http('GET', '/admin/calendar/moderation')['body'];
+    $http('POST', '/admin/calendar/moderate', ['csrf_token' => $tokenOn($page), 'eventID' => (string) $id, 'action' => 'approve']);
+    $row = $db->query("SELECT `status`, `isPublic`, `submissionStatus` FROM `tblEvents` WHERE `eventID` = {$id}")->fetch_assoc();
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    return [$row['submissionStatus'] ?? null, $row['status'] ?? null, (int) ($row['isPublic'] ?? -1)];
+};
+check('N5 approving a suggested event publishes it to members only: approved, published, isPublic still 0 (D-092)', $scnApprove(), ['approved', 'published', 0]);
+
+// =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario goes red\n";
 // =============================================================================
 $plant = static function (string $relPath, string|array $from, string|array $to, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
@@ -1563,6 +1627,21 @@ $p = $plant('_apps/calendar/event.php',
     $scnOwnMarkup);
 check('P37 with an own event\'s markup following "Public" alone again (before D-089), the page sends markup with the website box off',
     [$p['applied'], $p['result']['Public, box off'] ?? null], [true, [200, true]]);
+// D-079: each way a new event is made, put back to "public unless told otherwise".
+$p = $plant('_apps/calendar/manage/_event_form.php',
+    "<?php echo (isset(\$ev['isPublic']) === true && ((string) \$ev['isPublic'] === '1')) ? 'checked' : ''; ?>",
+    "<?php echo (isset(\$ev['isPublic']) === false || (string) \$ev['isPublic'] === '1') ? 'checked' : ''; ?>", $scnFormBox);
+check('P39 with the form ticking "Public" when the value is missing again, a new event starts public', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_apps/events/api/create.php',
+    "\$isPublic     = isset(\$body['isPublic']) === true && (bool) \$body['isPublic'] === true ? 1 : 0;",
+    "\$isPublic     = isset(\$body['isPublic']) === false || (bool) \$body['isPublic'] === true ? 1 : 0;", $scnApiDefault);
+check('P40 with the API treating a missing isPublic as true again, the new event is public', [$p['applied'], $p['result'][1] ?? null], [true, 1]);
+$p = $plant('_apps/calendar/manage/import.php',
+    "'isPublic'      => in_array(\$isPubStr,  ['1', 'true', 'yes', 'y'], true) ? 1 : 0,",
+    "'isPublic'      => in_array(\$isPubStr,  ['', '1', 'true', 'yes', 'y'], true) ? 1 : 0,", $scnImportDefault);
+check('P41 with the CSV import treating an empty cell as public again, the imported event is public', [$p['applied'], $p['result']], [true, 1]);
+$p = $plant('_apps/admin/calendar/moderate.php', "'UPDATE tblEvents SET status = \"published\", '", "'UPDATE tblEvents SET status = \"published\", isPublic = 1, '", $scnApprove);
+check('P42 with Approve setting isPublic = 1 again, an approved suggestion is public with nobody choosing it', [$p['applied'], $p['result'][2] ?? null], [true, 1]);
 // Round 15 (a hardening it suggested): only the page's FIRST ask taken out,
 // with the plain stale post — the hand-off ('mustBeNew') must then stop the
 // save under the lock and keep the other administrator's Yes. Round 12

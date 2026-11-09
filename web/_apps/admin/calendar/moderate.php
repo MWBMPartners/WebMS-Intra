@@ -4,9 +4,12 @@
  * -----------------------------------------------------------------------------
  * Admin — Calendar Submission Moderation Action Handler 🛡️ (#326)
  * -----------------------------------------------------------------------------
- * POST endpoint. Approve = flip status='published', isPublic=1,
- * submissionStatus='approved'. Reject = status='draft', isPublic=0,
- * submissionStatus='rejected'. Stamps moderatedBy/At.
+ * POST endpoint. Approve = status='published', submissionStatus='approved',
+ * and isPublic LEFT AS IT IS — the submission form stores 0, so an approved
+ * suggestion is for members only until an administrator ticks "Public" on the
+ * event (D-092, following D-079: approving used to set isPublic=1 too, which
+ * made it public with nobody ever seeing a "Public" choice). Reject =
+ * status='draft', isPublic=0, submissionStatus='rejected'. Stamps moderatedBy/At.
  *
  * ⚠️ This used to say "Reject = status='archived'", which was never true: the
  *    code has always written 'draft' (see the UPDATE below), and the column has
@@ -59,7 +62,7 @@ if ($eventId <= 0 || in_array($action, ['approve', 'reject'], true) === false) {
 
 if ($action === 'approve') {
     $stmt = $mysqli->prepare(
-        'UPDATE tblEvents SET status = "published", isPublic = 1, '
+        'UPDATE tblEvents SET status = "published", '
         . '    submissionStatus = "approved", moderatedByID = ?, moderatedAt = NOW() '
         . 'WHERE eventID = ? AND siteID = ? AND submissionStatus = "pending"'
     );

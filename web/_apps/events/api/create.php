@@ -21,7 +21,7 @@
  *     "categoryID":     7,                       (optional)
  *     "typeID":         3,                       (optional)
  *     "status":         "published",             (optional, default "draft")
- *     "isPublic":       true,                    (optional, default true)
+ *     "isPublic":       true,                    (optional, default false — D-079)
  *     "description":    "Order of service…"     (optional)
  *     "showOnWebsite":  false,                   (optional, default false — #493)
  *     "websiteFrom":    "2026-05-25",            (optional, YYYY-MM-DD or null)
@@ -171,7 +171,8 @@ if ($endDateTime !== null) {
 
 // 📥 Optional fields
 $isAllDay     = isset($body['isAllDay']) === true && (bool) $body['isAllDay'] === true ? 1 : 0;
-$isPublic     = isset($body['isPublic']) === false || (bool) $body['isPublic'] === true ? 1 : 0;
+// D-079: a new event starts members-only, so a missing isPublic means false.
+$isPublic     = isset($body['isPublic']) === true && (bool) $body['isPublic'] === true ? 1 : 0;
 $isFeatured   = isset($body['isFeatured']) === true && (bool) $body['isFeatured'] === true ? 1 : 0;
 $locationName = trim((string) ($body['locationName'] ?? ''));
 $status       = (string) ($body['status'] ?? 'draft');

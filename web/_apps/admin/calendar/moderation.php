@@ -5,7 +5,7 @@
  * Admin — Calendar Submission Moderation Queue 🛡️📅 (#326)
  * -----------------------------------------------------------------------------
  * Lists events in submissionStatus='pending' awaiting review. Per-row
- * approve / reject / open-for-edit actions POST to /admin/calendar/moderate.
+ * approve / reject actions POST to /admin/calendar/moderate (the only two it accepts).
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -79,7 +79,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 <div class="container py-4">
     <h1 class="h3 mb-3"><i class="fa-solid fa-calendar-check me-2 text-primary"></i>Moderate Calendar Submissions</h1>
-    <p class="text-muted">Public event submissions from <a href="<?php echo htmlspecialchars(Site::url('calendar/submit'), ENT_QUOTES, 'UTF-8'); ?>">/calendar/submit</a> wait here until an admin approves them.</p>
+    <p class="text-muted">Public event submissions from <a href="<?php echo htmlspecialchars(Site::url('calendar/submit'), ENT_QUOTES, 'UTF-8'); ?>">/calendar/submit</a> wait here until an admin approves them. Approving does not make an event public: a suggestion arrives members-only and stays so, unless <strong>Public</strong> is ticked on the event in Manage Events.</p>
 
     <ul class="nav nav-pills mb-3">
         <?php foreach (['pending' => 'fa-clock', 'approved' => 'fa-check', 'rejected' => 'fa-xmark'] as $s => $ico): ?>

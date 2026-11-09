@@ -797,7 +797,8 @@ $parseCsv = static function (string $tmpFile) use ($siteId, $mysqli, $fmtStore):
             'status'        => $status !== '' ? $status : 'draft',
             'categoryID'    => $catId,
             'typeID'        => $typeId,
-            'isPublic'      => in_array($isPubStr,  ['', '1', 'true', 'yes', 'y'], true) ? 1 : 0,
+            // D-079: an empty cell means members-only, as for every new event; only a yes makes it public.
+            'isPublic'      => in_array($isPubStr,  ['1', 'true', 'yes', 'y'], true) ? 1 : 0,
             'isFeatured'    => in_array($isFeatStr, ['1', 'true', 'yes', 'y'], true) ? 1 : 0,
             'errors'        => $rowErr,
             // 🧹 `_startTs` and `_endTs` were carried here and `unset()` on
@@ -1070,7 +1071,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card shadow-sm mb-3">
         <div class="card-body">
             <h2 class="h5">CSV format</h2>
-            <p class="small">Required columns: <code>eventName</code>, <code>startDateTime</code>. Optional: <code>endDateTime</code>, <code>isAllDay</code>, <code>locationName</code>, <code>description</code>, <code>status</code> (draft|published|cancelled|postponed), <code>category</code>, <code>type</code>, <code>isPublic</code>, <code>isFeatured</code>. First row must be the header.</p>
+            <p class="small">Required columns: <code>eventName</code>, <code>startDateTime</code>. Optional: <code>endDateTime</code>, <code>isAllDay</code>, <code>locationName</code>, <code>description</code>, <code>status</code> (draft|published|cancelled|postponed), <code>category</code>, <code>type</code>, <code>isPublic</code> (yes, y, true or 1 to make it public; empty or anything else means members-only), <code>isFeatured</code>. First row must be the header.</p>
             <p class="small text-muted mb-0">
                 Excel users: open your file in Excel, choose <em>File → Save As → CSV (Comma delimited) (.csv)</em>.
             </p>

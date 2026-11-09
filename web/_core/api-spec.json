@@ -501,8 +501,8 @@
           },
           "isPublic": {
             "type": "boolean",
-            "default": true,
-            "description": "Whether a signed-out visitor may see the event on the public calendar. **Defaults to true when the field is absent.** Note the portal reads this loosely, so the text `\"false\"` counts as TRUE — send a real true/false value."
+            "default": false,
+            "description": "Whether a signed-out visitor may see the event on the public calendar. **Defaults to false when the field is absent**: a new event starts members-only until somebody makes it public (D-079; on a portal not yet upgraded to this version it defaults to true). Note the portal reads this loosely, so the text `\"false\"` counts as TRUE — send a real true/false value."
           },
           "isFeatured": {
             "type": "boolean",

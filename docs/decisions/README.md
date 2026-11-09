@@ -147,7 +147,8 @@ appended with its real date and a note that it was added later.
 | [D-089](089-search-engine-markup-also-needs-the-website-tick.md) | 2026-11-08 | An event's search-engine markup also needs the public-website tick | in force |
 | [D-090](090-one-website-yes-covers-every-date-of-a-repeating-copied-event.md) | 2026-11-08 | One website "Yes" for every date of a repeating copied-in event covers all its dates | in force |
 | [D-091](091-dark-mode-shades-follow-the-organisations-colour.md) | 2026-11-09 | In dark mode, the main colour's shades follow the organisation's own colour | in force |
+| [D-092](092-approving-a-suggested-event-keeps-it-members-only.md) | 2026-11-09 | Approving an event a member of the public suggested keeps it members-only | in force |
 
-*91 decisions. This index is checked against the folder by
+*92 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

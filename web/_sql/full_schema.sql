@@ -1183,7 +1183,7 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
 
     -- 📊 Status and visibility
     `status`       ENUM('draft','published','cancelled','postponed') NOT NULL DEFAULT 'draft',
-    `isPublic`     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'Visible on public calendar',
+    `isPublic`     TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Visible on public calendar. A new event starts members-only (D-079, migration 259); existing events kept what they had.',
     -- 🌐 added by migration 258 (#493, P1) — placed HERE, straight
     --    after isPublic, so a fresh install has the columns in the same order as
     --    a database brought up to date by the migration (`AFTER isPublic`). The
@@ -11337,6 +11337,12 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('258_events_show_on_website.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 259_new_events_start_members_only.sql (D-079) ───────────────────────
+-- `tblEvents.isPublic` is declared above with DEFAULT 0. Nothing to carry: a
+-- fresh install has no event.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('259_new_events_start_members_only.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

@@ -443,7 +443,9 @@ Events, series, RSVP, exports, and seven view modes.
 - **Show on the public website (#493, package P1; D-057, D-077, D-078).** The countdown that other
   websites can show and the sitemap list an organisation's own event only while somebody has ticked
   "Show on the public website", the event is marked Public, and today is inside its optional from/until
-  dates (both inclusive, on the organisation's calendar). Every event starts unticked. Who may tick it is
+  dates (both inclusive, on the organisation's calendar). Every event starts unticked, and a new event
+  also starts with "Public" unticked, members-only until somebody ticks it — an approved suggestion from
+  the public too (D-079, D-092, migration 259). Who may tick it is
   the re-pointable permission `website.publish` (out of the box the organisation's administrators; the
   Website Editor role exists to give it to, though today only administrators can open the pages that
   change an event). Events copied in from outside calendars follow a rule — one

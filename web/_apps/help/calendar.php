@@ -259,6 +259,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
      three say what the switch governs, and when #493's public door ships it
      joins the list in all three. -->
 <section id="public-website" class="mb-5">
+    <?php // D-079 and D-092 have their own paragraph below, ahead of "Three things to know", which names each box in full. ?>
     <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2"></i>For admins &mdash; the public website</h2>
     <p>
         Some of what the portal shows is open to anybody on the internet, without signing in: the event
@@ -277,10 +278,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         administrators can open the page that changes an event, so giving it to somebody who is not an
         administrator lets them change nothing yet.
     </p>
+    <p>
+        A new event starts with <strong>Public</strong> unticked, so it is for members only until somebody
+        ticks it &mdash; and that includes an event a member of the public suggested, once it is approved.
+        Events that existed before your portal was upgraded to this version kept what they had.
+    </p>
     <p class="text-muted small">
         Three things to know. The portal's own pages &mdash; the event's page, the calendar a signed-out
         visitor sees, and the calendar feed people subscribe to &mdash; follow the &ldquo;Public&rdquo; box,
-        not this one; but what the event's page tells search engines needs this box too. A repeating series made with the box ticked gives
+        not &ldquo;Show on the public website&rdquo;; but what the event's page tells search engines needs
+        &ldquo;Show on the public website&rdquo; too. A repeating series made with &ldquo;Show on the public website&rdquo; ticked gives
         every date the same From and Until dates, so leave them empty or set them wide enough for the whole
         series. And taking an event off can take up to an hour to reach every copy; a copy somebody has
         already taken cannot be pulled back.
