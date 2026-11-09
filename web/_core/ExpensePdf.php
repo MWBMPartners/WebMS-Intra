@@ -233,11 +233,12 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;p
                 break;
         }
 
-        // 💾 Save PDF to uploads directory
-        $storeDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'pdfs';
-        $filename = 'claim_' . $claimID . '.pdf';
-        $path = $storeDir . DIRECTORY_SEPARATOR . $filename;
-        $saved = Pdf::create($html, $path, $wm);
+        // 💾 Save PDF to uploads directory — at the ONE path `pathFor()` names,
+        //    which the submit handler also asks so it can remove this file
+        //    when the claim is not saved (#869).
+        $path     = self::pathFor($claimID);
+        $filename = basename($path);
+        $saved    = Pdf::create($html, $path, $wm);
 
         if ($saved !== false) {
             // 📋 Update tblExpenseClaims.fileName
@@ -266,6 +267,29 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;p
             return $saved;
         }
         return false;
+    }
+
+    /**
+     * 📍 Where a claim's PDF is kept: the ONE place the path is built.
+     *
+     * Every stage of a claim writes the SAME file (`claim_<id>.pdf`), each
+     * replacing the last. `generate()` writes it here, and
+     * `expenses/submit/save.php` asks this too, so that a claim which is NOT
+     * saved takes its PDF with it (#869). Before that, a claim rolled back
+     * after this file had been written left it on disk — the claimant's name,
+     * department and every figure — with no claim row pointing at it, so no
+     * erasure could ever find it. Two places building the name would be two
+     * places to change, and the one that drifted would be the clean-up, which
+     * would then simply stop finding anything.
+     *
+     * @param int $claimID The claim's number.
+     *
+     * @return string An absolute path under `_uploads/pdfs`.
+     */
+    public static function pathFor(int $claimID): string
+    {
+        return PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'pdfs'
+            . DIRECTORY_SEPARATOR . 'claim_' . $claimID . '.pdf';
     }
 
     /**

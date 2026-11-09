@@ -43,6 +43,17 @@
  * WHAT IT CANNOT DO: it lists only this organisation's claims, on purpose. A
  * member of two organisations sees each one's claims on that organisation's
  * own address, and nowhere a list of both.
+ *
+ * A REFUSED CLAIM COMES BACK FILLED IN (#870, 9 November 2026). The save
+ * handler keeps the title, department and item lines of a refused claim, and
+ * this page fills the form in from them once. The receipts cannot be kept —
+ * a page cannot choose files for somebody — and a note above the files box
+ * says so. With JavaScript off the five plain item rows are filled in (more
+ * when more were typed); with it on the rows are built by the script below,
+ * which sets each value as a value, never as markup.
+ *
+ * THE FILE CHOOSER OFFERS WHAT THE RULE ACCEPTS (#871): its `accept` list is
+ * built from `ExpenseRules::RECEIPT_TYPES`, never written here by hand.
  * -----------------------------------------------------------------------------
  */
 
@@ -50,6 +61,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -66,11 +78,29 @@ $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
+$siteId = Site::id();
+
+// ✍️ WHAT WAS TYPED INTO A REFUSED CLAIM (#870), read and cleared exactly as
+//    the one-off message is, so it fills the form in ONCE and never again.
+//    The save handler keeps it on every refusal after the form token was
+//    accepted; `ExpenseRules` says which refusals keep nothing, and why. It
+//    never holds the receipts — a page cannot choose files for somebody —
+//    and the form says so when it has been filled in again.
+$draft = ExpenseRules::draftForForm($_SESSION[ExpenseRules::DRAFT_SESSION_KEY] ?? null, $siteId);
+unset($_SESSION[ExpenseRules::DRAFT_SESSION_KEY]);
+$draftTitle = $draft['claimTitle'] ?? '';
+$draftDept  = $draft['deptID'] ?? 0;
+$draftItems = $draft['items'] ?? [];
+
+// 📎 What the file chooser offers, built from the ONE list of receipt kinds
+//    (#871). It used to say "image/*,application/pdf", which hid the Word,
+//    Excel and CSV files the rule accepts and the help page names.
+$receiptAccept = ExpenseRules::receiptAcceptList();
+
 /* -------------------------------------------------------------------------- */
 /* 🏢 Active departments                                                      */
 /* -------------------------------------------------------------------------- */
 $depts = [];
-$siteId = Site::id();
 $stmt = $mysqli->prepare('SELECT deptID, deptName FROM tblDepts WHERE isActive = 1 AND siteID = ? ORDER BY deptName');
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);
@@ -250,9 +280,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <form method="post" action="<?php echo htmlspecialchars(Router::url('expenses/submit/save'), ENT_QUOTES, 'UTF-8'); ?>" enctype="multipart/form-data" novalidate>
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
 
+    <?php if ($draft !== null): ?>
+        <!-- ✍️ #870: the form was filled in again from a refused claim. -->
+        <div class="alert alert-info" id="claim-draft-restored">
+            <i class="fa-solid fa-circle-info me-1"></i>What you typed has been filled in again below. Any receipts you chose were not kept, so please choose them again before you submit.
+        </div>
+    <?php endif; ?>
+
     <div class="mb-3">
         <label class="form-label">Claim Title</label>
-        <input type="text" class="form-control" name="claimTitle" required>
+        <input type="text" class="form-control" name="claimTitle" value="<?php echo htmlspecialchars($draftTitle, ENT_QUOTES, 'UTF-8'); ?>" required>
     </div>
 
     <div class="mb-3">
@@ -267,10 +304,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 An administrator adds them at Admin &rarr; Departments.
             </div>
         <?php else: ?>
+        <?php
+        // The kept department is chosen again only if it is still one of
+        // this organisation's live departments; otherwise the prompt is, so
+        // exactly ONE option is ever `selected`.
+        $draftDeptListed = in_array($draftDept, array_map(static fn (array $d): int => (int) $d['deptID'], $depts), true);
+        ?>
         <select class="form-select" name="deptID" required>
-            <option value="" disabled selected>Select department...</option>
+            <option value="" disabled<?php echo $draftDeptListed === true ? '' : ' selected'; ?>>Select department...</option>
             <?php foreach ($depts as $dept): ?>
-                <option value="<?php echo (int) $dept['deptID']; ?>"><?php echo htmlspecialchars($dept['deptName'], ENT_QUOTES, 'UTF-8'); ?></option>
+                <option value="<?php echo (int) $dept['deptID']; ?>"<?php echo ($draftDeptListed === true && (int) $dept['deptID'] === $draftDept) ? ' selected' : ''; ?>><?php echo htmlspecialchars($dept['deptName'], ENT_QUOTES, 'UTF-8'); ?></option>
             <?php endforeach; ?>
         </select>
         <?php endif; ?>
@@ -290,19 +333,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div id="items-list">
         <!-- ⚠️ Static fallback rows for no-JS environments -->
         <noscript>
-            <?php for ($rowIdx = 1; $rowIdx <= 5; $rowIdx++): ?>
+            <?php
+            // Five plain rows, or as many as a refused claim had (#870), each
+            // filled in from what was typed where there is something.
+            $noScriptRows = max(5, count($draftItems));
+            ?>
+            <?php for ($rowIdx = 1; $rowIdx <= $noScriptRows; $rowIdx++): ?>
+            <?php $kept = $draftItems[$rowIdx - 1] ?? ['desc' => '', 'qty' => '1', 'unit' => '0.00']; ?>
             <div class="row g-2 align-items-end mb-2">
                 <div class="col-12 col-md-5">
                     <label class="form-label d-md-none">Description</label>
-                    <input type="text" name="itemDesc[]" class="form-control" aria-label="Description" placeholder="Item <?php echo $rowIdx; ?>">
+                    <input type="text" name="itemDesc[]" class="form-control" aria-label="Description" placeholder="Item <?php echo $rowIdx; ?>" value="<?php echo htmlspecialchars($kept['desc'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="col-4 col-md-2">
                     <label class="form-label d-md-none">Qty</label>
-                    <input type="number" name="itemQty[]" class="form-control text-end" aria-label="Quantity" min="1" value="1">
+                    <input type="number" name="itemQty[]" class="form-control text-end" aria-label="Quantity" min="1" value="<?php echo htmlspecialchars($kept['qty'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="col-4 col-md-2">
                     <label class="form-label d-md-none">Unit &pound;</label>
-                    <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit price" value="0.00">
+                    <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit price" value="<?php echo htmlspecialchars($kept['unit'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="col-4 col-md-3"></div>
             </div>
@@ -321,9 +370,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h3 class="h5 mt-4">Supporting Files</h3>
     <div class="mb-3">
         <div class="dropzone" id="filesDropzone" role="button" tabindex="0">Drop files here or click to upload</div>
-        <input type="file" name="files[]" id="files" class="form-control d-none" multiple accept="image/*,application/pdf">
+        <input type="file" name="files[]" id="files" class="form-control d-none" multiple accept="<?php echo htmlspecialchars($receiptAccept, ENT_QUOTES, 'UTF-8'); ?>">
         <noscript>
-            <input type="file" name="files[]" class="form-control mt-2" multiple accept="image/*,application/pdf">
+            <input type="file" name="files[]" class="form-control mt-2" multiple accept="<?php echo htmlspecialchars($receiptAccept, ENT_QUOTES, 'UTF-8'); ?>">
         </noscript>
     </div>
 
@@ -385,8 +434,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         totalInput.value = sum.toFixed(2);
     }
 
-    // 🏁 Initial row
-    list.insertAdjacentHTML('beforeend', itemTemplate(true));
+    // ✍️ The item lines of a refused claim, kept by the save handler (#870).
+    //    Written into the page as JSON with every character that could end a
+    //    script or start markup escaped, and set on each box as a VALUE —
+    //    never pasted into the markup, where a description that holds markup
+    //    of its own would become part of the page. (No example is written
+    //    here on purpose: tools/page-scripts-selftest.php reads the page as
+    //    served, script text included, and an example tag with a handler in
+    //    this comment reads to it as a real handler on a real element.)
+    const keptItems = <?php echo json_encode($draftItems, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE); ?>;
+
+    // 🏁 The first row, then one more for each further kept line. The first
+    //    row's remove button stays switched off, as it always was.
+    const rowsToDraw = Math.max(1, keptItems.length);
+    for (let i = 0; i < rowsToDraw; i++) {
+        list.insertAdjacentHTML('beforeend', itemTemplate(i === 0));
+        const kept = keptItems[i];
+        if (kept) {
+            const row = list.lastElementChild;
+            row.querySelector('[name="itemDesc[]"]').value = kept.desc;
+            row.querySelector('[name="itemQty[]"]').value  = kept.qty;
+            row.querySelector('[name="itemUnit[]"]').value = kept.unit;
+        }
+    }
 
     document.getElementById('addRow').addEventListener('click', () => {
         list.insertAdjacentHTML('beforeend', itemTemplate(false));

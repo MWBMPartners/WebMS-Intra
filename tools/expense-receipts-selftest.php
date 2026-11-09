@@ -51,8 +51,33 @@
  *   L  the CONNECT half of the new connection's 3-second deadline: asked to
  *      reach an address that never answers a connection attempt, it gives
  *      up in seconds, not PHP's default 60. K4 drives the READ half.
+ *   P  (#869) a claim undone AFTER its PDF was written takes the PDF with it:
+ *      refused, refused with the folder unwritable (logged by path), and the
+ *      connection lost. Section K also proves the PDF is KEPT and logged once
+ *      COMMIT has been sent. The PDF library (dompdf) is never committed, so
+ *      a STAND-IN for it is written into this run's copy of web/; the real
+ *      ExpensePdf::generate() and Pdf::create() run, and B20 asserts the
+ *      premise that a real claim PDF is written holding the claimant's name.
+ *   R  (#870) a refused claim comes back filled in — title, department and
+ *      item lines, NEVER the receipts — once; a refused form token keeps
+ *      nothing; and a submission over the server's post_max_size (driven by
+ *      starting the server with a 1 MB limit) is told it was too large, with
+ *      both sizes, not "Invalid CSRF token.". F04b, G03b, G03c and K06e pin
+ *      the same rule on the folder-missing, rolled-back and unconfirmed paths.
+ *   S  (#871) both file boxes offer exactly the kinds on RECEIPT_TYPES
  *   Z  across the WHOLE run, no column of either log holds a claimant's own
  *      file name (#714)
+ *
+ * PLANTED FAULTS (9 November 2026, #869-#871): eleven, each applied to the
+ * real handler or form page, each turning red the check meant to catch it,
+ * each put back byte for byte: the PDF not removed before COMMIT (P03, P06,
+ * P09); deleted after COMMIT (K06c, K06d, K11b, K16b, K16c); kept but not
+ * logged after COMMIT (K06d, K16c); left behind but not logged (P06); nothing
+ * typed ever kept (F04b, G03b, R02, R03, R07, R09); a refused token keeping
+ * the typing (R06); the too-large check removed (R11); the form not clearing
+ * the kept claim (G03c); the old hand-written accept list (S02); a kept
+ * description printed as markup (R03, R04); and the unconfirmed path keeping
+ * the typing (K06e).
  *
  * WHAT IT CANNOT DO, said plainly
  *   - A partly-arrived file (`UPLOAD_ERR_PARTIAL`) and PHP having no temporary
@@ -106,7 +131,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 148;
+const EXPECTED_CHECKS = 191;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -301,6 +326,49 @@ check('A44 a named file AND dropped files: both said, with the advice for both',
     str_contains($both['message'], '"a.exe"') && str_contains($both['message'], 'at most 3 files')
         && str_contains($both['message'], 'no more than 3 files'), true);
 
+// ── #871: what the file chooser offers ──────────────────────────────────────
+// Compared with a list built HERE from RECEIPT_TYPES itself, not with the
+// method's own answer twice, so a method that dropped a kind would fail.
+$acceptWanted = array_map(static fn (string $e): string => '.' . $e, R::RECEIPT_TYPES);
+check('A51 (#871) the chooser\'s list is exactly the receipt kinds, by the end of the name',
+    explode(',', R::receiptAcceptList()), $acceptWanted);
+check('A52 (#871) ...so Word, Excel, CSV and iPhone photos are all offered (D-096), and no "every picture" wildcard',
+    [in_array('.docx', explode(',', R::receiptAcceptList()), true), in_array('.xlsx', explode(',', R::receiptAcceptList()), true),
+        in_array('.csv', explode(',', R::receiptAcceptList()), true), in_array('.heic', explode(',', R::receiptAcceptList()), true),
+        str_contains(R::receiptAcceptList(), '*')], [true, true, true, true, false]);
+
+// ── #870: what a refused claim keeps, and a submission too large ────────────
+$kept = R::claimDraftFrom([
+    'claimTitle' => 'Trip to York',
+    'deptID'     => '12',
+    'itemDesc'   => ['Train', '', '<b>Lunch</b>', ''],
+    'itemQty'    => ['2', '1', '1', '1'],
+    'itemUnit'   => ['10.50', '0.00', '7', '3'],
+    'csrf_token' => 'never kept',
+], 5);
+check('A53 (#870) a refused claim keeps its title, department and the lines that hold anything — a blank line priced 0.00 is dropped, a priced line with no words is kept',
+    $kept, ['siteId' => 5, 'claimTitle' => 'Trip to York', 'deptID' => 12, 'items' => [
+        ['desc' => 'Train', 'qty' => '2', 'unit' => '10.50'],
+        ['desc' => '<b>Lunch</b>', 'qty' => '1', 'unit' => '7'],
+        ['desc' => '', 'qty' => '1', 'unit' => '3'],
+    ]]);
+check('A54 (#870) a field of the wrong TYPE is kept as nothing, never trusted (#642)',
+    R::claimDraftFrom(['claimTitle' => ['x'], 'deptID' => '0x1', 'itemDesc' => 'not a list'], 5),
+    ['siteId' => 5, 'claimTitle' => '', 'deptID' => 0, 'items' => []]);
+check('A55 (#870) the kept claim is offered back only to the SAME organisation',
+    [R::draftForForm($kept, 5) !== null, R::draftForForm($kept, 6), R::draftForForm('rubbish', 5)], [true, null, null]);
+check('A56 (#870) a POST that PHP emptied, declaring more than post_max_size, is "too large"',
+    R::postWasTooLarge('POST', 0, 0, '2097152', '1M'), true);
+check('A57 (#870) ...but not when anything arrived (a post that merely lost its token keeps its other fields)',
+    [R::postWasTooLarge('POST', 3, 0, '2097152', '1M'), R::postWasTooLarge('POST', 0, 1, '2097152', '1M')], [false, false]);
+check('A58 (#870) ...nor when it is within the limit, nor with no limit, nor for a GET',
+    [R::postWasTooLarge('POST', 0, 0, '1000', '1M'), R::postWasTooLarge('POST', 0, 0, '2097152', '0'),
+        R::postWasTooLarge('GET', 0, 0, '2097152', '1M'), R::postWasTooLarge('POST', 0, 0, 'lots', '1M')], [false, false, false, false]);
+$tooLargeWords = R::postTooLargeMessage(1048577, '1M');
+check('A59 (#870) the words give both sizes with a real gap — what was sent rounded UP, the limit DOWN — and say nothing was kept',
+    [str_contains($tooLargeWords, 'came to 1.1 MB, and this server accepts at most 1 MB'),
+        str_contains($tooLargeWords, 'not your receipts, and not what you typed'), str_contains($tooLargeWords, 'CSRF')], [true, true, false]);
+
 // ═════════════════════════════════════════════════════════════════════════════
 // The pages. A COPY of web/, so changing a folder's permissions never touches
 // the repository, and every receipt this run stores goes in a folder this run
@@ -408,7 +476,37 @@ file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key'
 
 $uploads  = $child . $sep . 'web' . $sep . '_uploads';
 $receipts = $uploads . $sep . 'expenses';
+$pdfs     = $uploads . $sep . 'pdfs';
 @mkdir($uploads, 0700, true);
+
+// 📄 A STAND-IN FOR THE PDF LIBRARY, in THIS RUN'S COPY only (#869).
+//    dompdf is never committed (`_libraries/` is uploaded by hand on a real
+//    server), so without this `Pdf::create()` returns false on every machine
+//    the test runs on, no claim PDF is ever written, and the clean-up of one
+//    could not be tested — which is exactly why #649 left #869 open. The
+//    stand-in answers the four calls `Pdf::create()` makes and "renders" the
+//    claim's HTML as text after a PDF-looking first line. So the REAL
+//    `ExpensePdf::generate()` and the REAL `Pdf::create()` run, write the
+//    file to the real path through the real temporary-name-and-rename, and
+//    the file holds the claimant's name exactly as a real PDF would.
+//    WHAT IT CANNOT SHOW: anything about dompdf itself.
+$standIn = $child . $sep . 'web' . $sep . '_libraries' . $sep . 'dompdf';
+mkdir($standIn, 0700, true);
+file_put_contents($standIn . $sep . 'autoload.inc.php', <<<'STANDIN'
+<?php
+// Written by tools/expense-receipts-selftest.php for ONE run. NOT dompdf.
+declare(strict_types=1);
+namespace Dompdf;
+final class Options { public function set(string $key, mixed $value): void {} }
+final class Dompdf {
+    private string $html = '';
+    public function __construct(?Options $options = null) {}
+    public function loadHtml(string $html): void { $this->html = $html; }
+    public function setPaper(string $size, string $orientation): void {}
+    public function render(): void {}
+    public function output(): string { return "%PDF-1.4\n% STAND-IN for tools/expense-receipts-selftest.php\n" . $this->html; }
+}
+STANDIN);
 
 // The router imitates web/public_html/.htaccess, as the other page tests do.
 $router = <<<'ROUTER'
@@ -678,21 +776,25 @@ $png = (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAD
 //    test green. Whatever any section sends is now in it.
 $sentNames = [];
 
-$submit = static function (string $title, array $files, ?callable $during = null, ?callable $afterPost = null) use ($http, $makeRequest, $answerOf, $tokenOn, $db, $deptId, $userId, $receipts, &$sentNames): array {
+// `$postOverride` (#870) replaces any of the posted fields — a wrong token, a
+// price of zero, a department that is not one — so a section can be REFUSED;
+// the answer then carries `page`, the claim form as drawn straight after, so
+// it can be read for what was filled in again.
+$submit = static function (string $title, array $files, ?callable $during = null, ?callable $afterPost = null, array $postOverride = []) use ($http, $makeRequest, $answerOf, $tokenOn, $db, $deptId, $userId, $receipts, &$sentNames): array {
     foreach ($files as [, $fileName]) {
         if ($fileName !== '') {
             $sentNames[] = $fileName;
         }
     }
     $form    = $http('GET', '/expenses/submit');
-    $request = $makeRequest('POST', '/expenses/submit/save', [
+    $request = $makeRequest('POST', '/expenses/submit/save', array_merge([
         'csrf_token' => $tokenOn($form['body']),
         'deptID'     => (string) $deptId,
         'claimTitle' => $title,
         'itemDesc[]' => ['Train fare'],
         'itemQty[]'  => ['1'],
         'itemUnit[]' => ['12.50'],
-    ], $files);
+    ], $postOverride), $files);
     if ($during === null) {
         $post = $answerOf($request, curl_exec($request));
     } else {
@@ -762,7 +864,7 @@ $submit = static function (string $title, array $files, ?callable $during = null
         }
     }
 
-    return ['post' => $post, 'message' => $message, 'alert' => $alert, 'claim' => $claim, 'rows' => $rows, 'disk' => $disk];
+    return ['post' => $post, 'message' => $message, 'alert' => $alert, 'claim' => $claim, 'rows' => $rows, 'disk' => $disk, 'page' => (string) $after['body']];
 };
 
 /** The newest error-log rows with this code, written after `$sinceId`. */
@@ -818,6 +920,38 @@ $folderNow = static function () use ($receipts): array {
     return is_array($all) === true ? array_values(array_diff($all, ['.', '..'])) : [];
 };
 
+/** Every file in the claim-PDF folder (#869), the same way. */
+$pdfsNow = static function () use ($pdfs): array {
+    clearstatcache();
+    $all = @scandir($pdfs);
+    return is_array($all) === true ? array_values(array_diff($all, ['.', '..'])) : [];
+};
+
+/**
+ * What the claim form says it was filled in with (#870), read off the page as
+ * drawn: the title box's value, the department chosen, the item lines the
+ * script is handed, the plain rows shown with JavaScript off, and whether the
+ * "filled in again" note is there. Read from the HTML the browser receives,
+ * so a page that kept the draft but never printed it fails.
+ */
+$formState = static function (string $page): array {
+    $items = null;
+    if (preg_match('/const keptItems = (.*?);\n/', $page, $m) === 1) {
+        $items = json_decode($m[1], true);
+    }
+    preg_match_all('/<option value="(\d+)" selected>/', $page, $sel);
+    preg_match_all('/name="itemDesc\[\]"[^>]*value="([^"]*)"/', $page, $plain);
+
+    return [
+        'note'    => str_contains($page, 'id="claim-draft-restored"'),
+        'title'   => preg_match('/name="claimTitle" value="([^"]*)"/', $page, $t) === 1 ? html_entity_decode($t[1], ENT_QUOTES, 'UTF-8') : null,
+        'dept'    => $sel[1],
+        'prompt'  => str_contains($page, '<option value="" disabled selected>'),
+        'items'   => $items,
+        'noscript' => array_values(array_filter(array_map(static fn (string $v): string => html_entity_decode($v, ENT_QUOTES, 'UTF-8'), $plain[1]), static fn (string $v): bool => $v !== '')),
+    ];
+};
+
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nB. #649's own case: a good file, one too big, one of the wrong kind, and an empty slot\n";
 // ═════════════════════════════════════════════════════════════════════════════
@@ -863,6 +997,14 @@ check('B18 no file name reached the database\'s receipt rows either',
     str_contains(json_encode($b['rows']) ?: '', 'Train ticket'), false);
 check('B19 nothing was put in the error log for files the CLAIMANT got wrong',
     count($errorsSince($errBefore, 'RECEIPT_NOT_STORED')), 0);
+// The premise of section P and of K's PDF checks: with the stand-in library,
+// the REAL code really writes a claim PDF, at the path `pathFor()` names, and
+// it really holds the claimant's name — which is why one left behind matters.
+$bPdf = $pdfs . $sep . 'claim_' . (int) ($b['claim']['claimID'] ?? 0) . '.pdf';
+$bPdfRow = $db->query('SELECT COUNT(*) AS n FROM tblExpenseClaimFiles WHERE claimID = ' . (int) ($b['claim']['claimID'] ?? 0) . " AND stage = 'Pending'")->fetch_assoc();
+check('B20 (#869 premise) a saved claim\'s PDF is on disk with its row, and holds the claimant\'s name',
+    [is_file($bPdf), str_starts_with((string) @file_get_contents($bPdf), '%PDF'),
+        str_contains((string) @file_get_contents($bPdf), 'Receipts Test Member'), (int) ($bPdfRow['n'] ?? 0)], [true, true, true, 1]);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nC. A file over the SERVER's own limit, refused by PHP before the portal sees it\n";
@@ -941,6 +1083,10 @@ check('F02 the claimant is told so, plainly, as a danger alert',
     [$f['alert'], $f['message']], ['danger', R::MSG_RECEIPT_FOLDER_MISSING]);
 check('F03 the folder still does not exist (nothing half-made)', is_dir($receipts), false);
 check('F04 the administrator gets an error-log line saying why', count($errorsSince($errBefore, 'RECEIPT_FOLDER')), 1);
+$fForm = $formState($f['page']);
+check('F04b (#870) THE FORM COMES BACK FILLED IN with what was typed — title, department and line — and says the receipts were not kept',
+    [$fForm['note'], $fForm['title'], $fForm['dept'], $fForm['items']],
+    [true, 'P649 F no folder', [(string) $deptId], [['desc' => 'Train fare', 'qty' => '1', 'unit' => '12.50']]]);
 // Only an EMPTY slot, which is what the real form sends when nothing is chosen.
 $f2 = $submit('P649 F2 no folder no receipt', [['files[]', '', '']]);
 check('F05 a claim with NO receipt is NOT refused for want of a folder it does not need', $f2['claim'] !== null, true);
@@ -971,6 +1117,12 @@ $db->query('DROP TRIGGER IF EXISTS trg_p649_refuse_receipt');
 check('G01 the claim is rolled back', $g['claim'], null);
 check('G02 the claimant is told it was not saved', [$g['alert'], $g['message']], ['danger', 'Error saving claim. Please try again.']);
 check('G03 THE MOVED FILE WENT WITH IT: the folder is exactly as it was', $folderNow(), $before);
+$gForm = $formState($g['page']);
+check('G03b (#870) a save that failed and was undone comes back FILLED IN, with the note about receipts',
+    [$gForm['note'], $gForm['title'], $gForm['items']], [true, 'P649 G rollback', [['desc' => 'Train fare', 'qty' => '1', 'unit' => '12.50']]]);
+$gAgain = $formState($http('GET', '/expenses/submit')['body']);
+check('G03c (#870) ...ONCE: drawn again, the form is empty (a kept claim never fills it in twice)',
+    [$gAgain['note'], $gAgain['title'], $gAgain['items']], [false, '', []]);
 
 // G2: the same failure, but the file CANNOT be removed. The trigger pauses the
 // receipt's row insert (the file is already moved) and then refuses it; while
@@ -1056,6 +1208,73 @@ check('J01 the claim is not saved (the server threw it away with the connection)
 check('J02 THE MOVED FILE IS STILL REMOVED: the folder is exactly as it was', $folderNow(), $before);
 check('J03 THE CLAIMANT IS STILL TOLD it was not saved',
     [$j['post']['status'], $j['alert'], $j['message']], [302, 'danger', 'Error saving claim. Please try again.']);
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "\nP. #869: a claim undone AFTER its PDF was written takes the PDF with it\n";
+// ═════════════════════════════════════════════════════════════════════════════
+// `ExpensePdf::generate()` writes `claim_<id>.pdf` to disk and THEN writes its
+// two rows. A trigger on the PDF's own row (the one carrying a stage — a
+// receipt's row has none) pauses, so this test can look at the folder while
+// the file is really there, and then refuses, so the claim is undone. Before
+// #869 the file stayed: the claimant's name and figures, with no row pointing
+// at it, where no erasure could find it. Built on the stand-in PDF library
+// (see the copy of web/ above): the real generate(), the real Pdf::create().
+$pdfTrigger = static function (string $then) use ($db): void {
+    $db->query('DROP TRIGGER IF EXISTS trg_p869_pdf');
+    $db->query(
+        "CREATE TRIGGER trg_p869_pdf BEFORE INSERT ON tblExpenseClaimFiles FOR EACH ROW "
+        . "BEGIN IF NEW.stage IS NOT NULL THEN SET @p649_pause = SLEEP(4); {$then} END IF; END"
+    );
+};
+$state['undo'][] = 'DROP TRIGGER IF EXISTS trg_p869_pdf';
+
+// P1: refused after the pause; the PDF must be removed with the receipt.
+$pdfTrigger("SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p869 planted refusal of the PDF row';");
+$pdfBefore     = $pdfsNow();
+$receiptBefore = $folderNow();
+$pdfDuring     = [];
+$p1 = $submit('P869 P1 pdf rollback', [['files[]', 'Meal ZZ-P1.png', $png]], static function (int $thread) use ($pdfsNow, &$pdfDuring): void {
+    $pdfDuring = $pdfsNow();
+});
+$p1New = array_values(array_diff($pdfDuring, $pdfBefore));
+check('P01 the premise: while the claim was still being saved, its PDF WAS on disk (one new claim_<n>.pdf)',
+    count($p1New) === 1 && preg_match('/^claim_\d+\.pdf$/', (string) ($p1New[0] ?? '')) === 1, true);
+check('P02 the claim is undone, and the claimant told', [$p1['claim'], $p1['alert'], $p1['message']], [null, 'danger', 'Error saving claim. Please try again.']);
+check('P03 THE PDF WENT WITH IT: the PDF folder is exactly as it was', $pdfsNow(), $pdfBefore);
+check('P04 ...and so did the receipt', $folderNow(), $receiptBefore);
+
+// P2: the same, but the PDF cannot be removed — it must be logged by PATH.
+$pdfTrigger("SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p869 planted refusal of the PDF row';");
+$errBefore = $lastErrorId();
+$pdfBefore = $pdfsNow();
+$p2 = $submit('P869 P2 pdf left behind', [['files[]', 'Meal ZZ-P2.png', $png]], static function (int $thread) use ($pdfs): void {
+    chmod($pdfs, 0500);
+});
+chmod($pdfs, 0700);
+$p2Left = array_values(array_diff($pdfsNow(), $pdfBefore));
+$p2Rows = $errorsSince($errBefore, 'CLAIM_PDF_LEFT_BEHIND');
+check('P05 the premise: the PDF really could not be removed (one left behind), and the claim is undone',
+    [count($p2Left), $p2['claim']], [1, null]);
+check('P06 THE ADMINISTRATOR IS TOLD, under its own code, by the PDF\'s path',
+    count($p2Rows) === 1 && str_contains((string) ($p2Rows[0]['errorDetail'] ?? ''), $pdfs . $sep . (string) ($p2Left[0] ?? '-')), true);
+check('P07 ...and never by the claimant\'s own file name (#714)', str_contains(json_encode($p2Rows) ?: '', 'ZZ-P2'), false);
+foreach ($p2Left as $leftover) {
+    @unlink($pdfs . $sep . $leftover); // this test's own leftover, by its generated name
+}
+
+// P3: the connection is LOST while the PDF's row is held, so the rollback
+// throws as well (section J's case, one step later): the PDF must still go.
+$pdfTrigger('');
+$pdfBefore = $pdfsNow();
+$pKilled   = false;
+$p3 = $submit('P869 P3 pdf connection lost', [['files[]', 'Meal ZZ-P3.png', $png]], static function (int $thread) use ($db, &$pKilled): void {
+    $db->query('KILL ' . $thread);
+    $pKilled = true;
+});
+$db->query('DROP TRIGGER IF EXISTS trg_p869_pdf');
+check('P08 the premise: the handler\'s connection really was killed while the PDF\'s row was held', $pKilled, true);
+check('P09 THE PDF IS STILL REMOVED, the claim not saved, and the claimant told',
+    [$pdfsNow() === $pdfBefore, $p3['claim'], $p3['alert']], [true, null, 'danger']);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nK. The commit was SENT and could not be confirmed: no receipt is ever deleted\n";
@@ -1201,6 +1420,14 @@ check('K06 the steps after a confirmed save really did not run (no "created" rec
 //    refused with the connection still up is not produced by this test.
 check('K06b THE APPROVERS WERE NOT E-MAILED about K1 (no attempt recorded anywhere K05b found one), so the message saying so is true',
     $approverMailFor($k1Id), 0);
+// #869: the claim's PDF follows the receipts' rule — once COMMIT is sent, KEPT.
+$k1Pdf     = $pdfs . $sep . 'claim_' . $k1Id . '.pdf';
+$k1PdfKept = $errorsSince($errBefore, 'CLAIM_PDF_KEPT_AFTER_FAILED_COMMIT');
+check('K06c (#869) THE SAVED CLAIM\'S PDF IS STILL ON DISK (once COMMIT is sent, nothing is deleted)', is_file($k1Pdf), true);
+check('K06d (#869) ...and recorded once, under its own code, by its path',
+    count($k1PdfKept) === 1 && str_contains((string) ($k1PdfKept[0]['errorDetail'] ?? ''), $k1Pdf), true);
+check('K06e (#870) nothing typed is kept for the form on this path (it would invite claiming the same money twice)',
+    $formState($k1['page'])['note'], false);
 
 // K2: the same, and the portal cannot ask what happened.
 file_put_contents($arm, 'forward-refuse');
@@ -1218,14 +1445,20 @@ check('K10 the claimant is told it is NOT KNOWN, and to look before submitting a
     [$k2['alert'], $k2['message']], ['danger', R::MSG_SAVE_NOT_CONFIRMED]);
 check('K11 with no database to write to, the kept file is named in PHP\'s own log by its PATH, never the claimant\'s name (#714)',
     str_contains($phpLog, 'was KEPT: ') && str_contains($phpLog, $k2Stored) && str_contains($phpLog, 'ZZ-K2') === false, true);
+$k2Pdf = $pdfs . $sep . 'claim_' . (int) ($k2['claim']['claimID'] ?? 0) . '.pdf';
+check('K11b (#869) ...and so is the claim\'s PDF, which is kept on disk',
+    [is_file($k2Pdf), str_contains($phpLog, 'its PDF was KEPT: ') && str_contains($phpLog, basename($k2Pdf))], [true, true]);
 
 // K3: the server never gets the commit — but the portal sent it.
 file_put_contents($arm, 'swallow');
 $errBefore = $lastErrorId();
 $before    = $folderNow();
+$k3PdfWas  = $pdfsNow();
 $k3        = $submit('P649 K3 never committed', [['files[]', 'Fuel ZZ-K3.png', $png]]);
 $k3New     = array_values(array_diff($folderNow(), $before));
 $k3Kept    = $keptRows($errBefore);
+$k3NewPdf  = array_values(array_diff($pdfsNow(), $k3PdfWas));
+$k3PdfRows = $errorsSince($errBefore, 'CLAIM_PDF_KEPT_AFTER_FAILED_COMMIT');
 check('K12 the premise: the proxy did NOT forward COMMIT', str_contains($proxySaid(), 'NOT forwarded'), true);
 check('K13 the claim was not saved (the server threw it away)', $k3['claim'], null);
 check('K14 THE FILE IS STILL KEPT — the portal cannot know, and never deletes after sending COMMIT (the stated cost: an orphan)',
@@ -1234,8 +1467,15 @@ check('K15 ...and it is logged by its path so an administrator can remove it',
     count($k3Kept) === 1 && str_contains((string) ($k3Kept[0]['errorDetail'] ?? ''), (string) ($k3New[0] ?? '-')), true);
 check('K16 the claimant is told it is not known, never that it failed or saved',
     [$k3['alert'], $k3['message']], ['danger', R::MSG_SAVE_NOT_CONFIRMED]);
+check('K16b (#869) THE PDF IS KEPT TOO, though no claim was saved — the same stated cost: an orphan, which the portal cannot know is one',
+    count($k3NewPdf), 1);
+check('K16c (#869) ...and it is logged by its path, under its own code, so an administrator can remove it',
+    count($k3PdfRows) === 1 && str_contains((string) ($k3PdfRows[0]['errorDetail'] ?? ''), $pdfs . $sep . (string) ($k3NewPdf[0] ?? '-')), true);
 foreach ($k3New as $orphan) {
     @unlink($receipts . $sep . $orphan); // this test's own orphan, by its generated name
+}
+foreach ($k3NewPdf as $orphan) {
+    @unlink($pdfs . $sep . $orphan); // this test's own orphan PDF, by its generated name
 }
 
 // K4: the new connection meets a database that says nothing.
@@ -1341,6 +1581,82 @@ check('I08 two files and an EMPTY box, limit 3: a plain success (an empty box is
     [count($i4['rows']), $i4['alert'], str_contains($i4['message'], 'at most')], [2, 'success', false]);
 $startServer();
 $waitUp();
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "\nR. #870: a refused claim comes back filled in; a submission too large is told so\n";
+// ═════════════════════════════════════════════════════════════════════════════
+// Every refusal before #870 sent the claimant back to an EMPTY form. Each case
+// below sends an empty file box too, as the real form does when nothing is
+// chosen, and reads the form as drawn straight afterwards.
+$tricky = 'Coffee <b>&"x\' café';
+$r1 = $submit('P870 R1 zero total', [['files[]', '', '']], null, null, [
+    'itemDesc[]' => [$tricky, ''],
+    'itemQty[]'  => ['3', '1'],
+    'itemUnit[]' => ['0', '0.00'],
+]);
+$r1Form = $formState($r1['page']);
+check('R01 the premise: refused as a total of zero, and nothing saved', [$r1['message'], $r1['claim']], ['Total must be greater than zero.', null]);
+check('R02 THE FORM IS FILLED IN AGAIN: title, department, and the line typed — the blank line priced 0.00 is not brought back',
+    [$r1Form['note'], $r1Form['title'], $r1Form['dept'], $r1Form['prompt'], $r1Form['items']],
+    [true, 'P870 R1 zero total', [(string) $deptId], false, [['desc' => $tricky, 'qty' => '3', 'unit' => '0']]]);
+check('R03 ...in the plain rows shown with JavaScript off as well', $r1Form['noscript'], [$tricky]);
+check('R04 ...and what was typed is printed as TEXT, never as markup (no raw "<b>" anywhere in the page)',
+    str_contains($r1['page'], 'Coffee <b>'), false);
+
+$r2 = $submit('P870 R2 bad token', [['files[]', '', '']], null, null, ['csrf_token' => 'not-the-token']);
+$r2Form = $formState($r2['page']);
+check('R05 a refused FORM TOKEN is still said as one', [$r2['message'], $r2['claim']], ['Invalid CSRF token.', null]);
+check('R06 ...and keeps NOTHING (the post may have come from another website, which must not fill in this member\'s form)',
+    [$r2Form['note'], $r2Form['title'], $r2Form['items']], [false, '', []]);
+
+$r3 = $submit('P870 R3 bad department', [['files[]', '', '']], null, null, ['deptID' => '999999999']);
+$r3Form = $formState($r3['page']);
+check('R07 a department that is not one: refused, and the form filled in with the title and line',
+    [$r3['message'], $r3Form['note'], $r3Form['title'], count((array) $r3Form['items'])],
+    ['Selected department is not valid for this site.', true, 'P870 R3 bad department', 1]);
+check('R08 ...with NO department chosen — the prompt is, so exactly one option is selected', [$r3Form['dept'], $r3Form['prompt']], [[], true]);
+
+$r4 = $submit('', [['files[]', '', '']]);
+$r4Form = $formState($r4['page']);
+check('R09 a missing title: refused, and the department and line come back',
+    [$r4['message'], $r4Form['note'], $r4Form['dept'], count((array) $r4Form['items'])],
+    ['Missing required fields (department and title).', true, [(string) $deptId], 1]);
+
+// R5: more than the server's `post_max_size`, so PHP empties the WHOLE post
+// before the handler runs — the form token with it. Started again with a
+// limit of 1 MB and sent a receipt of 1.5 MB.
+$startServer(['post_max_size' => '1M']);
+$waitUp();
+$phpLogBefore = strlen((string) @file_get_contents($phpErrorLog));
+$claimsBefore = (int) ($db->query("SELECT COUNT(*) AS n FROM tblExpenseClaims WHERE userID = {$userId}")->fetch_assoc()['n'] ?? -1);
+$r5 = $submit('P870 R5 too large', [['files[]', 'Big scan ZZ-R5.png', str_repeat('z', 1536 * 1024)]]);
+$r5Form = $formState($r5['page']);
+check('R10 the premise: PHP really threw the post away for its size (its own warning names the 1 MB limit)',
+    str_contains(substr((string) @file_get_contents($phpErrorLog), $phpLogBefore), 'exceeds the limit of 1048576 bytes'), true);
+check('R11 THE CLAIMANT IS TOLD IT WAS TOO LARGE, with both sizes — not "Invalid CSRF token."',
+    [$r5['alert'], str_starts_with($r5['message'], 'Your claim was NOT saved, because everything you sent together came to 1.6 MB, and this server accepts at most 1 MB in one submission.'),
+        str_contains($r5['message'], 'CSRF')], ['danger', true, false]);
+check('R12 ...nothing is saved, and the form says nothing was kept (nothing arrived to keep)',
+    [(int) ($db->query("SELECT COUNT(*) AS n FROM tblExpenseClaims WHERE userID = {$userId}")->fetch_assoc()['n'] ?? -1), $r5Form['note'], $r5Form['title']],
+    [$claimsBefore, false, '']);
+// The control on the same server: a SMALL post with a wrong token is still a
+// wrong token, so the size story is told only when PHP really emptied it.
+$r6 = $submit('P870 R6 small bad token', [['files[]', '', '']], null, null, ['csrf_token' => 'not-the-token']);
+check('R13 ...and on the same server a small post with a wrong token is still told "Invalid CSRF token." (never a size story it cannot stand behind)',
+    $r6['message'], 'Invalid CSRF token.');
+$startServer();
+$waitUp();
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "\nS. #871: the file chooser offers every kind of receipt the rule accepts\n";
+// ═════════════════════════════════════════════════════════════════════════════
+$sPage = $http('GET', '/expenses/submit')['body'];
+preg_match_all('/<input type="file" name="files\[\]"[^>]*\baccept="([^"]*)"/', $sPage, $sAccept);
+check('S01 both file boxes (the one the script opens, and the one shown with JavaScript off) are found',
+    count($sAccept[1]), 2);
+check('S02 EACH offers exactly the receipt kinds on RECEIPT_TYPES — Word, Excel, CSV and HEIC included — and no wildcard',
+    array_map(static fn (string $a): array => explode(',', html_entity_decode($a, ENT_QUOTES, 'UTF-8')), $sAccept[1]),
+    [$acceptWanted, $acceptWanted]);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nZ. Across the WHOLE run, no column of either log holds a claimant's file name\n";

@@ -618,10 +618,13 @@ final class ExpenseRules
      * Shown when the portal cannot make its receipts folder, so the claim is
      * NOT saved. The one case #649 asks to refuse the whole submission: every
      * receipt would fail, and a claim would reach the approver with none.
-     * It says the form must be filled in again, because the form page does
-     * not keep what was typed.
+     *
+     * It used to end "nothing you typed was kept", which was true while the
+     * form came back empty after every refusal. Since #870 the form is filled
+     * in again with what was typed — but NEVER with the receipts, which a
+     * browser will not let a page choose for somebody — so it says that now.
      */
-    public const MSG_RECEIPT_FOLDER_MISSING = 'Your claim was NOT saved, because the portal could not make the folder it keeps receipts in. This is a fault on the server, not in your claim, and it has been recorded for your administrator. Please tell them, and submit the claim again once it is fixed: nothing you typed was kept.';
+    public const MSG_RECEIPT_FOLDER_MISSING = 'Your claim was NOT saved, because the portal could not make the folder it keeps receipts in. This is a fault on the server, not in your claim, and it has been recorded for your administrator. Please tell them, and submit the claim again once it is fixed. What you typed has been filled in again below, but your receipts have not: choose them again.';
 
     /**
      * The upload field, as a plain list of one entry per file.
@@ -1095,5 +1098,311 @@ final class ExpenseRules
             'type'    => 'danger',
             'message' => $message,
         ];
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* 📎 What the file chooser offers (#871)                                 */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * The `accept` list for the claim form's file box, built from
+     * RECEIPT_TYPES so the two can never disagree.
+     *
+     * WHAT WAS WRONG. The box carried `accept="image/*,application/pdf"`,
+     * written by hand. RECEIPT_TYPES also accepts Word, Excel and CSV files,
+     * and the help page says so, but a browser's file chooser hides whatever
+     * `accept` leaves out — and a phone may not offer it at all — so a
+     * claimant was told a spreadsheet was a valid receipt and then could not
+     * easily pick one. It also offered every kind of picture, including kinds
+     * the rule refuses (a `.webp` or a `.bmp`), so the chooser invited a file
+     * the save then turned away.
+     *
+     * WHY BY THE END OF THE NAME, NOT BY TYPE ("image/jpeg"). The rule in
+     * `whyReceiptRefused()` judges a file by the end of its name and nothing
+     * else, so the chooser is told exactly the same thing. A list of types
+     * would be a second copy of the rule in a different vocabulary, and would
+     * drift. HEIC and HEIF (D-096) are on RECEIPT_TYPES, so they are offered.
+     *
+     * WHAT IT CANNOT DO. `accept` is a suggestion to the browser, not a rule:
+     * anybody can still choose "All files" and send something else. The
+     * handler judges every file again, and that is the boundary. Whether a
+     * particular phone still offers its camera for this list was NOT tested
+     * here — no phone was available; browsers treat `.jpg` and `.heic` as
+     * picture endings, which is what makes them offer one.
+     *
+     * @return string For example ".jpg,.jpeg,.png,…,.csv".
+     */
+    public static function receiptAcceptList(): string
+    {
+        return implode(',', array_map(static fn (string $ext): string => '.' . $ext, self::RECEIPT_TYPES));
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* ✍️ A refused claim keeps what was typed (#870)                         */
+    /* ---------------------------------------------------------------------- */
+    //
+    // WHAT WAS WRONG. Every refusal from `expenses/submit/save.php` sent the
+    // claimant back to an EMPTY form — a missing title, a total of zero, a
+    // retired department, the receipts folder failing, a save that failed and
+    // was undone — so they typed every line of the claim again.
+    //
+    // WHAT IS KEPT, AND WHAT IS NOT. The title, the department and the item
+    // lines are kept in the claimant's own session, ONCE, and the form fills
+    // itself in from them the next time it is drawn. The RECEIPTS ARE NOT: a
+    // browser does not let a page choose files on somebody's behalf, and PHP
+    // throws the uploaded copies away when the request ends. The form says so
+    // whenever it has been filled in again.
+    //
+    // WHEN NOTHING IS KEPT, on purpose:
+    //   - a refused FORM TOKEN. That request may not have come from this
+    //     person at all — another website can post a form to this address —
+    //     and keeping it would let that website fill in the claim form that a
+    //     member then sees as their own;
+    //   - a submission too large for the server, because PHP threw ALL of it
+    //     away before the page ran, so there is nothing to keep;
+    //   - a save whose COMMIT was sent and could not be confirmed. The claim
+    //     may well be saved, and a filled-in form would invite submitting the
+    //     same money again — the very thing that message warns against.
+
+    /** Where the kept claim lives in the session. Read and cleared by the form page. */
+    public const DRAFT_SESSION_KEY = 'expenses_submit_draft';
+
+    /** The most item lines kept: a real claim has a handful; this bounds the session file. */
+    public const DRAFT_MAX_ITEMS = 200;
+
+    /** The most characters kept of one text box (a title or a description). */
+    public const DRAFT_MAX_TEXT = 1000;
+
+    /** The most characters kept of one number box (a quantity or a unit price). */
+    public const DRAFT_MAX_NUMBER = 32;
+
+    /**
+     * What to keep of a refused claim, from the request it came in.
+     *
+     * Takes the posted fields as FACTS, so the handler and the self-test ask
+     * the same question. A request chooses the TYPE of what it sends as well
+     * as the value (#642): a field that is not text, or a list that is not a
+     * list, is kept as nothing rather than trusted.
+     *
+     * An item line is kept when it has a description, or a price that is not
+     * zero. The form's own empty lines (with JavaScript off it shows five,
+     * each priced "0.00") are not, so a refused claim does not come back with
+     * a column of blank rows.
+     *
+     * The limits (DRAFT_MAX_*) are far above anything a person types; they
+     * exist only so a crafted request cannot fill the session file. Text past
+     * them is cut, which is acceptable for a convenience copy and would NOT be
+     * for anything saved — nothing here is saved.
+     *
+     * Text that is not valid UTF-8 is repaired, never dropped, so the page
+     * that prints it cannot fail on it.
+     *
+     * @param array<mixed> $post   The request's posted fields (`$_POST`).
+     * @param int          $siteId The organisation the claim was for.
+     *
+     * @return array{siteId:int,claimTitle:string,deptID:int,items:list<array{desc:string,qty:string,unit:string}>}
+     */
+    public static function claimDraftFrom(array $post, int $siteId): array
+    {
+        $text = static function (mixed $value, int $max): string {
+            if (is_string($value) === false) {
+                return '';
+            }
+
+            return mb_substr(mb_scrub($value, 'UTF-8'), 0, $max, 'UTF-8');
+        };
+        $list = static fn (mixed $value): array => is_array($value) === true ? $value : [];
+
+        $descs = $list($post['itemDesc'] ?? null);
+        $qtys  = $list($post['itemQty'] ?? null);
+        $units = $list($post['itemUnit'] ?? null);
+        $items = [];
+        foreach ($descs as $i => $desc) {
+            if (count($items) >= self::DRAFT_MAX_ITEMS) {
+                break;
+            }
+            $one = [
+                'desc' => $text($desc, self::DRAFT_MAX_TEXT),
+                'qty'  => $text($qtys[$i] ?? '', self::DRAFT_MAX_NUMBER),
+                'unit' => $text($units[$i] ?? '', self::DRAFT_MAX_NUMBER),
+            ];
+            $priced = trim($one['unit']) !== '' && (float) $one['unit'] != 0.0;
+            if (trim($one['desc']) === '' && $priced === false) {
+                continue;
+            }
+            $items[] = $one;
+        }
+
+        $dept = $post['deptID'] ?? '';
+
+        return [
+            'siteId'     => $siteId,
+            'claimTitle' => $text($post['claimTitle'] ?? '', self::DRAFT_MAX_TEXT),
+            'deptID'     => (is_string($dept) === true && preg_match('/^[1-9][0-9]{0,9}$/', $dept) === 1) ? (int) $dept : 0,
+            'items'      => $items,
+        ];
+    }
+
+    /**
+     * The kept claim, if there is one for THIS organisation, ready for the
+     * form; otherwise null.
+     *
+     * The session is the portal's own, but it is read defensively all the
+     * same: anything not in the shape `claimDraftFrom()` writes is no draft.
+     * A draft kept for another organisation is not shown — a member of two
+     * sees each one's form on its own address, and a department number from
+     * one means nothing in the other.
+     *
+     * @param mixed $stored The session's value under DRAFT_SESSION_KEY.
+     * @param int   $siteId The organisation the form is being drawn for.
+     *
+     * @return array{claimTitle:string,deptID:int,items:list<array{desc:string,qty:string,unit:string}>}|null
+     */
+    public static function draftForForm(mixed $stored, int $siteId): ?array
+    {
+        if (is_array($stored) === false || ($stored['siteId'] ?? null) !== $siteId) {
+            return null;
+        }
+        $items = [];
+        foreach (is_array($stored['items'] ?? null) === true ? $stored['items'] : [] as $item) {
+            if (is_array($item) === false) {
+                continue;
+            }
+            $items[] = [
+                'desc' => is_string($item['desc'] ?? null) === true ? $item['desc'] : '',
+                'qty'  => is_string($item['qty'] ?? null) === true ? $item['qty'] : '',
+                'unit' => is_string($item['unit'] ?? null) === true ? $item['unit'] : '',
+            ];
+        }
+
+        return [
+            'claimTitle' => is_string($stored['claimTitle'] ?? null) === true ? $stored['claimTitle'] : '',
+            'deptID'     => is_int($stored['deptID'] ?? null) === true ? $stored['deptID'] : 0,
+            'items'      => $items,
+        ];
+    }
+
+    /* ---------------------------------------------------------------------- */
+    /* 📦 A submission too large for the server (#870)                        */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * How many bytes the server's `post_max_size` allows, or 0 for "no limit
+     * known".
+     *
+     * Read with PHP's own `ini_parse_quantity()`, so "8M", "1G" and "65536"
+     * mean exactly what PHP means by them. `0` means no limit to PHP, and a
+     * value PHP cannot read counts as 0 too — no known limit — which makes
+     * `postWasTooLarge()` answer false: the claimant is then told what they
+     * were told before, rather than a size story nobody can stand behind.
+     *
+     * @param string $setting `ini_get('post_max_size')`.
+     */
+    public static function postLimitBytes(string $setting): int
+    {
+        if (trim($setting) === '') {
+            return 0;
+        }
+        $bytes = @ini_parse_quantity($setting);
+
+        return $bytes > 0 ? $bytes : 0;
+    }
+
+    /**
+     * Did PHP throw the whole submission away because it was larger than
+     * `post_max_size`?
+     *
+     * WHAT WAS WRONG. When everything sent together is over that limit, PHP
+     * empties `$_POST` and `$_FILES` before the page runs. The form token is
+     * in `$_POST`, so the page found no token and told the claimant "Invalid
+     * CSRF token." — untrue, and no help: the cause was the size of their
+     * receipts, and pressing Submit again gave the same answer for ever.
+     *
+     * HOW IT IS TOLD APART. All three must hold: the request is a POST, PHP
+     * passed on NOTHING (no fields and no files), and the size the browser
+     * declared (`CONTENT_LENGTH`) is over the limit. A post that merely lost
+     * its token still carries its other fields, so it is never mistaken for
+     * this; and a large post that arrived whole is never called too large.
+     *
+     * Takes FACTS, so the handler and the self-test ask the same question.
+     *
+     * @param string $method        `$_SERVER['REQUEST_METHOD']`.
+     * @param int    $fieldCount    `count($_POST)`.
+     * @param int    $fileCount     `count($_FILES)`.
+     * @param mixed  $contentLength `$_SERVER['CONTENT_LENGTH'] ?? null`.
+     * @param string $postMaxSize   `ini_get('post_max_size')`.
+     */
+    public static function postWasTooLarge(string $method, int $fieldCount, int $fileCount, mixed $contentLength, string $postMaxSize): bool
+    {
+        if (strtoupper($method) !== 'POST' || $fieldCount !== 0 || $fileCount !== 0) {
+            return false;
+        }
+        $limit = self::postLimitBytes($postMaxSize);
+
+        return $limit > 0 && self::declaredLength($contentLength) > $limit;
+    }
+
+    /**
+     * The size a request declared, as a whole number of bytes; 0 when it
+     * declared none, or something that is not a plain number.
+     *
+     * @param mixed $contentLength `$_SERVER['CONTENT_LENGTH'] ?? null`.
+     */
+    public static function declaredLength(mixed $contentLength): int
+    {
+        if (is_int($contentLength) === true) {
+            return max(0, $contentLength);
+        }
+        if (is_string($contentLength) === true && preg_match('/^[0-9]{1,18}$/', $contentLength) === 1) {
+            return (int) $contentLength;
+        }
+
+        return 0;
+    }
+
+    /**
+     * A number of bytes as a person would say it: "2.5 MB", "640 KB", to one
+     * decimal place at most.
+     *
+     * `$roundUp` exists so the too-large message can never read "came to
+     * 8 MB, and this server accepts at most 8 MB": what was SENT is rounded
+     * up and the LIMIT down, so the gap the claimant reads is always real.
+     *
+     * @param int  $bytes   The size.
+     * @param bool $roundUp True to round up, false to round down.
+     */
+    public static function sizeInWords(int $bytes, bool $roundUp): string
+    {
+        $round = static fn (float $x): float => $roundUp === true ? ceil($x * 10) / 10 : floor($x * 10) / 10;
+        if ($bytes >= 1024 * 1024) {
+            $mb = $round($bytes / (1024 * 1024));
+
+            return rtrim(rtrim(number_format($mb, 1, '.', ''), '0'), '.') . ' MB';
+        }
+        $kb = $roundUp === true ? (int) ceil($bytes / 1024) : (int) floor($bytes / 1024);
+
+        return max(1, $kb) . ' KB';
+    }
+
+    /**
+     * What the claimant is told when the submission was too large.
+     *
+     * It says that NOTHING was kept, typing included, because that is true
+     * here and nowhere else: PHP threw the whole request away before the
+     * portal saw any of it, so the form cannot be filled in again.
+     *
+     * @param int    $sentBytes   What the browser declared it was sending.
+     * @param string $postMaxSize `ini_get('post_max_size')`.
+     */
+    public static function postTooLargeMessage(int $sentBytes, string $postMaxSize): string
+    {
+        $limit = self::sizeInWords(self::postLimitBytes($postMaxSize), false);
+
+        return 'Your claim was NOT saved, because everything you sent together came to '
+            . self::sizeInWords($sentBytes, true) . ', and this server accepts at most '
+            . $limit . ' in one submission. Because of that, nothing you sent reached the portal — '
+            . 'not your receipts, and not what you typed — so the form below is empty. '
+            . 'Please fill it in again and attach fewer or smaller receipts, so that together they come to less than '
+            . $limit . '. A photo taken at a lower resolution is often much smaller.';
     }
 }

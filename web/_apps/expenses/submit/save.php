@@ -40,6 +40,22 @@
  * and NOWHERE else — never the database, the activity log or the error log
  * (#714). See `ExpenseRules::shownFileName()` for why that is safe.
  *
+ * THE CLAIM'S PDF FOLLOWS THE SAME TWO HALVES (#869, 9 November 2026)
+ * ---------------------------------------------------------------------
+ * `ExpensePdf::generate()` writes `_uploads/pdfs/claim_<id>.pdf` — the
+ * claimant's name, department and every figure — INSIDE the transaction, so
+ * a claim undone after that step used to leave the file behind with no row
+ * pointing at it, where no erasure could find it. Now: before COMMIT is sent
+ * it is removed with the receipts (logged by path if it cannot be); after
+ * COMMIT is sent it is KEPT and logged by path, like every receipt.
+ *
+ * A REFUSED CLAIM KEEPS WHAT WAS TYPED (#870). Every refusal after the form
+ * token has been accepted keeps the title, department and item lines for the
+ * form to fill itself in from (`ExpenseRules::claimDraftFrom()`); never the
+ * receipts, which a page cannot choose for somebody. And a submission larger
+ * than the server's `post_max_size` — which PHP empties before this page
+ * runs, token and all — is told THAT, instead of "Invalid CSRF token.".
+ *
  * WHAT IT STILL CANNOT DO: add a receipt to a claim afterwards. The advice is
  * to withdraw the claim and submit it again, which is the only route the
  * portal offers today.
@@ -48,7 +64,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.5.0
+ * @version   0.6.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/649
  * -----------------------------------------------------------------------------
  */
@@ -80,18 +96,54 @@ $startupWarning = error_get_last();
 Auth::ensureSession();
 Auth::requireLogin();
 
-if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
-    $_SESSION['flash_msg']  = 'Invalid CSRF token.';
+// ↩️ EVERY REFUSAL GOES BACK TO THE FORM THROUGH HERE (#870), and says
+//    whether what was typed is kept for the form to fill itself in from.
+//    Before, each refusal wrote the message and redirected by itself, and
+//    none kept anything, so the claimant typed the whole claim again. The
+//    receipts are NEVER kept: a page cannot choose files for somebody.
+//    `$keepTyped` is false in exactly the cases `ExpenseRules` lists under
+//    "WHEN NOTHING IS KEPT" — read there before changing a call below.
+$sendBack = static function (string $message, bool $keepTyped): never {
+    unset($_SESSION[ExpenseRules::DRAFT_SESSION_KEY]);
+    if ($keepTyped === true) {
+        $_SESSION[ExpenseRules::DRAFT_SESSION_KEY] = ExpenseRules::claimDraftFrom($_POST, Site::id());
+    }
+    $_SESSION['flash_msg']  = $message;
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Router::url('expenses/submit'));
     exit();
+};
+
+// 📦 A SUBMISSION LARGER THAN THE SERVER TAKES (#870). PHP has emptied
+//    `$_POST` and `$_FILES` before this page ran, so the form token is
+//    missing too, and the check below would tell the claimant "Invalid CSRF
+//    token." — untrue: the cause is the size. Asked FIRST, for that reason.
+//    Nothing is kept, because nothing arrived.
+if (ExpenseRules::postWasTooLarge(
+    (string) ($_SERVER['REQUEST_METHOD'] ?? ''),
+    count($_POST),
+    count($_FILES),
+    $_SERVER['CONTENT_LENGTH'] ?? null,
+    (string) ini_get('post_max_size')
+) === true) {
+    $sendBack(
+        ExpenseRules::postTooLargeMessage(
+            ExpenseRules::declaredLength($_SERVER['CONTENT_LENGTH'] ?? null),
+            (string) ini_get('post_max_size')
+        ),
+        false
+    );
+}
+
+// A refused token keeps NOTHING: the request may have come from another
+// website posting to this address, and keeping it would let that website
+// fill in the claim form this member then sees as their own.
+if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+    $sendBack('Invalid CSRF token.', false);
 }
 
 if (Captcha::verify($_POST, 'expense-claim') === false) {
-    $_SESSION['flash_msg']  = 'Captcha verification failed. Please try again.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Router::url('expenses/submit'));
-    exit();
+    $sendBack('Captcha verification failed. Please try again.', true);
 }
 
 // 📝 Validate required fields
@@ -100,10 +152,7 @@ $deptID     = (int) ($_POST['deptID'] ?? 0);
 $claimTitle = trim($_POST['claimTitle'] ?? '');
 
 if ($deptID === 0 || $claimTitle === '') {
-    $_SESSION['flash_msg']  = 'Missing required fields (department and title).';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Router::url('expenses/submit'));
-    exit();
+    $sendBack('Missing required fields (department and title).', true);
 }
 
 // 🧮 Recalculate total server-side (do not trust client-side hidden field)
@@ -117,10 +166,7 @@ foreach ($_POST['itemDesc'] ?? [] as $i => $desc) {
     $totalAmt += $qty * $unit;
 }
 if ($totalAmt <= 0) {
-    $_SESSION['flash_msg']  = 'Total must be greater than zero.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Router::url('expenses/submit'));
-    exit();
+    $sendBack('Total must be greater than zero.', true);
 }
 
 $siteId = Site::id();
@@ -138,20 +184,14 @@ $siteId = Site::id();
 // untouched: its own approvers still finish them (owner's answer Q3).
 $deptCheck = $mysqli->prepare('SELECT deptID FROM tblDepts WHERE deptID = ? AND siteID = ? AND isActive = 1 LIMIT 1');
 if ($deptCheck === false) {
-    $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Router::url('expenses/submit'));
-    exit();
+    $sendBack('Error saving claim. Please try again.', true);
 }
 $deptCheck->bind_param('ii', $deptID, $siteId);
 $deptCheck->execute();
 $deptExists = $deptCheck->get_result()->fetch_assoc() !== null;
 $deptCheck->close();
 if ($deptExists === false) {
-    $_SESSION['flash_msg']  = 'Selected department is not valid for this site.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Router::url('expenses/submit'));
-    exit();
+    $sendBack('Selected department is not valid for this site.', true);
 }
 
 // 📎 JUDGE EVERY FILE FIRST, before anything is written (#649).
@@ -219,10 +259,7 @@ if (count($receiptsToStore) > 0 && is_dir($upDir) === false) {
             'The expense receipts folder could not be made, so a claim was refused',
             'Folder: ' . $upDir . ' — check that the portal may write to _uploads.'
         );
-        $_SESSION['flash_msg']  = ExpenseRules::MSG_RECEIPT_FOLDER_MISSING;
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . Router::url('expenses/submit'));
-        exit();
+        $sendBack(ExpenseRules::MSG_RECEIPT_FOLDER_MISSING, true);
     }
 }
 
@@ -233,6 +270,9 @@ $claimID = 0;
 $movedPaths = [];
 // Set just before COMMIT is sent; see the catch below for why it matters.
 $commitAttempted = false;
+// Set just before the claim's PDF is made (#869), so a failure can tell
+// whether THIS request may have written `ExpensePdf::pathFor($claimID)`.
+$pdfAttempted = false;
 App::beginTransaction();
 try {
     // 1. 📋 Insert claim header
@@ -346,7 +386,12 @@ try {
         $fileStmt->close();
     }
 
-    // 4. 📄 Pending PDF
+    // 4. 📄 Pending PDF. It is written to disk HERE, inside the transaction,
+    //    and its two rows are written after it — so a failure from this point
+    //    on (one of those rows refused, the connection lost) can leave the
+    //    file on disk for a claim that is then undone (#869). The flag lets
+    //    the catch below take it away.
+    $pdfAttempted = true;
     ExpensePdf::generate($claimID, 'Pending');
 
     // A commit that does not happen must not be reported as a saved claim.
@@ -385,6 +430,26 @@ try {
             }
         }
 
+        // 📄 THE CLAIM'S PDF GOES TOO (#869), for the same reason and in the
+        //    same place — before the rollback, needing no database. It holds
+        //    the claimant's name, department and every figure, and with the
+        //    claim undone no row points at it, so no erasure could reach it.
+        //
+        //    Removing whatever is at that path is safe, not merely likely to
+        //    be: the name is built from the claim number alone, and this
+        //    request's INSERT has just been given that number, so no SAVED
+        //    claim can point at the file. It is only looked for once the PDF
+        //    step was reached, so a failure earlier — before this request
+        //    could have written anything there — touches nothing.
+        $pdfLeftBehind = '';
+        if ($pdfAttempted === true && $claimID > 0) {
+            $pdfPath = ExpensePdf::pathFor($claimID);
+            clearstatcache(true, $pdfPath);
+            if (is_file($pdfPath) === true && @unlink($pdfPath) === false) {
+                $pdfLeftBehind = $pdfPath;
+            }
+        }
+
         // Undo the claim. On a lost connection this throws too, and the server
         // throws an unfinished transaction away by itself once the connection
         // is gone — nothing was committed, because COMMIT was never sent.
@@ -401,6 +466,9 @@ try {
         foreach ($leftBehind as $path) {
             error_log('[expenses/submit] a receipt file for a claim that was not saved could not be removed: ' . $path);
         }
+        if ($pdfLeftBehind !== '') {
+            error_log('[expenses/submit] the PDF of a claim that was not saved could not be removed: ' . $pdfLeftBehind);
+        }
         try {
             Logger::exception($ex);
             if ($rollbackFault !== null) {
@@ -415,14 +483,21 @@ try {
                     'File: ' . $path . ' — nothing in the database points at it; remove it by hand.'
                 );
             }
+            if ($pdfLeftBehind !== '') {
+                Logger::errorPlatform(
+                    'Expenses',
+                    'Error',
+                    'CLAIM_PDF_LEFT_BEHIND',
+                    'The PDF of a claim that was not saved could not be removed',
+                    'File: ' . $pdfLeftBehind . ' — it holds the claimant\'s name and figures, and nothing in the database points at it; remove it by hand.'
+                );
+            }
         } catch (\Throwable $ignored) {
             error_log('[expenses/submit] a claim was not saved and the error log could not be written: ' . $ex->getMessage());
         }
 
-        $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . Router::url('expenses/submit'));
-        exit();
+        // Nothing was saved, so what was typed is kept for the form (#870).
+        $sendBack('Error saving claim. Please try again.', true);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -447,6 +522,23 @@ try {
             $keptFiles[] = $moved;
         }
     }
+
+    // 📄 THE CLAIM'S PDF IS KEPT TOO, under the same rule and for the same
+    //    reason (#869): if the claim WAS saved, its row points at this file.
+    //    It is recorded by path under its own code, so an administrator
+    //    reading the list can tell the claim's own document from a receipt.
+    $keptPdf = '';
+    if ($pdfAttempted === true && $claimID > 0) {
+        $pdfPath = ExpensePdf::pathFor($claimID);
+        clearstatcache(true, $pdfPath);
+        if (is_file($pdfPath) === true) {
+            $keptPdf = $pdfPath;
+        }
+    }
+
+    // Nothing typed is kept for the form on THIS path: the claim may well be
+    // saved, and a filled-in form would invite claiming the same money twice.
+    unset($_SESSION[ExpenseRules::DRAFT_SESSION_KEY]);
 
     // Tidy the request's own transaction if its connection still works. A
     // failure is passed over: it can change nothing about what was committed.
@@ -475,6 +567,9 @@ try {
     foreach ($keptFiles as $path) {
         error_log('[expenses/submit] claim #' . $claimID . ': its save could not be confirmed, so this receipt file was KEPT: ' . $path);
     }
+    if ($keptPdf !== '') {
+        error_log('[expenses/submit] claim #' . $claimID . ': its save could not be confirmed, so its PDF was KEPT: ' . $keptPdf);
+    }
     try {
         Logger::exception($ex);
         if ($rollbackFault !== null) {
@@ -487,6 +582,15 @@ try {
                 'RECEIPT_KEPT_AFTER_FAILED_COMMIT',
                 'A claim\'s save could not be confirmed, so its receipt file was kept',
                 'Claim #' . $claimID . '. File: ' . $path . ' — if no such claim exists, nothing points at this file; remove it by hand.'
+            );
+        }
+        if ($keptPdf !== '') {
+            Logger::errorPlatform(
+                'Expenses',
+                'Error',
+                'CLAIM_PDF_KEPT_AFTER_FAILED_COMMIT',
+                'A claim\'s save could not be confirmed, so its PDF was kept',
+                'Claim #' . $claimID . '. File: ' . $keptPdf . ' — it holds the claimant\'s name and figures; if no such claim exists, nothing points at this file, so remove it by hand.'
             );
         }
         // The same "could not store it" lines the ordinary path writes after
@@ -585,5 +689,8 @@ $told = ExpenseRules::submittedMessage(
 );
 $_SESSION['flash_msg']  = $told['message'];
 $_SESSION['flash_type'] = $told['type'];
+// The claim is saved: an earlier refusal's kept typing must not fill the form
+// in again, or it would invite submitting the same claim twice (#870).
+unset($_SESSION[ExpenseRules::DRAFT_SESSION_KEY]);
 header('Location: ' . Router::url('expenses/submit') . '?success=' . $claimID);
 exit();
