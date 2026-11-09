@@ -23,13 +23,14 @@
  *    make its receipts folder, checked BEFORE anything is written;
  *  - files PHP DROPS for being past `max_file_uploads` are reported too
  *    (unnamed — PHP never passes their names on);
- *  - a claim that is not saved takes the receipt files it had already moved
- *    with it, removed BEFORE the rollback is tried, so a lost connection
- *    cannot stop it — a file nothing points at could never be reached by an
- *    erasure; one that cannot be removed is logged by its path;
- *  - but once COMMIT has been sent, a failure is not proof the claim was
- *    lost: a NEW connection is asked first, and a claim that was saved (or
- *    may have been) keeps every file and the claimant is told the truth;
+ *  - a claim that fails BEFORE its commit is sent takes the receipt files it
+ *    had already moved with it, removed BEFORE the rollback is tried, so a
+ *    lost connection cannot stop it — a file nothing points at could never
+ *    be reached by an erasure; one that cannot be removed is logged by path;
+ *  - ONCE COMMIT HAS BEEN SENT, NO RECEIPT FILE IS EVER DELETED: the server
+ *    may have saved the claim. Every file is kept and logged by its path, and
+ *    a NEW connection is asked only which message to show ("saved, do not
+ *    submit again", or "not known, check your claims list first");
  *  - and once the claim is COMMITTED, nothing after it (the activity record,
  *    the e-mail to approvers) can make this page say "Error saving claim":
  *    that sentence used to be reachable for a claim that WAS saved, inviting
@@ -232,7 +233,6 @@ $claimID = 0;
 $movedPaths = [];
 // Set just before COMMIT is sent; see the catch below for why it matters.
 $commitAttempted = false;
-$oldThreadId     = 0;
 App::beginTransaction();
 try {
     // 1. 📋 Insert claim header
@@ -353,69 +353,103 @@ try {
     // Under the portal's strict reporting a failed commit throws; this is the
     // same answer for a connection that does not.
     //
-    // 🔌 FROM HERE ON A FAILURE IS NOT PROOF THE CLAIM WAS LOST (round 2 of
-    //    the check). Once COMMIT has been sent, a lost reply leaves the server
-    //    free to have committed it, so the catch below asks a NEW connection
-    //    before it removes any file. The old connection's number on the server
-    //    is kept so that question can wait for it to finish.
-    $oldThreadId     = (int) $mysqli->thread_id;
+    // 🔌 FROM HERE ON, NO RECEIPT FILE IS EVER DELETED. Once COMMIT has been
+    //    sent, a failure is not proof the claim was lost: the server may have
+    //    committed it and only the answer failed to arrive. See the catch.
     $commitAttempted = true;
     if (App::commit() === false) {
         throw new \RuntimeException('The claim could not be committed');
     }
 } catch (\Throwable $ex) {
-    // ❓ FIRST: WAS THE CLAIM SAVED AFTER ALL? (round 2 of the check)
-    //    Before COMMIT is sent, a failure means the claim was not saved, and
-    //    the files can go. Once COMMIT has been sent, a lost reply proves
-    //    nothing: the server may have committed. Measured with a proxy that
-    //    forwarded COMMIT and dropped the connection before the reply, round
-    //    1's code deleted the receipt of a claim that WAS saved and told the
-    //    claimant to submit it again. So a NEW connection is asked, through
-    //    `ExpenseRules::outcomeOfInterruptedCommit()`, before any file is
-    //    touched — and only a definite "not saved" removes anything.
-    $outcome = ExpenseRules::COMMIT_NOT_SAVED;
-    if ($commitAttempted === true) {
-        $outcome = ExpenseRules::outcomeOfInterruptedCommit(
-            static fn (): \mysqli => DbServer::connectAgain(),
-            $claimID,
-            $userId,
-            $oldThreadId
-        );
+    if ($commitAttempted === false) {
+        // ═══════════════════════════════════════════════════════════════════
+        // BEFORE COMMIT WAS SENT: the claim was not saved.
+        // ═══════════════════════════════════════════════════════════════════
+        // 🧹 A CLAIM THAT IS NOT SAVED TAKES ITS RECEIPT FILES WITH IT (#649).
+        //    Before, a failure after a receipt had been moved (its row
+        //    refused, the PDF step throwing) left the file in the folder with
+        //    no claim and no row pointing at it — a copy of somebody's receipt
+        //    that nothing lists and no erasure could ever find. Only files
+        //    THIS request moved are named.
+        //
+        //    ⚠️ THE FILES GO BEFORE THE ROLLBACK, AND EVERYTHING AFTER THEM IS
+        //       GUARDED (round 1 of the check). The first version rolled back
+        //       first, with nothing around it, and on a lost connection
+        //       `rollback()` THROWS too ("MySQL server has gone away"): the
+        //       second exception escaped, the files stayed, and the claimant
+        //       got no message. Removing a file needs no database.
+        $leftBehind = [];
+        foreach ($movedPaths as $moved) {
+            if (is_file($moved) === true && @unlink($moved) === false) {
+                $leftBehind[] = $moved;
+            }
+        }
+
+        // Undo the claim. On a lost connection this throws too, and the server
+        // throws an unfinished transaction away by itself once the connection
+        // is gone — nothing was committed, because COMMIT was never sent.
+        $rollbackFault = null;
+        try {
+            App::rollback();
+        } catch (\Throwable $second) {
+            $rollbackFault = $second;
+        }
+
+        // A file that could not be removed is named by its PATH only — a name
+        // the portal made up, never the claimant's (#714) — and goes to PHP's
+        // own error log as well, because the database log may have failed.
+        foreach ($leftBehind as $path) {
+            error_log('[expenses/submit] a receipt file for a claim that was not saved could not be removed: ' . $path);
+        }
+        try {
+            Logger::exception($ex);
+            if ($rollbackFault !== null) {
+                Logger::exception($rollbackFault);
+            }
+            foreach ($leftBehind as $path) {
+                Logger::errorPlatform(
+                    'Expenses',
+                    'Error',
+                    'RECEIPT_LEFT_BEHIND',
+                    'A receipt file for a claim that was not saved could not be removed',
+                    'File: ' . $path . ' — nothing in the database points at it; remove it by hand.'
+                );
+            }
+        } catch (\Throwable $ignored) {
+            error_log('[expenses/submit] a claim was not saved and the error log could not be written: ' . $ex->getMessage());
+        }
+
+        $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Router::url('expenses/submit'));
+        exit();
     }
 
-    // 🧹 A CLAIM THAT IS NOT SAVED TAKES ITS RECEIPT FILES WITH IT (#649).
-    //    Before, a failure after a receipt had been moved (its row refused,
-    //    the PDF step throwing) left the file in the folder with no claim and
-    //    no row pointing at it — a copy of somebody's receipt that nothing
-    //    lists and no erasure could ever find. Only files THIS request moved
-    //    are named. A claim that IS saved, or may be, keeps every file.
+    // ═══════════════════════════════════════════════════════════════════════
+    // COMMIT WAS SENT AND ITS SUCCESS COULD NOT BE CONFIRMED.
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🔒 NO RECEIPT FILE IS DELETED ON THIS PATH, WHATEVER HAPPENS. The server
+    //    may have committed the claim and only the answer failed to arrive, or
+    //    it may have refused it with the connection still up. Two earlier
+    //    designs tried to tell which and then delete; both deleted the receipt
+    //    of a SAVED claim (measured — see ExpenseRules, "A claim whose save
+    //    could not be confirmed"). The design is simplified on purpose: keep
+    //    every file, record each by its stored path, and ask a NEW connection
+    //    only which MESSAGE to show. Nothing that look answers can delete.
     //
-    //    ⚠️ THE FILES GO BEFORE THE ROLLBACK, AND EVERYTHING AFTER THEM IS
-    //       GUARDED (round 1 of the check). The first version rolled back
-    //       first, with nothing around it, and on a lost connection
-    //       `rollback()` THROWS too ("MySQL server has gone away"): the second
-    //       exception escaped, the files stayed, and the claimant got no
-    //       message. Removing a file needs no database.
-    $leftBehind = [];
-    $keptFiles  = [];
+    //    The honest cost: when the commit really did fail, those files stay on
+    //    disk with no claim pointing at them, for the administrator to remove
+    //    from the error log's list. Deleting a saved claim's evidence cannot be
+    //    undone; an orphan file can be.
+    $keptFiles = [];
     foreach ($movedPaths as $moved) {
-        if (is_file($moved) === false) {
-            continue;
-        }
-        if ($outcome !== ExpenseRules::COMMIT_NOT_SAVED) {
+        if (is_file($moved) === true) {
             $keptFiles[] = $moved;
-            continue;
-        }
-        if (@unlink($moved) === false) {
-            $leftBehind[] = $moved;
         }
     }
 
-    // Undo the claim. When the connection is gone this throws too, and the
-    // server does whatever it does with an unfinished transaction on its own
-    // — which is exactly why the outcome was asked of a new connection above
-    // rather than assumed here. A failure is recorded and passed over, so it
-    // can never stop the message below.
+    // Tidy the request's own transaction if its connection still works. A
+    // failure is passed over: it can change nothing about what was committed.
     $rollbackFault = null;
     try {
         App::rollback();
@@ -423,78 +457,76 @@ try {
         $rollbackFault = $second;
     }
 
-    // Record what happened. Files are named by their PATH only — names the
-    // portal made up, never the claimant's (#714) — and go to PHP's own error
-    // log as well, because the database log may be the very thing that failed.
-    foreach ($leftBehind as $path) {
-        error_log('[expenses/submit] a receipt file for a claim that was not saved could not be removed: ' . $path);
+    // A NEW connection, with a short deadline (`DbServer::connectAgain()`), so
+    // the records below can be written even when the request's own connection
+    // has failed, and so the claim can be looked for. None is a fault: without
+    // it the records go to PHP's own error log and the answer is "not known".
+    $fresh = null;
+    try {
+        $fresh = DbServer::connectAgain();
+        Logger::useConnection($fresh);
+    } catch (\Throwable $noConnection) {
+        $fresh = null;
     }
-    if ($outcome === ExpenseRules::COMMIT_UNKNOWN) {
-        foreach ($keptFiles as $path) {
-            error_log('[expenses/submit] claim #' . $claimID . ': its commit was interrupted and it is not known whether it was saved; this receipt file was KEPT: ' . $path);
-        }
-    }
-    if ($outcome === ExpenseRules::COMMIT_SAVED) {
-        // The steps after the commit did not run, so the "could not store it"
-        // lines they would have written go to PHP's own log instead.
-        foreach ($notAttached as $file) {
-            if (($file['reason'] ?? '') === ExpenseRules::RECEIPT_NOT_STORED) {
-                error_log('[expenses/submit] claim #' . $claimID . ': ' . (string) ($file['adminNote'] ?? 'a receipt could not be stored'));
-            }
-        }
+
+    // Record every kept file by its PATH — a name the portal made up, never
+    // the claimant's (#714) — one row each, so an administrator can find them;
+    // and in PHP's own error log too, in case even the new connection failed.
+    foreach ($keptFiles as $path) {
+        error_log('[expenses/submit] claim #' . $claimID . ': its save could not be confirmed, so this receipt file was KEPT: ' . $path);
     }
     try {
         Logger::exception($ex);
         if ($rollbackFault !== null) {
             Logger::exception($rollbackFault);
         }
-        foreach ($leftBehind as $path) {
+        foreach ($keptFiles as $path) {
             Logger::errorPlatform(
                 'Expenses',
                 'Error',
-                'RECEIPT_LEFT_BEHIND',
-                'A receipt file for a claim that was not saved could not be removed',
-                'File: ' . $path . ' — nothing in the database points at it; remove it by hand.'
+                'RECEIPT_KEPT_AFTER_FAILED_COMMIT',
+                'A claim\'s save could not be confirmed, so its receipt file was kept',
+                'Claim #' . $claimID . '. File: ' . $path . ' — if no such claim exists, nothing points at this file; remove it by hand.'
             );
         }
-        if ($outcome === ExpenseRules::COMMIT_UNKNOWN && count($keptFiles) > 0) {
-            Logger::errorPlatform(
-                'Expenses',
-                'Error',
-                'RECEIPT_KEPT_UNKNOWN',
-                'A claim\'s commit was interrupted and it could not be told whether it was saved, so its receipt files were kept',
-                'Claim #' . $claimID . '. Files: ' . implode(', ', $keptFiles) . ' — if no such claim exists, remove them by hand.'
-            );
+        // The same "could not store it" lines the ordinary path writes after
+        // its commit, because the claimant is told they were recorded.
+        foreach ($notAttached as $file) {
+            if (($file['reason'] ?? '') === ExpenseRules::RECEIPT_NOT_STORED) {
+                Logger::errorPlatform(
+                    'Expenses',
+                    'Error',
+                    'RECEIPT_NOT_STORED',
+                    'A receipt could not be stored, so it was not attached to a claim',
+                    'Claim #' . $claimID . ': ' . (string) ($file['adminNote'] ?? 'no further detail was recorded')
+                );
+            }
         }
     } catch (\Throwable $ignored) {
-        error_log('[expenses/submit] a claim failed and the error log could not be written: ' . $ex->getMessage());
+        error_log('[expenses/submit] a claim\'s save could not be confirmed and the error log could not be written: ' . $ex->getMessage());
     }
 
-    if ($outcome === ExpenseRules::COMMIT_SAVED) {
-        // It WAS saved. Say so, with everything the usual message says about
-        // its receipts, and ask the claimant not to submit it again.
-        $told = ExpenseRules::submittedMessage(
-            $claimID,
-            $notAttached,
-            (string) ini_get('upload_max_filesize'),
-            $cutShort,
-            $countLimit
-        );
-        $_SESSION['flash_msg']  = $told['message'] . ' ' . ExpenseRules::MSG_SAVED_BUT_CONNECTION_LOST;
-        $_SESSION['flash_type'] = 'warning';
-        header('Location: ' . Router::url('expenses/submit') . '?success=' . $claimID);
-        exit();
-    }
-    if ($outcome === ExpenseRules::COMMIT_UNKNOWN) {
-        $_SESSION['flash_msg']  = ExpenseRules::MSG_CLAIM_SAVE_UNKNOWN;
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . Router::url('expenses/submit'));
-        exit();
+    // Was it saved? This decides the MESSAGE and nothing else.
+    $found = false;
+    if ($fresh instanceof \mysqli) {
+        try {
+            $found = ExpenseRules::claimIsSaved($fresh, $claimID, $userId);
+        } catch (\Throwable $cannotAsk) {
+            $found = false;
+        }
     }
 
-    $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
-    $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . Router::url('expenses/submit'));
+    $told = ExpenseRules::unconfirmedMessage(
+        $found,
+        $claimID,
+        $notAttached,
+        (string) ini_get('upload_max_filesize'),
+        $cutShort,
+        $countLimit
+    );
+    $_SESSION['flash_msg']  = $told['message'];
+    $_SESSION['flash_type'] = $told['type'];
+    header('Location: ' . Router::url('expenses/submit') . ($found === true ? '?success=' . $claimID : ''));
     exit();
 }
 

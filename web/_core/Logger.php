@@ -102,6 +102,25 @@ class Logger
     private static ?mysqli $db = null;
 
     /**
+     * 🔁 Write to THIS connection for the rest of the request (#649).
+     *
+     * For the one moment a request's own connection can no longer be trusted:
+     * an expense claim whose commit could not be confirmed, where the receipt
+     * files it kept must be recorded for the administrator. Without this the
+     * rows would go through the failed connection and, at best, reach PHP's
+     * own error log instead. The caller opens the new connection with
+     * `DbServer::connectAgain()`; nothing else changes about how a row is
+     * written, and a row that still cannot be written falls back exactly as
+     * before.
+     *
+     * @param mysqli $db An open connection.
+     */
+    public static function useConnection(mysqli $db): void
+    {
+        self::$db = $db;
+    }
+
+    /**
      * 🔁 True while writeErrorRow() is busy with one error: writing its row,
      * sending its alert e-mail, or forwarding it to the error monitor.
      */

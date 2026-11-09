@@ -1204,8 +1204,9 @@ jobs:
       #    that is not attached is named to the claimant with its reason, the
       #    claim is refused only when the receipts folder cannot be made, a
       #    rolled-back claim leaves no receipt on disk (even when the database
-      #    connection is lost), a claim whose commit's reply was lost keeps
-      #    its receipt unless it was definitely not saved, files past
+      #    connection is lost), once a claim's commit has been sent no receipt
+      #    file is ever deleted (only the message depends on whether the
+      #    claim turns out to be saved), files past
       #    max_file_uploads are reported, and a failure after the commit never
       #    says "Error saving claim". It takes write permission from folders
       #    in its own copy of web/, CREATEs TRIGGERs, renames tblUserDepts for

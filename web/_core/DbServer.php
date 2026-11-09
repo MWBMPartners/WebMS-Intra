@@ -326,6 +326,10 @@ final class DbServer
      *                              PHP leaves it out of any error report.
      * @param string|null $database The database to open, or '' for none yet.
      * @param int|null    $port     The port the database server listens on.
+     * @param int|null    $timeout  Seconds to wait for the server — to connect,
+     *                              and for each answer on this connection — or
+     *                              null for PHP's own defaults (about a minute),
+     *                              which is what every caller got before #649.
      *
      * @return mysqli An open connection.
      *
@@ -340,9 +344,40 @@ final class DbServer
         ?string $user,
         #[\SensitiveParameter] ?string $password,
         ?string $database,
-        ?int $port
+        ?int $port,
+        ?int $timeout = null
     ): mysqli {
-        $db = new mysqli($host, $user, $password, $database, $port);
+        // ⏱️ A connection with its own deadline (#649). mysqlnd takes its
+        //    connect deadline from `default_socket_timeout` and its deadline
+        //    for each answer from `mysqlnd.net_read_timeout`, both read when
+        //    the connection is made, so both are set for this one `new mysqli`
+        //    and put back straight after — the rest of the request keeps its
+        //    own. The READ deadline matters as much as the connect one: a
+        //    server that accepts the connection and then says nothing would
+        //    otherwise hold the handshake for about a minute (measured with
+        //    section K4 of tools/expense-receipts-selftest.php).
+        //
+        //    Done with settings rather than `mysqli_init()` and
+        //    `real_connect()` on purpose: those are two more ways to open a
+        //    connection, and tools/db-strict-mode-selftest.php holds this file
+        //    to exactly ONE, so that nothing can open one without passing
+        //    through makeStrict() below.
+        $restore = [];
+        if ($timeout !== null) {
+            foreach (['default_socket_timeout', 'mysqlnd.net_read_timeout'] as $setting) {
+                $restore[$setting] = ini_get($setting);
+                ini_set($setting, (string) $timeout);
+            }
+        }
+        try {
+            $db = new mysqli($host, $user, $password, $database, $port);
+        } finally {
+            foreach ($restore as $setting => $value) {
+                if ($value !== false) {
+                    ini_set($setting, $value);
+                }
+            }
+        }
 
         // 🔤 utf8mb4 is the character set that holds every character,
         //    including emoji. See: https://dev.mysql.com/doc/refman/8.0/en/charset-unicode-utf8mb4.html
@@ -356,21 +391,26 @@ final class DbServer
     /**
      * 🔁 A SECOND, NEW connection with the portal's own credentials, for the
      *    rare moment the request's own connection can no longer be trusted
-     *    (#649, round 2 of the independent check).
+     *    (#649).
      *
-     * The case it was written for: the connection is lost WHILE a claim is
-     * being committed. The server may have committed it or not, and the old
-     * connection cannot say which — only a new one can look. It reads the
-     * same credentials file start-up reads and opens the connection through
-     * connect() above, so it is just as strict; it never reuses the request's
-     * connection. The caller closes it.
+     * The case it was written for: a claim's commit could not be confirmed.
+     * The server may have committed it or not, and the request's own
+     * connection cannot say which. It reads the same credentials file
+     * start-up reads and opens the connection through connect() above, so it
+     * is just as strict; it never reuses the request's connection.
+     *
+     * It waits at most `$timeout` seconds (3 by default) for the server, so a
+     * database that cannot be reached cannot hold the request for a minute
+     * while the person waits for an answer.
+     *
+     * @param int $timeout Seconds to wait to connect, and for each answer.
      *
      * @return mysqli An open connection.
      *
      * @throws \RuntimeException     When the credentials file cannot be read.
      * @throws \mysqli_sql_exception When the server cannot be reached.
      */
-    public static function connectAgain(): mysqli
+    public static function connectAgain(int $timeout = 3): mysqli
     {
         $authFile = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'auth_creds.php';
         if (is_readable($authFile) === false) {
@@ -386,7 +426,8 @@ final class DbServer
             isset($creds['db_user']) === true ? (string) $creds['db_user'] : null,
             isset($creds['db_pass']) === true ? (string) $creds['db_pass'] : null,
             isset($creds['db_name']) === true ? (string) $creds['db_name'] : null,
-            isset($creds['db_port']) === true ? (int) $creds['db_port'] : 3306
+            isset($creds['db_port']) === true ? (int) $creds['db_port'] : 3306,
+            $timeout
         );
     }
 

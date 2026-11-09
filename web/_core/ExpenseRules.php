@@ -966,123 +966,129 @@ final class ExpenseRules
         ];
     }
 
+
     /* ---------------------------------------------------------------------- */
-    /* 🔌 A claim whose COMMIT was interrupted (#649, round 2 of the check)    */
+    /* 🔌 A claim whose save could not be confirmed (#649)                     */
     /* ---------------------------------------------------------------------- */
     //
-    // WHAT WENT WRONG IN ROUND 1. The failure path removed the receipt files
-    // it had moved, FIRST, on every failure. That is right before the commit
-    // is sent. It is WRONG once it has been: a connection lost DURING the
-    // commit leaves the server free to have committed, and measured with a
-    // proxy that forwards COMMIT and then drops the connection, claim #75 and
-    // its receipt row existed, the FILE was gone, and the claimant was told
-    // "Error saving claim. Please try again." — inviting a second claim for
-    // the same money, while the approver got a claim whose evidence had been
-    // deleted. So once the commit has been sent, the handler asks a NEW
-    // connection what really happened before it touches a single file.
-
-    /** The claim is in the database: it WAS saved. Keep every file. */
-    public const COMMIT_SAVED = 'saved';
-
-    /** The claim is not in the database and the old connection has finished: it was NOT saved. */
-    public const COMMIT_NOT_SAVED = 'not-saved';
-
-    /** It could not be found out. Keep every file, and say so. */
-    public const COMMIT_UNKNOWN = 'unknown';
+    // THE RULE, simplified on purpose after the same item failed two review
+    // rounds running: ONCE COMMIT HAS BEEN SENT, NO RECEIPT FILE IS EVER
+    // DELETED, whatever happens next. The files are kept and recorded by
+    // their stored path for the administrator, and a NEW connection is asked
+    // only which MESSAGE to show. Nothing it answers can delete anything.
+    //
+    // WHY, with the two designs it replaced:
+    //   - Round 1 removed the moved files on every failure. Measured with a
+    //     proxy that forwarded COMMIT and dropped the reply: the claim and its
+    //     receipt row were saved, the FILE was gone, and the claimant was told
+    //     to submit again.
+    //   - Round 2 asked a new connection "is the claim there?" and then "has
+    //     the old connection gone?", deleting the files on "absent and gone".
+    //     The two questions are asked at two moments, and a commit landing
+    //     between them read as "not saved": measured, 10 of 60 runs deleted a
+    //     SAVED claim's receipt. Behind a connection proxy or a replicated
+    //     database the connection numbers mean something else again.
+    //
+    // THE HONEST COST: when a commit really did fail after being sent, the
+    // receipt files stay on disk with no claim pointing at them. They are
+    // logged by path (RECEIPT_KEPT_AFTER_FAILED_COMMIT) for the administrator
+    // to remove. That was chosen because deleting a saved claim's evidence
+    // cannot be undone, and an orphan file can be.
 
     /**
-     * Was a claim saved, when its commit was interrupted?
+     * Is this claim in the database? Asked on a NEW connection, so it sees only
+     * what the server really committed. It decides a MESSAGE and nothing else.
      *
-     * Asked on a NEW connection, so it sees only what the server really
-     * committed. "Not in the database" is only believed once the OLD
-     * connection has gone from the server's list of connections: until then
-     * the server may still be part-way through the commit it was sent, and a
-     * claim missing NOW may be there a moment later. While it lingers this
-     * waits and asks again; if it is still there after the last try, the
-     * answer is "unknown" — never "not saved", because that answer deletes
-     * files. A connection may always see its own account's other
-     * connections, so no special right is needed to look.
+     * @param mysqli $fresh   A connection opened after the failure.
+     * @param int    $claimId The claim's number.
+     * @param int    $userId  Its claimant, so another person's claim is never mistaken for it.
      *
-     * Takes the way to connect as an argument, so the handler passes the
-     * portal's own (`DbServer::connectAgain()`) and nothing here reaches for
-     * credentials. Every failure — no connection, a query refused — answers
-     * COMMIT_UNKNOWN.
+     * @return bool
      *
-     * @param callable():\mysqli $connect     Opens a NEW connection.
-     * @param int                $claimId     The claim's number (0: none was made).
-     * @param int                $userId      Its claimant, so another person's claim of the same number is never mistaken for it.
-     * @param int                $oldThreadId The lost connection's own number on the server (0: not known).
-     * @param int                $tries       How many times to look.
-     * @param int                $pauseMicro  How long to wait between looks, in microseconds.
-     *
-     * @return string One of the COMMIT_* constants.
+     * @throws \Throwable When the question cannot be asked; the caller then
+     *                    says it is not known.
      */
-    public static function outcomeOfInterruptedCommit(
-        callable $connect,
-        int $claimId,
-        int $userId,
-        int $oldThreadId,
-        int $tries = 10,
-        int $pauseMicro = 300000
-    ): string {
+    public static function claimIsSaved(mysqli $fresh, int $claimId, int $userId): bool
+    {
         if ($claimId <= 0) {
-            // No claim row was ever written, so there is nothing to find.
-            return self::COMMIT_NOT_SAVED;
+            return false;
         }
-        $fresh = null;
-        try {
-            $fresh = $connect();
-            for ($try = 1; $try <= max(1, $tries); $try++) {
-                $row = $fresh->prepare('SELECT `claimID` FROM `tblExpenseClaims` WHERE `claimID` = ? AND `userID` = ? LIMIT 1');
-                $row->bind_param('ii', $claimId, $userId);
-                $row->execute();
-                $saved = $row->get_result()->fetch_assoc() !== null;
-                $row->close();
-                if ($saved === true) {
-                    return self::COMMIT_SAVED;
-                }
-                if ($oldThreadId > 0) {
-                    $still = $fresh->prepare('SELECT `ID` FROM `information_schema`.`PROCESSLIST` WHERE `ID` = ? LIMIT 1');
-                    $still->bind_param('i', $oldThreadId);
-                    $still->execute();
-                    $lingering = $still->get_result()->fetch_assoc() !== null;
-                    $still->close();
-                    if ($lingering === false) {
-                        return self::COMMIT_NOT_SAVED;
-                    }
-                }
-                if ($try < $tries) {
-                    usleep($pauseMicro);
-                }
-            }
+        $row = $fresh->prepare('SELECT `claimID` FROM `tblExpenseClaims` WHERE `claimID` = ? AND `userID` = ? LIMIT 1');
+        $row->bind_param('ii', $claimId, $userId);
+        $row->execute();
+        $found = $row->get_result()->fetch_assoc() !== null;
+        $row->close();
 
-            // Still not found, and either the old connection is still there
-            // or its number was not known: nobody can say it was not saved.
-            return self::COMMIT_UNKNOWN;
-        } catch (\Throwable $e) {
-            return self::COMMIT_UNKNOWN;
-        } finally {
-            if ($fresh instanceof mysqli) {
-                try {
-                    $fresh->close();
-                } catch (\Throwable $ignored) {
-                    // Closing a connection that has already failed tells nobody anything.
-                }
-            }
-        }
+        return $found;
     }
 
     /**
-     * Said, AFTER the usual "submitted" message, when the commit's reply was
-     * lost but the claim is in the database. The usual message is still true
-     * — the claim and its receipts are saved — but the steps after the
-     * commit (the activity record, the approvers' e-mail) did not run.
+     * Said after the usual "submitted" words when the claim IS in the database
+     * but its save could not be confirmed at the time. "Could not be
+     * confirmed" and not "the connection was lost": a commit can also be
+     * refused with the connection still up. The approvers' e-mail is sent only
+     * after a confirmed save, so on this path it never went — said plainly,
+     * because the claimant may be waiting for an approver who does not know.
      */
-    public const MSG_SAVED_BUT_CONNECTION_LOST = 'The portal lost its connection to the database at the very moment your claim was saved, so the approvers may not have been sent their usual e-mail. Please do NOT submit this claim again: it is saved, and it is listed under Your claims.';
+    public const MSG_SAVED_UNCONFIRMED = 'The save could not be confirmed at the time, so the approvers were NOT sent their usual e-mail about this claim. Please do NOT submit it again: it is saved, and it is listed under Your claims.';
 
     /**
      * Said when it could not be found out whether the claim was saved. The
-     * receipts are KEPT, so a saved claim never loses its evidence.
+     * receipts are kept either way, so a saved claim never loses its evidence.
      */
-    public const MSG_CLAIM_SAVE_UNKNOWN = 'The portal could not tell whether your claim was saved: its connection to the database was lost at the very moment of saving. Please look under Your claims below before submitting it again, so the same money is not claimed twice. If the claim is not listed after a few minutes, submit it again.';
+    public const MSG_SAVE_NOT_CONFIRMED = 'It is not known whether your claim was saved: the save could not be confirmed. Please look under Your claims below before submitting it again, so the same money is not claimed twice. If it is not listed, submit it again.';
+
+    /**
+     * What the claimant is told when the save could not be confirmed.
+     *
+     * Whole sentences, chosen per case (#694). Found: the usual "submitted"
+     * message — which already names every file that was not attached, and
+     * anything past the server's file limit — followed by
+     * MSG_SAVED_UNCONFIRMED. Not found, or not known: MSG_SAVE_NOT_CONFIRMED,
+     * then, when files were not attached, one sentence naming them, because
+     * that was worked out before the commit and is true whatever the answer.
+     *
+     * @param bool                                   $found       Whether the claim was found saved.
+     * @param int                                    $claimId     The claim's number.
+     * @param list<array{name:string,reason:string}> $notAttached Files not attached.
+     * @param string                                 $serverLimit `upload_max_filesize`, for the words.
+     * @param string                                 $cutShort    One of the CUT_SHORT_* constants.
+     * @param int                                    $countLimit  `max_file_uploads`, for the words.
+     *
+     * @return array{type:string,message:string}
+     */
+    public static function unconfirmedMessage(
+        bool $found,
+        int $claimId,
+        array $notAttached,
+        string $serverLimit = '',
+        string $cutShort = self::CUT_SHORT_NO,
+        int $countLimit = 0
+    ): array {
+        if ($found === true) {
+            $told = self::submittedMessage($claimId, $notAttached, $serverLimit, $cutShort, $countLimit);
+
+            return [
+                'type'    => 'warning',
+                'message' => $told['message'] . ' ' . self::MSG_SAVED_UNCONFIRMED,
+            ];
+        }
+
+        $parts = [];
+        foreach ($notAttached as $file) {
+            $parts[] = self::shownFileName((string) ($file['name'] ?? ''))
+                . ', because ' . self::receiptRefusalWords((string) ($file['reason'] ?? ''), $serverLimit);
+        }
+        $message = self::MSG_SAVE_NOT_CONFIRMED;
+        if (count($parts) === 1) {
+            $message .= ' Either way, one file you chose was NOT attached: ' . $parts[0] . '.';
+        } elseif (count($parts) > 1) {
+            $message .= ' Either way, ' . count($parts) . ' files you chose were NOT attached: ' . implode('; ', $parts) . '.';
+        }
+
+        return [
+            'type'    => 'danger',
+            'message' => $message,
+        ];
+    }
 }

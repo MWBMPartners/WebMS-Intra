@@ -16,8 +16,14 @@ one of three things, chosen by what the arm file says:
   forward-refuse  the same, and it then creates the "refuse" file: while that
                   exists every NEW connection is cut at once, so the portal
                   cannot even ask what happened. The test removes it.
+  forward-stall   the same, but every NEW connection is accepted and then
+                  answered with silence, as a database that is reachable but
+                  not responding would, so the portal's own deadline is what
+                  ends the wait.
   swallow         never send COMMIT on; cut both sides. The server throws the
-                  unfinished claim away.
+                  unfinished claim away — but the portal had already SENT its
+                  COMMIT, so it cannot know that, and takes the same path as
+                  the other three.
 
 The arm file is removed when it fires, so it acts on one COMMIT only.
 
@@ -84,11 +90,12 @@ async def client_to_server(reader, writer, close_both, state):
                     LOG.write('armed COMMIT seen; NOT forwarded; dropping\n')
                     close_both()
                     return
-                if mode == 'forward-refuse':
+                if mode in ('forward-refuse', 'forward-stall'):
                     # Created HERE, at the commit, and not by the test before
                     # the request: the portal's own connection opens at the
                     # start of the request and must not be refused.
-                    open(REFUSE, 'w').close()
+                    with open(REFUSE, 'w') as handle:
+                        handle.write('stall' if mode == 'forward-stall' else 'refuse')
                 writer.write(packet)
                 await writer.drain()
                 LOG.write('armed COMMIT seen; forwarded; dropping before the reply (%s)\n' % mode)
@@ -115,6 +122,19 @@ async def server_to_client(reader, writer, close_both, state):
 
 async def handle(client_reader, client_writer):
     if os.path.exists(REFUSE):
+        try:
+            with open(REFUSE, 'r') as handle_file:
+                kind = handle_file.read().strip()
+        except OSError:
+            kind = 'refuse'
+        if kind == 'stall':
+            # Accept the connection and then say NOTHING, the way a database
+            # that is reachable but not answering behaves. Only a deadline on
+            # the portal's side ends the wait.
+            LOG.write('new connection held silently (stall)\n')
+            await asyncio.sleep(120)
+            client_writer.close()
+            return
         LOG.write('new connection refused (refuse file present)\n')
         client_writer.close()
         return

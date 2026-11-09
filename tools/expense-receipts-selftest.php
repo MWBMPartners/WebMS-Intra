@@ -42,11 +42,12 @@
  *      handler runs, and the claimant is told, without names (PHP gives none)
  *   J  the database connection is LOST part-way, so the rollback throws too:
  *      the moved file is still removed and the claimant still told
- *   K  the connection is lost AT the commit, through a small proxy
- *      (`tools/expense-receipts-commit-proxy.py`): a claim the server DID
- *      save keeps its receipt and the claimant is told not to submit it again;
- *      when nobody can tell, the file is kept and the claimant told to look;
- *      only a claim that definitely was not saved loses its file
+ *   K  the commit is SENT and cannot be confirmed, through a small proxy
+ *      (`tools/expense-receipts-commit-proxy.py`): NO receipt file is ever
+ *      deleted on this path. A claim the server saved is reported as saved
+ *      (approvers not e-mailed, do not submit again); otherwise "not known".
+ *      Every kept file is logged by its path — including the orphan left when
+ *      the commit really did fail, which is the cost of never deleting.
  *   Z  across the WHOLE run, no column of either log holds a claimant's own
  *      file name (#714)
  *
@@ -61,10 +62,9 @@
  *     for exactly that, and nothing here proves it).
  *   - Sections E and F take write permission away from a folder. Run as the
  *     ROOT user that does nothing, so the test REFUSES rather than passing.
- *   - Section K cannot reproduce the narrowest race: the server still part-way
- *     through a commit when the portal asks whether the claim is there. The
- *     handler waits for the old connection to leave the server's list before
- *     believing "not saved" for exactly that, and nothing here proves it.
+ *   - A commit REFUSED with the connection still up (a database cluster can
+ *     do that) is not produced here; it takes the same path as section K, and
+ *     only the words of its message are pinned (A47-A49).
  *   - Stopped with Ctrl-C or a polite kill, it puts back what it changed
  *     (when PHP has the pcntl extension). Killed outright (`kill -9`) it
  *     cannot: see the note beside the signal handler for what to remove.
@@ -93,7 +93,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 136;
+const EXPECTED_CHECKS = 142;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -267,24 +267,21 @@ $maybe = R::submittedMessage(7, [], '', R::CUT_SHORT_POSSIBLE, 3);
 check('A43 when it cannot be told, the words say IF, never that files were lost',
     str_contains($maybe['message'], 'so if you chose more than 3, the rest never reached the portal'), true);
 $both = R::submittedMessage(7, [['name' => 'a.exe', 'reason' => R::RECEIPT_WRONG_TYPE]], '', R::CUT_SHORT_CERTAIN, 3);
-// Round 2 of the check: was a claim saved when its commit was interrupted?
-// Asked with a real NEW connection each time, as the handler asks it.
-$newConnection = static fn (): mysqli => new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
-$noSuchClaim   = 2147480001;
-check('A45 no way to ask (the connection is refused) is UNKNOWN, never "not saved" — "not saved" deletes files',
-    R::outcomeOfInterruptedCommit(static function (): mysqli {
-        throw new RuntimeException('refused');
-    }, 5, 1, 0), R::COMMIT_UNKNOWN);
-check('A46 no claim row was ever written: not saved, with nothing to ask',
-    R::outcomeOfInterruptedCommit(static function (): mysqli {
-        throw new RuntimeException('must not be called');
-    }, 0, 1, 0), R::COMMIT_NOT_SAVED);
-check('A47 claim absent while the OLD connection is still on the server: UNKNOWN (it may still be committing)',
-    R::outcomeOfInterruptedCommit($newConnection, $noSuchClaim, 1, (int) $db->thread_id, 2, 1000), R::COMMIT_UNKNOWN);
-check('A48 claim absent and the old connection gone: NOT SAVED',
-    R::outcomeOfInterruptedCommit($newConnection, $noSuchClaim, 1, 2147480002, 2, 1000), R::COMMIT_NOT_SAVED);
-check('A49 claim absent and the old connection\'s number not known: UNKNOWN, never assumed gone',
-    R::outcomeOfInterruptedCommit($newConnection, $noSuchClaim, 1, 0, 2, 1000), R::COMMIT_UNKNOWN);
+// A claim whose save could not be confirmed (round 3 of the check simplified
+// this: once COMMIT is sent nothing is deleted, and the look only picks words).
+check('A45 a claim that is not there is not "saved"', R::claimIsSaved($db, 2147480001, 1), false);
+check('A46 no claim row was ever written (number 0): not "saved", with nothing asked', R::claimIsSaved($db, 0, 1), false);
+$savedUnconfirmed = R::unconfirmedMessage(true, 41, []);
+check('A47 found saved: a warning saying it WAS submitted, that the approvers were NOT e-mailed, and not to submit again',
+    [$savedUnconfirmed['type'], str_contains($savedUnconfirmed['message'], 'Your claim #41 has been submitted.'),
+        str_contains($savedUnconfirmed['message'], 'the approvers were NOT sent their usual e-mail'),
+        str_contains($savedUnconfirmed['message'], 'Please do NOT submit it again')], ['warning', true, true, true]);
+$notKnown = R::unconfirmedMessage(false, 41, [['name' => 'x.exe', 'reason' => R::RECEIPT_WRONG_TYPE]]);
+check('A48 not found: "not known", and the file that was not attached is STILL named',
+    [$notKnown['type'], str_starts_with($notKnown['message'], R::MSG_SAVE_NOT_CONFIRMED),
+        str_contains($notKnown['message'], 'Either way, one file you chose was NOT attached: "x.exe", because')], ['danger', true, true]);
+check('A49 neither message claims the connection "was lost", which is not known (a commit can be refused with it still up)',
+    str_contains($savedUnconfirmed['message'] . $notKnown['message'], 'lost'), false);
 check('A44 a named file AND dropped files: both said, with the advice for both',
     str_contains($both['message'], '"a.exe"') && str_contains($both['message'], 'at most 3 files')
         && str_contains($both['message'], 'no more than 3 files'), true);
@@ -345,8 +342,11 @@ register_shutdown_function(static function () use (&$state): void {
 //    `exit()` from a signal handler DOES run them. What still cannot be
 //    cleaned: a run killed outright (SIGKILL, `kill -9`), which no program can
 //    catch — then remove `trg_p649_*` triggers, rename `tblUserDepts_p649_aside`
-//    back, and delete the `expense-receipts-*` folder under the temp folder by
-//    hand. Without the pcntl extension only the shutdown function is there.
+//    back, delete the `expense-receipts-*` folder under the temp folder, and
+//    stop the two processes it started and left running: PHP's web server
+//    (`php -S 127.0.0.1:…`) and section K's python3 commit proxy. The test's
+//    member and department are removed at the start of the next run. Without
+//    the pcntl extension only the shutdown function is there.
 if (function_exists('pcntl_async_signals') === true && function_exists('pcntl_signal') === true) {
     pcntl_async_signals(true);
     foreach ([SIGINT, SIGTERM, SIGHUP] as $signal) {
@@ -1043,18 +1043,23 @@ check('J03 THE CLAIMANT IS STILL TOLD it was not saved',
     [$j['post']['status'], $j['alert'], $j['message']], [302, 'danger', 'Error saving claim. Please try again.']);
 
 // ═════════════════════════════════════════════════════════════════════════════
-echo "\nK. The connection is lost AT the commit, when the server may have saved the claim\n";
+echo "\nK. The commit was SENT and could not be confirmed: no receipt is ever deleted\n";
 // ═════════════════════════════════════════════════════════════════════════════
-// Round 2 of the independent check: round 1's failure path deleted the moved
-// receipt FIRST on every failure. A connection lost DURING the commit leaves
-// the server free to have committed, and measured, a SAVED claim lost its
-// receipt file while the claimant was told "Error saving claim. Please try
-// again." Sections G and J cut the connection BEFORE the commit and could not
-// see it. Here a small proxy sits between the portal and the database and
+// Two designs deleted the receipt of a SAVED claim on this path, both measured
+// by the independent check: round 1 removed the files on every failure, and
+// round 2 asked two questions at two moments, so a commit landing between them
+// read as "not saved" (10 of 60 runs). Round 3 simplified the rule: ONCE COMMIT
+// HAS BEEN SENT, NO FILE IS DELETED. A new connection is asked only which
+// MESSAGE to show. A small proxy sits between the portal and the database and
 // acts on the commit itself (`tools/expense-receipts-commit-proxy.py`):
-//   K1 forward        the server commits, the portal never hears it
+//   K1 forward        the server commits; the portal never hears it
 //   K2 forward-refuse the same, and the portal cannot even ask afterwards
-//   K3 swallow        the server never gets the commit
+//   K3 swallow        the server never gets the commit — but the portal SENT
+//                     it, cannot know, and so takes this same path: the file
+//                     is KEPT, an orphan logged by path. That is the cost the
+//                     simpler rule accepts, and this case pins it.
+//   K4 forward-stall  the portal's new connection meets a database that
+//                     answers nothing, and its short deadline must end the wait
 $python = trim((string) shell_exec('command -v python3 2>/dev/null'));
 if ($python === '') {
     refuse('section K needs python3 to run its commit proxy, and this machine has none');
@@ -1092,18 +1097,31 @@ file_put_contents($credsFile, "<?php\n// Section K of tools/expense-receipts-sel
 $phpErrorLog = $child . $sep . 'php-errors.log';
 $proxySaid   = static fn (): string => (string) @file_get_contents($proxyLog);
 
+/** The rows this run's error log gained with a code, after a mark. */
+$keptRows = static function (int $since) use ($errorsSince): array {
+    return $errorsSince($since, 'RECEIPT_KEPT_AFTER_FAILED_COMMIT');
+};
+
 // K1: the server commits; the portal never hears it.
 file_put_contents($arm, 'forward');
-$before = $folderNow();
-$k1 = $submit('P649 K1 committed', [['files[]', 'Hotel ZZ-K1.png', $png]]);
+$errBefore = $lastErrorId();
+$k1 = $submit('P649 K1 committed', [['files[]', 'Hotel ZZ-K1.png', $png], ['files[]', 'K1 notes ZZ.txt', 'not a receipt']]);
+$k1Id     = (int) ($k1['claim']['claimID'] ?? 0);
+$k1Stored = (string) ($k1['rows'][0]['storedFilename'] ?? '-');
+$k1Kept   = $keptRows($errBefore);
 check('K00 the premise: the proxy forwarded COMMIT and cut the reply', str_contains($proxySaid(), 'forwarded; dropping before the reply (forward)'), true);
-check('K01 the server DID save the claim', $k1['claim'] !== null, true);
-check('K02 ...with its receipt row', count($k1['rows']), 1);
-check('K03 THE RECEIPT FILE IS STILL ON DISK (round 1 deleted it)',
-    is_file($receipts . $sep . (string) ($k1['rows'][0]['storedFilename'] ?? '-')), true);
-check('K04 THE CLAIMANT IS TOLD IT WAS SAVED, and not to submit it again',
-    [$k1['alert'], str_contains($k1['message'], 'Your claim #' . (int) ($k1['claim']['claimID'] ?? 0) . ' has been submitted'),
-        str_contains($k1['message'], R::MSG_SAVED_BUT_CONNECTION_LOST)], ['warning', true, true]);
+check('K01 the server DID save the claim, with its receipt row', [$k1['claim'] !== null, count($k1['rows'])], [true, 1]);
+check('K02 THE RECEIPT FILE IS STILL ON DISK (round 1 deleted it)', is_file($receipts . $sep . $k1Stored), true);
+check('K03 THE CLAIMANT IS TOLD IT WAS SAVED, that the approvers were NOT e-mailed, and not to submit it again',
+    [$k1['alert'], str_contains($k1['message'], 'Your claim #' . $k1Id . ' has been submitted'),
+        str_contains($k1['message'], R::MSG_SAVED_UNCONFIRMED)], ['warning', true, true]);
+check('K04 ...and the file that was not attached is still named', str_contains($k1['message'], '"K1 notes ZZ.txt", because'), true);
+check('K05 ONE RECEIPT_KEPT_AFTER_FAILED_COMMIT row, written through the NEW connection, by stored path and never by the claimant\'s name',
+    count($k1Kept) === 1 && str_contains((string) ($k1Kept[0]['errorDetail'] ?? ''), $k1Stored)
+        && str_contains(json_encode($k1Kept) ?: '', 'ZZ-K1') === false, true);
+$k1Activity = (int) ($db->query("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityDescription LIKE 'Claim #{$k1Id} created%'")->fetch_assoc()['n'] ?? -1);
+check('K06 the steps after a confirmed save really did not run (no "created" record), so "the approvers were NOT sent their e-mail" is true',
+    $k1Activity, 0);
 
 // K2: the same, and the portal cannot ask what happened.
 file_put_contents($arm, 'forward-refuse');
@@ -1113,23 +1131,47 @@ $k2 = $submit('P649 K2 cannot tell', [['files[]', 'Taxi ZZ-K2.png', $png]], null
 @unlink($refuseNew);
 $k2Stored = (string) ($k2['rows'][0]['storedFilename'] ?? '-');
 $phpLog   = (string) @file_get_contents($phpErrorLog);
-check('K05 the premise: COMMIT forwarded, and the portal\'s new connection refused',
+check('K07 the premise: COMMIT forwarded, and the portal\'s new connection refused',
     str_contains($proxySaid(), '(forward-refuse)') && str_contains($proxySaid(), 'new connection refused'), true);
-check('K06 the server did save it, with its receipt row', [$k2['claim'] !== null, count($k2['rows'])], [true, 1]);
-check('K07 THE FILE IS KEPT, because nobody could say the claim was not saved', is_file($receipts . $sep . $k2Stored), true);
-check('K08 the claimant is told it is NOT KNOWN, and to look before submitting again',
-    [$k2['alert'], $k2['message']], ['danger', R::MSG_CLAIM_SAVE_UNKNOWN]);
-check('K09 the kept file is named for the administrator by its PATH, never the claimant\'s name (#714)',
+check('K08 the server did save it, with its receipt row', [$k2['claim'] !== null, count($k2['rows'])], [true, 1]);
+check('K09 THE FILE IS KEPT', is_file($receipts . $sep . $k2Stored), true);
+check('K10 the claimant is told it is NOT KNOWN, and to look before submitting again',
+    [$k2['alert'], $k2['message']], ['danger', R::MSG_SAVE_NOT_CONFIRMED]);
+check('K11 with no database to write to, the kept file is named in PHP\'s own log by its PATH, never the claimant\'s name (#714)',
     str_contains($phpLog, 'was KEPT: ') && str_contains($phpLog, $k2Stored) && str_contains($phpLog, 'ZZ-K2') === false, true);
 
-// K3: the server never gets the commit, so nothing was saved.
+// K3: the server never gets the commit — but the portal sent it.
 file_put_contents($arm, 'swallow');
-$before = $folderNow();
-$k3 = $submit('P649 K3 never committed', [['files[]', 'Fuel ZZ-K3.png', $png]]);
-check('K10 the premise: the proxy did NOT forward COMMIT', str_contains($proxySaid(), 'NOT forwarded'), true);
-check('K11 the claim is not saved', $k3['claim'], null);
-check('K12 the moved file is removed, because the claim definitely was not saved', $folderNow(), $before);
-check('K13 the claimant is told it was not saved', [$k3['alert'], $k3['message']], ['danger', 'Error saving claim. Please try again.']);
+$errBefore = $lastErrorId();
+$before    = $folderNow();
+$k3        = $submit('P649 K3 never committed', [['files[]', 'Fuel ZZ-K3.png', $png]]);
+$k3New     = array_values(array_diff($folderNow(), $before));
+$k3Kept    = $keptRows($errBefore);
+check('K12 the premise: the proxy did NOT forward COMMIT', str_contains($proxySaid(), 'NOT forwarded'), true);
+check('K13 the claim was not saved (the server threw it away)', $k3['claim'], null);
+check('K14 THE FILE IS STILL KEPT — the portal cannot know, and never deletes after sending COMMIT (the stated cost: an orphan)',
+    count($k3New), 1);
+check('K15 ...and it is logged by its path so an administrator can remove it',
+    count($k3Kept) === 1 && str_contains((string) ($k3Kept[0]['errorDetail'] ?? ''), (string) ($k3New[0] ?? '-')), true);
+check('K16 the claimant is told it is not known, never that it failed or saved',
+    [$k3['alert'], $k3['message']], ['danger', R::MSG_SAVE_NOT_CONFIRMED]);
+foreach ($k3New as $orphan) {
+    @unlink($receipts . $sep . $orphan); // this test's own orphan, by its generated name
+}
+
+// K4: the new connection meets a database that says nothing.
+file_put_contents($arm, 'forward-stall');
+$started = microtime(true);
+$k4 = $submit('P649 K4 silent database', [['files[]', 'Parking ZZ-K4.png', $png]], null, static function () use ($refuseNew): void {
+    @unlink($refuseNew);
+});
+$took = microtime(true) - $started;
+@unlink($refuseNew);
+check('K17 the premise: the new connection was held in silence', str_contains($proxySaid(), 'new connection held silently (stall)'), true);
+check('K18 THE REQUEST STILL ENDED within 20 seconds (the new connection\'s short deadline; PHP\'s default is about a minute)',
+    $took < 20.0, true);
+check('K19 ...with the file kept and "not known" said',
+    [is_file($receipts . $sep . (string) ($k4['rows'][0]['storedFilename'] ?? '-')), $k4['message']], [true, R::MSG_SAVE_NOT_CONFIRMED]);
 
 // Back to the database directly, and the proxy stopped.
 file_put_contents($credsFile, $credsOriginal);
