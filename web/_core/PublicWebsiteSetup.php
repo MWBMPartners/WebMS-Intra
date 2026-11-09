@@ -1051,10 +1051,11 @@ final class PublicWebsiteSetup
     }
 
     /** What the check says about the main website whenever it did not get a normal page. */
-    public const NOT_A_NORMAL_PAGE = 'This check did not get a normal page from your main website. That can happen when a '
-        . 'website is down, sends visitors on to another address this check will not follow, uses an unusual port, has a '
-        . 'security-certificate problem, or turns away automated visitors. Open it in your own browser to see what your '
-        . 'visitors get.';
+    public const NOT_A_NORMAL_PAGE = 'This check did not get a normal page from your main website. That can happen, for '
+        . 'example, when a website is down, its name does not exist or points at a private or internal address, it sends '
+        . 'visitors on to another address this check will not follow, it uses an unusual port, it has a security-certificate '
+        . 'problem, it turns away automated visitors, or this server is not allowed to make outside connections. Open it in '
+        . 'your own browser to see what your visitors get.';
 
     /**
      * 🔎 What the check says about the main website — ONLY what is certainly
@@ -1064,8 +1065,17 @@ final class PublicWebsiteSetup
      *     limit): "it answered";
      *   - this server has no curl: "could not be checked on this server";
      *   - anything else: ONE sentence that is always true
-     *     (`NOT_A_NORMAL_PAGE`), plus — only where SafeFetch reports one — the
-     *     last HTTP status received, as a fact and not as a cause.
+     *     (`NOT_A_NORMAL_PAGE`, worded "for example" — never a complete list),
+     *     plus — only where SafeFetch reports one — the last HTTP status
+     *     received, as a fact and not as a cause. A status of 400 or more means
+     *     the website DID answer, so that row is "For information" ('note');
+     *     anything else is "Needs attention" ('problem').
+     *
+     * ⚠️ NO TEST-ONLY PARAMETER (round 4). It used to take `$curlAvailable`
+     *    so a test could say "no curl"; every test then passed it, and the
+     *    one path the portal uses — asking PHP — was exercised by nothing
+     *    (round 3's hook fault in a new place). The self-test now runs the
+     *    REAL `checkSetUp()` in a PHP with `curl_init` disabled.
      *
      * ⚠️ WHY IT NAMES NO CAUSE. Three rounds of P3's check each found the
      *    previous version naming causes that were untrue for real answers: by
@@ -1078,17 +1088,14 @@ final class PublicWebsiteSetup
      *    failing two rounds running is simplified, not refined again. So the
      *    sentence lists possibilities and the person looks in a browser.
      *
-     * @param array<string,mixed> $got           A `SafeFetch::get()` result.
-     * @param bool|null           $curlAvailable For the self-test only: whether
-     *                                           this server can fetch at all.
-     *                                           Null asks PHP.
+     * @param array<string,mixed> $got A `SafeFetch::get()` result.
      *
      * @return array{state:string, words:string}
      */
-    public static function mainWebsiteVerdict(array $got, ?bool $curlAvailable = null): array
+    public static function mainWebsiteVerdict(array $got): array
     {
         $status = (int) ($got['status'] ?? 0);
-        if (($curlAvailable ?? function_exists('curl_init')) === false) {
+        if (function_exists('curl_init') === false) {
             return ['state' => 'untested', 'words' => 'it could not be checked on this server, because this server cannot '
                 . 'fetch outside addresses (PHP\'s curl extension is not installed). Open it in your own browser to see what your visitors get.'];
         }
@@ -1096,7 +1103,7 @@ final class PublicWebsiteSetup
             return ['state' => 'ok', 'words' => 'it answered.'];
         }
 
-        return ['state' => 'problem', 'words' => self::NOT_A_NORMAL_PAGE
+        return ['state' => $status >= 400 ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE
             . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
     }
 

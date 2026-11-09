@@ -1094,7 +1094,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
 
     <h3 class="h5 mt-4 mb-3">Check my set-up</h3>
-    <p class="mb-0">The button checks what can be known today: whether your main website answers over https, whether your public address&rsquo;s name exists, whether each framing website is valid and allowed, how many events and posters are marked to appear on the public website today, and whether the portal&rsquo;s own address is set. It always says the public door cannot be tested yet, because it is not part of this version. It changes no setting, and its result is shown to you once and not kept. The portal does count how many times you have run it (at most six in ten minutes), and if your main website does not answer normally, the portal's error log (Admin, Error log) may note the website's name and the reply it gave.</p>
+    <p class="mb-0">The button checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched, and it says so), whether your public address&rsquo;s name exists, whether each framing website is valid and allowed, how many events and posters are marked to appear on the public website today, and whether the portal&rsquo;s own address is set. It always says the public door cannot be tested yet, because it is not part of this version. It changes no setting, and its result is shown to you once and not kept. The portal does count how many times you have run it (at most six in ten minutes), and if your main website does not answer normally, the portal's error log (Admin, Error log) may note the website's name and the reply it gave.</p>
 </div>
 
 <!-- Section: Time zones (#604).

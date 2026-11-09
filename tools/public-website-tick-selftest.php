@@ -128,7 +128,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 230;
+const PWT_EXPECTED_CHECKS = 232;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2034,17 +2034,17 @@ echo json_encode([
     // round 3 the verdict names no cause: a 200 answered; curl missing could
     // not be checked; ANYTHING else is one sentence that is always true, plus
     // the last status where there is one — including a stalled or oversized
-    // answer, which used to have causes of their own.
+    // answer, which used to have causes of their own. "No curl" is NOT asked
+    // here: it is driven through the real path in a PHP without curl (W23).
     'verdicts'       => [
-        'nothing'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false], true),
-        'ok'         => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => true, 'status' => 200, 'capped' => false], true),
-        'big page'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => true], true),
-        'forbidden'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 403, 'capped' => false], true),
+        'nothing'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false]),
+        'ok'         => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => true, 'status' => 200, 'capped' => false]),
+        'big page'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => true]),
+        'forbidden'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 403, 'capped' => false]),
         'too slow'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => false,
-            'message' => 'The other server took too long to answer.'], true),
+            'message' => 'The other server took too long to answer.']),
         'too big'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 404, 'capped' => true,
-            'message' => 'The file is bigger than the size limit, so it was not read.'], true),
-        'no curl'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false], false),
+            'message' => 'The file is bigger than the size limit, so it was not read.']),
     ],
 ]);
 ASK);
@@ -2529,10 +2529,10 @@ check('W16 with nobody holding Website Set-up, the Roles page says global admini
 //      is always true, plus the last status where there is one. The sentence
 //      is pinned here as text on purpose: it is what a person reads, and it
 //      must never name a cause as fact.
-$pwNotNormal = 'This check did not get a normal page from your main website. That can happen when a website is down, sends visitors '
-    . 'on to another address this check will not follow, uses an unusual port, has a security-certificate problem, or turns away '
-    . 'automated visitors. Open it in your own browser to see what your visitors get.';
-$pwSaid = static fn (int $status): array => ['problem', $pwNotNormal . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
+$pwNotNormal = 'This check did not get a normal page from your main website. That can happen, for example, when a website is down, its name does not exist or points at a private or internal address, it sends visitors on to another address this check will not follow, it uses an unusual port, it has a security-certificate problem, it turns away automated visitors, or this server is not allowed to make outside connections. Open it in your own browser to see what your visitors get.';
+// A status of 400 or more means the website DID answer: "For information"
+// ('note'); nothing received, or anything else, is "Needs attention".
+$pwSaid = static fn (int $status): array => [$status >= 400 ? 'note' : 'problem', $pwNotNormal . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
 $scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
     $out = [];
     foreach ((array) ($askSetup($siteOne)['verdicts'] ?? []) as $name => $one) {
@@ -2540,11 +2540,10 @@ $scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
     }
     return $out;
 };
-check('W17 the wording function, asked directly: a 200 (even one cut off by the size limit) answered; no curl could not be checked; nothing, a 403, a stalled 200 and an oversized 404 each get the one sentence, plus the status where there is one',
+check('W17 the wording function, asked directly: a 200 (even one cut off by the size limit) answered; nothing, a 403, a stalled 200 and an oversized 404 each get the one sentence, plus the status where there is one, "For information" from 400 up',
     $scnPwVerdicts(), [
         'nothing' => $pwSaid(0), 'ok' => ['ok', 'it answered.'], 'big page' => ['ok', 'it answered.'],
-        'forbidden' => $pwSaid(403), 'too slow' => $pwSaid(200), 'too big' => $pwSaid(404),
-        'no curl' => ['untested', 'it could not be checked on this server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed). Open it in your own browser to see what your visitors get.']]);
+        'forbidden' => $pwSaid(403), 'too slow' => $pwSaid(200), 'too big' => $pwSaid(404)]);
 
 // W21 (rounds 2 and 3): the words for REAL answers, driven IN-PROCESS. A TLS
 //      server of this test's own answers as a.test (and c.test, whose name its
@@ -2777,6 +2776,23 @@ check('W22 the REAL checkSetUp() hands SafeFetch an overall deadline 15 seconds 
         'what it says' => ['ok: https://a.test: it answered.'],
         'at another port' => [0, ['untested: https://a.test:8443: it uses port 8443, which is not the standard https port, so this check cannot reach it. Open it in your own browser to see what your visitors get.']],
         'http at 443' => [1, 'https://a.test/', 'ok: http://a.test:443: it answered.']]);
+
+// W23 (round 4): "could not be checked on this server" through the REAL path
+//      — the real checkSetUp() in a PHP whose curl_init is switched off
+//      (`-d disable_functions=curl_init`), exactly as a host without curl
+//      would run it. The verdict has no test parameter any more, so this is
+//      the only way to reach that branch, and it is the way the portal does.
+$scnPwNoCurl = static function () use ($db, $siteOne, $child, $sep, $tlsPort, $pwClean): array {
+    $pwClean();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.website.address', 'https://a.test', '', 0)");
+    $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -d disable_functions=curl_init -d ' . escapeshellarg('error_log=' . $child . $sep . 'ask-check.log') . ' '
+        . escapeshellarg($child . $sep . 'ask-check.php') . ' ' . $siteOne . ' ' . $tlsPort . ' 2>&1');
+    $pwClean();
+    $got = json_decode($raw, true);
+    return is_array($got) === true ? ['what it says' => $got['main rows'] ?? null] : ['could not ask' => $raw];
+};
+check('W23 on a server without curl (curl_init switched off), the real check says the main website could not be checked on this server',
+    $scnPwNoCurl(), ['what it says' => ['untested: https://a.test: it could not be checked on this server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed). Open it in your own browser to see what your visitors get.']]);
 
 // W18 (round 1, item 3): a framing list a HAND EDIT spoiled — what the PAGE
 //      shows in its box and what the CHECK reports. Only the valid line may
@@ -3308,10 +3324,14 @@ check('P95 with the overall deadline no longer in the options, the check would g
 $p = $plant('_core/PublicWebsiteSetup.php', "SafeFetch::get('https://' . \$host . '/', self::mainWebsiteFetchOptions())", "SafeFetch::get('https://' . \$host . '/', ['httpsOnly' => true])", $scnPwCheckOptions);
 check('P98 (round 3\'s plant A) with the real call handed other options, the deadline is gone from the REAL path — W22 records what SafeFetch is really given. (Plant A as first written, a default closure ignoring the options, cannot be written any more: there is no hook and no closure.)',
     [$p['applied'], $p['result']['overall deadline, seconds ahead'] ?? 'missing'], [true, 'none']);
-$p = $plant('_core/PublicWebsiteSetup.php', "        if ((\$curlAvailable ?? function_exists('curl_init')) === false) {", "        if (false) {", $scnPwVerdicts);
-check('P99 (round 3\'s plant B) with the no-curl branch gone, a server that cannot fetch at all is told the website gave no normal page', [$p['applied'], $p['result']['no curl'] ?? null], [true, $pwSaid(0)]);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (function_exists('curl_init') === false) {", "        if (false) {", $scnPwNoCurl);
+check('P99 (rounds 3 and 4: plants B and C) with the no-curl branch never taken, a server without curl is told its website gave no normal page — W23 drives the real path, so this now goes red. (Plant C as first written, a test parameter defaulted to "curl is here", cannot be written any more: the parameter is gone.)',
+    [$p['applied'], $p['result']['what it says'][0] ?? null], [true, 'problem: https://a.test: ' . $pwNotNormal]);
 $p = $plant('_core/PublicWebsiteSetup.php', "            . (\$status > 0 ? ' The last answer this check received was HTTP ' . \$status . '.' : '')];", "];", $scnPwLive);
-check('P96 with the status fact dropped, a 403 is no longer reported as one', [$p['applied'], $p['result']['forbidden'] ?? null], [true, [403, 'problem', $pwNotNormal]]);
+check('P96 with the status fact dropped, a 403 is no longer reported as one', [$p['applied'], $p['result']['forbidden'] ?? null], [true, [403, 'note', $pwNotNormal]]);
+$p = $plant('_core/PublicWebsiteSetup.php', "return ['state' => \$status >= 400 ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE", "return ['state' => 'problem', 'words' => self::NOT_A_NORMAL_PAGE", $scnPwLive);
+check('P100 (round 4) with every non-200 marked "Needs attention", a website that DID answer with a 403 is shown as a problem rather than for information',
+    [$p['applied'], $p['result']['forbidden'][1] ?? null], [true, 'problem']);
 $p = $plant('_core/PublicWebsiteSetup.php', "if (\$status === 200 && ((\$got['ok'] ?? false) === true || (\$got['capped'] ?? false) === true)) {", 'if ($status === 200) {', $scnPwLive);
 check('P97 with any 200 counted as answered, a 200 whose connection was cut off is said to have answered', [$p['applied'], $p['result']['cut off'] ?? null], [true, [200, 'ok', 'it answered.']]);
 $p = $plant('_apps/admin/roles/index.php', '<?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>', '<?php if (false): ?>', $scnPwRolesWarning);

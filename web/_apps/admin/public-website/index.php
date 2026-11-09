@@ -215,7 +215,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h5">Check my set-up</h2>
-            <p class="text-muted">Checks what can be known today: whether your main website answers over https, whether your public address's name exists, whether each framing website is valid, what is marked to appear on the public website today, and whether the portal's own address is set. It cannot test the public door, because that is not part of this version. It changes no setting.</p>
+            <p class="text-muted">Checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched), whether your public address's name exists, whether each framing website is valid, what is marked to appear on the public website today, and whether the portal's own address is set. It cannot test the public door, because that is not part of this version. It changes no setting.</p>
             <p class="small text-muted mb-2">The portal's own address is <?php echo PortalAddress::state() === PortalAddress::STATE_SET ? 'set' : 'not set'; ?>.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/check')); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
