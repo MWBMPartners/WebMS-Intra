@@ -767,7 +767,16 @@ final class ExpenseRules
     /** No file was dropped for being past the server's limit on how many files one request may carry. */
     public const CUT_SHORT_NO = 'no';
 
-    /** PHP said so: files past the limit were dropped. */
+    /**
+     * PHP said so: something past the limit was dropped.
+     *
+     * ⚠️ "CERTAIN" IS ABOUT THE DROPPING, NOT ABOUT REAL FILES (round 2 of the
+     *    independent check). PHP raises the same warning for an EMPTY box that
+     *    arrives past the limit — with JavaScript off the form has a second
+     *    box after the first — even when every real file arrived. The words
+     *    for this case therefore say "anything you chose beyond the first N",
+     *    never that a file of yours was lost.
+     */
     public const CUT_SHORT_CERTAIN = 'certain';
 
     /**
@@ -786,11 +795,17 @@ final class ExpenseRules
      * fourth simply was not there — three were attached, the claimant was
      * told "Your claim #8 has been submitted.", and the fourth was named
      * nowhere. PHP's warning is raised before any script runs, so no error
-     * handler sees it; it is still what `error_get_last()` answers when the
-     * handler asks first thing. That is the certain signal. When it has been
-     * overwritten by something earlier in the request, the fallback is the
-     * count: as many files as the limit allows is the one state in which
-     * some may be missing.
+     * handler sees it, and `error_get_last()` answers it only until anything
+     * else raises a notice.
+     *
+     * ⚠️ THE FALLBACK IS NOT OPTIONAL — DO NOT DELETE IT (round 2 of the check).
+     *    The handler reads the warning on its own first line, but the portal's
+     *    start-up, `index.php`, the session start and the router all run BEFORE
+     *    that line. Measured: a session clean-up notice (PHP's session garbage
+     *    collection) replaced the warning, and the "certain" answer was lost.
+     *    So the warning is a bonus when it survives, and the count is what the
+     *    handler can always rely on: as many files as the limit allows is the
+     *    one state in which some may be missing, and its words say "if".
      *
      * @param mixed $lastError What `error_get_last()` answered.
      * @param int   $received  How many FILES arrived — empty boxes NOT counted,
@@ -914,7 +929,7 @@ final class ExpenseRules
             $opening = 'Your claim #' . $claimId . ' has been submitted, but ' . $count . ' files you chose were NOT attached to it: '
                 . implode('; ', $parts) . '.';
         } elseif ($cutShort === self::CUT_SHORT_CERTAIN) {
-            $opening = 'Your claim #' . $claimId . ' has been submitted, but not every file you chose was received.';
+            $opening = 'Your claim #' . $claimId . ' has been submitted, but not everything sent with it was received.';
         } else {
             $opening = 'Your claim #' . $claimId . ' has been submitted, but not every file you chose may have been received.';
         }
@@ -922,7 +937,10 @@ final class ExpenseRules
         // 2. The server's limit on how many files, when it was reached.
         $limitSentence = '';
         if ($cut === true && $cutShort === self::CUT_SHORT_CERTAIN) {
-            $limitSentence = ' This server accepts at most ' . $countLimit . ' files in one submission, so the files you chose beyond that never reached the portal: they are not attached, and their names cannot be shown here.';
+            // "Anything you chose beyond the first N", never "your files": PHP
+            // raises this warning for an EMPTY box past the limit too (see
+            // CUT_SHORT_CERTAIN), so it is not proof a real file was lost.
+            $limitSentence = ' This server accepts at most ' . $countLimit . ' files in one submission and more than that were sent, so anything you chose beyond the first ' . $countLimit . ' never reached the portal: it is not attached, and its name cannot be shown here.';
         } elseif ($cut === true) {
             $limitSentence = ' This server accepts at most ' . $countLimit . ' files in one submission and ' . $countLimit . ' arrived, so if you chose more than ' . $countLimit . ', the rest never reached the portal: they are not attached, and their names cannot be shown here.';
         }
@@ -947,4 +965,124 @@ final class ExpenseRules
             'message' => $opening . $limitSentence . $after,
         ];
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* 🔌 A claim whose COMMIT was interrupted (#649, round 2 of the check)    */
+    /* ---------------------------------------------------------------------- */
+    //
+    // WHAT WENT WRONG IN ROUND 1. The failure path removed the receipt files
+    // it had moved, FIRST, on every failure. That is right before the commit
+    // is sent. It is WRONG once it has been: a connection lost DURING the
+    // commit leaves the server free to have committed, and measured with a
+    // proxy that forwards COMMIT and then drops the connection, claim #75 and
+    // its receipt row existed, the FILE was gone, and the claimant was told
+    // "Error saving claim. Please try again." — inviting a second claim for
+    // the same money, while the approver got a claim whose evidence had been
+    // deleted. So once the commit has been sent, the handler asks a NEW
+    // connection what really happened before it touches a single file.
+
+    /** The claim is in the database: it WAS saved. Keep every file. */
+    public const COMMIT_SAVED = 'saved';
+
+    /** The claim is not in the database and the old connection has finished: it was NOT saved. */
+    public const COMMIT_NOT_SAVED = 'not-saved';
+
+    /** It could not be found out. Keep every file, and say so. */
+    public const COMMIT_UNKNOWN = 'unknown';
+
+    /**
+     * Was a claim saved, when its commit was interrupted?
+     *
+     * Asked on a NEW connection, so it sees only what the server really
+     * committed. "Not in the database" is only believed once the OLD
+     * connection has gone from the server's list of connections: until then
+     * the server may still be part-way through the commit it was sent, and a
+     * claim missing NOW may be there a moment later. While it lingers this
+     * waits and asks again; if it is still there after the last try, the
+     * answer is "unknown" — never "not saved", because that answer deletes
+     * files. A connection may always see its own account's other
+     * connections, so no special right is needed to look.
+     *
+     * Takes the way to connect as an argument, so the handler passes the
+     * portal's own (`DbServer::connectAgain()`) and nothing here reaches for
+     * credentials. Every failure — no connection, a query refused — answers
+     * COMMIT_UNKNOWN.
+     *
+     * @param callable():\mysqli $connect     Opens a NEW connection.
+     * @param int                $claimId     The claim's number (0: none was made).
+     * @param int                $userId      Its claimant, so another person's claim of the same number is never mistaken for it.
+     * @param int                $oldThreadId The lost connection's own number on the server (0: not known).
+     * @param int                $tries       How many times to look.
+     * @param int                $pauseMicro  How long to wait between looks, in microseconds.
+     *
+     * @return string One of the COMMIT_* constants.
+     */
+    public static function outcomeOfInterruptedCommit(
+        callable $connect,
+        int $claimId,
+        int $userId,
+        int $oldThreadId,
+        int $tries = 10,
+        int $pauseMicro = 300000
+    ): string {
+        if ($claimId <= 0) {
+            // No claim row was ever written, so there is nothing to find.
+            return self::COMMIT_NOT_SAVED;
+        }
+        $fresh = null;
+        try {
+            $fresh = $connect();
+            for ($try = 1; $try <= max(1, $tries); $try++) {
+                $row = $fresh->prepare('SELECT `claimID` FROM `tblExpenseClaims` WHERE `claimID` = ? AND `userID` = ? LIMIT 1');
+                $row->bind_param('ii', $claimId, $userId);
+                $row->execute();
+                $saved = $row->get_result()->fetch_assoc() !== null;
+                $row->close();
+                if ($saved === true) {
+                    return self::COMMIT_SAVED;
+                }
+                if ($oldThreadId > 0) {
+                    $still = $fresh->prepare('SELECT `ID` FROM `information_schema`.`PROCESSLIST` WHERE `ID` = ? LIMIT 1');
+                    $still->bind_param('i', $oldThreadId);
+                    $still->execute();
+                    $lingering = $still->get_result()->fetch_assoc() !== null;
+                    $still->close();
+                    if ($lingering === false) {
+                        return self::COMMIT_NOT_SAVED;
+                    }
+                }
+                if ($try < $tries) {
+                    usleep($pauseMicro);
+                }
+            }
+
+            // Still not found, and either the old connection is still there
+            // or its number was not known: nobody can say it was not saved.
+            return self::COMMIT_UNKNOWN;
+        } catch (\Throwable $e) {
+            return self::COMMIT_UNKNOWN;
+        } finally {
+            if ($fresh instanceof mysqli) {
+                try {
+                    $fresh->close();
+                } catch (\Throwable $ignored) {
+                    // Closing a connection that has already failed tells nobody anything.
+                }
+            }
+        }
+    }
+
+    /**
+     * Said, AFTER the usual "submitted" message, when the commit's reply was
+     * lost but the claim is in the database. The usual message is still true
+     * — the claim and its receipts are saved — but the steps after the
+     * commit (the activity record, the approvers' e-mail) did not run.
+     */
+    public const MSG_SAVED_BUT_CONNECTION_LOST = 'The portal lost its connection to the database at the very moment your claim was saved, so the approvers may not have been sent their usual e-mail. Please do NOT submit this claim again: it is saved, and it is listed under Your claims.';
+
+    /**
+     * Said when it could not be found out whether the claim was saved. The
+     * receipts are KEPT, so a saved claim never loses its evidence.
+     */
+    public const MSG_CLAIM_SAVE_UNKNOWN = 'The portal could not tell whether your claim was saved: its connection to the database was lost at the very moment of saving. Please look under Your claims below before submitting it again, so the same money is not claimed twice. If the claim is not listed after a few minutes, submit it again.';
 }

@@ -42,6 +42,11 @@
  *      handler runs, and the claimant is told, without names (PHP gives none)
  *   J  the database connection is LOST part-way, so the rollback throws too:
  *      the moved file is still removed and the claimant still told
+ *   K  the connection is lost AT the commit, through a small proxy
+ *      (`tools/expense-receipts-commit-proxy.py`): a claim the server DID
+ *      save keeps its receipt and the claimant is told not to submit it again;
+ *      when nobody can tell, the file is kept and the claimant told to look;
+ *      only a claim that definitely was not saved loses its file
  *   Z  across the WHOLE run, no column of either log holds a claimant's own
  *      file name (#714)
  *
@@ -56,14 +61,22 @@
  *     for exactly that, and nothing here proves it).
  *   - Sections E and F take write permission away from a folder. Run as the
  *     ROOT user that does nothing, so the test REFUSES rather than passing.
+ *   - Section K cannot reproduce the narrowest race: the server still part-way
+ *     through a commit when the portal asks whether the claim is there. The
+ *     handler waits for the old connection to leave the server's list before
+ *     believing "not saved" for exactly that, and nothing here proves it.
+ *   - Stopped with Ctrl-C or a polite kill, it puts back what it changed
+ *     (when PHP has the pcntl extension). Killed outright (`kill -9`) it
+ *     cannot: see the note beside the signal handler for what to remove.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_expreceipts SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/expense-receipts-selftest.php
  *
  *         The database must already hold `web/_sql/full_schema.sql`. Needs
- *         PHP's curl and fileinfo extensions, `proc_open()`, and permission
- *         to CREATE TRIGGER. It REFUSES rather than skipping when anything is
- *         missing, because a skipped test reads exactly like a passing one.
+ *         PHP's curl and fileinfo extensions, `proc_open()`, python3 (for
+ *         section K's proxy), and permission to CREATE TRIGGER. It REFUSES
+ *         rather than skipping when anything is missing, because a skipped
+ *         test reads exactly like a passing one.
  *
  * Exit:   0 only when every check ran and passed, and the count is the one
  *         expected; 1 when a check failed; 2 when it refused to run.
@@ -80,7 +93,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 116;
+const EXPECTED_CHECKS = 136;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -249,11 +262,29 @@ check('A40 some other warning is not mistaken for it',
 $cutOnly = R::submittedMessage(7, [], '', R::CUT_SHORT_CERTAIN, 3);
 check('A41 files dropped and nothing named: still a WARNING', $cutOnly['type'], 'warning');
 check('A42 ...saying the limit and that the rest never arrived',
-    str_contains($cutOnly['message'], 'This server accepts at most 3 files in one submission, so the files you chose beyond that never reached the portal'), true);
+    str_contains($cutOnly['message'], 'This server accepts at most 3 files in one submission and more than that were sent, so anything you chose beyond the first 3 never reached the portal'), true);
 $maybe = R::submittedMessage(7, [], '', R::CUT_SHORT_POSSIBLE, 3);
 check('A43 when it cannot be told, the words say IF, never that files were lost',
     str_contains($maybe['message'], 'so if you chose more than 3, the rest never reached the portal'), true);
 $both = R::submittedMessage(7, [['name' => 'a.exe', 'reason' => R::RECEIPT_WRONG_TYPE]], '', R::CUT_SHORT_CERTAIN, 3);
+// Round 2 of the check: was a claim saved when its commit was interrupted?
+// Asked with a real NEW connection each time, as the handler asks it.
+$newConnection = static fn (): mysqli => new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+$noSuchClaim   = 2147480001;
+check('A45 no way to ask (the connection is refused) is UNKNOWN, never "not saved" — "not saved" deletes files',
+    R::outcomeOfInterruptedCommit(static function (): mysqli {
+        throw new RuntimeException('refused');
+    }, 5, 1, 0), R::COMMIT_UNKNOWN);
+check('A46 no claim row was ever written: not saved, with nothing to ask',
+    R::outcomeOfInterruptedCommit(static function (): mysqli {
+        throw new RuntimeException('must not be called');
+    }, 0, 1, 0), R::COMMIT_NOT_SAVED);
+check('A47 claim absent while the OLD connection is still on the server: UNKNOWN (it may still be committing)',
+    R::outcomeOfInterruptedCommit($newConnection, $noSuchClaim, 1, (int) $db->thread_id, 2, 1000), R::COMMIT_UNKNOWN);
+check('A48 claim absent and the old connection gone: NOT SAVED',
+    R::outcomeOfInterruptedCommit($newConnection, $noSuchClaim, 1, 2147480002, 2, 1000), R::COMMIT_NOT_SAVED);
+check('A49 claim absent and the old connection\'s number not known: UNKNOWN, never assumed gone',
+    R::outcomeOfInterruptedCommit($newConnection, $noSuchClaim, 1, 0, 2, 1000), R::COMMIT_UNKNOWN);
 check('A44 a named file AND dropped files: both said, with the advice for both',
     str_contains($both['message'], '"a.exe"') && str_contains($both['message'], 'at most 3 files')
         && str_contains($both['message'], 'no more than 3 files'), true);
@@ -277,9 +308,11 @@ register_shutdown_function(static function () use (&$state): void {
             echo "  ! could not undo: {$sql}\n";
         }
     }
-    if (is_resource($state['proc']) === true) {
-        proc_terminate($state['proc']);
-        proc_close($state['proc']);
+    foreach (['proc', 'proxy'] as $process) {
+        if (is_resource($state[$process] ?? null) === true) {
+            proc_terminate($state[$process]);
+            proc_close($state[$process]);
+        }
     }
     if ($state['child'] !== null && is_dir($state['child']) === true) {
         // A recursive delete of a folder THIS run made, under the system temp
@@ -304,6 +337,25 @@ register_shutdown_function(static function () use (&$state): void {
         @rmdir($state['child']);
     }
 });
+
+// 🛑 CTRL-C AND A POLITE STOP RUN THE SAME CLEAN-UP (round 2 of the check).
+//    PHP does not run shutdown functions when a signal ends the process, so a
+//    run stopped part-way used to leave a planted trigger, a renamed
+//    `tblUserDepts` and a temporary copy of web/ holding the database password.
+//    `exit()` from a signal handler DOES run them. What still cannot be
+//    cleaned: a run killed outright (SIGKILL, `kill -9`), which no program can
+//    catch — then remove `trg_p649_*` triggers, rename `tblUserDepts_p649_aside`
+//    back, and delete the `expense-receipts-*` folder under the temp folder by
+//    hand. Without the pcntl extension only the shutdown function is there.
+if (function_exists('pcntl_async_signals') === true && function_exists('pcntl_signal') === true) {
+    pcntl_async_signals(true);
+    foreach ([SIGINT, SIGTERM, SIGHUP] as $signal) {
+        pcntl_signal($signal, static function (int $which): void {
+            echo "\nStopped by a signal ({$which}); putting things back.\n";
+            exit(3);
+        });
+    }
+}
 
 mkdir($child, 0700, true);
 $copied = 0;
@@ -401,6 +453,12 @@ $startServer = static function (array $extraIni = []) use (&$state, $child, $sep
                 '-d', 'upload_max_filesize=12M', '-d', 'post_max_size=64M',
                 '-d', 'upload_tmp_dir=' . $child,
                 '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
+                // Session clean-up switched OFF for this server: round 2 of the
+                // check measured a clean-up notice REPLACING PHP's "too many
+                // files" warning before the handler could read it, which turns
+                // check I03 red by chance. The handler copes (its fallback is
+                // the count, checked by I07); the test must not depend on luck.
+                '-d', 'session.gc_probability=0',
             ],
             $ini,
             [
@@ -572,6 +630,11 @@ $db->query("INSERT INTO tblDepts (siteID, deptName, isActive) VALUES ({$siteId},
 $deptId = (int) $db->insert_id;
 $state['undo'][] = "DELETE FROM tblDepts WHERE deptID = {$deptId}";
 $state['undo'][] = "DELETE FROM tblLocalAccounts WHERE userID = {$userId}";
+// Undone NEWEST FIRST, so this runs before the department's removal: a run
+// stopped part-way leaves claims charged to the department, and the database
+// refuses to remove a department that claims still point at (measured with
+// Ctrl-C). The member's own row is removed at the start of the next run.
+$state['undo'][] = "DELETE FROM tblExpenseClaims WHERE userID = {$userId}";
 
 // Sign in through the real form.
 $page = $http('GET', '/login');
@@ -593,7 +656,19 @@ $png = (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAD
  *
  * @return array{post:array, message:string, alert:string, claim:?array, rows:list<array>, disk:list<string>}
  */
-$submit = static function (string $title, array $files, ?callable $during = null) use ($http, $makeRequest, $answerOf, $tokenOn, $db, $deptId, $userId, $receipts): array {
+// 📛 EVERY FILE NAME THIS RUN SENDS, collected HERE, inside `$submit`, for
+//    section Z. Round 2 of the independent check: the first list was kept by
+//    hand, missed every section-I name and the Latin-1 "Café" name, and a
+//    planted fault writing real names into the activity log left the whole
+//    test green. Whatever any section sends is now in it.
+$sentNames = [];
+
+$submit = static function (string $title, array $files, ?callable $during = null, ?callable $afterPost = null) use ($http, $makeRequest, $answerOf, $tokenOn, $db, $deptId, $userId, $receipts, &$sentNames): array {
+    foreach ($files as [, $fileName]) {
+        if ($fileName !== '') {
+            $sentNames[] = $fileName;
+        }
+    }
     $form    = $http('GET', '/expenses/submit');
     $request = $makeRequest('POST', '/expenses/submit/save', [
         'csrf_token' => $tokenOn($form['body']),
@@ -641,6 +716,12 @@ $submit = static function (string $title, array $files, ?callable $during = null
         if ($called === false) {
             echo "  ! the handler's receipt insert was never seen running, so nothing was done part-way\n";
         }
+    }
+    // Something to put right between the post and reading the message (section
+    // K removes the proxy's "refuse every connection" file here, or the page
+    // that shows the message could not reach the database either).
+    if ($afterPost !== null) {
+        $afterPost();
     }
     $after   = $http('GET', '/expenses/submit');
     $message = '';
@@ -699,8 +780,22 @@ $lastActivityId = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(lo
 // The marks for section Z, taken before the first claim of the run.
 $runErrorStart    = $lastErrorId();
 $runActivityStart = $lastActivityId();
-// Every claimant file name the run sends, for section Z.
-$sentNames = [];
+
+/**
+ * A file name as it would appear in `$logsSince()`'s text: encoded the SAME
+ * way, so a name that is not valid UTF-8 ("Caf\xE9") is searched for in the
+ * form the haystack really holds it, never in a form it cannot contain.
+ */
+$needleOf = static fn (string $name): string => substr(
+    (string) json_encode($name, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE),
+    1,
+    -1
+);
+/** Which of these names appear anywhere in the text. */
+$namesFoundIn = static fn (string $haystack, array $names): array => array_values(array_filter(
+    array_unique($names),
+    static fn (string $n): bool => str_contains($haystack, $needleOf($n))
+));
 
 /** Every file in the receipts folder, so a section can tell what appeared. */
 $folderNow = static function () use ($receipts): array {
@@ -747,9 +842,7 @@ check('B15 ...and saying how to add them', str_contains($b['message'], 'withdraw
 $act = $db->query("SELECT activityDescription FROM tblActivityLogs WHERE userID = {$userId} AND activityType = 'ExpenseSubmit' ORDER BY logID DESC LIMIT 1")->fetch_assoc();
 check('B16 the activity record counts what was not attached',
     str_contains((string) ($act['activityDescription'] ?? ''), '2 file(s) not attached'), true);
-$sentNames = array_merge($sentNames, [$bigName, $wrongName, $goodName]);
-$bLogs     = $logsSince($runErrorStart, $runActivityStart);
-$leak      = array_values(array_filter([$bigName, $wrongName, $goodName], static fn (string $n): bool => str_contains($bLogs, $n)));
+$leak = $namesFoundIn($logsSince($runErrorStart, $runActivityStart), [$bigName, $wrongName, $goodName]);
 check('B17 the claimant\'s own file names reach NO column of either log (#714)', $leak, []);
 check('B18 no file name reached the database\'s receipt rows either',
     str_contains(json_encode($b['rows']) ?: '', 'Train ticket'), false);
@@ -770,8 +863,6 @@ check('C05 ...in the one-file sentence', str_contains($c['message'], 'one file y
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nD. An empty file is refused; an iPhone photo (HEIC) is attached\n";
 // ═════════════════════════════════════════════════════════════════════════════
-$sentNames = array_merge($sentNames, ['Scan of everything.pdf', 'Empty.pdf', 'IMG_4031.HEIC', 'Parking ZZ-MOVE.png',
-    'Taxi ZZ-NOFOLDER.png', 'Lunch ZZ-ROLLBACK.png', 'Hotel ZZ-AFTER.png', 'Dinner ZZ-LEFT.png', 'Fuel ZZ-KILLED.png']);
 $d = $submit('P649 D empty and heic', [
     ['files[]', 'Empty.pdf', ''],
     ['files[]', 'IMG_4031.HEIC', "\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" . str_repeat("\x00", 64)],
@@ -952,6 +1043,102 @@ check('J03 THE CLAIMANT IS STILL TOLD it was not saved',
     [$j['post']['status'], $j['alert'], $j['message']], [302, 'danger', 'Error saving claim. Please try again.']);
 
 // ═════════════════════════════════════════════════════════════════════════════
+echo "\nK. The connection is lost AT the commit, when the server may have saved the claim\n";
+// ═════════════════════════════════════════════════════════════════════════════
+// Round 2 of the independent check: round 1's failure path deleted the moved
+// receipt FIRST on every failure. A connection lost DURING the commit leaves
+// the server free to have committed, and measured, a SAVED claim lost its
+// receipt file while the claimant was told "Error saving claim. Please try
+// again." Sections G and J cut the connection BEFORE the commit and could not
+// see it. Here a small proxy sits between the portal and the database and
+// acts on the commit itself (`tools/expense-receipts-commit-proxy.py`):
+//   K1 forward        the server commits, the portal never hears it
+//   K2 forward-refuse the same, and the portal cannot even ask afterwards
+//   K3 swallow        the server never gets the commit
+$python = trim((string) shell_exec('command -v python3 2>/dev/null'));
+if ($python === '') {
+    refuse('section K needs python3 to run its commit proxy, and this machine has none');
+}
+if ($dbHost !== '127.0.0.1' && $dbHost !== 'localhost') {
+    refuse("section K's proxy forwards to 127.0.0.1, and this database is on {$dbHost}");
+}
+$proxyPort = $port + 1000 + random_int(0, 200);
+$arm       = $child . $sep . 'proxy-arm';
+$refuseNew = $child . $sep . 'proxy-refuse';
+$proxyLog  = $child . $sep . 'proxy.log';
+$state['proxy'] = proc_open(
+    [$python, $repo . $sep . 'tools' . $sep . 'expense-receipts-commit-proxy.py',
+        (string) $proxyPort, (string) $dbPort, $arm, $refuseNew, $proxyLog],
+    [0 => ['file', '/dev/null', 'r'], 1 => ['file', $proxyLog, 'a'], 2 => ['file', $proxyLog, 'a']],
+    $proxyPipes
+);
+$listening = false;
+for ($i = 0; $i < 80; $i++) {
+    if (str_contains((string) @file_get_contents($proxyLog), 'listening on')) {
+        $listening = true;
+        break;
+    }
+    usleep(100000);
+}
+if ($listening === false) {
+    refuse('the commit proxy never started (see ' . $proxyLog . ')');
+}
+// Point THIS RUN's copy of the portal at the proxy. Only the copy's
+// credentials file changes; the repository's is never touched.
+$credsFile     = $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'auth_creds.php';
+$credsOriginal = (string) file_get_contents($credsFile);
+file_put_contents($credsFile, "<?php\n// Section K of tools/expense-receipts-selftest.php: through the commit proxy.\nreturn "
+    . var_export(['db_host' => '127.0.0.1', 'db_user' => $dbUser, 'db_pass' => $dbPass, 'db_name' => $dbName, 'db_port' => $proxyPort], true) . ";\n");
+$phpErrorLog = $child . $sep . 'php-errors.log';
+$proxySaid   = static fn (): string => (string) @file_get_contents($proxyLog);
+
+// K1: the server commits; the portal never hears it.
+file_put_contents($arm, 'forward');
+$before = $folderNow();
+$k1 = $submit('P649 K1 committed', [['files[]', 'Hotel ZZ-K1.png', $png]]);
+check('K00 the premise: the proxy forwarded COMMIT and cut the reply', str_contains($proxySaid(), 'forwarded; dropping before the reply (forward)'), true);
+check('K01 the server DID save the claim', $k1['claim'] !== null, true);
+check('K02 ...with its receipt row', count($k1['rows']), 1);
+check('K03 THE RECEIPT FILE IS STILL ON DISK (round 1 deleted it)',
+    is_file($receipts . $sep . (string) ($k1['rows'][0]['storedFilename'] ?? '-')), true);
+check('K04 THE CLAIMANT IS TOLD IT WAS SAVED, and not to submit it again',
+    [$k1['alert'], str_contains($k1['message'], 'Your claim #' . (int) ($k1['claim']['claimID'] ?? 0) . ' has been submitted'),
+        str_contains($k1['message'], R::MSG_SAVED_BUT_CONNECTION_LOST)], ['warning', true, true]);
+
+// K2: the same, and the portal cannot ask what happened.
+file_put_contents($arm, 'forward-refuse');
+$k2 = $submit('P649 K2 cannot tell', [['files[]', 'Taxi ZZ-K2.png', $png]], null, static function () use ($refuseNew): void {
+    @unlink($refuseNew);
+});
+@unlink($refuseNew);
+$k2Stored = (string) ($k2['rows'][0]['storedFilename'] ?? '-');
+$phpLog   = (string) @file_get_contents($phpErrorLog);
+check('K05 the premise: COMMIT forwarded, and the portal\'s new connection refused',
+    str_contains($proxySaid(), '(forward-refuse)') && str_contains($proxySaid(), 'new connection refused'), true);
+check('K06 the server did save it, with its receipt row', [$k2['claim'] !== null, count($k2['rows'])], [true, 1]);
+check('K07 THE FILE IS KEPT, because nobody could say the claim was not saved', is_file($receipts . $sep . $k2Stored), true);
+check('K08 the claimant is told it is NOT KNOWN, and to look before submitting again',
+    [$k2['alert'], $k2['message']], ['danger', R::MSG_CLAIM_SAVE_UNKNOWN]);
+check('K09 the kept file is named for the administrator by its PATH, never the claimant\'s name (#714)',
+    str_contains($phpLog, 'was KEPT: ') && str_contains($phpLog, $k2Stored) && str_contains($phpLog, 'ZZ-K2') === false, true);
+
+// K3: the server never gets the commit, so nothing was saved.
+file_put_contents($arm, 'swallow');
+$before = $folderNow();
+$k3 = $submit('P649 K3 never committed', [['files[]', 'Fuel ZZ-K3.png', $png]]);
+check('K10 the premise: the proxy did NOT forward COMMIT', str_contains($proxySaid(), 'NOT forwarded'), true);
+check('K11 the claim is not saved', $k3['claim'], null);
+check('K12 the moved file is removed, because the claim definitely was not saved', $folderNow(), $before);
+check('K13 the claimant is told it was not saved', [$k3['alert'], $k3['message']], ['danger', 'Error saving claim. Please try again.']);
+
+// Back to the database directly, and the proxy stopped.
+file_put_contents($credsFile, $credsOriginal);
+@unlink($arm);
+proc_terminate($state['proxy']);
+proc_close($state['proxy']);
+$state['proxy'] = null;
+
+// ═════════════════════════════════════════════════════════════════════════════
 echo "\nI. More files than the server takes in one submission (max_file_uploads)\n";
 // ═════════════════════════════════════════════════════════════════════════════
 // PHP drops every file past `max_file_uploads` (20 by default; hosts set it
@@ -961,25 +1148,25 @@ echo "\nI. More files than the server takes in one submission (max_file_uploads)
 $startServer(['max_file_uploads' => '3']);
 $waitUp();
 $i1 = $submit('P649 I four files', [
-    ['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png], ['files[]', 'r3.png', $png], ['files[]', 'r4 ZZ-DROPPED.png', $png],
+    ['files[]', 'I-one ZZ.png', $png], ['files[]', 'I-two ZZ.png', $png], ['files[]', 'I-three ZZ.png', $png], ['files[]', 'r4 ZZ-DROPPED.png', $png],
 ]);
 check('I01 the premise: PHP really dropped one (three receipts kept)', [$i1['claim'] !== null, count($i1['rows'])], [true, 3]);
 check('I02 THE CLAIMANT IS WARNED, not congratulated', $i1['alert'], 'warning');
 check('I03 ...told PHP\'s own limit and that the rest never arrived (said as certain, because PHP said so)',
-    str_contains($i1['message'], 'This server accepts at most 3 files in one submission, so the files you chose beyond that never reached the portal'), true);
+    str_contains($i1['message'], 'This server accepts at most 3 files in one submission and more than that were sent, so anything you chose beyond the first 3 never reached the portal'), true);
 check('I04 ...and how to add them', str_contains($i1['message'], 'submit it again with no more than 3 files'), true);
 check('I05 ...without inventing a name for the dropped file', str_contains($i1['message'], 'ZZ-DROPPED'), false);
-$i2 = $submit('P649 I two files', [['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png]]);
+$i2 = $submit('P649 I two files', [['files[]', 'I-one ZZ.png', $png], ['files[]', 'I-two ZZ.png', $png]]);
 check('I06 fewer files than the limit: a plain success, no talk of a limit',
     [count($i2['rows']), $i2['alert'], str_contains($i2['message'], 'at most')], [2, 'success', false]);
-$i3 = $submit('P649 I exactly three', [['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png], ['files[]', 'r3.png', $png]]);
+$i3 = $submit('P649 I exactly three', [['files[]', 'I-one ZZ.png', $png], ['files[]', 'I-two ZZ.png', $png], ['files[]', 'I-three ZZ.png', $png]]);
 check('I07 EXACTLY the limit: all three kept, and PHP gave no warning, so the words say IF',
     [count($i3['rows']), str_contains($i3['message'], 'so if you chose more than 3, the rest never reached the portal')], [3, true]);
 // MEASURED: PHP does NOT count an empty box towards its limit (an empty box
 // then three files, limit 3: all three kept, no warning). The first version of
 // the fallback counted empty boxes, so two files and an unused box read as
 // "as many as allowed" and told the claimant files might be missing.
-$i4 = $submit('P649 I two and an empty box', [['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png], ['files[]', '', '']]);
+$i4 = $submit('P649 I two and an empty box', [['files[]', 'I-one ZZ.png', $png], ['files[]', 'I-two ZZ.png', $png], ['files[]', '', '']]);
 check('I08 two files and an EMPTY box, limit 3: a plain success (an empty box is not a file PHP counts)',
     [count($i4['rows']), $i4['alert'], str_contains($i4['message'], 'at most')], [2, 'success', false]);
 $startServer();
@@ -990,8 +1177,14 @@ echo "\nZ. Across the WHOLE run, no column of either log holds a claimant's file
 // ═════════════════════════════════════════════════════════════════════════════
 $allLogs = $logsSince($runErrorStart, $runActivityStart);
 check('Z00 the premise: the run did write log rows to search', strlen($allLogs) > 1000, true);
+// The list is collected inside `$submit`, so its size proves it was really
+// filled by every section (the first version's hand-kept list missed some).
+check('Z00b the premise: the names searched for include the ones the hand-kept list missed (section I\'s, and the Latin-1 "Café" name)',
+    count(array_unique($sentNames)) >= 15
+        && in_array("Caf\xE9 bill.txt", $sentNames, true)
+        && in_array('I-one ZZ.png', $sentNames, true), true);
 check('Z01 NONE of the file names the run sent appears in ANY column of tblErrors or tblActivityLogs (#714)',
-    array_values(array_filter(array_unique($sentNames), static fn (string $n): bool => str_contains($allLogs, $n))), []);
+    $namesFoundIn($allLogs, $sentNames), []);
 
 // ── Tidy up the rows this test made ─────────────────────────────────────────
 $removeMember($userId);

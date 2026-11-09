@@ -354,6 +354,43 @@ final class DbServer
     }
 
     /**
+     * 🔁 A SECOND, NEW connection with the portal's own credentials, for the
+     *    rare moment the request's own connection can no longer be trusted
+     *    (#649, round 2 of the independent check).
+     *
+     * The case it was written for: the connection is lost WHILE a claim is
+     * being committed. The server may have committed it or not, and the old
+     * connection cannot say which — only a new one can look. It reads the
+     * same credentials file start-up reads and opens the connection through
+     * connect() above, so it is just as strict; it never reuses the request's
+     * connection. The caller closes it.
+     *
+     * @return mysqli An open connection.
+     *
+     * @throws \RuntimeException     When the credentials file cannot be read.
+     * @throws \mysqli_sql_exception When the server cannot be reached.
+     */
+    public static function connectAgain(): mysqli
+    {
+        $authFile = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . 'auth_creds.php';
+        if (is_readable($authFile) === false) {
+            throw new \RuntimeException('The database credentials file could not be read');
+        }
+        $creds = require $authFile;
+        if (is_array($creds) === false) {
+            throw new \RuntimeException('The database credentials file did not hold a list of settings');
+        }
+
+        return self::connect(
+            isset($creds['db_host']) === true ? (string) $creds['db_host'] : null,
+            isset($creds['db_user']) === true ? (string) $creds['db_user'] : null,
+            isset($creds['db_pass']) === true ? (string) $creds['db_pass'] : null,
+            isset($creds['db_name']) === true ? (string) $creds['db_name'] : null,
+            isset($creds['db_port']) === true ? (int) $creds['db_port'] : 3306
+        );
+    }
+
+    /**
      * 🔒 Make this connection strict: a value that does not fit is REFUSED
      *    with an error instead of being stored changed.
      *
