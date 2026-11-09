@@ -4,19 +4,25 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: `c403338a` (#493 P2a, migration 260),
-`0fcdf53c` (D-079 + D-092), `87f6fa8a` (D-091), `2cf919b5` (D-089), `de32d26` (#493 P1). Nothing uncommitted.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: `9c1cecfb` (#493 P2b, migration 261),
+`c403338a` (#493 P2a, migration 260), `0fcdf53c` (D-079 + D-092), `87f6fa8a` (D-091). Nothing uncommitted
+in the main checkout.
+
+## In flight (two packages side by side, no shared files — the 12 October 2026 rule)
+
+- **#821** (three #569 follow-ups) — built in worktree `.claude/worktrees/agent-a94ac0254f7a19bb4`, branch
+  `p821-build`, commits `e75d67e1` + `a40d8cf6` (on top of `e2f10c55`). Round 2 of the check is running
+  (presentation/tooling: three-round cap). Its CHANGELOG/DEV_NOTES/FEATURES entries are in that worktree's
+  `.claude-work/evidence/821/notes.md` (not committed) and are added when it is cherry-picked here.
+  #821 stays OPEN afterwards: its comment items 4-8 are not done. Raised from it: #863, #864.
 
 ## Next, in this order
 
-1. **#493 P2b** — the foyer slideshow: a page playing the organisation's posters full-screen, opened by a
-   secret per-organisation link with a QR code (replaceable, which stops the old link at once), no sign-in.
-   What it shows is D-086's tiered setting (installation permits "public only" or "either"; the
-   organisation chooses within it; ships as public only). Public posters come ONLY from
-   `PublicWebsite::posterWhere()`.
-2. #493 P3 (admin page, delegation, D-085), P4 (the public door; delete the old widget folder, D-084).
-3. #569 — the page findings left. 4. The backlog (D-055). 5. #754. 6. The Codex review (D-007), then
-   the merge.
+1. **#493 P3** (the admin page, delegation, D-085), then **P4** (the public door; delete the old widget
+   folder, D-084). Both share files with P2a/P2b, so they run one at a time.
+2. **#823** (two pages with two canonical addresses) — can run beside P3 if their files do not overlap.
+3. The rest of the backlog (D-055), paired where files do not overlap. 4. #754 (waits on the merge).
+   5. The Codex review (D-007), then the merge.
 
 ## Blocked on the owner
 
@@ -85,3 +91,4 @@ index there. **Codex has reviewed none of this work.**
 | #856 | Some public-website-tick plant checks pass when their scenario fails for any reason |
 | #858 | Without JavaScript, a saved outside-calendar choice's redraw can show a Yes the person unticked |
 | #859 | The public event-suggestion form promises an e-mail on approval, and nothing sends one |
+| #865 | The offline page never retries by itself; nothing tests that the service worker refuses `private` |
