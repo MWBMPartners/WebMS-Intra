@@ -97,9 +97,11 @@ IDENTIFIER_READERS: dict[str, tuple[int, str]] = {
 # Rule 2. Path under web/ -> (how many whole-session uses it may hold, why each is harmless).
 WHOLE_SESSION_USERS: dict[str, tuple[int, str]] = {
     "_core/Auth.php": (
-        1,
+        3,
         "sendOfflineCopyHeaders() takes the NAMES of the session's values (array_keys) to decide one response "
-        "header. No value is read.",
+        "header. No value is read. And beginSessionFor() (#900) writes the session back to ITSELF, keeping only "
+        "the entries named in SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON (array_intersect_key on the left and the "
+        "right of one assignment, two uses): it removes values from the session and copies none anywhere else.",
     ),
     "_core/Debug.php": (
         1,

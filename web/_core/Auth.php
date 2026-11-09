@@ -564,14 +564,16 @@ class Auth
         //    check caught it. It claimed an attacker could plant an id, wait
         //    for the victim to SIGN IN, and then use the id they chose. THAT
         //    ATTACK NEVER WORKED HERE. Every one of the six places that grants
-        //    `$_SESSION['user_id']` is immediately preceded by
-        //    `session_regenerate_id(true)` — Auth.php 1568/1829/2113,
-        //    auth/login/webauthn.php 120, invites/accept.php 183, and the
-        //    two-factor step inherits the password step's rotation. So the id
-        //    somebody is signed in UNDER was already always one PHP minted.
+        //    `$_SESSION['user_id']` is immediately preceded by a rotation —
+        //    since #900 by beginSessionFor(), which calls
+        //    `session_regenerate_id(true)`: loginLocal(), the two single-sign-on
+        //    callbacks, auth/login/webauthn.php, invites/accept.php and the
+        //    two-factor step (which before #900 inherited the password step's
+        //    rotation instead). So the id somebody is signed in UNDER was
+        //    already always one PHP minted.
         //
-        //    🛑 WHICH MEANS: THIS SETTING DOES NOT MAKE THOSE
-        //    `session_regenerate_id(true)` CALLS REDUNDANT. Strict mode does
+        //    🛑 WHICH MEANS: THIS SETTING DOES NOT MAKE THAT ROTATION
+        //    REDUNDANT. Strict mode does
         //    not rotate an id at a privilege boundary; it only refuses an id
         //    nobody issued. Remove the rotations believing this covers them
         //    and you open the real hole.
@@ -904,6 +906,204 @@ class Auth
                 : 'A signed-in session was ended because account #' . $userId . ' no longer exists.',
             $row !== null ? $userId : null
         );
+    }
+
+    /**
+     * Session entries that are KEPT when the person signing in is not the
+     * person the session already belonged to (#900). Everything else is
+     * thrown away. See beginSessionFor(), the one place this list is used.
+     *
+     * It is a list of what to KEEP, never a list of what to remove, for the
+     * same reason SESSION_KEYS_SAFE_TO_KEEP_OFFLINE is: the next feature to
+     * keep something in the session will not think to add it to a removal
+     * list, and what it keeps would then pass to the next person. With this
+     * list, a new entry is removed on a change of person unless somebody
+     * decides otherwise here, with a reason.
+     *
+     * The one entry, and why (worked out from the code on 9 November 2026):
+     *
+     *   portal_locale  The language this BROWSER is being shown, chosen from
+     *                  the globe menu. When nobody was signed in, the sign-in
+     *                  page the new person has just used was drawn in it, so
+     *                  dropping it would switch the screen to another language
+     *                  at the moment of signing in. (When somebody else was
+     *                  signed in with a saved language of their own, the page
+     *                  was drawn in THAT, which is not kept.) It is not the
+     *                  person's own saved choice:
+     *                  that is `user_locale`, which is NOT kept, so on the
+     *                  next request I18n::reconsiderNowSessionExists() reads
+     *                  the new person's choice from their account, and
+     *                  resolveLocale() asks that first. What it CAN carry,
+     *                  said plainly: if the previous person was signed in and
+     *                  chose a language, this holds that choice, and a new
+     *                  person with no saved choice of their own goes on
+     *                  seeing the screen in it.
+     *
+     * Entries deliberately NOT kept, because each looks as if it should be:
+     *
+     *   login_redirect  Where to go back to after signing in. It is written
+     *                  in two kinds of place only, both FOR THE SESSION'S
+     *                  CURRENT PERSON: the four two-factor branches (after
+     *                  the identity is granted, for the person waiting for a
+     *                  code) and the "Add a password" page (for the person
+     *                  signed in). Established with
+     *                  `grep -rn "login_redirect'\] *=" web` on 76709e3e,
+     *                  which answers those five lines; nothing a visitor
+     *                  reaches before signing in writes it. So a value
+     *                  waiting at a grant always belongs to the person
+     *                  already in the session. When that is the person
+     *                  signing in, the whole session is kept and
+     *                  comeBackAfterSignIn() still finds it; when it is
+     *                  somebody else, it is the page THEY were trying to
+     *                  reach, and it must not take the next person there.
+     *   oauth_state    Already spent: both callbacks unset it before the
+     *                  identity is granted. And a Microsoft or Google sign-in
+     *                  started before a different person signed in by another
+     *                  route should not be able to finish afterwards.
+     *   csrf_token     The form token. csrfToken() makes a new one on demand,
+     *                  and a token the previous person was shown should not
+     *                  be good for the next. Every grant answers with a
+     *                  redirect (a passkey with an address to go to), so no
+     *                  page drawn with the old token is still meant to post.
+     *   active_site_id Which organisation is open. Every first sign-in step
+     *                  sets it again straight afterwards (setSessionSiteId(),
+     *                  or initSessionSite() for a passkey and an invitation),
+     *                  and in session mode that method removes it first for
+     *                  this very reason. The two-factor step does not set it
+     *                  and does not need to: it only ever completes the SAME
+     *                  person, whose session is kept whole.
+     *   user_locale    The previous person's own saved language. Keeping it
+     *                  would also stop the new person's saved language being
+     *                  read at all, because reconsiderNowSessionExists()
+     *                  reads the account only while `user_locale` is NOT set.
+     *
+     * @var list<string>
+     */
+    private const SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON = [
+        'portal_locale',
+    ];
+
+    /**
+     * 👤 Whose session this is right now: the signed-in person, else the
+     * person who has given their password and is waiting for their
+     * two-factor code, else nobody (0).
+     *
+     * Only those two entries count. The Asset Tracker kiosk's
+     * `kiosk_user_id` is NOT a sign-in — it lets a member borrow equipment at
+     * a shared terminal and opens no page — so a kiosk session is nobody's
+     * here, and a real sign-in on that browser starts clean.
+     *
+     * @return int The account number, or 0 for nobody.
+     */
+    private static function sessionPerson(): int
+    {
+        foreach (['user_id', '2fa_user_id'] as $key) {
+            $value = $_SESSION[$key] ?? null;
+            if ((is_int($value) === true || (is_string($value) === true && ctype_digit($value) === true))
+                && (int) $value > 0
+            ) {
+                return (int) $value;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * 🔑 THE ONE PLACE A SIGN-IN DECIDES WHAT IT KEEPS OF THE SESSION BEFORE
+     * IT (#900). Call it at every grant of an identity, IMMEDIATELY BEFORE
+     * `$_SESSION['user_id']` is written (for the second step, before the
+     * promotion from waiting-for-a-code), and nowhere else.
+     *
+     * WHAT WAS WRONG. Each sign-in path called `session_regenerate_id(true)`
+     * and then wrote the person's number. That gives the session a NEW
+     * IDENTIFIER and keeps EVERY ENTRY in it. The sign-in page refuses a
+     * browser that is already signed in, but the Microsoft and Google
+     * addresses, the passkey endpoint and an invitation link do not — and the
+     * sign-in page does not refuse a browser part-way through somebody else's
+     * two-factor step. So whatever was waiting in the session for one person
+     * — a message about to be shown ("Total must be greater than zero."), a
+     * success message naming their receipt files, typing kept for a form, an
+     * API key or kiosk token made a moment ago and shown once — was handed to
+     * whoever signed in next on that browser. Found by the independent check
+     * on the Expenses package (#869-#871), by editing a session file.
+     *
+     * WHAT IT DOES
+     *   - A DIFFERENT person (sessionPerson() is not $userId — and nobody is
+     *     different from everybody): the session is emptied except the
+     *     entries in SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON. A first sign-in
+     *     on a browser nobody was signed in on counts too: a visitor's waiting
+     *     message or form typing belongs to whoever was at the keyboard, who
+     *     need not be the person now signing in.
+     *   - The SAME person (re-authenticating — the "Add a password" page's
+     *     "sign in again with Microsoft, Google or a passkey" (#731), or the
+     *     two-factor step completing what the password step began): nothing
+     *     is removed. Their own waiting message, their come-back address and
+     *     everything else of theirs stays. Said exactly, because the code
+     *     cannot know more: "of theirs" means "written while the session was
+     *     theirs". Something written in the minutes between a password and a
+     *     two-factor code, by whoever is at the keyboard then, is kept too —
+     *     as it was before #900. That needs a second person to use the browser
+     *     between somebody's two sign-in steps.
+     *   - EITHER WAY the identifier is replaced and the old one's stored data
+     *     deleted (`session_regenerate_id(true)`). That rotation is NOT made
+     *     redundant by `session.use_strict_mode` (#705): strict mode refuses an
+     *     identifier nobody issued; it does not replace one at a privilege
+     *     boundary. The session is emptied BEFORE the rotation, as
+     *     endSessionOfInactiveAccount() does, so that even if a new identifier
+     *     cannot be issued the old one names an emptied session.
+     *
+     * WHY THE PROOF OF A FRESH SIGN-IN SURVIVES. SelfServicePassword's proof
+     * (#731) is recorded by every path AFTER this call, for the person just
+     * signed in, so the sign-in that records it never removes it. A proof
+     * belonging to the PREVIOUS person is removed, which is right: it names
+     * them, and recentlyProvedThemselves() would refuse it for anybody else.
+     *
+     * WHY NOT REFUSE A SIGNED-IN BROWSER AT /login/ms365 AND /login/google
+     * INSTEAD, as the sign-in page does. The "Add a password" page sends a
+     * signed-in member to exactly those addresses to prove who they are
+     * (#731), so refusing would break the recovery route that feature exists
+     * for. Deciding by WHO signs in covers that case and the shared browser
+     * alike.
+     *
+     * WHAT IT CANNOT DO
+     *   - Tell apart two people who share one ACCOUNT: to the portal that is
+     *     one person.
+     *   - Reach the kiosk hand-over (`kiosk_user_id`), which grants no sign-in
+     *     and is not one of the six places that set `user_id`.
+     *   - Judge whether somebody MAY sign in. Every caller has decided that.
+     *
+     * @param int $userId The account about to be signed in (for the second
+     *                    step, about to be promoted from waiting-for-a-code).
+     *
+     * @return void
+     *
+     * @throws \LogicException When no session is active. Every caller starts
+     *                         one first; a grant into no session would be
+     *                         silently lost, so it is refused loudly.
+     */
+    public static function beginSessionFor(int $userId): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            throw new \LogicException('A sign-in was granted with no session active.');
+        }
+
+        if (self::sessionPerson() !== $userId) {
+            // 🧹 Keep only what is on the list, by name. array_intersect_key()
+            //    compares KEYS, so no value is ever looked at.
+            $_SESSION = array_intersect_key(
+                $_SESSION,
+                array_flip(self::SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON)
+            );
+        }
+
+        // 🔄 A new identifier; `true` deletes the old one's stored data.
+        session_regenerate_id(true);
+
+        // 🔁 Anything this request already worked out about "the current
+        //    person" was about the previous one.
+        self::$activeAccountAsked = null;
+        App::resetUser();
     }
 
     /**
@@ -1662,9 +1862,16 @@ class Auth
         }
 
         /* ----------------------- 6. Create session -------------------------- */
-        // 🔄 Regenerate session ID to prevent session fixation attacks
-        // See: https://owasp.org/www-community/attacks/Session_fixation
-        session_regenerate_id(true);
+        // 🔑 beginSessionFor() is the ONE place a sign-in decides what it keeps
+        //    of the session before it (#900): somebody else's waiting messages
+        //    and typing are removed, the same person's are kept, and the
+        //    identifier is replaced either way (fixation defence — see
+        //    https://owasp.org/www-community/attacks/Session_fixation). This
+        //    used to be a bare `session_regenerate_id(true)`, which keeps every
+        //    entry: and this address does not refuse a browser somebody is
+        //    already signed in on, because the "Add a password" page sends a
+        //    signed-in member here on purpose (#731).
+        self::beginSessionFor($userId);
 
         $_SESSION['user_id']    = $userId;
         $_SESSION['user_name']  = $name;
@@ -1953,7 +2160,9 @@ class Auth
         }
 
         /* ----------------------- 6. Create session -------------------------- */
-        session_regenerate_id(true);
+        // 🔑 The one place a sign-in decides what it keeps of the session
+        //    before it (#900) — see the same call in callbackMS365() above.
+        self::beginSessionFor($userId);
 
         $_SESSION['user_id']    = $userId;
         $_SESSION['user_name']  = $name;
@@ -2377,9 +2586,15 @@ class Auth
             return false;
         }
 
-        // 🔄 Regenerate session ID to prevent session fixation
-        // See: https://owasp.org/www-community/attacks/Session_fixation
-        session_regenerate_id(true);
+        // 🔑 beginSessionFor() is the ONE place a sign-in decides what it keeps
+        //    of the session before it (#900), and replaces the identifier
+        //    (fixation defence — see
+        //    https://owasp.org/www-community/attacks/Session_fixation). The
+        //    sign-in page refuses a browser that is already SIGNED IN, but not
+        //    one part-way through somebody else's two-factor step, nor a
+        //    visitor's session holding a message or typing; this used to be a
+        //    bare `session_regenerate_id(true)`, which kept all of it.
+        self::beginSessionFor((int) $row['userID']);
 
         // ✅ Create the user session using data from tblUsers
         $_SESSION['user_id']    = (int) $row['userID'];

@@ -117,8 +117,16 @@ if ($action === 'auth_verify') {
 
             $webauthnUserId = (int) $row['userID'];
 
-            // 🔄 Create session
-            session_regenerate_id(true);
+            // 🔑 `Auth::beginSessionFor()` is the ONE place a sign-in decides
+            //    what it keeps of the session before it (#900). This endpoint
+            //    signs in whoever's authenticator answered, including into a
+            //    browser somebody ELSE is signed in on, so the previous person's
+            //    waiting messages and typing must go — and the same person
+            //    proving themselves again from the "Add a password" page (#731)
+            //    must keep theirs. It also replaces the identifier, which the
+            //    bare `session_regenerate_id(true)` here used to do on its own
+            //    while keeping every entry.
+            Auth::beginSessionFor($webauthnUserId);
 
             $_SESSION['user_id']    = $webauthnUserId;
             $_SESSION['user_name']  = $row['fullName'];

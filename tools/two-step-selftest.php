@@ -73,6 +73,17 @@
  *   J. What the old code left in a session (readable codes, a readable key)
  *      is taken out the next time the person opens the page; and a code
  *      sent when no key is waiting is answered with a new key and a reason.
+ *   K. What a sign-in keeps of the session before it (#900). A different
+ *      person — by password, Microsoft, Google or an invitation, on a browser
+ *      where nobody, somebody else, or somebody waiting for their code was —
+ *      gets NONE of the waiting entries except the browser's language; the
+ *      same person (finishing their code step, or signing in again with
+ *      Microsoft as the "Add a password" page asks) keeps ALL of theirs; the
+ *      proof of a fresh sign-in (#731) survives the sign-in that records it;
+ *      and five planted faults are each caught. The Microsoft and Google
+ *      sign-ins are driven through the real callbacks with the provider
+ *      stubbed in the SCRATCH copy only (part K's own header says exactly how
+ *      and what that cannot prove); the passkey sign-in is not driven.
  *
  * SAFETY
  * ------
@@ -155,7 +166,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 93;
+const EXPECTED_CHECKS = 117;
 
 function refuse(string $why): never
 {
@@ -277,7 +288,13 @@ const PEOPLE = [
     'pia'   => 922026,
     'quin'  => 922027,
     'rosa'  => 922028,
+    'sam'   => 922029, // K: "A", signed in, with entries waiting in her session
+    'tia'   => 922030, // K: "B", who signs in next on A's browser
+    'uma'   => 922031, // K: "C", with two-step sign-in on
 ];
+/** Part K's invitation: the account it makes is a NEW person, numbered by the database, so it is found by these. */
+const INVITEE_EMAIL = 'invitee.twostep@selftest.invalid';
+const INVITEE_LOGIN = 'tss-invitee';
 /** How this test names itself to the portal, so the records it causes can be found and removed. */
 const AGENT = 'two-step-selftest';
 /** The trigger part I makes, and drops. */
@@ -307,6 +324,16 @@ function removeWorld(): void
     }
     q('DELETE FROM tblTrustedDevices WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblTotpBackupCodes WHERE userID BETWEEN 922000 AND 922999');
+    // Part K: the Microsoft and Google links its sign-ins make, and the invitation and the account it made.
+    q('DELETE FROM tblLinkedAccounts WHERE userID BETWEEN 922000 AND 922999');
+    q('DELETE FROM tblInvitation WHERE email = ?', 's', [INVITEE_EMAIL]);
+    foreach (q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [INVITEE_EMAIL]) as $invitee) {
+        $inviteeId = (int) $invitee['userID'];
+        foreach (['tblActivityLogs', 'tblErrors', 'tblLinkedAccounts', 'tblLocalAccounts', 'tblUserSites', 'tblUsers'] as $table) {
+            q('DELETE FROM ' . $table . ' WHERE userID = ?', 'i', [$inviteeId]);
+        }
+    }
+    q('DELETE FROM tblLocalAccounts WHERE username = ?', 's', [INVITEE_LOGIN]);
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUserSites WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUsers WHERE userID BETWEEN 922000 AND 922999');
@@ -976,10 +1003,16 @@ $quiet             = [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $s
  * and F7 pass only if the page of codes says "do not keep" ITSELF. With them
  * on, PHP's own header already says "no-store" on every page, so those two
  * checks would pass whatever the page said.
+ *
+ * "session.serialize_handler=php" is SET rather than assumed, because part K
+ * reads and writes the session FILES and must know their format; and stored
+ * compiled pages are switched off because part K plants faults into a file
+ * and must be served the changed one.
  */
 $startPortal = static function (int $onPort) use ($child, $sep, $quiet, $env): mixed {
     return proc_open(
-        [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
+        [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'session.serialize_handler=php', '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
+            '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
             '-d', 'display_errors=0', '-d', 'session.cache_limiter=', '-S', '127.0.0.1:' . $onPort, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
         $quiet,
         $pipes,
@@ -1659,6 +1692,416 @@ $yDone = codeStep($yJar, ip(91), ['code' => appCode($key)]);
 ok('Z3 control: an ordinary ?redirect= still carries the person there after the code', $yIn['location'] === '/auth/2fa/verify' && $yDone['status'] === 302 && $yDone['location'] === '/account' && signedIn($yJar, ip(91)) === true, describe($yIn) . ' then ' . describe($yDone));
 
 // =============================================================================
+head('K. A sign-in keeps nothing of somebody else\'s session, and all of the same person\'s (#900)');
+// =============================================================================
+// WHAT WAS WRONG. Every sign-in path replaced the session's IDENTIFIER and kept
+// every ENTRY in it, so a message, kept typing or anything else waiting for one
+// person was handed to whoever signed in next on that browser. Found by editing
+// a session file (#900), which is also how these checks put "the previous
+// person's" entries in place: `putInSession()` appends real entries in PHP's own
+// session format and proves they landed before anything is pressed.
+//
+// HOW THE MICROSOFT AND GOOGLE SIGN-INS ARE DRIVEN, said plainly because it is
+// the one artificial thing here. No test can reach Microsoft or Google, so the
+// SCRATCH copy of Auth.php (never the repository's) has three test stubs written
+// into it, each required to apply exactly where expected: the token request
+// answers with the "code" it was sent when that code starts with STUB, the key
+// list is not fetched for such a token, and such a token is read as the claims
+// rather than checked as a signature. Everything else in the callbacks is the
+// real code: the state check, finding the account by e-mail, linking it, the
+// grant, the proof, the two-factor gate and the redirect. What this does NOT
+// prove is anything about a real provider's answer or a real signature check.
+//
+// The passkey sign-in is the one path not driven: no test here can make a real
+// authenticator's signature. It calls the same Auth::beginSessionFor() as every
+// other path; the plants below prove what that method does.
+
+const STUB = 'p900stub:';
+
+/**
+ * Every entry in a browser's session file, by name, as PHP's 'php' format holds
+ * them (name|value, one after another). Null when it cannot be read — every
+ * caller treats that as a failure, never as "nothing there".
+ *
+ * @return array<string,mixed>|null
+ */
+function sessionEntries(string $jar): ?array
+{
+    $file = sessionFile($jar);
+    if ($file === '') {
+        return null;
+    }
+    clearstatcache(true, $file);
+    $body = (string) file_get_contents($file);
+    $out  = [];
+    $at   = 0;
+    while ($at < strlen($body)) {
+        $bar = strpos($body, '|', $at);
+        if ($bar === false) {
+            return null;
+        }
+        $rest  = substr($body, $bar + 1);
+        $value = @unserialize($rest, ['allowed_classes' => false]);
+        if ($value === false && str_starts_with($rest, 'b:0;') === false) {
+            return null;
+        }
+        $out[substr($body, $at, $bar - $at)] = $value;
+        $at = $bar + 1 + strlen(serialize($value));
+    }
+
+    return $out;
+}
+
+/** The session identifier this browser holds now ('' when none). */
+function sessionIdOf(string $jar): string
+{
+    $file = sessionFile($jar);
+
+    return $file === '' ? '' : substr(basename($file), 5);
+}
+
+/**
+ * Put entries into a browser's session, as a page would have left them, and
+ * REFUSE unless every one reads back: an edit that did not land would make the
+ * "it is gone" checks pass for the wrong reason.
+ *
+ * @param array<string,mixed> $entries
+ */
+function putInSession(string $jar, array $entries): void
+{
+    $file = sessionFile($jar);
+    if ($file === '') {
+        refuse('a browser has no session file, so the previous person\'s entries could not be put in place');
+    }
+    $add = '';
+    foreach ($entries as $name => $value) {
+        $add .= $name . '|' . serialize($value);
+    }
+    file_put_contents($file, $add, FILE_APPEND);
+    $now = sessionEntries($jar);
+    foreach ($entries as $name => $value) {
+        if ($now === null || array_key_exists($name, $now) === false || $now[$name] !== $value) {
+            refuse("the entry '{$name}' did not land in the session file, so nothing below would mean anything");
+        }
+    }
+}
+
+/** Which of `$entries` are still in the session with the same value. @return list<string> */
+function stillThere(?array $now, array $entries): array
+{
+    $kept = [];
+    foreach ($entries as $name => $value) {
+        if ($now !== null && array_key_exists($name, $now) === true && $now[$name] === $value) {
+            $kept[] = (string) $name;
+        }
+    }
+
+    return $kept;
+}
+
+/** The password step in a browser that already exists (passwordStep() always makes a new one). */
+function passwordIn(string $jar, string $who, string $ip, string $query = ''): array
+{
+    global $password;
+    $form = req($jar, 'GET', '/login', null, $ip);
+
+    return req($jar, 'POST', '/login' . $query, ['csrf_token' => token($form['body']), 'username' => login($who), 'password' => $password], $ip);
+}
+
+/** A person's e-mail address in the made-up world. */
+function emailOf(string $who): string
+{
+    return $who . '.twostep@selftest.invalid';
+}
+
+/**
+ * A Microsoft ('ms365') or Google ('google') sign-in as `$who`, in an existing
+ * browser: the real start address (which stores the state), then the real
+ * callback carrying that state and a stub code naming the person.
+ *
+ * @return array{start:array, state:string, back:array}
+ */
+function ssoIn(string $jar, string $provider, string $who, string $ip): array
+{
+    $start = req($jar, 'GET', '/login/' . $provider, null, $ip);
+    $state = preg_match('/[?&]state=([0-9a-f]{32})(?:&|$)/', $start['location'], $m) === 1 ? $m[1] : '';
+    $claims = $provider === 'ms365'
+        ? ['sub' => 'p900-ms-' . $who, 'preferred_username' => emailOf($who), 'name' => 'Selftest two-step ' . $who]
+        : ['sub' => 'p900-g-' . $who, 'email' => emailOf($who), 'name' => 'Selftest two-step ' . $who];
+    $back = req($jar, 'GET', '/login/' . $provider . '/callback?' . http_build_query(['state' => $state, 'code' => STUB . json_encode($claims)]), null, $ip);
+
+    return ['start' => $start, 'state' => $state, 'back' => $back];
+}
+
+/** The proof of a fresh sign-in (#731) in a session, as "userID:method", or '' when there is none. */
+function proofIn(?array $entries): string
+{
+    $proof = $entries['reauth_proof'] ?? null;
+
+    return is_array($proof) === true ? (string) ($proof['userID'] ?? '') . ':' . (string) ($proof['method'] ?? '') : '';
+}
+
+// 🧪 The stubs, in the SCRATCH copy only, each required to land exactly where meant.
+$scratchAuth  = $child . $sep . 'web' . $sep . '_core' . $sep . 'Auth.php';
+$authAsCopied = (string) file_get_contents($scratchAuth);
+$stubbed      = $authAsCopied;
+foreach ([
+    "    public static function curlPost(string \$url, array \$data): ?string\n    {\n" => [1, "    public static function curlPost(string \$url, array \$data): ?string\n    {\n"
+        . "        // TEST STUB written by tools/two-step-selftest.php into its scratch copy (#900).\n"
+        . "        if (is_string(\$data['code'] ?? null) === true && str_starts_with(\$data['code'], '" . STUB . "') === true) {\n"
+        . "            return json_encode(['id_token' => substr(\$data['code'], " . strlen(STUB) . ")]);\n"
+        . "        }\n"],
+    '$jwksJson = file_get_contents($jwksUri);' => [2, '$jwksJson = str_starts_with($idToken, \'{\') ? \'{}\' : file_get_contents($jwksUri);'],
+    '$payload = SimpleJWT::decode($idToken, $jwks, [' => [2, '$payload = str_starts_with($idToken, \'{\') ? json_decode($idToken, true) : SimpleJWT::decode($idToken, $jwks, ['],
+] as $from => [$times, $to]) {
+    $count   = 0;
+    $stubbed = str_replace($from, $to, $stubbed, $count);
+    if ($count !== $times) {
+        refuse("a provider stub matched {$count} place(s) in the scratch Auth.php, not {$times}: '" . mb_substr($from, 0, 60) . "'");
+    }
+}
+file_put_contents($scratchAuth, $stubbed);
+clearstatcache(true, $scratchAuth);
+if ((string) file_get_contents($scratchAuth) !== $stubbed) {
+    refuse('the provider stubs could not be written into the scratch copy');
+}
+setting('auth.ms365.enduser.clientID', 'p900-client');
+setting('auth.ms365.enduser.clientSecret', 'p900-secret');
+setting('auth.ms365.enduser.redirectURI', 'http://127.0.0.1:' . $port . '/login/ms365/callback');
+setting('auth.ms365.tenantID', 'p900-tenant');
+setting('auth.google.clientID', 'p900-client');
+setting('auth.google.clientSecret', 'p900-secret');
+setting('auth.google.redirectURI', 'http://127.0.0.1:' . $port . '/login/google/callback');
+setting('auth.google.hostedDomain', '');
+
+/**
+ * What "the previous person" left waiting. A fresh marker every time, so an
+ * entry left over from one scenario can never satisfy another. `portal_locale`
+ * is the one entry a different person is MEANT to keep, so it is separate.
+ *
+ * @return array<string,mixed>
+ */
+function theirs(): array
+{
+    return [
+        'flash_msg'        => 'P900 waiting for the previous person ' . bin2hex(random_bytes(4)),
+        'flash_type'       => 'danger',
+        'p900_kept_typing' => 'typed by the previous person ' . bin2hex(random_bytes(4)),
+    ];
+}
+/** What a session may hold straight after a different person's password sign-in, and nothing else. */
+const AFTER_A_FRESH_SIGN_IN = ['portal_locale', 'user_id', 'user_name', 'user_email', 'active_site_id', 'reauth_proof'];
+
+// --- K1. Nobody signed in, a visitor's entries waiting; B signs in by password.
+$kJar  = newJar();
+req($kJar, 'GET', '/login', null, ip(101));
+$waiting = theirs() + ['login_redirect' => '/p900-a-page-the-visitor-wanted'];
+putInSession($kJar, $waiting + ['portal_locale' => 'cy']);
+$kIdBefore = sessionIdOf($kJar);
+$kIn       = passwordIn($kJar, 'tia', ip(101));
+$kNow      = sessionEntries($kJar);
+ok('K01 a password sign-in on a browser nobody was signed in on keeps NONE of the visitor\'s waiting entries (message, typing, come-back address)',
+    $kIn['status'] === 302 && $kIn['location'] === '/' && (int) ($kNow['user_id'] ?? 0) === PEOPLE['tia'] && stillThere($kNow, $waiting) === [],
+    describe($kIn) . '; still there: ' . implode(', ', stillThere($kNow, $waiting)));
+$extra = $kNow === null ? ['(unreadable)'] : array_values(array_diff(array_keys($kNow), AFTER_A_FRESH_SIGN_IN));
+ok('K02 ...it keeps the browser\'s chosen language and NOTHING ELSE the sign-in did not write itself',
+    ($kNow['portal_locale'] ?? null) === 'cy' && $extra === [],
+    'language: ' . var_export($kNow['portal_locale'] ?? null, true) . '; other entries: ' . implode(', ', $extra));
+ok('K03 ...the proof of a fresh sign-in (#731) survives the very sign-in that records it, and names B',
+    proofIn($kNow) === PEOPLE['tia'] . ':password', 'proof: ' . proofIn($kNow));
+$kPage = req($kJar, 'GET', '/account/add-password', null, ip(101));
+ok('K04 ...B\'s own page does not show the waiting message, and the session identifier was replaced',
+    $kPage['status'] === 200 && str_contains($kPage['body'], (string) $waiting['flash_msg']) === false && $kIdBefore !== '' && sessionIdOf($kJar) !== $kIdBefore,
+    describe($kPage) . '; identifier ' . ($kIdBefore === sessionIdOf($kJar) ? 'NOT replaced' : 'replaced'));
+
+// --- K2. C has given her password and is waiting for her code; B signs in by password on that browser.
+$uma = switchOn('uma', ip(102));
+if ($uma['key'] === '' || count($uma['codes']) !== 8) {
+    refuse('two-step sign-in could not be switched on for part K\'s account (' . describe($uma['answer']) . ')');
+}
+[$k2Jar, $k2Pending] = passwordStep('uma', ip(103));
+$waiting = theirs();
+putInSession($k2Jar, $waiting);
+$k2In  = passwordIn($k2Jar, 'tia', ip(103));
+$k2Now = sessionEntries($k2Jar);
+ok('K05 B signing in by password on a browser where C is waiting for her code gets none of C\'s entries, and is not left holding C\'s waiting state',
+    $k2Pending['location'] === '/auth/2fa/verify' && $k2In['status'] === 302 && $k2In['location'] === '/'
+        && (int) ($k2Now['user_id'] ?? 0) === PEOPLE['tia'] && array_key_exists('2fa_user_id', (array) $k2Now) === false && stillThere($k2Now, $waiting) === [],
+    describe($k2Pending) . ' then ' . describe($k2In) . '; still there: ' . implode(', ', stillThere($k2Now, $waiting)) . (array_key_exists('2fa_user_id', (array) $k2Now) === true ? '; 2fa_user_id LEFT' : ''));
+
+// --- K3. C finishes her own two-step sign-in: the same person keeps everything of hers.
+/** Run K3's journey (also used by the plants). @return array{done:array, now:?array, idBefore:string, waiting:array} */
+$k3Journey = static function (string $ip) use ($uma): array {
+    $jar  = newJar();
+    $form = req($jar, 'GET', '/login', null, $ip);
+    req($jar, 'POST', '/login?redirect=%2Faccount%2Fadd-password', ['csrf_token' => token($form['body']), 'username' => login('uma'), 'password' => $GLOBALS['password']], $ip);
+    // The code page is opened FIRST and the entries put in AFTER it: the page
+    // shows and removes a waiting message when it is drawn, which is right, and
+    // would otherwise make "her own message is kept" fail for a reason that has
+    // nothing to do with the sign-in.
+    $page    = req($jar, 'GET', '/auth/2fa/verify', null, $ip);
+    $waiting = theirs();
+    putInSession($jar, $waiting);
+    $idBefore = sessionIdOf($jar);
+    $done     = req($jar, 'POST', '/auth/2fa/verify', ['csrf_token' => token($page['body']), 'code' => appCode($uma['key'])], $ip);
+
+    return ['jar' => $jar, 'done' => $done, 'now' => sessionEntries($jar), 'idBefore' => $idBefore, 'waiting' => $waiting];
+};
+$k3 = $k3Journey(ip(104));
+ok('K06 two-step sign-in still works, and the come-back address C asked for survives her own code step',
+    $k3['done']['status'] === 302 && $k3['done']['location'] === '/account/add-password' && (int) ($k3['now']['user_id'] ?? 0) === PEOPLE['uma'],
+    describe($k3['done']));
+ok('K07 ...every entry of C\'s own that was waiting is still there after her code step',
+    count(stillThere($k3['now'], $k3['waiting'])) === count($k3['waiting']),
+    'still there: ' . implode(', ', stillThere($k3['now'], $k3['waiting'])));
+ok('K08 ...her proof of a fresh sign-in, recorded at the password step, survives the code step, and the identifier is replaced at it',
+    proofIn($k3['now']) === PEOPLE['uma'] . ':password' && $k3['idBefore'] !== '' && sessionIdOf($k3['jar']) !== $k3['idBefore'],
+    'proof: ' . proofIn($k3['now']) . '; identifier ' . (sessionIdOf($k3['jar']) === $k3['idBefore'] ? 'NOT replaced' : 'replaced'));
+$k3Page = req($k3['jar'], 'GET', '/account/add-password', null, ip(104));
+ok('K09 ...and her own waiting message is shown to her',
+    $k3Page['status'] === 200 && str_contains($k3Page['body'], (string) $k3['waiting']['flash_msg']) === true, describe($k3Page));
+
+// --- K4. A is signed in; B signs in with Microsoft on that browser.
+/** Run K4's journey (also used by the plants). */
+$k4Journey = static function (string $provider, string $as, string $ip, string $comeBack): array {
+    [$jar]   = passwordStep('sam', $ip);
+    $waiting = theirs() + ['login_redirect' => $comeBack, 'user_locale' => 'cy'];
+    putInSession($jar, $waiting + ['portal_locale' => 'cy']);
+    $idBefore = sessionIdOf($jar);
+    $sso      = ssoIn($jar, $provider, $as, $ip);
+
+    return ['jar' => $jar, 'sso' => $sso, 'now' => sessionEntries($jar), 'idBefore' => $idBefore, 'waiting' => $waiting];
+};
+$k4 = $k4Journey('ms365', 'tia', ip(105), '/p900-sams-page');
+ok('K10 /login/ms365 is NOT refused for a browser somebody is signed in on (the "Add a password" page relies on that, #731)',
+    $k4['sso']['start']['status'] === 302 && str_starts_with($k4['sso']['start']['location'], 'https://login.microsoftonline.com/') === true && $k4['sso']['state'] !== '',
+    describe($k4['sso']['start']));
+ok('K11 the Microsoft callback signs B in, and sends B to the front page rather than to the page A was waiting to come back to',
+    $k4['sso']['back']['status'] === 302 && $k4['sso']['back']['location'] === '/' && (int) ($k4['now']['user_id'] ?? 0) === PEOPLE['tia'],
+    describe($k4['sso']['back']));
+ok('K12 ...none of A\'s entries reach B (message, typing, come-back address, A\'s saved language), the browser\'s language is kept, and the proof is B\'s, by Microsoft',
+    stillThere($k4['now'], $k4['waiting']) === [] && ($k4['now']['portal_locale'] ?? null) === 'cy' && proofIn($k4['now']) === PEOPLE['tia'] . ':Microsoft',
+    'still there: ' . implode(', ', stillThere($k4['now'], $k4['waiting'])) . '; proof: ' . proofIn($k4['now']));
+$k4Page = req($k4['jar'], 'GET', '/account/add-password', null, ip(105));
+ok('K13 ...and B\'s own page does not show A\'s waiting message — the fault as #900 found it',
+    $k4Page['status'] === 200 && str_contains($k4Page['body'], (string) $k4['waiting']['flash_msg']) === false, describe($k4Page));
+
+// --- K5. The same with Google.
+$k5 = $k4Journey('google', 'tia', ip(106), '/p900-sams-page');
+ok('K14 the Google callback likewise signs B in with none of A\'s entries, and records B\'s proof by Google',
+    $k5['sso']['back']['status'] === 302 && $k5['sso']['back']['location'] === '/' && (int) ($k5['now']['user_id'] ?? 0) === PEOPLE['tia']
+        && stillThere($k5['now'], $k5['waiting']) === [] && proofIn($k5['now']) === PEOPLE['tia'] . ':Google',
+    describe($k5['sso']['back']) . '; still there: ' . implode(', ', stillThere($k5['now'], $k5['waiting'])) . '; proof: ' . proofIn($k5['now']));
+
+// --- K6. A proves herself again with Microsoft, as the "Add a password" page asks (#731): the same person.
+$k6 = $k4Journey('ms365', 'sam', ip(107), '/account/add-password');
+ok('K15 A signing in again with Microsoft keeps every entry of her own and comes back to the page that asked',
+    $k6['sso']['back']['status'] === 302 && $k6['sso']['back']['location'] === '/account/add-password' && (int) ($k6['now']['user_id'] ?? 0) === PEOPLE['sam']
+        && count(stillThere($k6['now'], array_diff_key($k6['waiting'], ['login_redirect' => true]))) === count($k6['waiting']) - 1,
+    describe($k6['sso']['back']) . '; still there: ' . implode(', ', stillThere($k6['now'], $k6['waiting'])));
+ok('K16 ...her proof is renewed as Microsoft\'s, and the identifier is replaced even for the same person',
+    proofIn($k6['now']) === PEOPLE['sam'] . ':Microsoft' && $k6['idBefore'] !== '' && sessionIdOf($k6['jar']) !== $k6['idBefore'],
+    'proof: ' . proofIn($k6['now']) . '; identifier ' . (sessionIdOf($k6['jar']) === $k6['idBefore'] ? 'NOT replaced' : 'replaced'));
+
+// --- K7. A is signed in; a new person accepts an invitation on that browser.
+$inviteToken = bin2hex(random_bytes(32));
+q("INSERT INTO tblInvitation (siteID, email, tokenHash, intendedRole, expiresAt, createdByID) VALUES (1, ?, ?, 'user', DATE_ADD(NOW(), INTERVAL 1 DAY), NULL)", 'ss', [INVITEE_EMAIL, hash('sha256', $inviteToken)]);
+[$k7Jar] = passwordStep('sam', ip(108));
+$waiting = theirs();
+putInSession($k7Jar, $waiting);
+$k7Form = req($k7Jar, 'GET', '/auth/invite?token=' . $inviteToken, null, ip(108));
+$k7In   = req($k7Jar, 'POST', '/auth/invite', ['token' => $inviteToken, 'csrf_token' => token($k7Form['body']), 'fullName' => 'Selftest two-step invitee', 'username' => INVITEE_LOGIN, 'password' => $password, 'passwordConfirm' => $password], ip(108));
+$k7Now  = sessionEntries($k7Jar);
+$k7Id   = (int) (one('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [INVITEE_EMAIL])['userID'] ?? 0);
+ok('K17 accepting an invitation on a browser A is signed in on signs the NEW person in with none of A\'s entries',
+    $k7Form['status'] === 200 && $k7In['status'] === 302 && $k7Id > 0 && (int) ($k7Now['user_id'] ?? 0) === $k7Id && stillThere($k7Now, $waiting) === [],
+    describe($k7Form) . ' then ' . describe($k7In) . '; new account ' . $k7Id . '; still there: ' . implode(', ', stillThere($k7Now, $waiting)));
+
+// --- The plants. Each is written into the SCRATCH Auth.php (already stubbed),
+//     proved applied, required to change what one of the journeys above sees,
+//     and then taken out again with the file proved byte-identical.
+$plantAuth = static function (array $swaps) use ($scratchAuth, $stubbed): void {
+    $after = $stubbed;
+    foreach ($swaps as $from => $to) {
+        $count = 0;
+        $after = str_replace($from, $to, $after, $count);
+        if ($count !== 1) {
+            refuse("the plant '" . mb_substr($from, 0, 60) . "' matched {$count} place(s), not exactly one");
+        }
+    }
+    file_put_contents($scratchAuth, $after);
+    clearstatcache(true, $scratchAuth);
+    if ((string) file_get_contents($scratchAuth) !== $after) {
+        refuse('a plant did not apply to the scratch Auth.php');
+    }
+};
+$unplant = static function () use ($scratchAuth, $stubbed): void {
+    file_put_contents($scratchAuth, $stubbed);
+    clearstatcache(true, $scratchAuth);
+    if ((string) file_get_contents($scratchAuth) !== $stubbed) {
+        refuse('a plant could not be taken out of the scratch Auth.php');
+    }
+};
+$theClearing = 'if (self::sessionPerson() !== $userId) {';
+/** K1's journey again, for the plants: nobody signed in, a visitor's entries, B by password. */
+$k1Again = static function (string $ip): array {
+    $jar = newJar();
+    req($jar, 'GET', '/login', null, $ip);
+    $waiting = theirs();
+    putInSession($jar, $waiting);
+    passwordIn($jar, 'tia', $ip);
+
+    return stillThere(sessionEntries($jar), $waiting);
+};
+
+$plantAuth([$theClearing => 'if (false) {']);
+$p1Password = $k1Again(ip(111));
+$p1Sso      = $k4Journey('ms365', 'tia', ip(112), '/p900-sams-page');
+$unplant();
+ok('K18 PLANT, the clearing removed: the visitor\'s waiting message reaches B by password, so K01 can fail',
+    in_array('flash_msg', $p1Password, true) === true, 'still there under the plant: ' . implode(', ', $p1Password));
+ok('K19 ...and A\'s waiting message reaches B by Microsoft, so K12 can fail',
+    in_array('flash_msg', stillThere($p1Sso['now'], $p1Sso['waiting']), true) === true, 'still there under the plant: ' . implode(', ', stillThere($p1Sso['now'], $p1Sso['waiting'])));
+
+$plantAuth(['array_flip(self::SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON)' => '$_SESSION']);
+$p2 = $k1Again(ip(113));
+$unplant();
+ok('K20 PLANT, the list of what to keep widened to everything: the waiting message and typing reach B, so K01 can fail',
+    in_array('flash_msg', $p2, true) === true && in_array('p900_kept_typing', $p2, true) === true, 'still there under the plant: ' . implode(', ', $p2));
+
+$plantAuth([$theClearing => 'if (true) {']);
+$p3Code = $k3Journey(ip(114));
+$p3Sso  = $k4Journey('ms365', 'sam', ip(115), '/account/add-password');
+$unplant();
+ok('K21 PLANT, the clearing applied to the SAME person too: C loses her own message, her come-back address and her proof at her code step, so K06-K08 can fail',
+    stillThere($p3Code['now'], $p3Code['waiting']) === [] && $p3Code['done']['location'] !== '/account/add-password' && proofIn($p3Code['now']) === '',
+    describe($p3Code['done']) . '; still there: ' . implode(', ', stillThere($p3Code['now'], $p3Code['waiting'])) . '; proof: ' . proofIn($p3Code['now']));
+ok('K22 ...and A signing in again with Microsoft loses hers and is not brought back, so K15 can fail',
+    stillThere($p3Sso['now'], $p3Sso['waiting']) === [] && $p3Sso['sso']['back']['location'] !== '/account/add-password',
+    describe($p3Sso['sso']['back']) . '; still there: ' . implode(', ', stillThere($p3Sso['now'], $p3Sso['waiting'])));
+
+$plantAuth(["foreach (['user_id', '2fa_user_id'] as \$key) {" => "foreach (['user_id'] as \$key) {"]);
+$p4 = $k3Journey(ip(116));
+$unplant();
+ok('K23 PLANT, a session waiting for a code counted as nobody\'s: C loses her own entries at her code step, so K07 can fail',
+    stillThere($p4['now'], $p4['waiting']) === [] && $p4['done']['location'] !== '/account/add-password',
+    describe($p4['done']) . '; still there: ' . implode(', ', stillThere($p4['now'], $p4['waiting'])));
+
+$plantAuth(["on purpose (#731).\n        self::beginSessionFor(\$userId);" => "on purpose (#731).\n        session_regenerate_id(true);"]);
+$p5 = $k4Journey('ms365', 'tia', ip(117), '/p900-sams-page');
+$unplant();
+ok('K24 PLANT, the Microsoft callback put back as it was before #900 (a bare session_regenerate_id): A\'s message reaches B, so K12 and K13 can fail',
+    in_array('flash_msg', stillThere($p5['now'], $p5['waiting']), true) === true && (int) ($p5['now']['user_id'] ?? 0) === PEOPLE['tia'],
+    'still there under the plant: ' . implode(', ', stillThere($p5['now'], $p5['waiting'])));
+
+// The scratch copy goes back to exactly what was copied, stubs and all removed.
+file_put_contents($scratchAuth, $authAsCopied);
+clearstatcache(true, $scratchAuth);
+if ((string) file_get_contents($scratchAuth) !== $authAsCopied) {
+    refuse('the scratch Auth.php could not be put back as copied');
+}
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log  = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -1686,7 +2129,9 @@ cleanup();
 $left = (int) one(
     "SELECT (SELECT COUNT(*) FROM tblUsers WHERE userID BETWEEN 922000 AND 922999) + (SELECT COUNT(*) FROM tblLocalAccounts WHERE userID BETWEEN 922000 AND 922999) "
     . "+ (SELECT COUNT(*) FROM tblTotpBackupCodes WHERE userID BETWEEN 922000 AND 922999) + (SELECT COUNT(*) FROM tblActivityLogs WHERE userID BETWEEN 922000 AND 922999 OR visitorIP LIKE '198.51.100.%' OR userAgent = '" . AGENT . "') "
-    . "+ (SELECT COUNT(*) FROM tblApiRateLimits WHERE bucket LIKE 'totp\\_%:9220__%') + (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = '" . TRIGGER . "') AS n"
+    . "+ (SELECT COUNT(*) FROM tblApiRateLimits WHERE bucket LIKE 'totp\\_%:9220__%') + (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = '" . TRIGGER . "') "
+    . "+ (SELECT COUNT(*) FROM tblLinkedAccounts WHERE userID BETWEEN 922000 AND 922999) + (SELECT COUNT(*) FROM tblInvitation WHERE email = '" . INVITEE_EMAIL . "') "
+    . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress = '" . INVITEE_EMAIL . "') AS n"
 )['n'];
 $settingsBack = true;
 foreach ($before as $settingKey => $row) {

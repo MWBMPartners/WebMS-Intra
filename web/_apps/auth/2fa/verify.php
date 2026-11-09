@@ -232,7 +232,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit();
     }
 
-    // ✅ 2FA passed — complete login
+    // ✅ 2FA passed — complete login.
+    //
+    // 🔑 Through `Auth::beginSessionFor()`, the ONE place a sign-in decides what
+    //    it keeps of the session before it (#900). Here the session already
+    //    belongs to this person — the password, Microsoft, Google or passkey
+    //    step put them in `2fa_user_id`, and that step is where somebody
+    //    ELSE's entries were removed — so nothing is removed now. Everything
+    //    written while the session was waiting for this person's code is kept,
+    //    including their come-back address (`login_redirect`, read below) and
+    //    their proof of a fresh sign-in (#731). What it adds is a new identifier at
+    //    the moment the session becomes fully signed in: before #900 this step
+    //    inherited the first step's rotation and made none of its own, so the
+    //    identifier used while the code was being typed became the signed-in
+    //    one.
+    Auth::beginSessionFor($pendingUserId);
     $_SESSION['user_id']    = $pendingUserId;
     $_SESSION['2fa_passed'] = true;
     unset($_SESSION['2fa_user_id']);

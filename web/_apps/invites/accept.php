@@ -182,13 +182,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $db->commit();
 
-                // 🔄 Regenerate the session ID before granting identity on
-                // this public, pre-auth page (#B6b) — session fixation
-                // defence, identical to every other place a session gets
-                // promoted to an authenticated one (Auth::loginLocal(),
-                // the OAuth callbacks, WebAuthn login).
+                // 🔑 Replace the session ID before granting identity on this
+                // public, pre-auth page (#B6b) — session fixation defence,
+                // identical to every other place a session gets promoted to an
+                // authenticated one — AND decide what is kept of the session
+                // before it (#900). `Auth::beginSessionFor()` does both, in the
+                // one place every sign-in path asks. This page does not refuse
+                // a browser somebody is already signed in on, and the account
+                // made here is always a NEW person, so whatever was waiting in
+                // the session for the previous one is removed rather than handed
+                // over. It used to be a bare `session_regenerate_id(true)`,
+                // which keeps every entry.
                 // See: https://owasp.org/www-community/attacks/Session_fixation
-                session_regenerate_id(true);
+                Auth::beginSessionFor($newUserId);
 
                 // Sign in (write session). `active_site_id` — NOT `site_id`
                 // — is the key Site::id() actually reads (#B6c); the old
