@@ -4,33 +4,34 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: #493 P3 (ten commits from its worktree +
-docs; migration 262), #649 (`3e111466..a00ca32a` + docs), D-096, #823, #821 items 1-3. Whole suite 94/94;
-migration harness 42/42 on MySQL 8.4.11 and MariaDB 11.4.13. Nothing uncommitted in the main checkout.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: #790 (calendar import, four commits + docs),
+D-099, D-100, #667 (NotifyPrefs), D-097/D-098, #493 P3, #649. Whole suite 96/96. Nothing uncommitted in the
+main checkout.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
-- **#667** — one writer of a member's notification choices (`NotifyPrefs`), merging only the keys a form
-  showed. Worktree `.claude/worktrees/agent-ab53a7bdf5c7e4f44`, branch `p667-build`, commits `8fe7944c`,
-  `7be0f1e4`; test 41/41. **Check round 2 running** (protected arm: stored data). Its doc entries and a
-  replacement for CLAUDE.md's "Removing a preference switch is two changes" bullet are in that worktree's
-  `.claude-work/evidence/667/notes.md`.
+- **#493 P4a** — the public door's gate, naming, feeds and media (migration 263). Worktree
+  `.claude/worktrees/agent-ad88601b284f3771c`, branch `p4a-build`, commits `f432f2ae`, `cde9f9c3` (+ round-2
+  fixes in progress). Protected arm. Notes: that worktree's `.claude-work/evidence/p4a/notes.md`.
+- **#877** — a calendar-import row's web address from name + date, and D-100's "already in the calendar"
+  skip. Worktree `.claude/worktrees/agent-ab394d4cf0e7bde23`, branch `p877-build`, commit `a5c02cc0` (+ round-1
+  fixes and D-100 in progress).
 
 ## Next, in this order
 
-1. **#493 P4** — the public door (D-056: script, frame, feed; D-084: delete `web/public_html/widget/` with a
-   test that `/widget` answers nothing; D-087: the test-copy door setting, a card on Admin → Public website).
-   It must send `PublicWebsiteSetup::frameAncestorsFor()` and answer on `tblPublicHosts`. Plan it first and
-   post the plan on #493. It shares files with P3, so nothing touching those runs beside it.
-2. The rest of the backlog (D-055), two at a time where files do not overlap; only one package at a time
-   changes `web/_sql/`.
+1. P4a to commit; then **P4b** (script; delete `web/public_html/widget/` with its routes, migration 264),
+   **P4c** (page and frame), **P4d** (D-087 card; the check confirming a public address reaches this door) —
+   one at a time, they share files. The plan is on #493.
+2. The rest of the backlog (D-055), two at a time where files do not overlap; one package at a time in
+   `web/_sql/`.
 3. #821 items 4-8 (open). 4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
 
 ## Working pattern that is paying off
 
 Builders and checkers run in their own worktrees; the commissioning session cherry-picks a clean package,
 adds its docs from the worktree's notes, runs the whole suite, pushes. When the same item fails two check
-rounds running, simplify the design (P3's verdict, #649's after-commit path both landed that way).
+rounds running, simplify the design (P3's verdict, #649's after-commit path). A round whose only findings are
+comments or documentation does not send a package round again.
 
 ## Blocked on the owner
 
@@ -105,3 +106,11 @@ index there. **Codex has reviewed none of this work.**
 | #872 | The portal's own database connection has no read deadline |
 | #873 | SafeFetch reads any 'HTTP/x NNN' header line as a new status |
 | #874 | tblUsers.notifyPrefs' column comment names two retired keys |
+| #875 | Saving notification choices can unsubscribe a member from a newsletter they never saw |
+| #876 | Other public pages on an organisation's public address (D-098) |
+| #878 | top-bar-selftest.mjs missing from the whole-suite runner |
+| #879 | check_public_door_reads.py matches text |
+| #880 | Media routes do not answer byte-range requests (Safari video) |
+| #881 | Calendar import: check-rule level unpinned; 'database problem' sentence stated as certain |
+| #882 | Public door: an event with no end leaves the feed at its start; per-organisation headers |
+| #883 | Events API and other copies of slug code still make addresses from the name alone |
