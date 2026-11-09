@@ -4,25 +4,28 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: `9c1cecfb` (#493 P2b, migration 261),
-`c403338a` (#493 P2a, migration 260), `0fcdf53c` (D-079 + D-092), `87f6fa8a` (D-091). Nothing uncommitted
-in the main checkout.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: `5c19a8cd`/`4362a1bd`/`6209c0f0` (#823,
+closed), `e077b1f8` (#821 docs + D-093/D-094/D-095), `f934c7df`/`e0cee3bb` (#821 items 1-3), `9c1cecfb`
+(#493 P2b, migration 261). Nothing uncommitted in the main checkout. Whole suite 93/93.
 
-## In flight (two packages side by side, no shared files — the 12 October 2026 rule)
+## In flight (side by side, no shared files — the 12 October 2026 rule)
 
-- **#821** (three #569 follow-ups) — built in worktree `.claude/worktrees/agent-a94ac0254f7a19bb4`, branch
-  `p821-build`, commits `e75d67e1` + `a40d8cf6` (on top of `e2f10c55`). Round 2 of the check is running
-  (presentation/tooling: three-round cap). Its CHANGELOG/DEV_NOTES/FEATURES entries are in that worktree's
-  `.claude-work/evidence/821/notes.md` (not committed) and are added when it is cherry-picked here.
-  #821 stays OPEN afterwards: its comment items 4-8 are not done. Raised from it: #863, #864.
+- **#493 P3** — the Admin → Public website page (D-085, D-093, D-094, D-095), migration 262. Built in
+  worktree `.claude/worktrees/agent-a9965bc08d040d0f1`, branch `p3-build`, commit `61ba3808` (on
+  `f934c7df`); its test 216/216. **Check round 1 running** (protected arm: runs until clean). Its
+  CHANGELOG/DEV_NOTES/FEATURES entries are in that worktree's `.claude-work/evidence/p3/notes.md`; add them
+  when it is cherry-picked here.
+- **#649** — a receipt that fails to attach (money: protected arm). Being built in its own worktree, branch
+  `p649-build`.
+- Worktrees for #821 (`agent-a94ac…`) and #823 (`agent-aacab…`) are finished and merged; their notes are in.
 
 ## Next, in this order
 
-1. **#493 P3** (the admin page, delegation, D-085), then **P4** (the public door; delete the old widget
-   folder, D-084). Both share files with P2a/P2b, so they run one at a time.
-2. **#823** (two pages with two canonical addresses) — can run beside P3 if their files do not overlap.
-3. The rest of the backlog (D-055), paired where files do not overlap. 4. #754 (waits on the merge).
-   5. The Codex review (D-007), then the merge.
+1. P3 to commit; then **P4** (the public door, D-056/D-084/D-087; it makes the door answer on
+   `tblPublicHosts` and sends `frame-ancestors` from `PublicWebsiteSetup::frameAncestorsValue()`).
+2. The rest of the backlog (D-055), two at a time where files do not overlap and only one package at a
+   time changes `web/_sql/` (migration numbers and full_schema.sql clash otherwise).
+3. #821 items 4-8 (the issue stays open). 4. #754 (waits on the merge). 5. The Codex review (D-007), the merge.
 
 ## Blocked on the owner
 
