@@ -163,7 +163,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-3" data-door-form="off">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                     <input type="hidden" name="action" value="door_off">
-                    <p class="small mb-1"><strong>Switch the door off</strong> to stop your website showing anything from the portal. Every copy pasted into a website stops working, and turning the door on again gives it a new name.</p>
+                    <p class="small mb-1" data-door-off-words="1"><strong>Switch the door off</strong> to stop your website showing anything from the portal. Every copy pasted into a website stops working while it is off. Turning the door on again gives it a new name, so copies using the old name on the portal's own address stay stopped — but a public address carries no name, so it answers again the moment the door is back on. To stop a public address that has gone somewhere it should not, change or remove it.</p>
                     <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-off-ok" required><label class="form-check-label" for="pw-door-off-ok">I understand every copy pasted into a website will stop working</label></div>
                     <button type="submit" class="btn btn-outline-danger btn-sm mt-1">Switch the public door off</button>
                 </form>

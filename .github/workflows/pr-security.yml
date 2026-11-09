@@ -1367,6 +1367,16 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_public_door_reads.py
 
+      # #493 P4a, round 2 of its check: every web-root file that starts the
+      # portal (index.php, error.php, api-docs/index.php, and any new one) asks
+      # Site::isDoorRequest() and Site::publicAddressUnknown() before any
+      # session starts, so an organisation's public address never answers a
+      # portal page (D-098). A new web-root file is how this would come back.
+      - name: 'Every web-root entry point hands the public door over first (hard gate, #493)'
+        id: webroot_door_handoff
+        if: always()
+        run: python3 tools/audit-checks/check_webroot_door_handoff.py
+
       # Every page that writes its own <head> must also write the description,
       # canonical address and preview card (#569). Those pages are the ones a
       # stranger sees — the sign-in page and the public forms — and before #569

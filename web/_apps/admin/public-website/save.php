@@ -103,7 +103,13 @@ if ($action === 'door_on' || $action === 'door_replace' || $action === 'door_off
             . '): the "I understand" tick was not given. Nothing was changed.',
             $actorId
         );
-        $finish('Nothing was changed: tick the box to say you understand that every copy pasted into a website will stop working.', 'danger');
+        // The words must match the card's own tick (round 2 of P4a's check):
+        // with a public address set, replacing the name does NOT stop copies
+        // that use it.
+        $finish($action === 'door_replace' && PublicWebsiteSetup::publicHostFor($mysqli, $siteId) !== ''
+            ? 'Nothing was changed: tick the box to say you understand that copies using the old name on the portal\'s own '
+                . 'address will stop working, and copies using your public address will not.'
+            : 'Nothing was changed: tick the box to say you understand that every copy pasted into a website will stop working.', 'danger');
     }
     $out = match ($action) {
         'door_on'      => PublicWebsiteSetup::turnDoorOn($mysqli, $siteId, $actorId),

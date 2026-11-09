@@ -68,6 +68,11 @@ if (is_readable($bootstrap) === true) {
         if (class_exists('Portal\\Core\\Site', false) === true && \Portal\Core\Site::isDoorRequest() === true) {
             \Portal\Core\PublicDoor::notFound();
         }
+        // 🔁 The public-address look-up failed: this may BE a public address,
+        //    so nothing is drawn and no session started (round 2 of P4a's check).
+        if (class_exists('Portal\\Core\\Site', false) === true && \Portal\Core\Site::publicAddressUnknown() === true) {
+            \Portal\Core\PublicDoor::tryAgain();
+        }
         if (class_exists('Portal\\Core\\Router') === true) {
             // 🚪 Ask the organisation gate before drawing anything with a
             //    menu (see the note at the top of this file). The session is

@@ -347,11 +347,15 @@ class Router
         //    address nothing earlier recognised. It must never fall through
         //    to tblRoutes, and reserving 'w' here also reserves it as an
         //    organisation key (ReservedKeys).
-        //    ⚠️ It is NOT the door's identical 404 in one respect, said rather
-        //    than hidden: by the time the router runs, Auth::ensureSession()
-        //    has started a session, so a session file exists and a new
-        //    visitor may be sent a session cookie. notFound() still removes
-        //    the headers it can (X-Offline-Copy among them).
+        //    Repeated slashes (//w/…, /{key}//w/…) and an inactive
+        //    organisation's prefix are caught there too since round 2.
+        //    ⚠️ It is NOT the door's identical 404, said rather than hidden:
+        //    by the time the router runs, Auth::ensureSession() has started a
+        //    session, so a session file exists, a new visitor may be sent a
+        //    session cookie, and the header callback that session start
+        //    registers adds X-Offline-Copy AFTER notFound() has cleared the
+        //    headers (round 2 of P4a's check: an earlier version of this note
+        //    said notFound() removed it here, which was untrue).
         if ($path === 'w' || str_starts_with($path, 'w/') === true) {
             PublicDoor::notFound();
         }

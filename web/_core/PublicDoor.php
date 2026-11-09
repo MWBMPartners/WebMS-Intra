@@ -687,6 +687,36 @@ final class PublicDoor
         exit();
     }
 
+    /** The body of tryAgain(): it names no organisation, page or reason beyond what a visitor can act on. */
+    public const TRY_AGAIN_BODY = "Please try again in a moment.\n";
+
+    /**
+     * 🔁 The answer when it could not be told whether this request is on an
+     * organisation's public address (`Site::publicAddressUnknown()`, a failed
+     * look-up). Every way into start-up gives it — index.php, error.php and
+     * the API description — straight after start-up and before any session:
+     * no cookie, no session file, no organisation named, nothing that is a
+     * page (round 2 of P4a's check). It is the same answer on the members'
+     * address, where a failed look-up would have shown "Please try again"
+     * anyway.
+     */
+    public static function tryAgain(): never
+    {
+        self::clearHeaders();
+        http_response_code(503);
+        header('Retry-After: 30');
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-store');
+        header('Access-Control-Allow-Origin: *');
+        header('Cross-Origin-Resource-Policy: cross-origin');
+        header('Content-Security-Policy: ' . self::DATA_CSP);
+        header('Referrer-Policy: no-referrer');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Robots-Tag: noindex, nofollow, noarchive');
+        echo self::TRY_AGAIN_BODY;
+        exit();
+    }
+
     /** 🚧 Closed for maintenance or an upgrade: the same for every organisation and every address. */
     private static function closed(): never
     {

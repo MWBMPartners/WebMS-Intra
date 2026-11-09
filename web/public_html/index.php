@@ -67,6 +67,14 @@ use Portal\Core\SiteGate;
 if (Site::isDoorRequest() === true) {
     PublicDoor::answer($mysqli);
 }
+// 🔁 And when it could not even be told whether this host is an organisation's
+//    public address (the look-up failed), nothing is drawn and no session is
+//    started: the same plain "try again" from every way in (round 2 of P4a's
+//    check). The organisation gate would have said "try again" a moment later
+//    anyway, but only after a session cookie and file had been made.
+if (Site::publicAddressUnknown() === true) {
+    PublicDoor::tryAgain();
+}
 
 // 🔑 Start (or resume) the session BEFORE the maintenance gate below.
 //    Maintenance::currentUserCanBypass() → App::isUmbrellaAdmin() → App::user()

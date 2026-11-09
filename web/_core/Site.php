@@ -215,6 +215,15 @@ class Site
     private static bool $doorOnPublicHost = false;
 
     /**
+     * @var bool True when the public-address look-up FAILED, so this request
+     *      may be on an organisation's public address and nobody can tell
+     *      (#493 P4a, round 2 of its check). Every way into start-up then
+     *      answers `PublicDoor::tryAgain()` — no session, no organisation
+     *      named — rather than a page. See publicAddressUnknown().
+     */
+    private static bool $publicAddressUnknown = false;
+
+    /**
      * Session mode only: the account the organisation was worked out FOR
      * (0 = nobody signed in). SiteGate compares it with the account that is
      * signed in once the session has properly started. They differ only when
@@ -1735,6 +1744,7 @@ class Site
         self::$doorSiteId      = null;
         self::$doorSurface     = '';
         self::$doorOnPublicHost = false;
+        self::$publicAddressUnknown = false;
 
         // 🔍 Check if multisite is enabled (direct query, settings not loaded yet)
         $enabled = self::portalWideSetting($db, 'multisite.enabled');
@@ -1776,6 +1786,7 @@ class Site
         // the sign-in pages: detection stays FAILED whatever happens below,
         // and SiteGate shows "try again".
         $doorLookupFailed = $door === 'failed';
+        self::$publicAddressUnknown = $doorLookupFailed;
 
         if ($enabled === false) {
             return 1;
@@ -1847,8 +1858,19 @@ class Site
     private static function detectDoor(\mysqli $db, ?bool $multi, string $mode): string
     {
         $host = self::normaliseHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
-        $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
-        $path = is_string($path) === true ? $path : '/';
+        // ⚠️ NOT parse_url(): it reads a path that begins "//" as a HOST —
+        //    parse_url('//w/x/events.json') answers host "w" and path
+        //    "/x/events.json" — so //w/… slipped past this step (measured by
+        //    P4a's own test, round 2). The path is everything before the "?".
+        $uri  = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+        $cut  = strcspn($uri, '?#');
+        $path = substr($uri, 0, $cut);
+        $path = $path === '' ? '/' : $path;
+        // Repeated slashes count as one, exactly as Router::extractPath()
+        // counts them — otherwise //w/… or /{key}//w/… was not a door request
+        // here, reached the router after the session had started, and was
+        // answered with a session cookie (round 2 of P4a's check).
+        $path = (string) preg_replace('#/{2,}#', '/', $path);
         // Case-insensitive like every other address: /W/… is a door request
         // too (and is then refused, because a name is lower case).
         $isW  = preg_match('#^/w(/|$)#i', $path) === 1;
@@ -1883,12 +1905,14 @@ class Site
         //     as a door request, rather than by the router, which runs after
         //     the session has started and so would answer with a session
         //     cookie and a session file (round 1 of P4a's check). Only a real
-        //     ACTIVE organisation key counts, so no ordinary address whose
-        //     second part happens to be "w" is taken from the router.
+        //     organisation key counts — an INACTIVE organisation's too (round
+        //     2: its prefix otherwise reached the members' 404 with a cookie)
+        //     — so no ordinary address whose second part happens to be "w" is
+        //     taken from the router.
         if ($isW === false && $multi === true && $mode === self::MODE_PATH
             && preg_match('#^/([^/]+)/w(/|$)#i', $path, $prefixed) === 1) {
             try {
-                $stmt = $db->prepare('SELECT 1 FROM `tblSites` WHERE `siteKey` = ? AND `isActive` = 1 LIMIT 1');
+                $stmt = $db->prepare('SELECT 1 FROM `tblSites` WHERE `siteKey` = ? LIMIT 1');
                 $stmt->bind_param('s', $prefixed[1]);
                 $stmt->execute();
                 $isKey = $stmt->get_result()->fetch_row() !== null;
@@ -1990,6 +2014,19 @@ class Site
     public static function doorOnPublicHost(): bool
     {
         return self::$doorOnPublicHost;
+    }
+
+    /**
+     * Could the request's host NOT be looked up among the public addresses
+     * (a database fault)? Then it may be an organisation's public address, and
+     * nothing may be drawn on it: index.php, error.php and the API description
+     * answer `PublicDoor::tryAgain()` before any session starts and name no
+     * organisation (round 2 of P4a's check found the API description drawing
+     * organisation 1's page with a session cookie in exactly this state).
+     */
+    public static function publicAddressUnknown(): bool
+    {
+        return self::$publicAddressUnknown;
     }
 
     /**
@@ -2286,5 +2323,6 @@ class Site
         self::$doorSiteId = null;
         self::$doorSurface = '';
         self::$doorOnPublicHost = false;
+        self::$publicAddressUnknown = false;
     }
 }

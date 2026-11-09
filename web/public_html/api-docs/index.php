@@ -114,6 +114,12 @@ if (defined('PORTAL_ROOT') === false) {
     if (\Portal\Core\Site::isDoorRequest() === true) {
         \Portal\Core\PublicDoor::notFound();
     }
+    // 🔁 The public-address look-up FAILED: this may be a public address, and
+    //    this page would draw organisation 1's name with a session cookie
+    //    (round 2 of P4a's check measured exactly that). Nothing is drawn.
+    if (\Portal\Core\Site::publicAddressUnknown() === true) {
+        \Portal\Core\PublicDoor::tryAgain();
+    }
 
     // 🚧 The same two gates, in the same order, as index.php: closed for an
     //    upgrade, then the staff gate on a pre-release copy. Without them

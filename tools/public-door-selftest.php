@@ -99,7 +99,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 118;
+const PDS_EXPECTED_CHECKS = 124;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -734,7 +734,10 @@ check('K05 "Switch the public door off" without the tick changes nothing, and bo
     [$doorName($siteA), $logged('PublicWebsiteSetupRefused', $people['root']['id'])], [$nameA1, 2]);
 check('K06 the card warns, before the buttons are pressed, that replacing or switching off stops every pasted copy',
     [str_contains($k1['page'], 'Every copy pasted into a website with the old name stops working at once'),
-        str_contains($k1['page'], 'Every copy pasted into a website stops working, and turning the door on again gives it a new name')],
+        // Round 2 of P4a's check: the switch-off words must not offer a new
+        // name as protection for a PUBLIC address, which answers again the
+        // moment the door is back on.
+        str_contains($k1['page'], 'a public address carries no name, so it answers again the moment the door is back on')],
     [true, true]);
 $signIn('member');
 $kMember = $card('member', 'door_off', ['understood' => '1']);
@@ -828,6 +831,21 @@ check('K08 with a public address set, replacing the name stops the old /w/ name 
         str_contains($kBefore, 'data-door-replace-public="1"'), str_contains($kBefore, 'Every copy pasted into a website with the old name stops working at once'),
         str_contains($k8['page'], 'is NOT affected by the name'), $feedA()['status']],
     [404, 200, true, false, true, 200]);
+$k9 = $card('root', 'door_replace');
+check('K09 with a public address set, the refusal for a missing tick says what the card\'s tick says: the public address is NOT stopped by a new name',
+    [$doorName($siteA), str_contains($k9['page'], 'copies using your public address will not'),
+        // The refusal's OWN words, whole: the switch-off tick on the same page
+        // rightly says "every copy pasted into a website will stop working".
+        str_contains($k9['page'], 'tick the box to say you understand that every copy pasted into a website will stop working')],
+    [$nameA, true, false]);
+// Round 2 of P4a's check: switching the door off and on again does NOT protect a
+// leaked PUBLIC address — it answers again the moment the door is back on.
+$card('root', 'door_off', ['understood' => '1']);
+$offStatus = $http('GET', '/events.json', ['host' => $hostA])['status'];
+$card('root', 'door_on');
+$nameA = (string) $doorName($siteA);
+check('K10 a public address is refused while the door is off and answers again the moment it is back on — which is why the card offers changing or removing it, not a new name, as the way to stop it',
+    [$offStatus, $http('GET', '/events.json', ['host' => $hostA])['status'], $feedA()['status']], [404, 200, 200]);
 
 // Round 1 of P4a's check (D-098): error.php and api-docs start the portal
 // WITHOUT index.php, and on a real server .htaccess sends every refused .php,
@@ -916,6 +934,13 @@ $xBefore = $sessionFiles();
 $refusals['a door address behind an organisation prefix'] = $http('GET', '/selftest-door-b/w/' . $nameB . '/events.json');
 check('X07 in "own path each" mode, /{B\'s key}/w/{B\'s name}/events.json is the door\'s 404 — decided before the session, so no session file',
     [$refusals['a door address behind an organisation prefix']['status'], $sessionFiles() - $xBefore], [404, 0]);
+$xBefore = $sessionFiles();
+$refusals['a door address behind a prefix with a doubled slash'] = $http('GET', '/selftest-door-b//w/' . $nameB . '/events.json');
+$refusals['a door address behind an INACTIVE organisation\'s prefix'] = $http('GET', '/selftest-door-c/w/' . $nameC . '/events.json');
+$doubled = $http('GET', '//w/' . $nameA . '/events.json');
+check('X08 repeated slashes count as one (/{key}//w/... refused, //w/{name}/... answered as the door) and an INACTIVE organisation\'s prefix is refused too — all before any session',
+    [$refusals['a door address behind a prefix with a doubled slash']['status'], $refusals['a door address behind an INACTIVE organisation\'s prefix']['status'],
+        $doubled['status'], $doubled['headers']['set-cookie'] ?? '', $sessionFiles() - $xBefore], [404, 404, 200, '', 0]);
 $setInstallation('multisite.detectionMode', 'session');
 
 // =============================================================================
@@ -1452,11 +1477,64 @@ $p = $plant('_core/Site.php', "if (\$isW === false && \$multi === true && \$mode
     });
 check('P42 with the prefixed /w/ form left to the router, the refusal comes after the session start and leaves a session file', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
 $hostFault = ["SELECT h.`siteID`, h.`hostName`, s.`isActive` FROM", "SELECT h.`siteID`, h.`hostNameX`, s.`isActive` FROM"];
-$p = $plant('_core/PublicWebsiteSetup.php', $hostFault[0], $hostFault[1],
-    static fn (): array => [$http('GET', '/login', ['host' => 'door-a.selftest.test'])['status'],
-        str_contains($http('GET', '/login', ['host' => 'door-a.selftest.test'])['body'], 'Please try again'), $feedA()['status']]);
-check('P43 with the public-address look-up FAILING (a planted database fault), an ordinary request fails closed — "Please try again", never the sign-in page — and the door refuses',
-    [$p['applied'], $p['result']], [true, [503, true, 404]]);
+$failureState = static function () use ($http, $feedA, $sessionFiles): array {
+    $before = $sessionFiles();
+    $out    = [];
+    foreach ([['/login', 'door-a.selftest.test'], ['/api-docs/index.php', 'door-b.selftest.test'],
+        ['/api-docs/index.php', 'door-c.selftest.test'], ['/error.php?code=404', 'door-b.selftest.test'], ['/login', null]] as [$path, $host]) {
+        $r = $http('GET', $path, $host === null ? [] : ['host' => $host]);
+        $out[] = [$r['status'], $r['body'], $r['headers']['set-cookie'] ?? ''];
+    }
+    return ['answers' => $out, 'door' => $feedA()['status'], 'session files made' => $sessionFiles() - $before];
+};
+$tryAgain = [503, "Please try again in a moment.\n", ''];
+$p = $plant('_core/PublicWebsiteSetup.php', $hostFault[0], $hostFault[1], $failureState);
+check('P43 with the public-address look-up FAILING (a planted database fault), EVERY way in — index.php on a public and on the members\' address, the API description on B\'s and switched-off C\'s address, error.php — gives the same plain "try again": no page, no organisation named, no cookie, no session file; and the door refuses',
+    [$p['applied'], $p['result']], [true, ['answers' => [$tryAgain, $tryAgain, $tryAgain, $tryAgain, $tryAgain], 'door' => 404, 'session files made' => 0]]);
+/** Several edits across files at once, each found exactly once, then put back byte for byte. */
+$plantMany = static function (array $edits, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
+    $was = [];
+    foreach ($edits as [$rel, $from, $to]) {
+        $path = $child . $sep . 'web' . $sep . str_replace('/', $sep, $rel);
+        $text = $was[$path] ?? (string) file_get_contents($path);
+        $was[$path] ??= $text;
+        if (substr_count($text, $from) !== 1) {
+            echo "      ! PLANT NOT APPLIED: the text was found " . substr_count($text, $from) . " times in {$rel}\n";
+            foreach ($was as $p => $t) {
+                file_put_contents($p, $t);
+            }
+            return ['applied' => false, 'result' => null];
+        }
+        file_put_contents($path, str_replace($from, $to, $text));
+    }
+    $startServer();
+    $waitForServer();
+    $result = $scenario();
+    foreach ($was as $p => $t) {
+        file_put_contents($p, $t);
+    }
+    $startServer();
+    $waitForServer();
+    return ['applied' => true, 'result' => $result];
+};
+$faultEdit = ['_core/PublicWebsiteSetup.php', $hostFault[0], $hostFault[1]];
+$p = $plantMany([$faultEdit, ['public_html/index.php', "if (Site::publicAddressUnknown() === true) {\n    PublicDoor::tryAgain();\n}\n", '']],
+    static function () use ($http, $sessionFiles): int {
+        $before = $sessionFiles();
+        $http('GET', '/login', ['host' => 'door-a.selftest.test']);
+        return $sessionFiles() - $before;
+    });
+check('P46 with index.php\'s failure-state answer taken out, the same fault leaves a session file on what may be a public address', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
+$p = $plantMany([$faultEdit, ['public_html/error.php', "&& \\Portal\\Core\\Site::publicAddressUnknown() === true) {", '&& false) {']],
+    static function () use ($http, $sessionFiles): int {
+        $before = $sessionFiles();
+        $http('GET', '/error.php?code=404', ['host' => 'door-b.selftest.test']);
+        return $sessionFiles() - $before;
+    });
+check('P47 with error.php\'s failure-state answer taken out, the same fault leaves a session file', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
+$p = $plantMany([$faultEdit, ['public_html/api-docs/index.php', 'if (\\Portal\\Core\\Site::publicAddressUnknown() === true) {', 'if (false) {']],
+    static fn (): int => $http('GET', '/api-docs/index.php', ['host' => 'door-c.selftest.test'])['status']);
+check('P48 with the API description\'s failure-state answer taken out, the same fault draws it (200) on switched-off C\'s address', [$p['applied'], $p['result']], [true, 200]);
 $p = (static function () use ($child, $sep, $hostFault, $startServer, $waitForServer, $http): array {
     $site  = $child . $sep . 'web' . $sep . '_core' . $sep . 'Site.php';
     $setup = $child . $sep . 'web' . $sep . '_core' . $sep . 'PublicWebsiteSetup.php';
