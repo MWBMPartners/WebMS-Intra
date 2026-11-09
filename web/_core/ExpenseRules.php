@@ -1035,8 +1035,13 @@ final class ExpenseRules
     /**
      * Said when it could not be found out whether the claim was saved. The
      * receipts are kept either way, so a saved claim never loses its evidence.
+     *
+     * "After a few minutes" is load-bearing: a commit still being completed
+     * when the look happens would leave the claim missing NOW and listed a
+     * moment later, and "if it is not listed, submit it again" said at once
+     * would invite the same money to be claimed twice (round 4 of the check).
      */
-    public const MSG_SAVE_NOT_CONFIRMED = 'It is not known whether your claim was saved: the save could not be confirmed. Please look under Your claims below before submitting it again, so the same money is not claimed twice. If it is not listed, submit it again.';
+    public const MSG_SAVE_NOT_CONFIRMED = 'It is not known whether your claim was saved: the save could not be confirmed. Please look under Your claims below before submitting it again, so the same money is not claimed twice. If it is still not listed after a few minutes, submit it again.';
 
     /**
      * What the claimant is told when the save could not be confirmed.

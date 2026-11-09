@@ -93,7 +93,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 142;
+const EXPECTED_CHECKS = 148;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -282,6 +282,8 @@ check('A48 not found: "not known", and the file that was not attached is STILL n
         str_contains($notKnown['message'], 'Either way, one file you chose was NOT attached: "x.exe", because')], ['danger', true, true]);
 check('A49 neither message claims the connection "was lost", which is not known (a commit can be refused with it still up)',
     str_contains($savedUnconfirmed['message'] . $notKnown['message'], 'lost'), false);
+check('A50 "not known" says to submit again only if it is STILL not listed AFTER A FEW MINUTES (a commit may still be finishing)',
+    str_contains(R::MSG_SAVE_NOT_CONFIRMED, 'If it is still not listed after a few minutes, submit it again.'), true);
 check('A44 a named file AND dropped files: both said, with the advice for both',
     str_contains($both['message'], '"a.exe"') && str_contains($both['message'], 'at most 3 files')
         && str_contains($both['message'], 'no more than 3 files'), true);
@@ -1102,6 +1104,64 @@ $keptRows = static function (int $since) use ($errorsSince): array {
     return $errorsSince($since, 'RECEIPT_KEPT_AFTER_FAILED_COMMIT');
 };
 
+// 📧 SO K06 CAN PIN THE APPROVERS' E-MAIL ITSELF (round 4 of the check), not
+//    only the activity record: an approver for the department, and a sender
+//    address, so a CONFIRMED save really does try to e-mail them. K05b proves
+//    that on a control claim through the same proxy; without it, "no e-mail
+//    for K1" would pass merely because no e-mail is ever tried here.
+$approverEmail = 'p649.approver@selftest.invalid';
+$oldApprover   = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ?');
+$oldApprover->bind_param('s', $approverEmail);
+$oldApprover->execute();
+foreach ($oldApprover->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+    $db->query('DELETE FROM tblUserDepts WHERE userID = ' . (int) $row['userID']);
+    $removeMember((int) $row['userID']);
+}
+$oldApprover->close();
+$ins = $db->prepare("INSERT INTO tblUsers (fullName, emailAddress, isActive, isAdmin, createdAt) VALUES ('Receipts Test Approver', ?, 1, 0, NOW())");
+$ins->bind_param('s', $approverEmail);
+$ins->execute();
+$approverId = (int) $db->insert_id;
+$ins->close();
+$db->query("INSERT IGNORE INTO tblUserSites (siteID, userID, isActive) VALUES ({$siteId}, {$approverId}, 1)");
+$db->query("INSERT INTO tblUserDepts (userID, deptID, siteID, isApprover) VALUES ({$approverId}, {$deptId}, {$siteId}, 1)");
+$state['undo'][] = "DELETE FROM tblUserDepts WHERE userID = {$approverId}";
+$db->query("UPDATE tblSettings SET settingValue = 'p649@selftest.invalid' WHERE settingID = " . (int) $fromRow['settingID']);
+$state['undo'][] = "UPDATE tblSettings SET settingValue = '{$oldFrom}' WHERE settingID = " . (int) $fromRow['settingID'];
+/**
+ * How many records say the approvers' e-mail about this claim was ATTEMPTED.
+ *
+ * Three places, because which one is written depends on how far the send gets
+ * (measured on the first run of this section: the test's unconfigured mail
+ * route throws "Graph creds missing" BEFORE Mailer writes `tblEmailLog`, so
+ * the e-mail log alone held nothing, even for a confirmed save, and K05b went
+ * red — which is exactly what it is for):
+ *   - `tblEmailLog`, when Mailer reaches its own send record;
+ *   - the activity record `ExpenseMailer::notify()` writes after a send;
+ *   - the error-log row it writes when the send throws.
+ * Any of them means the e-mail step RAN.
+ */
+$approverMailFor = static function (int $claimId) use ($db): int {
+    $subject  = '%New Expense Claim #' . $claimId . ' %';
+    $sent     = 'Sent submitted email for claim #' . $claimId . ' to %';
+    $failed   = 'Failed to send submitted email for claim #' . $claimId;
+    $s = $db->prepare(
+        'SELECT (SELECT COUNT(*) FROM tblEmailLog WHERE subject LIKE ?)'
+        . ' + (SELECT COUNT(*) FROM tblActivityLogs WHERE activityDescription LIKE ?)'
+        . ' + (SELECT COUNT(*) FROM tblErrors WHERE errorTitle = ?) AS n'
+    );
+    $s->bind_param('sss', $subject, $sent, $failed);
+    $s->execute();
+    $n = (int) ($s->get_result()->fetch_assoc()['n'] ?? -1);
+    $s->close();
+    return $n;
+};
+
+// K0: a CONFIRMED save through the same proxy, as the control.
+$k0 = $submit('P649 K0 control', [['files[]', 'Control ZZ-K0.png', $png]]);
+check('K05b the premise: on a CONFIRMED save in this same set-up, the approvers\' e-mail step RUNS (an attempt is recorded)',
+    [$k0['alert'], $approverMailFor((int) ($k0['claim']['claimID'] ?? 0)) >= 1], ['success', true]);
+
 // K1: the server commits; the portal never hears it.
 file_put_contents($arm, 'forward');
 $errBefore = $lastErrorId();
@@ -1120,8 +1180,14 @@ check('K05 ONE RECEIPT_KEPT_AFTER_FAILED_COMMIT row, written through the NEW con
     count($k1Kept) === 1 && str_contains((string) ($k1Kept[0]['errorDetail'] ?? ''), $k1Stored)
         && str_contains(json_encode($k1Kept) ?: '', 'ZZ-K1') === false, true);
 $k1Activity = (int) ($db->query("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityDescription LIKE 'Claim #{$k1Id} created%'")->fetch_assoc()['n'] ?? -1);
-check('K06 the steps after a confirmed save really did not run (no "created" record), so "the approvers were NOT sent their e-mail" is true',
-    $k1Activity, 0);
+check('K06 the steps after a confirmed save really did not run (no "created" record)', $k1Activity, 0);
+// ⚠️ WHAT K06b CANNOT SEE, measured with a plant: a version that DID call the
+//    e-mail step on this path stays green here, because in K1 the request's
+//    own connection is gone and the e-mail step fails before it records
+//    anything. K06b pins the message's claim for a lost connection; a commit
+//    refused with the connection still up is not produced by this test.
+check('K06b THE APPROVERS WERE NOT E-MAILED about K1 (no attempt recorded anywhere K05b found one), so the message saying so is true',
+    $approverMailFor($k1Id), 0);
 
 // K2: the same, and the portal cannot ask what happened.
 file_put_contents($arm, 'forward-refuse');
@@ -1168,7 +1234,7 @@ $k4 = $submit('P649 K4 silent database', [['files[]', 'Parking ZZ-K4.png', $png]
 $took = microtime(true) - $started;
 @unlink($refuseNew);
 check('K17 the premise: the new connection was held in silence', str_contains($proxySaid(), 'new connection held silently (stall)'), true);
-check('K18 THE REQUEST STILL ENDED within 20 seconds (the new connection\'s short deadline; PHP\'s default is about a minute)',
+check('K18 THE REQUEST STILL ENDED within 20 seconds (the new connection\'s 3-second read deadline; without it nothing ends the wait until this stand-in server gives up at 120 seconds)',
     $took < 20.0, true);
 check('K19 ...with the file kept and "not known" said',
     [is_file($receipts . $sep . (string) ($k4['rows'][0]['storedFilename'] ?? '-')), $k4['message']], [true, R::MSG_SAVE_NOT_CONFIRMED]);
@@ -1179,6 +1245,55 @@ file_put_contents($credsFile, $credsOriginal);
 proc_terminate($state['proxy']);
 proc_close($state['proxy']);
 $state['proxy'] = null;
+$db->query("UPDATE tblSettings SET settingValue = '{$oldFrom}' WHERE settingID = " . (int) $fromRow['settingID']);
+$db->query("DELETE FROM tblUserDepts WHERE userID = {$approverId}");
+$removeMember($approverId);
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "\nL. The CONNECT half of the new connection's deadline\n";
+// ═════════════════════════════════════════════════════════════════════════════
+// Round 4 of the check: K4 drives only the READ half (its stand-in server
+// accepts the connection and then says nothing). Taking the CONNECT half away
+// left every check green while a connection to an address that never answers
+// took 60 seconds instead of 3. Here `DbServer::connect()` is asked, with a
+// 3-second deadline, to reach an address that never answers the attempt.
+//
+// ⚠️ THE PREMISE IS ASSERTED FIRST. Whether an address "never answers" is a
+//    fact about this machine's network, not about the code: a network that
+//    answers "no route" at once would make the check pass on broken code. So
+//    an address is used only if a plain 5-second attempt to reach it really
+//    is still waiting at the end; if none is, L00 FAILS and says this
+//    environment could not test it — it never passes in silence.
+require_once $repo . $sep . 'web' . $sep . '_core' . $sep . 'DbServer.php';
+$blackhole = '';
+foreach (['192.0.2.1', '198.51.100.1', '203.0.113.1', '10.255.255.1'] as $candidate) {
+    $tried = microtime(true);
+    $sock  = @stream_socket_client('tcp://' . $candidate . ':3306', $errNo, $errText, 5.0);
+    $waited = microtime(true) - $tried;
+    if (is_resource($sock) === true) {
+        fclose($sock);
+        continue; // it answered — not an address that never answers
+    }
+    if ($waited >= 4.5) {
+        $blackhole = $candidate;
+        break;
+    }
+}
+check('L00 the premise: an address that never answers an attempt to connect exists from here (if not, this environment COULD NOT TEST the connect half)',
+    $blackhole !== '', true);
+$beforeSettings = [ini_get('default_socket_timeout'), ini_get('mysqlnd.net_read_timeout')];
+$tried = microtime(true);
+$threw = false;
+try {
+    \Portal\Core\DbServer::connect($blackhole !== '' ? $blackhole : '192.0.2.1', 'nobody', 'nothing', '', 3306, 3);
+} catch (Throwable $e) {
+    $threw = true;
+}
+$waited = microtime(true) - $tried;
+check('L01 WITH the 3-second deadline, giving up on that address takes under 10 seconds (PHP\'s own connect deadline is 60)',
+    [$threw, $waited < 10.0], [true, true]);
+check('L02 ...and the request\'s own settings are put back afterwards',
+    [ini_get('default_socket_timeout'), ini_get('mysqlnd.net_read_timeout')], $beforeSettings);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nI. More files than the server takes in one submission (max_file_uploads)\n";

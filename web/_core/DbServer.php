@@ -328,8 +328,12 @@ final class DbServer
      * @param int|null    $port     The port the database server listens on.
      * @param int|null    $timeout  Seconds to wait for the server — to connect,
      *                              and for each answer on this connection — or
-     *                              null for PHP's own defaults (about a minute),
-     *                              which is what every caller got before #649.
+     *                              null for PHP's own settings, which is what
+     *                              every caller got before #649. By default those
+     *                              are 60 seconds to connect
+     *                              (`default_socket_timeout`) and a whole DAY,
+     *                              86,400 seconds, for each answer, the server's
+     *                              first one included (`mysqlnd.net_read_timeout`).
      *
      * @return mysqli An open connection.
      *
@@ -352,10 +356,20 @@ final class DbServer
         //    for each answer from `mysqlnd.net_read_timeout`, both read when
         //    the connection is made, so both are set for this one `new mysqli`
         //    and put back straight after — the rest of the request keeps its
-        //    own. The READ deadline matters as much as the connect one: a
-        //    server that accepts the connection and then says nothing would
-        //    otherwise hold the handshake for about a minute (measured with
-        //    section K4 of tools/expense-receipts-selftest.php).
+        //    own. BOTH halves are needed, and they cover different faults:
+        //      - CONNECT (`default_socket_timeout`, 60 seconds by default): a
+        //        server that never answers the attempt to connect at all.
+        //        Section L of tools/expense-receipts-selftest.php drives it.
+        //      - READ (`mysqlnd.net_read_timeout`, 86,400 seconds — a day — by
+        //        default): a server that accepts the connection and then says
+        //        nothing. Measured by the independent check on PHP 8.5.12 with
+        //        no deadline: still waiting after 150 seconds. Section K4
+        //        drives the 3-second deadline ending it; it does not measure
+        //        the default, because its stand-in server gives up after 120.
+        //    On a PHP built with libmysqlclient instead of mysqlnd, the
+        //    `mysqlnd.*` setting does not exist and the READ half does not
+        //    apply; only the connect half does. (The request's own connection
+        //    has no read deadline either; that is #872, not this method.)
         //
         //    Done with settings rather than `mysqli_init()` and
         //    `real_connect()` on purpose: those are two more ways to open a
@@ -399,9 +413,11 @@ final class DbServer
      * start-up reads and opens the connection through connect() above, so it
      * is just as strict; it never reuses the request's connection.
      *
-     * It waits at most `$timeout` seconds (3 by default) for the server, so a
-     * database that cannot be reached cannot hold the request for a minute
-     * while the person waits for an answer.
+     * It waits at most `$timeout` seconds (3 by default) for the server, both
+     * to connect and for each answer, so a database that cannot be reached —
+     * or that is reached and then says nothing — cannot hold the request for
+     * a minute (to connect) or a day (for an answer) while the person waits.
+     * See connect() for what each half covers and where it does not apply.
      *
      * @param int $timeout Seconds to wait to connect, and for each answer.
      *
