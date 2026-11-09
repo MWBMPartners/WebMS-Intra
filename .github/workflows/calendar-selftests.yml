@@ -258,7 +258,7 @@ jobs:
             sleep 1
           done
           docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
-          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords selftest_calimport selftest_eventaddress; do
+          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords selftest_calimport selftest_eventaddress selftest_signinlimits; do
             docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
             docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -420,3 +420,32 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_eventaddress
         run: php -d memory_limit=512M tools/event-address-selftest.php
+
+      # 🔐 Password sign-in, on EVERY engine in this matrix (#887).
+      #
+      #    WHY IT IS HERE AS WELL AS IN portal-selftests.yml. That workflow runs
+      #    it on MySQL 8.0.36 and 8.4.11 only, and MySQL 9.7 has no SHA1(), SHA()
+      #    or MD5(): the sign-in lock was named with SHA1(), so on 9.7 every
+      #    password sign-in was refused as "Too many failed attempts" while every
+      #    test that signs in ran green elsewhere. Section 0 of this test takes
+      #    the portal's REAL lock on the server in front of it, so it can only
+      #    fail on an engine that lacks a function the lock uses — which means it
+      #    must run on such an engine, and this matrix is the one with MySQL 9.7
+      #    and MariaDB 12.3. (check_no_removed_sql_functions.py in
+      #    pr-security.yml is the text guard that works on every engine.)
+      #    Needs curl and openssl (both in the PHP step above) and time zones
+      #    known by name, which every image in the matrix loads itself. It takes
+      #    the web port, the mail port and the seven after it (9520-9528); the
+      #    feed stand-in left running above is on 9055. ⚠️ Like every step here,
+      #    not yet a live gate (#754). Run locally on MySQL 8.0.36, 8.4.11,
+      #    9.7.4 and MariaDB 11.4.13, 12.3.3.
+      - name: Sign-in limits self-test, on this engine (#887)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_signinlimits
+          SELFTEST_WEB_DIR: ${{ runner.temp }}/sign-in-limits
+          SELFTEST_WEB_PORT: '9520'
+          SELFTEST_MAIL_PORT: '9521'
+        run: |
+          mkdir -p "$SELFTEST_WEB_DIR"
+          php -d memory_limit=512M tools/sign-in-limits-selftest.php

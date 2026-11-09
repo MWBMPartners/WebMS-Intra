@@ -154,10 +154,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    The same message covers a try that Auth::loginLocal() found the
         //    address blocked for (tries sent at the same moment get past the
         //    check at the top of this page, and are caught there).
+        //    A THIRD answer since #887: the database would not answer the
+        //    sign-in lock at all. Nobody tried too often and no password was
+        //    checked, so "Too many failed attempts" would be untrue — and on
+        //    MySQL 9.7 it was shown to every member, for ever, while the real
+        //    fault reached no record. The fault is in the error log now.
         $waitMinutes   = Auth::localSignInWaitMinutes();
-        $errorMsg      = $waitMinutes > 0
-            ? t('auth.too_many_attempts', ['minutes' => $waitMinutes])
-            : t('auth.invalid_credentials');
+        if (Auth::localSignInUnavailable() === true) {
+            $errorMsg = t('auth.signin_unavailable');
+        } elseif ($waitMinutes > 0) {
+            $errorMsg = t('auth.too_many_attempts', ['minutes' => $waitMinutes]);
+        } else {
+            $errorMsg = t('auth.invalid_credentials');
+        }
         $signInRefused = true;
     }
 
@@ -181,6 +190,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //      written the record for this try: 'LoginFailed' for an unknown name
     //      or a wrong password, 'LoginBlocked' when a limit was reached (the
     //      name's own, or this address's when tries arrive together).
+    //      'LoginUnavailable' when the sign-in lock could not be asked for at
+    //      all (#887), with an error record beside it; not counted either.
     //    - The address is already blocked: 'LoginBlocked', the name
     //      Auth::loginLocal() uses for the same thing. RateLimiter counts
     //      'LoginFailed' only, so this record is kept for the audit trail and

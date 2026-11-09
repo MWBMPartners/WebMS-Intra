@@ -1244,6 +1244,21 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_reserved_words_quoted.py
 
+      # MySQL 9.7 has no MD5(), SHA1() or SHA() at all (measured on 9.7.4:
+      # ERROR 1305, "FUNCTION <db>.SHA1 does not exist"). Every named database
+      # lock in the portal was built with SHA1(DATABASE()), so on 9.7 every
+      # password sign-in was refused as "Too many failed attempts" and the mail
+      # queue job threw on every run (#887). No test that signs in ran on 9.7,
+      # so this TEXT check is the guard that works on every engine; the check's
+      # own cases run first, so a check that has stopped catching anything
+      # fails here rather than passing quietly.
+      - name: 'No SQL calls a function MySQL 9.7 removed (hard gate, #887)'
+        id: no_removed_sql_functions
+        if: always()
+        run: |
+          python3 tools/audit-checks/check_no_removed_sql_functions.py --selftest
+          python3 tools/audit-checks/check_no_removed_sql_functions.py
+
       # A snapshot reads the tables one after another, so without ONE consistent
       # view it can hold half a record - and it still answers success, while the
       # restore is the thing that finds out. TWO lines give that view, and

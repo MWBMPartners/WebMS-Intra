@@ -2059,8 +2059,8 @@ class Auth
      * WHY SHA2 AND NOT SHA1 (#887, 9 November 2026). This used SHA1(), and
      * MySQL 9.7 has NO SHA1(), SHA() or MD5() at all: measured on 9.7.4,
      * `SELECT SHA1('x')` answers ERROR 1305 "FUNCTION <db>.SHA1 does not
-     * exist" (SHA2() is still there). signInLock() catches that error and
-     * answers "could not have the lock", so on MySQL 9.7 EVERY password
+     * exist" (SHA2() is still there). The old signInLock() caught that error
+     * and answered "busy", so on MySQL 9.7 EVERY password
      * sign-in was refused with "Too many failed attempts" and no password
      * was ever checked — on a database version DbServer calls supported.
      * LEFT(SHA2(…, 256), 40) is 40 characters exactly as SHA1's answer was,
@@ -2078,6 +2078,14 @@ class Auth
     /** Minutes to wait, set by the last loginLocal() when it refused because of a limit; otherwise 0. */
     private static int $localSignInWait = 0;
 
+    /** True when the last loginLocal() refused because the sign-in lock could not be asked for at all (#887). */
+    private static bool $localSignInFault = false;
+
+    /** What takeSignInLock() answers: taken, held by another try, or not askable at all. */
+    private const LOCK_TAKEN = 'taken';
+    private const LOCK_BUSY  = 'busy';
+    private const LOCK_FAULT = 'fault';
+
     /**
      * Why the last loginLocal() said no. Above 0: a limit was reached (for
      * the address or for the name) and no password was checked; the number is
@@ -2091,6 +2099,25 @@ class Auth
     public static function localSignInWaitMinutes(): int
     {
         return self::$localSignInWait;
+    }
+
+    /**
+     * True when the last loginLocal() said no because sign-in could not be
+     * done AT ALL: the database would not answer the request for the sign-in
+     * lock (#887). No password was checked and nobody tried too often, so the
+     * page must NOT say "Too many failed attempts" — it says sign-in is
+     * temporarily unavailable. localSignInWaitMinutes() is 0 in this case.
+     *
+     * WHY THIS EXISTS. On MySQL 9.7, which has no SHA1(), the lock request
+     * failed on every try and was reported as "another try is still being
+     * checked": every member who signs in with a password was told "Too many
+     * failed attempts. Please try again in 1 minute(s)" for ever, the
+     * activity log said the same untrue thing, and nothing reached the error
+     * log, so nobody looking after the installation could see why.
+     */
+    public static function localSignInUnavailable(): bool
+    {
+        return self::$localSignInFault;
     }
 
     /**
@@ -2116,8 +2143,17 @@ class Auth
      * - A try that cannot have the lock within SIGN_IN_LOCK_WAIT seconds is
      *   refused as blocked, with no password checked. Refusing is the safe
      *   answer: letting it through would be the old fault again.
-     * - GET_LOCK() is the same on MySQL 8.0 and 8.4, needs no table and no
-     *   special permission, and so works on shared hosting.
+     * - GET_LOCK() is the same on MySQL 8.0, 8.4 and 9.7 and on MariaDB 11.4
+     *   and 12.3 (each measured, #887), needs no table and no special
+     *   permission, and so works on shared hosting. The lock's NAME must use
+     *   only functions every one of them has — see SIGN_IN_LOCK_SQL.
+     * - A lock that cannot be ASKED FOR at all (the database refuses the
+     *   statement, or GET_LOCK() answers NULL) is still refused — letting the
+     *   try through would mean tries from one address no longer take turns —
+     *   but it is NOT reported as "busy": it writes an error record and an
+     *   activity line naming a database fault, and the page says sign-in is
+     *   temporarily unavailable (#887). Before that, a broken lock read
+     *   exactly like the limiter working, to the member AND in the records.
      *
      * REJECTED: writing the failure record first and counting afterwards.
      * The right password would then need its record taken back, and a
@@ -2144,11 +2180,21 @@ class Auth
         self::ensureSession();
         global $mysqli;
 
-        self::$localSignInWait = 0;
+        self::$localSignInWait  = 0;
+        self::$localSignInFault = false;
         $identifier = strtolower(trim($identifier));
         $ip         = RateLimiter::clientIp();
 
-        if (self::signInLock($mysqli, $ip, true) === false) {
+        $lock = self::takeSignInLock($mysqli, $ip);
+        if ($lock === self::LOCK_FAULT) {
+            // 🧯 Not "busy": the database would not answer the question at all
+            //    (#887). Refused all the same — see the docblock above — and
+            //    said truthfully, in all three places that say anything.
+            self::$localSignInFault = true;
+            Logger::activity('LoginUnavailable', 'Sign-in try refused: the sign-in lock could not be taken because of a database fault. No password was checked.');
+            return false;
+        }
+        if ($lock === self::LOCK_BUSY) {
             self::$localSignInWait = 1;
             Logger::activity('LoginBlocked', 'Sign-in try refused: another try from this address was still being checked. No password was checked.');
             return false;
@@ -2157,41 +2203,96 @@ class Auth
         try {
             return self::loginLocalOneAtATime($mysqli, $identifier, $password, $ip);
         } finally {
-            self::signInLock($mysqli, $ip, false);
+            self::releaseSignInLock($mysqli, $ip);
         }
     }
 
     /**
-     * Take, or let go of, the sign-in lock for one visitor address.
+     * Take the sign-in lock for one visitor address, waiting up to
+     * SIGN_IN_LOCK_WAIT seconds.
      *
-     * @param bool $take True to take it (waiting up to SIGN_IN_LOCK_WAIT
-     *                   seconds), false to let it go.
+     * Answers one of three things, because they need different words (#887):
+     * - LOCK_TAKEN: GET_LOCK() answered 1.
+     * - LOCK_BUSY: GET_LOCK() answered 0 — another try from this address held
+     *   it for the whole wait. The ordinary "too many at once" case.
+     * - LOCK_FAULT: the database refused the statement (it threw), or
+     *   GET_LOCK() answered NULL, which MySQL documents as "an error
+     *   occurred". An error record is written, with the exception's class
+     *   and code and NEVER the visitor's address, which a lock name is built
+     *   from and a fault's own words could quote.
      *
-     * @return bool True when the lock was taken, or let go. False on a
-     *              time-out and on any database error. This never throws: a
-     *              try that cannot have the lock is refused by loginLocal(),
-     *              and a lock that cannot be let go is freed when the
-     *              request's connection closes.
+     * This used to be one method answering true or false, with every
+     * exception swallowed into false — so a missing SQL function read as
+     * "busy". Never put that catch-all back.
+     *
+     * It never throws: a try that cannot have the lock is refused by
+     * loginLocal().
      */
-    private static function signInLock(\mysqli $db, string $ip, bool $take): bool
+    private static function takeSignInLock(\mysqli $db, string $ip): string
     {
         try {
-            if ($take === true) {
-                $wait = self::SIGN_IN_LOCK_WAIT;
-                $stmt = $db->prepare('SELECT GET_LOCK(' . self::SIGN_IN_LOCK_SQL . ', ?) AS done');
-                $stmt->bind_param('si', $ip, $wait);
-            } else {
-                $stmt = $db->prepare('SELECT RELEASE_LOCK(' . self::SIGN_IN_LOCK_SQL . ') AS done');
-                $stmt->bind_param('s', $ip);
-            }
+            $wait = self::SIGN_IN_LOCK_WAIT;
+            $stmt = $db->prepare('SELECT GET_LOCK(' . self::SIGN_IN_LOCK_SQL . ', ?) AS done');
+            $stmt->bind_param('si', $ip, $wait);
             $stmt->execute();
             $row = $stmt->get_result()->fetch_assoc();
             $stmt->close();
+        } catch (\Throwable $e) {
+            self::recordSignInLockFault(get_class($e) . ' (code ' . (string) $e->getCode() . ')');
 
-            // 1 = done; 0 = timed out (or not ours to let go); NULL = an error.
-            return (int) ($row['done'] ?? 0) === 1;
+            return self::LOCK_FAULT;
+        }
+
+        $done = $row['done'] ?? null;
+        if ($done === null) {
+            self::recordSignInLockFault('GET_LOCK() answered NULL');
+
+            return self::LOCK_FAULT;
+        }
+
+        return (int) $done === 1 ? self::LOCK_TAKEN : self::LOCK_BUSY;
+    }
+
+    /**
+     * Write the error record for a sign-in lock that could not be asked for.
+     * `$what` is a class name and an error code, or a fixed phrase — never the
+     * database's own words, which could quote the lock name and so the hash
+     * of the visitor's address. Recording must never stop the refusal, so a
+     * failure here is swallowed: the activity line and the page still say it.
+     */
+    private static function recordSignInLockFault(string $what): void
+    {
+        try {
+            // Critical, not Error: the seeded alert levels are "Critical,Fatal",
+            // and a fault that refuses EVERY password sign-in is worth an alert
+            // (Logger's cooldown keeps it to one per cooldown period).
+            Logger::errorPlatform(
+                'Auth',
+                'Critical',
+                'SIGN_IN_LOCK',
+                'Password sign-in refused: the sign-in lock could not be taken because of a database fault',
+                $what . '. Every password sign-in is refused until this is fixed; single sign-on is not affected. See #887.'
+            );
         } catch (\Throwable $ignored) {
-            return false;
+            // Nothing more to do: the caller refuses either way.
+        }
+    }
+
+    /**
+     * Let go of the sign-in lock. Never throws, and its answer is not needed:
+     * a lock that cannot be let go is freed by the database when the
+     * request's connection closes.
+     */
+    private static function releaseSignInLock(\mysqli $db, string $ip): void
+    {
+        try {
+            $stmt = $db->prepare('SELECT RELEASE_LOCK(' . self::SIGN_IN_LOCK_SQL . ') AS done');
+            $stmt->bind_param('s', $ip);
+            $stmt->execute();
+            $stmt->get_result();
+            $stmt->close();
+        } catch (\Throwable $ignored) {
+            // Freed when the connection closes; see above.
         }
     }
 

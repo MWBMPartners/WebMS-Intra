@@ -38,6 +38,9 @@
  *
  *   0. The sign-in lock's own SQL runs on the database in front of it, and
  *      the first try from a fresh address is checked, not refused (#887).
+ *  0b. A lock the database will not answer (planted, in the scratch copy) is
+ *      refused, said truthfully to the member, and recorded as an error; a
+ *      lock genuinely held by another try still says "too many" (#887).
  *   A. One record per refused try: a wrong password, a made-up name, an empty
  *      password and an expired form each write exactly one.
  *   B. Five means five: after four wrong passwords the right one signs in;
@@ -179,7 +182,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 119; // two added by #887 (section 0)
+const EXPECTED_CHECKS = 124; // seven added by #887 (sections 0 and 0b)
 
 function refuse(string $why): never
 {
@@ -1069,7 +1072,7 @@ $state['mailProc'] = proc_open([PHP_BINARY, '-S', '127.0.0.1:' . $mailPort, $chi
 /** Start one portal server process on one port. They share the sessions folder, so a form opened on one can be sent to another. */
 $startPortal = static function (int $onPort) use ($child, $sep, $quiet, $env): mixed {
     return proc_open(
-        [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1',
+        [PHP_BINARY, '-d', 'session.save_path=' . $child . $sep . 'sessions', '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1', '-d', 'opcache.enable_cli=0',
             '-d', 'display_errors=0', '-S', '127.0.0.1:' . $onPort, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
         $quiet,
         $pipes,
@@ -1099,8 +1102,8 @@ head('0. The sign-in lock runs on THIS database (#887)');
 // =============================================================================
 //    WHAT WENT WRONG. The lock that makes sign-in tries from one address take
 //    turns was named with SHA1(), and MySQL 9.7 has no SHA1(), SHA() or MD5()
-//    (measured on 9.7.4: ERROR 1305). Auth::signInLock() catches the error and
-//    answers "could not have the lock", so on MySQL 9.7 EVERY password sign-in
+//    (measured on 9.7.4: ERROR 1305). The old Auth::signInLock() caught the error
+//    and answered "busy", so on MySQL 9.7 EVERY password sign-in
 //    was refused as "Too many failed attempts" with no password checked.
 //    Nothing caught it because every run of this file was on MySQL 8.0 or 8.4,
 //    where SHA1() still exists — so these two checks prove something only when
@@ -1141,6 +1144,98 @@ ok(
 if (records(ip(11), 'LoginFailed') < 1) {
     refuse('the portal did not record a failed sign-in against the made-up address ' . ip(11) . ' (' . describe($first) . '), so the limits cannot be told apart');
 }
+
+// =============================================================================
+head('0b. A lock that cannot be asked for is refused AND SAID; a busy one is still "too many" (#887)');
+// =============================================================================
+//    WHAT WENT WRONG. Auth::signInLock() swallowed EVERY failure into "busy":
+//    a missing SQL function, a refused statement or GET_LOCK() answering NULL
+//    all read as "another try from this address is still being checked". On
+//    MySQL 9.7, which has no SHA1(), that told every member "Too many failed
+//    attempts. Please try again in 1 minute(s)" for ever, wrote that same
+//    untrue line in the activity log, and put NOTHING in the error log — so
+//    nobody looking after the installation could see why nobody could sign in.
+//
+//    HOW THIS REACHES THE FAULT ON EVERY ENGINE. No engine this file runs on
+//    lacks a function the real lock uses, so the fault is PLANTED in this run's
+//    scratch copy of web/ only: the lock's SQL is given a function that exists
+//    nowhere, one request is made, and the file is put back at once (in a
+//    `finally`, so a failed check cannot leave every later part signing in
+//    against a broken lock). The built-in server reads each file per request;
+//    the portal servers are started with the opcode cache off so it cannot
+//    serve the old copy.
+//
+//    And the other half — a lock that is genuinely HELD (GET_LOCK answering 0)
+//    — must still say "Too many failed attempts", or this fix would have
+//    turned the ordinary case into the new message.
+$copyAuth    = $child . $sep . 'web' . $sep . '_core' . $sep . 'Auth.php';
+$authSource  = (string) file_get_contents($copyAuth);
+$lockLine    = 'private const SIGN_IN_LOCK_SQL = "' . $lockSql . '";';
+$plantedSql  = str_replace('LEFT(SHA2(', 'LEFT(P887_NO_SUCH_FUNCTION(', $lockSql);
+if (substr_count($authSource, $lockLine) !== 1 || $plantedSql === $lockSql) {
+    refuse('could not find the sign-in lock\'s SQL exactly once in the scratch copy of Auth.php, so the database fault cannot be planted (has its shape changed?)');
+}
+$errMark = (int) one('SELECT COALESCE(MAX(errorID), 0) AS m FROM tblErrors')['m'];
+file_put_contents($copyAuth, str_replace($lockLine, 'private const SIGN_IN_LOCK_SQL = "' . $plantedSql . '";', $authSource));
+try {
+    $faulty = tryPassword(ip(7), login('alpha'), $password);
+} finally {
+    file_put_contents($copyAuth, $authSource);
+}
+$faultRows = q('SELECT errorSeverity, errorCode, errorTitle, errorDetail FROM tblErrors WHERE errorID > ?', 'i', [$errMark]);
+$faultText = implode(' | ', array_map(static fn (array $r): string => (string) $r['errorTitle'] . ' / ' . (string) $r['errorDetail'], $faultRows));
+ok(
+    'a lock the database will not answer: the RIGHT password is still refused (tries from one address must keep taking turns), and nothing was counted as a failure',
+    signedIn($faulty) === false && records(ip(7), 'LoginFailed') === 0 && records(ip(7), 'LoginBlocked') === 0,
+    describe($faulty) . '; LoginFailed ' . records(ip(7), 'LoginFailed') . ', LoginBlocked ' . records(ip(7), 'LoginBlocked')
+);
+ok(
+    '...and the member is told sign-in is temporarily UNAVAILABLE, never "Too many failed attempts", which would be untrue',
+    str_contains(said($faulty), 'temporarily unavailable') === true && str_contains(said($faulty), 'Too many failed attempts') === false,
+    describe($faulty)
+);
+ok(
+    '...and the activity log says it was a database fault ("LoginUnavailable"), once',
+    records(ip(7), 'LoginUnavailable') === 1,
+    'LoginUnavailable records: ' . records(ip(7), 'LoginUnavailable')
+);
+ok(
+    '...and exactly ONE error record says so, at Critical, naming the exception\'s class and code (1305, an unknown function) and NOT the visitor\'s address',
+    count($faultRows) === 1
+        && (string) $faultRows[0]['errorSeverity'] === 'Critical'
+        && (string) $faultRows[0]['errorCode'] === 'SIGN_IN_LOCK'
+        && str_contains((string) $faultRows[0]['errorDetail'], 'code 1305') === true
+        && str_contains($faultText, '203.0.113') === false
+        && str_contains($faultText, 'P887_NO_SUCH_FUNCTION') === false,
+    'records: ' . count($faultRows) . '; ' . $faultText
+);
+
+$holder = $db->prepare('SELECT GET_LOCK(' . $lockSql . ', 0) AS got');
+$heldIp = ip(6);
+$holder->bind_param('s', $heldIp);
+$holder->execute();
+$heldGot = (int) ($holder->get_result()->fetch_assoc()['got'] ?? 0);
+$holder->close();
+$errMark = (int) one('SELECT COALESCE(MAX(errorID), 0) AS m FROM tblErrors')['m'];
+try {
+    $busy = tryPassword($heldIp, login('alpha'), $password); // waits the portal's five seconds, then gives up
+} finally {
+    $letGo = $db->prepare('SELECT RELEASE_LOCK(' . $lockSql . ') AS done');
+    $letGo->bind_param('s', $heldIp);
+    $letGo->execute();
+    $letGo->get_result();
+    $letGo->close();
+}
+ok(
+    'a lock genuinely HELD by another try (this test holds it): refused as before, "Too many failed attempts … 1 minute(s)", a "LoginBlocked" record and NO error record',
+    $heldGot === 1
+        && signedIn($busy) === false
+        && said($busy) === 'danger: Too many failed attempts. Please try again in 1 minute(s).'
+        && records($heldIp, 'LoginBlocked') === 1
+        && records($heldIp, 'LoginUnavailable') === 0
+        && (int) one('SELECT COUNT(*) AS n FROM tblErrors WHERE errorID > ?', 'i', [$errMark])['n'] === 0,
+    'premise (the test held the lock): ' . $heldGot . '; ' . describe($busy) . '; LoginBlocked ' . records($heldIp, 'LoginBlocked')
+);
 
 // =============================================================================
 head('A. One record per refused try');

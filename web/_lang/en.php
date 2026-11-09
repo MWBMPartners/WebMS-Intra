@@ -82,6 +82,7 @@ return [
     'auth.enter_credentials'        => 'Please enter your username or email and password.',
     'auth.invalid_credentials'      => 'Invalid credentials.',
     'auth.too_many_attempts'        => 'Too many failed attempts. Please try again in :minutes minute(s).',
+    'auth.signin_unavailable'       => 'Signing in with a password is temporarily unavailable. Please try again later; if this continues, tell whoever looks after this portal.',
     'auth.new_password'             => 'New Password',
     'auth.confirm_password'         => 'Confirm Password',
     'auth.reset_password'           => 'Reset Password',
