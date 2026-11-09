@@ -34,8 +34,8 @@
  *      their own <head> outside web/_apps' ordinary pattern — with a planted
  *      fault on /api-docs. Since #821 also the three other exempt SCREENS
  *      (the projector display, the asset tag page, the confidence monitor),
- *      each of which must say out loud that it has no icon, with a planted
- *      fault on one of them.
+ *      each of which must say out loud that it has no icon, with three planted
+ *      faults: the icon line deleted, commented out, and moved into <body>.
  *   H. /openapi.json names the INSTALLATION's product, never one written into
  *      the description file (#821), with a planted fault.
  *
@@ -43,14 +43,27 @@
  *   - It does not judge how a preview card LOOKS, only what the page says.
  *   - It does not check og:image's picture really loads; it checks the tag is
  *     only written when a raster file is on disk.
- *   - It signs nobody in. Pages behind the sign-in are covered by part B
- *     through a page that is public and uses the shared header.
- *   - TOKEN-GATED PAGES ARE NOT COVERED, and they are a real gap: accepting
+ *   - It signs ONE person in, an ordinary member, and only for the confidence
+ *     monitor (G08, G13/G14), which refuses anybody signed out. Every other
+ *     page here is fetched signed out. Ordinary pages behind the sign-in are
+ *     covered by part B only through a page that is public and uses the
+ *     shared header; nothing here fetches a signed-in page that requires
+ *     head-meta.php itself.
+ *   - TWO token-reached screens ARE covered (#821): the projector display
+ *     (`worship/display?t=…`) and the asset tag page (`a/{token}`), each drawn
+ *     for a record this test makes and removes. The token pages that REQUIRE
+ *     head-meta.php are still NOT covered, and they are a real gap: accepting
  *     an invitation, resetting a password, confirming an erasure request and
- *     unsubscribing all need a record seeded before they will draw their HTML,
- *     which needs a real user and organisation row because of the foreign
- *     keys. Each of those pages DOES require head-meta.php — the audit check
- *     proves that much — but nothing here proves the tags come out of them.
+ *     unsubscribing with a GOOD link all need a record seeded before they
+ *     will draw their HTML. Each of them does require head-meta.php — the
+ *     audit check proves that much — but nothing here proves the tags come
+ *     out of them. (A05 fetches /unsubscribe with a BROKEN link only.)
+ *   - Only part G reads a page's head the way a browser does — HTML comments
+ *     removed, the <head> only: the icon checks of G01-G04, and both the
+ *     description and the icon in G05-G14 (#821 round 1). Parts A-F, and the
+ *     description and preview-card checks of G01/G02, still search the whole
+ *     response, so a tag commented out or moved into the <body> would pass
+ *     them.
  *   - MariaDB: not covered here.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… \
@@ -66,7 +79,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/569
  * -----------------------------------------------------------------------------
  */
@@ -572,8 +585,51 @@ echo "\n=== G. /api-docs and the kiosk, which draw their own <head> outside the 
 // WHAT IT CANNOT DO: say whether the browser reports a console error. That
 // needs a browser; `tools/layout-audit.mjs` is the tool for it. What it CAN
 // say is the cause that error had — a page with no `rel="icon"` link.
-$iconOn = static fn (string $html): bool
-    => preg_match('#<link[^>]*\brel\s*=\s*"icon"[^>]*>#i', $html) === 1;
+//
+// 🔍 ONLY A LIVE ICON LINK IN THE <head> COUNTS (#821 round 1). The first
+//    version of these checks matched an icon link ANYWHERE in the response,
+//    so the line commented out — `<!-- <link rel="icon" href="data:,"> -->` —
+//    still passed: the independent check measured 34 of 34 green with exactly
+//    that fault put back into two screens. A browser ignores a commented-out
+//    link and ignores a link in the <body> for this purpose, so the response
+//    is read the way a browser reads it: HTML comments removed FIRST (a
+//    comment may itself contain `</head>`), then only the text between the
+//    first `<head` and the first `</head>` is looked at. An answer with no
+//    <head> at all gives '' and so has no icon.
+$liveHead = static function (string $html): string {
+    $noComments = (string) preg_replace('#<!--.*?-->#s', '', $html);
+    return preg_match('#<head\b[^>]*>(.*?)</head>#is', $noComments, $m) === 1 ? $m[1] : '';
+};
+// Every icon link in the live <head>. `rel` is a LIST of words, so
+// `rel="shortcut icon"` is an icon link too; either quote style is accepted.
+$iconLinks = static function (string $html) use ($liveHead): array {
+    preg_match_all('#<link\b[^>]*>#i', $liveHead($html), $all);
+    return array_values(array_filter(
+        $all[0],
+        static fn (string $link): bool => preg_match('#\brel\s*=\s*(["\'])([^"\']*)\1#i', $link, $r) === 1
+            && in_array('icon', preg_split('#\s+#', strtolower(trim($r[2]))) ?: [], true)
+    ));
+};
+$iconOn = static fn (string $html): bool => $iconLinks($html) !== [];
+
+/**
+ * The screen carries a description AND exactly one icon link, the empty
+ * `data:,` one — both read from the live <head> only. Answers what is missing,
+ * or '' when nothing is. Used for the kiosk (G05) and the three screens of
+ * #821 (G06-G08), which make the same choice for the same reason.
+ */
+$emptyIconOnly = static function (string $html) use ($tag, $liveHead, $iconLinks): string {
+    $miss = [];
+    $desc = $tag($liveHead($html), 'name', 'description');
+    if ($desc === null || trim($desc) === '') {
+        $miss[] = 'a description in the <head>';
+    }
+    $icons = $iconLinks($html);
+    if (count($icons) !== 1 || preg_match('#\bhref\s*=\s*(["\'])data:,\1#i', $icons[0]) !== 1) {
+        $miss[] = 'exactly one live icon link in the <head>, the empty `data:,` one (found ' . count($icons) . ')';
+    }
+    return implode('; ', $miss);
+};
 foreach (['G01' => '/api-docs', 'G02' => '/api-docs/index.php'] as $id => $path) {
     $html = $get($path);
     if ($html === '' || str_contains($html, 'id="swagger-ui"') === false) {
@@ -647,27 +703,33 @@ if ($docsAfter === null || $docsAfter === $docsBefore) {
 }
 
 // G05: the kiosk's "unavailable" screen — what a request with no token gets.
-$html = $get('/assets/kiosk');
-$desc = $tag($html, 'name', 'description');
-if ($html !== '' && $desc !== null && trim($desc) !== '' && preg_match('#<link[^>]*\brel="icon"\s+href="data:,"#i', $html) === 1) {
+// Read the same way as G06-G08 (comments removed, <head> only) since #821
+// round 1: the first version matched anywhere in the response, so a
+// commented-out icon line passed here too.
+$html  = $get('/assets/kiosk');
+$kMiss = $html === '' ? 'the page could not be fetched' : $emptyIconOnly($html);
+if ($kMiss === '') {
     ok('G05', 'the kiosk screen carries a description and an explicitly empty icon, so no /favicon.ico request is made');
 } else {
-    bad('G05', 'the kiosk screen is missing its description or its empty icon link', substr($html, 0, 400));
+    bad('G05', 'the kiosk screen is missing: ' . $kMiss, substr($html, 0, 400));
 }
 
 // -----------------------------------------------------------------------------
-// G06-G10: THE OTHER THREE EXEMPT SCREENS (#821).
+// G06-G14: THE OTHER THREE EXEMPT SCREENS (#821).
 //
 // WHY. The projector display (`worship/display`), the asset tag page
 // (`a/{token}`, drawn by assets/tag.php) and the confidence monitor
 // (`service-plans/confidence`) are on the static check's EXEMPT list, like the
-// kiosk, and drew their own <head> with no icon link — so a browser asked for
-// /favicon.ico on every load and got a 404 (F03 pins that the address is
-// unanswered). That was MEASURED in a real browser before the fix, not
-// inferred: on 9 November 2026 tools/layout-audit.mjs reported "Failed to load
-// resource ... 404 — at /favicon.ico" for each of the three, one run per
-// screen. Each now carries the kiosk's explicit empty icon and a one-line
-// description. These checks prove that is what comes OUT, over HTTP.
+// kiosk, and drew their own <head> with no icon link — so the browser fell
+// back to /favicon.ico and got a 404 (F03 pins that the address is
+// unanswered). WHAT WAS MEASURED, and no more: on 9 November 2026, in headless
+// Edge driven by tools/layout-audit.mjs, each of the three, audited alone in a
+// fresh browser, reported "Failed to load resource ... 404 — at /favicon.ico".
+// The browser asked ONCE PER RUN, on the first page it loaded, not once per
+// page: three screens audited together showed the error on the first only.
+// How often a visitor's own browser asks again was not measured. Each screen
+// now carries the kiosk's explicit empty icon and a one-line description.
+// These checks prove that is what comes OUT, over HTTP.
 //
 // Each screen draws only for a real record, so the test makes one of each and
 // removes them again at the end. The confidence monitor needs a signed-in
@@ -689,9 +751,16 @@ $readSetting = static function (string $key) use ($db): ?string {
     return is_array($row) === true ? (string) $row['settingValue'] : null;
 };
 
-/** Remove every record G06-G10 made. Safe to call twice. */
+/** Remove every record G06-G14 made. Safe to call twice. */
 $g8Tidy = static function () use ($db, $g8): void {
     $db->query('DELETE FROM tblAssetAudit WHERE assetID = ' . $g8['asset']);
+    // The tag page also mirrors each scan into the shared activity log, as an
+    // `AssetTokenScan` row naming nobody (the visitor is signed out), so the
+    // account clean-up below never reaches it. AssetRegister::audit() writes
+    // its description as "Asset #<id> — …", which is what finds it; the space
+    // after the number stops it matching a longer one that starts the same.
+    $db->query("DELETE FROM tblActivityLogs WHERE activityType LIKE 'Asset%' "
+        . "AND activityDescription LIKE 'Asset #" . $g8['asset'] . " %'");
     $db->query('DELETE FROM tblAssets WHERE assetID = ' . $g8['asset']);
     $db->query('DELETE FROM tblServicePlans WHERE planID = ' . $g8['displayPlan']);
     $db->query('DELETE FROM tblServicePlan WHERE planID = ' . $g8['plan']);
@@ -756,20 +825,6 @@ $getAsMe = static function (string $path, array $post = []) use ($port, $g8Jar):
     return is_string($body) === true ? $body : '';
 };
 
-/** The screen carries a description AND exactly the empty icon, and no other icon link. */
-$emptyIconOnly = static function (string $html) use ($tag): string {
-    $miss = [];
-    $desc = $tag($html, 'name', 'description');
-    if ($desc === null || trim($desc) === '') {
-        $miss[] = 'a description';
-    }
-    $icons = preg_match_all('#<link[^>]*\brel\s*=\s*"icon"[^>]*>#i', $html, $all);
-    if ($icons !== 1 || preg_match('#\bhref\s*=\s*"data:,"#i', $all[0][0] ?? '') !== 1) {
-        $miss[] = 'exactly one icon link, the empty `data:,` one (found ' . (int) $icons . ')';
-    }
-    return implode('; ', $miss);
-};
-
 $screens = [
     'G06' => ['/worship/display?t=' . $displayToken, 'the projector display', 'Page-head display plan', false],
     'G07' => ['/a/' . $tagToken, 'the asset tag page', 'Page-head projector', false],
@@ -799,33 +854,74 @@ foreach ($screens as $id => [$path, $words, $marker, $signedIn]) {
     }
 }
 
-// G09/G10: PLANT the fault on one screen. With the icon line taken out of the
-// copied projector display, G06's question must come back with an answer — or
-// G06-G08 prove nothing. Only the icon line is removed, so the page still
-// draws (a plant that broke the page would be "caught" for the wrong reason).
-$plantShow   = $child . $sep . 'web' . $sep . '_apps' . $sep . 'worship' . $sep . 'display.php';
-$showBefore  = (string) file_get_contents($plantShow);
-$showAfter   = preg_replace('#^\s*<link rel="icon" href="data:,">\s*$\n#m', '', $showBefore);
-if ($showAfter === null || $showAfter === $showBefore) {
-    bad('G09', 'could not plant the fault: no empty icon line found in the copied projector display');
-} else {
-    file_put_contents($plantShow, $showAfter);
-    $html = $get('/worship/display?t=' . $displayToken);
-    if (str_contains($html, 'Page-head display plan') === false) {
-        bad('G09', 'the planted projector display did not draw at all, so the plant broke more than the icon', substr($html, 0, 300));
+// G09-G14: PLANT the fault, three ways, one screen each. Each plant must turn
+// the check red — or G06-G08 prove nothing — and the screen must pass again
+// once the copy is put back. Each plant touches ONLY the icon line, so the
+// screen still draws (a plant that broke the page would be "caught" for the
+// wrong reason, which is why "did it draw" is asked first).
+//
+//   G09/G10  the line DELETED (projector display) — the obvious fault;
+//   G11/G12  the line COMMENTED OUT (asset tag page) — what the first version
+//            of these checks could not see: the text is all still in the
+//            response, and only a browser's reading ignores it (#821 round 1);
+//   G13/G14  the line MOVED into the <body> (confidence monitor) — still a
+//            live tag, in a place a browser does not take an icon from.
+$plantScreen = static function (
+    string $planted, string $restored, string $file, string $path, string $marker,
+    string $words, string $how, callable $transform, callable $fetch
+) use ($emptyIconOnly): void {
+    $before = (string) file_get_contents($file);
+    $after  = $transform($before);
+    if (is_string($after) === false || $after === $before) {
+        bad($planted, "could not plant the fault ({$how}): no empty icon line found in the copied {$words}");
+        return;
+    }
+    file_put_contents($file, $after);
+    $html = $fetch($path);
+    if (str_contains($html, $marker) === false) {
+        bad($planted, "the planted {$words} did not draw at all, so the plant broke more than the icon", substr($html, 0, 300));
     } elseif ($emptyIconOnly($html) !== '') {
-        ok('G09', 'with the icon line taken out of the projector display, the check sees it — G06 can see the fault');
+        ok($planted, "with the icon line {$how} in the {$words}, the check goes red — it can see that fault");
     } else {
-        bad('G09', 'with the icon line taken out, the projector display STILL passed, so G06 proves nothing');
+        bad($planted, "with the icon line {$how}, the {$words} STILL passed, so its check proves nothing");
     }
-    file_put_contents($plantShow, $showBefore);
-    $html = $get('/worship/display?t=' . $displayToken);
-    if ($emptyIconOnly($html) === '') {
-        ok('G10', 'and the projector display is whole again once the fault is taken out');
+    file_put_contents($file, $before);
+    if ($emptyIconOnly($fetch($path)) === '') {
+        ok($restored, "and the {$words} is whole again once the fault is taken out");
     } else {
-        bad('G10', 'the projector display did not recover after the planted fault was removed');
+        bad($restored, "the {$words} did not recover after the planted fault was removed");
     }
-}
+};
+// The icon line on its own (kept indentation in group 1), and the same line
+// together with its line ending, for the two plants that take it out.
+$iconLine      = '#^([ \t]*)(<link rel="icon" href="data:,">)[ \t]*$#m';
+$iconLineWhole = '#^[ \t]*<link rel="icon" href="data:,">[ \t]*\n#m';
+$appsCopy      = $child . $sep . 'web' . $sep . '_apps' . $sep;
+
+$plantScreen(
+    'G09', 'G10', $appsCopy . 'worship' . $sep . 'display.php',
+    '/worship/display?t=' . $displayToken, 'Page-head display plan', 'projector display', 'deleted',
+    static fn (string $s): ?string => preg_replace($iconLineWhole, '', $s, 1),
+    $get
+);
+$plantScreen(
+    'G11', 'G12', $appsCopy . 'assets' . $sep . 'tag.php',
+    '/a/' . $tagToken, 'Page-head projector', 'asset tag page', 'commented out',
+    static fn (string $s): ?string => preg_replace($iconLine, '$1<!-- $2 -->', $s, 1),
+    $get
+);
+$plantScreen(
+    'G13', 'G14', $appsCopy . 'service-plans' . $sep . 'confidence.php',
+    '/service-plans/confidence?id=' . $g8['plan'], 'Page-head confidence plan', 'confidence monitor', 'moved into the <body>',
+    static function (string $s) use ($iconLineWhole): ?string {
+        $without = preg_replace($iconLineWhole, '', $s, 1);
+        if (is_string($without) === false || $without === $s || substr_count($without, "<body>\n") !== 1) {
+            return null;
+        }
+        return str_replace("<body>\n", "<body>\n    <link rel=\"icon\" href=\"data:,\">\n", $without);
+    },
+    $getAsMe
+);
 $g8Tidy();
 if ($servicePlansWas === null) {
     $clearSetting('service_plans.enabled');

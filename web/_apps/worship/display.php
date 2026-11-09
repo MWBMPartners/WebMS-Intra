@@ -67,11 +67,14 @@ $siteName     = (string) (Site::branding('name')  ?? 'Portal');
     <meta name="description" content="A projector screen that shows the words of a service as the operator moves through them.">
     <!-- 🔖 "THIS SCREEN HAS NO ICON", SAID OUT LOUD (#821). With no icon link
          at all a browser falls back to /favicon.ico by convention; nothing
-         answers that address, so every load cost a 404 that the browser
-         reports as a console error. Measured, not assumed: on 9 November 2026
-         the browser audit (tools/layout-audit.mjs, which since #821 prints the
-         address of a failed request) reported "Failed to load resource ... 404
-         — at /favicon.ico" for this screen before this line was added.
+         answers that address, so the browser got a 404 and reported it as
+         a console error. What was measured, and no more: on 9 November
+         2026, in headless Edge driven by tools/layout-audit.mjs (which since
+         #821 prints the address of a failed request), this screen audited
+         alone reported "Failed to load resource ... 404 — at /favicon.ico"
+         before this line was added. That browser asked ONCE PER RUN, on the
+         first page it loaded, not on every page; how often a visitor's own
+         browser asks again was not measured.
 
          Why an EMPTY icon and not the portal's own: the portal's icon is
          worked out by head-meta.php, which this file deliberately does not use
