@@ -89,8 +89,10 @@ $renderUnavailable = static function (): never {
     <meta name="description" content="A self-service check-in and check-out terminal for borrowed equipment.">
     <!-- 🔖 "THIS PAGE HAS NO ICON", SAID OUT LOUD (#569). With no icon link
          at all a browser falls back to /favicon.ico by convention; nothing
-         answers that address, so every kiosk load cost a 404 that the browser
-         reports as a console error. Measured with the browser audit on
+         answers that address, so the browser's request for it got a 404, reported
+         as a console error (in the audit's headless Edge, once per run: the
+         browser remembers the failure, so how often a visitor's own browser
+         asks again was not measured, #821). Measured with the browser audit on
          7 November 2026, once /api-docs stopped hiding it by asking first.
 
          Why an EMPTY icon and not the portal's own: the portal's icon comes

@@ -21180,6 +21180,20 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### A "not found" is not a failed request, and a check must read a page as a browser does (#821)
+
+- **A 404 produces no `Network.loadingFailed` event** — the network part worked — so the only sign is a
+  console line that names no address; the address is in the log entry's own `url` field, which
+  `tools/layout-audit.mjs` used to throw away. That is how a missing `/favicon.ico` on `/api-docs` read as
+  "a JavaScript error at 320px". The audit now prints it.
+- **The browser asks for `/favicon.ico` once per run, not once per page** (it remembers the failure). To
+  measure whether one page triggers it, audit that page alone in a fresh run.
+- **Text that is present is not a tag that is live.** The first version of the new icon checks matched an
+  icon link anywhere in the response, so the line commented out passed 34 of 34 (round 1 of the check
+  planted it). They now remove comments FIRST (a comment may contain `</head>`), look only between
+  `<head>` and `</head>`, and read `rel` as a list of words. The QR guard (#623) and the head-tags gate
+  (#569) recorded the same shape. Parts A-F of the test still search the whole response; its header says so.
+
 ### The noticeboard's foyer screen (#493 P2b, migration 261)
 
 - **`Portal\Core\NoticeboardFoyer` is the one place** that makes, replaces and checks the secret link,

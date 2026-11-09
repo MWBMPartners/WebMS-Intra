@@ -47,7 +47,7 @@
  *     monitor (G08, G13/G14), which refuses anybody signed out. Every other
  *     page here is fetched signed out. Ordinary pages behind the sign-in are
  *     covered by part B only through a page that is public and uses the
- *     shared header; nothing here fetches a signed-in page that requires
+ *     shared header; nothing here checks a signed-in page that requires
  *     head-meta.php itself.
  *   - TWO token-reached screens ARE covered (#821): the projector display
  *     (`worship/display?t=…`) and the asset tag page (`a/{token}`), each drawn

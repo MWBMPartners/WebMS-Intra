@@ -4,6 +4,23 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Three full-screen pages stop asking for an icon that does not exist; the API description file carries no brand (#821)
+
+- **Fixed:** the projector display (`/worship/display`), the page reached by scanning an asset tag and
+  the speaker's confidence monitor (`/service-plans/confidence`) draw their own page head with no icon
+  link, so the browser asked for `/favicon.ico`, which nothing answers, and reported a "not found" error
+  (measured in headless Edge, once per run). Each now says plainly that it has no icon, as the kiosk
+  screen does, and carries a one-line description.
+- **Fixed:** `web/_core/api-spec.json` named the product and the publishing company. Neither was ever
+  served — `/openapi.json` already fills in the installation's own product name and publisher (#307) —
+  so **what a visitor sees does not change**; the file now carries a plain placeholder.
+- **Changed:** `tools/layout-audit.mjs` names the address of each console error, the script and line of
+  each JavaScript exception, and the addresses of requests that failed.
+- **Tests:** `tools/page-head-selftest.php`, 38 checks. The icon checks read the page head the way a
+  browser does (comments removed, the `<head>` only) and three planted faults — the icon line deleted,
+  commented out, and moved into the body — each turn them red. Two check rounds by fresh Claude agents.
+  Raised from it: #863, #864.
+
 ### A foyer screen can play the noticeboard's posters, opened by a secret link (#493, package P2b, migration 261)
 
 - **Added:** `/noticeboard/foyer?token=…` plays an organisation's posters full-screen in a loop with nobody

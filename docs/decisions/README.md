@@ -148,7 +148,10 @@ appended with its real date and a note that it was added later.
 | [D-090](090-one-website-yes-covers-every-date-of-a-repeating-copied-event.md) | 2026-11-08 | One website "Yes" for every date of a repeating copied-in event covers all its dates | in force |
 | [D-091](091-dark-mode-shades-follow-the-organisations-colour.md) | 2026-11-09 | In dark mode, the main colour's shades follow the organisation's own colour | in force |
 | [D-092](092-approving-a-suggested-event-keeps-it-members-only.md) | 2026-11-09 | Approving an event a member of the public suggested keeps it members-only | in force |
+| [D-093](093-only-a-global-administrator-hands-out-public-website-setup.md) | 2026-11-09 | Only an organisation's global administrator may hand out "Set up the public website" | in force |
+| [D-094](094-the-installation-can-forbid-framing-for-every-organisation.md) | 2026-11-09 | The installation can forbid every organisation's public pages being framed | in force |
+| [D-095](095-the-public-website-page-stores-both-addresses.md) | 2026-11-09 | The public-website page stores the organisation's main website and, optionally, a public address for the portal's public pages | in force |
 
-*92 decisions. This index is checked against the folder by
+*95 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
