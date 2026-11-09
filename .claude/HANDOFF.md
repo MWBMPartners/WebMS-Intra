@@ -4,7 +4,7 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: the #493 P1 commit,
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: `de32d26` (#493 P1),
 `52a7c6b` (D-088 to D-091), `747e2ef` (#852). Nothing uncommitted.
 
 ## Next, in this order
