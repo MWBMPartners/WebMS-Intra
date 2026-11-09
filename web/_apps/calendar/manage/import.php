@@ -1247,11 +1247,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             //    doubled every event. The owner chose: skip such
                             //    a row unless "Import these anyway" is ticked.
                             //
-                            //    Asked in turn, row by row, so a row the file
-                            //    repeats EXACTLY (same name, same start) is left
-                            //    out as already there once its first copy has
-                            //    been saved a moment earlier in this same run.
-                            //    That is deliberate: it is the same event twice.
+                            //    A row the FILE repeats (same name, same stored
+                            //    start as an earlier row) never reaches this
+                            //    question: the repeat test just below runs
+                            //    first and labels it "Repeats an earlier row",
+                            //    whatever happened to its first copy. With the
+                            //    tick set, neither test runs, so the calendar
+                            //    is not asked at all.
                             // 🔁 A repeat of an EARLIER ROW OF THIS FILE (same
                             //    stored start, same name byte for byte) is
                             //    left out unless the tick is set — the same

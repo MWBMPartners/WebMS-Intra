@@ -1009,9 +1009,9 @@ $x = $scnTwice(true);
 check('X6 WITH the tick, the repeated rows are imported too',
     [$x['lines'], $x['count']], [[2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK', 6 => 'OK'], 5]);
 
-// A repeat of a row the database REFUSED: "to import it as well" would claim a
-// first copy that is not there, so the message must say row 2 was not
-// imported either.
+// A repeat of a row the database REFUSED: it is still left out, and its line
+// is the same single wording as any repeat ($repeatWords) — it guesses nothing
+// about row 2 and points at row 2's own line, which says it was refused.
 $twiceRefused = $child . $sep . 'p790-twice-refused.csv';
 file_put_contents(
     $twiceRefused,
