@@ -109,7 +109,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 168;
+const PDS_EXPECTED_CHECKS = 170;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1172,14 +1172,40 @@ $scnReplaceWords = static function () use ($db, $siteA, $hostA, $card, $doorName
 };
 check('D17 "Replace the name" claims a public address is NOT affected — in its message AND its record — only when that address is the door\'s (approved, not a members\' address), never while it waits or is a members\' address',
     $scnReplaceWords(), ['waiting' => [false, false], 'a members\' address' => [false, false], 'in effect' => [true, true]]);
-/** X5: the set-up check's row about approval, in the same three states. */
+/**
+ * X5: the set-up check's row about approval, in the same three states.
+ *
+ * Round 9 of P4a's check: the first version matched words ANYWHERE on the
+ * page, and the organisation's card prints "Waiting for the installation's
+ * administrator…" itself, so the check's own waiting row was never tested —
+ * replacing it with an "ok" row saying the address was "set and ready" left
+ * every check green. So this reads ONLY the set-up check's results block
+ * (data-setup-check), takes its "Public address" rows in order — the address
+ * is this organisation's alone, its name exists, APPROVAL, not yet tested —
+ * and returns the approval row's STATE and WORDS, which the check compares
+ * exactly.
+ */
 $scnCheckRow = static function () use ($db, $siteA, $http, $tokenOn, $people, $asMembersAddress): array {
-    $run = static function () use ($http, $tokenOn, $people): array {
+    $run = static function () use ($http, $tokenOn, $people): ?array {
         $jar  = $people['root']['jar'];
         $page = $http('GET', '/admin/public-website', ['jar' => $jar]);
         $http('POST', '/admin/public-website/check', ['jar' => $jar, 'post' => ['csrf_token' => $tokenOn($page['body'])]]);
-        $body = $http('GET', '/admin/public-website', ['jar' => $jar])['body'];
-        return [str_contains($body, 'Approved by the installation'), str_contains($body, 'does NOT answer on it'), str_contains($body, 'Waiting for the installation')];
+        $body  = $http('GET', '/admin/public-website', ['jar' => $jar])['body'];
+        $start = strpos($body, 'data-setup-check="1"');
+        $end   = $start === false ? false : strpos($body, '</ul>', $start);
+        if ($start === false || $end === false) {
+            return null;
+        }
+        preg_match_all('#<li class="mb-2" data-check-state="([^"]*)">(.*?)</li>#s', substr($body, $start, $end - $start), $m, PREG_SET_ORDER);
+        $rows = [];
+        foreach ($m as $one) {
+            $text = trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($one[2]), ENT_QUOTES, 'UTF-8')));
+            $at   = strpos($text, 'Public address:');
+            if ($at !== false) {
+                $rows[] = [$one[1], trim(substr($text, $at + strlen('Public address:')))];
+            }
+        }
+        return $rows[2] ?? null;
     };
     $out = [];
     $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
@@ -1191,8 +1217,14 @@ $scnCheckRow = static function () use ($db, $siteA, $http, $tokenOn, $people, $a
     $out['in effect'] = $run();
     return $out;
 };
-check('D18 "Check my set-up" says Waiting, "approved but members sign in at it, so the door does NOT answer", or Approved — each in its own state and only there',
-    $scnCheckRow(), ['waiting' => [false, false, true], 'a members\' address' => [false, true, false], 'in effect' => [true, false, false]]);
+/** What the set-up check's approval row must say in each state: [state, words], compared EXACTLY. */
+$checkRowWant = [
+    'waiting'            => ['problem', 'Waiting for the installation\'s administrator to approve it. Until then it does nothing.'],
+    'a members\' address' => ['problem', 'Approved, but it is also an address members sign in at, so the public door does NOT answer on it.'],
+    'in effect'          => ['ok', 'Approved by the installation\'s administrator.'],
+];
+check('D18 "Check my set-up" gives its OWN approval row — read from its results block alone, state and words exact — as Waiting, "approved but members sign in at it, so the door does NOT answer", or Approved, each in its own state',
+    $scnCheckRow(), $checkRowWant);
 
 $setOwn($siteA, 'calendar.enabled', 'false');
 $refusals['Calendar switched off'] = $feedA();
@@ -2179,7 +2211,20 @@ check('P69 with "Replace the name" back on any stored address, it tells an organ
 $p = $plant('_core/PublicWebsiteSetup.php', "self::HOST_MEMBERS   => ['label' => 'Public address', 'state' => 'problem'",
     "'not-a-status'       => ['label' => 'Public address', 'state' => 'problem'", $scnCheckRow);
 check('P70 with the set-up check\'s "a members\' address" row taken out, it no longer says the door does not answer on such an address',
-    [$p['applied'], $p['result']['a members\' address'][1] ?? null], [true, false]);
+    [$p['applied'], ($p['result']['a members\' address'] ?? null) === $checkRowWant['a members\' address']], [true, false]);
+// Round 9 of P4a's check: the WAITING row was pinned by nothing (the card prints
+// the same words). Two plants on it: an "ok" row claiming the address is ready,
+// and a mere rewording; D18 must see both.
+$waitingArm = "default              => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Waiting for the '\n"
+    . "                    . 'installation\\'s administrator to approve it. Until then it does nothing.'],";
+$p = $plant('_core/PublicWebsiteSetup.php', $waitingArm,
+    "default              => ['label' => 'Public address', 'state' => 'ok', 'words' => 'Your public address is set and ready.'],", $scnCheckRow);
+check('P71 with the set-up check\'s waiting row turned into "ok — set and ready", a waiting address reads as ready',
+    [$p['applied'], ($p['result']['waiting'] ?? null) === $checkRowWant['waiting']], [true, false]);
+$p = $plant('_core/PublicWebsiteSetup.php', $waitingArm,
+    "default              => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Approval pending.'],", $scnCheckRow);
+check('P72 with the set-up check\'s waiting row merely reworded ("Approval pending."), it no longer says the address does nothing until approved',
+    [$p['applied'], ($p['result']['waiting'] ?? null) === $checkRowWant['waiting']], [true, false]);
 // P58 and P60 put A's own address back, which (rightly) leaves it waiting:
 // approve it again directly so the tidy-up starts from the state it expects.
 $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");

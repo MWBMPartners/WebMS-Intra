@@ -5,28 +5,39 @@
 # matches a static asset. This enables clean URLs like /expenses/submit
 # instead of /expenses/submit/index.php.
 #
-# SECURITY: Direct access to .php files anywhere under public_html/ is BLOCKED
-# (returns 404). The only entry points that may execute PHP via direct URL are
-# /index.php (the front controller itself), /api-docs/ (Swagger UI viewer,
-# served via Apache's DirectoryIndex), and /error.php (Apache ErrorDocument
-# target — must remain externally reachable as Apache invokes it for 4xx/5xx
-# subrequests). Every APP page lives in web/_apps/ outside the webroot
-# entirely after #159 and is reached via the front-controller → Router →
-# tblRoutes pipeline.
+# SECURITY: an address that names a PHP file directly is refused with a 404
+# by the deny rule below, wherever the file is, with three exceptions it lets
+# through exactly: /index.php, /api-docs/index.php and /error.php. Every APP
+# page lives in web/_apps/, outside this folder (#159), and is reached only
+# through the front controller, the Router and tblRoutes.
 #
-# WHAT IS ACTUALLY IN THIS FOLDER, because the three-file story below used to
-# be written as though nothing else were here: the webroot holds EIGHT .php
-# files, not three. The five that are not entry points — robots.php,
-# sitemap.php, manifest.php, openapi.php and offline/index.php — are 404'd by
-# the deny rule like any other, and are reached only through the router, by
-# the clean addresses seeded in tblRoutes (robots.txt → robots.php,
-# sitemap.xml → sitemap.php, manifest.json → manifest.php,
-# openapi.json → openapi.php; Router.php includes offline/index.php itself for
-# the 'offline' address). So the deny rule's exception list is NOT a list of
-# what is in the folder, and a new file put here does NOT belong on it: give
-# it a route instead. Do not "tidy away" one of those five on the strength of
-# a comment saying only three files live here — each one answers a live
-# address.
+# WHICH FILES IN THIS FOLDER REALLY RUN, measured on Apache 2.4 with
+# php:8.4-apache and pinned by tools/htaccess-apache-selftest.php (round 9 of
+# P4a's check: this paragraph used to say only the three exceptions ran, and
+# that offline/index.php was refused and reached only through the router,
+# which is untrue on Apache):
+#   - index.php runs for "/" (the folder's DirectoryIndex) and for every
+#     address the rules below hand to it. Typing /index.php itself is
+#     redirected to "/" by the rule that hides the front controller;
+#   - error.php runs at /error.php, and as the page for every 403, 404, 500
+#     and 503 (the ErrorDocument lines at the end);
+#   - api-docs/index.php runs at /api-docs/ through that folder's
+#     DirectoryIndex, and at /api-docs/index.php;
+#   - offline/index.php runs at /offline/ through that folder's
+#     DirectoryIndex. The deny rule sees the address /offline/, not
+#     /offline/index.php, so it does not refuse it. The address /offline (no
+#     slash) never reaches the router on Apache: the server's own
+#     DirectorySlash answers it first with a redirect to /offline/. It is the
+#     static offline page; the public door's self-test runs it directly and
+#     finds no session started and nobody named.
+#   - robots.php, sitemap.php, manifest.php and openapi.php are refused when
+#     named directly. They answer only through the router, at the clean
+#     addresses seeded in tblRoutes: robots.txt, sitemap.xml, manifest.json
+#     and openapi.json.
+# So the deny rule's exception list is NOT a list of what is in this folder,
+# and a new file put here does NOT belong on it: give it a route instead. Do
+# not "tidy away" any of these files on the strength of a list that leaves
+# them out: each one answers a live address.
 #
 # This means a probe like "/expenses/submit/save.php" returns 404 — no leak of
 # the backend language, no way to bypass the router's auth + CSRF gates by

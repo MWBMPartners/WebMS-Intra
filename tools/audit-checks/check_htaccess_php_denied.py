@@ -43,9 +43,11 @@ while the rule does nothing, each green:
     decides for the whole file);
   - an earlier rule that ends processing first (`RewriteRule ^ - [L]`);
   - an `[OR]` on a condition, which turns "all of these" into "any of these".
-Nothing in the tests executes the real .htaccess (the self-tests use PHP's
-built-in server, which ignores it), so whether the rule RUNS cannot be driven
-here (D-065): the source is PINNED instead.
+At round 7 nothing in the tests executed the real .htaccess (the portal's
+self-tests use PHP's built-in server, which ignores it), so the source was
+PINNED instead. Since round 8 tools/htaccess-apache-selftest.php DOES execute
+it, on a real Apache (D-065: drive what runs), and that test is the guard;
+this check reads the text without Docker, as an early warning, and pins:
   1. Exactly one RewriteEngine directive, and it says On — or, beside it,
      only further `RewriteEngine On` lines inside a later
      `<IfModule mod_rewrite.c>` section, which change nothing. No Rewrite*
