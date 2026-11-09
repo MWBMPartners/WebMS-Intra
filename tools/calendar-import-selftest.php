@@ -30,9 +30,15 @@
  *   F  the activity record exists and gives both counts
  *   G  the refusal is recorded for whoever looks after the installation
  *   H  pressing Confirm again imports nothing a second time
+ *   S  two rows with the SAME NAME, which needs no trigger at all: the
+ *      second is refused in plain words and the row after it is imported
+ *   T  a refusal carrying a SERVER code above 3000 (3819, a broken CHECK rule)
+ *      is a refusal, not a lost connection: the row after it is still saved
  *   P  THE PLANT: with the loop's two `catch` blocks made unable to catch
  *      anything — exactly the old loop's behaviour — the same file goes red.
- *      Then the plant is taken out and the scenario is green again.
+ *      Then the plant is taken out and the scenario is green again. A second
+ *      plant puts back "every code from 2000 up is a lost connection", and
+ *      section T's file goes red.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It does not drive a LOST CONNECTION part-way through (the "whether it
@@ -135,12 +141,21 @@ if ($tables < 100) {
 //    not a check that reports (#735).
 const REFUSED_NAME = 'P790 row refused';
 const TRIGGER_TEXT = 'p790 test trigger: this row is refused on purpose';
+// 🔢 A second name, refused with MYSQL_ERRNO 3819 — the code MySQL gives a row
+//    that breaks a CHECK rule. A SERVER code of 3000 and up is a refusal, not a
+//    lost connection; the first version of #790 read every code from 2000 up
+//    as a lost connection, and section T exists to keep that from coming back.
+const REFUSED_3819_NAME = 'P790 refused 3819';
+const TRIGGER_3819_TEXT = 'p790 test trigger: refused with a server code above 3000';
 $db->query('DROP TRIGGER IF EXISTS `p790_refuse_one_row`');
 try {
     $db->query(
         'CREATE TRIGGER `p790_refuse_one_row` BEFORE INSERT ON `tblEvents` FOR EACH ROW '
         . "BEGIN IF NEW.`eventName` = '" . REFUSED_NAME . "' THEN "
-        . "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '" . TRIGGER_TEXT . "'; END IF; END"
+        . "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '" . TRIGGER_TEXT . "'; "
+        . "ELSEIF NEW.`eventName` = '" . REFUSED_3819_NAME . "' THEN "
+        . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_3819_TEXT . "', MYSQL_ERRNO = 3819; "
+        . "END IF; END"
     );
 } catch (Throwable $e) {
     refuse('could not create the test trigger on tblEvents (' . $e->getMessage()
@@ -475,14 +490,15 @@ $reportOf = static function (string $html): array {
  * One whole import: upload, preview, confirm. Returns everything the checks
  * need, read from the page AND from the database.
  */
-$runImport = static function () use ($http, $tokenOn, $signIn, $csv, $db, $reportOf, $userId): array {
+$runImport = static function (?string $file = null) use ($http, $tokenOn, $signIn, $csv, $db, $reportOf, $userId): array {
+    $file ??= $csv;
     $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'");
     $mark = (int) ($db->query('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')->fetch_assoc()['m'] ?? 0);
     $errMark = (int) ($db->query('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')->fetch_assoc()['m'] ?? 0);
 
     $signIn();
     $page    = $http('GET', '/calendar/manage/import');
-    $preview = $http('POST', '/calendar/manage/import', ['csrf_token' => $tokenOn($page['body']), 'action' => 'preview'], ['csv_file' => $csv]);
+    $preview = $http('POST', '/calendar/manage/import', ['csrf_token' => $tokenOn($page['body']), 'action' => 'preview'], ['csv_file' => $file]);
     $token   = $tokenOn($preview['body']) !== '' ? $tokenOn($preview['body']) : $tokenOn($page['body']);
     $confirm = $http('POST', '/calendar/manage/import', ['csrf_token' => $token, 'action' => 'confirm']);
 
@@ -500,9 +516,9 @@ $runImport = static function () use ($http, $tokenOn, $signIn, $csv, $db, $repor
         $activity[] = (string) $row['activityDescription'];
     }
     $errors = [];
-    $rs = $db->query("SELECT `errorTitle`, `errorDetail` FROM `tblErrors` WHERE `errorID` > {$errMark}");
+    $rs = $db->query("SELECT `errorSeverity`, `errorTitle`, `errorDetail` FROM `tblErrors` WHERE `errorID` > {$errMark}");
     while ($row = $rs->fetch_assoc()) {
-        $errors[] = (string) $row['errorTitle'] . ' | ' . (string) $row['errorDetail'];
+        $errors[] = (string) $row['errorSeverity'] . ' | ' . (string) $row['errorTitle'] . ' | ' . (string) $row['errorDetail'];
     }
 
     return [
@@ -574,6 +590,11 @@ check('F3 ...and 2 rows were not imported (the refused one and the preview\'s)',
 echo "G. The refusal is recorded for whoever looks after the installation\n";
 $recorded = array_values(array_filter($r['errors'], static fn (string $e): bool => str_contains($e, TRIGGER_TEXT)));
 check('G1 exactly one error record carries the database\'s words', count($recorded), 1);
+check('G3 ...at "Notification", the level the alert e-mail leaves out by default, so a re-imported '
+    . 'file of refused rows cannot send a message per row',
+    str_starts_with($recorded[0] ?? '', 'Notification | '), true);
+check('G4 ...and it never says the connection was lost, because it was not',
+    str_contains($recorded[0] ?? '', 'connection was lost'), false);
 check('G2 ...and it says which row of an import it was',
     str_contains($recorded[0] ?? '', 'row 3'), true);
 
@@ -586,41 +607,63 @@ check('H1 the page says there is nothing to import', str_contains($again['body']
 $count = (int) ($db->query("SELECT COUNT(*) AS n FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'")->fetch_assoc()['n'] ?? -1);
 check('H2 ...and the database still holds exactly the two events', $count, 2);
 
-echo "S. Two rows with the SAME NAME: the ordinary cause, with no trigger at all\n";
+echo "S. The SAME NAME three times: the ordinary cause, with no trigger at all\n";
 // 🔤 An imported event's web address is made from its NAME alone, and the
-//    database refuses a second event at the same address. So a file holding
-//    the same service twice — the commonest thing anybody imports — had its
-//    second row refused, and before #790 that refusal stopped the import
-//    exactly as the trigger does above. This section needs no trigger: it is
-//    the cause a real file meets.
+//    database refuses a second event at the same address (#877). So a file
+//    holding the same service more than once — the commonest thing anybody
+//    imports — had its second row refused, and before #790 that refusal
+//    stopped the import exactly as the trigger does above. This section needs
+//    no trigger: it is the cause a real file meets. THREE copies, so two rows
+//    are refused and S5 can tell one record per import from one per row.
 $dup = $child . $sep . 'p790-dup.csv';
 file_put_contents(
     $dup,
     "eventName,startDateTime,endDateTime,status\n"
     . "\"P790 Sunday Service\",2031-03-02 10:00:00,2031-03-02 11:00:00,published\n"
     . "\"P790 Sunday Service\",2031-03-09 10:00:00,2031-03-09 11:00:00,published\n"
-    . "\"P790 after the twin\",2031-03-10 10:00:00,2031-03-10 11:00:00,published\n"
+    . "\"P790 Sunday Service\",2031-03-16 10:00:00,2031-03-16 11:00:00,published\n"
+    . "\"P790 after the twins\",2031-03-17 10:00:00,2031-03-17 11:00:00,published\n"
 );
-$db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'");
-$signIn();
-$page    = $http('GET', '/calendar/manage/import');
-$preview = $http('POST', '/calendar/manage/import', ['csrf_token' => $tokenOn($page['body']), 'action' => 'preview'], ['csv_file' => $dup]);
-$confirm = $http('POST', '/calendar/manage/import', [
-    'csrf_token' => $tokenOn($preview['body']) !== '' ? $tokenOn($preview['body']) : $tokenOn($page['body']),
-    'action'     => 'confirm',
-]);
-$dupReport = $reportOf($confirm['body']);
-check('S1 the page finishes with a list of all three rows', array_keys($dupReport), [2, 3, 4]);
-check('S2 the first service is imported, the second is not, the row after is imported',
-    array_map(static fn (array $line): string => $line[0], $dupReport), [2 => 'OK', 3 => 'Skipped', 4 => 'OK']);
-check('S3 ...and the second\'s reason says, in plain words, that the name\'s web address is taken',
-    str_contains($dupReport[3][1] ?? '', 'another event already has the web address made from this name'), true);
-$names = [];
-$rs = $db->query("SELECT `eventName` FROM `tblEvents` WHERE `eventName` LIKE 'P790 %' ORDER BY `eventID`");
-while ($row = $rs->fetch_assoc()) {
-    $names[] = (string) $row['eventName'];
-}
-check('S4 the database holds exactly what the list says', $names, ['P790 Sunday Service', 'P790 after the twin']);
+$s = $runImport($dup);
+check('S1 the page finishes with a list of all four rows', array_keys($s['report']), [2, 3, 4, 5]);
+check('S2 the first service is imported, the two copies are not, the row after is imported',
+    array_map(static fn (array $line): string => $line[0], $s['report']),
+    [2 => 'OK', 3 => 'Skipped', 4 => 'Skipped', 5 => 'OK']);
+check('S3 ...and a copy\'s reason says, in plain words, that the name\'s web address is taken',
+    str_contains($s['report'][3][1] ?? '', 'another event already has the web address made from this name'), true);
+check('S4 the database holds exactly what the list says',
+    array_values($s['events']), ['P790 Sunday Service', 'P790 after the twins']);
+$dupRecords = array_values(array_filter($s['errors'], static fn (string $e): bool => str_contains($e, 'calendar file import')));
+check('S6 TWO refused rows make ONE error record for the import, not one per row', count($dupRecords), 1);
+check('S7 ...which counts both rows', str_contains($dupRecords[0] ?? '', '2 row(s) refused'), true);
+
+echo "T. A server code above 3000 is a REFUSAL, not a lost connection\n";
+$csv3819 = $child . $sep . 'p790-3819.csv';
+file_put_contents(
+    $csv3819,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 T before\",2031-04-01 10:00:00,2031-04-01 11:00:00,published\n"
+    . '"' . REFUSED_3819_NAME . "\",2031-04-02 10:00:00,2031-04-02 11:00:00,published\n"
+    . "\"P790 T after\",2031-04-03 10:00:00,2031-04-03 11:00:00,published\n"
+);
+/** Section T's file, reduced to what the checks and the plant compare. */
+$scnServerCode = static function () use ($runImport, $csv3819): array {
+    $t = $runImport($csv3819);
+    return [
+        'lines'   => array_map(static fn (array $line): string => $line[0], $t['report']),
+        'msg3'    => $t['report'][3][1] ?? '',
+        'events'  => array_values($t['events']),
+        'lostBox' => str_contains($t['body'], 'The connection to the database was lost at row'),
+    ];
+};
+$t = $scnServerCode();
+check('T1 the row refused with code 3819 is "Skipped", and the rows either side are imported',
+    $t['lines'], [2 => 'OK', 3 => 'Skipped', 4 => 'OK']);
+check('T2 ...its reason is the database\'s refusal, with the code',
+    str_contains($t['msg3'], 'the database refused this row (error 3819'), true);
+check('T3 ...THE ROW AFTER IT IS SAVED — under the first version it was never tried',
+    $t['events'], ['P790 T before', 'P790 T after']);
+check('T4 ...and the page does not claim the connection was lost', $t['lostBox'], false);
 
 // 🔇 Read BEFORE the plant, which throws on purpose and fills the log.
 $phpLog  = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -628,7 +671,7 @@ $ownLines = array_values(array_filter(
     explode("\n", $phpLog),
     static fn (string $line): bool => str_contains($line, 'manage' . DIRECTORY_SEPARATOR . 'import.php')
 ));
-check('S5 the import page wrote no PHP error, warning or notice in sections A to S', $ownLines, []);
+check('S5 the import page wrote no PHP error, warning or notice in sections A to T', $ownLines, []);
 
 echo "P. The plant: the old loop, with nothing catching, goes RED\n";
 // 🚨 THIS IS WHAT MAKES THE CHECKS ABOVE WORTH HAVING. The plant makes both
@@ -660,6 +703,28 @@ check('P2 ...row 2 was still saved before the throw — the half-import #790 is 
     array_values($planted['events']), ['P790 first']);
 check('P3 ...row 4, after the refused row, was never tried', in_array('P790 last', $planted['events'], true), false);
 check('P4 ...and no activity record was written', $planted['activity'], []);
+
+file_put_contents($pagePath, $before);
+clearstatcache(true, $pagePath);
+
+// 🔌 The second plant puts back the first version's test, "2000 and above is a
+//    lost connection", and section T's file must go red.
+$codeTest = "if (\$code >= 2000 && \$code <= 2999) {\n"
+    . "                            return true;\n"
+    . "                        }\n"
+    . "                        return \$onMariaDb === true ? \$code === 1927 : \$code === 4031;";
+if (substr_count($before, $codeTest) !== 1) {
+    refuse('section P could not find exactly one copy of the lost-connection test in the copied page');
+}
+file_put_contents($pagePath, str_replace($codeTest, 'return $code >= 2000;', $before));
+clearstatcache(true, $pagePath);
+$startServer();
+$waitForServer();
+$t = $scnServerCode();
+check('P7 with "2000 and above" put back, the 3819 row is reported as a lost connection ("Not known")',
+    $t['lines'][3] ?? null, 'Not known');
+check('P8 ...and the row after it is never tried', $t['events'], ['P790 T before']);
+check('P9 ...and the page claims the connection was lost', $t['lostBox'], true);
 
 file_put_contents($pagePath, $before);
 clearstatcache(true, $pagePath);

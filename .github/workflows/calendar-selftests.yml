@@ -237,7 +237,9 @@ jobs:
       # 🧱 One database per test, each from full_schema.sql. The first loop
       #    waits for a SIGNED-IN query, not just a ping (the same reason as
       #    wait_for_mysql() in tools/e2e-migrations/run.sh).
-      - name: Build five throwaway databases from full_schema.sql
+      #    The name carries no count on purpose: it said "five" while it built
+      #    six, and #790 made it seven. The list in the loop is the count.
+      - name: Build the throwaway databases from full_schema.sql
         id: databases
         env:
           MYSQL_CID: ${{ job.services.mysql.id }}
@@ -393,6 +395,9 @@ jobs:
       #    after the refusal are still saved, and the activity record is
       #    written. It creates a TRIGGER (root may) and removes it on exit,
       #    and its web server takes a random port between 8790 and 8940.
+      #    ⚠️ This workflow has NEVER RUN ON GITHUB (#754): wiring it here is
+      #    not yet a live gate. It was run locally on MySQL 8.0.36 and
+      #    MariaDB 11.4 only.
       - name: Calendar file import self-test (#790)
         if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
         env:

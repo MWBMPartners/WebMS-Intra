@@ -920,6 +920,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    same way, and saying so once, truthfully, is better
                     //    than a list of identical failures.
                     $lostAtRow   = 0;
+                    $unknownCount = 0;
+                    // 📋 What goes to Admin → Errors is gathered here and
+                    //    written ONCE, after the loop. One record per refused
+                    //    ROW would put a spreadsheet's worth of lines on that
+                    //    page every time a file of refused rows is imported
+                    //    again — and, where an installation has chosen to be
+                    //    e-mailed about "Error" records, a message per row.
+                    $refusedLines = [];
+                    $faultLines   = [];
+                    $lostLine     = '';
+                    $lostCode     = 0;
+
+                    // 🔌 WHICH CODES MEAN "THE CONNECTION WENT", not "the row
+                    //    was refused". A connection that goes WHILE a row is
+                    //    being saved leaves that row's outcome unknown, so the
+                    //    two must never be confused — in either direction.
+                    //
+                    // ⚠️ THE FIRST VERSION SAID "2000 AND ABOVE ARE THE
+                    //    CLIENT's CODES", and that was untrue. Only 2000-2999
+                    //    are the client library's. MySQL's own refusals carry
+                    //    3000 and up (3819 is a CHECK rule a row breaks, 3100 a
+                    //    replication hook refusing it) and MariaDB's 4000 and
+                    //    up. Measured by the independent check with a trigger
+                    //    raising 3819: the row was reported "Not known: the
+                    //    connection to the database was lost", the valid row
+                    //    after it was never tried — while the activity record,
+                    //    written over that same connection, WAS written,
+                    //    proving the connection had never gone.
+                    //
+                    //    So: 2000-2999 (2006 "gone away" and 2013 "lost during
+                    //    query" are the ones that happen), plus the one SERVER
+                    //    code on each engine that means the server ended the
+                    //    connection — MySQL's 4031 (disconnected for being idle
+                    //    too long) and MariaDB's 1927 (the connection was
+                    //    killed). Each is asked only of its own engine,
+                    //    because the two number their codes independently and
+                    //    a number one uses may mean something else to the
+                    //    other. `server_info` is read from what the connection
+                    //    already holds; it sends nothing.
+                    $onMariaDb   = stripos((string) $mysqli->server_info, 'mariadb') !== false;
+                    $lostTheLine = static function (int $code) use ($onMariaDb): bool {
+                        if ($code >= 2000 && $code <= 2999) {
+                            return true;
+                        }
+                        return $onMariaDb === true ? $code === 1927 : $code === 4031;
+                    };
                     foreach ($rows as $r) {
                         if (count($r['errors'] ?? []) > 0) {
                             $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => implode('; ', $r['errors'])];
@@ -968,9 +1014,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         //    page already promised a list of which rows were
                         //    imported and which were skipped, and a long file
                         //    failing whole on one bad row is worse for somebody
-                        //    importing a year of events. Whether to switch to
-                        //    all-or-nothing is the owner's choice and is asked
-                        //    on #790.
+                        //    importing a year of events. The owner chose this
+                        //    over all-or-nothing: D-099.
                         //
                         //    A single INSERT is saved whole or not at all, so a
                         //    row refused by the database leaves nothing behind.
@@ -1067,13 +1112,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $savedAs = (int) $stmt->insert_id;
                         } catch (\mysqli_sql_exception $refused) {
                             $code = (int) $refused->getCode();
-                            // 🔌 2000 and above are the CLIENT's codes — the
-                            //    connection, not the row. 2006 "gone away" and
-                            //    2013 "lost during query" are the ones that
-                            //    matter, and for those the server may already
-                            //    have saved the row, so nothing is promised.
-                            if ($code >= 2000) {
+                            // 🔌 A lost connection, not a refusal: the server
+                            //    may already have saved the row, so nothing is
+                            //    promised. Which codes count is decided ONCE,
+                            //    in `$lostTheLine` above.
+                            if ($lostTheLine($code) === true) {
                                 $lostAtRow = (int) $r['rowNum'];
+                                $lostCode  = $code;
+                                $lostLine  = $refused->getMessage();
                                 $unknown   = true;
                                 $refusal   = 'Not known: the connection to the database was lost while this row was being '
                                     . 'saved (error ' . $code . '), so this page cannot tell whether it was saved. Check '
@@ -1093,13 +1139,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $refusal = 'Not imported: the database refused this row (error ' . $code . ': '
                                     . $refused->getMessage() . '). Nothing from this row was saved.';
                             }
-                            Logger::errorPlatform(
-                                'MySQL',
-                                'Error',
-                                (string) $code,
-                                'A row of a calendar file import was refused by the database',
-                                'row ' . (int) $r['rowNum'] . ': ' . $refused->getMessage()
-                            );
+                            if ($unknown === false) {
+                                $refusedLines[] = 'row ' . (int) $r['rowNum'] . ' (error ' . $code . '): '
+                                    . $refused->getMessage();
+                            }
                         } catch (\Throwable $fault) {
                             // 🧯 Anything else: a fault in THIS PAGE's own code
                             //    while getting the row ready. The insert is the
@@ -1109,14 +1152,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $refusal = 'Not imported: this row could not be got ready for saving because of a fault in '
                                 . 'the portal, which has been recorded for whoever looks after it. Nothing from this '
                                 . 'row was saved.';
-                            Logger::errorPlatform(
-                                'PHP',
-                                'Error',
-                                'CALENDAR_IMPORT_ROW',
-                                'A row of a calendar file import could not be got ready for saving',
-                                'row ' . (int) $r['rowNum'] . ': ' . get_class($fault) . ': ' . $fault->getMessage()
-                                    . "\n" . $fault->getFile() . ':' . $fault->getLine()
-                            );
+                            $faultLines[] = 'row ' . (int) $r['rowNum'] . ': ' . get_class($fault) . ': '
+                                . $fault->getMessage() . ' (' . $fault->getFile() . ':' . $fault->getLine() . ')';
                         }
 
                         if ($savedAs > 0) {
@@ -1124,7 +1161,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $okCount++;
                         } else {
                             $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => $refusal, 'unknown' => $unknown];
-                            $notCount++;
+                            // A row whose outcome is not known is counted on
+                            // its own: calling it "not imported" in the
+                            // activity record would claim what the page
+                            // cannot know.
+                            if ($unknown === true) {
+                                $unknownCount++;
+                            } else {
+                                $notCount++;
+                            }
                         }
                     }
                     // 🧹 Closing a statement on a connection that has gone can
@@ -1143,7 +1188,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     Logger::activity(
                         'EventsImported',
                         'Bulk import: ' . $okCount . ' events created, ' . $notCount . ' rows not imported'
+                        . ($unknownCount > 0 ? ', ' . $unknownCount . ' row whose outcome is not known' : '')
                     );
+
+                    // 📋 ONE record per kind, per import (see above), each
+                    //    worded for what actually happened. A refused row is
+                    //    the file's problem, shown in full on the page the
+                    //    administrator is looking at, so it is a
+                    //    "Notification" — the lowest level, which the alert
+                    //    e-mail leaves out unless an installation has asked
+                    //    for it (`portal.alerts.severities`, by default
+                    //    "Critical,Fatal"). The title carries no count, so the
+                    //    alert's cool-down (keyed on platform, code and title)
+                    //    treats repeated imports as the same thing. A fault in
+                    //    the page and a lost connection are the portal's
+                    //    problems, so they are "Error". The lost connection's
+                    //    record says the connection was lost — never
+                    //    "refused" — and it usually lands only in PHP's own
+                    //    log, because the database it would be written to is
+                    //    the one that went.
+                    if (count($refusedLines) > 0) {
+                        Logger::errorPlatform(
+                            'MySQL',
+                            'Notification',
+                            'CALENDAR_IMPORT_ROWS_REFUSED',
+                            'Rows of a calendar file import were refused by the database',
+                            count($refusedLines) . " row(s) refused:\n" . implode("\n", $refusedLines)
+                        );
+                    }
+                    if (count($faultLines) > 0) {
+                        Logger::errorPlatform(
+                            'PHP',
+                            'Error',
+                            'CALENDAR_IMPORT_ROW_FAULT',
+                            'Rows of a calendar file import could not be got ready for saving',
+                            implode("\n", $faultLines)
+                        );
+                    }
+                    if ($lostAtRow > 0) {
+                        Logger::errorPlatform(
+                            'MySQL',
+                            'Error',
+                            (string) $lostCode,
+                            'The database connection was lost during a calendar file import',
+                            'at row ' . $lostAtRow . ': ' . $lostLine
+                        );
+                    }
                     // The rows leave the session whatever happened: every row
                     // has an outcome above, and pressing Confirm again would
                     // otherwise try the IMPORTED rows a second time.
