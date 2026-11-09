@@ -1052,12 +1052,16 @@ final class PublicWebsiteSetup
 
     /**
      * The HTTP statuses that mean the main website answered and TURNED THE
-     * CHECK AWAY — sign-in required (401), refused (403), too many requests
-     * (429). Only these are shown "For information"; see `mainWebsiteVerdict()`.
+     * CHECK AWAY: refused (403) and too many requests (429) — what bot
+     * protection and rate limits typically send an automated check while the
+     * website is fine for visitors. Only these are shown "For information";
+     * see `mainWebsiteVerdict()`. 401 is deliberately NOT here (round 7): a
+     * 401 at the front page means EVERY visitor is asked for a password, so
+     * the public cannot see the website at all.
      *
      * @var list<int>
      */
-    public const TURNED_AWAY_STATUSES = [401, 403, 429];
+    public const TURNED_AWAY_STATUSES = [403, 429];
 
     /** What the check says about the main website whenever it did not get a normal page. */
     public const NOT_A_NORMAL_PAGE = 'This check did not get a normal page from your main website. That can happen, for '
@@ -1078,17 +1082,18 @@ final class PublicWebsiteSetup
      *     plus — only where SafeFetch reports one — the last HTTP status
      *     received, as a fact and not as a cause. The row is "For
      *     information" ('note') ONLY for the statuses in
-     *     `TURNED_AWAY_STATUSES` — 401, 403 and 429 — where the website
-     *     answered and turned this check away (asked for a sign-in, refused it,
-     *     or said "too many requests"), which a website that is fine for
-     *     visitors often does to an automated check. EVERY other answer, and
-     *     no answer at all, is "Needs attention" ('problem'): a 5xx is the
-     *     website's own server saying it is failing, and a 404, 410 or 421
-     *     often means a lapsed or misconfigured domain (a hosting service
-     *     answering "no site here"). (Round 4 drew the line at "400 or more",
-     *     which called a failing server "For information"; round 5 at
-     *     "400-499", which still called a 404 "For information"; round 6
-     *     narrowed it to the three statuses that really mean "turned away".)
+     *     `TURNED_AWAY_STATUSES` — 403 and 429 — where the website answered
+     *     and turned this check away (refused it, or said "too many
+     *     requests"): what bot protection and rate limits send an automated
+     *     check while the website is fine for visitors. EVERY other answer,
+     *     and no answer at all, is "Needs attention" ('problem'): a 401 means
+     *     every visitor is asked for a password, a 5xx is the website's own
+     *     server saying it is failing, and a 404, 410 or 421 often means a
+     *     lapsed or misconfigured domain (a hosting service answering "no
+     *     site here"). (Round 4 drew the line at "400 or more", which called a
+     *     failing server "For information"; round 5 at "400-499", which still
+     *     called a 404 "For information"; round 6 at 401, 403 and 429; round 7
+     *     took 401 out.)
      *
      * ⚠️ NO TEST-ONLY PARAMETER (round 4). It used to take `$curlAvailable`
      *    so a test could say "no curl"; every test then passed it, and the
