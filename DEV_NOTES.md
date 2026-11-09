@@ -21180,6 +21180,89 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### One row, one outcome: the calendar file import (#790)
+
+- **Wrap the work for each row, not the loop.** `execute()` throws under
+  `MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR`. So a loop of inserts with no
+  `try` is all-or-part-of-nothing: the throw escapes with the earlier rows
+  already committed (autocommit), and nothing reports which ones.
+- **Two dead branches are gone.** The old `'DB error: ' . $stmt->error` message
+  could never run, for the same reason. An `execute()` that answers false is
+  now turned into the same exception, so a future change of reporting mode
+  cannot bring back a second, untested path. The `prepare() === false` check
+  could never run either; `prepare()` is now inside a `try`.
+- **A lost connection is NOT "any code from 2000 up".** Only 2000-2999 are the
+  client library's codes, which describe the connection (2006 "gone away", 2013
+  "lost during query"). MySQL's own refusals use 3000 and up (3819 is a broken
+  CHECK rule, 3100 a replication hook), and MariaDB's use 4000 and up.
+  - The rule now: 2000-2999, plus MySQL's 4031 (disconnected for being idle)
+    and MariaDB's 1927 (connection killed), each asked only of its own engine.
+  - The first version read 3819 as a lost connection. It marked a refused row
+    "Not known" and never tried the valid row after it, while the activity
+    record, written over that same connection, proved the connection was alive.
+    The independent check found this; section T of the test pins it, and a
+    plant putting back `>= 2000` turns T red.
+- **For a real lost connection,** the server may have saved the row, so the page
+  says "Not known" (a yellow badge) and sends nothing further.
+  - The independent check drove this on MySQL 8.0.36 and MariaDB 11.4. The
+  committed test does not.
+  - The record of it says the connection was lost, never "refused". It usually
+    lands only in PHP's own log, because the database it would be written to is
+    the one that went.
+- **Admin, Errors gets one record per KIND per import, not one per row.** Per
+  row, re-importing a file of refused rows would put a spreadsheet's worth of
+  lines on that page. Where an installation has chosen to be e-mailed about
+  "Error", it would also send a message per row.
+- **Who a refusal is FOR decides its level.** `$describesTheRow` in the page is
+  the one place this is decided.
+  - **About the row → "Notification".** The row's own values decide it, and the
+    administrator reading the results list can fix it. The codes: 1048, 1062,
+    1264, 1265, 1292, 1366, 1406, 1452, plus MySQL 3819 or MariaDB 4025 (a
+    broken CHECK rule), each asked only of its own engine. The alert e-mail's
+    default is "Critical,Fatal".
+  - **1644 is on the "Notification" side by CHOICE, not because it is about
+    the row.** It is ANY trigger's or procedure's refusal: a SIGNAL with
+    SQLSTATE '45000', 'HY000' or '22000' and no MYSQL_ERRNO raises 1644 every
+    time (measured by the third independent check). The portal ships no
+    trigger on `tblEvents`, so a 1644 comes only from code the installation's
+    people added. It stays a Notification because the trigger's own message is
+    shown on the results list. A trigger that signals a server-side condition
+    should give its SIGNAL its own MYSQL_ERRNO, and is then recorded as "Error".
+  - **About the database → "Error".** Every other code: 1114 or 1021 (table or
+    disk full), 1290 or 1836 (read-only), 1205 or 1213 (lock timeout or
+    deadlock), 3100 (replication hook). The page adds "This is a problem with
+    the database, not with the row".
+  - **An unknown code falls on the "Error" side** on purpose. Wrongly telling
+    the installation's administrator is a nuisance; wrongly not telling them
+    hides a fault.
+  - **The first version put every refusal at "Notification"** under a comment
+    calling every refused row "the file's problem". The second independent
+    check found that an installation e-mailed about "Error" would stop hearing
+    of a full disk or a read-only database: exactly the faults only it can fix.
+  - **Titles carry no count**, so the alert cool-down (keyed on platform, code
+    and title) treats repeated imports as the same thing. The exception: the
+    singular title ("A row …") and the plural ("Rows …") are two different
+    cool-down keys, so one import refusing one row and the next refusing two
+    can send two alerts in one window.
+  - Faults in the page itself, and a lost connection, also go in as "Error".
+  - **Which engine** is asked of `DbServer::classify()`, the one place that
+    answers it.
+- **Chosen:** each row on its own, option 2 of #790. The owner confirmed it as
+  D-099.
+- **Test:** `tools/calendar-import-selftest.php`, 57 checks over real HTTP.
+  - A trigger on `tblEvents` refuses one name with SQLSTATE 45000 (error 1644,
+    "Notification"), a second with MYSQL_ERRNO 3819 (a refusal, not a lost
+    connection) and a third with MYSQL_ERRNO 1114 (a full table, "Error").
+  - Plants collapse the row-or-database split in each direction, and sections
+    U and G go red.
+  - Section S needs no trigger at all: three rows with the same name.
+  - Section P plants the old loop, with both `catch` blocks unable to catch,
+    and goes red. A second plant puts back `>= 2000` and goes red.
+  - Wired into `calendar-selftests.yml` (five engines). **That workflow has
+    never run on GitHub (#754)**, so this is not yet a live gate.
+  - Also in `tools/run-all-selftests.sh`.
+  - Measured green locally on MySQL 8.0.36 and MariaDB 11.4 only.
+
 ### One writer for a member's notification choices (#667)
 
 - `Portal\Core\NotifyPrefs` is the one writer of a member's choices (an

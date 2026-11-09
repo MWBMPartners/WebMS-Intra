@@ -445,6 +445,10 @@ Events, series, RSVP, exports, and seven view modes.
 
 **Shipped:**
 - Event CRUD with hero images, location, all-day support, public/featured flags.
+- Bulk import of events from a spreadsheet file (CSV) on Manage Events: preview, then each row is imported
+  on its own — the results list shows every row as imported (with its event number), not imported (with the
+  reason), or, if the database connection was lost, not known; the activity log records the counts (#790,
+  D-099).
 - **Show on the public website (#493, package P1; D-057, D-077, D-078).** The countdown that other
   websites can show and the sitemap list an organisation's own event only while somebody has ticked
   "Show on the public website", the event is marked Public, and today is inside its optional from/until

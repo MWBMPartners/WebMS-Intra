@@ -4,6 +4,36 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Calendar file import: one refused row no longer stops the import (#790, D-099)
+
+- **Calendar file import: one refused row no longer stops the import (#790,
+  D-099).** Each row is now saved on its own. A row the database refuses is
+  listed as "Skipped" with the database's reason, and the rest of the file
+  carries on.
+  - **Before:** under the portal's strict database reporting, one refused row
+    gave an error page. The rows before it were already saved, the rows after
+    it were never tried, there was no list of which rows landed, and no
+    activity record was written.
+  - **This was reachable by an ordinary file:** two rows with the same event
+    name (#877). A row with the same name as another event now gets a plain
+    sentence saying so.
+  - **Activity record:** it gives the counts ("N events created, M rows not
+    imported").
+  - **Admin, Errors:** each import writes at most one record per kind.
+    - A refusal about the ROW (a duplicate name, a value too long, a broken
+      rule) is a "Notification", which the alert e-mail leaves out by default.
+    - A refusal about the DATABASE (a full table or disk, a read-only database,
+      a lock timeout) is an "Error", the level an installation can ask to be
+      e-mailed about. The organisation administrator reading the results cannot
+      fix those; the installation's administrator can.
+  - **Lost connection:** a connection lost part-way stops the import at that
+    row. The page says that row's outcome is not known, rather than claiming it
+    was or was not saved.
+    - The page also says the activity record may be MISSING in that case: it is
+      written over the same connection that went. When it does get written, it
+      adds "1 row whose outcome is not known".
+- **Tests:** new `tools/calendar-import-selftest.php`, 57 checks over real HTTP on MySQL 8.0.36 and MariaDB 11.4, with planted faults for each rule. Four check rounds by fresh Claude agents (protected arm); round 3's only finding was an untrue comment, corrected. Raised from it: #877, #878, #881.
+
 ### Notification choices are no longer lost between two pages (#667)
 
 - The Notification preferences page used to rebuild a member's whole set of
