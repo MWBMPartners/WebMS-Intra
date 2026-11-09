@@ -7398,6 +7398,9 @@ CREATE TABLE IF NOT EXISTS `tblNoticeboardPosters` (
     `aspect`      VARCHAR(12)  NOT NULL DEFAULT '4/5',
     `useSerif`    TINYINT(1)   NOT NULL DEFAULT 0,
     `sortOrder`   INT          NOT NULL DEFAULT 0 COMMENT 'Manual override; board otherwise sorts chronologically',
+    `showOnWebsite` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'The poster is on the organisation''s PUBLIC WEBSITE only while this is 1 AND today is inside websiteFrom..websiteUntil (D-057, D-078). Starts at 0 on every poster (#493 P2, migration 260); set to 1 only on Noticeboard, Public website, by a person holding website.publish (D-077), judged by PublicWebsite. The board''s own editor never sets it to 1; it clears it when it deletes a poster, so one brought back is off. Decided only by PublicWebsite::posterWhere().',
+    `websiteFrom` DATE         DEFAULT NULL COMMENT 'The first DAY the poster may be on the public website (D-078), inclusive. A calendar date on the ORGANISATION''s calendar. NULL = no limit on that side. Narrows showOnWebsite, never widens it.',
+    `websiteUntil` DATE        DEFAULT NULL COMMENT 'The last DAY the poster may be on the public website (D-078), inclusive. A calendar date on the ORGANISATION''s calendar. NULL = no limit on that side. Narrows showOnWebsite, never widens it.',
     `isDeleted`   TINYINT(1)   NOT NULL DEFAULT 0,
     `createdByID` INT          DEFAULT NULL,
     `updatedByID` INT          DEFAULT NULL,
@@ -11324,7 +11327,7 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `description`, `isStandard`)
 SELECT s.`siteID`, 'website_editor', 'Website Editor',
-       'Holds "Choose what appears on the public website"; until a page a non-administrator can open asks for it, this changes nothing',
+       'Holds "Choose what appears on the public website": can choose which noticeboard posters are on the public website, and when',
        1
 FROM `tblSites` s
 WHERE NOT EXISTS (
@@ -11343,6 +11346,17 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('258_events_show_on_website.sql
 -- `tblEvents.isPublic` is declared above with DEFAULT 0. Nothing to carry: a
 -- fresh install has no event.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('259_new_events_start_members_only.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 260_noticeboard_posters_on_public_website.sql (#493, P2a) ───────────
+-- The three `tblNoticeboardPosters` columns are declared above, on the table
+-- itself. A fresh install has no poster. Here: the address of the page that
+-- sets them.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('noticeboard/website', 'noticeboard/website.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('260_noticeboard_posters_on_public_website.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

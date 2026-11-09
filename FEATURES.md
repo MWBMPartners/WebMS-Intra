@@ -845,6 +845,7 @@ Visual poster wall — pinboard of event posters. Distinct from the text-based A
 - Manual sort ordering (drag-and-drop persisted); auto-fallback to chronological
 - QR share panel — links to poster's deep-link URL, server-encoded via `Portal\Core\Qr` and pinned to the current host
 - Site-admin gated writes; any authenticated user can view
+- Posters on the public website (#493 P2a): a per-poster "Show on the public website" switch with optional first/last day, set on `/noticeboard/website` by whoever holds `website.publish` (D-077). Every poster starts off (migration 260); the board's own editor never puts one on, and deleting a poster takes it off. One rule, `PublicWebsite::posterWhere()`, decides which posters are on the website
 - Real media upload pipeline (#363) — finfo-sniffed, size-capped (`noticeboard.upload.maxBytes`, default 15 MB), server-generated filename; served back publicly (no login) via `/noticeboard/media?f=<token>` so posters keep rendering for an anonymous QR scanner. Orphaned uploads (abandoned in the editor, or whose poster was later soft-deleted) are purged automatically after each save.
 
 **Tables:** `tblNoticeboardPosters`, `tblNoticeboardUploads`
@@ -852,6 +853,7 @@ Visual poster wall — pinboard of event posters. Distinct from the text-based A
 **Routes / API:**
 - `GET  /noticeboard`             — board page (authed)
 - `GET  /noticeboard/media`       — poster media bytes, by token (PUBLIC, no auth — #363)
+- `GET/POST /noticeboard/website`  — which posters are on the public website (authed; changes need `website.publish`)
 - `GET  /api/noticeboard/list`    — poster feed (authed)
 - `POST /api/noticeboard/save`    — bulk upsert (site-admin, CSRF, cross-site guard)
 - `POST /api/noticeboard/upload`  — media upload (site-admin, CSRF, finfo MIME allowlist — #363)

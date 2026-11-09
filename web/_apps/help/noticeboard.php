@@ -141,6 +141,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
 </section>
 
+<!-- 🌐 Posters on the public website (#493 P2a) -->
+<section id="public-website" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2"></i>Posters on the public website</h2>
+    <p>
+        A poster can also appear on your organisation's public website, which anybody can read without signing in.
+        Nothing goes there until somebody ticks it: every poster starts off the website, including new ones. Choose
+        which posters show on <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('noticeboard/website'), ENT_QUOTES, 'UTF-8'); ?>">Noticeboard, Public website</a>:
+        tick <strong>Show on the public website</strong>, and if you like give a first and a last day (both days count,
+        an empty date means no limit, and the dates follow your organisation's calendar).
+    </p>
+    <p class="text-muted small">
+        Your organisation's administrators can change this; the permission &ldquo;Choose what appears on the public
+        website&rdquo; on the Roles page can be given to other roles too (the Website Editor role exists for it).
+        Editing a poster on the board never puts it on the public website. Deleting one takes it off, and if a
+        deleted poster is brought back it stays off until somebody ticks it again. A poster's picture or video can
+        be opened by anybody who has its link (that is how the QR code works), whether or not it is ticked.
+    </p>
+</section>
+
 <!-- 5️⃣ Viewing & QR share -->
 <section id="viewing" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-qrcode me-2"></i>Viewing &amp; QR Share</h2>

@@ -21180,3 +21180,21 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### Noticeboard posters on the public website (#493 P2a, migration 260)
+
+- **The board's editor cannot carry the tick.** The editor is a generated bundle (`dc-runtime`, not in this
+  repository, #623). `api/noticeboard/save` replaces the whole board, but its `ON DUPLICATE KEY UPDATE`
+  names only the columns it is given, so the three website columns survive every editor save and a poster
+  it creates takes the column defaults (off). Plant P45 adds the switch to that UPDATE and section Q goes red.
+- **A soft delete that keeps a flag can bring it back** (round 1 of the check). Deleting set only
+  `isDeleted = 1`, and the upsert revives any poster whose id it is sent (`isDeleted=0`) — so an editor tab
+  opened before the deletion put a ticked poster straight back on the public website with nobody ticking
+  it, and it could not be unticked meanwhile because the page lists only undeleted posters. Deleting now
+  also clears `showOnWebsite` (check Q7, plant P46). When a delete is soft, ask what each flag on the row
+  means if the row comes back.
+- **One judgement for events and posters.** `PublicWebsite::judgeEventFields()` and `judgePosterFields()`
+  both call one private `judgeFields()`; only the noun in a refusal differs, so a poster can never be judged
+  by a looser copy (#768's lesson).
+- **The page asks the judgement on values read under a row lock inside the transaction that writes** (#647),
+  so two people saving one poster cannot both be judged against the value from before the other's save.
+

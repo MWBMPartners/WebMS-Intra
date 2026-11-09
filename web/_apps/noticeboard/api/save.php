@@ -180,19 +180,25 @@ try {
     }
     $up->close();
 
-    // 🗑️ Soft-delete rows no longer present in the payload.
+    // 🗑️ Soft-delete rows no longer present in the payload — and take each
+    //    one OFF the public website as it goes (#493 P2a, round 1 of its
+    //    check). A deleted poster kept its tick, and this save's upsert
+    //    revives any poster whose id it is sent (`isDeleted=0`): an editor tab
+    //    opened before the deletion, or a key, brought it straight back onto
+    //    the public website with nobody ticking it. Cleared here, a revived
+    //    poster comes back OFF until somebody holding website.publish ticks it.
     if (count($keepIds) > 0) {
         $in    = implode(',', array_fill(0, count($keepIds), '?'));
         $types = 'i' . str_repeat('i', count($keepIds));
         $del   = $db->prepare(
-            "UPDATE tblNoticeboardPosters SET isDeleted = 1 WHERE siteID = ? AND posterID NOT IN ($in)"
+            "UPDATE tblNoticeboardPosters SET isDeleted = 1, showOnWebsite = 0 WHERE siteID = ? AND posterID NOT IN ($in)"
         );
         $params = array_merge([$siteId], $keepIds);
         $del->bind_param($types, ...$params);
         $del->execute();
         $del->close();
     } else {
-        $del = $db->prepare('UPDATE tblNoticeboardPosters SET isDeleted = 1 WHERE siteID = ?');
+        $del = $db->prepare('UPDATE tblNoticeboardPosters SET isDeleted = 1, showOnWebsite = 0 WHERE siteID = ?');
         $del->bind_param('i', $siteId);
         $del->execute();
         $del->close();

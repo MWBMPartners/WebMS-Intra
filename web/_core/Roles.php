@@ -216,10 +216,12 @@ final class Roles
         //    `tools/roles-selftest.php` compare the order.
         'website_editor' => [
             'label'       => 'Website Editor',
-            // Said as it is today (round 1): no page a non-administrator can open
-            // asks for the permission yet, so promising more would be untrue.
-            'description' => 'Holds "Choose what appears on the public website"; until a page a '
-                . 'non-administrator can open asks for it, this changes nothing',
+            // Said as it is today: #493 P2a's Noticeboard, Public website is the
+            // first page a non-administrator can open that asks the permission.
+            // The description an organisation already holds is rewritten by
+            // migration 260, only where it is still the old sentence.
+            'description' => 'Holds "Choose what appears on the public website": can choose which noticeboard '
+                . 'posters are on the public website, and when',
         ],
     ];
 

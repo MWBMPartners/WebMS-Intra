@@ -15,7 +15,9 @@
  *   1. WHO MAY CHANGE the switch and the dates (`mayPublish()`, D-077);
  *   2. whether a posted change is ALLOWED and well formed, judged on facts so
  *      the form, its handler and the events API cannot disagree
- *      (`judgeEventFields()`, the #647 shape);
+ *      (`judgeEventFields()`, the #647 shape) — and, since #493 P2a, the same
+ *      judgement for a noticeboard poster (`judgePosterFields()`), with the
+ *      ONE rule for which posters are on the website (`posterWhere()`);
  *   3. how an event COPIED IN from an outside calendar reaches the website —
  *      the installation's rule capping the organisation's (`copiedRuleFor()`,
  *      `saveRuleForInstallation()`, `saveRuleForOrganisation()`; D-080, D-081).
@@ -36,15 +38,15 @@
  *   - It cannot pull back a copy already taken: the countdown feed is cached
  *     for a minute by anything in between, the sitemap for an hour, and a
  *     search engine keeps what it took.
- *   - In package P1 the permission DECIDES ALMOST NOTHING, and that is a
+ *   - FOR EVENTS the permission decides almost nothing, and that is a
  *     measured fact, not a design choice: every page that writes an event
  *     (`calendar/manage/*`, the events API in session mode) is itself open to
  *     administrators only, and an administrator of the organisation already
- *     holds the permission. So a Website Editor who is not an administrator
- *     can reach none of them yet, and the one thing the question decides
- *     today is an API key (a key is not a person and is refused, as #485
- *     refuses one). #493's noticeboard package (P2) is the first page a
- *     Website Editor who is not an administrator can open.
+ *     holds the permission; the one thing it decides there is an API key (a
+ *     key is not a person and is refused, as #485 refuses one). FOR POSTERS
+ *     it decides who may change them: Noticeboard, Public website (#493 P2a)
+ *     is open to anybody signed in, so there it lets a Website Editor in and
+ *     refuses a member who does not hold it.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -87,8 +89,8 @@ final class PublicWebsite
     // =========================================================================
 
     /**
-     * May this person turn an event's website switch or dates on or off, in
-     * this organisation?
+     * May this person turn an event's or a noticeboard poster's website switch
+     * or dates on or off, in this organisation?
      *
      *   - an ADMINISTRATOR OF THIS ORGANISATION may, always — D-077's "out of
      *     the box only that organisation's administrators hold it", and
@@ -115,7 +117,7 @@ final class PublicWebsite
      *
      * @param \mysqli $db     The connection.
      * @param int     $userId The account, or 0 for nobody (an API key).
-     * @param int     $siteId The organisation the event belongs to.
+     * @param int     $siteId The organisation the event or poster belongs to.
      */
     public static function mayPublish(\mysqli $db, int $userId, int $siteId): bool
     {
@@ -165,6 +167,36 @@ final class PublicWebsite
      */
     public static function judgeEventFields(array $arrived, array $stored, bool $mayPublish): array
     {
+        return self::judgeFields($arrived, $stored, $mayPublish, 'an event');
+    }
+
+    /**
+     * The same judgement for a noticeboard poster's three website fields
+     * (#493 P2a). ONE rule for both: only the noun in a refusal differs, so a
+     * poster can never be judged by a looser copy (#768's lesson — copies of
+     * one rule drift apart). See judgeEventFields() for what each part means.
+     *
+     * @param array<string,mixed>                                                  $arrived
+     * @param array{showOnWebsite:int, websiteFrom:?string, websiteUntil:?string} $stored
+     *
+     * @return array{ok:bool, kind:string, reason:string, values:array{showOnWebsite:int, websiteFrom:?string, websiteUntil:?string}, changed:bool, changes:list<string>, attempted?:list<string>}
+     */
+    public static function judgePosterFields(array $arrived, array $stored, bool $mayPublish): array
+    {
+        return self::judgeFields($arrived, $stored, $mayPublish, 'a poster');
+    }
+
+    /**
+     * The one judgement behind judgeEventFields() and judgePosterFields().
+     * `$noun` ('an event' / 'a poster') appears only in the refusal's words.
+     *
+     * @param array<string,mixed> $arrived
+     * @param array<string,mixed> $stored
+     *
+     * @return array<string,mixed>
+     */
+    private static function judgeFields(array $arrived, array $stored, bool $mayPublish, string $noun): array
+    {
         $was = [
             'showOnWebsite' => ((int) ($stored['showOnWebsite'] ?? 0)) === 1 ? 1 : 0,
             'websiteFrom'   => self::storedDate($stored['websiteFrom'] ?? null),
@@ -206,7 +238,7 @@ final class PublicWebsite
                 'forbidden',
                 $was,
                 'Only an administrator of this organisation, or somebody given "Choose what appears on the public website" '
-                . 'on the Roles page, can change whether an event is on the public website or for which days. Nothing was saved.'
+                . 'on the Roles page, can change whether ' . $noun . ' is on the public website or for which days. Nothing was saved.'
             ) + ['attempted' => $changes];
         }
 
@@ -260,6 +292,85 @@ final class PublicWebsite
             . (string) ($judged['reason'] ?? ''),
             $userId
         );
+    }
+
+    /**
+     * Record an allowed change to a POSTER's website fields (#493 P2a), as
+     * recordChange() does for an event.
+     *
+     * @param list<string> $changes from judgePosterFields()
+     */
+    public static function recordPosterChange(int $posterId, string $title, array $changes, ?int $userId, string $where): void
+    {
+        if ($changes === []) {
+            return;
+        }
+        $type = 'PosterWebsiteDatesChanged';
+        foreach ($changes as $line) {
+            if (str_starts_with($line, 'switched ON') === true) {
+                $type = 'PosterShownOnWebsite';
+            } elseif (str_starts_with($line, 'switched OFF') === true) {
+                $type = 'PosterHiddenFromWebsite';
+            }
+        }
+        Logger::activity(
+            $type,
+            'Poster #' . $posterId . ' "' . mb_substr($title, 0, 120) . '" on the public website: '
+            . implode('; ', $changes) . ' (' . $where . ').',
+            $userId
+        );
+    }
+
+    /**
+     * Record a REFUSED change to a poster's website fields (#493 P2a).
+     *
+     * @param array<string,mixed> $judged from judgePosterFields(), not ok
+     */
+    public static function recordPosterRefusal(int $posterId, string $title, array $judged, ?int $userId, string $where): void
+    {
+        $what = $judged['attempted'] ?? [];
+        Logger::activity(
+            'PosterWebsiteChangeRefused',
+            'Poster #' . $posterId . ' "' . mb_substr($title, 0, 120) . '": a change to the public website was refused ('
+            . $where . '). ' . ((is_array($what) === true && $what !== []) ? 'Asked for: ' . implode('; ', $what) . '. ' : '')
+            . (string) ($judged['reason'] ?? ''),
+            $userId
+        );
+    }
+
+    /**
+     * THE ONE RULE for which noticeboard posters are on the organisation's
+     * public website (#493 P2a; D-057, D-078). A fragment beginning " AND ",
+     * for a query over `tblNoticeboardPosters` under `$alias`: the switch on,
+     * not deleted, and `$today` inside the optional dates (both inclusive).
+     * `$today` is the ORGANISATION's calendar date (`date('Y-m-d')`, because
+     * start-up sets PHP's zone to the organisation's) — the same calendar the
+     * dates are kept on. The organisation itself is NOT in this rule: every
+     * caller must add its own `siteID = ?` (the page and the test both do).
+     * The public door (P4) and the foyer slideshow when it shows public posters
+     * only (P2b) decide WHICH POSTERS by this rule and nothing else. ⚠️ It does
+     * not govern a poster's uploaded image or video: `/noticeboard/media`
+     * serves those to anybody holding the file's token (#363, so a QR scan
+     * works signed out), ticked or not.
+     *
+     * @return array{sql:string, types:string, params:list<string>}
+     */
+    public static function posterWhere(string $alias, string $today): array
+    {
+        if (preg_match('/^[a-z][a-z0-9_]{0,15}$/', $alias) !== 1) {
+            throw new \InvalidArgumentException('PublicWebsite::posterWhere(): the alias must be a short lower-case name.');
+        }
+        if (self::dateFrom($today) === false || self::dateFrom($today) === null) {
+            throw new \InvalidArgumentException('PublicWebsite::posterWhere(): today must be a real date written YYYY-MM-DD.');
+        }
+        $a = $alias;
+        return [
+            'sql'    => " AND {$a}.isDeleted = 0 AND {$a}.showOnWebsite = 1"
+                . " AND ({$a}.websiteFrom IS NULL OR {$a}.websiteFrom <= ?)"
+                . " AND ({$a}.websiteUntil IS NULL OR {$a}.websiteUntil >= ?)",
+            'types'  => 'ss',
+            'params' => [$today, $today],
+        ];
     }
 
     // =========================================================================

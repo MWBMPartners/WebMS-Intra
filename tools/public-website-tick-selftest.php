@@ -86,7 +86,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 128;
+const PWT_EXPECTED_CHECKS = 143;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1452,6 +1452,167 @@ $scnApprove = static function () use ($makeEvent, $siteOne, $signIn, $http, $tok
 check('N5 approving a suggested event publishes it to members only: approved, published, isPublic still 0 (D-092)', $scnApprove(), ['approved', 'published', 0]);
 
 // =============================================================================
+echo "Q. Noticeboard posters on the public website (#493 P2a)\n";
+// =============================================================================
+$poster = static function (string $title, int $site, array $set = []) use ($db): int {
+    $stmt = $db->prepare("INSERT INTO `tblNoticeboardPosters` (`siteID`, `title`) VALUES (?, ?)");
+    $stmt->bind_param('is', $site, $title);
+    $stmt->execute();
+    $id = (int) $db->insert_id;
+    $stmt->close();
+    foreach ($set as $col => $val) {
+        $u = $db->prepare('UPDATE `tblNoticeboardPosters` SET `' . $col . '` = ? WHERE `posterID` = ?');
+        $u->bind_param('si', $val, $id);
+        $u->execute();
+        $u->close();
+    }
+    return $id;
+};
+$posterRow = static function (int $id) use ($db): ?array {
+    return $db->query("SELECT `showOnWebsite`, `websiteFrom`, `websiteUntil`, `isDeleted` FROM `tblNoticeboardPosters` WHERE `posterID` = {$id}")->fetch_assoc();
+};
+$colDefault = $db->query("SELECT `COLUMN_DEFAULT` FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() "
+    . "AND `TABLE_NAME` = 'tblNoticeboardPosters' AND `COLUMN_NAME` = 'showOnWebsite'")->fetch_assoc();
+check('Q1 a poster starts OFF the public website (the column\'s default)', trim((string) ($colDefault['COLUMN_DEFAULT'] ?? ''), "'"), '0');
+
+// The ONE rule, asked in the test's own child process like every other rule
+// read here, so a plant in the copy changes the answer.
+$tdy  = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d');
+$qOn      = $poster('PWT Q on', $siteOne, ['showOnWebsite' => '1']);
+$qOff     = $poster('PWT Q off', $siteOne);
+$qLater   = $poster('PWT Q later', $siteOne, ['showOnWebsite' => '1', 'websiteFrom' => '2099-01-01']);
+$qEarlier = $poster('PWT Q earlier', $siteOne, ['showOnWebsite' => '1', 'websiteUntil' => '2000-01-01']);
+$qGone    = $poster('PWT Q deleted', $siteOne, ['showOnWebsite' => '1', 'isDeleted' => '1']);
+$qOther   = $poster('PWT Q other organisation', $siteTwo, ['showOnWebsite' => '1']);
+// Both days count (D-078): a poster whose first or last day IS today is on.
+$qFromTdy  = $poster('PWT Q from today', $siteOne, ['showOnWebsite' => '1', 'websiteFrom' => $tdy]);
+$qUntilTdy = $poster('PWT Q until today', $siteOne, ['showOnWebsite' => '1', 'websiteUntil' => $tdy]);
+$scnPosterRule = static function () use ($child, $sep, $siteOne, $tdy): mixed {
+    $probe = $child . $sep . 'q-poster-rule.php';
+    file_put_contents($probe, '<?php declare(strict_types=1);'
+        . 'require ' . var_export($child . $sep . 'web' . $sep . '_core' . $sep . 'PublicWebsite.php', true) . ';'
+        . '$cfg = require ' . var_export($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'auth_creds.php', true) . ';'
+        . '$db = new mysqli($cfg["db_host"], $cfg["db_user"], $cfg["db_pass"], $cfg["db_name"], (int) $cfg["db_port"]);'
+        . '$r = \\Portal\\Core\\PublicWebsite::posterWhere("p", ' . var_export($tdy, true) . ');'
+        . '$st = $db->prepare("SELECT p.title FROM tblNoticeboardPosters p WHERE p.siteID = ? AND p.title LIKE \'PWT Q %\'" . $r["sql"] . " ORDER BY p.title");'
+        . '$st->bind_param("i" . $r["types"], ...array_merge([' . $siteOne . '], $r["params"]));'
+        . '$st->execute(); $o = []; foreach ($st->get_result()->fetch_all() as $x) { $o[] = $x[0]; } echo json_encode($o);');
+    $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($probe) . ' 2>&1');
+    $got = json_decode($raw, true);
+    return is_array($got) === true ? $got : ['could not ask' => $raw];
+};
+// The organisation is the CALLER's `siteID = ?` (the rule does not carry it);
+// the other organisation's ticked poster checks that the caller's filter is
+// applied alongside the rule, not that the rule itself filters.
+check('Q2 the ONE poster rule lets through only ticked, undeleted posters inside their dates, BOTH days counting (and the caller\'s organisation filter keeps the other organisation\'s out)',
+    $scnPosterRule(), ['PWT Q from today', 'PWT Q on', 'PWT Q until today']);
+
+$scnPosterPage = static function () use ($signIn, $http, $tokenOn, $posterRow, $qOff, $db): array {
+    $signIn('orgadmin');
+    $page = $http('GET', '/noticeboard/website')['body'];
+    $drawn = str_contains($page, 'id="show-' . $qOff . '"');
+    $r = $http('POST', '/noticeboard/website', ['csrf_token' => $tokenOn($page), 'posterID' => (string) $qOff, 'websiteFields' => '1',
+        'showOnWebsite' => '1', 'websiteFrom' => '', 'websiteUntil' => '']);
+    $row = $posterRow($qOff);
+    $logged = (int) $db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `activityType` = 'PosterShownOnWebsite' AND `activityDescription` LIKE '%#{$qOff} %'")->fetch_assoc()['n'];
+    $db->query("UPDATE `tblNoticeboardPosters` SET `showOnWebsite` = 0 WHERE `posterID` = {$qOff}");
+    return ['drawn' => $drawn, 'status' => $r['status'], 'stored' => (int) ($row['showOnWebsite'] ?? -1), 'recorded' => $logged > 0];
+};
+check('Q3 somebody who may publish ticks a poster on Noticeboard, Public website: stored ON and recorded',
+    $scnPosterPage(), ['drawn' => true, 'status' => 302, 'stored' => 1, 'recorded' => true]);
+
+$scnPosterRefused = static function () use ($signIn, $http, $tokenOn, $posterRow, $qOff, $db): array {
+    $signIn('member');
+    $page = $http('GET', '/noticeboard/website')['body'];
+    $drawn = str_contains($page, 'id="show-' . $qOff . '"');
+    $http('POST', '/noticeboard/website', ['csrf_token' => $tokenOn($page), 'posterID' => (string) $qOff, 'websiteFields' => '1', 'showOnWebsite' => '1']);
+    $row = $posterRow($qOff);
+    $logged = (int) $db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `activityType` = 'PosterWebsiteChangeRefused' AND `activityDescription` LIKE '%#{$qOff} %'")->fetch_assoc()['n'];
+    return ['controls drawn' => $drawn, 'stored' => (int) ($row['showOnWebsite'] ?? -1), 'refusal recorded' => $logged > 0];
+};
+check('Q4 a member who may not publish is drawn no controls, and a change they post anyway is refused, unchanged and recorded',
+    $scnPosterRefused(), ['controls drawn' => false, 'stored' => 0, 'refusal recorded' => true]);
+// The one person this page newly lets in: a Website Editor who is NOT an
+// administrator (D-077). A page that asked "is an administrator" instead of
+// the permission would refuse them while Q3 and Q4 stayed green.
+$scnPosterEditor = static function () use ($signIn, $http, $tokenOn, $posterRow, $qOff, $db): array {
+    $signIn('editor');
+    $page = $http('GET', '/noticeboard/website')['body'];
+    $board = $http('GET', '/noticeboard')['body'];
+    $http('POST', '/noticeboard/website', ['csrf_token' => $tokenOn($page), 'posterID' => (string) $qOff, 'websiteFields' => '1', 'showOnWebsite' => '1']);
+    $row = $posterRow($qOff);
+    $db->query("UPDATE `tblNoticeboardPosters` SET `showOnWebsite` = 0 WHERE `posterID` = {$qOff}");
+    return ['controls drawn' => str_contains($page, 'id="show-' . $qOff . '"'), 'linked from the board' => str_contains($board, 'noticeboard/website'),
+        'stored' => (int) ($row['showOnWebsite'] ?? -1)];
+};
+check('Q3b a Website Editor who is not an administrator is drawn the controls, linked to the page from the board, and can tick a poster',
+    $scnPosterEditor(), ['controls drawn' => true, 'linked from the board' => true, 'stored' => 1]);
+$scnPosterForeign = static function () use ($signIn, $http, $tokenOn, $posterRow, $qOther): array {
+    $signIn('orgadmin');
+    $page = $http('GET', '/noticeboard/website')['body'];
+    $http('POST', '/noticeboard/website', ['csrf_token' => $tokenOn($page), 'posterID' => (string) $qOther, 'websiteFields' => '1', 'showOnWebsite' => '0']);
+    $after = $http('GET', '/noticeboard/website')['body'];
+    return ['other organisation\'s poster unchanged' => (int) ($posterRow($qOther)['showOnWebsite'] ?? -1), 'told' => str_contains($after, 'could not be found on this noticeboard')];
+};
+check('Q8 another organisation\'s poster cannot be changed by posting its number: unchanged, and the page says it was not found',
+    $scnPosterForeign(), ['other organisation\'s poster unchanged' => 1, 'told' => true]);
+
+$scnPosterDates = static function () use ($signIn, $http, $tokenOn, $posterRow, $qOff): array {
+    $signIn('orgadmin');
+    $page = $http('GET', '/noticeboard/website')['body'];
+    $http('POST', '/noticeboard/website', ['csrf_token' => $tokenOn($page), 'posterID' => (string) $qOff, 'websiteFields' => '1',
+        'showOnWebsite' => '1', 'websiteFrom' => '2031-05-02', 'websiteUntil' => '2031-05-01']);
+    $row = $posterRow($qOff);
+    return [(int) ($row['showOnWebsite'] ?? -1), $row['websiteFrom'] ?? null];
+};
+check('Q5 a last day before the first is refused and nothing is written', $scnPosterDates(), [0, null]);
+
+// The board's own editor rewrites the whole board: the website fields must
+// survive it, and a poster it creates must start off the website.
+$scnEditorKeeps = static function () use ($signIn, $http, $tokenOn, $api, $posterRow, $qOn, $db): array {
+    $signIn('orgadmin');
+    $token = $tokenOn($http('GET', '/noticeboard')['body']);
+    $keep = [];
+    $res = $db->query("SELECT `posterID`, `title` FROM `tblNoticeboardPosters` WHERE `siteID` = {$GLOBALS['siteOne']} AND `isDeleted` = 0");
+    while ($row = $res->fetch_assoc()) {
+        $keep[] = ['id' => 'p' . (int) $row['posterID'], 'title' => (string) $row['title']];
+    }
+    $keep[] = ['id' => 'pnew1', 'title' => 'PWT Q made by the editor'];
+    $r = $api('/api/noticeboard/save', ['posters' => $keep], $token);
+    $made = $db->query("SELECT `showOnWebsite` FROM `tblNoticeboardPosters` WHERE `title` = 'PWT Q made by the editor' ORDER BY `posterID` DESC LIMIT 1")->fetch_assoc();
+    return ['status' => $r['status'], 'ticked poster kept on' => (int) ($posterRow($qOn)['showOnWebsite'] ?? -1),
+        'new poster' => (int) ($made['showOnWebsite'] ?? -1)];
+};
+check('Q6 a save from the board\'s own editor keeps a ticked poster ON, and a poster it creates starts OFF',
+    $scnEditorKeeps(), ['status' => 200, 'ticked poster kept on' => 1, 'new poster' => 0]);
+// Round 1: deleting a ticked poster on the board, then a save that names its
+// id again (an editor tab opened before the deletion), must NOT bring it back
+// onto the public website. Deleting takes it off.
+$scnDeleteRevive = static function () use ($signIn, $http, $tokenOn, $api, $posterRow, $poster, $siteOne, $db): array {
+    $rev = $poster('PWT Q revived', $siteOne, ['showOnWebsite' => '1']);
+    $signIn('orgadmin');
+    $all = static function () use ($db, $siteOne): array {
+        $out = [];
+        $res = $db->query("SELECT `posterID`, `title` FROM `tblNoticeboardPosters` WHERE `siteID` = {$siteOne} AND `isDeleted` = 0");
+        while ($row = $res->fetch_assoc()) {
+            $out[] = ['id' => 'p' . (int) $row['posterID'], 'title' => (string) $row['title']];
+        }
+        return $out;
+    };
+    $without = array_values(array_filter($all(), static fn (array $x): bool => $x['id'] !== 'p' . $rev));
+    $token = $tokenOn($http('GET', '/noticeboard')['body']);
+    $api('/api/noticeboard/save', ['posters' => $without], $token);
+    $afterDelete = $posterRow($rev);
+    $token = $tokenOn($http('GET', '/noticeboard')['body']);
+    $api('/api/noticeboard/save', ['posters' => array_merge($all(), [['id' => 'p' . $rev, 'title' => 'PWT Q revived']])], $token);
+    $afterRevive = $posterRow($rev);
+    return ['deleted' => (int) ($afterDelete['isDeleted'] ?? -1), 'off when deleted' => (int) ($afterDelete['showOnWebsite'] ?? -1),
+        'back on the board' => (int) ($afterRevive['isDeleted'] ?? -1), 'still off the website' => (int) ($afterRevive['showOnWebsite'] ?? -1)];
+};
+check('Q7 deleting a ticked poster on the board takes it off the website, and a save that brings it back leaves it OFF',
+    $scnDeleteRevive(), ['deleted' => 1, 'off when deleted' => 0, 'back on the board' => 0, 'still off the website' => 0]);
+
+// =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario goes red\n";
 // =============================================================================
 $plant = static function (string $relPath, string|array $from, string|array $to, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
@@ -1642,6 +1803,42 @@ $p = $plant('_apps/calendar/manage/import.php',
 check('P41 with the CSV import treating an empty cell as public again, the imported event is public', [$p['applied'], $p['result']], [true, 1]);
 $p = $plant('_apps/admin/calendar/moderate.php', "'UPDATE tblEvents SET status = \"published\", '", "'UPDATE tblEvents SET status = \"published\", isPublic = 1, '", $scnApprove);
 check('P42 with Approve setting isPublic = 1 again, an approved suggestion is public with nobody choosing it', [$p['applied'], $p['result'][2] ?? null], [true, 1]);
+// #493 P2a: the poster rule, the page's permission, and the editor's save.
+$p = $plant('_core/PublicWebsite.php', "'sql'    => \" AND {\$a}.isDeleted = 0 AND {\$a}.showOnWebsite = 1\"", "'sql'    => \" AND {\$a}.isDeleted = 0\"", $scnPosterRule);
+check('P43 with the switch dropped from the poster rule, an unticked poster reaches the public website', [$p['applied'], in_array('PWT Q off', (array) $p['result'], true)], [true, true]);
+$p = $plant('_apps/noticeboard/website.php',
+    "\$judged = PublicWebsite::judgePosterFields(\$arrived, \$row, PublicWebsite::mayPublish(\$mysqli, \$userId, \$siteId));",
+    "\$judged = PublicWebsite::judgePosterFields(\$arrived, \$row, true);", $scnPosterRefused);
+check('P44 with the page no longer asking the permission when it saves, a member\'s posted change is stored', [$p['applied'], $p['result']['stored'] ?? null], [true, 1]);
+$db->query("UPDATE `tblNoticeboardPosters` SET `showOnWebsite` = 0 WHERE `posterID` = {$qOff}");
+$p = $plant('_apps/noticeboard/api/save.php', "'sortOrder=VALUES(sortOrder), updatedByID=VALUES(updatedByID), isDeleted=0'",
+    "'sortOrder=VALUES(sortOrder), updatedByID=VALUES(updatedByID), isDeleted=0, showOnWebsite=0'", $scnEditorKeeps);
+check('P45 with the editor\'s save writing the switch, a ticked poster is taken off by an unrelated save', [$p['applied'], $p['result']['ticked poster kept on'] ?? null], [true, 0]);
+$db->query("UPDATE `tblNoticeboardPosters` SET `showOnWebsite` = 1 WHERE `posterID` = {$qOn}");
+$p = $plant('_apps/noticeboard/api/save.php',
+    ["\"UPDATE tblNoticeboardPosters SET isDeleted = 1, showOnWebsite = 0 WHERE siteID = ? AND posterID NOT IN (\$in)\""],
+    ["\"UPDATE tblNoticeboardPosters SET isDeleted = 1 WHERE siteID = ? AND posterID NOT IN (\$in)\""], $scnDeleteRevive);
+check('P46 with deleting no longer taking a poster off the website, a revived poster comes back ON with nobody ticking it', [$p['applied'], $p['result']['still off the website'] ?? null], [true, 1]);
+// Round 3: deleting the LAST poster on the board (an empty board saved) runs
+// the soft delete's OTHER branch, which must clear the switch too. Run last,
+// because it empties organisation one's board and the plants above need it.
+$scnLastPoster = static function () use ($signIn, $http, $tokenOn, $api, $posterRow, $poster, $siteOne, $db): array {
+    $db->query("UPDATE `tblNoticeboardPosters` SET `isDeleted` = 1 WHERE `siteID` = {$siteOne}");
+    $last = $poster('PWT Q last poster', $siteOne, ['showOnWebsite' => '1']);
+    $signIn('orgadmin');
+    $api('/api/noticeboard/save', ['posters' => []], $tokenOn($http('GET', '/noticeboard')['body']));
+    $row = $posterRow($last);
+    return ['deleted' => (int) ($row['isDeleted'] ?? -1), 'off' => (int) ($row['showOnWebsite'] ?? -1)];
+};
+check('Q7b deleting the LAST poster on the board (the soft delete\'s other branch) takes it off the website too',
+    $scnLastPoster(), ['deleted' => 1, 'off' => 0]);
+$p = $plant('_apps/noticeboard/api/save.php',
+    "'UPDATE tblNoticeboardPosters SET isDeleted = 1, showOnWebsite = 0 WHERE siteID = ?'",
+    "'UPDATE tblNoticeboardPosters SET isDeleted = 1 WHERE siteID = ?'", $scnLastPoster);
+check('P47 with that branch no longer clearing the switch, the last poster deleted keeps it', [$p['applied'], $p['result']['off'] ?? null], [true, 1]);
+// Section Q's posters go, organisation two's included (its foreign key would
+// otherwise stop the organisation being removed at the end, round 1).
+$db->query("DELETE FROM `tblNoticeboardPosters` WHERE `title` LIKE 'PWT Q %'");
 // Round 15 (a hardening it suggested): only the page's FIRST ask taken out,
 // with the plain stale post — the hand-off ('mustBeNew') must then stop the
 // save under the lock and keep the other administrator's Yes. Round 12

@@ -4,6 +4,23 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Noticeboard posters can go on the public website, one at a time (#493, package P2a, migration 260)
+
+- **Added:** each poster has "Show on the public website" and an optional first and last day (D-057,
+  D-078), set on a new page, **Noticeboard, Public website** (`/noticeboard/website`), by whoever holds
+  "Choose what appears on the public website" (D-077). Every poster starts off the website, including
+  every existing one after the upgrade and every new one. A change by somebody who may not make it is
+  refused with the reason and recorded, by the same judgement events use.
+- **Why a page of its own:** the board's editor is a generated bundle that cannot gain a control here.
+  Its save never puts a poster on the public website; deleting a poster takes it off, so one brought
+  back (for example by an editor tab opened before the deletion) is off until somebody ticks it again.
+- **Not yet:** nothing shows the ticked posters to the public — the public door is #493 package P4. One
+  rule, `PublicWebsite::posterWhere()`, decides which posters it will show.
+- **Tests:** section Q of `tools/public-website-tick-selftest.php` — the rule (both days counting), the page,
+  a Website Editor who is not an administrator, a member refused, another organisation's poster refused, a
+  bad date range, an editor save keeping the switch, and a deleted poster brought back staying off — with
+  four plants (P43-P46), each going red when its guard is taken out.
+
 ### A new event starts members-only (D-079, #493, migration 259)
 
 - **Changed:** an event's "Public" box decides whether somebody who is not signed in sees it on the

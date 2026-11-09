@@ -242,7 +242,9 @@ final class Capabilities
      * event's "Show on the public website" switch and dates on or off. Asked
      * in ONE place, `PublicWebsite::mayPublish()`, which every writer that can
      * SET the switch or its dates asks: the Manage Events form and the events
-     * API. Every other writer of an event — the CSV import, the series bulk
+     * API — and, since #493 P2a, Noticeboard, Public website for posters (the
+     * board's own editor never sets a poster's switch; it only clears it when
+     * it deletes one). Every other writer of an event — the CSV import, the series bulk
      * edit, moderation, the public submission form and the outside-calendar
      * importer — never names the three columns, so what it makes is off the
      * website; a series pattern change does name them, because it copies a
@@ -894,20 +896,22 @@ final class Capabilities
         //       administrator of the organisation already passes the gate in
         //       `PublicWebsite::mayPublish()` before this is asked — and so does
         //       an account holding the portal-wide `isAdmin` flag that belongs
-        //       to the organisation. So in package P1 a Website Editor who is
-        //       not an administrator can reach no page that uses it, and every
-        //       person who can reach one already passes; the only caller it
-        //       refuses is an API key, which is not a person. It is what #493's
-        //       noticeboard package (P2) will ask on a page an editor CAN open.
+        //       to the organisation. So in package P1 it refused only an API
+        //       key. #493 P2a's Noticeboard, Public website is the first page
+        //       a non-administrator can open that asks it: there it lets a
+        //       Website Editor choose which posters are on the website, and
+        //       refuses (and records) a signed-in member who does not hold it.
         self::WEBSITE_PUBLISH => [
             'label' => 'Choose what appears on the public website',
-            // ⚠️ SAID AS IT IS TODAY (round 1): every page that changes an event is
-            //    open to administrators only, and they hold this already, so a role
-            //    given it opens nothing yet. A sentence promising more was untrue.
-            'opens' => 'Turning an event\'s "Show on the public website" switch on or off, and setting the '
-                . 'first and last day it may show there. Today only administrators can open the pages that '
-                . 'change an event, and administrators of this organisation may already do this, so giving '
-                . 'this to a role changes nothing yet for anybody who is not an administrator.',
+            // ⚠️ SAID AS IT IS TODAY. In P1 a role given this opened nothing (only
+            //    administrators can open the pages that change an event). #493 P2a
+            //    added the first page a non-administrator can open that asks it —
+            //    Noticeboard, Public website — so the sentence now says what that
+            //    page lets them do, and still says events need an administrator.
+            'opens' => 'Choosing which noticeboard posters are on the public website, and for which days, on '
+                . 'Noticeboard, Public website. It also turns an event\'s "Show on the public website" switch on '
+                . 'or off, but only administrators can open the pages that change an event, so for events it '
+                . 'adds nothing for anybody who is not an administrator.',
             'standard' => ['website_editor'],
             'globalAdminFallsOpen' => true,
             'organisationMayRepoint' => true,
