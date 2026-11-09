@@ -1089,9 +1089,12 @@ class Events
                 }
             }
         } finally {
-            // Closing on a connection that has gone can throw too, and must
-            // not replace the fault that got us here (the import words a lost
-            // connection by its code).
+            // A guard, not a measured fault: on MySQL with the connection
+            // KILLed, `execute()` threw and `close()` then answered true
+            // (measured by the third independent check on #877). The try
+            // stays so that IF a close ever throws, it cannot replace the
+            // fault that got us here — the import words a lost connection by
+            // that fault's code.
             try {
                 $probe->close();
             } catch (\Throwable $ignored) {
@@ -1169,9 +1172,12 @@ class Events
             $ask->execute();
             $row = $ask->get_result()->fetch_assoc();
         } finally {
-            // Closing on a connection that has gone can throw too, and must
-            // not replace the fault that got us here (the import words a lost
-            // connection by its code).
+            // A guard, not a measured fault: on MySQL with the connection
+            // KILLed, `execute()` threw and `close()` then answered true
+            // (measured by the third independent check on #877). The try
+            // stays so that IF a close ever throws, it cannot replace the
+            // fault that got us here — the import words a lost connection by
+            // that fault's code.
             try {
                 $ask->close();
             } catch (\Throwable $ignored) {

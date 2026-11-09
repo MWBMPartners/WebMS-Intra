@@ -42,8 +42,11 @@
  *      does not count, a COPIED-IN event of the organisation does, and an
  *      event added between preview and Confirm is caught at Confirm; only
  *      the exact value "1" counts as ticked
- *   X  a row the FILE repeats exactly is marked "repeats row N" in the
- *      preview and left out at Confirm unless ticked, so the two pages agree
+ *   X  a row the FILE repeats (same name, same STORED start — so a start
+ *      written without seconds counts too) is marked "repeats row N" in the
+ *      preview and left out at Confirm unless ticked, so the two pages agree;
+ *      a repeat of a row the database refused says that row was not imported
+ *      either
  *   R  another writer taking the web address between the import asking
  *      whether it is free and saving the row (#877). First stood in for by
  *      the trigger: taken once, the row is saved on its second try; taken
@@ -72,13 +75,16 @@
  *      count deleted events, leave copied-in events out, and ignore
  *      capitals — and section V goes red for each. Three more count any
  *      value as ticked and make each page forget the file's own repeats
- *      (sections V and X go red).
+ *      (sections V and X go red), and two more key a repeat by the cell's raw
+ *      text on one page only (section X goes red).
  *   L  a connection lost BEFORE a row's INSERT is sent (during one of the two
  *      questions asked first) is reported as "not imported, nothing saved",
  *      never as "may have been saved". Driven by one line injected into the
  *      CHILD copy of `Events::freeSlug()` that throws a lost connection's own
- *      error code; a last plant calls every lost connection "not known"
- *      again and L goes red.
+ *      error code — once for a row's first question, and once for the RETRY's
+ *      question after a first save was sent and refused. Two plants (every
+ *      lost connection "not known"; the sent flag not set back between
+ *      attempts) turn L red.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It does not drive a LOST CONNECTION part-way through (the "whether it
@@ -213,6 +219,9 @@ const TRIGGER_1114_TEXT = 'p790 test trigger: the table is full, on purpose';
 //    refusal it is counting.
 const RACE_ONCE_NAME   = 'P790 race once';
 const RACE_ALWAYS_NAME = 'P790 race always';
+// Refused once like RACE_ONCE_NAME; section L then makes the RETRY's address
+// question lose the connection (round 3 of the independent check).
+const RACE_ONCE_LOST_NAME = 'P790 race once lost';
 const RACE_TEXT        = "Duplicate entry 'p877' for key 'uq_event_site_slug'";
 $db->query('DROP TRIGGER IF EXISTS `p790_refuse_one_row`');
 $db->query('DROP TABLE IF EXISTS `p877_slug_tries`');
@@ -240,7 +249,7 @@ try {
         . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_3819_TEXT . "', MYSQL_ERRNO = 3819; "
         . "ELSEIF NEW.`eventName` = '" . REFUSED_1114_NAME . "' THEN "
         . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_1114_TEXT . "', MYSQL_ERRNO = 1114; "
-        . "ELSEIF NEW.`eventName` IN ('" . RACE_ONCE_NAME . "', '" . RACE_ALWAYS_NAME . "') THEN "
+        . "ELSEIF NEW.`eventName` IN ('" . RACE_ONCE_NAME . "', '" . RACE_ALWAYS_NAME . "', '" . RACE_ONCE_LOST_NAME . "') THEN "
         . "INSERT INTO `p877_slug_tries` (`eventName`, `tries`) VALUES (NEW.`eventName`, 1) "
         . "ON DUPLICATE KEY UPDATE `tries` = `tries` + 1; "
         . "IF NEW.`eventName` = '" . RACE_ALWAYS_NAME . "' "
@@ -946,7 +955,10 @@ echo "X. A row the FILE repeats is marked in the preview and left out at Confirm
 //    preview and was then skipped at Confirm as "Already in the calendar",
 //    because its first copy had just been saved. Row 3 repeats row 2 exactly;
 //    row 4 differs only in capitals and row 5 only in date, so neither is a
-//    repeat.
+//    repeat. Row 6 writes row 2's start WITHOUT seconds — different text, the
+//    same stored value — so it IS a repeat, and only a key built from the
+//    STORED start on both pages says so on both (the third independent check
+//    changed only the preview's key to the raw text and stayed green).
 $twice = $child . $sep . 'p790-twice.csv';
 file_put_contents(
     $twice,
@@ -955,6 +967,7 @@ file_put_contents(
     . "\"P790 twice\",2031-10-01 10:00:00,2031-10-01 11:00:00,published\n"
     . "\"P790 TWICE\",2031-10-01 10:00:00,2031-10-01 11:00:00,published\n"
     . "\"P790 twice\",2031-10-02 10:00:00,2031-10-02 11:00:00,published\n"
+    . "\"P790 twice\",2031-10-01 10:00,2031-10-01 11:00,published\n"
 );
 /** The file with a repeated row, with or without the tick. */
 $scnTwice = static function (bool $tick) use ($runImport, $twice): array {
@@ -970,18 +983,39 @@ $scnTwice = static function (bool $tick) use ($runImport, $twice): array {
     ];
 };
 $x = $scnTwice(false);
-check('X1 the preview marks the repeated row "Repeats an earlier row", naming row 2, and calls the other three Ready',
-    [$x['repeatMarks'], $x['saysRow2'], $x['ready']], [1, true, 3]);
-check('X2 Confirm, without the tick, leaves out exactly the row the preview marked — the two pages agree',
-    $x['lines'], [2 => 'OK', 3 => 'Repeats an earlier row', 4 => 'OK', 5 => 'OK']);
+check('X1 the preview marks BOTH repeated rows "Repeats an earlier row" — the exact copy and the one written '
+    . 'without seconds — naming row 2, and calls the other three Ready',
+    [$x['repeatMarks'], $x['saysRow2'], $x['ready']], [2, true, 3]);
+check('X2 Confirm, without the tick, leaves out exactly the rows the preview marked — the two pages agree',
+    $x['lines'], [2 => 'OK', 3 => 'Repeats an earlier row', 4 => 'OK', 5 => 'OK', 6 => 'Repeats an earlier row']);
 check('X3 ...says which row it repeats, and how to import it anyway',
     [str_contains($x['msg3'], 'Repeats row 2 of this file'), str_contains($x['msg3'], 'import a file holding only this row')],
     [true, true]);
 check('X4 ...three events are saved: different capitals and a different date are not repeats', $x['count'], 3);
 check('X5 ...and the activity record counts the repeat on its own',
-    $x['activity'], ['Bulk import: 3 events created, 0 already in the calendar, 1 repeated in the file, 0 rows not imported']);
+    $x['activity'], ['Bulk import: 3 events created, 0 already in the calendar, 2 repeated in the file, 0 rows not imported']);
 $x = $scnTwice(true);
-check('X6 WITH the tick, the repeated row is imported too', [$x['lines'], $x['count']], [[2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK'], 4]);
+check('X6 WITH the tick, the repeated rows are imported too',
+    [$x['lines'], $x['count']], [[2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK', 6 => 'OK'], 5]);
+
+// A repeat of a row the database REFUSED: "to import it as well" would claim a
+// first copy that is not there, so the message must say row 2 was not
+// imported either.
+$twiceRefused = $child . $sep . 'p790-twice-refused.csv';
+file_put_contents(
+    $twiceRefused,
+    "eventName,startDateTime,endDateTime,status\n"
+    . '"' . REFUSED_NAME . "\",2031-10-05 10:00:00,2031-10-05 11:00:00,published\n"
+    . '"' . REFUSED_NAME . "\",2031-10-05 10:00:00,2031-10-05 11:00:00,published\n"
+);
+$xr = $runImport($twiceRefused);
+check('X7 a repeat of a REFUSED row is still left out, and says row 2 was not imported either — never "to import it as well"',
+    [
+        array_map(static fn (array $line): string => $line[0], $xr['report']),
+        str_contains($xr['report'][3][1] ?? '', 'Row 2 was not imported either'),
+        str_contains($xr['report'][3][1] ?? '', 'To import it as well'),
+    ],
+    [[2 => 'Skipped', 3 => 'Repeats an earlier row'], true, false]);
 
 echo "R. Another writer takes the address between asking and saving (#877)\n";
 // 🏁 Stood in for by the trigger (see RACE_ONCE_NAME at the top): the database
@@ -1400,14 +1434,15 @@ $restoreBoth();
 
 // (e) "IS IT FREE" ASKED ONCE, BEFORE THE TRIES: every try then re-sends the
 //     address the database has just refused. The trigger in R1-R11 cannot see
-//     this (it refuses whatever the address); only the real race can.
+//     this (it refuses whatever the address); only the real race can. (`$slug`
+//     starts empty for every row, so "ask only while it is empty" asks once.)
 $plant(
     $pagePath,
     $before,
-    "for (\$slugTry = 1; ; \$slugTry++) {\n"
+    "\$insertSent = false;\n"
     . "                                \$slug = Events::freeSlug(\$mysqli, \$siteId, \$slugStem);",
-    "\$slug = Events::freeSlug(\$mysqli, \$siteId, \$slugStem);\n"
-    . "                            for (\$slugTry = 1; ; \$slugTry++) {",
+    "\$insertSent = false;\n"
+    . "                                \$slug = \$slug !== '' ? \$slug : Events::freeSlug(\$mysqli, \$siteId, \$slugStem);",
     'the free-address question inside the tries'
 );
 $rp = $scnRace();
@@ -1520,6 +1555,34 @@ check('P34 with Confirm forgetting the file\'s repeats, the repeated row is desc
     $x['lines'][3] ?? null, 'Already in the calendar');
 $restoreBoth();
 
+// (q) THE PREVIEW KEYS REPEATS BY THE CELL'S RAW TEXT: row 6 (row 2's start
+//     without seconds) is called Ready while Confirm skips it.
+$plant(
+    $pagePath,
+    $before,
+    '$repeatKey = $storedStart . "\0" . (string) $r[\'eventName\'];',
+    '$repeatKey = (string) $r[\'startDateTime\'] . "\0" . (string) $r[\'eventName\'];',
+    'the preview\'s repeat key'
+);
+$x = $scnTwice(false);
+check('P38 with the preview keying repeats by raw text, the row written without seconds shows Ready, so X1 would have gone red',
+    [$x['repeatMarks'], $x['ready']], [1, 4]);
+$restoreBoth();
+
+// (r) CONFIRM KEYS REPEATS BY THE CELL'S RAW TEXT: row 6 slips past the repeat
+//     test and is described as already in the calendar instead.
+$plant(
+    $pagePath,
+    $before,
+    '$repeatKey = $startSql . "\0" . $name;',
+    '$repeatKey = (string) $r[\'startDateTime\'] . "\0" . $name;',
+    'Confirm\'s repeat key'
+);
+$x = $scnTwice(false);
+check('P39 with Confirm keying repeats by raw text, the row written without seconds is not called a repeat, so X2 would have gone red',
+    $x['lines'][6] ?? null, 'Already in the calendar');
+$restoreBoth();
+
 // (n) THE PREVIEW FORGETS THE FILE'S OWN REPEATS: it calls the row Ready again.
 $plant(
     $pagePath,
@@ -1530,7 +1593,7 @@ $plant(
 );
 $x = $scnTwice(false);
 check('P35 with the preview forgetting the file\'s repeats, the repeated row shows Ready while Confirm skips it, so X1 would have gone red',
-    [$x['repeatMarks'], $x['ready'], $x['lines'][3] ?? null], [0, 4, 'Repeats an earlier row']);
+    [$x['repeatMarks'], $x['ready'], $x['lines'][3] ?? null], [0, 5, 'Repeats an earlier row']);
 $restoreBoth();
 
 echo "L. A connection lost BEFORE the row is sent is not reported as \"may have been saved\" (#877)\n";
@@ -1554,6 +1617,12 @@ $inject = "    public static function freeSlug(mysqli \$db, int \$siteId, string
 $injected = $inject
     . "        if (str_starts_with(\$stem, 'p790-lost-before-send') === true) {\n"
     . "            throw new \\mysqli_sql_exception('injected by the self-test: MySQL server has gone away', 2006);\n"
+    . "        }\n"
+    // The SECOND address question for RACE_ONCE_LOST_NAME — the one asked
+    // after its first save was sent and refused — loses the connection.
+    . "        static \$p877RetryAsks = 0;\n"
+    . "        if (str_starts_with(\$stem, 'p790-race-once-lost') === true && ++\$p877RetryAsks >= 2) {\n"
+    . "            throw new \\mysqli_sql_exception('injected by the self-test: MySQL server has gone away', 2006);\n"
     . "        }\n";
 /** The lost-connection file, run against a page whose Events.php carries the injection. */
 $scnLost = static function () use ($runImport, $lostFile): array {
@@ -1575,6 +1644,52 @@ check('L2 ...it says the connection was lost BEFORE the row was sent, so nothing
 check('L3 ...only the row before it is in the database', $lo['events'], ['P790 L before']);
 check('L4 ...and the activity record counts it as not imported, with no row "whose outcome is not known"',
     $lo['activity'], ['Bulk import: 1 events created, 0 already in the calendar, 0 repeated in the file, 2 rows not imported']);
+
+// 🔁 THE RETRY'S QUESTION LOSES THE CONNECTION. The first save of this row is
+//    SENT and refused (the trigger's 1062, as if another writer had just taken
+//    the address); the retry's address question then loses the connection. The
+//    first attempt saved nothing and the second sent nothing, so the row must
+//    say "not imported", never "not known" — round 3 of the independent check
+//    measured "not known" here, because the sent flag was never set back.
+$lostRetryFile = $child . $sep . 'p790-lost-retry.csv';
+file_put_contents(
+    $lostRetryFile,
+    "eventName,startDateTime,endDateTime,status\n"
+    . '"' . RACE_ONCE_LOST_NAME . "\",2031-11-05 10:00:00,2031-11-05 11:00:00,published\n"
+);
+/** The retry-lost file, run against a page whose Events.php carries the injection. */
+$scnLostRetry = static function () use ($runImport, $lostRetryFile): array {
+    $r = $runImport($lostRetryFile);
+    return [
+        'lines'    => array_map(static fn (array $line): string => $line[0], $r['report']),
+        'msg2'     => $r['report'][2][1] ?? '',
+        'tries'    => $r['tries'],
+        'events'   => array_values($r['events']),
+        'activity' => $r['activity'],
+    ];
+};
+$lr = $scnLostRetry();
+check('L5 PREMISE: the row\'s first save really was sent and refused (the trigger counted exactly one try)',
+    $lr['tries'], [RACE_ONCE_LOST_NAME => 1]);
+check('L6 the connection lost during the RETRY\'s address question reads "not imported … before this row was sent", '
+    . 'not "not known"',
+    [$lr['lines'], str_contains($lr['msg2'], 'lost before this row was sent')], [[2 => 'Skipped'], true]);
+check('L7 ...nothing is in the database, and the activity record has no row "whose outcome is not known"',
+    [$lr['events'], $lr['activity']],
+    [[], ['Bulk import: 0 events created, 0 already in the calendar, 0 repeated in the file, 1 rows not imported']]);
+
+// (p) THE SENT FLAG NOT SET BACK between attempts: the refused first attempt
+//     leaks into the retry, and the row says it may have been saved.
+$plant(
+    $pagePath,
+    $before,
+    "\$insertSent = false;\n                                \$slug = Events::freeSlug(",
+    "\$slug = Events::freeSlug(",
+    'the per-attempt reset of the sent flag'
+);
+$lr = $scnLostRetry();
+check('P37 with the sent flag not set back, the retry-lost row says "Not known", so L6 would have gone red',
+    $lr['lines'][2] ?? null, 'Not known');
 
 // (o) EVERY LOST CONNECTION CALLED "NOT KNOWN" again — the old wording.
 $plant($pagePath, $before, '$unknown   = $insertSent;', '$unknown   = true;', 'the sent-or-not test');

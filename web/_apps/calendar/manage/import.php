@@ -978,6 +978,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    for each name and start.
                     $repeatCount  = 0;
                     $firstRowSeen = [];
+                    // The repeat keys of rows that WERE imported in this run.
+                    $savedKeys    = [];
                     // ☑️ "Import these anyway" (D-100). An unticked box is not
                     //    sent at all, and NOT SENT MEANS NO here — the safe
                     //    default the owner chose — so this asks for the exact
@@ -1271,10 +1273,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'ok'     => false,
                                     'repeat' => true,
                                     'row'    => $r['rowNum'],
+                                    // Worded by whether row N itself was
+                                    // imported: if it was not, "to import it
+                                    // as well" would claim a copy that is not
+                                    // there.
                                     'msg'    => 'Repeats row ' . $repeatOf . ' of this file (the same name and the same '
                                         . 'start date and time), so it was not imported. Nothing from it was saved. '
-                                        . 'To import it as well, import a file holding only this row and tick '
-                                        . '"Import these anyway".',
+                                        . (isset($savedKeys[$repeatKey]) === true
+                                            ? 'To import it as well, import a file holding only this row and tick '
+                                                . '"Import these anyway".'
+                                            : 'Row ' . $repeatOf . ' was not imported either, so this event is not in '
+                                                . 'the calendar from this file; to import it, put it right and import '
+                                                . 'a file holding only that row.'),
                                 ];
                                 $repeatCount++;
                                 continue;
@@ -1342,6 +1352,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $slugStem  = Events::slugStem($name, $startSql);
                             $slugTries = 3;
                             for ($slugTry = 1; ; $slugTry++) {
+                                // 📤 Reset at the top of EVERY attempt: an
+                                //    earlier attempt that was sent and REFUSED
+                                //    (its address taken) saved nothing, so if
+                                //    this attempt's address question then loses
+                                //    the connection, nothing has been sent that
+                                //    could have been saved. Left set, that case
+                                //    read "Not known" — found by the third
+                                //    independent check, measured on both engines.
+                                $insertSent = false;
                                 $slug = Events::freeSlug($mysqli, $siteId, $slugStem);
                                 $stmt->bind_param(
                                     'issssssisssiiii',
@@ -1454,6 +1473,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         if ($savedAs > 0) {
+                            // Remembered so a later repeat of this row can say
+                            // truthfully that its first copy WAS imported.
+                            $savedKeys[$repeatKey] = true;
                             $results[] = ['ok' => true, 'row' => $r['rowNum'], 'msg' => 'Imported as event #' . $savedAs];
                             $okCount++;
                         } else {

@@ -169,7 +169,7 @@ FILE_ALLOWLIST: dict[str, str] = {
     # read or change an IMPORTED row, because there is no eventID to
     # look one up by until this statement itself creates one — D5 is
     # about existing rows, not ones a form is in the middle of making.
-    "_apps/calendar/manage/import.php": "bulk-creates the organisation's OWN events from a CSV; never reads an existing row",
+    "_apps/calendar/manage/import.php": "bulk-creates the organisation's OWN events from a CSV; the only existing rows it reads are through Events::alreadyInCalendar() and Events::freeSlug() (#877, D-100), which are line-allowlisted below with their reasons",
     "_apps/calendar/submit-save.php": "creates the organisation's OWN event from the public submission form; never reads an existing row",
     "_apps/events/api/create.php": "REST create endpoint for the organisation's OWN events; never reads an existing row",
     # 🔢 Counting and erasure only — these touch tblEvents to count rows
@@ -393,8 +393,9 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # imported a second time); the question is scoped by siteID and returns
     # only the event's number, address and start, to that calendar's manager.
     # Keyed by line number: moved 1154 -> 1161 when #877's second round wrapped
-    # the free-address question's statement close in a try/catch above it.
-    ("_core/Events.php", 1161): (
+    # the free-address question's statement close in a try/catch above it, and
+    # 1161 -> 1164 when round 3 reworded that try's comment.
+    ("_core/Events.php", 1164): (
         "SELECT `eventID`, `eventSlug`, `startDateTime` FROM `tblEvents` WHERE `siteID` = ? AND `isDeleted` = 0",
         "asks whether this organisation's calendar already holds the same event, for its own manager importing a file (D-100); copied-in events of the same organisation count on purpose",
     ),
