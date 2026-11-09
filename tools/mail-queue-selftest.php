@@ -1769,10 +1769,10 @@ if (part('Q10', 'The job: its token, the lock, and what it prints') === true) {
     setting('maintenance.cronToken', $jobToken);
     ok('with NO token set in the portal, an empty token is refused too (the job does nothing until an administrator sets one)', $unset['status'] === 403, 'HTTP ' . $unset['status'] . ' ' . $unset['body']);
     // A second run while one holds the lock. This test's own connection takes the very lock a run takes.
-    $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())), 0)");
+    $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)), 0)");
     $busy = $job('right');
     $mail = mailSince('accept');
-    $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))");
+    $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)))");
     ok(
         'a second run while another holds the lock is turned away, says so ("busy"), sends nothing and leaves the message waiting',
         $busy['status'] === 200 && ($busy['json']['status'] ?? '') === 'busy' && ($busy['json']['ran'] ?? -1) === 0 && $mail['messages'] === [] && count(queued("status = 'queued'")) === 1,
@@ -3901,11 +3901,11 @@ if (part('F10', 'An erasure that cannot have the run lock still takes the person
     );
     // This test's own connection takes the lock a run of the job holds, and
     // keeps it: a run that never ends. The erasure waits its 20 seconds for it.
-    $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())), 0)");
+    $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)), 0)");
     $began   = microtime(true);
     $first   = child(['task' => 'erase', 'requestId' => REQUEST_LOCKED, 'userId' => PEOPLE['locked'], 'adminId' => PEOPLE['root']]);
     $waited  = microtime(true) - $began;
-    $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))");
+    $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)))");
     $request = one('SELECT status FROM tblErasureRequest WHERE requestID = ?', 'i', [REQUEST_LOCKED]);
     $audit   = one("SELECT action, recordKey, details FROM tblErasureAudit WHERE requestID = ? AND tableName = 'tblMailQueue' ORDER BY auditID DESC LIMIT 1", 'i', [REQUEST_LOCKED]);
     $left    = (string) json_encode(q('SELECT toRecipients FROM tblMailQueue'));

@@ -2055,8 +2055,22 @@ class Auth
      * locks are shared by every database on a server, and two installations
      * on one server (a test copy beside the live one) must not make each
      * other wait. The result is 47 characters; MySQL allows 64.
+     *
+     * WHY SHA2 AND NOT SHA1 (#887, 9 November 2026). This used SHA1(), and
+     * MySQL 9.7 has NO SHA1(), SHA() or MD5() at all: measured on 9.7.4,
+     * `SELECT SHA1('x')` answers ERROR 1305 "FUNCTION <db>.SHA1 does not
+     * exist" (SHA2() is still there). signInLock() catches that error and
+     * answers "could not have the lock", so on MySQL 9.7 EVERY password
+     * sign-in was refused with "Too many failed attempts" and no password
+     * was ever checked — on a database version DbServer calls supported.
+     * LEFT(SHA2(…, 256), 40) is 40 characters exactly as SHA1's answer was,
+     * so the name is still 47 characters, and it works on MySQL 8.0, 8.4
+     * and 9.7 and on MariaDB 11.4 and 12.3 (each measured). Every named
+     * lock in the portal had the same fault and was changed with this one;
+     * tools/audit-checks/check_no_removed_sql_functions.py stops any of the
+     * three coming back.
      */
-    private const SIGN_IN_LOCK_SQL = "CONCAT('signin:', SHA1(CONCAT(IFNULL(DATABASE(), ''), ':', ?)))";
+    private const SIGN_IN_LOCK_SQL = "CONCAT('signin:', LEFT(SHA2(CONCAT(IFNULL(DATABASE(), ''), ':', ?), 256), 40))";
 
     /** How long, in seconds, a sign-in try waits for that lock before it is refused. */
     private const SIGN_IN_LOCK_WAIT = 5;

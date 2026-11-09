@@ -216,10 +216,23 @@ const TRIGGER_1114_TEXT = 'p790 test trigger: the table is full, on purpose';
 //    the refusal the unique key gives (1062, naming `uq_event_site_slug`):
 //    "race once" only on its FIRST try, so the import's retry must save it;
 //    "race always" on every try, so the retry must give up after a bounded
-//    number and say so. Each try is counted in `p877_slug_tries`, a MEMORY
-//    table, because a refused statement takes back what an InnoDB table was
-//    given but NOT what a MEMORY table was given — the count survives the
-//    refusal it is counting.
+//    number and say so. Each try is counted, and the count must survive the
+//    refusal it is counting — a refused statement takes back every row it
+//    wrote. It used to be a MEMORY table, which a refusal does not take back.
+//    MySQL 9.7 REFUSED THAT (#887): it runs with GTID consistency enforced
+//    (`@@enforce_gtid_consistency = ON` on mysql:9.7.4, measured), which
+//    refuses any statement that could write a non-transactional table AND a
+//    transactional one — and it judges the statement's SHAPE, so while the
+//    trigger named a MEMORY table EVERY insert into `tblEvents` was refused
+//    with error 1785, not just the race rows, and the whole file went red for
+//    a reason that was never in the code under test. Now each race name has
+//    its own InnoDB table with an AUTO_INCREMENT column, because the one
+//    thing a refused statement does NOT give back is an AUTO_INCREMENT number
+//    (measured on MySQL 8.0, 8.4, 9.7 and MariaDB 11.4, 12.3): the trigger
+//    inserts a row per try, and the number of tries is the NEXT number the
+//    table would give, less one — read by `$readTries`. TRUNCATE starts each
+//    table at 1 again. The trigger's own insert does not disturb the event's
+//    LAST_INSERT_ID(), also measured.
 const RACE_ONCE_NAME   = 'P790 race once';
 const RACE_ALWAYS_NAME = 'P790 race always';
 // Refused once like RACE_ONCE_NAME; section L then makes the RETRY's address
@@ -227,22 +240,45 @@ const RACE_ALWAYS_NAME = 'P790 race always';
 const RACE_ONCE_LOST_NAME = 'P790 race once lost';
 const RACE_TEXT        = "Duplicate entry 'p877' for key 'uq_event_site_slug'";
 $db->query('DROP TRIGGER IF EXISTS `p790_refuse_one_row`');
-$db->query('DROP TABLE IF EXISTS `p877_slug_tries`');
-try {
-    $db->query(
-        'CREATE TABLE `p877_slug_tries` (`eventName` VARCHAR(100) NOT NULL PRIMARY KEY, `tries` INT NOT NULL) '
-        // ⚠️ THE COLLATION IS NAMED, and must match `tblEvents.eventName`'s
-        //    (`utf8mb4_general_ci`), because the trigger compares the two. Left
-        //    to the database's default, a database made with a plain CREATE
-        //    DATABASE — as the workflows do — gets MySQL 8.0's
-        //    utf8mb4_0900_ai_ci or MariaDB 11.4's utf8mb4_uca1400_ai_ci, and the
-        //    comparison fails with 1267 "Illegal mix of collations" (found by
-        //    the second independent check: 98 of 106 on both engines).
-        . 'ENGINE=MEMORY DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci'
-    );
-} catch (Throwable $e) {
-    refuse('could not create the test table p877_slug_tries (' . $e->getMessage() . ')');
+// One counting table per race name, in a fixed order (the order `$readTries`
+// reports them in, which is the order the old `ORDER BY eventName` gave). The
+// tables hold no text, so the collation trap the old one had to name (1267,
+// "Illegal mix of collations", when the trigger compared names) cannot arise.
+const RACE_TRIES_TABLES = [
+    RACE_ALWAYS_NAME    => 'p877_tries_always',
+    RACE_ONCE_NAME      => 'p877_tries_once',
+    RACE_ONCE_LOST_NAME => 'p877_tries_once_lost',
+];
+$db->query('DROP TABLE IF EXISTS `p877_slug_tries`'); // the old MEMORY table, if an earlier run left it
+foreach (RACE_TRIES_TABLES as $triesTable) {
+    $db->query('DROP TABLE IF EXISTS `' . $triesTable . '`');
+    try {
+        $db->query('CREATE TABLE `' . $triesTable . '` (`n` INT NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB');
+    } catch (Throwable $e) {
+        refuse('could not create the test table ' . $triesTable . ' (' . $e->getMessage() . ')');
+    }
 }
+/**
+ * How many times the trigger saw each race name since the tables were last
+ * emptied: the next AUTO_INCREMENT number less one (see above). It empties
+ * them as it reads, so each read starts the count again. A name never tried
+ * is left out, as the old table left it out.
+ *
+ * @return array<string, int>
+ */
+$readTries = static function (mysqli $db): array {
+    $tries = [];
+    foreach (RACE_TRIES_TABLES as $raceName => $triesTable) {
+        $db->query('INSERT INTO `' . $triesTable . '` () VALUES ()');
+        $count = (int) $db->insert_id - 1;
+        $db->query('TRUNCATE TABLE `' . $triesTable . '`');
+        if ($count > 0) {
+            $tries[$raceName] = $count;
+        }
+    }
+
+    return $tries;
+};
 try {
     $db->query(
         'CREATE TRIGGER `p790_refuse_one_row` BEFORE INSERT ON `tblEvents` FOR EACH ROW '
@@ -252,11 +288,19 @@ try {
         . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_3819_TEXT . "', MYSQL_ERRNO = 3819; "
         . "ELSEIF NEW.`eventName` = '" . REFUSED_1114_NAME . "' THEN "
         . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_1114_TEXT . "', MYSQL_ERRNO = 1114; "
-        . "ELSEIF NEW.`eventName` IN ('" . RACE_ONCE_NAME . "', '" . RACE_ALWAYS_NAME . "', '" . RACE_ONCE_LOST_NAME . "') THEN "
-        . "INSERT INTO `p877_slug_tries` (`eventName`, `tries`) VALUES (NEW.`eventName`, 1) "
-        . "ON DUPLICATE KEY UPDATE `tries` = `tries` + 1; "
-        . "IF NEW.`eventName` = '" . RACE_ALWAYS_NAME . "' "
-        . "OR (SELECT `tries` FROM `p877_slug_tries` WHERE `eventName` = NEW.`eventName`) = 1 THEN "
+        . "ELSEIF NEW.`eventName` = '" . RACE_ALWAYS_NAME . "' THEN "
+        . "INSERT INTO `p877_tries_always` () VALUES (); "
+        . "SIGNAL SQLSTATE '23000' SET MESSAGE_TEXT = '" . str_replace("'", "''", RACE_TEXT) . "', MYSQL_ERRNO = 1062; "
+        // "Race once": refused only when this try's row is the table's FIRST.
+        // A refused try's row is taken back, so the second try sees MAX() = 2.
+        . "ELSEIF NEW.`eventName` = '" . RACE_ONCE_NAME . "' THEN "
+        . "INSERT INTO `p877_tries_once` () VALUES (); "
+        . "IF (SELECT MAX(`n`) FROM `p877_tries_once`) = 1 THEN "
+        . "SIGNAL SQLSTATE '23000' SET MESSAGE_TEXT = '" . str_replace("'", "''", RACE_TEXT) . "', MYSQL_ERRNO = 1062; "
+        . "END IF; "
+        . "ELSEIF NEW.`eventName` = '" . RACE_ONCE_LOST_NAME . "' THEN "
+        . "INSERT INTO `p877_tries_once_lost` () VALUES (); "
+        . "IF (SELECT MAX(`n`) FROM `p877_tries_once_lost`) = 1 THEN "
         . "SIGNAL SQLSTATE '23000' SET MESSAGE_TEXT = '" . str_replace("'", "''", RACE_TEXT) . "', MYSQL_ERRNO = 1062; "
         . "END IF; "
         . "END IF; END"
@@ -282,10 +326,12 @@ register_shutdown_function(static function () use (&$state): void {
             echo "  ! could not remove the test trigger p790_refuse_one_row; remove it by hand.\n";
         }
         try {
-            $state['db']->query('DROP TABLE IF EXISTS `p877_slug_tries`');
+            foreach (RACE_TRIES_TABLES as $triesTable) {
+                $state['db']->query('DROP TABLE IF EXISTS `' . $triesTable . '`');
+            }
             $state['db']->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P877 %'");
         } catch (Throwable $e) {
-            echo "  ! could not remove p877_slug_tries or the P877 holder event; remove them by hand.\n";
+            echo "  ! could not remove the p877_tries_* tables or the P877 holder event; remove them by hand.\n";
         }
     }
     if ($state['child'] !== null && is_dir($state['child']) === true) {
@@ -610,12 +656,12 @@ $runImport = static function (
     bool $clear = true,
     array $confirmExtra = [],
     ?callable $between = null
-) use ($http, $tokenOn, $signIn, $csv, $db, $reportOf, $userId): array {
+) use ($http, $tokenOn, $signIn, $csv, $db, $reportOf, $userId, $readTries): array {
     $file ??= $csv;
     if ($clear === true) {
         $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'");
     }
-    $db->query('DELETE FROM `p877_slug_tries`');
+    $readTries($db); // empties the counting tables: each read starts them at 1 again
     $mark = (int) ($db->query('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')->fetch_assoc()['m'] ?? 0);
     $errMark = (int) ($db->query('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')->fetch_assoc()['m'] ?? 0);
 
@@ -637,11 +683,7 @@ $runImport = static function (
         $events[(int) $row['eventID']] = (string) $row['eventName'];
         $slugs[(int) $row['eventID']]  = (string) $row['eventSlug'];
     }
-    $tries = [];
-    $rs = $db->query('SELECT `eventName`, `tries` FROM `p877_slug_tries` ORDER BY `eventName`');
-    while ($row = $rs->fetch_assoc()) {
-        $tries[(string) $row['eventName']] = (int) $row['tries'];
-    }
+    $tries = $readTries($db);
     $activity = [];
     $rs = $db->query(
         "SELECT `activityDescription` FROM `tblActivityLogs` WHERE `logID` > {$mark} "

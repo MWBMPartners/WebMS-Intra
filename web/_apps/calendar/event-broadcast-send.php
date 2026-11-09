@@ -182,8 +182,10 @@ if ($intended === 0) {
 // lock the database gives up by itself if the request dies. REJECTED: making
 // step 2 a locking read. Two presses then each wait for the other and the
 // database ends one of them with an error.
+// SHA2, never SHA1 or MD5: MySQL 9.7 has neither, and this lock then threw
+// on every press (#887).
 $lockEvent = (string) $eventId;
-$stmt      = $mysqli->prepare("SELECT GET_LOCK(CONCAT('portal-broadcast:', SHA1(CONCAT(DATABASE(), ':', ?))), 10) AS got");
+$stmt      = $mysqli->prepare("SELECT GET_LOCK(CONCAT('portal-broadcast:', LEFT(SHA2(CONCAT(DATABASE(), ':', ?), 256), 40)), 10) AS got");
 $stmt->bind_param('s', $lockEvent);
 $stmt->execute();
 $gotLock = (int) ($stmt->get_result()->fetch_assoc()['got'] ?? 0);
@@ -250,7 +252,7 @@ try {
     error_log('Event broadcast: the broadcast could not be recorded, and nothing of it was kept: ' . get_class($problem));
 }
 try {
-    $stmt = $mysqli->prepare("SELECT RELEASE_LOCK(CONCAT('portal-broadcast:', SHA1(CONCAT(DATABASE(), ':', ?))))");
+    $stmt = $mysqli->prepare("SELECT RELEASE_LOCK(CONCAT('portal-broadcast:', LEFT(SHA2(CONCAT(DATABASE(), ':', ?), 256), 40)))");
     $stmt->bind_param('s', $lockEvent);
     $stmt->execute();
     $stmt->close();

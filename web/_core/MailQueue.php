@@ -1563,8 +1563,9 @@ final class MailQueue
         // 🔒 One run at a time. The lock belongs to this database connection
         //    and is given up by the database itself if the run dies. It is
         //    named for this database, because such a lock is shared by every
-        //    database on the server.
-        $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())), 0) AS got");
+        //    database on the server. SHA2, never SHA1 or MD5: MySQL 9.7 has
+        //    neither, and this line then threw on every run (#887).
+        $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)), 0) AS got");
         $got  = (int) ($lock->fetch_assoc()['got'] ?? 0);
         $lock->free();
         if ($got !== 1) {
@@ -1601,7 +1602,7 @@ final class MailQueue
                         $out['left' . ucfirst($status)] = $count;
                     }
                 }
-                $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))");
+                $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)))");
             } catch (\Throwable $ignored) {
                 // See above.
             }
@@ -2025,7 +2026,7 @@ final class MailQueue
     public static function sendOneHeld(mysqli $db, int $queueId, string $onlyCertificate = ''): array
     {
         $not  = static fn (string $words): array => ['done' => 'not-tried', 'words' => $words];
-        $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())), 0) AS got");
+        $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)), 0) AS got");
         $got  = (int) ($lock->fetch_assoc()['got'] ?? 0);
         $lock->free();
         if ($got !== 1) {
@@ -2120,7 +2121,7 @@ final class MailQueue
             }];
         } finally {
             try {
-                $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))");
+                $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)))");
             } catch (\Throwable $ignored) {
                 // The database has gone, and gives the lock up by itself.
             }
@@ -2533,7 +2534,7 @@ final class MailQueue
     public static function eraseAddress(mysqli $db, string $email): array
     {
         $wait = self::ERASURE_WAITS_SECONDS;
-        $stmt = $db->prepare("SELECT GET_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())), ?) AS got");
+        $stmt = $db->prepare("SELECT GET_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)), ?) AS got");
         $stmt->bind_param('i', $wait);
         $stmt->execute();
         $alone = (int) ($stmt->get_result()->fetch_assoc()['got'] ?? 0) === 1;
@@ -2543,7 +2544,7 @@ final class MailQueue
         } finally {
             if ($alone === true) {
                 try {
-                    $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))");
+                    $db->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)))");
                 } catch (\Throwable $ignored) {
                     // The database gives the lock up by itself when the connection ends.
                 }

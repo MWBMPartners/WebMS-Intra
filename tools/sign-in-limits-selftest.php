@@ -36,6 +36,8 @@
  * on the page's clock instead was hours wrong, and with both on one zone that
  * cannot be seen (this file's own first run passed for exactly that reason).
  *
+ *   0. The sign-in lock's own SQL runs on the database in front of it, and
+ *      the first try from a fresh address is checked, not refused (#887).
  *   A. One record per refused try: a wrong password, a made-up name, an empty
  *      password and an expired form each write exactly one.
  *   B. Five means five: after four wrong passwords the right one signs in;
@@ -177,7 +179,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 117;
+const EXPECTED_CHECKS = 119; // two added by #887 (section 0)
 
 function refuse(string $why): never
 {
@@ -1092,10 +1094,50 @@ echo 'portal server process ' . (int) proc_get_status($state['proc'])['pid'] . '
     . ' on port ' . $mailPort . ', PHP ' . PHP_VERSION . ', database ' . (string) one('SELECT VERSION() AS v')['v'] . ', ' . gmdate('Y-m-d H:i:s') . " UTC\n";
 echo 'the portal is set to the time zone ' . $zone . '; the database server\'s clock is ' . $dbOffset . " minute(s) from UTC\n";
 
+// =============================================================================
+head('0. The sign-in lock runs on THIS database (#887)');
+// =============================================================================
+//    WHAT WENT WRONG. The lock that makes sign-in tries from one address take
+//    turns was named with SHA1(), and MySQL 9.7 has no SHA1(), SHA() or MD5()
+//    (measured on 9.7.4: ERROR 1305). Auth::signInLock() catches the error and
+//    answers "could not have the lock", so on MySQL 9.7 EVERY password sign-in
+//    was refused as "Too many failed attempts" with no password checked.
+//    Nothing caught it because every run of this file was on MySQL 8.0 or 8.4,
+//    where SHA1() still exists — so these two checks prove something only when
+//    this file runs on an engine that lacks a function the lock uses. The guard
+//    that works on EVERY engine is
+//    tools/audit-checks/check_no_removed_sql_functions.py; these are the
+//    measurement on the engine in front of us, which a text check cannot be.
+//
+//    The lock's SQL is READ out of the portal's own class, never copied here:
+//    a copy would go on passing after the portal's line had been put back.
+require_once $webSrc . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Auth.php';
+$lockSql   = (string) (new ReflectionClassConstant(\Portal\Core\Auth::class, 'SIGN_IN_LOCK_SQL'))->getValue();
+$lockFault = '';
+$lockRow   = null;
+try {
+    $lockRow = one('SELECT GET_LOCK(' . $lockSql . ', 0) AS got, RELEASE_LOCK(' . $lockSql . ') AS freed, LENGTH(' . $lockSql . ') AS len', 'sss', [ip(10), ip(10), ip(10)]);
+} catch (\Throwable $e) {
+    $lockFault = $e->getMessage();
+}
+ok(
+    'the sign-in lock\'s own SQL can be taken and let go on this database server, and its name fits MySQL\'s 64-character limit',
+    $lockFault === '' && (int) ($lockRow['got'] ?? 0) === 1 && (int) ($lockRow['freed'] ?? 0) === 1 && (int) ($lockRow['len'] ?? 99) <= 64,
+    $lockFault !== '' ? 'the database refused it: ' . $lockFault : 'answered ' . json_encode($lockRow)
+);
+
 // 🧭 Before anything is counted: the portal must be counting by the made-up
 //    address. If it is not, every part below would share one address and the
 //    numbers would mean nothing.
 $first = tryPassword(ip(11), login('alpha'), 'wrong-' . bin2hex(random_bytes(4)));
+//    The FIRST try from an address nobody has used must have its password
+//    CHECKED. On MySQL 9.7 before #887 it was refused as "Too many failed
+//    attempts" instead, and the refusal below then blamed the made-up address.
+ok(
+    'the very first sign-in try from a fresh address is checked, not refused as "Too many failed attempts"',
+    str_contains(said($first), 'Too many failed attempts') === false && said($first) === 'danger: Invalid credentials.',
+    describe($first)
+);
 if (records(ip(11), 'LoginFailed') < 1) {
     refuse('the portal did not record a failed sign-in against the made-up address ' . ip(11) . ' (' . describe($first) . '), so the limits cannot be told apart');
 }

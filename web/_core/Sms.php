@@ -965,7 +965,8 @@ class Sms
             //    what the lock adds is that two runs cannot both spend the
             //    same room in the day's limit. It belongs to this database
             //    connection and is given up by the database if the run dies.
-            $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())), 0) AS got");
+            //    SHA2, never SHA1 or MD5: MySQL 9.7 has neither (#887).
+            $lock = $db->query("SELECT GET_LOCK(CONCAT('portal-held-texts:', LEFT(SHA2(DATABASE(), 256), 40)), 0) AS got");
             $got  = (int) ($lock->fetch_assoc()['got'] ?? 0);
             $lock->free();
             if ($got !== 1) {
@@ -1012,7 +1013,7 @@ class Sms
                     // See above.
                 }
                 try {
-                    $db->query("DO RELEASE_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())))");
+                    $db->query("DO RELEASE_LOCK(CONCAT('portal-held-texts:', LEFT(SHA2(DATABASE(), 256), 40)))");
                 } catch (\Throwable $ignored) {
                     // See above.
                 }

@@ -1340,11 +1340,11 @@ at($FRI20);
 $D3 = 'ZQXT D3 while another run holds the lock';
 text('follow', 'prayer_assignment', $D3);
 at($W1 + 60);
-$second->query("SELECT GET_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())), 0)")->free();
+$second->query("SELECT GET_LOCK(CONCAT('portal-held-texts:', LEFT(SHA2(DATABASE(), 256), 40)), 0)")->free();
 $beforeD3 = rowOf($D3);
 $locked   = run();
 $afterD3  = rowOf($D3);
-$second->query("DO RELEASE_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())))");
+$second->query("DO RELEASE_LOCK(CONCAT('portal-held-texts:', LEFT(SHA2(DATABASE(), 256), 40)))");
 $freed = run();
 ok(
     'D3 while another run holds the lock a run does NOTHING (it says it did not run, counts nothing, and the text is not touched); once the lock is free the text is sent',
@@ -1995,9 +1995,9 @@ fresh();
 at($FRI20);
 $J5 = 'ZQXT J5 due while the mail step finds another run busy';
 text('follow', 'prayer_assignment', $J5);
-$second->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())), 0)")->free();
+$second->query("SELECT GET_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)), 0)")->free();
 $busy = page($W1 + 60);
-$second->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))");
+$second->query("DO RELEASE_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)))");
 ok(
     'J5 the mail step finds another run busy and does nothing: the page still says "busy" for mail, AND the texts step ran (the due text was taken and handed over)',
     ($busy['json']['status'] ?? '') === 'busy' && ($busy['json']['ran'] ?? -1) === 0 && (textsOf($busy['json'])['ran'] ?? 0) === 1 && (textsOf($busy['json'])['failed'] ?? 0) === 1 && rowOf($J5)['claimedAt'] === utc($W1 + 60),
@@ -2041,9 +2041,9 @@ ok(
         && rowOf($J8) === $asHeld && str_contains($noClass['log'], 'the held texts step stopped: Error') === true,
     $noClass['out'] . ' / log: ' . $noClass['log']
 );
-$second->query("SELECT GET_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())), 0)")->free();
+$second->query("SELECT GET_LOCK(CONCAT('portal-held-texts:', LEFT(SHA2(DATABASE(), 256), 40)), 0)")->free();
 $textsBusy = page($W1 + 60);
-$second->query("DO RELEASE_LOCK(CONCAT('portal-held-texts:', SHA1(DATABASE())))");
+$second->query("DO RELEASE_LOCK(CONCAT('portal-held-texts:', LEFT(SHA2(DATABASE(), 256), 40)))");
 ok(
     'J9 another run of the texts step holds its lock: the page\'s mail step is "ok", the texts step says it did not run, and the due text is untouched',
     ($textsBusy['json']['status'] ?? '') === 'ok' && (textsOf($textsBusy['json'])['ran'] ?? 1) === 0 && rowOf($J8) === $asHeld,
@@ -2067,7 +2067,7 @@ $mysqli->query('CREATE TABLE ' . PROBE_TABLE . ' (probeID INT NOT NULL AUTO_INCR
 $mysqli->query(
     'CREATE TRIGGER ' . PROBE_HOOK . ' BEFORE UPDATE ON tblSmsMessage FOR EACH ROW BEGIN IF NEW.claimedAt IS NOT NULL AND OLD.claimedAt IS NULL THEN '
     . 'INSERT INTO ' . PROBE_TABLE . " (mailMarkSet, mailLockFree) VALUES ((SELECT COUNT(*) FROM tblMailRouteState WHERE routeKey = 'installation' AND jobLastRanAt IS NOT NULL), "
-    . "IS_FREE_LOCK(CONCAT('portal-mail-queue:', SHA1(DATABASE())))); END IF; END"
+    . "IS_FREE_LOCK(CONCAT('portal-mail-queue:', LEFT(SHA2(DATABASE(), 256), 40)))); END IF; END"
 );
 q("DELETE FROM tblMailRouteState WHERE routeKey = 'installation'");
 $many  = page($W1 + 60);

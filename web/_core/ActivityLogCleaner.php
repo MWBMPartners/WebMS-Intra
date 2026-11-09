@@ -147,8 +147,8 @@ final class ActivityLogCleaner
     /** The copy of a session written by Logger::sessionFacts() starts with exactly this (see Logger::SESSION_FACTS_FORMAT). */
     private const NEW_COPY_LIKE = '{"format":"facts-1",%';
 
-    /** The named database lock, one per database: two installations on one database server must not hold each other up. */
-    private const LOCK_SQL = "CONCAT('portal-log-cleaner:', SHA1(DATABASE()))";
+    /** The named database lock, one per database: two installations on one database server must not hold each other up. SHA2, never SHA1 or MD5: MySQL 9.7 has neither (#887). */
+    private const LOCK_SQL = "CONCAT('portal-log-cleaner:', LEFT(SHA2(DATABASE(), 256), 40))";
 
     /**
      * 🧹 Go through old records for at most `$budgetSeconds`. Never throws.

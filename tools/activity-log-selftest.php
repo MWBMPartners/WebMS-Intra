@@ -899,7 +899,7 @@ echo 'portal server process ' . (int) proc_get_status($state['proc'])['pid'] . '
 echo 'the older database: ' . upgradeState() . "\n";
 
 $filesVersion = (string) require $webSrc . $sep . '_core' . $sep . 'version.php';
-$lockSql      = "CONCAT('portal-log-cleaner:', SHA1(DATABASE()))";
+$lockSql      = "CONCAT('portal-log-cleaner:', LEFT(SHA2(DATABASE(), 256), 40))";
 
 // =============================================================================
 head('U. The upgrade, on the real Upgrade page, with the cleaning held up');
@@ -1017,7 +1017,7 @@ $state['lockHolder'] = null;
 // =============================================================================
 head('K. The cleaner, piece by piece');
 // =============================================================================
-$untouchedBefore = q("SELECT logID, MD5(CONCAT_WS('|', COALESCE(sessionID, '~'), COALESCE(sessionDataSnapshot, '~'), COALESCE(activityDescription, '~'))) AS mark FROM tblActivityLogs "
+$untouchedBefore = q("SELECT logID, SHA2(CONCAT_WS('|', COALESCE(sessionID, '~'), COALESCE(sessionDataSnapshot, '~'), COALESCE(activityDescription, '~')), 256) AS mark FROM tblActivityLogs "
     . "WHERE (sessionID IS NULL OR sessionID = '' OR sessionID LIKE 'sha256:%') AND (sessionDataSnapshot IS NULL OR sessionDataSnapshot LIKE '{\"format\":\"facts-1\",%') ORDER BY logID");
 ok('there are records already in the new form to leave alone: the made-up one, and the ones this run\'s sign-ins have just written', count($untouchedBefore) >= 3, count($untouchedBefore) . ' such record(s)');
 
@@ -1088,7 +1088,7 @@ ok(
         && $now[8]['sessionDataSnapshot'] === null && $now[10]['sessionDataSnapshot'] === null,
     json_encode(array_map(static fn (array $r): ?string => $r['sessionDataSnapshot'], $now))
 );
-$untouchedAfter = q('SELECT logID, MD5(CONCAT_WS(\'|\', COALESCE(sessionID, \'~\'), COALESCE(sessionDataSnapshot, \'~\'), COALESCE(activityDescription, \'~\'))) AS mark FROM tblActivityLogs WHERE logID IN (' . implode(',', array_map('intval', array_column($untouchedBefore, 'logID'))) . ') ORDER BY logID');
+$untouchedAfter = q('SELECT logID, SHA2(CONCAT_WS(\'|\', COALESCE(sessionID, \'~\'), COALESCE(sessionDataSnapshot, \'~\'), COALESCE(activityDescription, \'~\')), 256) AS mark FROM tblActivityLogs WHERE logID IN (' . implode(',', array_map('intval', array_column($untouchedBefore, 'logID'))) . ') ORDER BY logID');
 ok(
     'A RECORD ALREADY IN THE NEW FORM IS LEFT EXACTLY AS IT IS: the made-up one keeps its fingerprint and its facts, and so does every record written while old ones waited',
     $untouchedAfter === $untouchedBefore && $now[5]['sessionID'] === Logger::fingerprintOf($id['newform']) && $now[5]['sessionDataSnapshot'] === $newFacts && $now[7]['sessionID'] === null,
