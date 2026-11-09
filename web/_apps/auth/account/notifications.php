@@ -23,10 +23,12 @@
  *     person who is not an administrator is never sent either, whatever
  *     these say.
  *
- * ADDING A SWITCH: add the key to `$defaults` here AND to `$allowedKeys` in
- * notifications-save.php in the same change. The save page stores "off"
- * for every key on its list that the form did not send, so a key on its
- * list with no switch here is switched off for everybody who presses Save.
+ * ADDING A SWITCH: add the key to `NotifyPrefs::SETTABLE` (the ONE list of
+ * choices a member can set) and to `$defaults` here, and draw it with
+ * `$switchRow`, which puts the hidden "this form drew me" marker beside it.
+ * The save page changes ONLY the switches a form marks as drawn and keeps
+ * every other stored choice (#667), so a key with no switch here is never
+ * touched — it is not switched off for everybody, as it used to be.
  *
  * Stored in tblUsers.notifyPrefs (JSON column from migration 026).
  *
@@ -51,6 +53,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\MailQueue;
+use Portal\Core\NotifyPrefs;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
 
@@ -158,10 +161,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 /**
  * 🎨 Helper — render a single switch row
  */
+//
+// 🔖 Every switch carries its own hidden "this form drew me" marker
+//    (`NotifyPrefs::shownMarker()`, #667). The save page changes ONLY the
+//    switches that carry one: a marked switch that is not ticked is OFF, and a
+//    choice this page did not draw is left exactly as stored. Drawing the
+//    marker HERE, inside the one helper that draws a switch, is what keeps the
+//    two from drifting apart — there is no separate list to forget.
 $switchRow = static function (string $key, string $label, string $helpText) use ($prefs): string {
     $checked = (bool) ($prefs[$key] ?? false) === true ? 'checked' : '';
     $id = 'np-' . htmlspecialchars($key, ENT_QUOTES, 'UTF-8');
     return '<div class="form-check form-switch py-2 border-bottom">'
+         . NotifyPrefs::shownMarker($key)
          . '<input class="form-check-input" type="checkbox" role="switch" '
          . 'name="prefs[' . htmlspecialchars($key, ENT_QUOTES, 'UTF-8') . ']" value="1" '
          . 'id="' . $id . '" ' . $checked . '>'
@@ -208,11 +219,11 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
     //    chosen, and has not. Each switch goes back on this page WITH its
     //    sender, never before it — see #662, which lists what each one needs.
     //
-    //    They are removed from `notifications-save.php`'s allowed-key list in
-    //    the same change. That matters: the handler writes `false` for every
-    //    key on its list that the form did not send, so leaving them listed
-    //    while hiding the switches would have quietly rewritten everybody's
-    //    stored preferences to off.
+    //    They were removed from the save page's allowed-key list in the same
+    //    change, because at the time that handler wrote `false` for every
+    //    listed key the form did not send. Since #667 the save changes only
+    //    the switches a form marks as drawn, so a switch taken off this page
+    //    simply stops being written and the member's stored choice is kept.
     ?>
 
     <div class="card shadow-sm mb-3">
@@ -237,12 +248,11 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
             //    deleted rather than reworded, because a notice that no longer
             //    describes anything is worse than none.
             //
-            //    If you are tempted to remove this key from the page, read the
-            //    long note at the top of notifications-save.php first: that
-            //    handler REBUILDS the whole column from its allowed-key list,
-            //    so taking a key off the page without taking it off the list
-            //    rewrites that preference to off for everybody, one at a time,
-            //    as they each press Save (#667).
+            //    Taking this switch off the page no longer rewrites anybody's
+            //    choice: since #667 the save page changes only the switches a
+            //    form marks as drawn. But the reminder job still READS the
+            //    key, so removing the switch would leave members unable to
+            //    change a choice that still takes effect.
             ?>
         </div>
     </div>
@@ -273,27 +283,24 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
                 </p>
                 <?php
                 // 🧷 The push switches are not shown while push is not set
-                //    up, and the save page stores "off" for every key the
-                //    form does not send. So each push choice that is ON is
-                //    carried in a hidden field: without it, pressing Save
-                //    here would switch that push off for the person, and it
-                //    would stay off after an administrator set push up.
+                //    up, so the form carries NO marker for them, and the save
+                //    page leaves every stored push choice exactly as it is
+                //    (#667) — on stays on, off stays off, nothing chosen stays
+                //    nothing chosen (which reads as on).
                 //
-                //    WHAT WAS WRONG. Until #514 part 9 none was carried, so
-                //    Save on this page (to change something else entirely)
-                //    switched "We're live now" and "Service reminders" off
-                //    for that person. Part 9 first carried only its own new
-                //    switch; the independent check of 13 October 2026 ran the
-                //    page and confirmed the two older ones were still lost.
-                //    All three are carried now.
-                //
-                //    A choice that is OFF gets no field, so it stays off.
+                //    WHAT USED TO BE HERE, and why it has gone. The save page
+                //    used to store "off" for every key on its list that the
+                //    form did not send, so each push choice that was ON had to
+                //    be carried in a hidden `prefs[...]` field, or pressing
+                //    Save here switched it off (#514 part 9 found the older
+                //    two were still being lost after the first fix). Now that
+                //    the save page changes only the switches a form MARKS as
+                //    drawn, those hidden fields would do nothing at all, and a
+                //    field that does nothing under a comment saying it matters
+                //    is how the next reader is misled — so they are removed.
+                //    Section N of `tools/access-pages-selftest.php` pins the
+                //    behaviour.
                 ?>
-                <?php foreach (['pushLivestream', 'pushServiceReminders', 'pushApprovals'] as $pushKey): ?>
-                    <?php if ((bool) ($prefs[$pushKey] ?? false) === true): ?>
-                        <input type="hidden" name="prefs[<?php echo htmlspecialchars($pushKey, ENT_QUOTES, 'UTF-8'); ?>]" value="1">
-                    <?php endif; ?>
-                <?php endforeach; ?>
             <?php else: ?>
                 <?php echo $switchRow('pushLivestream', 'We\'re live now', 'Notify me when a livestream starts (if I\'ve enabled notifications on this device below).'); ?>
                 <?php echo $switchRow('pushServiceReminders', 'Service reminders', 'Notify me shortly before a service I\'ve RSVP\'d to starts.'); ?>

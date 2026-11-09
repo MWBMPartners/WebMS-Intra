@@ -2860,10 +2860,17 @@ ok('…and a member, who is never told, is handed an empty list there, not someb
 
 // --- N: Save on the notification preferences page ---------------------------------
 // Push is not set up in this portal, so the page shows none of the push
-// switches. The save page stores "off" for every switch the form does not
-// send. Pressing Save must not switch a push choice off because of that:
+// switches. Pressing Save must not switch a push choice off because of that:
 // not the new one (imported events waiting for approval), and not the two
 // older ones ("We're live now" and "Service reminders"), which it used to.
+//
+// 🔖 SINCE #667 THE PAGE CARRIES NOTHING FOR THEM, and that is the point. The
+//    save used to store "off" for every listed key the form did not send, so
+//    the page carried each ON push choice in a hidden field. Now the save
+//    changes only the switches a form MARKS as drawn (`prefsShown[<key>]`),
+//    so an undrawn push choice is left exactly as stored — including "not
+//    stored", which every reader takes as ON. These two checks pin that: no
+//    push field or marker on the page, and every push choice as it was.
 /** Every field a browser would send when Save is pressed on the page as shown: ticked boxes, chosen buttons and hidden fields. */
 $fieldsOf = static function (string $html): array {
     $fields = [];
@@ -2891,21 +2898,24 @@ $storedChoices = static function (): array {
 
     return $out;
 };
-/** Which of the three push choices the page carries in a field, as shown. */
+/** Which of the three push choices the page carries at all — as a ticked field OR as a "this form drew me" marker. */
 $carried = static fn (array $fields): array => array_values(array_filter(
     ['pushLivestream', 'pushServiceReminders', 'pushApprovals'],
-    static fn (string $key): bool => ($fields['prefs[' . $key . ']'] ?? '') === '1'
+    static fn (string $key): bool => isset($fields['prefs[' . $key . ']']) === true || isset($fields['prefsShown[' . $key . ']']) === true
 ));
 q('UPDATE tblUsers SET notifyPrefs = NULL WHERE userID = ?', 'i', [ADM]);
 $prefsPage = req($jar['adm'], 'GET', ADDR_A . '/account/notifications');
 $fields    = $fieldsOf($prefsPage['body']);
 $saved     = req($jar['adm'], 'POST', ADDR_A . '/account/notifications/save', $fields);
+// "approvalRequests" is drawn and ticked (nothing stored reads as on), so it
+// IS written — which is what proves the save really happened, rather than
+// "not stored" for the push choices meaning the post was refused.
 ok(
-    'notification preferences, push not set up: the page shows no push switch but carries all three push choices in hidden fields, and pressing Save leaves '
-    . '"pushLivestream", "pushServiceReminders" and "pushApprovals" all ON',
+    'notification preferences, push not set up: the page shows no push switch and carries nothing for any of the three, and pressing Save leaves '
+    . '"pushLivestream", "pushServiceReminders" and "pushApprovals" exactly as stored (here: not stored, which reads as ON) while it saves "Approval requests" (#667)',
     $prefsPage['status'] === 200 && str_contains($prefsPage['body'], 'Browser push notifications are not configured') === true
-    && $carried($fields) === ['pushLivestream', 'pushServiceReminders', 'pushApprovals'] && isset($fields['csrf_token']) === true && $saved['status'] === 302
-    && $storedChoices() === ['pushLivestream' => true, 'pushServiceReminders' => true, 'pushApprovals' => true, 'approvalRequests' => true],
+    && $carried($fields) === [] && ($fields['prefsShown[approvalRequests]'] ?? '') === '1' && isset($fields['csrf_token']) === true && $saved['status'] === 302
+    && $storedChoices() === ['pushLivestream' => 'not stored', 'pushServiceReminders' => 'not stored', 'pushApprovals' => 'not stored', 'approvalRequests' => true],
     'page HTTP ' . $prefsPage['status'] . '; save HTTP ' . $saved['status'] . '; carried: ' . json_encode($carried($fields)) . '; stored: ' . json_encode($storedChoices())
 );
 q('UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?', 'si', ['{"pushApprovals":false,"pushLivestream":false,"pushServiceReminders":true,"approvalRequests":true}', ADM]);
@@ -2913,9 +2923,9 @@ $prefsPage = req($jar['adm'], 'GET', ADDR_A . '/account/notifications');
 $fields    = $fieldsOf($prefsPage['body']);
 $saved     = req($jar['adm'], 'POST', ADDR_A . '/account/notifications/save', $fields);
 ok(
-    '…and a push choice somebody had switched OFF stays off: with two of the three off, only the one that is on is carried, and Save leaves each as it was, '
+    '…and a push choice somebody had switched OFF stays off: nothing is carried for any of the three, and Save leaves each as it was, '
     . 'with "Approval requests" still on',
-    $carried($fields) === ['pushServiceReminders'] && ($fields['prefs[approvalRequests]'] ?? '') === '1' && $saved['status'] === 302
+    $carried($fields) === [] && ($fields['prefs[approvalRequests]'] ?? '') === '1' && $saved['status'] === 302
     && $storedChoices() === ['pushLivestream' => false, 'pushServiceReminders' => true, 'pushApprovals' => false, 'approvalRequests' => true],
     'save HTTP ' . $saved['status'] . '; carried: ' . json_encode($carried($fields)) . '; stored: ' . json_encode($storedChoices())
 );

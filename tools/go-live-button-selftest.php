@@ -1071,13 +1071,21 @@ foreach (['admin', 'off', 'plain', 'coord', 'coord2', 'coordx', 'coordw', 'coord
 
 // "We're live now" is switched OFF by the member, on the real notification preferences page, the way a person does it:
 // every switch left on except that one.
+//
+// 🔖 Since #667 the save changes ONLY the switches the page marks as drawn (`prefsShown[<key>]`, one beside each
+//    switch), so the switches are read OFF THE PAGE rather than typed here: a post naming keys the page does not draw
+//    would change nothing, and a typed list is how this set-up once named seven switches nobody drew.
 $prefsPage = glb_request($jar['off'], 'GET', '/account/notifications');
+$shown     = [];
 $prefs     = [];
-foreach (['emailDigest', 'eventReminders', 'eventRsvpConfirmation', 'expenseStatusUpdates', 'expenseApproverNudges', 'announcementsNew', 'prayerModeration', 'accountSecurity',
-    'givingStatements', 'taskReminders', 'rotaReminders', 'approvalRequests', 'pushServiceReminders', 'pushApprovals'] as $key) {
-    $prefs[$key] = '1';
+glb_findAll('/name="prefsShown\[([A-Za-z]+)\]"/', $prefsPage['body'], $shownKeys);
+foreach ($shownKeys[1] as $key) {
+    $shown[$key] = '1';
+    if ($key !== 'pushLivestream') {
+        $prefs[$key] = '1';
+    }
 }
-$saved = glb_request($jar['off'], 'POST', '/account/notifications/save', ['csrf_token' => glb_metaToken($jar['off'], '/account/notifications'), 'prefs' => $prefs, 'sabbathHonour' => 'inherit']);
+$saved = glb_request($jar['off'], 'POST', '/account/notifications/save', ['csrf_token' => glb_metaToken($jar['off'], '/account/notifications'), 'prefsShown' => $shown, 'prefs' => $prefs, 'sabbathHonour' => 'inherit']);
 
 // =============================================================================
 // 🧪 The checks
@@ -1247,16 +1255,25 @@ foreach ($refused as $words => $address) {
 echo "\nF. Switching it off lasts\n";
 glb_reset();
 // The member who switched "We're live now" off (in the set-up above) opens their ACCOUNT page and presses Save on its own
-// "Notification Preferences" card without touching anything about push. That card has three switches of its own.
+// "Notification Preferences" card without touching anything about push. That card has ONE switch of its own,
+// "Event reminders" (its other two, "Weekly email digest" and "Expense claim updates", were retired in #569/#667).
+//
+// 🔖 Since #667 the card says which switch it drew with a hidden `prefsShown[eventReminders]` field, which
+//    glb_readForm() picks up with the other hidden fields — so this posts exactly what a browser would, plus the tick.
+//    The `emailDigest` posted alongside is a switch the card does NOT draw: it must be ignored, never written.
 $accountPage = glb_request($jar['off'], 'GET', '/account');
 $card        = glb_readForm($accountPage['body'], 'update_notifications');
-glb_check($accountPage['status'] === 200 && $card['found'] === true && isset($card['fields']['csrf_token']) === true, 'the member opens their Account page and finds the "Notification Preferences" card', 'HTTP ' . $accountPage['status']);
-$savedCard = glb_request($jar['off'], 'POST', $card['action'], $card['fields'] + ['emailDigest' => '1', 'eventReminders' => '1']);
+glb_check(
+    $accountPage['status'] === 200 && $card['found'] === true && isset($card['fields']['csrf_token']) === true && ($card['fields']['prefsShown[eventReminders]'] ?? '') === '1',
+    'the member opens their Account page and finds the "Notification Preferences" card, which marks the one switch it draws',
+    'HTTP ' . $accountPage['status'] . '; fields ' . json_encode(array_keys($card['fields']))
+);
+$savedCard = glb_request($jar['off'], 'POST', $card['action'], $card['fields'] + ['prefs[eventReminders]' => '1', 'prefs[emailDigest]' => '1', 'prefsShown[emailDigest]' => '1']);
 $storedNow = json_decode((string) ($db->query('SELECT notifyPrefs FROM tblUsers WHERE userID = ' . GLB_OFF)->fetch_row()[0] ?? ''), true);
 glb_check($savedCard['status'] === 302, 'pressing Save on that card works (it is redirected back to the Account page)', 'HTTP ' . $savedCard['status'] . ' to "' . $savedCard['location'] . '"');
 glb_check(
-    is_array($storedNow) === true && ($storedNow['emailDigest'] ?? null) === true && ($storedNow['eventReminders'] ?? null) === true && ($storedNow['expenseUpdates'] ?? null) === false,
-    'the card\'s own three choices were saved as pressed',
+    is_array($storedNow) === true && ($storedNow['eventReminders'] ?? null) === true && array_key_exists('emailDigest', $storedNow) === false && array_key_exists('expenseUpdates', $storedNow) === false,
+    'the card\'s own choice was saved as pressed, and the retired "emailDigest" / "expenseUpdates" were NOT written (#667)',
     json_encode($storedNow) ?: ''
 );
 // 🔢 "Every other choice is still there" used to be checked as

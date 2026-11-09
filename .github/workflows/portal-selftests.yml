@@ -613,7 +613,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1198,6 +1198,19 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_i18nlang
         run: php tools/i18n-member-language-http-selftest.php
+
+      # 🔔 #667. Two pages save a member's notification choices into ONE
+      #    column; until #667 one rebuilt the whole column and dropped every
+      #    key it did not list. This drives BOTH real pages over HTTP and
+      #    reads the column back, races the real NotifyPrefs::merge() from two
+      #    processes (one web worker can never run two saves at once), and
+      #    plants four faults into its own copy of web/, each of which must go
+      #    red. Needs curl and proc_open, and REFUSES rather than skipping.
+      - name: "Two pages save notification choices and neither loses the other's (#667)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_notifyprefs
+        run: php tools/notify-prefs-selftest.php
 
       # 📎 #649. Submits REAL expense claims with REAL files through the real
       #    handler and reads the message, the database and the disk: a file

@@ -26,6 +26,7 @@ use Portal\Core\Auth;
 //    the line only fails when it RUNS — `php -l` is happy without it (#536).
 use Portal\Core\I18n;
 use Portal\Core\Logger;
+use Portal\Core\NotifyPrefs;
 use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
@@ -53,48 +54,55 @@ $action = $_POST['action'] ?? 'update_profile';
 if ($action === 'update_notifications') {
     $userId = (int) $_SESSION['user_id'];
 
-    // ⚠️ WHAT WAS WRONG HERE (#612): this card has three switches, and the code used to store
-    // ONLY those three, replacing everything else the person had stored. The other choices
-    // live on Account, Notifications ("We're live now", "Service reminders", the approvals
-    // push and every other e-mail choice), and a choice that is missing counts as ON
-    // (WebPush::notifyPrefAllows()). So a member who had switched "We're live now" off, and
-    // then pressed Save on this card without touching it, was switched back ON, and was
-    // sent the next "we are live" push. Now the stored choices are read first and ONLY this
-    // card's three keys are changed. WHAT THIS CANNOT DO: it cannot tell what a missing key
-    // meant; it leaves every other key exactly as it found it (including unknown ones).
-    $stored = [];
-    $readStmt = $mysqli->prepare('SELECT notifyPrefs FROM tblUsers WHERE userID = ? LIMIT 1');
-    if ($readStmt === false) {
-        // Unable to read what is stored: write nothing rather than overwrite it with a guess.
-        $_SESSION['flash_msg']  = 'Your notification preferences could not be saved. Please try again.';
-        $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . Site::url('account'), true, 302);
+    // ⚠️ WHAT WAS WRONG HERE, TWICE.
+    //
+    //    #612: this card used to store ONLY its own switches, replacing
+    //    everything else the person had stored — and a choice that is missing
+    //    counts as ON (WebPush::notifyPrefAllows()), so a member who had
+    //    switched "We're live now" off, then pressed Save here, was switched
+    //    back ON. #612 made it read first and change only its own keys.
+    //
+    //    #667: that read had no lock, so two saves at once could each read the
+    //    old value and the second write threw away the first's change; and it
+    //    still wrote `false` for `emailDigest` and `expenseUpdates`, which this
+    //    card had stopped drawing (#569) — an unticked box and an absent box
+    //    look the same in a post. Both keys are RETIRED now (#662, #667:
+    //    nothing has ever read either, and `expenseUpdates` was a second name
+    //    for `expenseStatusUpdates`); nothing writes them, and what a member
+    //    had stored is left alone.
+    //
+    //    NOW this card writes through `NotifyPrefs::merge()`, the ONE writer of
+    //    the column, exactly as the full Notification preferences page does:
+    //    only the switches the card marked as drawn (`prefsShown[<key>]`) are
+    //    changed, under a row lock, and every other key is kept as stored. A
+    //    post with no marker at all changes nothing (#677).
+    //
+    // 📨 THE ANSWER GOES IN THE ADDRESS, not the session. This branch used to
+    //    put its message in `$_SESSION['flash_msg']`, which the Account page
+    //    never reads — so "saved", and the "could not be saved" refusal, were
+    //    both swallowed, and the message surfaced later on some unrelated page
+    //    that does read it. The Account page reads `?notify_saved=1` and the
+    //    `?error=` words in its own map, as every other action here does.
+    $changes = NotifyPrefs::changesFromPost($_POST);
+    if ($changes === null) {
+        header('Location: ' . Site::url('account') . '?error=notify_stale', true, 302);
         exit();
     }
-    $readStmt->bind_param('i', $userId);
-    $readStmt->execute();
-    $readRow = $readStmt->get_result()->fetch_assoc();
-    $readStmt->close();
-    $decodedPrefs = ($readRow !== null && $readRow['notifyPrefs'] !== null) ? json_decode((string) $readRow['notifyPrefs'], true) : null;
-    if (is_array($decodedPrefs) === true) {
-        $stored = $decodedPrefs;
+    $merged = NotifyPrefs::merge($mysqli, $userId, $changes);
+    if ($merged['outcome'] !== NotifyPrefs::SAVED && $merged['outcome'] !== NotifyPrefs::NOTHING_TO_CHANGE) {
+        // Nothing was written: `merge()` rolls back on any refusal.
+        Logger::errorPlatform('MySQL', 'Error', 'NOTIFY_PREFS_MERGE', 'Notification preferences could not be saved (' . $merged['outcome'] . ')', '');
+        header('Location: ' . Site::url('account') . '?error=notify_db', true, 302);
+        exit();
     }
-    $stored['emailDigest']    = isset($_POST['emailDigest']) === true;
-    $stored['expenseUpdates'] = isset($_POST['expenseUpdates']) === true;
-    $stored['eventReminders'] = isset($_POST['eventReminders']) === true;
-    $prefs = json_encode($stored, JSON_THROW_ON_ERROR);
-
-    $npStmt = $mysqli->prepare('UPDATE tblUsers SET notifyPrefs = ? WHERE userID = ?');
-    if ($npStmt !== false) {
-        $npStmt->bind_param('si', $prefs, $userId);
-        $npStmt->execute();
-        $npStmt->close();
+    if ($merged['replacedUnreadable'] === true) {
+        // See NotifyPrefs' class docblock: every other choice still reads as
+        // ON, as it already did. Recorded so the replacement is never silent.
+        Logger::errorPlatform('Portal', 'Warning', 'NOTIFY_PREFS_UNREADABLE', 'A member\'s stored notification preferences could not be read and were replaced by the choices they had just saved', '');
     }
 
     Logger::activity('NotificationPrefsUpdate', 'Updated notification preferences');
-    $_SESSION['flash_msg']  = 'Notification preferences saved.';
-    $_SESSION['flash_type'] = 'success';
-    header('Location: ' . Site::url('account'), true, 302);
+    header('Location: ' . Site::url('account') . '?notify_saved=1', true, 302);
     exit();
 }
 

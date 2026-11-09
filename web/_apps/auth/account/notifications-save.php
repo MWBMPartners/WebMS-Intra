@@ -4,16 +4,16 @@
  * -----------------------------------------------------------------------------
  * Account — Notification preferences save handler 📬
  * -----------------------------------------------------------------------------
- * POST-only. Persists the user's notifyPrefs JSON.
+ * POST-only. Saves the switches on the Notification preferences page into
+ * `tblUsers.notifyPrefs` through `NotifyPrefs::merge()` — the ONE writer of
+ * that column — plus the Sabbath choice and the newsletter opt-in.
  *
- * EVERY KEY ON `$allowedKeys` MUST HAVE A SWITCH ON notifications.php. An
- * unticked switch sends nothing, so this page stores "off" for every key on
- * the list that the form did not send. A key added here with no switch on
- * the page would be switched off for everybody who presses Save.
+ * Only the switches the page marked as DRAWN are changed; every other stored
+ * choice is kept exactly as it was (#667). See the long note below.
  *
  * @package   Portal\Auth
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * -----------------------------------------------------------------------------
  */
 
@@ -22,6 +22,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\NotifyPrefs;
 use Portal\Core\Site;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -39,95 +40,92 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit();
 }
 
-// 🛡️ Whitelist the keys we accept — anything else is silently dropped.
-// 🧹 Seven keys were removed from this list on 29 October 2026 (#569, #662):
-//    emailDigest, eventRsvpConfirmation, expenseStatusUpdates,
-//    expenseApproverNudges, announcementsNew, prayerModeration and
-//    accountSecurity. Their switches came off the page in the same change
-//    because nothing that sends anything ever read them.
+// -----------------------------------------------------------------------------
+// 🔔 The switches: MERGED into what is stored, never written over it (#667)
+// -----------------------------------------------------------------------------
+// ⚠️ WHAT WAS WRONG HERE. This handler used to REBUILD `tblUsers.notifyPrefs`
+//    from its own list of eight keys and write the result over the whole
+//    column. Two harms followed, both recorded so nobody brings it back:
 //
-//    REMOVING THEM FROM HERE IS THE HALF THAT MATTERS, and it has to happen in
-//    the same change. A few lines below, this handler writes `false` for every
-//    key on this list that the form did not send. Hide a switch and leave its
-//    key listed, and the very next time anybody saved their preferences the
-//    handler would quietly rewrite that stored preference to off — for
-//    everybody, one by one, as they each pressed Save.
+//      1. Every key NOT on that list was DROPPED the next time the member
+//         pressed Save. The small card on /account owned a key this page did
+//         not list (`expenseUpdates`), so saving here threw it away; and each
+//         switch #569 took off this page lost the member's stored choice the
+//         same way. This page and that card fought over the column (#667).
+//      2. It wrote `false` for every listed key the form did not send, so a
+//         switch that was merely NOT DRAWN (the push switches, while push is
+//         not set up) read as switched OFF. The page used to paper over that
+//         by carrying each "on" push choice in a hidden field.
 //
-//    BE PRECISE ABOUT WHAT HAPPENS TO THE OLD VALUES, because an earlier
-//    version of this note got it wrong and said they were "left exactly as
-//    they are". THEY ARE NOT. This handler REBUILDS the preferences from this
-//    list and writes the result over the whole `notifyPrefs` column, so a key
-//    that is not on the list is DROPPED the next time that member saves. That
-//    is accepted here only because nothing reads any of the seven: no
-//    behaviour changes either way. If one of them comes back with its sender,
-//    members will have lost whatever they had chosen and it starts from the
-//    default again.
+//    NOW: `NotifyPrefs::changesFromPost()` reads ONLY the keys this form
+//    marked as drawn (`prefsShown[<key>]`, written beside each switch on the
+//    page), and `NotifyPrefs::merge()` — the ONE writer of this column —
+//    changes just those, under a row lock inside its own transaction, keeping
+//    every other key exactly as stored. The list of keys a member can set is
+//    `NotifyPrefs::SETTABLE`; there is no second list here to keep in step.
 //
-//    The same replacing behaviour is why this page and the smaller card on
-//    `/account` have always fought over this column — see #667.
-//
-//    `eventReminders` STAYS on the list, and since #666 (1 November 2026) it
-//    is one of the keys that really does something: `cron/event-reminders.php`
-//    reads it before sending the day-before and one-hour reminders, so a
-//    member who switches it off is not sent those. The day-of summary further
-//    down that job goes to coordinators and administrators and is NOT filtered
-//    by this key.
-//    It used to be listed here with a standing notice on the page admitting
-//    the e-mails ignored it. Both the notice and the fault are gone.
-$allowedKeys = [
-    'eventReminders',
-    'givingStatements',
-    'taskReminders',
-    'rotaReminders',
-    'approvalRequests',
-    'pushLivestream',
-    'pushServiceReminders',
-    // The push to administrators about imported events waiting for approval
-    // (#514 part 9). Its switch is in the page's "Push notifications" card.
-    'pushApprovals',
-];
-
-$incoming = $_POST['prefs'] ?? [];
-if (is_array($incoming) === false) {
-    $incoming = [];
-}
-
-// 🎛️ Build the bool map. Unchecked switches don't appear in $_POST at all,
-// so we default to false for any allowed key that's missing.
-$prefs = [];
-foreach ($allowedKeys as $k) {
-    $prefs[$k] = isset($incoming[$k]) === true && $incoming[$k] === '1';
+//    A post that carries NO `prefsShown` at all — a page left open from before
+//    this change, or a request made by hand — changes NOTHING and says so
+//    (#677: ask whether a field ARRIVED, never what it contains). The Sabbath
+//    choice and the newsletter below are not saved either, because the same
+//    out-of-date page would carry those as well, and one honest refusal is
+//    easier to understand than a save that half happened.
+$changes = NotifyPrefs::changesFromPost($_POST);
+if ($changes === null) {
+    $_SESSION['notifications_flash']      = 'This page was out of date, so nothing was changed. Please check your choices below and press Save again.';
+    $_SESSION['notifications_flash_type'] = 'warning';
+    header('Location: ' . Site::url('account/notifications'), true, 302);
+    exit();
 }
 
 $user   = App::user();
 $userId = (int) ($user['userID'] ?? 0);
 
-$json = json_encode($prefs, JSON_UNESCAPED_UNICODE);
-if ($json === false) {
-    $_SESSION['notifications_flash']      = 'Failed to encode preferences.';
-    $_SESSION['notifications_flash_type'] = 'danger';
-    header('Location: ' . Site::url('account/notifications'), true, 302);
-    exit();
-}
-
-// 🕯️ Sabbath override (#231). 'inherit'/'on'/'off' validated; anything
-//    else falls back to 'inherit'. Saved alongside notifyPrefs in one UPDATE.
-$sabbathHonour = (string) ($_POST['sabbathHonour'] ?? 'inherit');
-if (in_array($sabbathHonour, ['inherit', 'on', 'off'], true) === false) {
-    $sabbathHonour = 'inherit';
-}
-
-$stmt = $mysqli->prepare('UPDATE tblUsers SET notifyPrefs = ?, sabbathHonour = ? WHERE userID = ?');
-if ($stmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'NOTIFY_PREFS_PREP', $mysqli->error, '');
+$merged = NotifyPrefs::merge($mysqli, $userId, $changes);
+if ($merged['outcome'] !== NotifyPrefs::SAVED && $merged['outcome'] !== NotifyPrefs::NOTHING_TO_CHANGE) {
+    // Nothing was written: `merge()` rolls back on any refusal. The outcome
+    // word is recorded, never the stored preferences themselves.
+    Logger::errorPlatform('MySQL', 'Error', 'NOTIFY_PREFS_MERGE', 'Notification preferences could not be saved (' . $merged['outcome'] . ')', '');
     $_SESSION['notifications_flash']      = t('error.db_save_preferences');
     $_SESSION['notifications_flash_type'] = 'danger';
     header('Location: ' . Site::url('account/notifications'), true, 302);
     exit();
 }
-$stmt->bind_param('ssi', $json, $sabbathHonour, $userId);
-$stmt->execute();
-$stmt->close();
+if ($merged['replacedUnreadable'] === true) {
+    // The stored value was not a set of named choices, so it was replaced by
+    // the choices this save made. Every other choice still reads as ON, as it
+    // already did — see NotifyPrefs' class docblock for why. Recorded so the
+    // replacement is never silent.
+    Logger::errorPlatform('Portal', 'Warning', 'NOTIFY_PREFS_UNREADABLE', 'A member\'s stored notification preferences could not be read and were replaced by the choices they had just saved', '');
+}
+
+// 🕯️ Sabbath override (#231). 'inherit'/'on'/'off' validated; anything else
+//    falls back to 'inherit'.
+//
+// ⚠️ ONLY WHEN THE FIELD ARRIVED (#677). The three buttons are drawn only
+//    while the organisation has the Sabbath feature switched on, and this used
+//    to read `$_POST['sabbathHonour'] ?? 'inherit'` — so pressing Save while
+//    the feature was off reset a member's choice to "inherit", and switching
+//    the feature back on later did not bring it back. It used to share one
+//    statement with the switches; it is its own statement now because the
+//    switches go through `NotifyPrefs::merge()`.
+if (array_key_exists('sabbathHonour', $_POST) === true && is_string($_POST['sabbathHonour']) === true) {
+    $sabbathHonour = $_POST['sabbathHonour'];
+    if (in_array($sabbathHonour, ['inherit', 'on', 'off'], true) === false) {
+        $sabbathHonour = 'inherit';
+    }
+    $stmt = $mysqli->prepare('UPDATE `tblUsers` SET `sabbathHonour` = ? WHERE `userID` = ?');
+    if ($stmt === false) {
+        Logger::errorPlatform('MySQL', 'Error', 'NOTIFY_PREFS_PREP', $mysqli->error, '');
+        $_SESSION['notifications_flash']      = t('error.db_save_preferences');
+        $_SESSION['notifications_flash_type'] = 'danger';
+        header('Location: ' . Site::url('account/notifications'), true, 302);
+        exit();
+    }
+    $stmt->bind_param('si', $sabbathHonour, $userId);
+    $stmt->execute();
+    $stmt->close();
+}
 
 // 📰 Newsletter opt-in — merged in from the old separate page at
 //    /account/notifications, which used to occupy this address and hide the

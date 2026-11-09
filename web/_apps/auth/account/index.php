@@ -179,10 +179,11 @@ if ($laCheck !== false) {
     $laCheck->close();
 }
 
-// 🔔 Load notification preferences
+// 🔔 Load notification preferences. A choice with nothing stored reads as ON,
+//    matching WebPush::notifyPrefAllows(). `emailDigest` and `expenseUpdates`
+//    used to be listed here too; both are retired (#662, #667) and nothing
+//    on this page draws them any more.
 $notifyPrefs = [
-    'emailDigest'      => true,
-    'expenseUpdates'   => true,
     'eventReminders'   => true,
     'givingStatements' => true,
 ];
@@ -229,6 +230,9 @@ if (isset($_GET['wa_deleted']) === true && $_GET['wa_deleted'] === '1') {
 if (isset($_GET['wa_registered']) === true && $_GET['wa_registered'] === '1') {
     $successMsg = 'Passkey registered successfully.';
 }
+if (isset($_GET['notify_saved']) === true && $_GET['notify_saved'] === '1') {
+    $successMsg = 'Your notification preferences have been saved.';
+}
 if (isset($_GET['totp_disabled']) === true && $_GET['totp_disabled'] === '1') {
     $successMsg = 'Two-factor authentication has been disabled.';
 }
@@ -249,6 +253,11 @@ if (isset($_GET['error']) === true) {
         'pw_policy'    => 'New password does not meet the requirements.',
         'pw_empty'     => 'All password fields are required.',
         'db'           => 'A database error occurred. Please try again.',
+        // The "Notification Preferences" card (#667). `notify_stale` is a post
+        // that did not say which switches it drew — a page left open from
+        // before the change — so nothing was changed, on purpose.
+        'notify_stale' => 'This page was out of date, so your notification preferences were not changed. Please check them below and press Save again.',
+        'notify_db'    => 'Your notification preferences could not be saved, and nothing was changed. Please try again.',
         'unlink_fail'  => 'Unable to unlink that account. You must keep at least one login method.',
         'unlink_csrf'  => 'Invalid session token. Please try again.',
         'wa_delete'    => 'Unable to remove that passkey.',
@@ -1200,33 +1209,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <!-- 🔔 Notification Preferences Card -->
 <?php
-// 🔔 This card OVERLAPS the Notification preferences page, and that is a real
-//    pre-existing fault, not a tidy-up waiting to happen (#667).
+// 🔔 This card OVERLAPS the Notification preferences page. Both write
+//    `tblUsers.notifyPrefs`, and until #667 they fought over it:
+//    `account/notifications-save.php` REBUILT the whole column from its own
+//    list and wrote it over the top, dropping any key this card owned, and
+//    this card's handler had no lock.
 //
-//    Two handlers write the same column. `account/save.php`'s
-//    `update_notifications` action writes three keys here;
-//    `account/notifications-save.php` REBUILDS `tblUsers.notifyPrefs` from its
-//    own allowed list and writes the result over the top — so saving on the
-//    other page drops `expenseUpdates`, which only exists here. That is the
-//    same class of fault as #612 and it is logged rather than fixed in this
-//    package.
+//    SINCE #667 BOTH GO THROUGH `NotifyPrefs::merge()`, the ONE writer of the
+//    column, which changes only the switches a form marked as drawn and keeps
+//    every other stored choice. So beside each switch below sits
+//    `NotifyPrefs::shownMarker()`, and the switch is named `prefs[<key>]`
+//    exactly as on the full page. Without the marker, pressing Save here would
+//    change NOTHING — deliberately, because an unticked box and an absent box
+//    look the same in a post (#677).
 //
-//    WHAT THIS PACKAGE DID CHANGE: the two switches on this card that nothing
-//    ever read — "Weekly email digest" and "Expense claim updates" — are gone
-//    from view (#569, #662). Nothing under web/_core or web/_apps/cron reads
-//    either; measured, not assumed.
+//    The two switches nothing ever read — "Weekly email digest" and "Expense
+//    claim updates" — came off this card in #569 (#662), and #667 RETIRED
+//    their keys: nothing writes `emailDigest` or `expenseUpdates` now, and a
+//    member's stored value is left where it is.
 //
-//    THE FORM ITSELF IS DELIBERATELY KEPT, and this is the important part. An
-//    earlier attempt removed the whole card, which broke section F of
-//    `tools/go-live-button-selftest.php` — the ONLY regression guard proving
-//    that pressing Save here does not throw away a member's other stored
-//    choices (#612). Removing a feature must not quietly remove the test that
-//    guards a past fault, so the form, its action and its anti-forgery token
-//    all stay exactly as they were.
-//
-//    `account/save.php` still writes the two dead keys when a request happens
-//    to carry them. Harmless: nothing reads either. It is left alone so that
-//    this is a change to a page and not to a save handler.
+//    THE FORM ITSELF IS DELIBERATELY KEPT. An earlier attempt removed the
+//    whole card, which broke section F of `tools/go-live-button-selftest.php`
+//    — the regression guard proving that pressing Save here does not throw
+//    away a member's other stored choices (#612). Removing a feature must not
+//    quietly remove the test that guards a past fault.
 ?>
 <!-- 🔔 Notification Preferences Card -->
 <div class="card shadow-sm mt-4">
@@ -1244,7 +1250,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <input type="hidden" name="action" value="update_notifications">
 
             <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" id="notifyEvents" name="eventReminders" value="1"
+                <?php echo \Portal\Core\NotifyPrefs::shownMarker('eventReminders'); ?>
+                <input class="form-check-input" type="checkbox" id="notifyEvents" name="prefs[eventReminders]" value="1"
                        <?php echo ($notifyPrefs['eventReminders'] === true) ? 'checked' : ''; ?>>
                 <label class="form-check-label" for="notifyEvents">
                     <strong>Event reminders</strong>
