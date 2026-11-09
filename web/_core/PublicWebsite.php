@@ -407,7 +407,11 @@ final class PublicWebsite
         // INSTALLATION row of `public.frame.origins`, which nothing reads, and
         // an organisation row of `public.frame.permitted`, which nothing reads
         // either, so either would read as a setting while doing nothing.
-        foreach ([self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY] as $locked) {
+        // The list is `LOCKED_KEYS`, which `lockedPageFor()` reads too, so the
+        // two can never disagree about WHICH keys are locked (round 2 of P3's
+        // check). It is a `self::` constant on purpose: the settings-locks
+        // self-test finds a lock's keys by reading this body's constants.
+        foreach (self::LOCKED_KEYS as $locked) {
             if (strcasecmp($key, $locked) === 0) {
                 return true;
             }
@@ -415,6 +419,14 @@ final class PublicWebsite
 
         return false;
     }
+
+    /**
+     * Every key this class locks out of the general settings editor — the ONE
+     * list `lockedInGeneralEditor()` and `lockedPageFor()` both read.
+     *
+     * @var list<string>
+     */
+    public const LOCKED_KEYS = [self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY];
 
     /**
      * 🧭 WHICH PAGE a locked key is changed on — the ONE place that decides
@@ -430,20 +442,31 @@ final class PublicWebsite
      *    named in four copies of an `if` is how that happened, so the answer
      *    lives here and the four places ask.
      *
-     * @return array{route:string, name:string}|null
+     * `who` says, in words for the Settings page, who can change it there —
+     * because Admin, Public website is NOT every administrator's page (D-085):
+     * the main website and the framing list are for a global administrator or
+     * somebody given "Set up the public website", and the installation's
+     * framing switch for the installation's global administrator alone
+     * (`installationOnly`).
+     *
+     * @return array{route:string, name:string, who:string, installationOnly:bool}|null
      */
     public static function lockedPageFor(string $key): ?array
     {
-        if (strcasecmp($key, self::RULE_KEY) === 0) {
-            return ['route' => 'admin/calendar/feeds', 'name' => 'Admin, Outside calendars'];
+        if (self::lockedInGeneralEditor($key) === false) {
+            return null;
         }
-        foreach ([self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY] as $locked) {
-            if (strcasecmp($key, $locked) === 0) {
-                return ['route' => 'admin/public-website', 'name' => 'Admin, Public website'];
-            }
+        if (strcasecmp($key, self::RULE_KEY) === 0) {
+            return ['route' => 'admin/calendar/feeds', 'name' => 'Admin, Outside calendars',
+                'who' => 'an administrator of this organisation', 'installationOnly' => false];
+        }
+        if (strcasecmp($key, self::FRAME_PERMITTED_KEY) === 0) {
+            return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',
+                'who' => 'the installation\'s global administrator', 'installationOnly' => true];
         }
 
-        return null;
+        return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',
+            'who' => 'a global administrator, or somebody given "Set up the public website"', 'installationOnly' => false];
     }
 
     /**

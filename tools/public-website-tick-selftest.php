@@ -85,11 +85,17 @@
  *     between; curl here caches nothing, so that minute is not tested.
  *   - The series-repattern half (a date the pattern ADDS is off the website)
  *     is check S18w of tools/event-repeat-pages-selftest.php, not here.
- *   - Section W cannot make a server answer the set-up check with a 403 or
- *     a redirect: SafeFetch refuses every loopback address, and this test
- *     reaches nothing outside the machine. So only "nothing answered" is
- *     driven over HTTP (W11, a loopback main website); every other answer is
- *     checked by asking the real wording function directly (W17).
+ *   - OVER HTTP, the set-up check can only be shown a refused main website
+ *     (W11, a loopback address): SafeFetch refuses every loopback address,
+ *     and this test reaches nothing outside the machine. So the other answers
+ *     are driven IN-PROCESS (W21): a small TLS server of this test's own, a
+ *     certificate this test makes, SafeFetch's `$testResolverOverride` naming
+ *     it, and a scratch copy of SafeFetch told to trust that certificate —
+ *     the real SafeFetch code otherwise, the real wording function, real
+ *     redirects, a real certificate failure. Answers no server here can give
+ *     (a 503, curl missing) are asked of the wording function directly (W17).
+ *     W22 runs the real `checkSetUp()` in-process with a `$fetch` that records
+ *     the options it is handed, which is what pins the overall deadline.
  *   - Two saves of one organisation's public address at the SAME moment are
  *     not driven (one web worker); the wording for that clash is read, not run.
  *   - Section W does not run the Users page's script, so the locked role
@@ -120,7 +126,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 224;
+const PWT_EXPECTED_CHECKS = 229;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -156,7 +162,7 @@ $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (preg_match('/^selftest_[A-Za-z0-9_]+$/', $dbName) !== 1) {
     refuse("set SELFTEST_DB_NAME to a database whose name starts with selftest_ (got '{$dbName}'). This test writes rows");
 }
-foreach (['curl_init', 'proc_open'] as $needed) {
+foreach (['curl_init', 'proc_open', 'openssl_pkey_new'] as $needed) {
     if (function_exists($needed) === false) {
         refuse("this test needs {$needed}(), which this PHP does not have");
     }
@@ -2028,10 +2034,10 @@ echo json_encode([
         'nothing'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false]),
         'ok'         => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => true, 'status' => 200, 'capped' => false]),
         'big page'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => true]),
-        'slow page'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => false]),
         'forbidden'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 403, 'capped' => false]),
         'down'       => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 503, 'capped' => false]),
-        'redirected' => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 301, 'capped' => false]),
+        'no address' => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 300, 'capped' => false,
+            'message' => 'The other server answered with an error (HTTP status 300).']),
     ],
 ]);
 ASK);
@@ -2365,7 +2371,7 @@ $scnPwCheck = static function () use ($db, $siteOne, $signIn, $http, $freshToken
     $pwPost('setup', 'website', 'https://127.0.0.1');
     $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
     $page = $http('GET', '/admin/public-website')['body'];
-    $out['a loopback main website is unreachable'] = str_contains($page, 'https://127.0.0.1: nothing answered over https.');
+    $out['a loopback main website is unreachable'] = str_contains($page, 'https://127.0.0.1: it could not be checked — for example');
     $out['the door is still not ticked'] = preg_match('/data-check-state="ok"[^>]*>\s*<span[^>]*>[^<]*<\/span>\s*<strong>The public door/', $page) === 1;
     $pwClean();
     return $out;
@@ -2510,27 +2516,249 @@ $scnPwRolesWarning = static function () use ($db, $siteOne, $setupRole, $people,
 };
 check('W16 with nobody holding Website Set-up, the Roles page says global administrators still get in and an ordinary administrator does not', $scnPwRolesWarning(), 'right');
 
-// W17 (round 1, item 2): what the check SAYS for each kind of answer. The
-//      status decides: a site answering with an error page CAN be reached and
-//      is told so; a redirect it will not follow is named as one; only no
-//      answer at all says nothing answered — and the time it gives is true.
+// W17 (rounds 1 and 2, item 2): what the check SAYS for answers no server here
+//      gives — asked of the real wording function directly. W21 drives the
+//      rest through a real TLS server (see there).
 $scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
     $v   = $askSetup($siteOne)['verdicts'] ?? [];
     $out = [];
     foreach ((array) $v as $name => $one) {
         $words = (string) ($one['words'] ?? '');
         $out[$name] = [(string) ($one['state'] ?? ''),
-            str_contains($words, 'nothing answered'), str_contains($words, 'can be reached'), str_contains($words, 'sending the visitor somewhere else')];
+            str_contains($words, 'could not be checked — for example'), str_contains($words, 'can be reached'), str_contains($words, 'did not say which address')];
     }
-    $out['time stated'] = str_contains((string) ($v['nothing']['words'] ?? ''), '5 seconds for a step (15 seconds in all, not counting looking the name up)');
+    $out['time stated'] = str_contains((string) ($v['nothing']['words'] ?? ''), '5 seconds for each step, 15 seconds in all, not counting looking a name up');
     $out['status named'] = str_contains((string) ($v['forbidden']['words'] ?? ''), 'HTTP 403');
     return $out;
 };
-check('W17 "Check my set-up" says what really happened: a 200 answered; a 403 or 503 can be reached but gave an error page (with its status); a redirect it will not follow is named; only no answer says nothing answered, with the true time limits',
+check('W17 the wording function, asked directly: a 200 answered; a 403 or 503 can be reached but gave an error page (with its status); a 3xx with no address says so; with nothing to go on it gives possibilities, with the true time limits',
     $scnPwVerdicts(), [
         'nothing' => ['problem', true, false, false], 'ok' => ['ok', false, false, false], 'big page' => ['ok', false, false, false],
-        'slow page' => ['problem', false, false, false], 'forbidden' => ['note', false, true, false], 'down' => ['note', false, true, false],
-        'redirected' => ['problem', false, false, true], 'time stated' => true, 'status named' => true]);
+        'forbidden' => ['note', false, true, false], 'down' => ['note', false, true, false],
+        'no address' => ['problem', false, false, true], 'time stated' => true, 'status named' => true]);
+
+// W21 (round 2, item 1): the set-up check's words for REAL answers, driven
+//      in-process. A TLS server of this test's own answers as a.test (and
+//      c.test, whose name its certificate does not cover); b.test points at a
+//      port nothing listens on. SafeFetch is the real code, in a scratch copy
+//      whose only change is trusting this test's certificate.
+$tlsDir = $child . $sep . 'tls';
+@mkdir($tlsDir, 0700, true);
+$tlsCnf = $tlsDir . $sep . 'tls.cnf';
+file_put_contents($tlsCnf, "[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN=a.test\n[v3]\nsubjectAltName=DNS:a.test,DNS:b.test\nbasicConstraints=critical,CA:TRUE\n");
+$tlsCfg = ['config' => $tlsCnf, 'digest_alg' => 'sha256', 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA, 'x509_extensions' => 'v3'];
+$tlsKey = openssl_pkey_new($tlsCfg);
+$tlsCsr = $tlsKey === false ? false : openssl_csr_new(['commonName' => 'a.test'], $tlsKey, $tlsCfg);
+$tlsCrt = $tlsCsr === false ? false : openssl_csr_sign($tlsCsr, null, $tlsKey, 2, $tlsCfg, random_int(1, 2000000000));
+if ($tlsCrt === false || openssl_x509_export_to_file($tlsCrt, $tlsDir . $sep . 'cert.pem') === false
+    || openssl_pkey_export_to_file($tlsKey, $tlsDir . $sep . 'key.pem', null, $tlsCfg) === false) {
+    refuse('could not make the test certificate for W21 (PHP\'s openssl extension)');
+}
+file_put_contents($tlsDir . $sep . 'server.php', <<<'TLS'
+<?php
+// Written by tools/public-website-tick-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+$ctx = stream_context_create(['ssl' => ['local_cert' => $argv[2], 'local_pk' => $argv[3], 'verify_peer' => false]]);
+$server = stream_socket_server('tls://127.0.0.1:' . $argv[1], $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $ctx);
+if ($server === false) {
+    fwrite(STDERR, "could not listen: {$errstr}\n");
+    exit(1);
+}
+while (true) {
+    $c = @stream_socket_accept($server, 60);
+    if ($c === false) {
+        continue; // a client that refused our certificate, or nobody yet
+    }
+    $req = (string) fgets($c);
+    while (($line = fgets($c)) !== false && trim($line) !== '') {
+    }
+    $path = explode(' ', $req)[1] ?? '/';
+    $answers = [
+        '/'           => "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+        '/e403'       => "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-nxdomain' => "HTTP/1.1 301 Moved\r\nLocation: https://no-such-name-p3.invalid/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-port'     => "HTTP/1.1 301 Moved\r\nLocation: https://a.test:8443/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-dead'     => "HTTP/1.1 301 Moved\r\nLocation: https://b.test/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-http'     => "HTTP/1.1 301 Moved\r\nLocation: http://a.test/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-loop'     => "HTTP/1.1 302 Found\r\nLocation: /r-loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-noloc'    => "HTTP/1.1 300 Multiple Choices\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/drop'       => "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nab",
+    ];
+    @fwrite($c, $answers[$path] ?? $answers['/']);
+    @fclose($c);
+}
+TLS);
+$tlsPort = $port + 57;
+$deadPort = $port + 58;
+$tlsProc = proc_open([PHP_BINARY, $tlsDir . $sep . 'server.php', (string) $tlsPort, $tlsDir . $sep . 'cert.pem', $tlsDir . $sep . 'key.pem'],
+    [0 => ['file', '/dev/null', 'r'], 1 => ['file', $tlsDir . $sep . 'server.log', 'a'], 2 => ['file', $tlsDir . $sep . 'server.log', 'a']], $tlsPipes);
+register_shutdown_function(static function () use (&$tlsProc): void {
+    if (is_resource($tlsProc) === true) {
+        proc_terminate($tlsProc);
+        proc_close($tlsProc);
+    }
+});
+for ($i = 0; $i < 40; $i++) {
+    $probeSocket = @fsockopen('127.0.0.1', $tlsPort, $eno, $estr, 0.25);
+    if ($probeSocket !== false) {
+        fclose($probeSocket);
+        break;
+    }
+    usleep(150000);
+}
+// The scratch copy of SafeFetch: the real file, told to trust this test's certificate.
+@mkdir($tlsDir . $sep . 'core', 0700, true);
+$realSafeFetch = (string) file_get_contents($child . $sep . 'web' . $sep . '_core' . $sep . 'SafeFetch.php');
+$trustLine = 'CURLOPT_SSL_VERIFYPEER    => true,';
+if (substr_count($realSafeFetch, $trustLine) !== 1) {
+    refuse('W21 could not find SafeFetch\'s certificate-checking line to point at the test certificate');
+}
+file_put_contents($tlsDir . $sep . 'core' . $sep . 'SafeFetch.php', str_replace($trustLine,
+    $trustLine . ' CURLOPT_CAINFO => ' . var_export($tlsDir . $sep . 'cert.pem', true) . ',', $realSafeFetch));
+file_put_contents($child . $sep . 'ask-live.php', <<<'ASK'
+<?php
+// Written by tools/public-website-tick-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+// SafeFetch from the scratch copy that trusts the test certificate; every
+// other class (SafeFetch asks Site for its user agent) from the copy of web/.
+spl_autoload_register(static function (string $class): void {
+    $short = str_replace('Portal\\Core\\', '', $class);
+    $file  = $short === 'SafeFetch' ? __DIR__ . '/tls/core/SafeFetch.php' : __DIR__ . '/web/_core/' . $short . '.php';
+    if (is_file($file) === true) {
+        require_once $file;
+    }
+});
+use Portal\Core\SafeFetch;
+$tls  = (int) $argv[1];
+$dead = (int) $argv[2];
+SafeFetch::$testResolverOverride = [
+    'a.test' => ['ips' => ['127.0.0.1'], 'port' => $tls],
+    'b.test' => ['ips' => ['127.0.0.1'], 'port' => $dead],
+    'c.test' => ['ips' => ['127.0.0.1'], 'port' => $tls],
+];
+$out = [];
+foreach (['ok' => 'https://a.test/', 'forbidden' => 'https://a.test/e403', 'to a missing name' => 'https://a.test/r-nxdomain',
+    'to an unusual port' => 'https://a.test/r-port', 'to a dead address' => 'https://a.test/r-dead', 'to plain http' => 'https://a.test/r-http',
+    'round in circles' => 'https://a.test/r-loop', 'no address' => 'https://a.test/r-noloc', 'cut off' => 'https://a.test/drop',
+    'certificate not for this name' => 'https://c.test/', 'at an unusual port' => 'https://a.test:8443/'] as $name => $url) {
+    $got = SafeFetch::get($url, \Portal\Core\PublicWebsiteSetup::mainWebsiteFetchOptions());
+    $v   = \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict($got);
+    $out[$name] = ['status' => $got['status'], 'state' => $v['state'], 'words' => $v['words']];
+}
+$ref = new \ReflectionClass(SafeFetch::class);
+$recognised = [];
+foreach ($ref->getConstants() as $constName => $value) {
+    if (str_starts_with($constName, 'MSG_') === true && $constName !== 'MSG_STATUS') {
+        $recognised[$constName] = \Portal\Core\PublicWebsiteSetup::safeFetchReason((string) $value) !== '';
+    }
+}
+$recognised['REFUSED_MESSAGE'] = \Portal\Core\PublicWebsiteSetup::safeFetchReason(SafeFetch::REFUSED_MESSAGE) === 'refused';
+$recognised['MSG_STATUS'] = \Portal\Core\PublicWebsiteSetup::safeFetchReason(sprintf((string) $ref->getConstant('MSG_STATUS'), 418)) === 'status';
+$out['every SafeFetch sentence recognised'] = $recognised;
+echo json_encode($out);
+ASK);
+$scnPwLive = static function () use ($child, $sep, $tlsPort, $deadPort): array {
+    $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -d ' . escapeshellarg('error_log=' . $child . $sep . 'ask-live.log') . ' '
+        . escapeshellarg($child . $sep . 'ask-live.php') . ' ' . $tlsPort . ' ' . $deadPort . ' 2>&1');
+    $got = json_decode($raw, true);
+    if (is_array($got) === false) {
+        return ['could not ask' => $raw];
+    }
+    $out = [];
+    $phrases = [
+        'ok' => 'answered over https.', 'forbidden' => 'can be reached over https, but it answered with an error page (HTTP 403)',
+        'to a missing name' => 'another address (HTTP 301), and this check will not go to that address — for example',
+        'to an unusual port' => 'another address (HTTP 301), and this check will not go to that address — for example',
+        // SafeFetch reports the failing step's status (0), so the words cannot
+        // know a redirect came first; they say "it, or an address it sent the
+        // visitor on to" rather than claim either.
+        'to a dead address' => 'it, or an address it sent the visitor on to, could not be reached over https — for example',
+        'to plain http' => 'that address is a plain http:// one', 'round in circles' => 'more than 3 times in a row',
+        'no address' => 'did not say which address to go to', 'cut off' => 'the connection was cut off before it finished',
+        'certificate not for this name' => 'could not be reached over https — for example its security certificate did not check out',
+        'at an unusual port' => 'or it uses a port other than the standard https one. Nothing was sent to it.',
+    ];
+    foreach ($phrases as $name => $phrase) {
+        $out[$name] = [(string) ($got[$name]['state'] ?? '?'), str_contains((string) ($got[$name]['words'] ?? ''), $phrase)];
+    }
+    $out['every SafeFetch sentence recognised'] = ($got['every SafeFetch sentence recognised'] ?? []) !== []
+        && in_array(false, (array) $got['every SafeFetch sentence recognised'], true) === false;
+    return $out;
+};
+check('W21 (in-process, a real TLS server) the check says what really happened: answered; an error page (403) that can be reached; a redirect to a missing name, an unusual port or a dead address, each said as a redirect with possibilities; a redirect to plain http; too many redirects; a 300 with no address; a connection cut off; a certificate for another name; and every SafeFetch sentence is recognised',
+    $scnPwLive(), ['ok' => ['ok', true], 'forbidden' => ['note', true], 'to a missing name' => ['problem', true], 'to an unusual port' => ['problem', true],
+        'to a dead address' => ['problem', true], 'to plain http' => ['problem', true], 'round in circles' => ['problem', true],
+        'no address' => ['problem', true], 'cut off' => ['problem', true], 'certificate not for this name' => ['problem', true],
+        'at an unusual port' => ['problem', true], 'every SafeFetch sentence recognised' => true]);
+
+// W22 (round 2, item 2): the real checkSetUp(), in-process, with a $fetch that
+//      RECORDS the options it is handed — the only way to see the overall
+//      deadline is really passed (nothing observable changes without it in a
+//      run that answers quickly). And a main website at an unusual port is not
+//      fetched at all, and says why.
+file_put_contents($child . $sep . 'ask-check.php', <<<'ASK'
+<?php
+// Written by tools/public-website-tick-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+$core = __DIR__ . '/web/_core/';
+define('PORTAL_CORE', rtrim($core, '/'));
+foreach (['App.php', 'Site.php', 'Logger.php', 'Roles.php', 'InstallationSettings.php', 'Capabilities.php', 'EventVisibility.php',
+    'PublicWebsite.php', 'PortalAddress.php', 'SafeFetch.php', 'PublicWebsiteSetup.php'] as $f) {
+    require_once $core . $f;
+}
+$c = require __DIR__ . '/web/_auth_keys/auth_creds.php';
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$mysqli = new mysqli($c['db_host'], $c['db_user'], $c['db_pass'], $c['db_name'], (int) $c['db_port']);
+$mysqli->set_charset('utf8mb4');
+$site = (int) $argv[1];
+\Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => '']], $site);
+$seen = [];
+$before = microtime(true);
+try {
+    $rows = \Portal\Core\PublicWebsiteSetup::checkSetUp($mysqli, $site, static function (string $url, array $opts) use (&$seen): array {
+        $seen[] = ['url' => $url, 'opts' => $opts];
+        return ['ok' => true, 'status' => 200, 'capped' => false, 'message' => ''];
+    });
+} catch (\Throwable $e) {
+    echo json_encode(['error' => get_class($e) . ': ' . $e->getMessage()]);
+    exit;
+}
+$first = $seen[0]['opts'] ?? [];
+echo json_encode([
+    'fetches'         => count($seen),
+    'deadline ahead'  => isset($first['deadline']) === true ? round((float) $first['deadline'] - $before) : null,
+    'step limit'      => $first['timeoutSeconds'] ?? null,
+    'redirect limit'  => $first['maxRedirects'] ?? null,
+    'https only'      => $first['httpsOnly'] ?? null,
+    'main rows'       => array_values(array_map(static fn (array $r): string => $r['state'] . ': ' . $r['words'],
+        array_filter($rows, static fn (array $r): bool => $r['label'] === 'Your main website'))),
+]);
+ASK);
+$scnPwCheckOptions = static function () use ($db, $siteOne, $child, $sep, $pwClean): array {
+    $ask = static function () use ($child, $sep, $siteOne): array {
+        $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -d ' . escapeshellarg('error_log=' . $child . $sep . 'ask-check.log') . ' '
+            . escapeshellarg($child . $sep . 'ask-check.php') . ' ' . $siteOne . ' 2>&1');
+        $got = json_decode($raw, true);
+        return is_array($got) === true ? $got : ['could not ask' => $raw];
+    };
+    $pwClean();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.website.address', 'https://www.pwt-deadline.example.org', '', 0)");
+    $plain = $ask();
+    $db->query("UPDATE `tblSettings` SET `settingValue` = 'https://www.pwt-deadline.example.org:8443' WHERE `siteID` = {$siteOne} AND `settingKey` = 'public.website.address'");
+    $withPort = $ask();
+    $pwClean();
+    return [
+        'fetched once' => $plain['fetches'] ?? $plain,
+        // A whole number of seconds, or 'none' when no deadline was handed over.
+        'overall deadline, seconds ahead' => isset($plain['deadline ahead']) === true ? (int) $plain['deadline ahead'] : 'none',
+        'each step' => $plain['step limit'] ?? null, 'redirects' => $plain['redirect limit'] ?? null, 'https only' => $plain['https only'] ?? null,
+        'at an unusual port: fetched' => $withPort['fetches'] ?? $withPort,
+        'at an unusual port: says so' => str_starts_with((string) (($withPort['main rows'] ?? [])[0] ?? ''), 'untested: https://www.pwt-deadline.example.org:8443: it uses port 8443'),
+    ];
+};
+check('W22 the real checkSetUp() hands SafeFetch an overall deadline 15 seconds ahead, 5 seconds a step, at most 3 redirects, https only; and a main website at an unusual port is not fetched and says why',
+    $scnPwCheckOptions(), ['fetched once' => 1, 'overall deadline, seconds ahead' => 15, 'each step' => 5, 'redirects' => 3, 'https only' => true,
+        'at an unusual port: fetched' => 0, 'at an unusual port: says so' => true]);
 
 // W18 (round 1, item 3): a framing list a HAND EDIT spoiled — what the PAGE
 //      shows in its box and what the CHECK reports. Only the valid line may
@@ -2587,32 +2815,64 @@ check('W19 an organisation with no public address choosing one another organisat
     $scnPwHostInsert(), ['this organisation' => null, 'the other organisation\'s row' => ['shared.pwt.example.org', '2020-01-01 00:00:00'],
         'said plainly' => true, 'a spoiled row is shown as none' => true, 'a spoiled row is replaced' => 'events.fresh.pwt.example.org']);
 
-// W20 (round 1, item 1): the general settings editor names the RIGHT page for
-//      each locked key — the copied-in rule at Admin, Outside calendars; this
-//      package's three at Admin, Public website — in its link and in what it
-//      records when it refuses a change.
-$scnPwEditorPage = static function () use ($db, $signIn, $http, $freshToken, $people, $pwRow): array {
+// W20 (rounds 1 and 2, item 1): the general settings editor names the RIGHT
+//      page for each locked key — the copied-in rule at Admin, Outside
+//      calendars; this package's three at Admin, Public website — in its link,
+//      in the words it shows when there is no link (who REALLY can change it,
+//      per key), in its on-screen refusal, and in what it records when it
+//      refuses a change, a delete and an add.
+$scnPwEditorPage = static function () use ($db, $siteOne, $signIn, $http, $freshToken, $people, $pwRow, $pwClean): array {
+    $pwClean();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.website.address', 'https://www.pwt-editor.example.org', '', 0)");
+    /** What a person sees beside each key on /settings: the linked page, or the words with no link. */
+    $beside = static function (string $page, string $key): string {
+        if (preg_match('/' . preg_quote($key, '/') . '.{0,4000}?<(a|span)\b[^>]*data-locked-page="([a-z\/\-]+)"[^>]*>(.*?)<\/\1>/s', $page, $m) !== 1) {
+            return 'nothing drawn';
+        }
+        return ($m[1] === 'a' ? 'link to ' : 'no link: ') . $m[2] . ' — ' . trim(html_entity_decode(strip_tags($m[3]), ENT_QUOTES, 'UTF-8'));
+    };
+    $out = [];
     $signIn('root');
-    $page  = $http('GET', '/settings')['body'];
-    $links = [];
-    foreach (['public.frame.permitted', 'public.events.copiedRule'] as $key) {
-        // The nearest "changed at" link after the key's own name on the page,
-        // which is that row's (each row prints its key, then its controls).
-        $links[$key] = preg_match('/' . preg_quote($key, '/') . '.{0,4000}?data-locked-page="([a-z\/\-]+)"/s', $page, $m) === 1 ? $m[1] : 'no link';
-    }
+    $page = $http('GET', '/settings')['body'];
+    $out['installation\'s global administrator'] = [$beside($page, 'public.frame.permitted'), $beside($page, 'public.events.copiedRule'), $beside($page, 'public.website.address')];
+    $signIn('siteroot');
+    $page = $http('GET', '/settings')['body'];
+    $out['organisation\'s global administrator'] = [$beside($page, 'public.frame.permitted'), $beside($page, 'public.website.address')];
+    $signIn('orgadmin');
+    $page = $http('GET', '/settings')['body'];
+    $out['ordinary administrator'] = [$beside($page, 'public.frame.permitted'), $beside($page, 'public.website.address')];
+
+    $signIn('root');
     $id = (int) ($db->query("SELECT `settingID` FROM `tblSettings` WHERE `settingKey` = 'public.frame.permitted' AND `siteID` IS NULL")->fetch_assoc()['settingID'] ?? 0);
     $http('POST', '/settings/save', ['csrf_token' => $freshToken(), 'settingID' => (string) $id, 'settingKey' => 'public.frame.permitted', 'settingValue' => 'no']);
+    $out['the refusal on screen'] = str_contains($http('GET', '/settings')['body'], 'This setting is changed only at Admin, Public website, which checks every value and records every change. Nothing was changed.');
     $http('POST', '/settings', ['csrf_token' => $freshToken(), 'action' => 'delete', 'settingID' => (string) $id]);
-    $logged = $db->query("SELECT `activityDescription` FROM `tblActivityLogs` WHERE `userID` = {$people['root']['id']} "
-        . "AND `activityType` IN ('SettingsUpdateRefused', 'SettingsDeleteRefused') AND `activityDescription` LIKE '%public.frame.permitted%' ORDER BY `logID`")->fetch_all(MYSQLI_ASSOC);
-    $named = array_map(static fn (array $r): bool => str_contains((string) $r['activityDescription'], 'Admin, Public website')
-        && str_contains((string) $r['activityDescription'], 'Outside calendars') === false, $logged);
-    return ['links' => $links, 'refusals recorded' => count($logged), 'each names Admin, Public website' => $named === [] ? false : !in_array(false, $named, true),
-        'still yes' => $pwRow(null, 'public.frame.permitted')];
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'public.website.address' AND `siteID` = {$siteOne}");
+    $http('POST', '/settings/save', ['csrf_token' => $freshToken(), 'settingID' => '0', 'settingKey' => 'public.website.address', 'settingValue' => 'https://www.pwt-added.example.org']);
+    $logged = $db->query("SELECT `activityType`, `activityDescription` FROM `tblActivityLogs` WHERE `userID` = {$people['root']['id']} "
+        . "AND `activityType` IN ('SettingsUpdateRefused', 'SettingsDeleteRefused') AND (`activityDescription` LIKE '%public.frame.permitted%' "
+        . "OR `activityDescription` LIKE '%public.website.address%') ORDER BY `logID`")->fetch_all(MYSQLI_ASSOC);
+    $out['refusals recorded'] = array_map(static fn (array $r): string => (string) $r['activityType']
+        . (str_contains((string) $r['activityDescription'], 'Admin, Public website') === true && str_contains((string) $r['activityDescription'], 'Outside calendars') === false
+            ? ' naming Admin, Public website' : ' naming the WRONG page'), $logged);
+    $out['nothing changed or added'] = [$pwRow(null, 'public.frame.permitted'),
+        (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblSettings` WHERE `settingKey` = 'public.website.address'")->fetch_assoc()['n'] ?? 0)];
+    $pwClean();
+    return $out;
 };
-check('W20 the general settings editor links public.frame.permitted to Admin, Public website and the copied-in rule to Admin, Outside calendars, and its refused change and delete record Admin, Public website',
-    $scnPwEditorPage(), ['links' => ['public.frame.permitted' => 'admin/public-website', 'public.events.copiedRule' => 'admin/calendar/feeds'],
-        'refusals recorded' => 2, 'each names Admin, Public website' => true, 'still yes' => 'yes']);
+$wSet = 'admin/public-website — ';
+check('W20 the settings editor names the right page per key — a link where the viewer can change it, and otherwise who really can (the installation\'s global administrator for the framing switch; a global administrator or a "Set up the public website" holder for the rest) — and its on-screen refusal and its recorded change, delete and add refusals all name Admin, Public website',
+    $scnPwEditorPage(), [
+        'installation\'s global administrator' => ['link to ' . $wSet . 'Changed at Admin, Public website', 'link to admin/calendar/feeds — Changed at Admin, Outside calendars',
+            'link to ' . $wSet . 'Changed at Admin, Public website'],
+        'organisation\'s global administrator' => ['no link: ' . $wSet . 'Changed by the installation\'s global administrator, at Admin, Public website',
+            'link to ' . $wSet . 'Changed at Admin, Public website'],
+        'ordinary administrator' => ['no link: ' . $wSet . 'Changed by the installation\'s global administrator, at Admin, Public website',
+            'no link: ' . $wSet . 'Changed by a global administrator, or somebody given "Set up the public website", at Admin, Public website'],
+        'the refusal on screen' => true,
+        'refusals recorded' => ['SettingsUpdateRefused naming Admin, Public website', 'SettingsDeleteRefused naming Admin, Public website',
+            'SettingsUpdateRefused naming Admin, Public website'],
+        'nothing changed or added' => ['yes', 0]]);
 $pwClean();
 
 // =============================================================================
@@ -2998,8 +3258,8 @@ check('P85 (D-093) with the Users page\'s rule gone, an ordinary administrator g
 $p = $plant('_apps/admin/users/index.php', "        carry.disabled = held.indexOf(carry.value) === -1;\n", '', $scnPwUsersPage);
 check('P86 (measured, expected to stay GREEN) with the locked box\'s carrier never switched on, the browser would send no answer for it — nothing here runs the page\'s script, so only the handler\'s refusal is proved',
     [$p['applied'], $p['result']['administrator changes a holder\'s other roles'] ?? null], [true, [true, true]]);
-$p = $plant('_core/PublicWebsite.php', 'foreach ([self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY] as $locked) {',
-    'foreach ([self::RULE_KEY] as $locked) {', $scnPwLocked);
+$p = $plant('_core/PublicWebsite.php', 'public const LOCKED_KEYS = [self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY];',
+    'public const LOCKED_KEYS = [self::RULE_KEY];', $scnPwLocked);
 check('P87 with the three keys taken out of the editor lock, the general settings editor would store them', [$p['applied'], $p['result']], [true, [false, false, false]]);
 $p = $plant('_core/templates/nav.php', '<?php if (App::isAdmin() !== true && $navMaySetUpWebsite === true): ?>', '<?php if (App::isAdmin() !== true): ?>', $scnPwMenu);
 check('P88 with the menu link no longer asking the gate, a member is shown a way to a page that refuses them', [$p['applied'], $p['result']['member'] ?? null], [true, 1]);
@@ -3012,8 +3272,16 @@ $p = $plant('_core/PublicWebsiteSetup.php', "'INSERT INTO `' . self::HOSTS_TABLE
 check('P91 with the public address INSERTED as an upsert, choosing another organisation\'s name takes it from them', [$p['applied'], $p['result']['this organisation'] ?? null], [true, 'shared.pwt.example.org']);
 $p = $plant('_core/PublicWebsiteSetup.php', "\$stmt = \$was !== '' || self::hasHostRow(\$db, \$siteId) === true", "\$stmt = \$was !== ''", $scnPwHostInsert);
 check('P92 with a spoiled row not looked for, replacing it is refused as a clash and the spoiled row stays', [$p['applied'], $p['result']['a spoiled row is replaced'] ?? null], [true, 'NOT A HOST!']);
-$p = $plant('_core/PublicWebsite.php', "return ['route' => 'admin/public-website', 'name' => 'Admin, Public website'];", "return ['route' => 'admin/calendar/feeds', 'name' => 'Admin, Outside calendars'];", $scnPwEditorPage);
-check('P93 with every public-website key sent to Admin, Outside calendars, the settings editor names the wrong page again', [$p['applied'], $p['result']['links']['public.frame.permitted'] ?? null], [true, 'admin/calendar/feeds']);
+$p = $plant('_core/PublicWebsite.php', "        return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',\n            'who' => 'a global administrator,",
+    "        return ['route' => 'admin/calendar/feeds', 'name' => 'Admin, Outside calendars',\n            'who' => 'a global administrator,", $scnPwEditorPage);
+check('P93 with every public-website key sent to Admin, Outside calendars, the settings editor names the wrong page again',
+    [$p['applied'], $p['result']['installation\'s global administrator'][2] ?? null], [true, 'link to admin/calendar/feeds — Changed at Admin, Outside calendars']);
+$p = $plant('_core/PublicWebsiteSetup.php', "            'deadline'              => microtime(true) + self::CHECK_DEADLINE_SECONDS,\n", '', $scnPwCheckOptions);
+check('P95 with the overall deadline no longer passed, the check would promise "15 seconds in all" while giving no such limit', [$p['applied'], $p['result']['overall deadline, seconds ahead'] ?? 'missing'], [true, 'none']);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$kind === 'unreachable') {", 'if (false) {', $scnPwLive);
+check('P96 with the "could not be reached" branch gone, a certificate for another name is no longer said to be a possible cause', [$p['applied'], $p['result']['certificate not for this name'] ?? null], [true, ['problem', false]]);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$kind === 'refused') {\n            return \$wasRedirect === true", "        if (\$kind === 'refused') {\n            return false", $scnPwLive);
+check('P97 with a refused redirect treated as a refused first address, a redirect to a missing name is not said to be a redirect', [$p['applied'], $p['result']['to a missing name'] ?? null], [true, ['problem', false]]);
 $p = $plant('_core/PublicWebsiteSetup.php', 'if ($status >= 400 && $status <= 599) {', 'if (false) {', $scnPwVerdicts);
 check('P94 with the error-page branch gone, a website answering 403 is told nothing answered', [$p['applied'], $p['result']['forbidden'] ?? null], [true, ['problem', false, false, false]]);
 $p = $plant('_apps/admin/roles/index.php', '<?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>', '<?php if (false): ?>', $scnPwRolesWarning);
@@ -3033,24 +3301,25 @@ $ours      = [];
 // PublicWebsite still fails this check.
 $expectedNotices = ['[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteOne . '\'s stored framing list held ',
     '[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteOne . '\'s stored public address is not one this page would accept'];
-$setAside = 0;
+$seenNotices = [];
 foreach (preg_split('/\R/', $serverLog) ?: [] as $line) {
     $deliberate = false;
-    foreach ($expectedNotices as $notice) {
+    foreach ($expectedNotices as $i => $notice) {
         if (str_contains($line, $notice) === true) {
             $deliberate = true;
+            $seenNotices[$i] = true;
         }
     }
     if ($deliberate === true) {
-        $setAside++;
         continue;
     }
     if (stripos($line, 'Fatal') !== false || stripos($line, 'PublicWebsite') !== false || stripos($line, 'Uncaught') !== false) {
         $ours[] = $line;
     }
 }
-check('Z1 the server logged no fatal error and nothing about PublicWebsite beyond the hand-edit notices section W causes on purpose (which it did log)',
-    [$ours, $setAside > 0], [[], true]);
+ksort($seenNotices);
+check('Z1 the server logged no fatal error and nothing about PublicWebsite beyond the two hand-edit notices section W causes on purpose — and it logged BOTH of them',
+    [$ours, array_keys($seenNotices)], [[], [0, 1]]);
 
 // ── Tidy up the rows this test made ─────────────────────────────────────────
 if ($indexWas === null) {

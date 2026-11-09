@@ -806,11 +806,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <span class="small text-secondary">Changed by a global administrator, at Admin, Organisations</span>
                                     <?php elseif ($outsideLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Outside services</a>
-                                    <?php elseif ($copiedRuleLocked === true && $publicWebsitePage !== null && ($publicWebsitePage['route'] !== 'admin/public-website' || \Portal\Core\PublicWebsiteSetup::maySetUpHere() === true)): ?>
+                                    <?php elseif ($copiedRuleLocked === true && $publicWebsitePage !== null && ($publicWebsitePage['route'] !== 'admin/public-website'
+                                        || (\Portal\Core\PublicWebsiteSetup::maySetUpHere() === true && ($publicWebsitePage['installationOnly'] === false || $isRoot === true)))): ?>
                                         <a class="small" data-locked-page="<?php echo htmlspecialchars($publicWebsitePage['route'], ENT_QUOTES, 'UTF-8'); ?>" href="<?php echo htmlspecialchars(Site::url($publicWebsitePage['route']), ENT_QUOTES, 'UTF-8'); ?>">Changed at <?php echo htmlspecialchars($publicWebsitePage['name'], ENT_QUOTES, 'UTF-8'); ?></a>
                                     <?php elseif ($copiedRuleLocked === true): ?>
-                                        <?php // Admin, Public website refuses an ordinary administrator (D-085), so no link to it. ?>
-                                        <span class="small text-secondary" data-locked-page="<?php echo htmlspecialchars((string) ($publicWebsitePage['route'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">Changed by a global administrator, at <?php echo htmlspecialchars((string) ($publicWebsitePage['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                                        <?php // No link: this viewer cannot change it there (D-085, D-094). Who CAN is said per key, by PublicWebsite::lockedPageFor(). ?>
+                                        <span class="small text-secondary" data-locked-page="<?php echo htmlspecialchars((string) ($publicWebsitePage['route'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">Changed by <?php echo htmlspecialchars((string) ($publicWebsitePage['who'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>, at <?php echo htmlspecialchars((string) ($publicWebsitePage['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
                                     <?php elseif ($foyerLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('noticeboard/foyer/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Noticeboard, Foyer screen</a>
                                     <?php elseif ($registrationsLocked === true): ?>

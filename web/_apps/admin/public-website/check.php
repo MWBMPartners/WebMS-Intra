@@ -15,8 +15,11 @@
  * host and the HTTP status.
  *
  * WHY POST AND A LIMIT: the check makes the portal's server fetch the
- * organisation's main website (through `SafeFetch`, five seconds at most) and
- * look a name up. A GET could be triggered by a link on any website, and an
+ * organisation's main website through `SafeFetch` — at most
+ * `PublicWebsiteSetup::CHECK_TIMEOUT_SECONDS` for each step and
+ * `CHECK_DEADLINE_SECONDS` in all, following up to `CHECK_MAX_REDIRECTS`
+ * redirects; looking a name up is not limited by either, because PHP's name
+ * lookup cannot be given a time limit — and look the public address up. A GET could be triggered by a link on any website, and an
  * unlimited button is a way to make the server knock on somebody's door over
  * and over. So it needs the form token, and one person may run it
  * `PublicWebsiteSetup::CHECK_LIMIT` times in `CHECK_WINDOW_SECONDS`

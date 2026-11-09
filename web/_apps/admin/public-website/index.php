@@ -93,7 +93,7 @@ $stateWords = [
     'ok'       => ['Fine', 'success'],
     'problem'  => ['Needs attention', 'danger'],
     'note'     => ['For information', 'secondary'],
-    'untested' => ['Cannot be tested yet', 'warning'],
+    'untested' => ['Not tested', 'warning'],
 ];
 
 $pageTitle       = 'Public website';
