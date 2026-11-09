@@ -21,41 +21,48 @@ is the same two statements, straight after start-up:
     if (... Site::publicAddressUnknown() ...) { PublicDoor::tryAgain(); }
 
 A NEW file in the web root that loads start-up is the realistic way this comes
-back, and nothing would notice: it would work perfectly on the members' address.
+back: it would work perfectly on the members' address.
 
-THE RULE, POSITIONAL (round 3 of the check)
--------------------------------------------
-The first version only required both questions somewhere above the first
-`ensureSession(`, so `session_start()` or `Auth::csrfToken()` written above them
-passed while its own success line said "before any session starts" (measured in
-a new file, in api-docs/index.php and in error.php). Now, in every PHP file
-under web/public_html/ whose code names `bootstrap.php`:
+WHAT THIS GATE HOLDS -- AND WHAT IT DOES NOT (round 4 of the check)
+-------------------------------------------------------------------
+Rounds 3 and 4 tried to make this gate prove "nothing runs before the
+hand-off", and each round found a new spelling it passed: a session started
+ABOVE the require, a call inside the hand-off's CONDITION
+(`session_start() !== false && Site::isDoorRequest()`), a call inside the
+first statement of the BODY (`PublicDoor::answer($mysqli, Auth::csrfToken())`),
+a start-up path built by interpolation. That question is BEHAVIOURAL, which is
+this repository's settled lesson (D-065, #763), so it is now answered by
+DRIVING every web-root PHP file: section F of tools/public-door-selftest.php
+finds every *.php under web/public_html/ by walking the folder, runs each one
+directly on a public address (and in the failure state, FS01), with and without
+a stale session cookie, and requires no cookie, no session file and no
+organisation named — with plants for a new entry point that starts a session
+before or after start-up.
 
-  1. the statement that requires start-up is found (the require whose statement
-     names `bootstrap.php`, or the first require after the string is assigned);
-  2. what follows it may be `use` statements only (they are compile-time), and
-     then the NEXT TWO statements must be exactly the two hand-offs above, in
-     that order: an `if` whose condition calls `Site::isDoorRequest()` and whose
-     body BEGINS with a call to `PublicDoor::notFound()` or
-     `PublicDoor::answer()`, then an `if` whose condition calls
-     `Site::publicAddressUnknown()` and whose body begins with a call to
-     `PublicDoor::tryAgain()`. Nothing else may come between start-up and them.
+This gate now holds only what a static reading can honestly hold, in every PHP
+file under web/public_html/ whose code names `bootstrap.php` (in a plain or an
+interpolated string):
 
-Class names are resolved through the file's own `use … as …` lines, and a
+  1. the two hand-offs are PRESENT -- an `if` whose condition calls
+     `Site::isDoorRequest()` and whose body begins with a call to
+     `PublicDoor::notFound()` or `PublicDoor::answer()`, and an `if` whose
+     condition calls `Site::publicAddressUnknown()` and whose body begins with
+     a call to `PublicDoor::tryAgain()`;
+  2. IN THAT ORDER;
+  3. NEAR THE TOP: they are the first two statements after the statement that
+     requires start-up (only `use` lines may come between).
+
+Class names are resolved through the file's own `use ... as ...` lines, and a
 fully-qualified `\\Portal\\Core\\Site` counts. It reads PHP with PHP's own
-tokeniser, so a comment or a STRING naming either question never counts. It
+tokeniser, so a comment or a string naming a question never counts. It
 REFUSES, with no fallback, when `php` cannot be run.
 
-WHAT IT STILL CANNOT SEE, said plainly
---------------------------------------
-- A dead branch: `if (false && Site::isDoorRequest())` has the right shape and
-  never runs. Likewise a condition that calls the question and ignores its
-  answer, or a body that calls the right method after something that exits.
-  tools/public-door-selftest.php drives all three files over HTTP, on a public
-  address and in the failure state, with a planted fault for each hand-off.
-- Start-up loaded through ANOTHER file this one includes (the text
-  `bootstrap.php` must be in this file's own code).
-- Whether PublicDoor's three methods really exit (they are declared `never`).
+WHAT IT DOES NOT CLAIM, said plainly: whether anything RUNS before or inside
+the hand-offs -- a call above the require, a call inside the condition or the
+body, a dead branch, an ignored answer, start-up loaded through another file --
+is tools/public-door-selftest.php's job (sections E and F, FS01, P37-P52), not
+this gate's. A green run here means "the hand-offs are written in the right
+place", never "nothing runs before them".
 
 USAGE
     python3 -I tools/audit-checks/check_webroot_door_handoff.py
@@ -63,7 +70,7 @@ USAGE
 Package:   WebMS-Intra
 Author:    MWBM Partners Ltd (t/a MWservices)
 Copyright: All Rights Reserved
-Version:   2.0.0
+Version:   3.0.0
 """
 
 from __future__ import annotations
@@ -80,6 +87,10 @@ WEBROOT = REPO / "web/public_html"
 # disappears, is reported too: the list must stay true.
 KNOWN = {"index.php", "error.php", "api-docs/index.php"}
 REQUIRES = {"T_REQUIRE", "T_REQUIRE_ONCE", "T_INCLUDE", "T_INCLUDE_ONCE"}
+# A start-up path in a plain string, or in the literal part of an
+# interpolated one ("$dir/_core/bootstrap.php"): round 4 found the second not
+# counted at all, while the docstring said "whose code names bootstrap.php".
+STRING_TOKENS = {"T_CONSTANT_ENCAPSED_STRING", "T_ENCAPSED_AND_WHITESPACE"}
 NAME_TOKENS = {"T_STRING", "T_NAME_QUALIFIED", "T_NAME_FULLY_QUALIFIED", "T_NAME_RELATIVE"}
 HANDOFFS = [
     ("Site", "isDoorRequest", ("PublicDoor", ("notFound", "answer"))),
@@ -186,7 +197,7 @@ def calls(toks: list, alias: dict[str, str], cls: str, methods: tuple) -> bool:
 
 def check_file(rel: str, toks: list) -> list[str]:
     alias = aliases(toks)
-    at = next((k for k, t in enumerate(toks) if t[0] == "T_CONSTANT_ENCAPSED_STRING" and "bootstrap.php" in t[1]), -1)
+    at = next((k for k, t in enumerate(toks) if t[0] in STRING_TOKENS and "bootstrap.php" in t[1]), -1)
     if at < 0:
         return []
     # The require that loads it: in the string's own statement, or the next one after it.
@@ -243,7 +254,7 @@ def main() -> int:
         except Refused as e:
             problems.append(str(e))
             continue
-        if any(t[0] == "T_CONSTANT_ENCAPSED_STRING" and "bootstrap.php" in t[1] for t in toks) is False:
+        if any(t[0] in STRING_TOKENS and "bootstrap.php" in t[1] for t in toks) is False:
             continue
         found.add(rel)
         problems.extend(check_file(rel, toks))
@@ -255,9 +266,9 @@ def main() -> int:
             print("✗ " + p)
         return 1
     print("check_webroot_door_handoff: OK — %d web-root file(s) start the portal (%s), and in each the two hand-offs "
-          "(Site::isDoorRequest() → PublicDoor, Site::publicAddressUnknown() → PublicDoor::tryAgain()) are the first "
-          "statements after start-up, with nothing in between. (It cannot see a dead branch or an ignored answer: "
-          "tools/public-door-selftest.php drives them.)" % (len(found), ", ".join(sorted(found))))
+          "(Site::isDoorRequest() → PublicDoor, Site::publicAddressUnknown() → PublicDoor::tryAgain()) are WRITTEN, in "
+          "order, as the first statements after the require of start-up. Whether anything RUNS before them is not this "
+          "check's to say: tools/public-door-selftest.php (section F) drives every web-root file." % (len(found), ", ".join(sorted(found))))
     return 0
 
 
