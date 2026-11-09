@@ -927,17 +927,20 @@ final class PublicWebsiteSetup
     // =========================================================================
 
     /**
-     * Run the set-up check for one organisation. Read-only: it changes
-     * nothing and stores nothing. Each row is `[label, state, words]` where
-     * state is 'ok', 'problem', 'note' or 'untested'. The door row is ALWAYS
-     * 'untested'.
+     * Run the set-up check for one organisation. Read-only: it changes no
+     * setting. Each row is `[label, state, words]` where state is 'ok',
+     * 'problem', 'note' or 'untested'. The door row is ALWAYS 'untested'.
      *
-     * @param callable|null $fetch For the self-test only: replaces
-     *                             `SafeFetch::get()`. Null in the portal.
+     * ⚠️ IT TAKES NO "FETCH" ARGUMENT ANY MORE (round 3 of P3's check). A test
+     *    hook that replaced the fetch let the real path pass different options
+     *    from the ones the test saw, with every check green. The real
+     *    `SafeFetch::get()` is called here, once, with
+     *    `mainWebsiteFetchOptions()`; the self-test records the options by
+     *    running this method against a scratch copy of SafeFetch.
      *
      * @return list<array{label:string, state:string, words:string}>
      */
-    public static function checkSetUp(\mysqli $db, int $siteId, ?callable $fetch = null): array
+    public static function checkSetUp(\mysqli $db, int $siteId): array
     {
         $rows    = [];
         $website = self::websiteAddressFor($db, $siteId);
@@ -949,24 +952,21 @@ final class PublicWebsiteSetup
         } else {
             $host = (string) parse_url($website, PHP_URL_HOST);
             $port = parse_url($website, PHP_URL_PORT);
-            if ($port !== null && $port !== false) {
-                // ⚠️ A WEBSITE AT AN UNUSUAL PORT CANNOT BE CHECKED, and that is
-                //    said rather than guessed (round 2 of P3's check). The page
-                //    accepts such an address (it is a real address), but
-                //    `SafeFetch` reaches only the standard https port, so a fetch
-                //    would be refused before connecting and every reason the
-                //    check could give would be untrue.
-                $rows[] = ['label' => 'Your main website', 'state' => 'untested', 'words' => $website . ': it uses port ' . (int) $port
-                    . ', and this check can reach a website only at the standard https port, so it was not checked. Open it in a browser to see.'];
+            $port = ($port === null || $port === false) ? 443 : (int) $port;
+            if ($port !== 443) {
+                // ⚠️ A WEBSITE AT ANOTHER PORT CANNOT BE CHECKED, and that is
+                //    said rather than guessed. The page accepts such an address
+                //    (it is a real address), but SafeFetch reaches only the
+                //    standard https port. Port 443 itself — which an http://
+                //    address keeps, because 443 is not http's usual port — IS
+                //    the standard https port, so it is checked (round 3).
+                $rows[] = ['label' => 'Your main website', 'state' => 'untested', 'words' => $website . ': it uses port ' . $port
+                    . ', which is not the standard https port, so this check cannot reach it. Open it in your own browser to see what your visitors get.'];
             } else {
-                $https     = 'https://' . $host . '/';
-                // `$fetch` is handed the SAME options the portal uses, so a test
-                // can see them (round 2: the deadline was pinned by nothing).
-                $fetchWith = $fetch ?? static fn (string $url, array $opts): array => SafeFetch::get($url, $opts);
                 try {
-                    $got = $fetchWith($https, self::mainWebsiteFetchOptions());
+                    $got = SafeFetch::get('https://' . $host . '/', self::mainWebsiteFetchOptions());
                 } catch (\Throwable $e) {
-                    $got = ['ok' => false, 'status' => 0, 'capped' => false, 'message' => ''];
+                    $got = ['ok' => false, 'status' => 0, 'capped' => false];
                 }
                 $verdict = self::mainWebsiteVerdict($got);
                 $rows[]  = ['label' => 'Your main website', 'state' => $verdict['state'], 'words' => $website . ': ' . $verdict['words']];
@@ -1050,145 +1050,54 @@ final class PublicWebsiteSetup
         ];
     }
 
+    /** What the check says about the main website whenever it did not get a normal page. */
+    public const NOT_A_NORMAL_PAGE = 'This check did not get a normal page from your main website. That can happen when a '
+        . 'website is down, sends visitors on to another address this check will not follow, uses an unusual port, has a '
+        . 'security-certificate problem, or turns away automated visitors. Open it in your own browser to see what your '
+        . 'visitors get.';
+
     /**
-     * 🔎 What the main website's fetch REALLY tells us, in plain words. Pure,
-     * and public so the self-test can ask it about every kind of answer.
+     * 🔎 What the check says about the main website — ONLY what is certainly
+     * known. Pure, and public so the self-test asks it directly.
      *
-     * ⚠️ TWO ROUNDS OF P3's CHECK FOUND UNTRUE SENTENCES HERE, and the lesson
-     *    is the same both times: judge by the MOST SPECIFIC thing `SafeFetch`
-     *    says, and where it cannot tell causes apart, word the reasons as
-     *    possibilities ("for example"), never as a complete list.
-     *      Round 1: every non-200 answer was "did not answer … or its name
-     *      could not be found" — untrue of a website answering 403.
-     *      Round 2: judging by the STATUS alone, a redirect to a name that
-     *      does not exist was called "plain http, a private network or too
-     *      many redirects" (none true), a certificate that did not check out
-     *      gave no certificate reason at all (probably the commonest real
-     *      case), and a site that DID answer with a redirect to a dead address
-     *      was told "nothing answered".
+     *   - a complete HTTP 200 (or a 200 cut off only by this check's own size
+     *     limit): "it answered";
+     *   - this server has no curl: "could not be checked on this server";
+     *   - anything else: ONE sentence that is always true
+     *     (`NOT_A_NORMAL_PAGE`), plus — only where SafeFetch reports one — the
+     *     last HTTP status received, as a fact and not as a cause.
      *
-     *    `SafeFetch::get()` returns `ok`, `status` (the LAST status received —
-     *    a redirect's, when the hop after it failed) and `message`, one of its
-     *    own fixed sentences. Those sentences are its private constants; they
-     *    are read here through reflection, so a change of wording there can
-     *    never silently turn every answer into the fallback (the self-test
-     *    proves each constant is still recognised).
+     * ⚠️ WHY IT NAMES NO CAUSE. Three rounds of P3's check each found the
+     *    previous version naming causes that were untrue for real answers: by
+     *    status alone (round 1), by SafeFetch's own sentences and status
+     *    (rounds 2 and 3: a 301 whose body was cut off, a two-step redirect
+     *    ending at http:// or at a missing name, a 300 with an address, a 304,
+     *    a redirect followed by a dead address — which SafeFetch reports with
+     *    the FAILING step's status, 0). SafeFetch's answer does not carry
+     *    enough to tell those apart, and the repository's rule is that an item
+     *    failing two rounds running is simplified, not refined again. So the
+     *    sentence lists possibilities and the person looks in a browser.
      *
-     * @param array<string,mixed> $got A `SafeFetch::get()` result.
+     * @param array<string,mixed> $got           A `SafeFetch::get()` result.
+     * @param bool|null           $curlAvailable For the self-test only: whether
+     *                                           this server can fetch at all.
+     *                                           Null asks PHP.
      *
      * @return array{state:string, words:string}
      */
-    public static function mainWebsiteVerdict(array $got): array
+    public static function mainWebsiteVerdict(array $got, ?bool $curlAvailable = null): array
     {
-        $status  = (int) ($got['status'] ?? 0);
-        $message = (string) ($got['message'] ?? '');
-        $kind    = self::safeFetchReason($message);
-        $limits  = self::CHECK_TIMEOUT_SECONDS . ' seconds for each step, ' . self::CHECK_DEADLINE_SECONDS
-            . ' seconds in all, not counting looking a name up';
-        $wasRedirect = $status >= 300 && $status <= 399;
-        $redirected  = 'it answered over https by sending the visitor to another address (HTTP ' . $status . '), ';
-
-        if (($got['ok'] ?? false) === true || (($got['capped'] ?? false) === true && $status === 200)) {
-            return ['state' => 'ok', 'words' => 'answered over https.'];
+        $status = (int) ($got['status'] ?? 0);
+        if (($curlAvailable ?? function_exists('curl_init')) === false) {
+            return ['state' => 'untested', 'words' => 'it could not be checked on this server, because this server cannot '
+                . 'fetch outside addresses (PHP\'s curl extension is not installed). Open it in your own browser to see what your visitors get.'];
         }
-        if ($kind === 'no-curl') {
-            return ['state' => 'untested', 'words' => 'it could not be checked: this server cannot fetch outside addresses '
-                . '(PHP\'s curl extension is not installed). Open it in a browser to see.'];
-        }
-        if ($kind === 'downgrade') {
-            return ['state' => 'problem', 'words' => $redirected . 'and that address is a plain http:// one, which this check does '
-                . 'not follow. Visitors arriving at https:// are sent to an insecure page.'];
-        }
-        if ($kind === 'too-many') {
-            return ['state' => 'problem', 'words' => 'it sent the visitor on to another address more than ' . self::CHECK_MAX_REDIRECTS
-                . ' times in a row, so this check stopped following.'];
-        }
-        if ($kind === 'refused') {
-            return $wasRedirect === true
-                ? ['state' => 'problem', 'words' => $redirected . 'and this check will not go to that address — for example because '
-                    . 'its name could not be found, it points at a private or internal network, or it uses a port other '
-                    . 'than the standard https one.']
-                : ['state' => 'problem', 'words' => 'it could not be checked — for example because its name could not be found, it '
-                    . 'points at a private or internal network, or it uses a port other than the standard https one. Nothing was sent to it.'];
-        }
-        if ($kind === 'too-slow') {
-            if ($wasRedirect === true) {
-                return ['state' => 'problem', 'words' => $redirected . 'but time ran out before that address answered (' . $limits . ').'];
-            }
-
-            // Status 0 cannot tell "the first address" from "an address it
-            // redirected to": SafeFetch reports the failing step's own status.
-            return ['state' => 'problem', 'words' => $status === 200
-                ? 'it began to answer over https but did not finish in time (' . $limits . ').'
-                : 'it, or an address it sent the visitor on to, did not answer in time (' . $limits . ').'];
-        }
-        if ($kind === 'unreachable') {
-            if ($wasRedirect === true) {
-                return ['state' => 'problem', 'words' => $redirected . 'but that address could not be reached — for example nothing '
-                    . 'accepted the connection there, or its security certificate did not check out.'];
-            }
-            if ($status === 200) {
-                return ['state' => 'problem', 'words' => 'it began to answer over https, but the connection was cut off before it finished.'];
-            }
-
-            // ⚠️ "It, or an address it sent the visitor on to": SafeFetch
-            //    reports the FAILING step's own status, which is 0 here
-            //    whether the first address failed or a redirect's target did
-            //    (measured, round 2), so this cannot say which.
-            return ['state' => 'problem', 'words' => 'it, or an address it sent the visitor on to, could not be reached over https — '
-                . 'for example its security certificate did not check out (it must be valid, current, and for this exact name), '
-                . 'nothing accepted the connection, or a network fault got in the way.'];
-        }
-        // An HTTP status that was not a 200, with nothing worse to say.
-        if ($status >= 400 && $status <= 599) {
-            return ['state' => 'note', 'words' => 'it can be reached over https, but it answered with an error page (HTTP '
-                . $status . '). Some websites answer like that to anything that is not a web browser, so it may be fine '
-                . 'for visitors; open it in a browser to see.'];
-        }
-        if ($wasRedirect === true) {
-            return ['state' => 'problem', 'words' => 'it answered over https with HTTP ' . $status . ' but did not say which '
-                . 'address to go to, so there was nothing to follow.'];
-        }
-        if ($status > 0) {
-            return ['state' => 'problem', 'words' => 'it answered over https with an unexpected reply (HTTP ' . $status . ').'];
+        if ($status === 200 && (($got['ok'] ?? false) === true || ($got['capped'] ?? false) === true)) {
+            return ['state' => 'ok', 'words' => 'it answered.'];
         }
 
-        return ['state' => 'problem', 'words' => 'it could not be checked — for example its name could not be found, its security '
-            . 'certificate did not check out, nothing accepted the connection, or it took too long (' . $limits . ').'];
-    }
-
-    /**
-     * Which of `SafeFetch`'s own sentences this is, by exact comparison with
-     * its constants: 'refused', 'no-curl', 'https-only', 'downgrade',
-     * 'too-many', 'too-slow', 'too-big', 'unreachable', 'status', or '' for
-     * none of them. Public so the self-test can prove every constant is still
-     * recognised.
-     */
-    public static function safeFetchReason(string $message): string
-    {
-        static $map = null;
-        if ($map === null) {
-            $map = [];
-            try {
-                $ref = new \ReflectionClass(SafeFetch::class);
-                foreach (['MSG_NO_CURL' => 'no-curl', 'MSG_HTTPS_ONLY' => 'https-only', 'MSG_DOWNGRADE' => 'downgrade',
-                    'MSG_TOO_MANY' => 'too-many', 'MSG_TOO_SLOW' => 'too-slow', 'MSG_TOO_BIG' => 'too-big',
-                    'MSG_UNREACHABLE' => 'unreachable'] as $constant => $kind) {
-                    if ($ref->hasConstant($constant) === true) {
-                        $map[(string) $ref->getConstant($constant)] = $kind;
-                    }
-                }
-            } catch (\Throwable $e) {
-                // Nothing recognised: every answer falls to the status and the
-                // fallback, which are worded as possibilities.
-            }
-            $map[SafeFetch::REFUSED_MESSAGE] = 'refused';
-        }
-        if (isset($map[$message]) === true) {
-            return $map[$message];
-        }
-
-        return preg_match('/^The other server answered with an error \(HTTP status \d+\)\.$/', $message) === 1 ? 'status' : '';
+        return ['state' => 'problem', 'words' => self::NOT_A_NORMAL_PAGE
+            . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
     }
 
     /**

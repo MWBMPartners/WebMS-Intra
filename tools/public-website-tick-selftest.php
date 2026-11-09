@@ -90,26 +90,28 @@
  *     and this test reaches nothing outside the machine. So the other answers
  *     are driven IN-PROCESS (W21): a small TLS server of this test's own, a
  *     certificate this test makes, SafeFetch's `$testResolverOverride` naming
- *     it, and a scratch copy of SafeFetch told to trust that certificate —
- *     the real SafeFetch code otherwise, the real wording function, real
- *     redirects, a real certificate failure. Answers no server here can give
- *     (a 503, curl missing) are asked of the wording function directly (W17).
- *     W22 runs the real `checkSetUp()` in-process with a `$fetch` that records
- *     the options it is handed, which is what pins the overall deadline.
+ *     it, and a scratch copy of SafeFetch told to trust that certificate and
+ *     to record the options it is handed — the real SafeFetch code otherwise,
+ *     the real wording function, real redirects, a real certificate failure.
+ *     The wording itself is also asked directly for the cheapest cases,
+ *     curl missing among them (W17). W22 runs the REAL `checkSetUp()` (it has
+ *     no test hook) against that recording copy, which is what pins the
+ *     overall deadline on the path the portal really takes.
  *   - Two saves of one organisation's public address at the SAME moment are
  *     not driven (one web worker); the wording for that clash is read, not run.
  *   - Section W does not run the Users page's script, so the locked role
  *     box's hidden carrier being switched on is NOT driven (P86 says so); the
- *     handler's refusal is what is proved. It cannot test that a main website
- *     really answers, because this test reaches nothing outside the machine:
- *     only the "cannot be reached" half is driven, with a loopback address.
+ *     handler's refusal is what is proved. Nothing here reaches a website
+ *     outside the machine; real answers are driven in-process (W21, W22)
+ *     against the test's own TLS server, and over HTTP only a refused
+ *     loopback address (W11).
  *
  * Usage:  SELFTEST_DB_NAME=selftest_… SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         [SELFTEST_WEB_PORT=9493] php tools/public-website-tick-selftest.php
  *
  *         The database must already hold `web/_sql/full_schema.sql` (with
- *         migration 262). Needs PHP's curl extension and `proc_open()`. It
- *         REFUSES rather than skipping when anything is missing.
+ *         migration 262). Needs PHP's curl and openssl extensions and
+ *         `proc_open()`. It REFUSES rather than skipping when anything is missing.
  *
  * Exit:   0 only when every check ran and passed AND the number of checks is
  *         the number expected; 1 otherwise; 2 when it refused to run.
@@ -126,7 +128,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 229;
+const PWT_EXPECTED_CHECKS = 230;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2027,17 +2029,22 @@ echo json_encode([
         'two'    => \Portal\Core\PublicWebsiteSetup::frameAncestorsValue(['https://a.example.org', 'https://b.example.org:8443']),
         'nasty'  => \Portal\Core\PublicWebsiteSetup::frameAncestorsValue(['*', "https://a.example.org; script-src *", "https://x.example.org\nX: y", "'self'", 'http://h.example.org']),
     ],
-    // Round 1 of P3's check: what the set-up check SAYS for each kind of answer,
-    // asked of the real wording function, because SafeFetch refuses every
-    // loopback address and so no server in this test can answer it with a 403.
+    // What the set-up check SAYS for answers that are cheapest to state
+    // directly (W21 drives real answers through a real TLS server). Since
+    // round 3 the verdict names no cause: a 200 answered; curl missing could
+    // not be checked; ANYTHING else is one sentence that is always true, plus
+    // the last status where there is one — including a stalled or oversized
+    // answer, which used to have causes of their own.
     'verdicts'       => [
-        'nothing'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false]),
-        'ok'         => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => true, 'status' => 200, 'capped' => false]),
-        'big page'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => true]),
-        'forbidden'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 403, 'capped' => false]),
-        'down'       => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 503, 'capped' => false]),
-        'no address' => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 300, 'capped' => false,
-            'message' => 'The other server answered with an error (HTTP status 300).']),
+        'nothing'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false], true),
+        'ok'         => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => true, 'status' => 200, 'capped' => false], true),
+        'big page'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => true], true),
+        'forbidden'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 403, 'capped' => false], true),
+        'too slow'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => false,
+            'message' => 'The other server took too long to answer.'], true),
+        'too big'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 404, 'capped' => true,
+            'message' => 'The file is bigger than the size limit, so it was not read.'], true),
+        'no curl'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false], false),
     ],
 ]);
 ASK);
@@ -2371,7 +2378,7 @@ $scnPwCheck = static function () use ($db, $siteOne, $signIn, $http, $freshToken
     $pwPost('setup', 'website', 'https://127.0.0.1');
     $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
     $page = $http('GET', '/admin/public-website')['body'];
-    $out['a loopback main website is unreachable'] = str_contains($page, 'https://127.0.0.1: it could not be checked — for example');
+    $out['a loopback main website is unreachable'] = str_contains($page, 'https://127.0.0.1: This check did not get a normal page from your main website.');
     $out['the door is still not ticked'] = preg_match('/data-check-state="ok"[^>]*>\s*<span[^>]*>[^<]*<\/span>\s*<strong>The public door/', $page) === 1;
     $pwClean();
     return $out;
@@ -2516,32 +2523,34 @@ $scnPwRolesWarning = static function () use ($db, $siteOne, $setupRole, $people,
 };
 check('W16 with nobody holding Website Set-up, the Roles page says global administrators still get in and an ordinary administrator does not', $scnPwRolesWarning(), 'right');
 
-// W17 (rounds 1 and 2, item 2): what the check SAYS for answers no server here
-//      gives — asked of the real wording function directly. W21 drives the
-//      rest through a real TLS server (see there).
+// W17 (round 3, simplified): the wording function, asked directly. A 200
+//      answered; no curl could not be checked; EVERYTHING else — nothing at
+//      all, a 403, a stalled 200, an oversized 404 — is the ONE sentence that
+//      is always true, plus the last status where there is one. The sentence
+//      is pinned here as text on purpose: it is what a person reads, and it
+//      must never name a cause as fact.
+$pwNotNormal = 'This check did not get a normal page from your main website. That can happen when a website is down, sends visitors '
+    . 'on to another address this check will not follow, uses an unusual port, has a security-certificate problem, or turns away '
+    . 'automated visitors. Open it in your own browser to see what your visitors get.';
+$pwSaid = static fn (int $status): array => ['problem', $pwNotNormal . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
 $scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
-    $v   = $askSetup($siteOne)['verdicts'] ?? [];
     $out = [];
-    foreach ((array) $v as $name => $one) {
-        $words = (string) ($one['words'] ?? '');
-        $out[$name] = [(string) ($one['state'] ?? ''),
-            str_contains($words, 'could not be checked — for example'), str_contains($words, 'can be reached'), str_contains($words, 'did not say which address')];
+    foreach ((array) ($askSetup($siteOne)['verdicts'] ?? []) as $name => $one) {
+        $out[$name] = [(string) ($one['state'] ?? ''), (string) ($one['words'] ?? '')];
     }
-    $out['time stated'] = str_contains((string) ($v['nothing']['words'] ?? ''), '5 seconds for each step, 15 seconds in all, not counting looking a name up');
-    $out['status named'] = str_contains((string) ($v['forbidden']['words'] ?? ''), 'HTTP 403');
     return $out;
 };
-check('W17 the wording function, asked directly: a 200 answered; a 403 or 503 can be reached but gave an error page (with its status); a 3xx with no address says so; with nothing to go on it gives possibilities, with the true time limits',
+check('W17 the wording function, asked directly: a 200 (even one cut off by the size limit) answered; no curl could not be checked; nothing, a 403, a stalled 200 and an oversized 404 each get the one sentence, plus the status where there is one',
     $scnPwVerdicts(), [
-        'nothing' => ['problem', true, false, false], 'ok' => ['ok', false, false, false], 'big page' => ['ok', false, false, false],
-        'forbidden' => ['note', false, true, false], 'down' => ['note', false, true, false],
-        'no address' => ['problem', false, false, true], 'time stated' => true, 'status named' => true]);
+        'nothing' => $pwSaid(0), 'ok' => ['ok', 'it answered.'], 'big page' => ['ok', 'it answered.'],
+        'forbidden' => $pwSaid(403), 'too slow' => $pwSaid(200), 'too big' => $pwSaid(404),
+        'no curl' => ['untested', 'it could not be checked on this server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed). Open it in your own browser to see what your visitors get.']]);
 
-// W21 (round 2, item 1): the set-up check's words for REAL answers, driven
-//      in-process. A TLS server of this test's own answers as a.test (and
-//      c.test, whose name its certificate does not cover); b.test points at a
-//      port nothing listens on. SafeFetch is the real code, in a scratch copy
-//      whose only change is trusting this test's certificate.
+// W21 (rounds 2 and 3): the words for REAL answers, driven IN-PROCESS. A TLS
+//      server of this test's own answers as a.test (and c.test, whose name its
+//      certificate does not cover); b.test points at a port nothing listens
+//      on. SafeFetch is the real code, in a scratch copy whose only changes
+//      are trusting this test's certificate and recording its options.
 $tlsDir = $child . $sep . 'tls';
 @mkdir($tlsDir, 0700, true);
 $tlsCnf = $tlsDir . $sep . 'tls.cnf';
@@ -2583,6 +2592,13 @@ while (true) {
         '/r-loop'     => "HTTP/1.1 302 Found\r\nLocation: /r-loop\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         '/r-noloc'    => "HTTP/1.1 300 Multiple Choices\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         '/drop'       => "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nab",
+        // Round 3's cases: a two-step chain ending at http:// or at a missing
+        // name, a 301 whose body is cut off, a 300 WITH an address, a 304.
+        '/r-two-http'    => "HTTP/1.1 301 Moved\r\nLocation: /r-http\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-two-missing' => "HTTP/1.1 301 Moved\r\nLocation: /r-nxdomain\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/r-cut'         => "HTTP/1.1 301 Moved\r\nLocation: /\r\nContent-Length: 100\r\nConnection: close\r\n\r\nab",
+        '/r-300-loc'     => "HTTP/1.1 300 Multiple Choices\r\nLocation: /\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/n304'          => "HTTP/1.1 304 Not Modified\r\nConnection: close\r\n\r\n",
     ];
     @fwrite($c, $answers[$path] ?? $answers['/']);
     @fclose($c);
@@ -2613,14 +2629,23 @@ $trustLine = 'CURLOPT_SSL_VERIFYPEER    => true,';
 if (substr_count($realSafeFetch, $trustLine) !== 1) {
     refuse('W21 could not find SafeFetch\'s certificate-checking line to point at the test certificate');
 }
-file_put_contents($tlsDir . $sep . 'core' . $sep . 'SafeFetch.php', str_replace($trustLine,
-    $trustLine . ' CURLOPT_CAINFO => ' . var_export($tlsDir . $sep . 'cert.pem', true) . ',', $realSafeFetch));
+// It also RECORDS the options each call is handed, which is how W22 sees what
+// the REAL checkSetUp() passes (round 3: a hook replacing the fetch let the
+// real path differ from what the test saw).
+$recordLine = '$o = self::options($opts);';
+if (substr_count($realSafeFetch, $recordLine) !== 1) {
+    refuse('W22 could not find the first line of SafeFetch::get() to record its options');
+}
+file_put_contents($tlsDir . $sep . 'core' . $sep . 'SafeFetch.php', str_replace([$trustLine, $recordLine], [
+    $trustLine . ' CURLOPT_CAINFO => ' . var_export($tlsDir . $sep . 'cert.pem', true) . ',',
+    '$GLOBALS[\'pwtSafeFetchCalls\'][] = [\'url\' => $url, \'opts\' => $opts]; ' . $recordLine,
+], $realSafeFetch));
 file_put_contents($child . $sep . 'ask-live.php', <<<'ASK'
 <?php
 // Written by tools/public-website-tick-selftest.php for ONE run. Test only.
 declare(strict_types=1);
-// SafeFetch from the scratch copy that trusts the test certificate; every
-// other class (SafeFetch asks Site for its user agent) from the copy of web/.
+// SafeFetch from the scratch copy; every other class (SafeFetch asks Site for
+// its user agent) from the copy of web/.
 spl_autoload_register(static function (string $class): void {
     $short = str_replace('Portal\\Core\\', '', $class);
     $file  = $short === 'SafeFetch' ? __DIR__ . '/tls/core/SafeFetch.php' : __DIR__ . '/web/_core/' . $short . '.php';
@@ -2639,22 +2664,14 @@ SafeFetch::$testResolverOverride = [
 $out = [];
 foreach (['ok' => 'https://a.test/', 'forbidden' => 'https://a.test/e403', 'to a missing name' => 'https://a.test/r-nxdomain',
     'to an unusual port' => 'https://a.test/r-port', 'to a dead address' => 'https://a.test/r-dead', 'to plain http' => 'https://a.test/r-http',
-    'round in circles' => 'https://a.test/r-loop', 'no address' => 'https://a.test/r-noloc', 'cut off' => 'https://a.test/drop',
-    'certificate not for this name' => 'https://c.test/', 'at an unusual port' => 'https://a.test:8443/'] as $name => $url) {
+    'round in circles' => 'https://a.test/r-loop', '300 with no address' => 'https://a.test/r-noloc', 'cut off' => 'https://a.test/drop',
+    'certificate not for this name' => 'https://c.test/', 'two steps to plain http' => 'https://a.test/r-two-http',
+    'two steps to a missing name' => 'https://a.test/r-two-missing', '301 cut off' => 'https://a.test/r-cut',
+    '300 with an address' => 'https://a.test/r-300-loc', '304' => 'https://a.test/n304'] as $name => $url) {
     $got = SafeFetch::get($url, \Portal\Core\PublicWebsiteSetup::mainWebsiteFetchOptions());
     $v   = \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict($got);
     $out[$name] = ['status' => $got['status'], 'state' => $v['state'], 'words' => $v['words']];
 }
-$ref = new \ReflectionClass(SafeFetch::class);
-$recognised = [];
-foreach ($ref->getConstants() as $constName => $value) {
-    if (str_starts_with($constName, 'MSG_') === true && $constName !== 'MSG_STATUS') {
-        $recognised[$constName] = \Portal\Core\PublicWebsiteSetup::safeFetchReason((string) $value) !== '';
-    }
-}
-$recognised['REFUSED_MESSAGE'] = \Portal\Core\PublicWebsiteSetup::safeFetchReason(SafeFetch::REFUSED_MESSAGE) === 'refused';
-$recognised['MSG_STATUS'] = \Portal\Core\PublicWebsiteSetup::safeFetchReason(sprintf((string) $ref->getConstant('MSG_STATUS'), 418)) === 'status';
-$out['every SafeFetch sentence recognised'] = $recognised;
 echo json_encode($out);
 ASK);
 $scnPwLive = static function () use ($child, $sep, $tlsPort, $deadPort): array {
@@ -2665,100 +2682,101 @@ $scnPwLive = static function () use ($child, $sep, $tlsPort, $deadPort): array {
         return ['could not ask' => $raw];
     }
     $out = [];
-    $phrases = [
-        'ok' => 'answered over https.', 'forbidden' => 'can be reached over https, but it answered with an error page (HTTP 403)',
-        'to a missing name' => 'another address (HTTP 301), and this check will not go to that address — for example',
-        'to an unusual port' => 'another address (HTTP 301), and this check will not go to that address — for example',
-        // SafeFetch reports the failing step's status (0), so the words cannot
-        // know a redirect came first; they say "it, or an address it sent the
-        // visitor on to" rather than claim either.
-        'to a dead address' => 'it, or an address it sent the visitor on to, could not be reached over https — for example',
-        'to plain http' => 'that address is a plain http:// one', 'round in circles' => 'more than 3 times in a row',
-        'no address' => 'did not say which address to go to', 'cut off' => 'the connection was cut off before it finished',
-        'certificate not for this name' => 'could not be reached over https — for example its security certificate did not check out',
-        'at an unusual port' => 'or it uses a port other than the standard https one. Nothing was sent to it.',
-    ];
-    foreach ($phrases as $name => $phrase) {
-        $out[$name] = [(string) ($got[$name]['state'] ?? '?'), str_contains((string) ($got[$name]['words'] ?? ''), $phrase)];
+    foreach ($got as $name => $one) {
+        $out[$name] = [(int) $one['status'], (string) $one['state'], (string) $one['words']];
     }
-    $out['every SafeFetch sentence recognised'] = ($got['every SafeFetch sentence recognised'] ?? []) !== []
-        && in_array(false, (array) $got['every SafeFetch sentence recognised'], true) === false;
     return $out;
 };
-check('W21 (in-process, a real TLS server) the check says what really happened: answered; an error page (403) that can be reached; a redirect to a missing name, an unusual port or a dead address, each said as a redirect with possibilities; a redirect to plain http; too many redirects; a 300 with no address; a connection cut off; a certificate for another name; and every SafeFetch sentence is recognised',
-    $scnPwLive(), ['ok' => ['ok', true], 'forbidden' => ['note', true], 'to a missing name' => ['problem', true], 'to an unusual port' => ['problem', true],
-        'to a dead address' => ['problem', true], 'to plain http' => ['problem', true], 'round in circles' => ['problem', true],
-        'no address' => ['problem', true], 'cut off' => ['problem', true], 'certificate not for this name' => ['problem', true],
-        'at an unusual port' => ['problem', true], 'every SafeFetch sentence recognised' => true]);
+// The status each answer leaves is SafeFetch's own (measured): after a
+// redirect, a failure further on reports the FAILING step's status — 0 for a
+// dead address or a certificate failure — which is exactly why the words name
+// no cause.
+$wLive = ['ok' => [200, 'ok', 'it answered.']];
+foreach (['forbidden' => 403, 'to a missing name' => 301, 'to an unusual port' => 301, 'to a dead address' => 0, 'to plain http' => 301,
+    'round in circles' => 302, '300 with no address' => 300, 'cut off' => 200, 'certificate not for this name' => 0,
+    'two steps to plain http' => 301, 'two steps to a missing name' => 301, '301 cut off' => 301, '300 with an address' => 300, '304' => 304] as $name => $status) {
+    $wLive[$name] = array_merge([$status], $pwSaid($status));
+}
+check('W21 (in-process, the real SafeFetch and a real TLS server) a complete 200 answered; every other real answer — a 403, a redirect to a missing name, an unusual port, a dead address or plain http, two-step chains, a redirect loop, a 300 with or without an address, a 304, a cut-off 200 or 301, a certificate for another name — gets the one sentence and the last status, and none names a cause',
+    $scnPwLive(), $wLive);
 
-// W22 (round 2, item 2): the real checkSetUp(), in-process, with a $fetch that
-//      RECORDS the options it is handed — the only way to see the overall
-//      deadline is really passed (nothing observable changes without it in a
-//      run that answers quickly). And a main website at an unusual port is not
-//      fetched at all, and says why.
+// W22 (rounds 2 and 3): the REAL checkSetUp() — no hook — run in-process
+//      against the recording copy of SafeFetch, so the options it records are
+//      the options the real path uses. Also: a main website at another port is
+//      not fetched and says why, and one stored as http://…:443 is checked,
+//      because 443 IS the standard https port.
 file_put_contents($child . $sep . 'ask-check.php', <<<'ASK'
 <?php
 // Written by tools/public-website-tick-selftest.php for ONE run. Test only.
 declare(strict_types=1);
-$core = __DIR__ . '/web/_core/';
-define('PORTAL_CORE', rtrim($core, '/'));
-foreach (['App.php', 'Site.php', 'Logger.php', 'Roles.php', 'InstallationSettings.php', 'Capabilities.php', 'EventVisibility.php',
-    'PublicWebsite.php', 'PortalAddress.php', 'SafeFetch.php', 'PublicWebsiteSetup.php'] as $f) {
-    require_once $core . $f;
-}
+spl_autoload_register(static function (string $class): void {
+    $short = str_replace('Portal\\Core\\', '', $class);
+    $file  = $short === 'SafeFetch' ? __DIR__ . '/tls/core/SafeFetch.php' : __DIR__ . '/web/_core/' . $short . '.php';
+    if (is_file($file) === true) {
+        require_once $file;
+    }
+});
+define('PORTAL_CORE', __DIR__ . '/web/_core');
 $c = require __DIR__ . '/web/_auth_keys/auth_creds.php';
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 $mysqli = new mysqli($c['db_host'], $c['db_user'], $c['db_pass'], $c['db_name'], (int) $c['db_port']);
 $mysqli->set_charset('utf8mb4');
 $site = (int) $argv[1];
 \Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => '']], $site);
-$seen = [];
+\Portal\Core\SafeFetch::$testResolverOverride = ['a.test' => ['ips' => ['127.0.0.1'], 'port' => (int) $argv[2]]];
+$GLOBALS['pwtSafeFetchCalls'] = [];
 $before = microtime(true);
 try {
-    $rows = \Portal\Core\PublicWebsiteSetup::checkSetUp($mysqli, $site, static function (string $url, array $opts) use (&$seen): array {
-        $seen[] = ['url' => $url, 'opts' => $opts];
-        return ['ok' => true, 'status' => 200, 'capped' => false, 'message' => ''];
-    });
+    $rows = \Portal\Core\PublicWebsiteSetup::checkSetUp($mysqli, $site);
 } catch (\Throwable $e) {
     echo json_encode(['error' => get_class($e) . ': ' . $e->getMessage()]);
     exit;
 }
-$first = $seen[0]['opts'] ?? [];
+$calls = $GLOBALS['pwtSafeFetchCalls'];
+$first = $calls[0]['opts'] ?? [];
 echo json_encode([
-    'fetches'         => count($seen),
-    'deadline ahead'  => isset($first['deadline']) === true ? round((float) $first['deadline'] - $before) : null,
-    'step limit'      => $first['timeoutSeconds'] ?? null,
-    'redirect limit'  => $first['maxRedirects'] ?? null,
-    'https only'      => $first['httpsOnly'] ?? null,
-    'main rows'       => array_values(array_map(static fn (array $r): string => $r['state'] . ': ' . $r['words'],
+    'fetches'        => count($calls),
+    'url'            => $calls[0]['url'] ?? null,
+    'deadline ahead' => isset($first['deadline']) === true ? (int) round((float) $first['deadline'] - $before) : 'none',
+    'step limit'     => $first['timeoutSeconds'] ?? null,
+    'redirect limit' => $first['maxRedirects'] ?? null,
+    'https only'     => $first['httpsOnly'] ?? null,
+    'main rows'      => array_values(array_map(static fn (array $r): string => $r['state'] . ': ' . $r['words'],
         array_filter($rows, static fn (array $r): bool => $r['label'] === 'Your main website'))),
 ]);
 ASK);
-$scnPwCheckOptions = static function () use ($db, $siteOne, $child, $sep, $pwClean): array {
-    $ask = static function () use ($child, $sep, $siteOne): array {
+$scnPwCheckOptions = static function () use ($db, $siteOne, $child, $sep, $tlsPort, $pwClean): array {
+    $ask = static function (string $website) use ($db, $child, $sep, $siteOne, $tlsPort): array {
+        $db->query("DELETE FROM `tblSettings` WHERE `siteID` = {$siteOne} AND `settingKey` = 'public.website.address'");
+        $st = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, 'public.website.address', ?, '', 0)");
+        $st->bind_param('is', $siteOne, $website);
+        $st->execute();
+        $st->close();
         $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -d ' . escapeshellarg('error_log=' . $child . $sep . 'ask-check.log') . ' '
-            . escapeshellarg($child . $sep . 'ask-check.php') . ' ' . $siteOne . ' 2>&1');
+            . escapeshellarg($child . $sep . 'ask-check.php') . ' ' . $siteOne . ' ' . $tlsPort . ' 2>&1');
         $got = json_decode($raw, true);
         return is_array($got) === true ? $got : ['could not ask' => $raw];
     };
     $pwClean();
-    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.website.address', 'https://www.pwt-deadline.example.org', '', 0)");
-    $plain = $ask();
-    $db->query("UPDATE `tblSettings` SET `settingValue` = 'https://www.pwt-deadline.example.org:8443' WHERE `siteID` = {$siteOne} AND `settingKey` = 'public.website.address'");
-    $withPort = $ask();
+    $plain    = $ask('https://a.test');
+    $withPort = $ask('https://a.test:8443');
+    $http443  = $ask('http://a.test:443');
     $pwClean();
     return [
-        'fetched once' => $plain['fetches'] ?? $plain,
-        // A whole number of seconds, or 'none' when no deadline was handed over.
-        'overall deadline, seconds ahead' => isset($plain['deadline ahead']) === true ? (int) $plain['deadline ahead'] : 'none',
+        'fetched' => [$plain['fetches'] ?? $plain, $plain['url'] ?? null],
+        'overall deadline, seconds ahead' => $plain['deadline ahead'] ?? 'none',
         'each step' => $plain['step limit'] ?? null, 'redirects' => $plain['redirect limit'] ?? null, 'https only' => $plain['https only'] ?? null,
-        'at an unusual port: fetched' => $withPort['fetches'] ?? $withPort,
-        'at an unusual port: says so' => str_starts_with((string) (($withPort['main rows'] ?? [])[0] ?? ''), 'untested: https://www.pwt-deadline.example.org:8443: it uses port 8443'),
+        'what it says' => $plain['main rows'] ?? null,
+        'at another port' => [$withPort['fetches'] ?? $withPort, $withPort['main rows'] ?? null],
+        'http at 443' => [$http443['fetches'] ?? $http443, $http443['url'] ?? null, ($http443['main rows'] ?? [])[0] ?? null],
     ];
 };
-check('W22 the real checkSetUp() hands SafeFetch an overall deadline 15 seconds ahead, 5 seconds a step, at most 3 redirects, https only; and a main website at an unusual port is not fetched and says why',
-    $scnPwCheckOptions(), ['fetched once' => 1, 'overall deadline, seconds ahead' => 15, 'each step' => 5, 'redirects' => 3, 'https only' => true,
-        'at an unusual port: fetched' => 0, 'at an unusual port: says so' => true]);
+check('W22 the REAL checkSetUp() hands SafeFetch an overall deadline 15 seconds ahead, 5 seconds a step, at most 3 redirects, https only; a main website at another port is not fetched and says so; one stored as http://…:443 is checked at the standard https port',
+    $scnPwCheckOptions(), [
+        'fetched' => [1, 'https://a.test/'], 'overall deadline, seconds ahead' => 15, 'each step' => 5, 'redirects' => 3, 'https only' => true,
+        'what it says' => ['ok: https://a.test: it answered.'],
+        'at another port' => [0, ['untested: https://a.test:8443: it uses port 8443, which is not the standard https port, so this check cannot reach it. Open it in your own browser to see what your visitors get.']],
+        'http at 443' => [1, 'https://a.test/', 'ok: http://a.test:443: it answered.']]);
 
 // W18 (round 1, item 3): a framing list a HAND EDIT spoiled — what the PAGE
 //      shows in its box and what the CHECK reports. Only the valid line may
@@ -2826,7 +2844,16 @@ $scnPwEditorPage = static function () use ($db, $siteOne, $signIn, $http, $fresh
     $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.website.address', 'https://www.pwt-editor.example.org', '', 0)");
     /** What a person sees beside each key on /settings: the linked page, or the words with no link. */
     $beside = static function (string $page, string $key): string {
-        if (preg_match('/' . preg_quote($key, '/') . '.{0,4000}?<(a|span)\b[^>]*data-locked-page="([a-z\/\-]+)"[^>]*>(.*?)<\/\1>/s', $page, $m) !== 1) {
+        // ANCHORED TO THE KEY'S OWN ROW (round 3): each row carries
+        // data-setting-key, so the row is the text from that attribute to the
+        // next row's; a link further down belongs to somebody else.
+        $start = strpos($page, 'data-setting-key="' . $key . '"');
+        if ($start === false) {
+            return 'no row';
+        }
+        $next = strpos($page, 'data-setting-key="', $start + 1);
+        $row  = $next === false ? substr($page, $start) : substr($page, $start, $next - $start);
+        if (preg_match('/<(a|span)\b[^>]*data-locked-page="([a-z\/\-]+)"[^>]*>(.*?)<\/\1>/s', $row, $m) !== 1) {
             return 'nothing drawn';
         }
         return ($m[1] === 'a' ? 'link to ' : 'no link: ') . $m[2] . ' — ' . trim(html_entity_decode(strip_tags($m[3]), ENT_QUOTES, 'UTF-8'));
@@ -3277,13 +3304,16 @@ $p = $plant('_core/PublicWebsite.php', "        return ['route' => 'admin/public
 check('P93 with every public-website key sent to Admin, Outside calendars, the settings editor names the wrong page again',
     [$p['applied'], $p['result']['installation\'s global administrator'][2] ?? null], [true, 'link to admin/calendar/feeds — Changed at Admin, Outside calendars']);
 $p = $plant('_core/PublicWebsiteSetup.php', "            'deadline'              => microtime(true) + self::CHECK_DEADLINE_SECONDS,\n", '', $scnPwCheckOptions);
-check('P95 with the overall deadline no longer passed, the check would promise "15 seconds in all" while giving no such limit', [$p['applied'], $p['result']['overall deadline, seconds ahead'] ?? 'missing'], [true, 'none']);
-$p = $plant('_core/PublicWebsiteSetup.php', "if (\$kind === 'unreachable') {", 'if (false) {', $scnPwLive);
-check('P96 with the "could not be reached" branch gone, a certificate for another name is no longer said to be a possible cause', [$p['applied'], $p['result']['certificate not for this name'] ?? null], [true, ['problem', false]]);
-$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$kind === 'refused') {\n            return \$wasRedirect === true", "        if (\$kind === 'refused') {\n            return false", $scnPwLive);
-check('P97 with a refused redirect treated as a refused first address, a redirect to a missing name is not said to be a redirect', [$p['applied'], $p['result']['to a missing name'] ?? null], [true, ['problem', false]]);
-$p = $plant('_core/PublicWebsiteSetup.php', 'if ($status >= 400 && $status <= 599) {', 'if (false) {', $scnPwVerdicts);
-check('P94 with the error-page branch gone, a website answering 403 is told nothing answered', [$p['applied'], $p['result']['forbidden'] ?? null], [true, ['problem', false, false, false]]);
+check('P95 with the overall deadline no longer in the options, the check would give no 15-second limit', [$p['applied'], $p['result']['overall deadline, seconds ahead'] ?? 'missing'], [true, 'none']);
+$p = $plant('_core/PublicWebsiteSetup.php', "SafeFetch::get('https://' . \$host . '/', self::mainWebsiteFetchOptions())", "SafeFetch::get('https://' . \$host . '/', ['httpsOnly' => true])", $scnPwCheckOptions);
+check('P98 (round 3\'s plant A) with the real call handed other options, the deadline is gone from the REAL path — W22 records what SafeFetch is really given. (Plant A as first written, a default closure ignoring the options, cannot be written any more: there is no hook and no closure.)',
+    [$p['applied'], $p['result']['overall deadline, seconds ahead'] ?? 'missing'], [true, 'none']);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if ((\$curlAvailable ?? function_exists('curl_init')) === false) {", "        if (false) {", $scnPwVerdicts);
+check('P99 (round 3\'s plant B) with the no-curl branch gone, a server that cannot fetch at all is told the website gave no normal page', [$p['applied'], $p['result']['no curl'] ?? null], [true, $pwSaid(0)]);
+$p = $plant('_core/PublicWebsiteSetup.php', "            . (\$status > 0 ? ' The last answer this check received was HTTP ' . \$status . '.' : '')];", "];", $scnPwLive);
+check('P96 with the status fact dropped, a 403 is no longer reported as one', [$p['applied'], $p['result']['forbidden'] ?? null], [true, [403, 'problem', $pwNotNormal]]);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$status === 200 && ((\$got['ok'] ?? false) === true || (\$got['capped'] ?? false) === true)) {", 'if ($status === 200) {', $scnPwLive);
+check('P97 with any 200 counted as answered, a 200 whose connection was cut off is said to have answered', [$p['applied'], $p['result']['cut off'] ?? null], [true, [200, 'ok', 'it answered.']]);
 $p = $plant('_apps/admin/roles/index.php', '<?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>', '<?php if (false): ?>', $scnPwRolesWarning);
 check('P90 with Website Set-up given the usual sentence, the Roles page tells an ordinary administrator they still get in, which is untrue for this door',
     [$p['applied'], str_starts_with((string) $p['result'], 'WRONG')], [true, true]);
