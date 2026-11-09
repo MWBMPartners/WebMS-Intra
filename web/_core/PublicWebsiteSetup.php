@@ -106,9 +106,16 @@ final class PublicWebsiteSetup
     /** The window, in seconds, the limit above counts in. */
     public const CHECK_WINDOW_SECONDS = 600;
 
-    /** The one sentence for every way the main website can fail to answer. */
-    public const UNREACHABLE = 'It did not answer over https within 5 seconds, or its address points at a private or '
-        . 'internal network, or its name could not be found.';
+    /**
+     * The whole set-up check's main-website fetch may take this long in all,
+     * in seconds, counting every redirect it follows. Each step has
+     * `CHECK_TIMEOUT_SECONDS` of its own within it. Looking the NAME up is not
+     * counted by either: PHP's name lookup cannot be given a time limit.
+     */
+    public const CHECK_DEADLINE_SECONDS = 15;
+
+    /** How many redirects the check follows before it gives up. */
+    public const CHECK_MAX_REDIRECTS = 3;
 
     /** What the Roles page and the Users page say when D-093 refuses a change. */
     public const HAND_OUT_REFUSED = 'Only a global administrator of this organisation (or of the whole installation) '
@@ -310,7 +317,9 @@ final class PublicWebsiteSetup
      * REFUSED, each with its reason: http or any other scheme; a "*" or any
      * other wildcard; a keyword such as 'self' or 'none'; a path, "?" or "#";
      * a user name; a name with no dot (localhost, or a keyword typed bare);
-     * a number instead of a name; anything `PortalAddress::check()` refuses.
+     * a number instead of a name — any host whose LAST part is digits, or 0x
+     * and hex digits (`endsInANumber()`), which a browser reads as an address
+     * number; anything `PortalAddress::check()` refuses.
      *
      * The answer never holds a space, a ";" or a line break: a header built
      * from it cannot be split (`frameAncestorsValue()` checks again).
@@ -350,7 +359,7 @@ final class PublicWebsiteSetup
         if (str_contains($host, '.') === false) {
             return $refuse('"' . $host . '" is not a website\'s full name. Type the whole name, such as https://www.example.org');
         }
-        if (preg_match('/^\d+(?:\.\d+){3}$/', $host) === 1) {
+        if (self::endsInANumber($host) === true) {
             return $refuse('Type the website\'s name, not a number, such as https://www.example.org');
         }
 
@@ -429,7 +438,8 @@ final class PublicWebsiteSetup
     /**
      * The optional public address for the portal's public pages (D-095): a
      * host NAME and nothing else. Capitals are tidied quietly (a name is the
-     * same name in capitals); everything else is refused with its reason.
+     * same name in capitals); everything else is refused with its reason,
+     * including a number instead of a name (`endsInANumber()`).
      *
      * @return array{host:string, problem:string}
      */
@@ -467,7 +477,7 @@ final class PublicWebsiteSetup
         if (str_contains($host, '.') === false) {
             return $refuse('"' . $host . '" is not a full name. Type the whole name, such as events.example.org');
         }
-        if (preg_match('/^\d+(?:\.\d+){3}$/', $host) === 1) {
+        if (self::endsInANumber($host) === true) {
             return $refuse('Type a name, not a number, such as events.example.org');
         }
 
@@ -495,11 +505,19 @@ final class PublicWebsiteSetup
             return '';
         }
         $checked = self::checkWebsiteAddress($stored);
-        if ($checked['problem'] !== '' || $checked['address'] !== $stored) {
+        if ($checked['problem'] !== '') {
             error_log('[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteId . '\'s stored main website is not one '
                 . 'this page would accept, so it is ignored.');
 
-            return $checked['problem'] === '' ? $checked['address'] : '';
+            return '';
+        }
+        if ($checked['address'] !== $stored) {
+            // Only tidying differs (capitals, a closing "/", the usual port):
+            // the same address, so it is used in its tidied form.
+            error_log('[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteId . '\'s stored main website was not in its '
+                . 'tidied form; the tidied form is used.');
+
+            return $checked['address'];
         }
 
         return $stored;
@@ -814,6 +832,21 @@ final class PublicWebsiteSetup
                 } catch (\mysqli_sql_exception $dup) {
                     $stmt->close();
                     if ($dup->getCode() === 1062) {
+                        // WHOSE row clashed — asked, never assumed. Two saves for
+                        // the SAME organisation at once clash too (on the
+                        // organisation's own key, or on the same name), and
+                        // telling that person "another organisation" would be
+                        // untrue.
+                        $owner = self::hostOwner($db, $host);
+                        if ($owner === $siteId) {
+                            return ['saved' => true, 'type' => 'info', 'message' => 'That is already this organisation\'s public '
+                                . 'address (it was saved at the same moment, probably from another tab). Nothing was different.'];
+                        }
+                        if ($owner === null) {
+                            return self::refusedAndRecorded('public address', $siteId, 'Somebody changed this organisation\'s '
+                                . 'public address at the same moment. Nothing was saved; look at the page again and try once more.', $actorId);
+                        }
+
                         return self::refusedAndRecorded('public address', $siteId, 'That public address is already used '
                             . 'by another organisation on this portal. Each public address belongs to one organisation. '
                             . 'Nothing was saved.', $actorId);
@@ -912,16 +945,15 @@ final class PublicWebsiteSetup
                     'timeoutSeconds'        => self::CHECK_TIMEOUT_SECONDS,
                     'connectTimeoutSeconds' => self::CHECK_TIMEOUT_SECONDS,
                     'maxBytes'              => 2000000,
-                    'maxRedirects'          => 3,
+                    'maxRedirects'          => self::CHECK_MAX_REDIRECTS,
                     'httpsOnly'             => true,
+                    'deadline'              => microtime(true) + self::CHECK_DEADLINE_SECONDS,
                 ]);
             } catch (\Throwable $e) {
                 $got = ['ok' => false, 'status' => 0, 'capped' => false];
             }
-            $answered = ($got['ok'] ?? false) === true || ((($got['capped'] ?? false) === true) && (int) ($got['status'] ?? 0) === 200);
-            $rows[] = $answered === true
-                ? ['label' => 'Your main website', 'state' => 'ok', 'words' => $website . ' answered over https.']
-                : ['label' => 'Your main website', 'state' => 'problem', 'words' => $website . ': ' . self::UNREACHABLE];
+            $verdict = self::mainWebsiteVerdict($got);
+            $rows[]  = ['label' => 'Your main website', 'state' => $verdict['state'], 'words' => $website . ': ' . $verdict['words']];
             if (str_starts_with($website, 'http://') === true) {
                 $rows[] = ['label' => 'Your main website', 'state' => 'note', 'words' => 'It is recorded with http://; it was checked at https://.'];
             }
@@ -983,6 +1015,58 @@ final class PublicWebsiteSetup
     }
 
     /**
+     * 🔎 What the main website's fetch REALLY tells us, in plain words. Pure,
+     * so the self-test asks it directly about answers its own harness cannot
+     * produce (SafeFetch refuses every loopback address, so no test server
+     * can answer it with a 403).
+     *
+     * ⚠️ `SafeFetch::get()` says `ok` ONLY for an HTTP 200. Round 1 of P3's
+     *    check found the first version calling every other answer "did not
+     *    answer … or its name could not be found" — untrue of a website that
+     *    answered with an error page, which is common: a website behind a
+     *    protection service often answers 403 to anything that is not a
+     *    browser. So the STATUS decides:
+     *      - 200 (or 200 cut off at the size limit): it answered;
+     *      - 400 to 599: it answered, with an error page — it CAN be reached;
+     *      - 300 to 399 without a 200 after it: it redirected somewhere this
+     *        check will not follow (a plain http:// address, a private
+     *        network, or more than CHECK_MAX_REDIRECTS redirects in a row);
+     *      - 0: nothing answered at all, for one of the reasons listed.
+     *
+     * @param array<string,mixed> $got A `SafeFetch::get()` result.
+     *
+     * @return array{state:string, words:string}
+     */
+    public static function mainWebsiteVerdict(array $got): array
+    {
+        $status = (int) ($got['status'] ?? 0);
+        if (($got['ok'] ?? false) === true || (($got['capped'] ?? false) === true && $status === 200)) {
+            return ['state' => 'ok', 'words' => 'answered over https.'];
+        }
+        if ($status >= 400 && $status <= 599) {
+            return ['state' => 'note', 'words' => 'it can be reached over https, but it answered with an error page (HTTP '
+                . $status . '). Some websites answer like that to anything that is not a web browser, so it may be fine '
+                . 'for visitors; open it in a browser to see.'];
+        }
+        if ($status >= 300 && $status <= 399) {
+            return ['state' => 'problem', 'words' => 'it answered over https by sending the visitor somewhere else (HTTP '
+                . $status . '), and this check will not follow it there: either to a plain http:// address, to a private '
+                . 'or internal network, or more than ' . self::CHECK_MAX_REDIRECTS . ' times in a row.'];
+        }
+        if ($status === 200) {
+            return ['state' => 'problem', 'words' => 'it began to answer over https but did not finish in time.'];
+        }
+        if ($status > 0) {
+            return ['state' => 'problem', 'words' => 'it answered over https with an unexpected reply (HTTP ' . $status . ').'];
+        }
+
+        return ['state' => 'problem', 'words' => 'nothing answered over https. Its name could not be found, or it points at a '
+            . 'private or internal network, or nothing accepted the connection, or it took longer than '
+            . self::CHECK_TIMEOUT_SECONDS . ' seconds for a step (' . self::CHECK_DEADLINE_SECONDS . ' seconds in all, '
+            . 'not counting looking the name up).'];
+    }
+
+    /**
      * How many events and posters are marked to show on the public website
      * TODAY, on the organisation's own calendar — by the SAME rules the
      * public door will use: `EventVisibility::where()` in website mode with
@@ -1024,6 +1108,23 @@ final class PublicWebsiteSetup
     // 🧹 Small helpers
     // =========================================================================
 
+    /**
+     * Would a browser read this host as a NUMBER (an IPv4 address) rather
+     * than a name? True when its LAST part is all digits, or `0x` followed by
+     * hex digits — the rule web browsers apply (the URL standard's "ends in a
+     * number"), so `192.0.2.4`, `127.1`, `127.1.2`, `0x7f.1` and
+     * `0x7f.0.0.1` all answer true. No real top-level domain is a number, so
+     * this refuses no real name. Round 1 of P3's check: the first version
+     * refused only four dotted decimal numbers and let the other forms by.
+     */
+    private static function endsInANumber(string $host): bool
+    {
+        $parts = explode('.', $host);
+        $last  = (string) end($parts);
+
+        return preg_match('/^(?:\d+|0x[0-9a-f]*)$/i', $last) === 1;
+    }
+
     /** Does this organisation have a public-address row at all (even one a hand edit spoiled)? */
     private static function hasHostRow(\mysqli $db, int $siteId): bool
     {
@@ -1034,6 +1135,18 @@ final class PublicWebsiteSetup
         $stmt->close();
 
         return $found !== null;
+    }
+
+    /** Which organisation holds this public address, or null when none does. */
+    private static function hostOwner(\mysqli $db, string $host): ?int
+    {
+        $stmt = $db->prepare('SELECT `siteID` FROM `' . self::HOSTS_TABLE . '` WHERE `hostName` = ? LIMIT 1');
+        $stmt->bind_param('s', $host);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row === null ? null : (int) $row['siteID'];
     }
 
     /** How many organisations hold this public address (the unique key makes it 0 or 1). */

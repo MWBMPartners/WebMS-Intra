@@ -85,6 +85,13 @@
  *     between; curl here caches nothing, so that minute is not tested.
  *   - The series-repattern half (a date the pattern ADDS is off the website)
  *     is check S18w of tools/event-repeat-pages-selftest.php, not here.
+ *   - Section W cannot make a server answer the set-up check with a 403 or
+ *     a redirect: SafeFetch refuses every loopback address, and this test
+ *     reaches nothing outside the machine. So only "nothing answered" is
+ *     driven over HTTP (W11, a loopback main website); every other answer is
+ *     checked by asking the real wording function directly (W17).
+ *   - Two saves of one organisation's public address at the SAME moment are
+ *     not driven (one web worker); the wording for that clash is read, not run.
  *   - Section W does not run the Users page's script, so the locked role
  *     box's hidden carrier being switched on is NOT driven (P86 says so); the
  *     handler's refusal is what is proved. It cannot test that a main website
@@ -113,7 +120,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 216;
+const PWT_EXPECTED_CHECKS = 224;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2014,6 +2021,18 @@ echo json_encode([
         'two'    => \Portal\Core\PublicWebsiteSetup::frameAncestorsValue(['https://a.example.org', 'https://b.example.org:8443']),
         'nasty'  => \Portal\Core\PublicWebsiteSetup::frameAncestorsValue(['*', "https://a.example.org; script-src *", "https://x.example.org\nX: y", "'self'", 'http://h.example.org']),
     ],
+    // Round 1 of P3's check: what the set-up check SAYS for each kind of answer,
+    // asked of the real wording function, because SafeFetch refuses every
+    // loopback address and so no server in this test can answer it with a 403.
+    'verdicts'       => [
+        'nothing'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 0, 'capped' => false]),
+        'ok'         => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => true, 'status' => 200, 'capped' => false]),
+        'big page'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => true]),
+        'slow page'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => false]),
+        'forbidden'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 403, 'capped' => false]),
+        'down'       => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 503, 'capped' => false]),
+        'redirected' => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 301, 'capped' => false]),
+    ],
 ]);
 ASK);
 $askSetup = static function (int $site) use ($child, $sep): array {
@@ -2162,6 +2181,8 @@ $scnPwFrames = static function () use ($pwPost, $pwRow, $siteOne, $recorded, $pe
         'a path'    => 'https://x.pwt.example.org/page',
         'a query'   => 'https://x.pwt.example.org?a=1',
         'a number'  => 'https://192.0.2.4',
+        'a short number' => 'https://127.1.2',
+        'a hex number'   => 'https://0x7f.1',
         'data'      => 'data:text/html,x',
         'semicolon' => 'https://x.pwt.example.org; script-src *',
     ];
@@ -2185,7 +2206,7 @@ $scnPwFrames = static function () use ($pwPost, $pwRow, $siteOne, $recorded, $pe
     return $out;
 };
 $wFramesWant = ['stored, tidied, duplicate collapsed' => "https://a.pwt.example.org\nhttps://b.pwt.example.org:8443\nhttps://b2.pwt.example.org"];
-foreach (['http', 'wildcard', 'bare star', 'keyword', 'bare none', 'a path', 'a query', 'a number', 'data', 'semicolon'] as $name) {
+foreach (['http', 'wildcard', 'bare star', 'keyword', 'bare none', 'a path', 'a query', 'a number', 'a short number', 'a hex number', 'data', 'semicolon'] as $name) {
     $wFramesWant['refused: ' . $name] = true;
 }
 $wFramesWant += ['says which line' => true, '21 refused' => true, '20 accepted' => 20, 'refusals recorded' => true, 'empty deletes' => null];
@@ -2238,7 +2259,8 @@ $scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, 
     $pwPost('setup', 'public_host', 'Events.PWT-One.example.org');
     $out['stored'] = $pwHost($siteOne);
     foreach (['a scheme' => 'https://e.pwt.example.org', 'a port' => 'e.pwt.example.org:8443', 'a path' => 'e.pwt.example.org/x',
-        'a user' => 'me@e.pwt.example.org', 'no dot' => 'localhost', 'a number' => '192.0.2.9', 'non-ascii' => 'évents.pwt.example.org'] as $name => $bad) {
+        'a user' => 'me@e.pwt.example.org', 'no dot' => 'localhost', 'a number' => '192.0.2.9', 'a short number' => '127.1',
+        'a hex number' => '0x7f.0.0.1', 'non-ascii' => 'évents.pwt.example.org'] as $name => $bad) {
         $pwPost('setup', 'public_host', $bad);
         $out['refused: ' . $name] = $pwHost($siteOne) === 'events.pwt-one.example.org';
     }
@@ -2265,7 +2287,7 @@ $scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, 
     return $out;
 };
 $wHostWant = ['stored' => 'events.pwt-one.example.org'];
-foreach (['a scheme', 'a port', 'a path', 'a user', 'no dot', 'a number', 'non-ascii'] as $name) {
+foreach (['a scheme', 'a port', 'a path', 'a user', 'no dot', 'a number', 'a short number', 'a hex number', 'non-ascii'] as $name) {
     $wHostWant['refused: ' . $name] = true;
 }
 $wHostWant += ['another organisation\'s refused' => 'events.pwt-one.example.org', 'the refusal says so' => true, 'the refusal names nobody' => true,
@@ -2343,7 +2365,7 @@ $scnPwCheck = static function () use ($db, $siteOne, $signIn, $http, $freshToken
     $pwPost('setup', 'website', 'https://127.0.0.1');
     $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
     $page = $http('GET', '/admin/public-website')['body'];
-    $out['a loopback main website is unreachable'] = str_contains($page, 'https://127.0.0.1: It did not answer over https');
+    $out['a loopback main website is unreachable'] = str_contains($page, 'https://127.0.0.1: nothing answered over https.');
     $out['the door is still not ticked'] = preg_match('/data-check-state="ok"[^>]*>\s*<span[^>]*>[^<]*<\/span>\s*<strong>The public door/', $page) === 1;
     $pwClean();
     return $out;
@@ -2487,6 +2509,110 @@ $scnPwRolesWarning = static function () use ($db, $siteOne, $setupRole, $people,
         && str_contains($words, 'Administrators of this organisation, and global administrators, still can') === false ? 'right' : 'WRONG: ' . $words;
 };
 check('W16 with nobody holding Website Set-up, the Roles page says global administrators still get in and an ordinary administrator does not', $scnPwRolesWarning(), 'right');
+
+// W17 (round 1, item 2): what the check SAYS for each kind of answer. The
+//      status decides: a site answering with an error page CAN be reached and
+//      is told so; a redirect it will not follow is named as one; only no
+//      answer at all says nothing answered — and the time it gives is true.
+$scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
+    $v   = $askSetup($siteOne)['verdicts'] ?? [];
+    $out = [];
+    foreach ((array) $v as $name => $one) {
+        $words = (string) ($one['words'] ?? '');
+        $out[$name] = [(string) ($one['state'] ?? ''),
+            str_contains($words, 'nothing answered'), str_contains($words, 'can be reached'), str_contains($words, 'sending the visitor somewhere else')];
+    }
+    $out['time stated'] = str_contains((string) ($v['nothing']['words'] ?? ''), '5 seconds for a step (15 seconds in all, not counting looking the name up)');
+    $out['status named'] = str_contains((string) ($v['forbidden']['words'] ?? ''), 'HTTP 403');
+    return $out;
+};
+check('W17 "Check my set-up" says what really happened: a 200 answered; a 403 or 503 can be reached but gave an error page (with its status); a redirect it will not follow is named; only no answer says nothing answered, with the true time limits',
+    $scnPwVerdicts(), [
+        'nothing' => ['problem', true, false, false], 'ok' => ['ok', false, false, false], 'big page' => ['ok', false, false, false],
+        'slow page' => ['problem', false, false, false], 'forbidden' => ['note', false, true, false], 'down' => ['note', false, true, false],
+        'redirected' => ['problem', false, false, true], 'time stated' => true, 'status named' => true]);
+
+// W18 (round 1, item 3): a framing list a HAND EDIT spoiled — what the PAGE
+//      shows in its box and what the CHECK reports. Only the valid line may
+//      appear, and nothing else may be called valid.
+$scnPwHandEdited = static function () use ($db, $siteOne, $signIn, $http, $freshToken, $pwClean): array {
+    $pwClean();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'public.frame.origins', "
+        . "'https://ok.pwt.example.org\n*\nhttps://x.pwt.example.org; script-src *\nhttp://plain.pwt.example.org', '', 0)");
+    $signIn('siteroot');
+    $page = $http('GET', '/admin/public-website')['body'];
+    $box  = preg_match('#<textarea[^>]*id="pw-origins"[^>]*>(.*?)</textarea>#s', $page, $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : null;
+    $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);
+    $result = $http('GET', '/admin/public-website')['body'];
+    preg_match_all('/<strong>Websites allowed to frame your pages:<\/strong>\s*([^<]*)</', $result, $rows);
+    $pwClean();
+    return [
+        'the page\'s box' => $box,
+        'what the check says about framing' => array_map(static fn (string $w): string => trim(html_entity_decode($w, ENT_QUOTES, 'UTF-8')), $rows[1]),
+        'a spoiled line shown anywhere' => str_contains($page . $result, 'script-src') || str_contains($page . $result, 'plain.pwt.example.org'),
+    ];
+};
+check('W18 with a hand-edited framing list holding "*", a ";" line and an http line, the page\'s box shows only the valid website and the check calls only that one valid',
+    $scnPwHandEdited(), ['the page\'s box' => 'https://ok.pwt.example.org',
+        'what the check says about framing' => ['https://ok.pwt.example.org is a valid https website and is allowed.'], 'a spoiled line shown anywhere' => false]);
+
+// W19 (round 1, item 4): the INSERT branch of the public address. An
+//      organisation with NO address choosing a name another organisation holds
+//      is refused, the other's row is untouched, and nothing is stored for
+//      this one. And a row a hand edit SPOILED (unreadable, so the page shows
+//      none) is replaced by an UPDATE, not refused as a clash.
+$scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $signIn, $http, $pwClean): array {
+    $pwClean();
+    $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteTwo}, 'shared.pwt.example.org', '2020-01-01 00:00:00')");
+    $pwPost('setup', 'public_host', 'shared.pwt.example.org');
+    $page  = $http('GET', '/admin/public-website')['body'];
+    $two   = $db->query("SELECT `hostName`, `changedAtUtc` FROM `tblPublicHosts` WHERE `siteID` = {$siteTwo}")->fetch_assoc();
+    $out = [
+        'this organisation' => $pwHost($siteOne),
+        'the other organisation\'s row' => $two === null ? null : [(string) $two['hostName'], (string) $two['changedAtUtc']],
+        'said plainly' => str_contains($page, 'already used by another organisation'),
+    ];
+    // Whatever organisation 1 holds now is replaced by the spoiled row — under
+    // plant P91 it already holds a name, and a plain INSERT would stop the run.
+    $db->query("DELETE FROM `tblPublicHosts` WHERE `siteID` = {$siteOne}");
+    $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteOne}, 'NOT A HOST!', UTC_TIMESTAMP())");
+    $signIn('setup');
+    $out['a spoiled row is shown as none'] = str_contains($http('GET', '/admin/public-website')['body'], 'NOT A HOST') === false;
+    $pwPost('setup', 'public_host', 'events.fresh.pwt.example.org');
+    $out['a spoiled row is replaced'] = $pwHost($siteOne);
+    $pwClean();
+    return $out;
+};
+check('W19 an organisation with no public address choosing one another organisation holds is refused, leaving the other\'s row untouched and storing nothing; a row a hand edit spoiled is shown as none and replaced',
+    $scnPwHostInsert(), ['this organisation' => null, 'the other organisation\'s row' => ['shared.pwt.example.org', '2020-01-01 00:00:00'],
+        'said plainly' => true, 'a spoiled row is shown as none' => true, 'a spoiled row is replaced' => 'events.fresh.pwt.example.org']);
+
+// W20 (round 1, item 1): the general settings editor names the RIGHT page for
+//      each locked key — the copied-in rule at Admin, Outside calendars; this
+//      package's three at Admin, Public website — in its link and in what it
+//      records when it refuses a change.
+$scnPwEditorPage = static function () use ($db, $signIn, $http, $freshToken, $people, $pwRow): array {
+    $signIn('root');
+    $page  = $http('GET', '/settings')['body'];
+    $links = [];
+    foreach (['public.frame.permitted', 'public.events.copiedRule'] as $key) {
+        // The nearest "changed at" link after the key's own name on the page,
+        // which is that row's (each row prints its key, then its controls).
+        $links[$key] = preg_match('/' . preg_quote($key, '/') . '.{0,4000}?data-locked-page="([a-z\/\-]+)"/s', $page, $m) === 1 ? $m[1] : 'no link';
+    }
+    $id = (int) ($db->query("SELECT `settingID` FROM `tblSettings` WHERE `settingKey` = 'public.frame.permitted' AND `siteID` IS NULL")->fetch_assoc()['settingID'] ?? 0);
+    $http('POST', '/settings/save', ['csrf_token' => $freshToken(), 'settingID' => (string) $id, 'settingKey' => 'public.frame.permitted', 'settingValue' => 'no']);
+    $http('POST', '/settings', ['csrf_token' => $freshToken(), 'action' => 'delete', 'settingID' => (string) $id]);
+    $logged = $db->query("SELECT `activityDescription` FROM `tblActivityLogs` WHERE `userID` = {$people['root']['id']} "
+        . "AND `activityType` IN ('SettingsUpdateRefused', 'SettingsDeleteRefused') AND `activityDescription` LIKE '%public.frame.permitted%' ORDER BY `logID`")->fetch_all(MYSQLI_ASSOC);
+    $named = array_map(static fn (array $r): bool => str_contains((string) $r['activityDescription'], 'Admin, Public website')
+        && str_contains((string) $r['activityDescription'], 'Outside calendars') === false, $logged);
+    return ['links' => $links, 'refusals recorded' => count($logged), 'each names Admin, Public website' => $named === [] ? false : !in_array(false, $named, true),
+        'still yes' => $pwRow(null, 'public.frame.permitted')];
+};
+check('W20 the general settings editor links public.frame.permitted to Admin, Public website and the copied-in rule to Admin, Outside calendars, and its refused change and delete record Admin, Public website',
+    $scnPwEditorPage(), ['links' => ['public.frame.permitted' => 'admin/public-website', 'public.events.copiedRule' => 'admin/calendar/feeds'],
+        'refusals recorded' => 2, 'each names Admin, Public website' => true, 'still yes' => 'yes']);
 $pwClean();
 
 // =============================================================================
@@ -2878,9 +3004,18 @@ check('P87 with the three keys taken out of the editor lock, the general setting
 $p = $plant('_core/templates/nav.php', '<?php if (App::isAdmin() !== true && $navMaySetUpWebsite === true): ?>', '<?php if (App::isAdmin() !== true): ?>', $scnPwMenu);
 check('P88 with the menu link no longer asking the gate, a member is shown a way to a page that refuses them', [$p['applied'], $p['result']['member'] ?? null], [true, 1]);
 $p = $plant('_core/PublicWebsiteSetup.php', "if (\$one['problem'] !== '' || \$one['origin'] !== trim(\$line)) {\n                \$dropped++;\n                continue;\n            }",
-    '', $scnPwOrgOnly);
-check('P89 with the stored list no longer checked again on read, a wildcard a hand edit stored is dropped only by the header builder — measured: the builder still holds',
-    [$p['applied'], $p['result']['hand edit filtered'] ?? null], [true, 'https://ok.pwt.example.org']);
+    '', $scnPwHandEdited);
+check('P89 with the stored list no longer checked again on read, the page and the check would show a hand edit\'s spoiled lines as valid entries (round 1: this plant used to stay green, because it only asked the header builder)',
+    [$p['applied'], count($p['result']['what the check says about framing'] ?? []) > 1], [true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', "'INSERT INTO `' . self::HOSTS_TABLE . '` (`hostName`, `siteID`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP())'",
+    "'INSERT INTO `' . self::HOSTS_TABLE . '` (`hostName`, `siteID`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE `siteID` = VALUES(`siteID`)'", $scnPwHostInsert);
+check('P91 with the public address INSERTED as an upsert, choosing another organisation\'s name takes it from them', [$p['applied'], $p['result']['this organisation'] ?? null], [true, 'shared.pwt.example.org']);
+$p = $plant('_core/PublicWebsiteSetup.php', "\$stmt = \$was !== '' || self::hasHostRow(\$db, \$siteId) === true", "\$stmt = \$was !== ''", $scnPwHostInsert);
+check('P92 with a spoiled row not looked for, replacing it is refused as a clash and the spoiled row stays', [$p['applied'], $p['result']['a spoiled row is replaced'] ?? null], [true, 'NOT A HOST!']);
+$p = $plant('_core/PublicWebsite.php', "return ['route' => 'admin/public-website', 'name' => 'Admin, Public website'];", "return ['route' => 'admin/calendar/feeds', 'name' => 'Admin, Outside calendars'];", $scnPwEditorPage);
+check('P93 with every public-website key sent to Admin, Outside calendars, the settings editor names the wrong page again', [$p['applied'], $p['result']['links']['public.frame.permitted'] ?? null], [true, 'admin/calendar/feeds']);
+$p = $plant('_core/PublicWebsiteSetup.php', 'if ($status >= 400 && $status <= 599) {', 'if (false) {', $scnPwVerdicts);
+check('P94 with the error-page branch gone, a website answering 403 is told nothing answered', [$p['applied'], $p['result']['forbidden'] ?? null], [true, ['problem', false, false, false]]);
 $p = $plant('_apps/admin/roles/index.php', '<?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>', '<?php if (false): ?>', $scnPwRolesWarning);
 check('P90 with Website Set-up given the usual sentence, the Roles page tells an ordinary administrator they still get in, which is untrue for this door',
     [$p['applied'], str_starts_with((string) $p['result'], 'WRONG')], [true, true]);
@@ -2892,12 +3027,30 @@ check('P11 with every plant removed again, the unticked event is off the countdo
 //    200, so the log is read as well.
 $serverLog = (string) @file_get_contents($child . $sep . 'php-errors.log');
 $ours      = [];
+// #493 P3: W18 and W19 plant a hand-spoiled framing list and public address on
+// purpose, and the readers' job is to drop them AND say so in this log — so
+// exactly those two notices are expected and set aside. Anything else naming
+// PublicWebsite still fails this check.
+$expectedNotices = ['[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteOne . '\'s stored framing list held ',
+    '[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteOne . '\'s stored public address is not one this page would accept'];
+$setAside = 0;
 foreach (preg_split('/\R/', $serverLog) ?: [] as $line) {
+    $deliberate = false;
+    foreach ($expectedNotices as $notice) {
+        if (str_contains($line, $notice) === true) {
+            $deliberate = true;
+        }
+    }
+    if ($deliberate === true) {
+        $setAside++;
+        continue;
+    }
     if (stripos($line, 'Fatal') !== false || stripos($line, 'PublicWebsite') !== false || stripos($line, 'Uncaught') !== false) {
         $ours[] = $line;
     }
 }
-check('Z1 the server logged no fatal error and nothing about PublicWebsite', $ours, []);
+check('Z1 the server logged no fatal error and nothing about PublicWebsite beyond the hand-edit notices section W causes on purpose (which it did log)',
+    [$ours, $setAside > 0], [[], true]);
 
 // ── Tidy up the rows this test made ─────────────────────────────────────────
 if ($indexWas === null) {

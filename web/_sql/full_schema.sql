@@ -11413,11 +11413,12 @@ WHERE NOT EXISTS (
     WHERE r.`siteID` = s.`siteID` AND r.`roleKey` = 'website_setup'
 );
 
--- Marked standard, in case an older hand-made role of this key exists: a custom
--- role can be DELETED by an organisation, and the code asks for this key.
-UPDATE `tblRoles`
-   SET `isStandard` = 1
- WHERE `roleKey` = 'website_setup' AND `isStandard` <> 1;
+-- A hand-made role of this key that NOBODY holds is marked standard; one that
+-- somebody holds is left as it is (migration 262's header says why).
+UPDATE `tblRoles` r
+   SET r.`isStandard` = 1
+ WHERE r.`roleKey` = 'website_setup' AND r.`isStandard` <> 1
+   AND NOT EXISTS (SELECT 1 FROM `tblUserRoles` ur WHERE ur.`roleID` = r.`roleID`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/public-website',       'admin/public-website/index.php', 1),

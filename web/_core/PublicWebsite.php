@@ -417,14 +417,53 @@ final class PublicWebsite
     }
 
     /**
-     * What the general settings editor says when it refuses one of them. It
-     * names both pages, because the editor shows one message for every key
-     * this method locks.
+     * 🧭 WHICH PAGE a locked key is changed on — the ONE place that decides
+     * it, for the general settings editor's link, its refusal message and the
+     * three refusals it records (delete, change, add). null when this class
+     * does not lock the key.
+     *
+     * ⚠️ Until round 1 of #493 P3's check every one of those places named
+     *    "Admin, Outside calendars" for every key this class locks, which was
+     *    true while there was ONE key and untrue the moment P3 added three —
+     *    and migration 262 seeds `public.frame.permitted` on every
+     *    installation, so every Settings page showed the wrong page. A page
+     *    named in four copies of an `if` is how that happened, so the answer
+     *    lives here and the four places ask.
+     *
+     * @return array{route:string, name:string}|null
      */
-    public const LOCKED_MESSAGE = 'Settings for the public website are changed only on their own pages: how copied-in events reach '
-        . 'it at Admin, Outside calendars, "Copied-in events on your public website" (which re-works every outside calendar at '
-        . 'once), and the main website, the websites allowed to frame its pages and whether framing is allowed at all at '
-        . 'Admin, Public website, which checks every value and records every change. Nothing was changed.';
+    public static function lockedPageFor(string $key): ?array
+    {
+        if (strcasecmp($key, self::RULE_KEY) === 0) {
+            return ['route' => 'admin/calendar/feeds', 'name' => 'Admin, Outside calendars'];
+        }
+        foreach ([self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY] as $locked) {
+            if (strcasecmp($key, $locked) === 0) {
+                return ['route' => 'admin/public-website', 'name' => 'Admin, Public website'];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * What the general settings editor says when it refuses one of these
+     * keys, naming the page THAT key is changed on (`lockedPageFor()`).
+     */
+    public static function lockedMessageFor(string $key): string
+    {
+        $page = self::lockedPageFor($key);
+        if ($page !== null && $page['route'] === 'admin/public-website') {
+            return 'This setting is changed only at Admin, Public website, which checks every value and records every '
+                . 'change. Nothing was changed.';
+        }
+
+        return self::LOCKED_MESSAGE;
+    }
+
+    /** What the general settings editor says when it refuses the copied-in rule. */
+    public const LOCKED_MESSAGE = 'How copied-in events reach the public website is changed only at Admin, Outside calendars, '
+        . '"Copied-in events on your public website", which re-works every outside calendar at once. Nothing was changed.';
 
     /**
      * The rule in force for one organisation: the STRICTER of the

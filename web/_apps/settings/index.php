@@ -200,10 +200,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         if ($lockedKey !== null && \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
             Logger::activity(
                 'SettingsDeleteRefused',
-                'Refused: "' . (string) $lockedKey['settingKey'] . '" is changed only on Admin, Outside calendars and cannot be deleted here',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is changed only on '
+                . (string) (\Portal\Core\PublicWebsite::lockedPageFor((string) $lockedKey['settingKey'])['name'] ?? '')
+                . ' and cannot be deleted here',
                 $_SESSION['user_id'] ?? null
             );
-            $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::LOCKED_MESSAGE;
+            $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::lockedMessageFor((string) $lockedKey['settingKey']);
             $_SESSION['flash_type'] = 'danger';
             header('Location: ' . Site::url('settings'));
             exit();
@@ -775,6 +777,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    global administrator can change there).
                                     $registrationsLocked = \Portal\Core\RegistrationRetention::lockedInGeneralEditor((string) $row['settingKey']);
                                     $copiedRuleLocked = \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // #493 P3: WHICH page — the copied-in rule's or Admin, Public website — is
+                                    // asked of the ONE place that decides it, never written here.
+                                    $publicWebsitePage = \Portal\Core\PublicWebsite::lockedPageFor((string) $row['settingKey']);
                                     // 🔒 And for the noticeboard foyer screen's two settings (#493 P2b).
                                     $foyerLocked = \Portal\Core\NoticeboardFoyer::lockedInGeneralEditor((string) $row['settingKey']);
                                     ?>
@@ -801,8 +806,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <span class="small text-secondary">Changed by a global administrator, at Admin, Organisations</span>
                                     <?php elseif ($outsideLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Outside services</a>
+                                    <?php elseif ($copiedRuleLocked === true && $publicWebsitePage !== null && ($publicWebsitePage['route'] !== 'admin/public-website' || \Portal\Core\PublicWebsiteSetup::maySetUpHere() === true)): ?>
+                                        <a class="small" data-locked-page="<?php echo htmlspecialchars($publicWebsitePage['route'], ENT_QUOTES, 'UTF-8'); ?>" href="<?php echo htmlspecialchars(Site::url($publicWebsitePage['route']), ENT_QUOTES, 'UTF-8'); ?>">Changed at <?php echo htmlspecialchars($publicWebsitePage['name'], ENT_QUOTES, 'UTF-8'); ?></a>
                                     <?php elseif ($copiedRuleLocked === true): ?>
-                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Outside calendars</a>
+                                        <?php // Admin, Public website refuses an ordinary administrator (D-085), so no link to it. ?>
+                                        <span class="small text-secondary" data-locked-page="<?php echo htmlspecialchars((string) ($publicWebsitePage['route'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">Changed by a global administrator, at <?php echo htmlspecialchars((string) ($publicWebsitePage['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
                                     <?php elseif ($foyerLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('noticeboard/foyer/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Noticeboard, Foyer screen</a>
                                     <?php elseif ($registrationsLocked === true): ?>

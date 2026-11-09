@@ -6,8 +6,13 @@
  * -----------------------------------------------------------------------------
  * Address: /admin/public-website/check (POST only, with the form token). Runs
  * `PublicWebsiteSetup::checkSetUp()` for the organisation open now, keeps the
- * answer in the session for ONE showing, and sends the person back to the
- * page. Nothing is stored anywhere else and nothing is changed.
+ * answer in the session for ONE showing (under that organisation's number),
+ * and sends the person back to the page. It changes no setting. It does leave
+ * two traces, said plainly: a row in the rate-limit table counting this run
+ * (`RateLimiter::recordHit()`, removed by its own clear-out), and — for most
+ * ways the main website can fail to answer — a notice in the portal's own
+ * error log (Admin, Error log) written by `SafeFetch`, naming the website's
+ * host and the HTTP status.
  *
  * WHY POST AND A LIMIT: the check makes the portal's server fetch the
  * organisation's main website (through `SafeFetch`, five seconds at most) and
@@ -79,6 +84,8 @@ if (RateLimiter::tooMany($bucket, PublicWebsiteSetup::CHECK_LIMIT, PublicWebsite
 }
 RateLimiter::recordHit($bucket, PublicWebsiteSetup::CHECK_WINDOW_SECONDS, 'pwsetup:check:');
 
-$_SESSION['public_website_check'] = PublicWebsiteSetup::checkSetUp($mysqli, $siteId);
+// Kept under the ORGANISATION's number, so another tab open on a different
+// organisation can never show this one's result (round 1 of P3's check).
+$_SESSION['public_website_check'][$siteId] = PublicWebsiteSetup::checkSetUp($mysqli, $siteId);
 header('Location: ' . $back, true, 302);
 exit();

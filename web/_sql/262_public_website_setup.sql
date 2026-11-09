@@ -20,10 +20,10 @@
 --   website_setup              a standard role, "Website Set-up", for every
 --                              organisation — the role the new permission
 --                              `website.setup` (D-085) ships pointing at.
---                              Granted to NOBODY: out of the box only a global
---                              administrator sets up the public website, and
---                              only a global administrator may give this role
---                              to anybody (D-093).
+--                              This migration grants it to NOBODY: out of the
+--                              box only a global administrator sets up the
+--                              public website, and only a global administrator
+--                              may give this role to anybody (D-093).
 --   three addresses            the page, its save handler and its "Check my
 --                              set-up" button, all needing a sign-in.
 --
@@ -35,6 +35,18 @@
 --
 -- NO PERSONAL DETAILS: tblPublicHosts holds an organisation, a host name and a
 -- moment. Who changed it is in the activity log.
+--
+-- A ROLE OF THIS KEY MADE BY HAND, said plainly because D-093 is about exactly
+-- who holds it. The permission is matched by the role's KEY, so if an
+-- organisation had made its own role called `website_setup` on Admin, Roles
+-- before this upgrade, whoever holds it can open Admin, Public website as soon
+-- as this runs — this migration did not grant it, but it cannot take it away
+-- without deleting somebody's role, which is not a migration's decision. Such a
+-- role is NOT marked standard (it stays deletable, and stays visibly the
+-- organisation's own), and a global administrator should look at Admin, Roles
+-- after upgrading. It cannot arise today: no customer installation exists yet,
+-- and the key is new in this package, so only somebody who typed this exact key
+-- by hand on an upgraded test copy could have one.
 --
 -- SAFE TO RUN TWICE: CREATE TABLE IF NOT EXISTS; the setting's ON DUPLICATE
 -- KEY UPDATE touches `defaultValue` only, so a choice somebody made is never
@@ -68,11 +80,15 @@ WHERE NOT EXISTS (
     WHERE r.`siteID` = s.`siteID` AND r.`roleKey` = 'website_setup'
 );
 
--- Marked standard, in case an older hand-made role of this key exists: a custom
--- role can be DELETED by an organisation, and the code asks for this key.
-UPDATE `tblRoles`
-   SET `isStandard` = 1
- WHERE `roleKey` = 'website_setup' AND `isStandard` <> 1;
+-- A hand-made role of this key that NOBODY holds is marked standard (a custom
+-- role can be DELETED by an organisation, and the code asks for this key). One
+-- that somebody DOES hold is left exactly as it is — see "A ROLE OF THIS KEY
+-- MADE BY HAND" in the header: promoting it would make its holders' access
+-- look as though the portal had shipped it.
+UPDATE `tblRoles` r
+   SET r.`isStandard` = 1
+ WHERE r.`roleKey` = 'website_setup' AND r.`isStandard` <> 1
+   AND NOT EXISTS (SELECT 1 FROM `tblUserRoles` ur WHERE ur.`roleID` = r.`roleID`);
 
 INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
     ('admin/public-website',       'admin/public-website/index.php', 1),

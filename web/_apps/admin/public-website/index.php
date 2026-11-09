@@ -79,8 +79,8 @@ if ($website !== '') {
 }
 
 // 🔎 A set-up check's result is shown ONCE and kept nowhere else.
-$checkRows = $_SESSION['public_website_check'] ?? null;
-unset($_SESSION['public_website_check']);
+$checkRows = $_SESSION['public_website_check'][$siteId] ?? null;
+unset($_SESSION['public_website_check'][$siteId]);
 if (is_array($checkRows) === false) {
     $checkRows = null;
 }
@@ -120,7 +120,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card mb-3 border-primary" data-setup-check="1">
             <div class="card-body">
                 <h2 class="h5">What the set-up check found</h2>
-                <p class="small text-muted">Shown once. It changed nothing, and nothing here is a promise that the public door works — that cannot be tested until it exists.</p>
+                <p class="small text-muted">Shown once. It changed no setting, and nothing here is a promise that the public door works — that cannot be tested until it exists.</p>
                 <ul class="list-unstyled mb-0">
                     <?php foreach ($checkRows as $row): ?>
                         <?php [$word, $colour] = $stateWords[(string) ($row['state'] ?? 'note')] ?? $stateWords['note']; ?>
@@ -215,7 +215,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h5">Check my set-up</h2>
-            <p class="text-muted">Checks what can be known today: whether your main website answers over https, whether your public address's name exists, whether each framing website is valid, what is marked to appear on the public website today, and whether the portal's own address is set. It cannot test the public door, because that is not part of this version. It changes nothing.</p>
+            <p class="text-muted">Checks what can be known today: whether your main website answers over https, whether your public address's name exists, whether each framing website is valid, what is marked to appear on the public website today, and whether the portal's own address is set. It cannot test the public door, because that is not part of this version. It changes no setting.</p>
             <p class="small text-muted mb-2">The portal's own address is <?php echo PortalAddress::state() === PortalAddress::STATE_SET ? 'set' : 'not set'; ?>.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/check')); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">

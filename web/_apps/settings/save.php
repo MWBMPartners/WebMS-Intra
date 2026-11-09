@@ -355,10 +355,10 @@ if ($settingId > 0) {
     if (\Portal\Core\PublicWebsite::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
-            'Refused: "' . $storedKey . '" is changed only on Admin, Outside calendars',
+            'Refused: "' . $storedKey . '" is changed only on ' . (string) (\Portal\Core\PublicWebsite::lockedPageFor($storedKey)['name'] ?? ''),
             $_SESSION['user_id'] ?? null
         );
-        $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::LOCKED_MESSAGE;
+        $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::lockedMessageFor($storedKey);
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();
@@ -865,10 +865,10 @@ if ($settingId > 0) {
     if (\Portal\Core\PublicWebsite::lockedInGeneralEditor($settingKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
-            'Refused: "' . $settingKey . '" is set only on Admin, Outside calendars',
+            'Refused: "' . $settingKey . '" is set only on ' . (string) (\Portal\Core\PublicWebsite::lockedPageFor($settingKey)['name'] ?? ''),
             $_SESSION['user_id'] ?? null
         );
-        $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::LOCKED_MESSAGE;
+        $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::lockedMessageFor($settingKey);
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();
