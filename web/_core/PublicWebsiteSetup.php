@@ -1050,6 +1050,15 @@ final class PublicWebsiteSetup
         ];
     }
 
+    /**
+     * The HTTP statuses that mean the main website answered and TURNED THE
+     * CHECK AWAY — sign-in required (401), refused (403), too many requests
+     * (429). Only these are shown "For information"; see `mainWebsiteVerdict()`.
+     *
+     * @var list<int>
+     */
+    public const TURNED_AWAY_STATUSES = [401, 403, 429];
+
     /** What the check says about the main website whenever it did not get a normal page. */
     public const NOT_A_NORMAL_PAGE = 'This check did not get a normal page from your main website. That can happen, for '
         . 'example, when a website is down, its name does not exist or points at a private or internal address, it sends '
@@ -1067,14 +1076,19 @@ final class PublicWebsiteSetup
      *   - anything else: ONE sentence that is always true
      *     (`NOT_A_NORMAL_PAGE`, worded "for example" — never a complete list),
      *     plus — only where SafeFetch reports one — the last HTTP status
-     *     received, as a fact and not as a cause. A status from 400 to 499
-     *     means the website DID answer and turned this check away (for example
-     *     a website that refuses automated visitors), so that row is "For
-     *     information" ('note'). A status from 500 to 599 is the website's own
-     *     server saying it is failing — the website IS down — so that row, like
-     *     nothing received at all, is "Needs attention" ('problem'). (Round 4
-     *     first drew the line at "400 or more", which labelled two kinds of
-     *     "down" opposite ways; round 5 corrected it.)
+     *     received, as a fact and not as a cause. The row is "For
+     *     information" ('note') ONLY for the statuses in
+     *     `TURNED_AWAY_STATUSES` — 401, 403 and 429 — where the website
+     *     answered and turned this check away (asked for a sign-in, refused it,
+     *     or said "too many requests"), which a website that is fine for
+     *     visitors often does to an automated check. EVERY other answer, and
+     *     no answer at all, is "Needs attention" ('problem'): a 5xx is the
+     *     website's own server saying it is failing, and a 404, 410 or 421
+     *     often means a lapsed or misconfigured domain (a hosting service
+     *     answering "no site here"). (Round 4 drew the line at "400 or more",
+     *     which called a failing server "For information"; round 5 at
+     *     "400-499", which still called a 404 "For information"; round 6
+     *     narrowed it to the three statuses that really mean "turned away".)
      *
      * ⚠️ NO TEST-ONLY PARAMETER (round 4). It used to take `$curlAvailable`
      *    so a test could say "no curl"; every test then passed it, and the
@@ -1108,7 +1122,7 @@ final class PublicWebsiteSetup
             return ['state' => 'ok', 'words' => 'it answered.'];
         }
 
-        return ['state' => ($status >= 400 && $status <= 499) ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE
+        return ['state' => in_array($status, self::TURNED_AWAY_STATUSES, true) === true ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE
             . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
     }
 

@@ -129,7 +129,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 233;
+const PWT_EXPECTED_CHECKS = 236;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2042,13 +2042,20 @@ echo json_encode([
         'ok'         => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => true, 'status' => 200, 'capped' => false]),
         'big page'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => true]),
         'forbidden'  => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 403, 'capped' => false]),
-        'exactly 400' => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 400, 'capped' => false]),
-        'exactly 499' => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 499, 'capped' => false]),
         'too slow'   => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 200, 'capped' => false,
             'message' => 'The other server took too long to answer.']),
         'too big'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 404, 'capped' => true,
             'message' => 'The file is bigger than the size limit, so it was not read.']),
-    ],
+    ] + (static function (): array {
+        // Round 6: cover the DIMENSION, not an example of it — every status
+        // class, both edges of every range, and each of the three "turned
+        // away" statuses, so a narrowed or widened rule cannot pass.
+        $out = [];
+        foreach ([101, 199, 204, 299, 300, 304, 399, 400, 401, 402, 403, 404, 410, 421, 428, 429, 430, 499, 500, 502, 503, 504, 599, 600] as $code) {
+            $out['HTTP ' . $code] = \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => $code, 'capped' => false]);
+        }
+        return $out;
+    })(),
 ]);
 ASK);
 $askSetup = static function (int $site) use ($child, $sep): array {
@@ -2533,10 +2540,12 @@ check('W16 with nobody holding Website Set-up, the Roles page says global admini
 //      is pinned here as text on purpose: it is what a person reads, and it
 //      must never name a cause as fact.
 $pwNotNormal = 'This check did not get a normal page from your main website. That can happen, for example, when a website is down, its name does not exist or points at a private or internal address, it sends visitors on to another address this check will not follow, it has a security-certificate problem, it turns away automated visitors, or this server is not allowed to make outside connections. Open it in your own browser to see what your visitors get.';
-// 400-499: the website DID answer and turned the check away — "For
-// information" ('note'). 500-599 (the website's server is failing), nothing
-// received, or anything else — "Needs attention" ('problem'). Round 5.
-$pwSaid = static fn (int $status): array => [($status >= 400 && $status <= 499) ? 'note' : 'problem', $pwNotNormal . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
+// Round 6: ONLY 401, 403 and 429 — the website answered and turned the check
+// away — are "For information" ('note'). Everything else, a 404 or a 5xx
+// among them, and no answer at all, is "Needs attention" ('problem'). The
+// three are written out here, not read from the class, so a change to the
+// class's list is a change this test notices.
+$pwSaid = static fn (int $status): array => [in_array($status, [401, 403, 429], true) === true ? 'note' : 'problem', $pwNotNormal . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
 $scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
     $out = [];
     foreach ((array) ($askSetup($siteOne)['verdicts'] ?? []) as $name => $one) {
@@ -2544,10 +2553,13 @@ $scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
     }
     return $out;
 };
-check('W17 the wording function, asked directly: a 200 (even one cut off by the size limit) answered; nothing, a 403, a stalled 200 and an oversized 404 each get the one sentence, plus the status where there is one, "For information" from 400 up',
-    $scnPwVerdicts(), [
-        'nothing' => $pwSaid(0), 'ok' => ['ok', 'it answered.'], 'big page' => ['ok', 'it answered.'],
-        'forbidden' => $pwSaid(403), 'exactly 400' => $pwSaid(400), 'exactly 499' => $pwSaid(499), 'too slow' => $pwSaid(200), 'too big' => $pwSaid(404)]);
+$wVerdictsWant = ['nothing' => $pwSaid(0), 'ok' => ['ok', 'it answered.'], 'big page' => ['ok', 'it answered.'],
+    'forbidden' => $pwSaid(403), 'too slow' => $pwSaid(200), 'too big' => $pwSaid(404)];
+foreach ([101, 199, 204, 299, 300, 304, 399, 400, 401, 402, 403, 404, 410, 421, 428, 429, 430, 499, 500, 502, 503, 504, 599, 600] as $code) {
+    $wVerdictsWant['HTTP ' . $code] = $pwSaid($code);
+}
+check('W17 the wording function, asked directly: a 200 (even one cut off by the size limit) answered; every other status from 101 to 600, nothing at all, a stalled 200 and an oversized 404 get the one sentence plus the status where there is one — "For information" ONLY for 401, 403 and 429',
+    $scnPwVerdicts(), $wVerdictsWant);
 
 // W21 (rounds 2 and 3): the words for REAL answers, driven IN-PROCESS. A TLS
 //      server of this test's own answers as a.test (and c.test, whose name its
@@ -2588,6 +2600,7 @@ while (true) {
     $answers = [
         '/'           => "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
         '/e403'       => "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        '/e404'       => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         '/e500'       => "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         '/e503'       => "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
         '/r-nxdomain' => "HTTP/1.1 301 Moved\r\nLocation: https://no-such-name-p3.invalid/\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -2667,7 +2680,7 @@ SafeFetch::$testResolverOverride = [
     'c.test' => ['ips' => ['127.0.0.1'], 'port' => $tls],
 ];
 $out = [];
-foreach (['ok' => 'https://a.test/', 'forbidden' => 'https://a.test/e403', 'failing (500)' => 'https://a.test/e500',
+foreach (['ok' => 'https://a.test/', 'forbidden' => 'https://a.test/e403', 'no site here (404)' => 'https://a.test/e404', 'failing (500)' => 'https://a.test/e500',
     'down (503)' => 'https://a.test/e503', 'to a missing name' => 'https://a.test/r-nxdomain',
     'to an unusual port' => 'https://a.test/r-port', 'to a dead address' => 'https://a.test/r-dead', 'to plain http' => 'https://a.test/r-http',
     'round in circles' => 'https://a.test/r-loop', '300 with no address' => 'https://a.test/r-noloc', 'cut off' => 'https://a.test/drop',
@@ -2698,7 +2711,7 @@ $scnPwLive = static function () use ($child, $sep, $tlsPort, $deadPort): array {
 // dead address or a certificate failure — which is exactly why the words name
 // no cause.
 $wLive = ['ok' => [200, 'ok', 'it answered.']];
-foreach (['forbidden' => 403, 'failing (500)' => 500, 'down (503)' => 503, 'to a missing name' => 301, 'to an unusual port' => 301, 'to a dead address' => 0, 'to plain http' => 301,
+foreach (['forbidden' => 403, 'no site here (404)' => 404, 'failing (500)' => 500, 'down (503)' => 503, 'to a missing name' => 301, 'to an unusual port' => 301, 'to a dead address' => 0, 'to plain http' => 301,
     'round in circles' => 302, '300 with no address' => 300, 'cut off' => 200, 'certificate not for this name' => 0,
     'two steps to plain http' => 301, 'two steps to a missing name' => 301, '301 cut off' => 301, '300 with an address' => 300, '304' => 304] as $name => $status) {
     $wLive[$name] = array_merge([$status], $pwSaid($status));
@@ -3336,13 +3349,21 @@ check('P99 (rounds 3 and 4: plants B and C) with the no-curl branch never taken,
     [$p['applied'], $p['result']['what it says'][0] ?? null], [true, 'problem: https://a.test: ' . $pwNotNormal]);
 $p = $plant('_core/PublicWebsiteSetup.php', "            . (\$status > 0 ? ' The last answer this check received was HTTP ' . \$status . '.' : '')];", "];", $scnPwLive);
 check('P96 with the status fact dropped, a 403 is no longer reported as one', [$p['applied'], $p['result']['forbidden'] ?? null], [true, [403, 'note', $pwNotNormal]]);
-$p = $plant('_core/PublicWebsiteSetup.php', "return ['state' => (\$status >= 400 && \$status <= 499) ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE", "return ['state' => 'problem', 'words' => self::NOT_A_NORMAL_PAGE", $scnPwLive);
+$pwStateRule = "in_array(\$status, self::TURNED_AWAY_STATUSES, true) === true ? 'note' : 'problem'";
+$p = $plant('_core/PublicWebsiteSetup.php', $pwStateRule, "'problem'", $scnPwLive);
 check('P100 (round 4) with every non-200 marked "Needs attention", a website that DID answer with a 403 is shown as a problem rather than for information',
     [$p['applied'], $p['result']['forbidden'][1] ?? null], [true, 'problem']);
-$p = $plant('_core/PublicWebsiteSetup.php', "return ['state' => (\$status >= 400 && \$status <= 499) ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE",
-    "return ['state' => \$status >= 400 ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE", $scnPwLive);
-check('P101 (round 5) with the boundary back at "400 or more", a website whose server answers 503 — it IS down — is shown for information rather than as needing attention',
+$p = $plant('_core/PublicWebsiteSetup.php', $pwStateRule, "\$status >= 400 ? 'note' : 'problem'", $scnPwLive);
+check('P101 (round 5) with the line back at "400 or more", a website whose server answers 503 — it IS down — is shown for information rather than as needing attention',
     [$p['applied'], $p['result']['down (503)'][1] ?? null], [true, 'note']);
+$p = $plant('_core/PublicWebsiteSetup.php', $pwStateRule, "(\$status >= 400 && \$status <= 499) ? 'note' : 'problem'", $scnPwLive);
+check('P102 (round 6) with the line at "400-499", a 404 — often a lapsed or misconfigured domain — is shown for information rather than as needing attention',
+    [$p['applied'], $p['result']['no site here (404)'][1] ?? null], [true, 'note']);
+$p = $plant('_core/PublicWebsiteSetup.php', $pwStateRule, "(\$status >= 400 && \$status !== 500 && \$status !== 503) ? 'note' : 'problem'", $scnPwVerdicts);
+check('P103 (round 6, the checker\'s plant) with only 500 and 503 kept as "Needs attention", a 502 or 504 — the commonest proxy "down" answers — would read "For information"; W17 now asks every 5xx',
+    [$p['applied'], $p['result']['HTTP 502'][0] ?? null, $p['result']['HTTP 504'][0] ?? null], [true, 'note', 'note']);
+$p = $plant('_core/PublicWebsiteSetup.php', 'public const TURNED_AWAY_STATUSES = [401, 403, 429];', 'public const TURNED_AWAY_STATUSES = [401, 403, 404, 429];', $scnPwVerdicts);
+check('P104 (round 6) with 404 added to the "turned away" list, W17 notices the list changed', [$p['applied'], $p['result']['HTTP 404'][0] ?? null], [true, 'note']);
 $p = $plant('_core/PublicWebsiteSetup.php', "if (\$status === 200 && ((\$got['ok'] ?? false) === true || (\$got['capped'] ?? false) === true)) {", 'if ($status === 200) {', $scnPwLive);
 check('P97 with any 200 counted as answered, a 200 whose connection was cut off is said to have answered', [$p['applied'], $p['result']['cut off'] ?? null], [true, [200, 'ok', 'it answered.']]);
 $p = $plant('_apps/admin/roles/index.php', '<?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>', '<?php if (false): ?>', $scnPwRolesWarning);
