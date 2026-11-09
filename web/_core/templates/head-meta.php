@@ -136,10 +136,17 @@ if ($pageDescription === '') {
 // later; a per-page flag would be one more thing for the next error page to
 // forget. 400 and above only: a 2xx is a real page, and a 3xx draws nothing.
 //
-// WHAT IT CANNOT DO: see a code set AFTER this file has run. Nothing here does
-// that (a status line is sent with the first byte of the page, so it would not
-// take effect anyway). `http_response_code()` answers `false` where there is
-// no web request at all; that is treated as an ordinary page.
+// WHAT IT CANNOT DO: see a code set AFTER this file has run. One thing does
+// set one then — the global exception handler in bootstrap.php, when a page
+// throws after it has drawn its header: it sets 500 and draws the error page,
+// but this file has already written the first head's canonical address and
+// preview card under a 200. Where PHP buffers its output (php.ini-production's
+// `output_buffering = 4096`, which many hosts use) that answer really goes out
+// as a 500 still carrying them (measured by round 1 of the check on #823);
+// without buffering the code cannot change and the answer stays a 200. This is
+// no worse than before #823, when every answer carried them.
+// `http_response_code()` answers `false` where there is no web request at all;
+// that is treated as an ordinary page.
 $headMetaStatus = http_response_code();
 $headMetaIsError = is_int($headMetaStatus) === true && $headMetaStatus >= 400;
 $canonicalPathForPage = (isset($pageCanonicalPath) === true && is_string($pageCanonicalPath) === true)

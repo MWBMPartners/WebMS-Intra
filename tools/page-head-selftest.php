@@ -53,8 +53,8 @@
  *     out, and an ADMINISTRATOR for part I (Settings needs one; the Dashboard
  *     needs anybody signed in). Every other page here is fetched signed out.
  *     So the only signed-in pages read through the shared header are the
- *     Dashboard, Settings and /help (I05); nothing else behind the sign-in is
- *     covered.
+ *     Dashboard, Settings, /help (I05) and the two 404 pages (I03, I04);
+ *     nothing else behind the sign-in is covered.
  *   - Part I proves the error rule on 404 answers only. A 403 or 500 answer
  *     goes through the same test in head-meta.php (the response code, which
  *     `Router::renderError()` sets before drawing), but no 403 or 500 page is
