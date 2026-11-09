@@ -23,6 +23,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\DbServer;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -927,7 +928,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    page every time a file of refused rows is imported
                     //    again — and, where an installation has chosen to be
                     //    e-mailed about "Error" records, a message per row.
-                    $refusedLines = [];
+                    $rowLines     = [];
+                    $serverLines  = [];
                     $faultLines   = [];
                     $lostLine     = '';
                     $lostCode     = 0;
@@ -957,14 +959,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    killed). Each is asked only of its own engine,
                     //    because the two number their codes independently and
                     //    a number one uses may mean something else to the
-                    //    other. `server_info` is read from what the connection
-                    //    already holds; it sends nothing.
-                    $onMariaDb   = stripos((string) $mysqli->server_info, 'mariadb') !== false;
+                    //    other. Which engine this is comes from
+                    //    `DbServer::classify()`, the ONE place that answers
+                    //    that question; `server_info` is what the connection
+                    //    already holds, so asking sends nothing.
+                    $onMariaDb   = DbServer::classify((string) $mysqli->server_info)['family'] === 'mariadb';
                     $lostTheLine = static function (int $code) use ($onMariaDb): bool {
                         if ($code >= 2000 && $code <= 2999) {
                             return true;
                         }
                         return $onMariaDb === true ? $code === 1927 : $code === 4031;
+                    };
+
+                    // 🧾 WHICH REFUSALS ARE ABOUT THE ROW, and which are about
+                    //    the DATABASE. The two go to different people.
+                    //
+                    //    A refusal about the ROW is the file's problem, and the
+                    //    organisation administrator looking at the results list
+                    //    can fix it: a duplicate web address (1062), a value
+                    //    too long (1406), out of range (1264), cut short
+                    //    (1265), of the wrong kind (1366) or not a real date or
+                    //    time (1292), an empty required value (1048), a
+                    //    category or type that is not there (1452), a CHECK rule
+                    //    the row breaks (MySQL 3819, MariaDB 4025), and a
+                    //    trigger's own refusal (1644, which is how a trigger
+                    //    says "not this row"). Each is decided by the row's own
+                    //    values.
+                    //
+                    //    EVERY OTHER refusal is about the database itself — a
+                    //    full table or disk (1114, 1021), a database set to
+                    //    read-only (1290, 1836), a lock wait or deadlock
+                    //    (1205, 1213), a replication hook (3100) — and the
+                    //    person looking at the list cannot fix it. The
+                    //    installation's administrator, who may be a different
+                    //    party, can. So those are recorded as "Error", the
+                    //    level an installation can choose to be e-mailed about.
+                    //
+                    // ⚠️ THE FIRST VERSION RECORDED EVERY REFUSAL AS
+                    //    "Notification" under a comment calling every refused
+                    //    row "the file's problem". For a full disk or a
+                    //    read-only database that was untrue, and an
+                    //    installation that had asked to be e-mailed about
+                    //    "Error" stopped hearing about exactly the faults only
+                    //    it could fix. Found by the second independent check.
+                    //
+                    //    An unknown code falls on the "Error" side on purpose:
+                    //    wrongly telling the installation's administrator is a
+                    //    nuisance, wrongly not telling them hides a fault.
+                    //    3819 and 4025 are asked only of their own engine, for
+                    //    the reason given above for 4031 and 1927.
+                    $describesTheRow = static function (int $code) use ($onMariaDb): bool {
+                        if (in_array($code, [1048, 1062, 1264, 1265, 1292, 1366, 1406, 1452, 1644], true) === true) {
+                            return true;
+                        }
+                        return $onMariaDb === true ? $code === 4025 : $code === 3819;
                     };
                     foreach ($rows as $r) {
                         if (count($r['errors'] ?? []) > 0) {
@@ -1135,13 +1183,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     . 'the web address made from this name ("' . $slug . '") — possibly an event that has since been '
                                     . 'deleted. Nothing from this row was saved. Give the event a different name and import '
                                     . 'it again.';
-                            } else {
+                            } elseif ($describesTheRow($code) === true) {
                                 $refusal = 'Not imported: the database refused this row (error ' . $code . ': '
                                     . $refused->getMessage() . '). Nothing from this row was saved.';
+                            } else {
+                                $refusal = 'Not imported: the database refused this row (error ' . $code . ': '
+                                    . $refused->getMessage() . '). Nothing from this row was saved. This is a '
+                                    . 'problem with the database, not with the row, and it has been recorded for '
+                                    . 'whoever looks after the portal.';
                             }
                             if ($unknown === false) {
-                                $refusedLines[] = 'row ' . (int) $r['rowNum'] . ' (error ' . $code . '): '
-                                    . $refused->getMessage();
+                                $line = 'row ' . (int) $r['rowNum'] . ' (error ' . $code . '): ' . $refused->getMessage();
+                                if ($describesTheRow($code) === true) {
+                                    $rowLines[] = $line;
+                                } else {
+                                    $serverLines[] = $line;
+                                }
                             }
                         } catch (\Throwable $fault) {
                             // 🧯 Anything else: a fault in THIS PAGE's own code
@@ -1192,28 +1249,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
 
                     // 📋 ONE record per kind, per import (see above), each
-                    //    worded for what actually happened. A refused row is
-                    //    the file's problem, shown in full on the page the
+                    //    worded for what actually happened.
+                    //
+                    //    A refusal about the ROW (`$describesTheRow`) is the
+                    //    file's problem, shown in full on the page the
                     //    administrator is looking at, so it is a
                     //    "Notification" — the lowest level, which the alert
                     //    e-mail leaves out unless an installation has asked
                     //    for it (`portal.alerts.severities`, by default
-                    //    "Critical,Fatal"). The title carries no count, so the
-                    //    alert's cool-down (keyed on platform, code and title)
-                    //    treats repeated imports as the same thing. A fault in
-                    //    the page and a lost connection are the portal's
-                    //    problems, so they are "Error". The lost connection's
-                    //    record says the connection was lost — never
-                    //    "refused" — and it usually lands only in PHP's own
-                    //    log, because the database it would be written to is
-                    //    the one that went.
-                    if (count($refusedLines) > 0) {
+                    //    "Critical,Fatal").
+                    //
+                    //    A refusal about the DATABASE, a fault in the page and
+                    //    a lost connection are the portal's problems, so they
+                    //    are "Error". The titles carry no count, so the alert's
+                    //    cool-down (keyed on platform, code and title) treats
+                    //    repeated imports as the same thing; only "row" and
+                    //    "rows" differ. The lost connection's record says the
+                    //    connection was lost — never "refused" — and it
+                    //    usually lands only in PHP's own log, because the
+                    //    database it would be written to is the one that went.
+                    if (count($rowLines) > 0) {
                         Logger::errorPlatform(
                             'MySQL',
                             'Notification',
                             'CALENDAR_IMPORT_ROWS_REFUSED',
-                            'Rows of a calendar file import were refused by the database',
-                            count($refusedLines) . " row(s) refused:\n" . implode("\n", $refusedLines)
+                            count($rowLines) === 1
+                                ? 'A row of a calendar file import was refused by the database'
+                                : 'Rows of a calendar file import were refused by the database',
+                            count($rowLines) . " row(s) refused:\n" . implode("\n", $rowLines)
+                        );
+                    }
+                    if (count($serverLines) > 0) {
+                        Logger::errorPlatform(
+                            'MySQL',
+                            'Error',
+                            'CALENDAR_IMPORT_DATABASE_REFUSED',
+                            count($serverLines) === 1
+                                ? 'The database refused a row of a calendar file import for a reason of its own'
+                                : 'The database refused rows of a calendar file import for a reason of its own',
+                            count($serverLines) . " row(s) refused by the database itself, not because of the "
+                                . "row:\n" . implode("\n", $serverLines)
                         );
                     }
                     if (count($faultLines) > 0) {
@@ -1221,7 +1296,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'PHP',
                             'Error',
                             'CALENDAR_IMPORT_ROW_FAULT',
-                            'Rows of a calendar file import could not be got ready for saving',
+                            count($faultLines) === 1
+                                ? 'A row of a calendar file import could not be got ready for saving'
+                                : 'Rows of a calendar file import could not be got ready for saving',
                             implode("\n", $faultLines)
                         );
                     }

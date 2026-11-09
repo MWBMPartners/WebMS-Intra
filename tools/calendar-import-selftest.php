@@ -34,11 +34,14 @@
  *      second is refused in plain words and the row after it is imported
  *   T  a refusal carrying a SERVER code above 3000 (3819, a broken CHECK rule)
  *      is a refusal, not a lost connection: the row after it is still saved
+ *   U  a refusal about the DATABASE (1114, a full table) is recorded as
+ *      "Error", where a refusal about the ROW (section G) is "Notification"
  *   P  THE PLANT: with the loop's two `catch` blocks made unable to catch
  *      anything — exactly the old loop's behaviour — the same file goes red.
  *      Then the plant is taken out and the scenario is green again. A second
  *      plant puts back "every code from 2000 up is a lost connection", and
- *      section T's file goes red.
+ *      section T's file goes red. Two more collapse the row-or-database
+ *      split, once each way, and sections U and G go red.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It does not drive a LOST CONNECTION part-way through (the "whether it
@@ -147,6 +150,13 @@ const TRIGGER_TEXT = 'p790 test trigger: this row is refused on purpose';
 //    as a lost connection, and section T exists to keep that from coming back.
 const REFUSED_3819_NAME = 'P790 refused 3819';
 const TRIGGER_3819_TEXT = 'p790 test trigger: refused with a server code above 3000';
+// 🗄️ A third name, refused with MYSQL_ERRNO 1114 — "the table is full". That
+//    is about the DATABASE, not the row: the person looking at the results
+//    cannot fix it, the installation's administrator can, so it must be
+//    recorded as "Error" (section U). 1644 above is about the ROW, so it is
+//    "Notification" (section G). The first version recorded both the same.
+const REFUSED_1114_NAME = 'P790 refused 1114';
+const TRIGGER_1114_TEXT = 'p790 test trigger: the table is full, on purpose';
 $db->query('DROP TRIGGER IF EXISTS `p790_refuse_one_row`');
 try {
     $db->query(
@@ -155,6 +165,8 @@ try {
         . "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = '" . TRIGGER_TEXT . "'; "
         . "ELSEIF NEW.`eventName` = '" . REFUSED_3819_NAME . "' THEN "
         . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_3819_TEXT . "', MYSQL_ERRNO = 3819; "
+        . "ELSEIF NEW.`eventName` = '" . REFUSED_1114_NAME . "' THEN "
+        . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_1114_TEXT . "', MYSQL_ERRNO = 1114; "
         . "END IF; END"
     );
 } catch (Throwable $e) {
@@ -597,6 +609,8 @@ check('G4 ...and it never says the connection was lost, because it was not',
     str_contains($recorded[0] ?? '', 'connection was lost'), false);
 check('G2 ...and it says which row of an import it was',
     str_contains($recorded[0] ?? '', 'row 3'), true);
+check('G5 ...and its title speaks of ONE row, because one was refused',
+    str_contains($recorded[0] ?? '', '| A row of a calendar file import was refused by the database |'), true);
 
 echo "H. Pressing Confirm again imports nothing a second time\n";
 $again = $http('POST', '/calendar/manage/import', [
@@ -636,6 +650,8 @@ check('S4 the database holds exactly what the list says',
 $dupRecords = array_values(array_filter($s['errors'], static fn (string $e): bool => str_contains($e, 'calendar file import')));
 check('S6 TWO refused rows make ONE error record for the import, not one per row', count($dupRecords), 1);
 check('S7 ...which counts both rows', str_contains($dupRecords[0] ?? '', '2 row(s) refused'), true);
+check('S8 ...under a title that speaks of rows, and at "Notification" (a duplicate is the row\'s problem)',
+    str_starts_with($dupRecords[0] ?? '', 'Notification | Rows of a calendar file import were refused by the database |'), true);
 
 echo "T. A server code above 3000 is a REFUSAL, not a lost connection\n";
 $csv3819 = $child . $sep . 'p790-3819.csv';
@@ -665,13 +681,46 @@ check('T3 ...THE ROW AFTER IT IS SAVED — under the first version it was never 
     $t['events'], ['P790 T before', 'P790 T after']);
 check('T4 ...and the page does not claim the connection was lost', $t['lostBox'], false);
 
+echo "U. A refusal about the DATABASE, not the row, is recorded as an Error\n";
+$csv1114 = $child . $sep . 'p790-1114.csv';
+file_put_contents(
+    $csv1114,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 U before\",2031-05-01 10:00:00,2031-05-01 11:00:00,published\n"
+    . '"' . REFUSED_1114_NAME . "\",2031-05-02 10:00:00,2031-05-02 11:00:00,published\n"
+    . "\"P790 U after\",2031-05-03 10:00:00,2031-05-03 11:00:00,published\n"
+);
+/** Section U's file, reduced to what the checks and the plants compare. */
+$scnDatabaseRefusal = static function () use ($runImport, $csv1114): array {
+    $u = $runImport($csv1114);
+    $mine = array_values(array_filter($u['errors'], static fn (string $e): bool => str_contains($e, TRIGGER_1114_TEXT)));
+    return [
+        'lines'   => array_map(static fn (array $line): string => $line[0], $u['report']),
+        'msg3'    => $u['report'][3][1] ?? '',
+        'events'  => array_values($u['events']),
+        'records' => $mine,
+    ];
+};
+$u = $scnDatabaseRefusal();
+check('U1 the row refused with 1114 is "Skipped", and the rows either side are imported',
+    $u['lines'], [2 => 'OK', 3 => 'Skipped', 4 => 'OK']);
+check('U2 ...and the page says it is a problem with the database, not with the row',
+    str_contains($u['msg3'], 'This is a problem with the database, not with the row'), true);
+check('U3 ...the database really holds the two rows either side', $u['events'], ['P790 U before', 'P790 U after']);
+check('U4 exactly one error record carries the database\'s words', count($u['records']), 1);
+check('U5 ...at "Error", the level an installation can choose to be e-mailed about, so the person who CAN fix '
+    . 'a full table hears of it',
+    str_starts_with($u['records'][0] ?? '', 'Error | '), true);
+check('U6 ...with a singular title, because one row was refused',
+    str_contains($u['records'][0] ?? '', '| The database refused a row of a calendar file import for a reason of its own |'), true);
+
 // 🔇 Read BEFORE the plant, which throws on purpose and fills the log.
 $phpLog  = (string) @file_get_contents($child . $sep . 'php-errors.log');
 $ownLines = array_values(array_filter(
     explode("\n", $phpLog),
     static fn (string $line): bool => str_contains($line, 'manage' . DIRECTORY_SEPARATOR . 'import.php')
 ));
-check('S5 the import page wrote no PHP error, warning or notice in sections A to T', $ownLines, []);
+check('S5 the import page wrote no PHP error, warning or notice in sections A to U', $ownLines, []);
 
 echo "P. The plant: the old loop, with nothing catching, goes RED\n";
 // 🚨 THIS IS WHAT MAKES THE CHECKS ABOVE WORTH HAVING. The plant makes both
@@ -725,6 +774,31 @@ check('P7 with "2000 and above" put back, the 3819 row is reported as a lost con
     $t['lines'][3] ?? null, 'Not known');
 check('P8 ...and the row after it is never tried', $t['events'], ['P790 T before']);
 check('P9 ...and the page claims the connection was lost', $t['lostBox'], true);
+
+// 🧾 The third and fourth plants collapse the row-or-database split, once in
+//    each direction, so neither half of it is guarded by nothing.
+$splitTest = 'if (in_array($code, [1048, 1062, 1264, 1265, 1292, 1366, 1406, 1452, 1644], true) === true) {';
+if (substr_count($before, $splitTest) !== 1) {
+    refuse('section P could not find exactly one copy of the row-or-database test in the copied page');
+}
+file_put_contents($pagePath, str_replace($splitTest, 'if (true) {', $before));
+clearstatcache(true, $pagePath);
+$startServer();
+$waitForServer();
+$u = $scnDatabaseRefusal();
+check('P10 with every refusal counted as the row\'s problem, the full table is recorded as a mere Notification',
+    str_starts_with($u['records'][0] ?? '', 'Notification | '), true);
+check('P11 ...so section U\'s U5 would have gone red', str_starts_with($u['records'][0] ?? '', 'Error | '), false);
+
+file_put_contents($pagePath, str_replace($splitTest, 'if (false) {', $before));
+clearstatcache(true, $pagePath);
+$startServer();
+$waitForServer();
+$g = $runImport();
+$gRecorded = array_values(array_filter($g['errors'], static fn (string $e): bool => str_contains($e, TRIGGER_TEXT)));
+check('P12 with no refusal counted as the row\'s problem, the trigger\'s refusal of one row is recorded as an Error',
+    str_starts_with($gRecorded[0] ?? '', 'Error | '), true);
+check('P13 ...so section G\'s G3 would have gone red', str_starts_with($gRecorded[0] ?? '', 'Notification | '), false);
 
 file_put_contents($pagePath, $before);
 clearstatcache(true, $pagePath);
