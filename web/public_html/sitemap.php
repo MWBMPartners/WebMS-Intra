@@ -74,6 +74,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\EventVisibility;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Site;
 
 // -----------------------------------------------------------------------------
@@ -229,8 +230,12 @@ $siteId = Site::id();
 //    ⚠️ The sitemap is cached for an hour, and a search engine keeps what it
 //    already took; narrowing an event cannot pull back an earlier copy.
 try {
+    // 🌐 #493 P1: an event is listed only when somebody allowed to publish
+    //    ticked "Show on the public website" and today is inside its dates
+    //    (D-057, D-078); a copied-in event follows its organisation's rule
+    //    (D-080, D-081). Until then every published event was listed here.
     $today      = date('Y-m-d');
-    $visibility = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today);
+    $visibility = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today, PublicWebsite::copiedRuleFor($db, $siteId));
     // 🕰️ #804, LEFT ON PURPOSE: `endDateTime >= NOW()` compares a reading of
     //    the event's own clock with the DATABASE SERVER's, so an event can
     //    leave this list some hours early or late. Nobody reads that edge:

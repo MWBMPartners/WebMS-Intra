@@ -413,7 +413,7 @@
           "startDateTime": {
             "type": "string",
             "example": "2026-06-01T10:00:00",
-            "description": "Required. When the event starts, **written on the clock of `timezone`** — or of the organisation's own zone when `timezone` is left out. **A value with no offset is stored EXACTLY as sent and no time zone is applied to it**, because this field holds a reading from a clock rather than a moment in history: `2026-03-29T01:30` is stored as `01:30` even where that hour does not exist in the zone. Accepted shapes for such a value: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DDTHH:MM`, with optional `:SS`; `YYYY-MM-DDTHH` (an hour alone); and ISO 8601 **basic** form `YYYYMMDDTHHMMSS` (or `THHMM`), which is this portal's own iCalendar format, so an `.ics` feed can be pushed back through this endpoint. The `T` may be lower case. A date with no time means midnight on it; a bare eight-digit number is NOT read as a date. **A fractional part is accepted only directly after the SECONDS**: `10:00:00.000` is read and the fraction dropped, while `10:00.5` is refused with 400 rather than read as ten o'clock \u2014 in ISO 8601 a fraction belongs to the lowest component written, so `10:00.5` means 10:00:30, and dropping it would silently lose up to 59 minutes. The basic form takes no fractional part at all. **Looser text is refused with 400** — `June 1 2026 10:00`, `2026-6-1T10:00`, a day-first date, a double space. A value carrying its own offset (`+02:00`, `-0500`, `-05`, a trailing `Z` or `z`) IS a moment: it is converted onto the event's clock and stored as that clock's reading — **and it must match the same shapes**, so `01/06/2026 10:00 +0100` is refused rather than read month-first, and a bare `Z` is refused rather than meaning now. The same fractional rule applies whether or not the value carries an offset. An impossible date such as `2026-02-31` is refused on both sides rather than rolled forward."
+            "description": "Required. When the event starts, **written on the clock of `timezone`** — or of the organisation's own zone when `timezone` is left out. **A value with no offset is stored EXACTLY as sent and no time zone is applied to it**, because this field holds a reading from a clock rather than a moment in history: `2026-03-29T01:30` is stored as `01:30` even where that hour does not exist in the zone. Accepted shapes for such a value: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DDTHH:MM`, with optional `:SS`; `YYYY-MM-DDTHH` (an hour alone); and ISO 8601 **basic** form `YYYYMMDDTHHMMSS` (or `THHMM`), which is this portal's own iCalendar format, so an `.ics` feed can be pushed back through this endpoint. The `T` may be lower case. A date with no time means midnight on it; a bare eight-digit number is NOT read as a date. **A fractional part is accepted only directly after the SECONDS**: `10:00:00.000` is read and the fraction dropped, while `10:00.5` is refused with 400 rather than read as ten o'clock — in ISO 8601 a fraction belongs to the lowest component written, so `10:00.5` means 10:00:30, and dropping it would silently lose up to 59 minutes. The basic form takes no fractional part at all. **Looser text is refused with 400** — `June 1 2026 10:00`, `2026-6-1T10:00`, a day-first date, a double space. A value carrying its own offset (`+02:00`, `-0500`, `-05`, a trailing `Z` or `z`) IS a moment: it is converted onto the event's clock and stored as that clock's reading — **and it must match the same shapes**, so `01/06/2026 10:00 +0100` is refused rather than read month-first, and a bare `Z` is refused rather than meaning now. The same fractional rule applies whether or not the value carries an offset. An impossible date such as `2026-02-31` is refused on both sides rather than rolled forward."
           },
           "endDateTime": {
             "type": "string",
@@ -508,6 +508,25 @@
             "type": "boolean",
             "default": false,
             "description": "Promote the event — pin it to the top of a listing, or show it on a highlights panel."
+          },
+          "showOnWebsite": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the event may appear on the organisation's PUBLIC WEBSITE (the countdown widget and the sitemap; #493, D-057). **Defaults to false**, and an event appears there only while this is true AND `isPublic` is true AND today, on the organisation's calendar, is inside `websiteFrom`..`websiteUntil`. Accepted: `true`, `false`, `1`, `0`, `\"1\"`, `\"0\"`, `\"true\"`, `\"false\"`; anything else is refused with 422. **Changing it needs the permission \"Choose what appears on the public website\"** (an administrator of the organisation always holds it, D-077): **an API key never does, because a key is not a person**, so a key that sends a value different from the stored one (on create, anything that is not off — `false`, `0`, `\"0\"` and `\"false\"` all mean off) is refused with 403, nothing is created or changed, and the refusal is recorded. Sending the value already stored is not a change and is accepted. On update, a body whose only fields are these three and all unchanged answers 200 and changes nothing — not even the event's last-changed time."
+          },
+          "websiteFrom": {
+            "type": "string",
+            "format": "date",
+            "nullable": true,
+            "example": "2026-05-25",
+            "description": "The first day the event may appear on the public website (D-078), **both ends inclusive**, written `YYYY-MM-DD` (from the year 1000). A calendar date on the ORGANISATION's calendar, not a moment and not the event's own time zone. `null` or `\"\"` means no limit on that side. It only narrows `showOnWebsite`; it never puts an event on the website by itself. Anything else, an impossible date such as `2026-02-31`, or a value after `websiteUntil`, is refused with 422. Changing it needs the same permission as `showOnWebsite`, so an API key cannot."
+          },
+          "websiteUntil": {
+            "type": "string",
+            "format": "date",
+            "nullable": true,
+            "example": "2026-06-01",
+            "description": "The last day the event may appear on the public website (D-078), inclusive, written `YYYY-MM-DD`; the same rules as `websiteFrom`. `null` or `\"\"` means no limit. A value before `websiteFrom` is refused with 422."
           },
           "description": {
             "type": "string",
@@ -2060,7 +2079,10 @@
             "description": "Validation error"
           },
           "403": {
-            "description": "Admin required or CSRF failed"
+            "description": "Admin required, or CSRF failed, or a request asked to change whether the event is on the public website (`showOnWebsite`, `websiteFrom`, `websiteUntil`) without the permission \"Choose what appears on the public website\" — which an API key never has (#493, D-077). Nothing was saved."
+          },
+          "422": {
+            "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an unknown time zone, an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
           },
           "429": {
             "description": "Too many requests on this API key. Only a request authenticated by a bearer key can be refused this way — a sign-in session is not rate-limited here — and a `Retry-After` header says how long to wait. The ceiling and the window are installation settings, 300 requests per 5 minutes by default.",
@@ -2117,6 +2139,12 @@
           },
           "400": {
             "description": "Validation error"
+          },
+          "403": {
+            "description": "Admin required, or CSRF failed, or a request asked to change whether the event is on the public website (`showOnWebsite`, `websiteFrom`, `websiteUntil`) without the permission \"Choose what appears on the public website\" — which an API key never has (#493, D-077). Nothing was saved."
+          },
+          "422": {
+            "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
           },
           "404": {
             "description": "Event not found"
@@ -4603,7 +4631,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias). On events, also: the request asked to change `showOnWebsite`, `websiteFrom` or `websiteUntil` without the permission \"Choose what appears on the public website\", which an API key never has (#493, D-077); nothing was saved.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4611,6 +4639,9 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an unknown time zone, an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
           },
           "405": {
             "description": "Method not allowed for this resource/shape — see the `Allow` response header for the verbs this resource actually supports.",
@@ -4830,7 +4861,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias). On events, also: the request asked to change `showOnWebsite`, `websiteFrom` or `websiteUntil` without the permission \"Choose what appears on the public website\", which an API key never has (#493, D-077); nothing was saved.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4838,6 +4869,9 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
           },
           "404": {
             "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
@@ -4958,7 +4992,7 @@
             }
           },
           "403": {
-            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias).",
+            "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias). On events, also: the request asked to change `showOnWebsite`, `websiteFrom` or `websiteUntil` without the permission \"Choose what appears on the public website\", which an API key never has (#493, D-077); nothing was saved.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4966,6 +5000,9 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
           },
           "404": {
             "description": "Resource not found — including a cross-site id probe, which 404s rather than 403 so it never confirms another tenant’s row exists.",
@@ -12330,7 +12367,7 @@
           "Translation"
         ],
         "summary": "Translate one published item into a language",
-        "description": "Translates one field of one published item and answers the translated words.\n\n**A SIGNED-IN MEMBER ONLY, and an API key is refused with 403 before anything is resolved.** Translating sends the text to an outside translation company on the reading member's own permission, and a key belongs to a system, which has no such permission to give.\n\n**The member must have switched translation on for their own account** (Account → Translation). Without that the request is refused with 403 and nothing is sent anywhere.\n\n**The text is NOT sent in the request.** Only the table and the row number are, and the portal reads the words itself through that row's own visibility rule. A row belonging to another organisation, an unpublished one, or one outside its own publish/expiry dates is answered 404 — the same answer as a row that does not exist, so a refusal never reveals whether it does.\n\n**Only three things are translatable**, all of them the organisation's own published words: an announcement's `body`, a project's `description`, and the `content` of an update posted against a project. **A prayer request is deliberately not translatable** and never will be through this endpoint: it is a member's own words, usually about a third person who has no way to agree to their circumstances being sent to another company.\n\n**The first translation of a piece into a language is paid for; after that it is served from the cache and costs nothing, until the piece's words are edited.** An edited piece is translated again on the next request, which is paid for and counted like any other, and its new translation replaces the old one; the translation of the old words is never served once the original has changed. The organisation has TWO monthly limits, counted per calendar month in UTC: the money the translation company reports charging, and the number of requests sent to it (which still works for a company that reports no cost, such as LibreTranslate). Once either is reached, a piece that has not been translated before, or whose words have been edited since it was, is refused with 503 while pieces already translated from their current words keep being served. The message is the same for both limits and does not say which; an administrator sees which on the Translation admin page. If this month's use cannot be read, nothing is sent and the answer is 503 with a message saying the limit could not be checked. If the chosen translation company has no key, or is not one the portal knows, nothing is sent or counted and the answer is 503 saying translation has not been fully set up. When the outside company simply failed to answer, the 503 says that and never claims a limit was reached — the message names the cause the portal can establish and asserts nothing it cannot.\n\nAnswers the portal's usual `{status, data, meta}` envelope, so the replacement form token arrives as `meta.csrfToken` — on most refusals as well as on success, because they are reached after the token was replaced. Several refusals are answered BEFORE the token is rotated and therefore carry no `meta.csrfToken`: not signed in (401), a wrong method (405), a request using an API key (403), a refused form token (403), the endpoint being switched off (403), and the Translation app being switched off for the organisation in Admin \u2192 Apps (403, `The Translation app is switched off for this organisation.`, answered before the handler is loaded, like any other switched-off app). **Its absence therefore means the token you hold is unchanged, not that it is dead** — only the refused-form-token case means yours is no longer usable, and nothing in the answer distinguishes it, so a caller that cannot tell should fetch a page rather than discard a good token.",
+        "description": "Translates one field of one published item and answers the translated words.\n\n**A SIGNED-IN MEMBER ONLY, and an API key is refused with 403 before anything is resolved.** Translating sends the text to an outside translation company on the reading member's own permission, and a key belongs to a system, which has no such permission to give.\n\n**The member must have switched translation on for their own account** (Account → Translation). Without that the request is refused with 403 and nothing is sent anywhere.\n\n**The text is NOT sent in the request.** Only the table and the row number are, and the portal reads the words itself through that row's own visibility rule. A row belonging to another organisation, an unpublished one, or one outside its own publish/expiry dates is answered 404 — the same answer as a row that does not exist, so a refusal never reveals whether it does.\n\n**Only three things are translatable**, all of them the organisation's own published words: an announcement's `body`, a project's `description`, and the `content` of an update posted against a project. **A prayer request is deliberately not translatable** and never will be through this endpoint: it is a member's own words, usually about a third person who has no way to agree to their circumstances being sent to another company.\n\n**The first translation of a piece into a language is paid for; after that it is served from the cache and costs nothing, until the piece's words are edited.** An edited piece is translated again on the next request, which is paid for and counted like any other, and its new translation replaces the old one; the translation of the old words is never served once the original has changed. The organisation has TWO monthly limits, counted per calendar month in UTC: the money the translation company reports charging, and the number of requests sent to it (which still works for a company that reports no cost, such as LibreTranslate). Once either is reached, a piece that has not been translated before, or whose words have been edited since it was, is refused with 503 while pieces already translated from their current words keep being served. The message is the same for both limits and does not say which; an administrator sees which on the Translation admin page. If this month's use cannot be read, nothing is sent and the answer is 503 with a message saying the limit could not be checked. If the chosen translation company has no key, or is not one the portal knows, nothing is sent or counted and the answer is 503 saying translation has not been fully set up. When the outside company simply failed to answer, the 503 says that and never claims a limit was reached — the message names the cause the portal can establish and asserts nothing it cannot.\n\nAnswers the portal's usual `{status, data, meta}` envelope, so the replacement form token arrives as `meta.csrfToken` — on most refusals as well as on success, because they are reached after the token was replaced. Several refusals are answered BEFORE the token is rotated and therefore carry no `meta.csrfToken`: not signed in (401), a wrong method (405), a request using an API key (403), a refused form token (403), the endpoint being switched off (403), and the Translation app being switched off for the organisation in Admin → Apps (403, `The Translation app is switched off for this organisation.`, answered before the handler is loaded, like any other switched-off app). **Its absence therefore means the token you hold is unchanged, not that it is dead** — only the refused-form-token case means yours is no longer usable, and nothing in the answer distinguishes it, so a caller that cannot tell should fetch a page rather than discard a good token.",
         "security": [
           {
             "sessionCookie": [],
@@ -12434,7 +12471,7 @@
             }
           },
           "403": {
-            "description": "An API key was used; or the Translation app is switched off for this organisation (Admin \u2192 Apps), answered `The Translation app is switched off for this organisation.`; or this member has not switched it on for their own account; or `sourceTable` is not one of the three; or `targetLanguage` was empty or is not one of the thirteen languages the portal knows. The message says which, and none of them reveals whether any row exists. **A refused form token also answers 403.** Of the causes listed here, four carry no `meta.csrfToken` because they are answered before the token is rotated: an API key, a refused form token, the endpoint being switched off, and the Translation app being switched off. The other causes do carry it. **One more 403 does carry it:** a Translation switch stored by hand as `true` rather than `1` is counted as on by the router and as off by the handler, so the request is refused by the handler, after the token was replaced, saying translation is switched off; nothing is sent and nothing is charged.",
+            "description": "An API key was used; or the Translation app is switched off for this organisation (Admin → Apps), answered `The Translation app is switched off for this organisation.`; or this member has not switched it on for their own account; or `sourceTable` is not one of the three; or `targetLanguage` was empty or is not one of the thirteen languages the portal knows. The message says which, and none of them reveals whether any row exists. **A refused form token also answers 403.** Of the causes listed here, four carry no `meta.csrfToken` because they are answered before the token is rotated: an API key, a refused form token, the endpoint being switched off, and the Translation app being switched off. The other causes do carry it. **One more 403 does carry it:** a Translation switch stored by hand as `true` rather than `1` is counted as on by the router and as off by the handler, so the request is refused by the handler, after the token was replaced, saying translation is switched off; nothing is sent and nothing is charged.",
             "content": {
               "application/json": {
                 "schema": {

@@ -86,6 +86,9 @@ if (EventVisibility::isAdminOfSite($mysqli, $importsUserId, $importsSiteId) === 
                 'showCalendar' => true,
                 'orgZone'      => FeedResolver::organisationZone($importsSiteId),
                 'prefix'       => 'imports',
+                // 🌐 #493 P1: so "and on the public website" is said only where
+                //    the organisation's rule would really put it there.
+                'copiedRule'   => \Portal\Core\PublicWebsite::copiedRuleFor($mysqli, $importsSiteId),
             ]);
             ?>
             <?php if ($importsMore > 0): ?>

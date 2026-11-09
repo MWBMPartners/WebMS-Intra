@@ -36,8 +36,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h1 class="h3 mb-3"><i class="fa-solid fa-clock-rotate-left me-2 text-primary"></i>Countdown widget</h1>
     <p class="text-muted">
         Drop this little widget anywhere on your church's website and visitors
-        see a live countdown to your next scheduled service. Updates itself
+        see a live countdown to your next service. Updates itself
         automatically &mdash; no plugin, no account, no maintenance.
+    </p>
+    <?php
+    // 🌐 #493 P1, round 4 of its check: since migration 258 the countdown
+    //    shows an event only when somebody has ticked it for the public
+    //    website, and every event starts unticked, so this page promised a
+    //    "next scheduled service" that the preview below showed as "No
+    //    upcoming services". Say what it needs.
+    ?>
+    <p class="small text-muted">
+        It counts down only to an event that is on your public website: one of your own events that somebody
+        has ticked <strong>Show on the public website</strong> on (in Manage Events), that is published, marked
+        Public, still to come and inside its website dates; or an event copied in from an outside calendar that your organisation's
+        rule for copied-in events lets through (Admin, Outside calendars). Until there is one, it shows
+        &ldquo;No upcoming services&rdquo;.
     </p>
 
     <h2 class="h5 mt-4 mb-3">Preview</h2>

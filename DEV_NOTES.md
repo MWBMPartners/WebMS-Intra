@@ -21004,3 +21004,113 @@ what the portal will serve, asked of the portal's own rule.
   as wide as the badge, so only the title shrank. Once badges could wrap, a badge alone in a row's aside
   shrank too and split over two lines; the aside keeps `nowrap`. And `word-break: break-word` inherited
   from a `.text-break` cell would split a badge's word once it may wrap, so the badge resets it.
+
+### Show on the public website, for events (#493, package P1)
+
+`EventVisibility::where()` in "website" mode is still the ONE rule for who may see an event on the
+public website; `Portal\Core\PublicWebsite` decides the three things around it (who may change the
+switch, whether a posted change is allowed, and which copied-in rule an organisation is held to). Four
+lessons from its checking, each a shape worth recognising elsewhere.
+
+- **A new parameter with a STRICTER default narrows every caller that omits it — tests included.**
+  `where()` gained `$copiedRule`, defaulting to "one tick per event". That is right for a page (a caller
+  that forgets shows fewer events, never more), but `feed-resolver-selftest.php`'s E22 asserted that a
+  calendar-sourced event IS on the website, omitted the argument, and went red. The package had updated
+  two other tests for exactly this and missed the third. Before changing what a defaulted parameter
+  means, list every caller in `web/` AND `tools/`: here `grep -rn "MODE_WEBSITE" web/ tools/`.
+- **A rule "judged on the organisation's calendar" cannot be tested in an organisation on UTC on a UTC
+  machine.** Organisation 1 is seeded as UTC and the runners use UTC, so swapping `date()` for
+  `gmdate()` in either public reader could not be seen. Section D of the test moves the organisation to
+  Pacific/Kiritimati (UTC+14) from 10:00 UTC or Pacific/Pago_Pago (UTC-11) before it — neither has clock
+  changes, and one of them is always on a different day from UTC — asserts that premise first, and
+  plants `gmdate()` in each reader (P23, P24). #549's trap again: a fixture that cannot tell two zones
+  apart proves nothing about which one the code uses.
+- **Read a tick box by its VALUE, not by whether it arrived.** The handler first used
+  `isset($_POST['showOnWebsite'])`, which is right for a bare checkbox but reads the common "hidden 0,
+  then the box" pattern as ON when unticked. It passes the posted value to the judgement now, which
+  refuses anything that is not a plain true or false.
+- **Every place that says what "the public website" is must agree.** The form said "Nothing goes on the
+  public website until this is ticked", while other new text defined the public website as including the
+  search-engine markup on an event's page — which, for the portal's own events, follows "Public" alone
+  (#850). The form, the help page and `api-spec.json` now all name what the switch governs today: the
+  countdown and the sitemap. When the public door (P4) ships, it joins all three.
+
+`check_event_visibility.py`'s `LINE_ALLOWLIST` is keyed by LINE NUMBER, so the slug probe in
+`calendar/manage/save.php` moved three times in this package (537, 602, 607, 610); the check names a stale entry,
+so it fails loudly rather than silently, but expect to move it whenever lines are added above it.
+
+Round 4 of the check found the copied-in half leaking past the rule in two ways, both fixed in
+`FeedResolver` and the choice page, and a lesson about reaching a refusal:
+
+- **A box that "does nothing" on the website can still decide something elsewhere.** Under "one tick per
+  event" the calendar's own website box was ignored by the countdown and the sitemap, but
+  `FeedResolver::isWider()` still counted it as a yes already given, so ticking it made a choice's yes
+  "not wider", applied it at once and released every date waiting for approval. `isWider()` now compares
+  the yes that COUNTS under the rule, on BOTH sides, and `candidateAnswer()` STORES a yes only where it
+  counts, so a rule's yes under the stricter rule neither waits for approval nor is stored. Under "one box
+  per calendar" both are exactly what they were. Ask of any "inert" input: what ELSE reads it?
+- **Change what a value COUNTS for, never the value itself.** Round 4's first fix set a rule's website yes
+  to 0 where the rules' answer is formed, and round 5 of the check found that wrong twice: the rule preview
+  compared the changed answer with the draft as written and called every matching event "another rule is
+  stricter", and an approval is recorded against a fingerprint that includes the box, so an approval given
+  under one rule was lost the moment the rule changed. The answer now stays as written; only the widening
+  comparison and the stored value ask what counts.
+- **Round 6 then found the fingerprint itself must count, too — and that the two directions need
+  different answers.** With the box fingerprinted as written, an approval given under "one tick per
+  event", while the approvals page said the box "does nothing", was reused to put the event on the
+  website the moment the rule was loosened; and ticking that inert box sent every approved event back to
+  waiting. `requestHash()` now records the yes AS IT COUNTS, so the inert box changes nothing and
+  loosening asks again. Tightening would then lose an approval given with the yes counting, so the
+  approval gate's step (c) lets an approval of the WIDER request (the same, with the yes counted) cover
+  the narrower one; a decline of the wider one is not taken as a decline of the narrower. The cost, said
+  plainly: after loosening, a date whose rule (with its website box TICKED) was approved under the stricter
+  rule shows to its calendar's own audience until somebody approves it again.
+- **"Until the next refresh" was untrue, so the rule's save now re-works every calendar at once**
+  (`FeedAdmin::reworkCalendars()`, through `inFeedLock()`, the one place it resolves). A refresh that
+  finds the outside file unchanged returns before the resolver runs, for up to `UNCHANGED_SKIP_HOURS`
+  (20), so a switch could leave the old answer standing for about a day. Ask, of any sentence saying when
+  something takes effect, what actually runs then.
+- **Rounds 7 and 8 found the same machinery's edges, each by a case nobody had built:** step (c) must run
+  whatever the box says (unticking an inert box lost a carried approval); pass 2, the sibling decision,
+  must look for the wider approval too (a date added after tightening waited); only an APPROVAL of the
+  wider request is carried, never a pending or declined one; and a newer approval of the wider request
+  outranks an older decline of the narrower. Each has its own check and a plant that turns it red.
+- **A form pre-filled for a GROUP of things must read the group, not one member and not a default.** The
+  "every date" form, opened from a date with a choice of its own, was pre-ticked from that date (round 6:
+  widened one date's tick to the series), then from nothing (round 7: narrowed the series off the
+  website), then from the calendar's own box (round 8: ignored a rule holding the series off, so an
+  untouched Save published every date with no approval), then from the series' other dates (round 9: a
+  private or a stale date vetoed the tick). **Four rounds, four directions, so the inference was dropped**:
+  a NEW choice asks "Show these dates on the public website?" as Yes / No with neither chosen, and an
+  Everyone choice that does not answer it is refused. When repeated fixes to an inferred default keep
+  failing in new directions, stop inferring and ask.
+- **`settings-locks-selftest.php` (#836) ran nowhere** — in no workflow and not in the whole-suite runner —
+  until 8 November. Its first run found this package's new lock missing from the add and delete paths.
+  A test nobody runs guards nothing; `for f in tools/*-selftest.php; do grep -q "$(basename "$f")"
+  tools/run-all-selftests.sh || echo "$f"; done` lists any others.
+- **A form pre-filled from a stored value can turn an inert value into a live one.** The choice form copied
+  `importWebsite` into its website box, so an untouched Save under the stricter rule converted a calendar's
+  inert yes into a choice's live one. Pre-ticking "only a yes that counts" was tried next and failed too
+  (rounds 6 to 9); a new choice now pre-ticks nothing (see above). **And a redraw is a pre-fill as well:**
+  round 10 found the form redrawn after any OTHER refusal from the tidied post, where an unsent answer had
+  already become "No" — so it showed "No" chosen. A redraw takes a question's answer from what was really
+  sent, never from a value normalised for saving. Round 11 found that rule still incomplete in two shapes:
+  a DISABLED control is not sent either, so "nothing sent" on a saved choice's box can mean "switched off,
+  still ticked" — the redraw takes an unsent answer from the stored choice unless the box was live; and a
+  form drawn as a NEW choice, redrawn after an unrelated refusal once somebody else had saved a choice, came
+  back as that choice's form with its marker gone. **When a form's meaning depends on what it was drawn
+  as, carry that in the form and refuse a save whose premise has changed**, rather than patching each
+  path that loses it: a page drawn as new never saves over a choice that has appeared since. **And ask
+  it again under the lock** (round 12, #647's rule): the page's own read is outside the calendar's lock,
+  so two saves pressed together both passed it; `saveChoice()` now refuses `mustBeNew` over an existing
+  choice inside the transaction that would write. **And refusing the save was not enough** (round 13):
+  `saveChoice()` checks the form before it locks, so a post refused for another reason never reached that
+  ask, and the page was then drawn as the newer choice's form. The page asks once more on the very read it
+  is drawn from. Round 14 then found the half of that which matters — drawing the saved choice rather than
+  what was typed — was pinned by nothing: a test of a refusal must also check what the page is redrawn AS.
+- **A refusal no real account can reach is driven in a planted world.** In P1 every account that can open
+  Manage Events may publish, so the handler's refusal is reachable only with the permission planted to say
+  no (P25); without that, its `mayPublish()` call could be replaced by `true` with every check green.
+- **A premise checked only when it is certain to hold is no premise.** Section D chose its zone so that the
+  two days always differed at the moment of choosing; the real hazard was the clock moving during the
+  requests, so the premise is now checked again afterwards.

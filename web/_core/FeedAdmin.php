@@ -260,6 +260,17 @@ final class FeedAdmin
 
     private const NOT_FOUND_EVENT = 'That event could not be found.';
 
+    /**
+     * The refusal for a choice form drawn as NEW when a choice for that event and
+     * scope has appeared since (#493 P1, rounds 10 to 13 of its check). Asked three
+     * times: cheaply by the page before saving; by saveChoice() inside the
+     * calendar's lock, because two saves pressed at the same moment both pass the
+     * cheap read; and by the page again when it is redrawn after ANY refusal,
+     * because saveChoice() checks the form before it takes the lock, so a post it
+     * refuses for another reason never reaches the second ask (round 13).
+     */
+    public const CHOICE_APPEARED = 'A choice for this was saved from somewhere else while this page was open, so it now shows that choice. Nothing was saved: check it and save again if you want to change it.';
+
     private const NOT_FOUND_RULE = 'That rule could not be found.';
 
     private const NOT_FOUND_APPROVAL = 'That waiting date could not be found.';
@@ -1596,6 +1607,14 @@ final class FeedAdmin
      * `whoCanSee()`) — and `newlyWaitingHere` — the dates filed under THIS
      * choice that newly wait for approval — which the message is built from.
      *
+     * `$post['mustBeNew'] === true` (the choice page sets it when its form was
+     * drawn as a new choice) makes a choice that ALREADY EXISTS, found under
+     * the lock, a refusal with status `appeared` (CHOICE_APPEARED) rather than
+     * an update: the person never saw that choice, so saving over it would
+     * replace an answer they were never shown (#493 P1, round 12 of its check:
+     * the page's own earlier read is outside this lock, and two saves pressed
+     * together both passed it).
+     *
      * @param array<string,mixed> $post
      *
      * @return array{ok:bool, status:string, message:string}
@@ -1666,10 +1685,14 @@ final class FeedAdmin
         $waitingBefore = [];
         $seeBefore     = [];
         $seeToday      = '';
-        $result        = self::inFeedLock($db, $feedId, $siteId, function () use ($db, $feedId, $siteId, $scope, $uidHash, $key, $f, $userId, $seenMap, &$waitingBefore, &$seeBefore, &$seeToday): array {
+        $mustBeNew     = ($post['mustBeNew'] ?? false) === true;
+        $result        = self::inFeedLock($db, $feedId, $siteId, function () use ($db, $feedId, $siteId, $scope, $uidHash, $key, $f, $userId, $seenMap, $mustBeNew, &$waitingBefore, &$seeBefore, &$seeToday): array {
             $seeToday  = self::ruleToday($db, $siteId);
             $seeBefore = self::whoCanSee($db, $feedId, $siteId, $seeToday);
             $locked    = self::lockedChoice($db, $feedId, $siteId, $scope, $uidHash, $key);
+            if ($locked !== null && $mustBeNew === true) {
+                return ['ok' => false, 'status' => 'appeared', 'message' => self::CHOICE_APPEARED];
+            }
             if ($locked === null) {
                 $stmt = $db->prepare(
                     'INSERT INTO tblExternalEventChoices (siteID, feedID, scope, externalUidHash, '
@@ -2606,14 +2629,24 @@ final class FeedAdmin
      * " · not sent to API keys" when either applies.
      *
      * @param array<string,mixed> $calendarRow From `calendar()` or `calendars()`.
+     * @param string              $copiedRule  From `PublicWebsite::copiedRuleFor()` (#493).
      */
-    public static function audienceLabel(array $calendarRow): string
+    public static function audienceLabel(array $calendarRow, string $copiedRule = EventVisibility::COPIED_BY_EVENT): string
     {
         $level = (string) ($calendarRow['audienceLevel'] ?? '');
         if ($level === 'public') {
             $label = 'Everyone';
+            // 🌐 #493 P1 (round 1): the calendar's own box is a yes that came
+            //    from the CALENDAR, so it counts only where the rule says so
+            //    (EventVisibility::copiedTickCounts(), the one test). Under
+            //    "one tick per event" the label used to say "also on the public
+            //    website" while the website showed none of these events.
+            //    `$copiedRule` defaults to the stricter, so a caller that forgets
+            //    it under-claims rather than over-claims.
             if ((int) ($calendarRow['websiteOptIn'] ?? 0) === 1) {
-                $label .= ' · also on the public website';
+                $label .= EventVisibility::copiedTickCounts('calendar', $copiedRule) === true
+                    ? ' · also on the public website'
+                    : ' · website box ticked, but it does nothing under "one tick per event"';
             }
         } elseif ($level === 'members') {
             $label = 'Members';
@@ -2683,6 +2716,72 @@ final class FeedAdmin
     // =========================================================================
     // 🔒 The one locked sequence (plan section 4.2)
     // =========================================================================
+
+    /**
+     * Re-work who may see the events of EVERY calendar of one organisation —
+     * or of every organisation, for `$siteId` null — now (#493 P1, round 6 of
+     * its check; D-080, D-081). Called when the rule for copied-in events
+     * changes, because that rule decides what the resolver stores and what
+     * needs approval: without it a switch waited for each calendar's next
+     * refresh, and a refresh that finds the outside file unchanged does not
+     * re-work anything, so the old answer could stand for about a day.
+     *
+     * Each calendar goes through `inFeedLock()`, the ONE place this class
+     * resolves, with nothing to write first — locked, re-worked and committed
+     * on its own, so one calendar failing leaves the others done. A failure
+     * is counted, never thrown, and its own words are not logged (they can
+     * quote what the calendar holds).
+     *
+     * @return array{done:int, failed:int}
+     */
+    public static function reworkCalendars(\mysqli $db, ?int $siteId): array
+    {
+        $stmt = $siteId === null
+            ? $db->prepare('SELECT feedID, siteID FROM tblExternalFeeds ORDER BY feedID')
+            : $db->prepare('SELECT feedID, siteID FROM tblExternalFeeds WHERE siteID = ? ORDER BY feedID');
+        if ($siteId !== null) {
+            $stmt->bind_param('i', $siteId);
+        }
+        $stmt->execute();
+        $feeds = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        $done = 0;
+        $failed = 0;
+        foreach ($feeds as $feed) {
+            // Each calendar gets its own time (round 7 of the check): the one
+            // raise in allowTimeForLockedWork() happens once, so a whole
+            // installation shared ONE budget and running out ended the request
+            // after the rule was saved, with no message. Restarting the count
+            // per calendar is what set_time_limit() does; a host that forbids
+            // it, or a web server's own time-out, can still end a very large
+            // sweep, and the rule's save is recorded BEFORE the sweep begins.
+            // Never LOWER a host's longer limit (round 8): restart the count at
+            // the larger of the host's limit and LOCKED_WORK_SECONDS, as
+            // allowTimeForLockedWork() promises.
+            $limit = (int) ini_get('max_execution_time');
+            if ($limit !== 0 && function_exists('set_time_limit') === true) {
+                @set_time_limit(max($limit, self::LOCKED_WORK_SECONDS));
+            }
+            try {
+                $result = self::inFeedLock($db, (int) $feed['feedID'], (int) $feed['siteID'], static fn (): array => ['ok' => true]);
+                if (($result['ok'] ?? false) === true) {
+                    $done++;
+                } else {
+                    $failed++;
+                    error_log('[WebMS-Intra] FeedAdmin::reworkCalendars: outside calendar #' . (int) $feed['feedID'] . ' was not re-worked ('
+                        . (string) ($result['status'] ?? 'refused') . ')');
+                }
+            } catch (\Throwable $e) {
+                $failed++;
+                // The number and the kind of fault only, never its words: they
+                // can quote what the calendar holds.
+                error_log('[WebMS-Intra] FeedAdmin::reworkCalendars: outside calendar #' . (int) $feed['feedID'] . ' could not be re-worked ('
+                    . get_class($e) . ')');
+            }
+        }
+
+        return ['done' => $done, 'failed' => $failed];
+    }
 
     /**
      * Run `$work` inside a transaction holding this calendar's row lock —
@@ -3367,7 +3466,10 @@ final class FeedAdmin
      *     test the level and freshness too). Signature: "admins".
      *   - "public": everyone signed in or out (the general branch's public
      *     line); the public website only with `importWebsite = 1` (the
-     *     website branch); API keys only with the event's
+     *     website branch) AND, under the organisation's "one tick per event"
+     *     rule (D-080, D-081 — #493 P1), only when that answer came from a
+     *     choice about the event itself (`importSource` 'date' or 'series');
+     *     API keys only with the event's
      *     `importApiOptOut = 0` (the key branch) AND the calendar's own
      *     `apiOptOut = 0` (`$apiTest`, tested live). Signature: the level,
      *     the website box, and whether keys receive it.
@@ -3519,7 +3621,7 @@ final class FeedAdmin
         // 1️⃣ Every live event of the calendar, with its calendar (the rule's
         //    `xf` calendar test, and its `$fresh` test, in buildWhere()).
         $stmt = $db->prepare(
-            'SELECT e.eventID, e.importLevel, e.importWebsite, e.importApiOptOut, e.importAudienceType, e.importAudienceID, '
+            'SELECT e.eventID, e.importLevel, e.importWebsite, e.importApiOptOut, e.importAudienceType, e.importAudienceID, e.importSource, '
             . '(e.importRecheckAt IS NULL OR e.importRecheckAt > UTC_TIMESTAMP()) AS inDate, '
             . 'f.isActive AS calendarOn, f.apiOptOut AS calendarApiOptOut '
             . 'FROM tblEvents e LEFT JOIN tblExternalFeeds f ON f.feedID = e.externalFeedID AND f.siteID = e.siteID '
@@ -3645,6 +3747,17 @@ final class FeedAdmin
             $listSig[$k] = (($people[$k] ?? []) === []) ? 'admins' : 'groups|' . implode(',', $people[$k]);
         }
 
+        // 🌐 Which website tick counts (D-080, D-081 — #493 P1), the copy of
+        //    the website branch's `? = 'calendar' OR importSource IN (...)`,
+        //    asked through EventVisibility::copiedTickCounts(), which is built
+        //    from the same constant. Read once for the organisation, with the very reader
+        //    the countdown and the sitemap use, so the two cannot disagree.
+        //    Without it, under "one tick per event", ticking a calendar's
+        //    website box would be counted as changing who can see its events
+        //    when the website shows none of them — an untrue "N events changed
+        //    who can see them" after a save.
+        $copiedRule = PublicWebsite::copiedRuleFor($db, $siteId);
+
         // 4️⃣ One signature per event.
         $out = [];
         foreach ($rows as $r) {
@@ -3655,7 +3768,9 @@ final class FeedAdmin
                 $sig = 'admins';
             } elseif ($level === 'public') {
                 $keys = ((int) $r['importApiOptOut'] === 0 && (int) $r['calendarApiOptOut'] === 0) ? 1 : 0;
-                $sig  = 'public|website=' . (int) $r['importWebsite'] . '|keys=' . $keys;
+                $onSite = (int) $r['importWebsite'] === 1
+                    && EventVisibility::copiedTickCounts($r['importSource'] === null ? null : (string) $r['importSource'], $copiedRule);
+                $sig  = 'public|website=' . ($onSite === true ? 1 : 0) . '|keys=' . $keys;
             } elseif ($level === 'members') {
                 $sig = 'members';
             } else {

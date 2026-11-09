@@ -47,6 +47,12 @@
  *     behind a per-site setting that is off by default.
  *   - Decide deliberately that publishing public event names, dates, locations
  *     and descriptions to anybody on the internet is what the customer wants.
+ *   - Since #493 (migration 258) the organisation's public website shows an
+ *     event only when it is ALSO ticked "Show on the public website" and today
+ *     is inside its website dates (D-057, D-078). This page's queries still ask
+ *     `isPublic = 1` alone, so on its own it would publish every public event.
+ *     Use `EventVisibility::where()` in "website" mode, as the countdown and the
+ *     sitemap do, rather than these queries.
  *
  * @link https://github.com/MWBMPartners/webMS-Intra/issues/336
  * @link https://github.com/MWBMPartners/WebMS-Intra/issues/478

@@ -464,6 +464,91 @@ $clockForBox = static fn (string $stored): string => substr(str_replace(' ', 'T'
         </div>
     </div>
 
+    <?php
+    // 🌐 THE PUBLIC WEBSITE (#493 package P1; D-057, D-077, D-078). Separate
+    //    from "Public (visible on calendar)" above, on purpose: that box is
+    //    about the portal's own calendar; this one is about the organisation's
+    //    public website (the countdown widget and the sitemap today), which
+    //    anybody on the internet can read. An event needs BOTH to get there.
+    //
+    //    WHO MAY CHANGE IT is `PublicWebsite::mayPublish()` — the ONE answer,
+    //    asked again by the handler, so this page never draws a control the
+    //    handler would refuse. Somebody who may not is shown the state as
+    //    WORDS and given no control at all, so their ordinary Save sends none
+    //    of these fields and the handler leaves them exactly as they are
+    //    (#677: ask whether a field ARRIVED).
+    //
+    //    WHY NO `disabled` CONTROL: a disabled control is not submitted, and an
+    //    unticked box is not submitted either, so the handler could not tell
+    //    "left alone" from "switched off". The hidden `websiteFields` marker
+    //    beside the real controls is what tells it the box was on the page.
+    //    For the same reason the switch is NOT greyed out for a members-only
+    //    event: the sentence under it says it will not show, instead.
+    $websiteIdSuffix = $isEdit ? 'edit' : 'new';
+    $websiteMay      = \Portal\Core\PublicWebsite::mayPublish($mysqli, (int) ($_SESSION['user_id'] ?? 0), Site::id());
+    $websiteOn       = (int) ($ev['showOnWebsite'] ?? 0) === 1;
+    $websiteFrom     = substr((string) ($ev['websiteFrom'] ?? ''), 0, 10);
+    $websiteUntil    = substr((string) ($ev['websiteUntil'] ?? ''), 0, 10);
+    ?>
+    <div class="col-12 mt-2">
+        <div class="border rounded p-3">
+            <p class="fw-semibold mb-2"><i class="fa-solid fa-globe me-1"></i> The organisation's public website</p>
+            <?php if ($websiteMay === true): ?>
+                <input type="hidden" name="websiteFields" value="1">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="showOnWebsite" value="1" id="showOnWebsite-<?php echo $websiteIdSuffix; ?>"
+                           aria-describedby="showOnWebsite-help-<?php echo $websiteIdSuffix; ?>"<?php echo $websiteOn === true ? ' checked' : ''; ?>>
+                    <label class="form-check-label" for="showOnWebsite-<?php echo $websiteIdSuffix; ?>">Show on the public website</label>
+                </div>
+                <div class="row g-2">
+                    <div class="col-12 col-sm-6">
+                        <label class="form-label small" for="websiteFrom-<?php echo $websiteIdSuffix; ?>">From (optional)</label>
+                        <input type="date" class="form-control" name="websiteFrom" id="websiteFrom-<?php echo $websiteIdSuffix; ?>"
+                               value="<?php echo htmlspecialchars($websiteFrom, ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                    <div class="col-12 col-sm-6">
+                        <label class="form-label small" for="websiteUntil-<?php echo $websiteIdSuffix; ?>">Until (optional)</label>
+                        <input type="date" class="form-control" name="websiteUntil" id="websiteUntil-<?php echo $websiteIdSuffix; ?>"
+                               value="<?php echo htmlspecialchars($websiteUntil, ENT_QUOTES, 'UTF-8'); ?>">
+                    </div>
+                </div>
+                <?php
+                // 🌐 #493 P1, round 3 of the check: this used to open "Nothing goes on
+                //    the public website until this is ticked" — untrue on the one screen
+                //    where the decision is made, because an own event's page, and the
+                //    search-engine markup on it, follow the "Public" box ALONE in this
+                //    package (the owner has since decided the markup should need this
+                //    switch too: D-089, #850, its own package). So it names what the switch governs, exactly as
+                //    api-spec.json's `showOnWebsite` does. When #493's public door
+                //    (package P4) ships, it joins this list — change both together.
+                ?>
+                <p class="small text-secondary mt-2 mb-0" id="showOnWebsite-help-<?php echo $websiteIdSuffix; ?>">
+                    This decides whether the event goes on the organisation's public website: the countdown widget
+                    and the sitemap. Nothing goes there until this is ticked, and it shows there only while it is
+                    ticked, the event is also marked "Public" above, and today is between the two dates (both days
+                    included; an empty date means no limit). The dates follow this organisation's calendar. Taking it
+                    off can take up to an hour to reach every copy, and a copy somebody has already taken cannot be
+                    pulled back. The portal's own pages (the event's page, the calendar a signed-out visitor sees and
+                    the calendar feed people subscribe to), and what the event's page tells search engines,
+                    follow the "Public" box above, not this one.
+                </p>
+            <?php else: ?>
+                <p class="mb-1"><?php
+                    // The SWITCH's state, said as the switch: "Shown on the public website"
+                    // was untrue whenever the dates or the "Public" box kept it off (#493
+                    // P1, round 3). The dates follow in brackets.
+                    echo $websiteOn === true ? 'Ticked to show on the public website' : 'Not ticked to show on the public website'; ?><?php
+                    if ($websiteFrom !== '' || $websiteUntil !== '') {
+                        echo htmlspecialchars(' (from ' . ($websiteFrom !== '' ? $websiteFrom : 'any day') . ' until '
+                            . ($websiteUntil !== '' ? $websiteUntil : 'any day') . ')', ENT_QUOTES, 'UTF-8');
+                    }
+                ?>.</p>
+                <p class="small text-secondary mb-0">Only an administrator of this organisation, or somebody given
+                    "Choose what appears on the public website" on the Roles page, can change this. Saving this form leaves it as it is.</p>
+            <?php endif; ?>
+        </div>
+    </div>
+
     <?php if ($hasVenueCheck === true): ?>
     <!-- 🏛️ Venue Bookings (#429, #436) Surface A — venue/room picker +
          "is it booked?" advisory check. #436: venueID/roomID are now

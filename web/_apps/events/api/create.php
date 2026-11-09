@@ -23,7 +23,18 @@
  *     "status":         "published",             (optional, default "draft")
  *     "isPublic":       true,                    (optional, default true)
  *     "description":    "Order of service…"     (optional)
+ *     "showOnWebsite":  false,                   (optional, default false — #493)
+ *     "websiteFrom":    "2026-05-25",            (optional, YYYY-MM-DD or null)
+ *     "websiteUntil":   "2026-06-01"             (optional, YYYY-MM-DD or null)
  *   }
+ *
+ * THE PUBLIC WEBSITE (#493 P1; D-057, D-077, D-078). The last three are judged
+ * by `PublicWebsite::judgeEventFields()`, the same judgement as the Manage
+ * Events form. A new event is OFF the website unless the caller may publish
+ * and asks for it. An API KEY may not: a key is not a person and cannot hold
+ * the permission (the #485 precedent), so a key asking to switch it on, or to
+ * set a date, is refused with 403 and the refusal recorded; a key sending the
+ * default (`false`, no dates) is not a change and is accepted.
  *
  * WHICH TIME ZONE (#604). An event's start and end are stored as a time on
  * a clock, with the clock's zone beside them in `tblEvents.timezone`. This
@@ -51,6 +62,7 @@ use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Site;
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
 //    the line only fails when it RUNS — `php -l` is happy without it (#536).
@@ -210,6 +222,37 @@ if ($w3wRaw !== '') {
     }
 }
 
+// 🌐 The public-website fields (#493 P1). Only keys that ARRIVED are judged
+//    (#677); a new event's starting point is OFF with no dates, so sending
+//    exactly that is not a change and needs no permission. The person is the
+//    signed-in account in session mode and NOBODY for an API key.
+$websiteArrived = [];
+foreach (PublicWebsite::EVENT_FIELDS as $websiteField) {
+    if (array_key_exists($websiteField, $body) === true) {
+        $websiteArrived[$websiteField] = $body[$websiteField];
+    }
+}
+$websiteActor  = ApiAuth::actorUserId();
+$websiteJudged = PublicWebsite::judgeEventFields(
+    $websiteArrived,
+    PublicWebsite::NEW_EVENT_VALUES,
+    PublicWebsite::mayPublish(App::db(), (int) ($websiteActor ?? 0), Site::id())
+);
+if ($websiteJudged['ok'] === false) {
+    if ($websiteJudged['kind'] === 'forbidden') {
+        PublicWebsite::recordRefusal(null, $eventName, $websiteJudged, $websiteActor,
+            ApiAuth::source() === 'apikey' ? 'the events API, with an API key' : 'the events API');
+        ApiResponse::error(
+            ApiAuth::source() === 'apikey'
+                ? 'An API key cannot change an event\'s "Show on the public website" switch or its website dates: a key is not a person and cannot hold that permission. Leave showOnWebsite, websiteFrom and websiteUntil out. Nothing was created.'
+                : $websiteJudged['reason'],
+            403
+        );
+    }
+    ApiResponse::error($websiteJudged['reason'], 422);
+}
+$websiteValues = $websiteJudged['values'];
+
 // 🐢 Slug from name (server-side; truncated to 100 chars to fit the column)
 $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
 $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
@@ -225,8 +268,9 @@ $stmt = $db->prepare(
     'INSERT INTO tblEvents '
     . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, '
     . 'isAllDay, locationName, status, isPublic, isFeatured, categoryID, typeID, createdByID, '
-    . 'locationAddress, locationWebURL, locationPhone, locationEmail, locationGeoLat, locationGeoLng, locationW3W) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    . 'locationAddress, locationWebURL, locationPhone, locationEmail, locationGeoLat, locationGeoLng, locationW3W, '
+    . '`showOnWebsite`, `websiteFrom`, `websiteUntil`) '
+    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
 );
 if ($stmt === false) {
     Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_CREATE_PREP', $db->error, '');
@@ -235,12 +279,14 @@ if ($stmt === false) {
 // 📍 #456 Chunk A: 14 -> 21 placeholders/vars (+locationAddress[s], +locationWebURL[s],
 // +locationPhone[s], +locationEmail[s], +locationGeoLat[d], +locationGeoLng[d], +locationW3W[s]).
 // 🕰️ #604: 21 -> 22 (+timezone[s], after endDateTime).
+// 🌐 #493 P1: 22 -> 25 (+showOnWebsite[i], +websiteFrom[s], +websiteUntil[s]).
 $stmt->bind_param(
-    'issssssisssiiiissssdds',
+    'issssssisssiiiissssddsiss',
     $siteId, $eventName, $slug, $description, $startSql, $endSql, $zoneName,
     $isAllDay, $locationName, $status, $isPublic, $isFeatured,
     $categoryId, $typeId, $creatorId,
-    $locationAddress, $locationWebURL, $locationPhone, $locationEmail, $locationGeoLat, $locationGeoLng, $locationW3W
+    $locationAddress, $locationWebURL, $locationPhone, $locationEmail, $locationGeoLat, $locationGeoLng, $locationW3W,
+    $websiteValues['showOnWebsite'], $websiteValues['websiteFrom'], $websiteValues['websiteUntil']
 );
 $ok    = $stmt->execute();
 $newId = (int) $stmt->insert_id;
@@ -252,6 +298,7 @@ if ($ok === false) {
 }
 
 Logger::activity('ApiEventCreate', 'API: created event #' . $newId . ' "' . $eventName . '"');
+PublicWebsite::recordChange($newId, $eventName, $websiteJudged['changes'], $websiteActor, 'the events API, a new event');
 
 // 📍 #456 Chunk A — canonical `location` object (cross-repo contract §2),
 // additive alongside the legacy locationName field for backward-compat.

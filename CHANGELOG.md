@@ -4,6 +4,60 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Events go on the public website only when somebody ticks them (#493, package P1)
+
+- **Changed — a live exposure closed (D-057, D-078).** The event countdown that other websites can
+  show (`/widget/countdown.json`) and the portal's sitemap (`/sitemap.xml`) are open to anybody, with no
+  sign-in. They used to show every published event marked "Public", and that box starts ticked. They now
+  show an organisation's own event only while somebody has ticked the new **Show on the public website**
+  on the Manage Events form, the event is also marked Public, and today is inside the optional "from" and
+  "until" dates (both days included; an empty date means no limit; judged on the organisation's
+  calendar). Migration 258 adds the switch at OFF on every existing event, so after the upgrade nothing
+  of an organisation's own is on its public website until somebody ticks it.
+- **Added — who may tick it (D-077).** A new permission, "Choose what appears on the public website"
+  (`website.publish`), which each organisation can give to any role on its Roles page. Out of the box only
+  the organisation's administrators hold it; a new standard role, Website Editor, exists to give it to,
+  though today only administrators can open the pages that change an event, so giving it to anybody else
+  changes nothing yet (it is for the noticeboard package that follows). A
+  change by somebody who may not make it is refused with the reason and recorded, never quietly dropped.
+  The events API accepts `showOnWebsite`, `websiteFrom` and `websiteUntil`; an API key may send the stored
+  values back but cannot change them (403), because a key is not a person. The public "submit an event"
+  form cannot set them at all.
+- **Added — events copied in from an outside calendar (D-080, D-081).** How they reach the public website
+  is a rule: "one box per subscribed calendar" (the earlier behaviour) or "one tick per event", where only
+  a choice made about that event counts. The installation's global administrator chooses; an
+  organisation's global administrator may choose the same or the stricter rule, never the looser, on a
+  new card on Admin, Outside calendars. It ships as the stricter rule, and a rule that cannot be read
+  counts as the stricter. Under the stricter rule neither a calendar's nor a rule's "Also show on the
+  public website" box can put an event there or let a choice skip its approval. Under either rule,
+  nothing answers a new choice's website question for you: it asks "Show these dates on the public
+  website?" as Yes or No with neither chosen, keeps it unanswered when the form comes back after any
+  other refusal, and refuses to save an Everyone choice that does not answer it. A form opened as a new
+  choice never saves over a choice saved since, from anywhere; it says so and shows that choice.
+  Saving the rule re-works every outside calendar it governs at once. Loosening it asks again about a rule with its website box
+  ticked that was approved while the stricter rule applied, and until somebody approves, such a date shows
+  to its calendar's own audience; tightening keeps every approval already given (and a newer
+  approval outranks an older decline). The rule is set only on that card: the general settings editor
+  refuses it, because saving it there would re-work nothing. The upgrade itself re-works nothing: a
+  copied-in date that a choice put on the website without an approval, before this change, can stay there
+  until its calendar is next re-worked in full. A refresh that finds the calendar's file unchanged skips
+  that for up to 20 hours after the last full one (and nothing refreshes while the scheduled feed job is
+  not running); saving the rule re-works every calendar at once.
+- **Not yet, each with an issue:** the event's own page on the portal, and the search-engine markup on
+  it, still follow the "Public" box alone, and the form says so. The owner has decided the markup should
+  also need the tick (D-089, #850); that follows in its own package.
+  A repeating series made with the box ticked gives every date the same two dates (#847). The series
+  bulk-edit page has no control for it (#844), and the events API's list and detail do not report it
+  (#843). The noticeboard, the portal's own signed-out calendar and the public website "door" are later
+  packages of #493.
+- **Tests:** new `tools/public-website-tick-selftest.php` drives the Manage Events form, the events API
+  (a key and a session), the public submission form, the countdown, the sitemap and the copied-in rule's
+  card over real HTTP, reads every result back from the database, and plants each guard out of a copy of
+  the portal to prove it can fail. Its section D moves the organisation to a time zone whose date is not
+  UTC's, so a reader judging the dates on the wrong calendar is caught; before that, the organisation
+  and the test machine were both on UTC and nothing could tell the two apart. `feed-resolver-selftest.php`'s
+  website check now names the copied-in rule it is asking under.
+
 ### Three older layout faults: a doubled "…", text under an alert's close button, a badge at tablet width (#852)
 
 - **Fixed (#852 item 1):** six page lists printed two "…" side by side when a long list was opened at

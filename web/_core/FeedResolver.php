@@ -596,7 +596,9 @@ final class FeedResolver
     /**
      * Everything `plan()` needs about one calendar, or null when it is gone.
      *
-     * Nine statements whatever the size of the calendar. Every choice, rule,
+     * Eleven statements whatever the size of the calendar (nine, and since
+     * #493 P1 two more: the copied-in rule, read for the installation and the
+     * organisation). Every choice, rule,
      * condition and list row is read only when it carries the calendar's OWN
      * organisation number; a row that does not (which the save pages refuse
      * to write) is simply ignored — the defence behind their own check.
@@ -626,6 +628,12 @@ final class FeedResolver
                 'websiteOptIn'  => (int) $feed['websiteOptIn'],
                 'apiOptOut'     => (int) $feed['apiOptOut'],
                 'categoryID'    => $feed['categoryID'] === null ? null : (int) $feed['categoryID'],
+                // 🌐 #493 P1, round 4 of its check: the rule this organisation
+                //    is held to for copied-in events (D-080, D-081), read ONCE
+                //    per resolve by the one reader, so isWider() and the stored
+                //    answer (candidateAnswer()) judge a website "yes" as the
+                //    countdown does.
+                'copiedRule'    => PublicWebsite::copiedRuleFor($db, $siteId),
             ],
             'categoryMap' => self::categoryMap($db, $feedId),
             'events'      => self::liveEvents($db, $feedId),
@@ -1165,6 +1173,19 @@ final class FeedResolver
                 // 9️⃣ (plan step 4) Rules, only when no choice decided. A
                 //    private event never gets here (plan step 2).
                 $candidate = self::combineRules($activeRules, $state['audience']);
+                // 🌐 #493 P1: the rules' answer stays EXACTLY AS WRITTEN here,
+                //    website box included, under either copied-in rule. Round 4
+                //    set a rule's website yes to 0 at this point under "one tick
+                //    per event", and round 5 of the check found that wrong twice:
+                //    the rule preview compared the dropped answer with the draft
+                //    as written and called every matching event "another rule is
+                //    stricter", and an approval is recorded against a
+                //    fingerprint that includes the box, so an approval given
+                //    under one rule was lost the moment the rule changed. What a
+                //    yes COUNTS for is asked where it matters: isWider(), the
+                //    approval fingerprint (requestHash(), with steps (c) and pass
+                //    2 letting an approval of the wider request cover a narrower
+                //    one), and candidateAnswer(), which stores it.
                 $why['conflict'] = ($candidate['source'] === 'conflict');
                 $why['combined'] = ['level' => $candidate['level'], 'detail' => $candidate['detail'], 'website' => $candidate['website']];
             }
@@ -1174,12 +1195,12 @@ final class FeedResolver
                 //    choice that may not show it), or nothing that applies.
                 $explain[$eventId] = $why;
                 $answers[$eventId] = $baseAnswer;
-            } elseif (self::isWider($candidate, $base) === false) {
+            } elseif (self::isWider($candidate, $base, (string) $feed['copiedRule']) === false) {
                 // 🔟 (plan step 5) Not wider: narrowing cannot expose anything,
                 //    so it applies at once and keeps no waiting row.
                 $why['state']      = 'applied';
                 $explain[$eventId] = $why;
-                $answers[$eventId] = self::candidateAnswer($candidate, $apiValue, $recheckText, $category);
+                $answers[$eventId] = self::candidateAnswer($candidate, $apiValue, $recheckText, $category, (string) $feed['copiedRule']);
             } elseif ($duplicate === true) {
                 // Round-1 check FIX B (24 September 2026): wider, but this
                 //    row is a duplicate. A duplicate never gets an approval
@@ -1196,7 +1217,7 @@ final class FeedResolver
                 $answers[$eventId] = $baseAnswer;
             } else {
                 // 1️⃣1️⃣ (plan step 6) Wider: the approval gate.
-                $request  = self::requestHash($candidate);
+                $request  = self::requestHash($candidate, (string) $feed['copiedRule']);
                 $content  = self::contentHash($event, $category, (string) $candidate['detail']);
                 $contentF = self::contentHash($event, $category, 'full');
                 $why['request'] = $request;
@@ -1259,6 +1280,38 @@ final class FeedResolver
                         $insertedReason = 'content_changed';
                     }
                 }
+                // (c) #493 P1, round 6 of its check: an approval of the WIDER
+                //     request covers this narrower one. The website box is
+                //     fingerprinted as it COUNTS (see requestHash()), so after
+                //     the rule is tightened, a request approved with its
+                //     website yes no longer matches by itself — and without this
+                //     its event fell back to the calendar's audience until
+                //     somebody approved the same thing again. An approved row
+                //     for the same request with the website yes counted, and
+                //     the same content, is enough: it agreed to more than this.
+                //     A DECLINE of the wider request is not taken as a decline
+                //     of this one; that still asks. Asked whenever the yes does
+                //     not count NOW, whatever the box says: round 7 found that
+                //     requiring the box ticked meant UNticking a box the pages
+                //     call inert threw the carried approval away.
+                //     An older DECLINE of this narrower request gives way to a
+                //     NEWER approval of the wider one (round 8): the latest
+                //     decision about this event is the one that stands.
+                if (($outcome === null || $outcome === 'waiting' || $outcome === 'declined')
+                    && self::countedWebsite($candidate, (string) $feed['copiedRule']) === 0) {
+                    foreach ($liveFor($eventId, self::requestHashWith($candidate, 1)) as $wideKey) {
+                        if ($rows[$wideKey]['status'] === 'approved' && (string) $rows[$wideKey]['contentHash'] === $content
+                            && ($outcome !== 'declined'
+                                || (string) ($rows[$wideKey]['decidedAt'] ?? '') > (string) ($rows[$liveKey]['decidedAt'] ?? ''))) {
+                            if (($outcome === 'waiting' || $outcome === 'declined') && $liveKey !== null) {
+                                $set($liveKey, ['status' => 'superseded']);
+                                unset($currentPending[$eventId]);
+                            }
+                            $outcome = 'applied';
+                            break;
+                        }
+                    }
+                }
                 if ($outcome === null) {
                     $currentPending[$eventId] = $insert($snapshot + [
                         'status' => 'pending', 'reason' => $insertedReason,
@@ -1271,7 +1324,7 @@ final class FeedResolver
                 $why['state'] = $outcome;
                 $explain[$eventId] = $why;
                 if ($outcome === 'applied') {
-                    $answers[$eventId] = self::candidateAnswer($candidate, $apiValue, $recheckText, $category);
+                    $answers[$eventId] = self::candidateAnswer($candidate, $apiValue, $recheckText, $category, (string) $feed['copiedRule']);
                 } elseif ($outcome === 'declined') {
                     $answers[$eventId] = $baseAnswer;
                 } else {
@@ -1331,8 +1384,26 @@ final class FeedResolver
                 continue;
             }
             $bucket = $info['uidHash'] . "\x00" . $rows[$key]['requestHash'] . "\x00" . $rows[$key]['contentHash'];
-            $best   = null;
+            // 🌐 #493 P1, round 7 of its check: as step (c) does for an event's
+            //    own rows, a sibling's APPROVAL of the wider request (the same,
+            //    with the website yes counted) covers this narrower one —
+            //    otherwise, after the rule was tightened, a date the outside
+            //    calendar added later waited although its siblings were
+            //    approved. Approvals only: a declined wider request still asks.
+            $candidates = [];
             foreach ($decided[$bucket] ?? [] as $d) {
+                $candidates[] = $d;
+            }
+            if (self::countedWebsite($info['candidate'], (string) $feed['copiedRule']) === 0) {
+                $wideBucket = $info['uidHash'] . "\x00" . self::requestHashWith($info['candidate'], 1) . "\x00" . $rows[$key]['contentHash'];
+                foreach ($decided[$wideBucket] ?? [] as $d) {
+                    if ($d['status'] === 'approved') {
+                        $candidates[] = $d;
+                    }
+                }
+            }
+            $best   = null;
+            foreach ($candidates as $d) {
                 if ($d['eventID'] === $eventId) {
                     continue;
                 }
@@ -1363,7 +1434,7 @@ final class FeedResolver
             unset($currentPending[$eventId]);
             if ($best['status'] === 'approved') {
                 $explain[$eventId]['state'] = 'applied';
-                $answers[$eventId] = self::candidateAnswer($info['candidate'], $info['apiValue'], $info['recheck'], $info['category']);
+                $answers[$eventId] = self::candidateAnswer($info['candidate'], $info['apiValue'], $info['recheck'], $info['category'], (string) $feed['copiedRule']);
             } else {
                 $explain[$eventId]['state'] = 'declined';
                 $answers[$eventId] = $info['baseAnswer'];
@@ -1525,7 +1596,7 @@ final class FeedResolver
         }
 
         $candidate = self::choiceCandidate($choice, $audience);
-        if (self::isWider($candidate, $base) === false) {
+        if (self::isWider($candidate, $base, (string) $feed['copiedRule']) === false) {
             return;
         }
         $seenPrint = $saved['seen'][$eventId];
@@ -1535,7 +1606,7 @@ final class FeedResolver
             return;
         }
 
-        $request  = self::requestHash($candidate);
+        $request  = self::requestHash($candidate, (string) $feed['copiedRule']);
         $content  = self::contentHash($event, $category, (string) $candidate['detail']);
         $snapshot = self::snapshot($event, $category, $candidate, $feed, $request, $content, $uidHash, $eventId);
         $live     = $liveFor($eventId, $request);
@@ -1662,10 +1733,20 @@ final class FeedResolver
      * The "Don't show via API" box plays NO part here (B2): it can only
      * narrow, so it never needs approval.
      *
+     * The website "yes" compared, on BOTH sides, is the one that COUNTS under
+     * the rule the organisation is held to for copied-in events (#493 P1,
+     * rounds 4 and 5 of its check; D-080, D-081). Under "one tick per event"
+     * the calendar's own box is not a yes already given, so it can no longer
+     * make a choice's yes "not wider" and skip the approval step; and a rule's
+     * yes, which counts for nothing there, does not widen anything, so it asks
+     * nobody to approve a change nobody could see. Under "one box per
+     * calendar" every source counts, and this is the comparison it always was.
+     *
      * @param array<string,mixed> $candidate
      * @param array<string,mixed> $base
+     * @param string              $copiedRule From the feed state (`PublicWebsite::copiedRuleFor()`).
      */
-    private static function isWider(array $candidate, array $base): bool
+    private static function isWider(array $candidate, array $base, string $copiedRule): bool
     {
         $candRank = self::LEVEL_RANK[(string) $candidate['level']];
         $baseRank = self::LEVEL_RANK[(string) $base['level']];
@@ -1673,7 +1754,16 @@ final class FeedResolver
             return $candRank > $baseRank;
         }
         if ($candidate['level'] === 'public') {
-            return (int) $candidate['website'] === 1 && (int) $base['website'] !== 1;
+            // Each yes counts only where its source does. The calendar's used
+            // to count always, so ticking a box the pages call inert under "one
+            // tick per event" made a choice's yes "not wider", applied it at
+            // once, and released every date waiting for approval onto the
+            // countdown, the sitemap and the search-engine markup.
+            $candCounts = (int) $candidate['website'] === 1
+                && EventVisibility::copiedTickCounts((string) ($candidate['source'] ?? ''), $copiedRule) === true;
+            $baseCounts = (int) $base['website'] === 1
+                && EventVisibility::copiedTickCounts((string) ($base['source'] ?? ''), $copiedRule) === true;
+            return $candCounts === true && $baseCounts === false;
         }
         if ($candidate['level'] === 'groups') {
             return array_diff($candidate['list'], $base['list']) !== [];
@@ -1688,9 +1778,38 @@ final class FeedResolver
      * the sorted list. Anything else changing (a different list, a rule
      * added to the combination) is a new request and needs a new decision.
      *
+     * THE WEBSITE BOX IS FINGERPRINTED AS IT COUNTS (#493 P1, round 6 of its
+     * check; D-080, D-081), not as written. As written, an approval given
+     * under "one tick per event" — while the approvals page said the box
+     * "does nothing" — was reused to put the event on the public website the
+     * moment the rule was loosened, and ticking that inert box sent every
+     * approved event back to waiting. Counted, loosening asks again and the
+     * box really does nothing. The other direction, tightening, would lose an
+     * approval given under the looser rule; the approval gate therefore lets
+     * an approval of the WIDER request cover the narrower one (step c).
+     *
      * @param array<string,mixed> $candidate
      */
-    private static function requestHash(array $candidate): string
+    private static function requestHash(array $candidate, string $copiedRule): string
+    {
+        return self::requestHashWith($candidate, self::countedWebsite($candidate, $copiedRule));
+    }
+
+    /** The website yes a candidate's answer COUNTS for under the rule (0 or 1). */
+    private static function countedWebsite(array $candidate, string $copiedRule): int
+    {
+        return ((int) $candidate['website'] === 1
+            && EventVisibility::copiedTickCounts((string) ($candidate['source'] ?? ''), $copiedRule) === true) ? 1 : 0;
+    }
+
+    /**
+     * The fingerprint with the website part given: `requestHash()` passes the
+     * counted value; step (c) of the approval gate passes 1, to look for an
+     * approval of the wider request.
+     *
+     * @param array<string,mixed> $candidate
+     */
+    private static function requestHashWith(array $candidate, int $website): string
     {
         $ids = array_map('intval', $candidate['originIds']);
         sort($ids, SORT_NUMERIC);
@@ -1699,7 +1818,7 @@ final class FeedResolver
 
         return hash('sha256', json_encode(
             [(string) $candidate['origin'], $ids, (string) $candidate['level'], (string) $candidate['detail'],
-                ((int) $candidate['website'] === 1) ? 1 : 0, $list],
+                $website === 1 ? 1 : 0, $list],
             JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
         ));
     }
@@ -1868,14 +1987,24 @@ final class FeedResolver
      *
      * @return array<string,mixed>
      */
-    private static function candidateAnswer(array $candidate, int $apiValue, ?string $recheck, ?int $category): array
+    private static function candidateAnswer(array $candidate, int $apiValue, ?string $recheck, ?int $category, string $copiedRule): array
     {
         $hidden = ((string) $candidate['level'] === 'hidden');
+        // 🌐 #493 P1, round 5 of its check: the website yes is STORED only
+        //    where it counts under the organisation's copied-in rule (D-080,
+        //    D-081). A rule's yes under "one tick per event" is stored as 0, so
+        //    if the installation later loosens the rule nothing shows until the
+        //    re-work that saving the rule runs decides it (and a loosened rule's
+        //    yes then asks for approval). The candidate itself, and so the
+        //    preview, keeps the box as written; the approval fingerprint counts
+        //    it (requestHash()).
+        $website = ((int) $candidate['website'] === 1
+            && EventVisibility::copiedTickCounts((string) ($candidate['source'] ?? ''), $copiedRule) === true) ? 1 : 0;
 
         return self::answerRow(
             (string) $candidate['level'],
             (string) $candidate['detail'],
-            (int) $candidate['website'],
+            $website,
             $apiValue,
             $hidden ? null : $candidate['audType'],
             $hidden ? null : $candidate['audID'],

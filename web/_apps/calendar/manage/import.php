@@ -869,6 +869,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    organisation was. WHAT IT CANNOT DO: take a zone per row.
                 //    The file has no column for one.
                 $importZone = Site::timezone();
+                // 🌐 #493 P1: the public-website columns are NOT listed, so
+                //    every imported row is OFF the website with no dates: a
+                //    spreadsheet cannot put events in front of the internet,
+                //    and a column the file happens to carry is never read.
                 $stmt = $mysqli->prepare(
                     'INSERT INTO tblEvents '
                     . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, '

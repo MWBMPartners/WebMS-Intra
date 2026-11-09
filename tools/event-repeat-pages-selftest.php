@@ -3209,6 +3209,11 @@ q(
 ok('S13 the first date is now cancelled by hand, with a submitter against it',
     (string) one('SELECT status FROM tblEvents WHERE eventID = ?', 'i', [(int) $histRows[0]['eventID']])['status'] === 'cancelled');
 
+// 🌐 #493 P1: every existing date of the series is ON the public website,
+//    with a window, so a copy that took the template's values would show it.
+q("UPDATE tblEvents SET `showOnWebsite` = 1, `websiteFrom` = '2029-01-01', `websiteUntil` = '2029-12-31' WHERE seriesID = ?",
+    'i', [$histSeries]);
+
 $histFields = [
     'patternStart'    => '2029-08-05T19:00',
     'patternEnd'      => '2029-08-05T20:00',
@@ -3229,7 +3234,7 @@ $histFlash   = flashOn($histLanding['body']);
 
 $born = q(
     'SELECT eventID, status, cancelReason, statusChangedByID, statusChangedAt, submissionStatus, submitterName, '
-    . 'submitterEmail, submittedAt, moderatedByID, moderationNote, createdByID '
+    . 'submitterEmail, submittedAt, moderatedByID, moderationNote, createdByID, `showOnWebsite`, `websiteFrom`, `websiteUntil` '
     . 'FROM tblEvents WHERE siteID = ? AND eventName = ? AND startDateTime IN (?, ?)',
     'isss',
     [ORG, 'EVREP Repat history', '2029-08-19 19:00:00', '2029-08-26 19:00:00']
@@ -3289,6 +3294,15 @@ ok('S17 NEITHER CARRIES THE SUBMITTER\'S NAME OR E-MAIL',
         && $r['moderationNote'] === null)) === 2);
 ok('S18 and each one is recorded as created by whoever made the change',
     count(array_filter($born, static fn (array $r): bool => (int) $r['createdByID'] === ADMIN)) === 2);
+// 🌐 #493 P1 (D-057; the D-033 precedent): a date the pattern ADDS is one
+//    nobody has looked at, so it is OFF the public website with no window,
+//    although every date it was copied from is ON with one. Planted, taking
+//    the template's value instead turns this red.
+ok('S18w NEITHER NEW DATE IS ON THE PUBLIC WEBSITE, and neither carries the template\'s website dates',
+    count(array_filter($born, static fn (array $r): bool => (int) $r['showOnWebsite'] === 0
+        && $r['websiteFrom'] === null && $r['websiteUntil'] === null)) === 2
+    && (int) (one('SELECT COUNT(*) AS n FROM tblEvents WHERE seriesID = ? AND `showOnWebsite` = 1', 'i', [$histSeries])['n'] ?? 0) > 0,
+    json_encode(array_map(static fn (array $r): array => [$r['showOnWebsite'], $r['websiteFrom'], $r['websiteUntil']], $born)));
 
 // -----------------------------------------------------------------------------
 // S18b — A NEW DATE DOES NOT INHERIT ANOTHER DATE'S REGISTRATION WINDOW.

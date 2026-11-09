@@ -669,6 +669,15 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                     'registrationClosesAt'      => true,
                     'capacityCount'             => true,
                     'registrationRetentionDays' => true,
+                    // 🌐 AND THE PUBLIC WEBSITE'S DATES (#493 P1, D-078). The
+                    //    window was chosen for the template's own date by a
+                    //    person who may publish; a date the pattern adds is not
+                    //    one anybody looked at. The SWITCH itself is not in this
+                    //    list for the same reason as `registrationEnabled`
+                    //    (NOT NULL, so NULL would fail the INSERT): it is set to
+                    //    0 explicitly below.
+                    'websiteFrom'               => true,
+                    'websiteUntil'              => true,
                 ];
 
                 $columns = [];
@@ -832,6 +841,18 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                             // Its DEFAULT, not NULL: the column refuses NULL.
                             // Off, which is what every date the create handler
                             // makes has, so a new date matches its siblings.
+                            $values[] = '0';
+                        } elseif ($column === 'showOnWebsite') {
+                            // 🌐 NEVER INHERITED (#493 P1; D-057, the D-033
+                            //    precedent for drafts). A date this change
+                            //    ADDS is one nobody has looked at, so it is not
+                            //    put in front of the whole internet because the
+                            //    template happened to be: "nothing is public
+                            //    until somebody ticks it, one item at a time".
+                            //    It also arrives as a DRAFT (just above), which
+                            //    the website would not show anyway — this keeps
+                            //    it off once somebody publishes it, until a
+                            //    person who may publish ticks it.
                             $values[] = '0';
                         } elseif ($column === 'timezone') {
                             // 🕰️ THE ZONE THE READING WAS MADE IN, not the

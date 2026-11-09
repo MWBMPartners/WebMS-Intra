@@ -2786,14 +2786,18 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
     $aklZone  = new DateTimeZone('Pacific/Auckland');
     $nySoon   = (new DateTimeImmutable('now', $nyZone))->modify('+30 minutes')->format('Y-m-d H:i:00');
     $aklBegun = (new DateTimeImmutable('now', $aklZone))->modify('-60 minutes')->format('Y-m-d H:i:00');
+    // 🌐 BOTH are ticked "Show on the public website" (#493 P1): since then the
+    //    countdown feed (X14) shows nothing that is not, so without the tick
+    //    X14 would test the switch rather than the clock. Ticking the Auckland
+    //    one too keeps "NOT the Auckland one" a real refusal by the clock.
     $nyName   = 'Selftest zones list 960906 New York soon';
     $aklName  = 'Selftest zones list 960907 Auckland begun';
     q(
-        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960906, 1, 'selftest-zones-list-960906', ?, ?, DATE_ADD(?, INTERVAL 1 HOUR), 'America/New_York', 'published', 1, 0)",
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, `showOnWebsite`, isDeleted) VALUES (960906, 1, 'selftest-zones-list-960906', ?, ?, DATE_ADD(?, INTERVAL 1 HOUR), 'America/New_York', 'published', 1, 1, 0)",
         'sss', [$nyName, $nySoon, $nySoon]
     );
     q(
-        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960907, 1, 'selftest-zones-list-960907', ?, ?, DATE_ADD(?, INTERVAL 2 HOUR), 'Pacific/Auckland', 'published', 1, 0)",
+        "INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, `showOnWebsite`, isDeleted) VALUES (960907, 1, 'selftest-zones-list-960907', ?, ?, DATE_ADD(?, INTERVAL 2 HOUR), 'Pacific/Auckland', 'published', 1, 1, 0)",
         'sss', [$aklName, $aklBegun, $aklBegun]
     );
     $freshX = new mysqli($creds['db_host'], $creds['db_user'], $creds['db_pass'], $creds['db_name'], $creds['db_port']);

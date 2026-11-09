@@ -1184,6 +1184,14 @@ CREATE TABLE IF NOT EXISTS `tblEvents` (
     -- 📊 Status and visibility
     `status`       ENUM('draft','published','cancelled','postponed') NOT NULL DEFAULT 'draft',
     `isPublic`     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT 'Visible on public calendar',
+    -- 🌐 added by migration 258 (#493, P1) — placed HERE, straight
+    --    after isPublic, so a fresh install has the columns in the same order as
+    --    a database brought up to date by the migration (`AFTER isPublic`). The
+    --    comments are the migration's, word for word: the migration harness
+    --    compares the two.
+    `showOnWebsite` TINYINT(1)  NOT NULL DEFAULT 0 COMMENT 'The portal''s own events only: 1 = a person allowed to publish (capability website.publish, D-077) ticked "Show on the public website" (D-057). The website also needs isPublic = 1 and today inside websiteFrom..websiteUntil (D-078). Starts at 0 on every row (#493, migration 258). Decides the website only through EventVisibility (web/_core/EventVisibility.php); written only after PublicWebsite::judgeEventFields() allows the change. Ignored on an event copied in from an outside calendar.',
+    `websiteFrom`   DATE        DEFAULT NULL COMMENT 'The first DAY the event may be on the public website (D-078), inclusive. A calendar date on the ORGANISATION''s calendar - not a moment and not the event''s own clock. NULL = no limit on that side. Narrows showOnWebsite, never widens it.',
+    `websiteUntil`  DATE        DEFAULT NULL COMMENT 'The last DAY the event may be on the public website (D-078), inclusive. A calendar date on the ORGANISATION''s calendar - not a moment and not the event''s own clock. NULL = no limit on that side. Narrows showOnWebsite, never widens it.',
     `isFeatured`   TINYINT(1)   NOT NULL DEFAULT 0,
     `isDeleted`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'Soft delete flag',
     `deletedAt`    DATETIME     DEFAULT NULL COMMENT 'Timestamp of soft-delete (set when isDeleted flips to 1)',
@@ -11300,6 +11308,35 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('257_registration_retention_ceiling.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 258_events_show_on_website.sql (#493, P1) ──────────────────────────
+-- The three `tblEvents` columns are declared above, on the table itself. A
+-- fresh install has no event, so nothing is carried. Here: the installation's
+-- rule for copied-in events (D-080/D-081, the stricter 'event' as the default),
+-- the Website Editor role for every organisation that exists (one more is
+-- seeded later by `Roles::seedStandardSet()` whenever an organisation is
+-- added), and the address of the form that sets the rule.
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'public.events.copiedRule', 'event', 'event', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `description`, `isStandard`)
+SELECT s.`siteID`, 'website_editor', 'Website Editor',
+       'Holds "Choose what appears on the public website"; until a page a non-administrator can open asks for it, this changes nothing',
+       1
+FROM `tblSites` s
+WHERE NOT EXISTS (
+    SELECT 1 FROM `tblRoles` r
+    WHERE r.`siteID` = s.`siteID` AND r.`roleKey` = 'website_editor'
+);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('admin/calendar/feeds/website-rule', 'admin/calendar/feeds-website-rule.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('258_events_show_on_website.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

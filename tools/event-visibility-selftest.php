@@ -345,6 +345,9 @@ $events = [
     'E50' => 900350, 'E51' => 900351, 'E52' => 900352, // part P10
     // one number, six kinds: each listed for ONE kind only, all naming SAME_NUMBER
     'E60' => 900360, 'E61' => 900361, 'E62' => 900362, 'E63' => 900363, 'E64' => 900364, 'E65' => 900365,
+    // #493 P1: the public website's switch, dates and copied-in rule (section W)
+    'E70' => 900370, 'E71' => 900371, 'E72' => 900372, 'E73' => 900373, 'E74' => 900374, 'E75' => 900375,
+    'E76' => 900376, 'E77' => 900377, 'E78' => 900378, 'E79' => 900379, 'E80' => 900380, 'E81' => 900381,
 ];
 const PLAN_LAST_EVENT = 900329;
 $eventName = array_flip($events);
@@ -654,6 +657,40 @@ try {
         ['E63', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E63, 'date',     0, 0],  // list: the DEPARTMENT with that number (V43)
         ['E64', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E64, 'date',     0, 0],  // list: the SMALL GROUP with that number (V44)
         ['E65', ORG_A, F2,     1, 'groups',  'full',  0, 'choice', CHOICE_E65, 'date',     0, 0],  // list: the LEADERSHIP ROLE with that number (V45)
+        // #493 P1 — section W. The organisation's OWN events (no calendar):
+        // the switch and the dates are in `$websiteOwn` below.
+        ['E70', ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // public, switch OFF
+        ['E71', ORG_A, null,   0, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // members-only, switch ON
+        ['E72', ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // ON, from tomorrow
+        ['E73', ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // ON, until yesterday
+        ['E74', ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // ON, from today until today (both ends inclusive)
+        ['E75', ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // ON, from yesterday, no end
+        ['E76', ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // ON, no start, until tomorrow
+        ['E77', ORG_A, null,   1, 'hidden',  'basic', 0, null,     null,       null,       0, 0],  // OFF, but dates around today (dates never widen)
+        // ...and COPIED-IN events, public + website box ticked, differing ONLY in
+        // where the "yes" came from, so the rule is the one thing that decides.
+        ['E78', ORG_A, F1,     1, 'public',  'full',  1, 'feed',   F1,         'calendar', 0, 0],  // the calendar's box
+        ['E79', ORG_A, F1,     1, 'public',  'full',  1, 'rule',   900615,     'rule',     0, 0],  // a rule's box
+        ['E80', ORG_A, F1,     1, 'public',  'full',  1, 'choice', 900506,     'series',   0, 0],  // a SERIES choice about this event
+        ['E81', ORG_A, F1,     1, 'public',  'full',  1, 'choice', 900507,     'date',     0, 0],  // a DATE choice about this event
+    ];
+    // 🌐 #493 P1: the public-website columns of the organisation's OWN events.
+    //    Every event not listed here has the column defaults — switch OFF, no
+    //    dates — exactly what migration 258 gives every existing row. E1 is
+    //    ticked so the plan's "website: {E1,E12}" cases keep meaning what they
+    //    always did; E2 (members-only) is ticked too, and must STILL stay off.
+    $yesterday = (new DateTimeImmutable($today))->modify('-1 day')->format('Y-m-d');
+    $tomorrow  = (new DateTimeImmutable($today))->modify('+1 day')->format('Y-m-d');
+    $websiteOwn = [
+        'E1'  => [1, null, null],
+        'E2'  => [1, null, null],
+        'E71' => [1, null, null],
+        'E72' => [1, $tomorrow, null],
+        'E73' => [1, null, $yesterday],
+        'E74' => [1, $today, $today],
+        'E75' => [1, $yesterday, null],
+        'E76' => [1, null, $tomorrow],
+        'E77' => [0, $yesterday, $tomorrow],
     ];
     // `importApiOptOut` is named on EVERY fixture event, 0 unless listed here.
     // The column defaults to 1 (the resolver's narrow default, migration 206),
@@ -678,6 +715,11 @@ try {
                 $isPublic, $level, $detail, $website, $apiOptOut[$name] ?? 0, $audType, $audId, $source, $private, $recheck,
             ]
         );
+        if (isset($websiteOwn[$name]) === true) {
+            [$on, $from, $until] = $websiteOwn[$name];
+            run($db, 'UPDATE tblEvents SET `showOnWebsite` = ?, `websiteFrom` = ?, `websiteUntil` = ? WHERE eventID = ?',
+                'issi', [$on, $from, $until, $id]);
+        }
     }
     echo 'Fixture inserted: 2 organisations, ' . count($accounts) . ' accounts (and V0, nobody), ' . count($calendars)
         . ' calendars, ' . count($eventRows) . " events.\n\n";
@@ -692,8 +734,12 @@ try {
      *
      * @return list<string>
      */
-    $visible = static function (string $mode, int $viewerId, ?int $site = null, bool $withExtras = false) use ($db, $today, $eventName): array {
-        $w = EventVisibility::where('e', $mode, $viewerId, $today);
+    // 🌐 `$rule` (#493 P1): the copied-in rule handed to "website" mode. It
+    //    defaults to COPIED_BY_CALENDAR here — the #514 behaviour — because
+    //    every website check written before #493 was written for that rule.
+    //    where() itself defaults to the STRICTER rule; section W tests both.
+    $visible = static function (string $mode, int $viewerId, ?int $site = null, bool $withExtras = false, string $rule = EventVisibility::COPIED_BY_CALENDAR) use ($db, $today, $eventName): array {
+        $w = EventVisibility::where('e', $mode, $viewerId, $today, $rule);
         $sql = 'SELECT e.eventID FROM tblEvents e WHERE e.eventID BETWEEN 900300 AND ' . ($withExtras === true ? 900399 : PLAN_LAST_EVENT)
             . ($site !== null ? ' AND e.siteID = ?' : '') . $w['sql'] . ' ORDER BY e.eventID';
         $types = ($site !== null ? 'i' : '') . $w['types'];
@@ -844,7 +890,9 @@ try {
     echo "\n=== strict membership on every installation (step 7) ===\n";
     check('V3 (active account, no membership row) sees exactly the V0 set', $sessionSeen['V3'] === $v0, 'got ' . setText($sessionSeen['V3']));
     $params = array_map(static fn (ReflectionParameter $p): string => $p->getName(), (new ReflectionMethod(EventVisibility::class, 'where'))->getParameters());
-    check('where() has exactly four parameters: alias, mode, viewerId, today', $params === ['alias', 'mode', 'viewerId', 'today'], implode(', ', $params));
+    // #493 P1 added `copiedRule`: a VALUE bound into "website" mode only, never
+    // a switch on how organisations are told apart (what this check guards).
+    check('where() has exactly five parameters: alias, mode, viewerId, today, copiedRule', $params === ['alias', 'mode', 'viewerId', 'today', 'copiedRule'], implode(', ', $params));
     $mentions = [];
     foreach ([EventVisibility::MODE_SESSION, EventVisibility::MODE_ANONYMOUS, EventVisibility::MODE_WEBSITE, EventVisibility::MODE_TOKEN,
         EventVisibility::MODE_INVITE, EventVisibility::MODE_KEY, EventVisibility::MODE_BULK_MEMBERS] as $mode) {
@@ -1336,6 +1384,76 @@ try {
             check("refused: {$label}", true);
         }
     }
+
+
+    // -------------------------------------------------------------------------
+    echo "\n=== W. the public website: switch, dates and the copied-in rule (#493 P1; D-057, D-078, D-080, D-081) ===\n";
+    $webCal   = $visible(EventVisibility::MODE_WEBSITE, 0, ORG_A, true, EventVisibility::COPIED_BY_CALENDAR);
+    $webEvent = $visible(EventVisibility::MODE_WEBSITE, 0, ORG_A, true, EventVisibility::COPIED_BY_EVENT);
+    $ownOnly  = static fn (array $set): array => array_values(array_intersect($set, ['E1', 'E2', 'E70', 'E71', 'E72', 'E73', 'E74', 'E75', 'E76', 'E77']));
+    $want     = ['E1', 'E74', 'E75', 'E76'];
+    check('W1 own events on the website = {E1,E74,E75,E76} under BOTH rules (switch on, public, today inside the dates)',
+        $ownOnly($webCal) === $want && $ownOnly($webEvent) === $want, 'calendar ' . setText($ownOnly($webCal)) . ' / event ' . setText($ownOnly($webEvent)));
+    check('W2 E70 (public, switch OFF) is not on the website — the default exposure D-057 rejects', in_array('E70', $webCal, true) === false);
+    check('W3 E2 and E71 (members-only, switch ON) are not on the website — the switch means nothing without isPublic',
+        in_array('E2', $webCal, true) === false && in_array('E71', $webCal, true) === false);
+    check('W4 E72 (from tomorrow) is not yet on the website', in_array('E72', $webCal, true) === false);
+    check('W5 E73 (until yesterday) is no longer on the website', in_array('E73', $webCal, true) === false);
+    check('W6 E74 (from today until today) IS on the website — both ends inclusive', in_array('E74', $webCal, true) === true);
+    check('W7 E77 (switch OFF, today inside its dates) is NOT on the website — the dates only narrow the switch',
+        in_array('E77', $webCal, true) === false);
+    $seenElsewhere = [];
+    foreach ([EventVisibility::MODE_SESSION, EventVisibility::MODE_ANONYMOUS] as $mode) {
+        if (in_array('E70', $visible($mode, $viewers['V0'], ORG_A, true), true) === false) {
+            $seenElsewhere[] = $mode;
+        }
+    }
+    check('W8 E70 (public, switch OFF) is still on the portal\'s own calendar for a signed-out visitor — the switch is about the website only', $seenElsewhere === [], implode(', ', $seenElsewhere));
+    check('W9 "one box per calendar": E78 (calendar box), E79 (rule box), E80 (series choice) and E81 (date choice) are all on the website',
+        array_values(array_intersect($webCal, ['E78', 'E79', 'E80', 'E81'])) === ['E78', 'E79', 'E80', 'E81'], setText($webCal));
+    check('W10 "one tick per event": only E80 and E81 — a choice about the event itself — and NOT E78 or E79',
+        array_values(array_intersect($webEvent, ['E78', 'E79', 'E80', 'E81'])) === ['E80', 'E81'], setText($webEvent));
+    $defaultRule = $visible(EventVisibility::MODE_WEBSITE, 0, ORG_A, true, 'not-a-rule');
+    check('W11 a rule the class cannot read counts as "one tick per event" (the stricter), never the looser', $defaultRule === $webEvent, setText($defaultRule));
+    $wDefault = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today);
+    $wEvent   = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today, EventVisibility::COPIED_BY_EVENT);
+    check('W12 where() with no rule given binds the stricter rule', $wDefault === $wEvent);
+    $wCal = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today, EventVisibility::COPIED_BY_CALENDAR);
+    check('W13 the SQL TEXT is byte-identical for both rules — only a bound value differs (the #503 rule)',
+        $wCal['sql'] === $wEvent['sql'] && $wCal['types'] === $wEvent['types'] && $wCal['params'] !== $wEvent['params']);
+    $otherModes = [];
+    foreach ([EventVisibility::MODE_SESSION, EventVisibility::MODE_ANONYMOUS, EventVisibility::MODE_TOKEN, EventVisibility::MODE_INVITE,
+        EventVisibility::MODE_KEY, EventVisibility::MODE_BULK_MEMBERS] as $mode) {
+        if (EventVisibility::where('e', $mode, $viewers['V1'], $today, EventVisibility::COPIED_BY_CALENDAR)
+            !== EventVisibility::where('e', $mode, $viewers['V1'], $today, EventVisibility::COPIED_BY_EVENT)) {
+            $otherModes[] = $mode;
+        }
+    }
+    check('W14 the copied-in rule changes NOTHING in any other mode', $otherModes === [], implode(', ', $otherModes));
+    $leakW = [];
+    foreach ($viewers as $vName => $vId) {
+        if ($visible(EventVisibility::MODE_WEBSITE, $vId, ORG_A, true, EventVisibility::COPIED_BY_EVENT) !== $webEvent) {
+            $leakW[] = $vName;
+        }
+    }
+    check('W15 website mode ignores a viewer passed by mistake, for every viewer, under the stricter rule too', $leakW === [], implode(', ', $leakW));
+    // W16 (#493 P1 round 1): the PHP half every page and FeedAdmin::whoCanSee()
+    // ask, answered for every importSource the column can hold, under both rules
+    // and an unreadable one — the same answers the SQL gave in W9-W11.
+    $tickMatrix = [];
+    foreach (['calendar', 'date', 'series', 'rule', 'waiting', 'private', 'conflict', 'duplicate', null] as $src) {
+        foreach ([EventVisibility::COPIED_BY_CALENDAR, EventVisibility::COPIED_BY_EVENT, 'garbage'] as $rule) {
+            $tickMatrix[($src ?? 'null') . '|' . $rule] = EventVisibility::copiedTickCounts($src, $rule);
+        }
+    }
+    $tickWant = [];
+    foreach (['calendar', 'date', 'series', 'rule', 'waiting', 'private', 'conflict', 'duplicate', 'null'] as $src) {
+        $tickWant[$src . '|calendar'] = true;
+        $tickWant[$src . '|event']    = in_array($src, ['date', 'series'], true);
+        $tickWant[$src . '|garbage']  = in_array($src, ['date', 'series'], true);
+    }
+    check('W16 copiedTickCounts(): under the looser rule every source counts; under the stricter (or an unreadable one) only date and series choices',
+        $tickMatrix === $tickWant, json_encode(array_diff_assoc($tickMatrix, $tickWant)));
 
     // -------------------------------------------------------------------------
     echo "\n=== redact() ===\n";

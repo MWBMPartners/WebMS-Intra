@@ -268,6 +268,8 @@ foreach ([
     'SafeFetch.php',
     'EventVisibility.php',
     'FeedResolver.php',
+    // #493 P1 round 4: FeedResolver reads the copied-in events rule through it.
+    'PublicWebsite.php',
     'TimeLimit.php',
     'FeedImporter.php',
 ] as $classFile) {
@@ -1835,7 +1837,7 @@ function fi_runJob(string $token = 'p6-selftest-token', bool $standInForPass = f
         . "declare(strict_types=1);\n"
         . '$c = ' . var_export($config, true) . ";\n"
         . "foreach (['WindowsTimeZones.php','IcsReader.php','App.php','Settings.php','Site.php','ErrorMonitor.php',"
-        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','TimeLimit.php','FeedImporter.php',"
+        . "'Logger.php','SafeFetch.php','EventVisibility.php','FeedResolver.php','PublicWebsite.php','TimeLimit.php','FeedImporter.php',"
         // The pass that tells administrators (#514 part 9), and every class it
         // can reach. With no mail route and no push set up, as here, it asks
         // only "can anything be sent?" and stops; the rest are loaded so that

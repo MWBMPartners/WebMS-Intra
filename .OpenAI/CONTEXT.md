@@ -3181,6 +3181,16 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   choice; for a map, both people. Unreadable is `no`. Guards:
   `check_outside_services_gated.py` (presence) and `tools/outside-services-selftest.php` (behaviour).
   The technical record is DEV_NOTES.md, "Outside services in three tiers (#778)".
+- **The public website, for events (#493 P1; D-057, D-077, D-078, D-080, D-081).**
+  `EventVisibility::where()` in "website" mode is the ONE rule for which events the public website lists
+  (an event page's search-engine markup asks `EventVisibility::copiedTickCounts()`, which shares its constant);
+  `Portal\Core\PublicWebsite` is the ONE place that decides who may change `showOnWebsite` /
+  `websiteFrom` / `websiteUntil` (`mayPublish()`), judges a posted change (`judgeEventFields()`, asked by
+  the form AND the events API), and works out the copied-in rule (`copiedRuleFor()`, the installation
+  capping the organisation at READ time). Every website-mode caller passes `copiedRuleFor()`; the
+  parameter's default is the stricter rule, so a caller — or a test — that omits it silently narrows.
+  The public submission form never names the three columns. Test: `tools/public-website-tick-selftest.php`.
+  The technical record is DEV_NOTES.md, "Show on the public website, for events (#493, package P1)".
 
 ## A time on a clock is not a moment, and the test for it cannot work (#777 part one)
 

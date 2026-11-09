@@ -232,7 +232,11 @@ ROLES_HAS_REMAINING: dict[str, dict] = {
                 # information rather than a finding, on purpose: the line is a
                 # convenience for the reader and a wrong one must never be the
                 # thing that fails a push. It is still worth keeping true.
-                "line": 1422,
+                # 1451 at 04862dd; #493 P1 added `website.publish` above it.
+                # Three corrections in that package's check were each wrong,
+                # because each was written from the previous figure rather than
+                # from the command. Run `grep -n hasAnyOf web/_core/Capabilities.php`.
+                "line": 1512,
                 "method": "hasAnyOf",
                 "why": "This IS `Capabilities::allows()`'s own body — the one place a "
                 "capability's roles are turned into an answer about a person. Every "

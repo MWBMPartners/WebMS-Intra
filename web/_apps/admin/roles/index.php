@@ -312,10 +312,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                      because "make the mapping, then grant the role" is the
                      ordinary order of work.
                 -->
-                <div class="alert alert-warning py-2 mb-2">
+                <?php // 🌐 #493 P1 (rounds 1 and 2). A role IS named here and nobody holds it,
+                      //    which is a different state from "no role named" (the alert just
+                      //    above), so it gets its OWN sentence. Round 1 put each permission's
+                      //    `emptyMeans` here, which was written for the empty set and so said
+                      //    untrue things in this state ("until a role is named here again",
+                      //    "any administrator can change it back"). What can be said truthfully
+                      //    from the registry alone is whether a GLOBAL administrator still gets
+                      //    in (`globalAdminFallsOpen`); where they do not (the erasure review,
+                      //    #724), nobody can open this door at all until somebody holds a role. ?>
+                <?php $capFallsOpen = Capabilities::fallsOpenForGlobalAdmin($capKey); ?>
+                <div class="alert alert-warning py-2 mb-2" data-no-role-holder="<?php echo htmlspecialchars($capKey, ENT_QUOTES, 'UTF-8'); ?>"
+                     data-falls-open="<?php echo $capFallsOpen === true ? '1' : '0'; ?>">
                     <i class="fa-solid fa-triangle-exclamation me-1"></i>
-                    Nobody here holds any of these roles yet, so nobody can open this door.
-                    Give somebody one on the
+                    <?php if ($capFallsOpen === true): ?>
+                        Nobody here holds any of these roles yet, so nobody opens this door through a role. Administrators of this organisation, and global administrators, still can.
+                    <?php else: ?>
+                        Nobody here holds any of these roles yet, so nobody can open this door — not even a global administrator.
+                    <?php endif; ?>
+                    Give somebody one of the roles on the
                     <a href="<?php echo htmlspecialchars(Site::url('admin/users'), ENT_QUOTES, 'UTF-8'); ?>">Users</a>
                     page.
                 </div>

@@ -9,8 +9,10 @@
  * every date of that repeating event. A choice decides who may see those
  * dates and how much of them, in place of the rules and the calendar's own
  * setting. The form posts to itself: a refusal draws the page again with the
- * message and everything typed; a save or a removal returns to the
- * calendar's own page.
+ * message and everything typed — except when a choice has appeared since a
+ * form drawn as a NEW choice was opened, when it draws that saved choice
+ * instead and says so (#493 P1, FeedAdmin::CHOICE_APPEARED); a save or a
+ * removal returns to the calendar's own page.
  *
  * WHAT THE PAGE SHOWS, AND WHY
  * ----------------------------
@@ -94,6 +96,7 @@ use Portal\Core\ExternalAudience;
 use Portal\Core\FeedAdmin;
 use Portal\Core\FeedResolver;
 use Portal\Core\Logger;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -209,8 +212,56 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         'overridesPrivateMark' => ($postText('overridesPrivateMark') === '1') ? '1' : '0',
         'seen'                 => $seen,
     ];
+    // 🌐 #493 P1, round 9 of its check: a NEW choice for "Everyone" must say
+    //    whether its dates go on the public website. The form asks it as Yes /
+    //    No with neither chosen (see "What to draw" below), and saying nothing
+    //    is refused rather than read as No, because reading it either way is
+    //    exactly what four rounds found to change the website on an untouched
+    //    Save. A choice already saved keeps its checkbox, where an untouched
+    //    box is the stored answer.
+    //
+    //    Rounds 10 and 11 found the same two faults in four shapes, so the
+    //    rule is now stated by what the form KNOWS, not patched per shape:
+    //    • A form drawn as a NEW choice (it carries drawnAsNew) NEVER saves
+    //      over a choice that has appeared since — whoever saved it, whatever
+    //      else this post says, and whether or not it is refused for another
+    //      reason first. Round 10 refused only an unanswered Everyone save;
+    //      round 11 found the stale form redrawn after a "no group ticked"
+    //      refusal as the OTHER choice's checkbox, unticked, minus the
+    //      marker, so the next save still wrote "No" over a "Yes". The page
+    //      then shows the choice that now applies.
+    //    • A redraw takes the website answer from what was REALLY SENT, and
+    //      where nothing was sent it does not guess "No". The script disables
+    //      the website control for any audience but Everyone and a disabled
+    //      control is not submitted, so "nothing sent" means unticked only
+    //      when the audience sent WAS Everyone on the saved choice's
+    //      checkbox. Otherwise: the saved choice's own answer (round 11: a
+    //      stored "Yes" came back unticked), or, for a new choice, unanswered.
+    $websiteAnswered = in_array($postText('websiteOptIn'), ['0', '1'], true);
+    $choiceNow       = FeedAdmin::choiceFor($mysqli, $event, $scope);
+    $drawnAsNew      = $postText('drawnAsNew') === '1';
+    if ($websiteAnswered === true) {
+        $websiteRedraw = $postText('websiteOptIn');
+    } elseif ($choiceNow === null) {
+        $websiteRedraw = '';
+    } elseif ($post['audienceLevel'] === 'public') {
+        $websiteRedraw = '0';
+    } else {
+        $websiteRedraw = ((int) $choiceNow['websiteOptIn'] === 1) ? '1' : '0';
+    }
+    if ($drawnAsNew === true && $choiceNow !== null) {
+        $refusal = FeedAdmin::CHOICE_APPEARED;
+        $typed   = null;
+        $result  = null;
+    } elseif ($choiceNow === null && $post['audienceLevel'] === 'public' && $websiteAnswered === false) {
+        $refusal = 'Say whether these dates go on the public website: choose Yes or No. Nothing was saved.';
+        $typed   = ['websiteOptIn' => ''] + $post;
+        $result  = null;
+    } else {
     try {
-        $result = FeedAdmin::saveChoice($mysqli, $eventId, $scope, $siteId, $userId, $post);
+        // drawnAsNew is asked AGAIN under the calendar's lock (round 12): the
+        // read above is outside it, so two saves pressed together both pass.
+        $result = FeedAdmin::saveChoice($mysqli, $eventId, $scope, $siteId, $userId, ['mustBeNew' => $drawnAsNew] + $post);
     } catch (\Throwable $e) {
         Logger::errorPlatform('FeedAdmin', 'Error', 'CHOICE_SAVE', 'Saving a choice of event #' . $eventId . ' failed', $e->getMessage());
         $finish($failed, 'danger', $selfUrl);
@@ -218,20 +269,39 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     if ($result['status'] === 'not_found') {
         $finish((string) $result['message'], 'danger', $listUrl);
     }
-    if ($result['ok'] !== true) {
+    if ($result['ok'] !== true && $result['status'] === 'appeared') {
         $refusal = (string) $result['message'];
-        $typed   = $post;
+        $typed   = null;
+    } elseif ($result['ok'] !== true) {
+        $refusal = (string) $result['message'];
+        $typed   = ['websiteOptIn' => $websiteRedraw] + $post;
     } else {
         Logger::activity('ExternalChoiceSaved', 'Choice #' . (int) ($result['choiceId'] ?? 0) . ' (event #' . $eventId . ', ' . $scope . ')', $userId);
         $finish((string) $result['message'], 'success', $viewUrl . '#events');
+    }
     }
 }
 
 // 📖 What to draw: the saved choice (if any), the dates it covers, and the
 //    values for the form — what was typed after a refusal, else the saved
-//    choice, else the date's CURRENT setting (so saving without touching
-//    anything changes nothing).
+//    choice, else, for a new choice, the date's CURRENT audience and detail
+//    with the website question unanswered (see below). Saving a new choice
+//    untouched is NOT a no-op: its audience and detail are the opened date's,
+//    which for a choice for every date may differ from the other dates
+//    (#854), and an Everyone choice is refused until the website question is
+//    answered.
 $existing = FeedAdmin::choiceFor($mysqli, $event, $scope);
+// 🌐 #493 P1, round 13: a form drawn as NEW that was refused for ANY reason is
+//    judged again here, on the very read this page is drawn from. saveChoice()
+//    checks the form before it takes the lock, so a post it refused for
+//    another reason (no group ticked, the private-mark warning) never reached
+//    its "mustBeNew" ask; if a choice was saved meanwhile, the page would be
+//    drawn as THAT choice's form, without the marker, and the next Save would
+//    write over it. Instead it says a choice appeared and shows it.
+if ($typed !== null && $existing !== null && ($drawnAsNew ?? false) === true) {
+    $refusal = FeedAdmin::CHOICE_APPEARED;
+    $typed   = null;
+}
 // One date of a repeating event with no choice of its own: is there a choice
 // for every date? It decides this date instead (fix round 1 of chunk P8-3,
 // check finding L2 — the page used to say "No choice yet: this date follows
@@ -254,9 +324,27 @@ if ($typed !== null) {
         'audience' => [],
     ];
 } else {
+    // 🌐 #493 P1: a NEW choice's website question starts UNANSWERED, and the
+    //    page asks it as Yes / No with neither chosen; the handler refuses an
+    //    "Everyone" choice that does not answer it. Four rounds of the check
+    //    (rounds 6 to 9) each found the previous attempt to INFER a starting
+    //    tick wrong in a new direction — copying the opened date's own yes
+    //    widened it to every date; starting unticked narrowed a series off the
+    //    website; starting from the calendar's box ignored a rule holding the
+    //    series off; reading the other dates was vetoed by a private or a
+    //    stale one — and every one of those made an untouched Save change what
+    //    the public website shows. With nothing pre-chosen, an untouched Save
+    //    of an EVERYONE choice is refused and says why. (An untouched Save at
+    //    Members stores the opened date's audience and detail — #854 — unless
+    //    a date it covers is marked private, when the private-mark warning
+    //    refuses it; at Only administrators it is never refused; at Selected
+    //    groups and people it is refused because no group is ticked. None of
+    //    this is about the website answer.) A choice already SAVED
+    //    shows its own stored answer, exactly (above). The audience and the
+    //    detail are still pre-filled from the date (#854).
     $v = [
         'audienceLevel' => (string) ($event['importLevel'] ?? 'members'), 'detailLevel' => (string) ($event['importDetail'] ?? 'basic'),
-        'websiteOptIn' => ((int) ($event['importWebsite'] ?? 0) === 1) ? '1' : '0', 'apiOptOut' => '0',
+        'websiteOptIn' => '', 'apiOptOut' => '0',
         'fromDate' => '', 'toDate' => '', 'note' => '', 'overridesPrivateMark' => '0', 'audience' => [],
     ];
 }
@@ -456,6 +544,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <form method="post" action="<?php echo $esc($selfUrl); ?>" class="row g-3" id="choice-form">
         <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">
         <input type="hidden" name="action" value="save">
+        <?php if ($existing === null): ?>
+            <?php // Says this form was drawn as a NEW choice, so it never saves over a choice that has appeared since, from
+                  // anywhere: asked by the handler, by FeedAdmin::saveChoice() under the lock, and again when a refused page is
+                  // drawn (rounds 10-13; FeedAdmin::CHOICE_APPEARED says why three). ?>
+            <input type="hidden" name="drawnAsNew" value="1">
+        <?php endif; ?>
 
         <div class="col-12">
             <fieldset>
@@ -490,12 +584,28 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
 
         <div class="col-12">
+            <?php if ($existing === null): ?>
+                <?php // A NEW choice asks the question with neither answer chosen (round 9; see the handler). The fieldset carries
+                      // the id, so the script below disables both answers when the audience is not "Everyone". ?>
+                <fieldset id="choice-website" aria-describedby="choice-website-help">
+                    <legend class="form-label small mb-1">Show these dates on the public website?</legend>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" id="choice-website-yes" name="websiteOptIn" value="1"<?php echo $v['websiteOptIn'] === '1' ? ' checked' : ''; ?>>
+                        <label class="form-check-label" for="choice-website-yes">Yes</label>
+                    </div>
+                    <div class="form-check form-check-inline">
+                        <input class="form-check-input" type="radio" id="choice-website-no" name="websiteOptIn" value="0"<?php echo $v['websiteOptIn'] === '0' ? ' checked' : ''; ?>>
+                        <label class="form-check-label" for="choice-website-no">No</label>
+                    </div>
+                </fieldset>
+            <?php else: ?>
             <div class="form-check">
                 <input class="form-check-input" type="checkbox" id="choice-website" name="websiteOptIn" value="1"
                        aria-describedby="choice-website-help"<?php echo $v['websiteOptIn'] === '1' ? ' checked' : ''; ?>>
                 <label class="form-check-label" for="choice-website">Also show on the public website</label>
             </div>
-            <div class="form-text" id="choice-website-help">Adds these dates to the countdown widget and the sitemap. Only for "Everyone".</div>
+            <?php endif; ?>
+            <div class="form-text" id="choice-website-help">Adds these dates to the organisation's public website — the countdown widget, the sitemap and the search-engine markup on each date's page — under either rule for copied-in events, because a choice is about this event itself. Two exceptions: a choice cannot put on the website a date the outside calendar lists twice when its calendar's own setting keeps it off (a "No" still takes such a date off), under either rule; and the search-engine markup goes out only where a signed-out visitor sees the date in full (at "Full details"; or on a calendar set to Everyone, unless the outside calendar marks the date private). Only for "Everyone".</div>
         </div>
         <div class="col-12">
             <div class="form-check">

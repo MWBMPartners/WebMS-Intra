@@ -401,7 +401,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                        aria-describedby="feed-website-help"<?php echo $v['websiteOptIn'] === '1' ? ' checked' : ''; ?>>
                 <label class="form-check-label" for="feed-website">Also show on the public website</label>
             </div>
-            <div class="form-text" id="feed-website-help">Adds these events to the countdown widget and the sitemap. Only for "Everyone".</div>
+            <div class="form-text" id="feed-website-help">Adds these events to the organisation's public website — the countdown widget, the sitemap and the search-engine markup on each event's page. Only for "Everyone".<?php // 🌐 #493 P1 (D-080, D-081): say it when this box does nothing. Under "one tick per event" only a
+                  //    choice about the event itself counts, so a box here would read as working when it is not (#671). ?><?php if (EventVisibility::copiedTickCounts('calendar', \Portal\Core\PublicWebsite::copiedRuleFor($mysqli, $siteId)) === false): ?> <strong data-website-box-inert="1">While this organisation is held to "one tick per event", this box does nothing:</strong> a copied-in event reaches the website only through a choice made about that event itself. See Outside calendars, "Copied-in events on your public website".<?php endif; ?></div>
         </div>
         <div class="col-12">
             <div class="form-check">

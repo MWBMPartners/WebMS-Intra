@@ -130,7 +130,10 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 // the importer class, loaded for its `zoneFor()`, names them.
 $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
 foreach (['App.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'EventVisibility.php', 'FeedResolver.php', 'FeedImporter.php',
-    'GdprEraser.php'] as $classFile) {
+    // `PublicWebsite.php` since #493 P1 round 4: FeedResolver reads the
+    // copied-in events rule through it. Missing, every resolve is a fatal
+    // "class not found" that php -l cannot see.
+    'GdprEraser.php', 'PublicWebsite.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }
 
@@ -138,6 +141,7 @@ use Portal\Core\EventVisibility;
 use Portal\Core\FeedImporter;
 use Portal\Core\FeedResolver;
 use Portal\Core\GdprEraser;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Site;
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
@@ -169,6 +173,31 @@ function fr_startSite(): void
     Site::init($mysqli, ['site' => ['timezoneKeptAt' => (string) ($mark[0] ?? '')]], 1);
 }
 fr_startSite();
+
+// 🌐 THE COPIED-IN EVENTS RULE THIS FILE RUNS UNDER (#493 P1, round 4 of its
+//    check; D-080, D-081). Everything here describes #514's behaviour, which
+//    is the looser rule, "one box per calendar". Migration 258 seeds the
+//    stricter "one tick per event", under which a rule's website box is
+//    dropped and the calendar's own box no longer counts when the resolver
+//    decides what widens — so three #514 checks about a rule's website request
+//    went red the day the resolver learned the rule. The file therefore runs
+//    under the looser rule, put back at the end whatever happens; what the
+//    stricter rule does to the resolver is pinned by its own checks, beside E22.
+$frCopiedRuleAtStart = fr_one("SELECT settingValue FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL");
+fr_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'public.events.copiedRule', 'calendar', 'event', 0) "
+    . "ON DUPLICATE KEY UPDATE settingValue = 'calendar'");
+register_shutdown_function(static function () use ($frCopiedRuleAtStart): void {
+    try {
+        if ($frCopiedRuleAtStart === null) {
+            fr_q("DELETE FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL");
+        } else {
+            fr_q("UPDATE tblSettings SET settingValue = ? WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL", 's',
+                [(string) $frCopiedRuleAtStart['settingValue']]);
+        }
+    } catch (Throwable $e) {
+        echo "NOTE: could not put the copied-in events rule back: " . $e->getMessage() . "\n";
+    }
+});
 if (Site::timezoneFacts()['inRow'] === false) {
     echo "REFUSED — this database does not hold migration 217's mark, so an organisation's zone would be read from the old setting. Build it from web/_sql/full_schema.sql. Nothing was checked.\n";
     exit(1);
@@ -2112,14 +2141,235 @@ try {
     $webEvent = fr_event($fw, 'e22-web@p7', 'Website but not API');
     fr_resolve($fw);
     $today = fr_todayLocal()->format('Y-m-d');
-    $inMode = static function (string $mode) use ($webEvent, $today): bool {
-        $w = EventVisibility::where('e', $mode, 0, $today);
+    // 🌐 #493 P1: website mode now also asks WHICH rule an organisation is held
+    //    to for copied-in events (D-080, D-081), and a caller that passes none
+    //    gets the STRICTER one. This event's website "yes" comes from its
+    //    calendar's own box (FeedResolver writes importSource 'calendar' when
+    //    no rule and no choice decided it), so it is on the website only under
+    //    "one box per calendar". This check is about the API box, not that
+    //    rule, so it asks under the looser rule — AND pins that the stricter
+    //    rule keeps the same event off, so the fixture exercises the new clause
+    //    rather than stepping round it. #493 P1 first missed this caller and
+    //    the check went red; round 3 of its independent check found it.
+    $inMode = static function (string $mode, string $copiedRule = EventVisibility::COPIED_BY_EVENT) use ($webEvent, $today): bool {
+        $w = EventVisibility::where('e', $mode, 0, $today, $copiedRule);
         $types = 'i' . $w['types'];
 
         return fr_q('SELECT e.eventID FROM tblEvents e WHERE e.eventID = ?' . $w['sql'], $types, array_merge([$webEvent], $w['params'])) !== [];
     };
-    fr_ok('KEEP-WORKING: website mode still returns a public, website-ticked event whose calendar is "Don\'t show via API"; key mode does not',
-        $inMode(EventVisibility::MODE_WEBSITE) === true && $inMode(EventVisibility::MODE_KEY) === false, json_encode(fr_ev($webEvent)));
+    fr_ok('KEEP-WORKING: website mode still returns a public, website-ticked event whose calendar is "Don\'t show via API" under "one box per calendar", and NOT under the stricter "one tick per event" (#493); key mode does not',
+        $inMode(EventVisibility::MODE_WEBSITE, EventVisibility::COPIED_BY_CALENDAR) === true
+            && $inMode(EventVisibility::MODE_WEBSITE, EventVisibility::COPIED_BY_EVENT) === false
+            && $inMode(EventVisibility::MODE_KEY) === false, json_encode(fr_ev($webEvent)));
+
+    // 🌐 #493 P1, round 4 of its check: what the RESOLVER does under each
+    //    copied-in rule (D-080, D-081). Under "one tick per event" the
+    //    calendar's own website box counted as a yes already given, so ticking
+    //    it — a box four pages call inert there — made a choice's yes "not
+    //    wider", applied it at once and released every date waiting for
+    //    approval onto the public website. And a rule's yes, which counts for
+    //    nothing there, still waited for an approval that changed nothing.
+    //    The installation's rule is set for each step and put back after.
+    $copiedRuleWas = fr_one("SELECT settingValue FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL");
+    $setCopiedRule = static function (string $rule): void {
+        fr_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'public.events.copiedRule', ?, 'event', 0) "
+            . 'ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)', 's', [$rule]);
+    };
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    $fsc = fr_newFeed(ORG_A, 'public', ['website' => 0]);
+    $sce = fr_event($fsc, 'e22b-series@p7', 'Series choice for the website');
+    fr_choice($fsc, 'series', 'e22b-series@p7', 'public', ['website' => 1]);
+    fr_resolve($fsc);
+    $waitingFirst = fr_ev($sce)['importSource'] === 'waiting' && count(fr_apprWith($sce, 'pending')) === 1;
+    fr_q('UPDATE tblExternalFeeds SET websiteOptIn = 1 WHERE feedID = ?', 'i', [$fsc]);
+    fr_resolve($fsc);
+    fr_ok('#493 round 4: under "one tick per event" a series choice ticked for the website waits for approval, and ticking the calendar\'s own box (which counts for nothing there) does NOT release it',
+        $waitingFirst === true && fr_ev($sce)['importSource'] === 'waiting' && count(fr_apprWith($sce, 'pending')) === 1, json_encode(fr_ev($sce)));
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    $looserInForce = PublicWebsite::copiedRuleFor($mysqli, ORG_A) === EventVisibility::COPIED_BY_CALENDAR;
+    fr_resolve($fsc);
+    fr_ok('KEEP-WORKING (#514): under "one box per calendar" the same box is a yes already given, so the choice is not wider and applies at once',
+        $looserInForce === true && fr_ev($sce)['importSource'] === 'series', json_encode(fr_ev($sce)));
+
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    $frl = fr_newFeed(ORG_A, 'public', ['website' => 0]);
+    $rle = fr_event($frl, 'e22c-rule@p7', 'Rule website event');
+    fr_rule($frl, 'public', [['title', 'contains', 'rule website']], ['website' => 1]);
+    fr_resolve($frl);
+    $rev = fr_ev($rle);
+    fr_ok('#493 rounds 4-5: under "one tick per event" a rule\'s website box counts for nothing — applied at once, stored website 0, no approval row',
+        $rev['importSource'] === 'rule' && (int) $rev['importWebsite'] === 0 && count(fr_appr($rle)) === 0, json_encode($rev));
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    fr_resolve($frl);
+    $rev = fr_ev($rle);
+    fr_ok('KEEP-WORKING (#514): under "one box per calendar" the same rule widens the calendar\'s answer and waits for approval',
+        $rev['importSource'] === 'waiting' && count(fr_apprWith($rle, 'pending')) === 1, json_encode($rev));
+
+    // 🌐 #493 P1, round 5 of its check: the two faults round 4's first design
+    //    caused by CHANGING the rule's answer rather than only what it counts
+    //    for. (a) The rule PREVIEW compared the changed answer with the draft as
+    //    written and called every matching event "another rule is stricter".
+    //    (b) An approval is recorded against a fingerprint that includes the
+    //    website box, so an approval given under one rule was lost the moment
+    //    the rule changed, and the event fell back to the calendar's audience.
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    $fpv = fr_newFeed(ORG_A, 'public', ['website' => 0]);
+    fr_event($fpv, 'e22d-preview@p7', 'Preview choir evening');
+    $fpm = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    fr_event($fpm, 'e22d-preview-m@p7', 'Preview choir members');
+    fr_resolve($fpv);
+    fr_resolve($fpm);
+    $draftWeb = ['ruleID' => 0, 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'websiteOptIn' => 1, 'apiOptOut' => 0,
+        'conditions' => [['isException' => 0, 'matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'Preview choir']]];
+    $pvPublic  = FeedResolver::previewRule($mysqli, $fpv, $draftWeb, FeedResolver::databaseNowUtc($mysqli));
+    $pvMembers = FeedResolver::previewRule($mysqli, $fpm, $draftWeb, FeedResolver::databaseNowUtc($mysqli));
+    fr_ok('#493 round 5: under "one tick per event" previewing ONE rule with its website box ticked says what really happens — "applies now" on an Everyone calendar, "waits for approval" on a Members one — never "another rule is stricter"',
+        ($pvPublic[0]['outcome'] ?? null) === 'applies_now' && ($pvMembers[0]['outcome'] ?? null) === 'waits_for_approval',
+        json_encode([$pvPublic, $pvMembers]));
+
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    $fap = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    $ape = fr_event($fap, 'e22e-approved@p7', 'Approved website evening');
+    fr_rule($fap, 'public', [['title', 'contains', 'approved website']], ['website' => 1]);
+    fr_resolve($fap);
+    $apePending = fr_apprWith($ape, 'pending');
+    $apeDecided = $apePending !== [] && fr_decide((int) $apePending[0]['approvalID'], 'approved') === true;
+    fr_resolve($fap);
+    $apeLoose = fr_ev($ape);
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    fr_resolve($fap);
+    $apeStrict = fr_ev($ape);
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    fr_resolve($fap);
+    $apeBack = fr_ev($ape);
+    fr_ok('#493 round 5: an approval given under "one box per calendar" survives a switch to "one tick per event" and back — Everyone throughout, the website yes stored only while it counts, and no new approval asked for',
+        $apeDecided === true
+        && $apeLoose['importLevel'] === 'public' && (int) $apeLoose['importWebsite'] === 1 && $apeLoose['importSource'] === 'rule'
+        && $apeStrict['importLevel'] === 'public' && (int) $apeStrict['importWebsite'] === 0 && $apeStrict['importSource'] === 'rule'
+        && $apeBack['importLevel'] === 'public' && (int) $apeBack['importWebsite'] === 1 && $apeBack['importSource'] === 'rule'
+        && fr_apprWith($ape, 'pending') === [],
+        json_encode([$apeLoose, $apeStrict, $apeBack, fr_appr($ape)]));
+
+    // 🌐 #493 P1, round 6 of its check: the website box is fingerprinted as it
+    //    COUNTS. (c) An approval given under "one tick per event", where the
+    //    approvals page says the box does nothing, must NOT be reused to put
+    //    the event on the website once the rule is loosened — it was. (d) And
+    //    under that rule, ticking a rule's inert box must not disturb an
+    //    approval already given — it sent every such event back to waiting.
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    $fsl = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    $sle = fr_event($fsl, 'e22f-strict@p7', 'Strict concert evening');
+    fr_rule($fsl, 'public', [['title', 'contains', 'strict concert']], ['website' => 1]);
+    fr_resolve($fsl);
+    $slePending = fr_apprWith($sle, 'pending');
+    $sleDecided = $slePending !== [] && fr_decide((int) $slePending[0]['approvalID'], 'approved') === true;
+    fr_resolve($fsl);
+    $sleStrict = fr_ev($sle);
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    fr_resolve($fsl);
+    $sleLoose = fr_ev($sle);
+    fr_ok('#493 round 6: an approval given under "one tick per event" (website box counting for nothing) is NOT reused to put the event on the website when the rule is loosened — it asks again, and the date waits off the website',
+        $sleDecided === true && $sleStrict['importLevel'] === 'public' && (int) $sleStrict['importWebsite'] === 0
+        && $sleLoose['importSource'] === 'waiting' && (int) $sleLoose['importWebsite'] === 0 && count(fr_apprWith($sle, 'pending')) === 1,
+        json_encode([$sleStrict, $sleLoose, fr_appr($sle)]));
+
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    $fbx = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    $bxe = fr_event($fbx, 'e22g-box@p7', 'Box toggle evening');
+    $bxRule = fr_rule($fbx, 'public', [['title', 'contains', 'box toggle']], ['website' => 0]);
+    fr_resolve($fbx);
+    $bxPending = fr_apprWith($bxe, 'pending');
+    $bxDecided = $bxPending !== [] && fr_decide((int) $bxPending[0]['approvalID'], 'approved') === true;
+    fr_resolve($fbx);
+    fr_q('UPDATE tblExternalFeedRules SET websiteOptIn = 1 WHERE ruleID = ?', 'i', [$bxRule]);
+    fr_resolve($fbx);
+    $bxAfter = fr_ev($bxe);
+    fr_ok('#493 round 6: under "one tick per event" ticking a rule\'s website box (which counts for nothing there) leaves an approved event exactly as approved — no new request',
+        $bxDecided === true && $bxAfter['importLevel'] === 'public' && $bxAfter['importSource'] === 'rule' && fr_apprWith($bxe, 'pending') === [],
+        json_encode([$bxAfter, fr_appr($bxe)]));
+
+    // 🌐 #493 P1, round 7 of its check. (e) An approval CARRIED by step (c)
+    //    must survive UNticking a rule's inert box — step (c) used to require
+    //    the box ticked. (f) After tightening, a date the outside calendar adds
+    //    later must follow its approved siblings — pass 2 never looked for the
+    //    wider approval.
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    $fun = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    $une = fr_event($fun, 'e22h-untick@p7', 'Untick concert evening');
+    $unRule = fr_rule($fun, 'public', [['title', 'contains', 'untick concert']], ['website' => 1]);
+    fr_resolve($fun);
+    $unPending = fr_apprWith($une, 'pending');
+    $unDecided = $unPending !== [] && fr_decide((int) $unPending[0]['approvalID'], 'approved') === true;
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    fr_resolve($fun);
+    fr_q('UPDATE tblExternalFeedRules SET websiteOptIn = 0 WHERE ruleID = ?', 'i', [$unRule]);
+    fr_resolve($fun);
+    $unAfter = fr_ev($une);
+    fr_ok('#493 round 7: under "one tick per event" UNticking a rule\'s inert website box keeps an approval given under "one box per calendar" — Everyone, applied, nothing waiting',
+        $unDecided === true && $unAfter['importLevel'] === 'public' && $unAfter['importSource'] === 'rule' && fr_apprWith($une, 'pending') === [],
+        json_encode([$unAfter, fr_appr($une)]));
+
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    $fsb = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    $sb1 = fr_event($fsb, 'e22i-series@p7', 'Sibling concert series', ['key' => '20300101T190000Z', 'day' => 7]);
+    fr_rule($fsb, 'public', [['title', 'contains', 'sibling concert']], ['website' => 1]);
+    fr_resolve($fsb);
+    $sbPending = fr_apprWith($sb1, 'pending');
+    $sbDecided = $sbPending !== [] && fr_decide((int) $sbPending[0]['approvalID'], 'approved') === true;
+    fr_resolve($fsb);
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    fr_resolve($fsb);
+    $sb2 = fr_event($fsb, 'e22i-series@p7', 'Sibling concert series', ['key' => '20300108T190000Z', 'day' => 14]);
+    fr_resolve($fsb);
+    $sb2After = fr_ev($sb2);
+    fr_ok('#493 round 7: after tightening, a date the outside calendar ADDS to an approved series follows its approved sibling — Everyone, applied, nothing waiting',
+        $sbDecided === true && $sb2After['importLevel'] === 'public' && $sb2After['importSource'] === 'rule' && fr_apprWith($sb2, 'pending') === [],
+        json_encode([$sb2After, fr_appr($sb2), fr_ev($sb1)]));
+
+    // 🌐 #493 P1, round 8 of its check. (g) Only an APPROVAL of the wider
+    //    request is carried: a DECLINED one, after tightening, must not put
+    //    the event at Everyone. (h) An older decline of the narrower request
+    //    gives way to a NEWER approval of the wider one.
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    $fdc = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    $dce = fr_event($fdc, 'e22j-declined@p7', 'Declined concert evening');
+    fr_rule($fdc, 'public', [['title', 'contains', 'declined concert']], ['website' => 1]);
+    fr_resolve($fdc);
+    $dcPending = fr_apprWith($dce, 'pending');
+    $dcDecided = $dcPending !== [] && fr_decide((int) $dcPending[0]['approvalID'], 'declined') === true;
+    fr_resolve($fdc);
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    fr_resolve($fdc);
+    $dcAfter = fr_ev($dce);
+    fr_ok('#493 round 8: a DECLINED wider request is not carried across a tightening — the event stays at its calendar\'s audience, never Everyone',
+        $dcDecided === true && $dcAfter['importLevel'] === 'members', json_encode([$dcAfter, fr_appr($dce)]));
+
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    $fod = fr_newFeed(ORG_A, 'members', ['website' => 0]);
+    $ode = fr_event($fod, 'e22k-older@p7', 'Older decline evening');
+    fr_rule($fod, 'public', [['title', 'contains', 'older decline']], ['website' => 1]);
+    fr_resolve($fod);
+    $odPending = fr_apprWith($ode, 'pending');
+    $odDeclined = $odPending !== [] && fr_decide((int) $odPending[0]['approvalID'], 'declined') === true;
+    fr_resolve($fod);
+    fr_q("UPDATE tblExternalEventApprovals SET decidedAt = UTC_TIMESTAMP() - INTERVAL 1 HOUR WHERE eventID = ? AND status = 'declined'", 'i', [$ode]);
+    $setCopiedRule(EventVisibility::COPIED_BY_CALENDAR);
+    fr_resolve($fod);
+    $odWide = fr_apprWith($ode, 'pending');
+    $odApproved = $odWide !== [] && fr_decide((int) $odWide[0]['approvalID'], 'approved') === true;
+    fr_resolve($fod);
+    $setCopiedRule(EventVisibility::COPIED_BY_EVENT);
+    fr_resolve($fod);
+    $odAfter = fr_ev($ode);
+    fr_ok('#493 round 8: an older DECLINE of the narrower request gives way to a NEWER approval of the wider one after tightening — Everyone, applied',
+        $odDeclined === true && $odApproved === true && $odAfter['importLevel'] === 'public' && $odAfter['importSource'] === 'rule',
+        json_encode([$odAfter, fr_appr($ode)]));
+
+    if ($copiedRuleWas === null) {
+        fr_q("DELETE FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL");
+    } else {
+        $setCopiedRule((string) $copiedRuleWas['settingValue']);
+    }
 
     // -------------------------------------------------------------------------
     fr_heading('E25. Personal data: "delete my data" reaches every new person column (C7)');

@@ -44,6 +44,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#admin-categories" class="badge text-bg-secondary text-decoration-none">For admins — categories</a>
             <a href="#admin-themes" class="badge text-bg-secondary text-decoration-none">For admins — month themes</a>
             <a href="#repeats" class="badge text-bg-secondary text-decoration-none">For admins &mdash; repeating events</a>
+            <a href="#public-website" class="badge text-bg-secondary text-decoration-none">For admins &mdash; the public website</a>
             <a href="#anon-checkins" class="badge text-bg-secondary text-decoration-none">Anonymous check-ins at the door</a>
             <a href="#imported" class="badge text-bg-secondary text-decoration-none">Imported calendars</a>
         </div>
@@ -249,6 +250,48 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         That is deliberate. Once a series has dates that no single pattern describes &mdash; which is true
         of any series that has already started &mdash; listing each date is the only way the feed can stay
         truthful. Everything still shows at the right time; there are just more entries.
+    </p>
+</section>
+
+<!-- 🌐 Showing an event on the organisation's public website (#493 package
+     P1; D-057, D-077, D-078, D-080, D-081). Change with the form's own words
+     in calendar/manage/_event_form.php and api-spec.json's showOnWebsite: all
+     three say what the switch governs, and when #493's public door ships it
+     joins the list in all three. -->
+<section id="public-website" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2"></i>For admins &mdash; the public website</h2>
+    <p>
+        Some of what the portal shows is open to anybody on the internet, without signing in: the event
+        countdown that other websites can show, and the list of pages the portal gives search engines (its
+        sitemap). An event goes there only when somebody ticks <strong>Show on the public website</strong>
+        on the event's form, and then only while the event is also marked <strong>Public</strong> and today
+        is between the optional <strong>From</strong> and <strong>Until</strong> dates. Both of those days
+        count, an empty date means no limit, and the dates follow your organisation's calendar.
+    </p>
+    <p>
+        <strong>Nothing goes there until somebody ticks it</strong>, and that includes events that existed
+        before this setting did. Your organisation's administrators can tick it. The permission
+        &ldquo;Choose what appears on the public website&rdquo; on the
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Roles page</a>
+        can be given to other roles too (the Website Editor role exists for this), but today only
+        administrators can open the page that changes an event, so giving it to somebody who is not an
+        administrator lets them change nothing yet.
+    </p>
+    <p class="text-muted small">
+        Three things to know. The portal's own pages &mdash; the event's page, the calendar a signed-out
+        visitor sees, and the calendar feed people subscribe to &mdash; and what the event's page tells
+        search engines, follow the &ldquo;Public&rdquo; box, not this one. A repeating series made with the box ticked gives
+        every date the same From and Until dates, so leave them empty or set them wide enough for the whole
+        series. And taking an event off can take up to an hour to reach every copy; a copy somebody has
+        already taken cannot be pulled back.
+    </p>
+    <p class="mb-0">
+        Events copied in from an outside calendar reach the public website by a rule set on
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Outside calendars</a>:
+        either everything that a calendar's or a rule's &ldquo;Also show on the public website&rdquo; box
+        covers (and choices too), or only events somebody has made a choice about &mdash; one date, or every
+        date of a repeating event, future ones included. Whoever runs the installation decides which your
+        organisation may use, and your organisation may hold itself to the stricter one.
     </p>
 </section>
 

@@ -10,7 +10,16 @@
  *
  * Updatable fields: eventName, description, startDateTime, endDateTime,
  *                   isAllDay, locationName, categoryID, typeID, status,
- *                   isPublic, isFeatured.
+ *                   isPublic, isFeatured, and (#493 P1) showOnWebsite,
+ *                   websiteFrom, websiteUntil.
+ *
+ * THE PUBLIC WEBSITE FIELDS are judged by `PublicWebsite::judgeEventFields()`,
+ * the same judgement as the Manage Events form, against what is STORED: a
+ * value equal to the stored one is not a change and needs no permission; a
+ * real change needs `PublicWebsite::mayPublish()`, which an API key never has
+ * (a key is not a person — the #485 precedent), and is refused with 403 and
+ * recorded. A body carrying ONLY these fields, all unchanged, is accepted as
+ * "nothing to update" rather than an error, because it changed nothing.
  *
  * @package   Portal\API
  * @license   All Rights Reserved
@@ -25,6 +34,7 @@ use Portal\Core\ApiResponse;
 use Portal\Core\App;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Site;
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
 //    the line only fails when it RUNS — `php -l` is happy without it (#536).
@@ -43,8 +53,11 @@ $db     = App::db();
 
 // 🔍 Verify the event exists + belongs to this site
 // Imported events are read-only (#514 D5); this makes an imported event exactly as "not found" as a missing one.
+// 🌐 #493 P1: the website fields and the name are read here too, so "did it
+//    CHANGE" (#687) is judged against the row being edited.
 $check = $db->prepare(
-    'SELECT eventID, timezone FROM tblEvents WHERE eventID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL LIMIT 1'
+    'SELECT `eventID`, `eventName`, `timezone`, `showOnWebsite`, `websiteFrom`, `websiteUntil` '
+    . 'FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? AND `isDeleted` = 0 AND externalFeedID IS NULL LIMIT 1'
 );
 if ($check === false) {
     ApiResponse::error('Database error', 500);
@@ -245,35 +258,85 @@ if (array_key_exists('locationW3W', $body) === true) {
     $params[] = $w3wVal;
 }
 
-if (count($set) === 0) {
+// 🌐 THE PUBLIC WEBSITE (#493 P1). Only keys that ARRIVED are judged (#677).
+$websiteArrived = [];
+foreach (PublicWebsite::EVENT_FIELDS as $websiteField) {
+    if (array_key_exists($websiteField, $body) === true) {
+        $websiteArrived[$websiteField] = $body[$websiteField];
+    }
+}
+$websiteActor  = ApiAuth::actorUserId();
+$websiteJudged = PublicWebsite::judgeEventFields(
+    $websiteArrived,
+    [
+        'showOnWebsite' => (int) $found['showOnWebsite'],
+        'websiteFrom'   => $found['websiteFrom'] === null ? null : (string) $found['websiteFrom'],
+        'websiteUntil'  => $found['websiteUntil'] === null ? null : (string) $found['websiteUntil'],
+    ],
+    PublicWebsite::mayPublish($db, (int) ($websiteActor ?? 0), $siteId)
+);
+if ($websiteJudged['ok'] === false) {
+    if ($websiteJudged['kind'] === 'forbidden') {
+        PublicWebsite::recordRefusal($eventId, (string) $found['eventName'], $websiteJudged, $websiteActor,
+            ApiAuth::source() === 'apikey' ? 'the events API, with an API key' : 'the events API');
+        ApiResponse::error(
+            ApiAuth::source() === 'apikey'
+                ? 'An API key cannot change an event\'s "Show on the public website" switch or its website dates: a key is not a person and cannot hold that permission. Nothing was updated.'
+                : $websiteJudged['reason'],
+            403
+        );
+    }
+    ApiResponse::error($websiteJudged['reason'], 422);
+}
+if ($websiteJudged['changed'] === true) {
+    // Only a CHANGE is written, and the judgement allows one only for somebody
+    // who may publish; otherwise these three columns are not in the SET at all.
+    $set[]    = '`showOnWebsite` = ?';
+    $set[]    = '`websiteFrom` = ?';
+    $set[]    = '`websiteUntil` = ?';
+    $types   .= 'iss';
+    $params[] = $websiteJudged['values']['showOnWebsite'];
+    $params[] = $websiteJudged['values']['websiteFrom'];
+    $params[] = $websiteJudged['values']['websiteUntil'];
+}
+
+// Website fields sent, all equal to what is stored, and nothing else: nothing
+// changed, which is not the caller's mistake, so it answers exactly as a
+// successful update does (the same shape) without touching the row — not even
+// `updatedAt`, which would claim an edit that never happened.
+$nothingToWrite = count($set) === 0 && $websiteArrived !== [];
+if (count($set) === 0 && $nothingToWrite === false) {
     ApiResponse::error('No updatable fields in request body', 400);
 }
 
-$set[]    = 'updatedAt = NOW()';
-$types   .= 'ii';
-$params[] = $eventId;
-$params[] = $siteId;
+if ($nothingToWrite === false) {
+    $set[]    = 'updatedAt = NOW()';
+    $types   .= 'ii';
+    $params[] = $eventId;
+    $params[] = $siteId;
 
-// Imported events are read-only (#514 D5); the existence check above already refuses one, so this
-// statement is unreachable for an imported row — the condition is repeated here so the statement
-// still carries its own marker for tools/audit-checks/check_event_visibility.py.
-$sql = 'UPDATE tblEvents SET ' . implode(', ', $set)
-     . ' WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1';
-$stmt = $db->prepare($sql);
-if ($stmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_PREP', $db->error, '');
-    ApiResponse::error('Database error', 500);
+    // Imported events are read-only (#514 D5); the existence check above already refuses one, so this
+    // statement is unreachable for an imported row — the condition is repeated here so the statement
+    // still carries its own marker for tools/audit-checks/check_event_visibility.py.
+    $sql = 'UPDATE tblEvents SET ' . implode(', ', $set)
+         . ' WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1';
+    $stmt = $db->prepare($sql);
+    if ($stmt === false) {
+        Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_PREP', $db->error, '');
+        ApiResponse::error('Database error', 500);
+    }
+    $stmt->bind_param($types, ...$params);
+    $ok = $stmt->execute();
+    $stmt->close();
+
+    if ($ok === false) {
+        Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_FAIL', $db->error, '');
+        ApiResponse::error('Failed to update event', 500);
+    }
+
+    Logger::activity('ApiEventUpdate', 'API: updated event #' . $eventId);
+    PublicWebsite::recordChange($eventId, (string) $found['eventName'], $websiteJudged['changes'], $websiteActor, 'the events API');
 }
-$stmt->bind_param($types, ...$params);
-$ok = $stmt->execute();
-$stmt->close();
-
-if ($ok === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_UPDATE_FAIL', $db->error, '');
-    ApiResponse::error('Failed to update event', 500);
-}
-
-Logger::activity('ApiEventUpdate', 'API: updated event #' . $eventId);
 
 // 📍 #456 Chunk A — re-fetch and emit the canonical `location` object
 // (cross-repo contract §2) reflecting the post-update row, additive

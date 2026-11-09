@@ -238,6 +238,30 @@ final class Capabilities
     public const PORTAL_CHECK     = 'portal.check';
 
     /**
+     * #493 package P1 (the owner, 7 November 2026 — D-077): who may turn an
+     * event's "Show on the public website" switch and dates on or off. Asked
+     * in ONE place, `PublicWebsite::mayPublish()`, which every writer that can
+     * SET the switch or its dates asks: the Manage Events form and the events
+     * API. Every other writer of an event — the CSV import, the series bulk
+     * edit, moderation, the public submission form and the outside-calendar
+     * importer — never names the three columns, so what it makes is off the
+     * website; a series pattern change does name them, because it copies a
+     * whole template row, and writes the switch off and both dates empty. ⚠️ Give any of them those columns (#844 asks
+     * for one) and it must ask this too. (This said "which every writer of an
+     * event asks" until round 5 of #493 P1's check.) Two kinds of administrator pass there BEFORE the capability
+     * is asked: an administrator of the organisation (`isAdminOfSite()`), and
+     * an active account holding the portal-wide `isAdmin` flag — what Admin →
+     * Users sets — that belongs to this organisation (round 1 of #493's check:
+     * leaving that one out refused every administrator after the first on a
+     * single-organisation installation). So out of the box only administrators
+     * publish — D-077's own words — and an organisation can add any role on the
+     * Roles page. The role it ships pointing at, `website_editor`, is held by
+     * nobody until somebody grants it (migration 258 seeds it and grants
+     * nothing).
+     */
+    public const WEBSITE_PUBLISH  = 'website.publish';
+
+    /**
      * Every field an entry in either list MUST declare, in the order the
      * entries are written.
      *
@@ -856,6 +880,43 @@ final class Capabilities
                 . 'Nothing stops working — the page only ever reports.',
             'askedAt' => [
                 'web/_apps/admin/check/index.php',
+            ],
+        ],
+
+        // 🌐 THE PUBLIC WEBSITE (#493, D-077). Putting an item in front of
+        //    anybody on the internet is a different act from editing it, which
+        //    is why it is its own permission and not "whoever may edit the
+        //    event" (D-077 rules that out).
+        //
+        //    ⚠️ SAY PLAINLY WHAT IT DECIDES TODAY, because a switch that opens
+        //       nothing is #671's "a lie with a Save button". Every page that
+        //       writes an event is open to administrators only, and an
+        //       administrator of the organisation already passes the gate in
+        //       `PublicWebsite::mayPublish()` before this is asked — and so does
+        //       an account holding the portal-wide `isAdmin` flag that belongs
+        //       to the organisation. So in package P1 a Website Editor who is
+        //       not an administrator can reach no page that uses it, and every
+        //       person who can reach one already passes; the only caller it
+        //       refuses is an API key, which is not a person. It is what #493's
+        //       noticeboard package (P2) will ask on a page an editor CAN open.
+        self::WEBSITE_PUBLISH => [
+            'label' => 'Choose what appears on the public website',
+            // ⚠️ SAID AS IT IS TODAY (round 1): every page that changes an event is
+            //    open to administrators only, and they hold this already, so a role
+            //    given it opens nothing yet. A sentence promising more was untrue.
+            'opens' => 'Turning an event\'s "Show on the public website" switch on or off, and setting the '
+                . 'first and last day it may show there. Today only administrators can open the pages that '
+                . 'change an event, and administrators of this organisation may already do this, so giving '
+                . 'this to a role changes nothing yet for anybody who is not an administrator.',
+            'standard' => ['website_editor'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will be able to change what appears on the public website. '
+                . 'Administrators of this organisation will still be able to, because the gate lets an '
+                . 'administrator of the organisation in before it asks about any role. Nothing already on '
+                . 'the website is taken off it.',
+            'askedAt' => [
+                'web/_core/PublicWebsite.php',
             ],
         ],
     ];

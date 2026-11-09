@@ -24,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\Events;
 use Portal\Core\EventVisibility;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Site;
 
 // 🌐 CORS — open to all origins (widget embeds across the internet).
@@ -57,8 +58,14 @@ $nextEvent = null;
 //    ⚠️ This reply is cached for 60 seconds by browsers and by anything in
 //    between (Cache-Control above), so narrowing an event can take up to a
 //    minute to reach an embed; a copy already taken cannot be pulled back.
+// 🌐 #493 P1: "website" mode now also needs the event's own "Show on the
+//    public website" switch and today inside its dates (D-057, D-078), and a
+//    copied-in event follows the rule its organisation is held to (D-080,
+//    D-081) — worked out here and BOUND by the rule, never written into it.
+//    `$today` is the organisation's (start-up sets PHP's zone to it), which is
+//    the calendar those dates are kept on.
 $today      = date('Y-m-d');
-$visibility = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today);
+$visibility = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today, PublicWebsite::copiedRuleFor($mysqli, $siteId));
 $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_WEBSITE, 0, $today, 'canSeeFull');
 // 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
 //    joining it in with `.`: tools/audit-checks/check_sql_columns.py does not
@@ -111,7 +118,7 @@ if ($nextEvent === null) {
         'siteName'     => $siteName,
         'productName'  => $productName,
         'nextEvent'    => null,
-        'message'      => 'No upcoming services scheduled',
+        'message'      => 'No upcoming services on the public website',
     ], JSON_UNESCAPED_SLASHES);
     exit();
 }

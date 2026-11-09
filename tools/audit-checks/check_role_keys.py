@@ -239,6 +239,7 @@ def extract_a9_block(text: str, anchor_index: int) -> list[str]:
 LATER_STANDARD_ROLES = {
     # role key          migration that seeds it into every organisation
     "data_controller": "241_data_controller_role.sql",
+    "website_editor": "258_events_show_on_website.sql",
 }
 
 

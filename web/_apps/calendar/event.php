@@ -46,6 +46,7 @@ use Portal\Core\AssetRegister;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
 use Portal\Core\EventVisibility;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -467,9 +468,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    handed a description, a location or an image the page itself leaves
 //    out. A search engine visits signed out, so it only ever reaches this
 //    page at all for an event the rule shows to everybody.
+// 🌐 #493 P1 (round 2): AND ONLY WHERE THAT WEBSITE "YES" COUNTS under the
+//    rule the organisation is held to for copied-in events (D-080, D-081).
+//    Under "one tick per event" a yes that came from the calendar's own box
+//    or a rule's box counts for nothing — this asked `importWebsite` alone,
+//    so the calendar's box still sent the event's markup to search engines
+//    while four sentences elsewhere said that box "does nothing". It asks the
+//    ONE test, `EventVisibility::copiedTickCounts()`, with the rule read by
+//    the same reader the countdown and the sitemap use.
+//    ⚠️ The portal's OWN events below still follow `isPublic` alone here.
+//       The owner has decided they should also need the website switch
+//       (D-089, 8 November 2026; #850); that is built in its own package
+//       straight after #493 P1, which is why this one leaves it alone.
 $eventPublicFlag = $event['isPublic'] ?? null;
 if ($isImported === true) {
-    $jsonLdAllowed = $canSeeFull === true && (int) $event['importWebsite'] === 1;
+    $jsonLdAllowed = $canSeeFull === true && (int) $event['importWebsite'] === 1
+        && EventVisibility::copiedTickCounts(
+            $event['importSource'] === null ? null : (string) $event['importSource'],
+            PublicWebsite::copiedRuleFor($mysqli, $siteId)
+        ) === true;
 } else {
     $jsonLdAllowed = $eventPublicFlag === 1 || $eventPublicFlag === '1';
 }

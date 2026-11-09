@@ -514,6 +514,9 @@ foreach ([
     // above — a capability missing from this list and `$shouldShipWith`
     // ships pointing at any role at all with every check green.
     Capabilities::PORTAL_CHECK       => 'Cap Check',
+    // #493 P1 (D-077): who may put an event on the public website. Added HERE
+    // in the same change that adds it to the registry (#739's rule).
+    Capabilities::WEBSITE_PUBLISH    => 'Cap Website',
 ] as $capabilityKey => $personName) {
     $shippedRole = Capabilities::standardRoleKeys($capabilityKey)[0];
     $personId    = $capNewUser($personName, false);
@@ -564,6 +567,8 @@ $OTHERS = [
     // what it shows is what a TESTER is most likely to hit and least able to
     // describe, so the narrowest gate would defeat the point.
     Capabilities::PORTAL_CHECK,
+    // #493 P1 (D-077): who may put an event on the public website.
+    Capabilities::WEBSITE_PUBLISH,
 ];
 
 // =============================================================================
@@ -583,7 +588,7 @@ cap_section('A — the registry as declared');
 cap_check(
     'every offered capability is declared, in order, and nothing has been added, '
         . 'dropped or swapped: #724\'s, the five the owner named on 3 November 2026, '
-        . 'the six #739 converted, and #756\'s',
+        . 'the six #739 converted, #756\'s, #477\'s and #493\'s',
     Capabilities::keys() === array_merge([$CAP], $OTHERS),
     implode(',', Capabilities::keys())
 );
@@ -1499,6 +1504,11 @@ $shouldShipWith = [
     // what it shows is what a TESTER is most likely to hit and least able to
     // describe, so the narrowest gate would defeat the point.
     Capabilities::PORTAL_CHECK       => 'staff',
+    // #493 P1 (D-077): ships pointing at the new Website Editor role, which
+    // migration 258 seeds and grants to NOBODY — out of the box only the
+    // organisation's administrators publish, through the gate in
+    // `PublicWebsite::mayPublish()`, not through this role.
+    Capabilities::WEBSITE_PUBLISH    => 'website_editor',
 ];
 foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     cap_check(

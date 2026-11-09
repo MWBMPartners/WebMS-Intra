@@ -71,6 +71,7 @@ if (defined('PORTAL_ROOT') === false) {
     return;
 }
 
+use Portal\Core\EventVisibility;
 use Portal\Core\FeedAdmin;
 use Portal\Core\Site;
 
@@ -103,6 +104,9 @@ if (function_exists('portal_feed_approval_rows') === false) {
         $back    = ((string) $o['back'] === 'feed') ? 'feed' : 'approvals';
         $feedId  = (int) $o['feedId'];
         $csrf    = (string) $o['csrf'];
+        // 🌐 #493 P1: the copied-in rule in force; the stricter when a caller
+        //    leaves it out, so a forgotten argument under-claims.
+        $copiedRule = (string) ($o['copiedRule'] ?? EventVisibility::COPIED_BY_EVENT);
         /** @var \DateTimeZone $zone */
         $zone    = $o['orgZone'];
 
@@ -150,7 +154,14 @@ if (function_exists('portal_feed_approval_rows') === false) {
             );
             $asks     = (FeedAdmin::LEVEL_LABELS[$level] ?? $level)
                 . (isset(FeedAdmin::DETAIL_LABELS[$detail]) === true ? ', ' . FeedAdmin::DETAIL_LABELS[$detail] : '')
-                . ((int) $row['requestedWebsite'] === 1 ? ', and on the public website' : '');
+                . ((int) $row['requestedWebsite'] === 1
+                    // 🌐 #493 P1: a CHOICE is about this event and its box counts
+                    //    under either rule; a RULE's box counts only under "one box
+                    //    per subscribed calendar". Asked of the one test.
+                    ? (EventVisibility::copiedTickCounts((string) $row['origin'] === 'choice' ? 'date' : 'rule', $copiedRule) === true
+                        ? ', and on the public website'
+                        : ', with the website box ticked (which does nothing under "one tick per event")')
+                    : '');
             $names    = [];
             foreach ((array) ($row['names'] ?? []) as $entry) {
                 $names[] = (string) $entry['label'] . ($stateWords[(string) $entry['state']] ?? '');

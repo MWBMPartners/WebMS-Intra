@@ -88,6 +88,7 @@ use Portal\Core\Auth;
 use Portal\Core\EventVisibility;
 use Portal\Core\FeedAdmin;
 use Portal\Core\FeedResolver;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -124,6 +125,20 @@ $saveUrl = Site::url('admin/calendar/feeds/save');
 $editUrl = Site::url('admin/calendar/feeds/edit');
 $viewUrl = Site::url('admin/calendar/feeds/view');
 $inboxOn = AppRegistry::isEnabled('approvals');
+
+// 🌐 HOW COPIED-IN EVENTS REACH THE PUBLIC WEBSITE (#493 P1; D-080, D-081).
+//    Both levels are read from their OWN rows (`PublicWebsite::storedRule()`),
+//    never from `$SETTINGS`, which has already merged the organisation's row
+//    over the installation's and so cannot say which level chose what (#674).
+//    The rule IN FORCE is the stricter of the two (`copiedRuleFor()`), the
+//    same answer the countdown widget and the sitemap get.
+$ruleUrl          = Site::url('admin/calendar/feeds/website-rule');
+$ruleInstallation = PublicWebsite::storedRule($mysqli, null, false);
+$ruleOwn          = PublicWebsite::storedRule($mysqli, $siteId, false);
+$ruleInForce      = PublicWebsite::copiedRuleFrom($ruleInstallation, $ruleOwn);
+$ruleInstallWord  = $ruleInstallation === EventVisibility::COPIED_BY_CALENDAR ? EventVisibility::COPIED_BY_CALENDAR : EventVisibility::COPIED_BY_EVENT;
+$ruleOwnWord      = $ruleOwn === null ? PublicWebsite::INHERIT
+    : ($ruleOwn === EventVisibility::COPIED_BY_CALENDAR ? EventVisibility::COPIED_BY_CALENDAR : EventVisibility::COPIED_BY_EVENT);
 
 $pageTitle   = 'Outside calendars';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Outside calendars' => ''];
@@ -197,7 +212,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php if ($failures > 0): ?>
                         <span class="badge bg-danger ms-1"><?php echo $failures; ?> failed in a row</span>
                     <?php endif; ?>
-                    <div class="small">Who can see its events: <?php echo $esc(FeedAdmin::audienceLabel($c)); ?></div>
+                    <div class="small">Who can see its events: <?php echo $esc(FeedAdmin::audienceLabel($c, $ruleInForce)); ?></div>
                     <div class="small text-muted">
                         Checked every <?php echo (int) $c['fetchEveryMins']; ?> minutes
                         &middot; Next refresh <?php echo $isOn === true ? $esc(FeedAdmin::showMoment($c['nextFetchAt'] === null ? null : (string) $c['nextFetchAt'], $orgZone)) : '—'; ?>
@@ -266,5 +281,75 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endforeach; ?>
         </div>
     <?php endif; ?>
+
+    <?php // 🌐 #493 P1 (D-080, D-081). Every administrator of the organisation sees
+          //    the rule in force; only the right person gets a form for each level:
+          //    the installation's for a global administrator, the organisation's for
+          //    its global administrator (`App::isSiteRootAdmin()`, which counts a
+          //    global administrator too). The handler asks both again. ?>
+    <div class="card mb-4" id="website-copied-rule">
+        <div class="card-body">
+            <h2 class="h6"><i class="fa-solid fa-globe me-1" aria-hidden="true"></i>Copied-in events on your public website</h2>
+            <p class="small mb-2" data-rule-in-force="<?php echo $esc($ruleInForce); ?>">
+                <?php // Saving a new rule re-works every outside calendar it governs at once (round 6 of #493 P1's check). ?>
+                In force for this organisation: <strong><?php echo $esc(PublicWebsite::ruleWords($ruleInForce)); ?></strong>.
+                <?php if ($ruleInForce === EventVisibility::COPIED_BY_CALENDAR): ?>
+                    A calendar whose "Also show on the public website" box is ticked sends every public event in it to
+                    the website, including future ones nobody has looked at, unless a rule or a choice narrows it. A rule's website box asks for approval
+                    where it widens what the calendar shows, so moving here from "one tick per event" asks again about
+                    a rule approved while that rule applied; until somebody approves it, such a date shows to its
+                    calendar's own audience.
+                <?php else: ?>
+                    A copied-in event reaches the website only through a choice made about that event itself (on its own
+                    page, a choice for that date or that series). A calendar's or a rule's "Also show on the public
+                    website" box does nothing while this applies. Moving here from "one box per calendar" sends a date
+                    that a choice put on the website without an approval back to wait for one; a date the outside
+                    calendar lists twice goes back to its calendar's own setting instead, and stays there.
+                <?php endif; ?>
+            </p>
+            <?php if (App::isRootAdmin() === true): ?>
+                <form method="post" action="<?php echo $esc($ruleUrl); ?>" class="mb-3">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                    <input type="hidden" name="action" value="installation">
+                    <fieldset>
+                        <legend class="small fw-semibold">For the whole installation (every organisation is held to this or stricter)</legend>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="rule" value="event" id="rule-inst-event"<?php echo $ruleInstallWord === EventVisibility::COPIED_BY_EVENT ? ' checked' : ''; ?>>
+                            <label class="form-check-label small" for="rule-inst-event">One tick per event (stricter)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="rule" value="calendar" id="rule-inst-calendar"<?php echo $ruleInstallWord === EventVisibility::COPIED_BY_CALENDAR ? ' checked' : ''; ?>>
+                            <label class="form-check-label small" for="rule-inst-calendar">One box per subscribed calendar</label>
+                        </div>
+                    </fieldset>
+                    <button type="submit" class="btn btn-sm btn-outline-primary mt-1">Save for the installation</button>
+                </form>
+            <?php endif; ?>
+            <?php if (App::isSiteRootAdmin() === true): ?>
+                <form method="post" action="<?php echo $esc($ruleUrl); ?>">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                    <input type="hidden" name="action" value="organisation">
+                    <fieldset>
+                        <legend class="small fw-semibold">For this organisation</legend>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="rule" value="inherit" id="rule-org-inherit"<?php echo $ruleOwnWord === PublicWebsite::INHERIT ? ' checked' : ''; ?>>
+                            <label class="form-check-label small" for="rule-org-inherit">Follow the installation (now: <?php echo $esc($ruleInstallation === null ? PublicWebsite::ruleWords(EventVisibility::COPIED_BY_EVENT) . ', as nothing is stored' : PublicWebsite::ruleWords($ruleInstallation)); ?>)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="rule" value="event" id="rule-org-event"<?php echo $ruleOwnWord === EventVisibility::COPIED_BY_EVENT ? ' checked' : ''; ?>>
+                            <label class="form-check-label small" for="rule-org-event">One tick per event</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="rule" value="calendar" id="rule-org-calendar"<?php echo $ruleOwnWord === EventVisibility::COPIED_BY_CALENDAR ? ' checked' : ''; ?>>
+                            <label class="form-check-label small" for="rule-org-calendar">One box per subscribed calendar<?php echo $ruleInstallWord === EventVisibility::COPIED_BY_EVENT ? ' — not allowed while the installation chooses one tick per event' : ''; ?></label>
+                        </div>
+                    </fieldset>
+                    <button type="submit" class="btn btn-sm btn-outline-primary mt-1">Save for this organisation</button>
+                </form>
+            <?php elseif (App::isRootAdmin() === false): ?>
+                <p class="small text-muted mb-0">Only this organisation's global administrator can change it.</p>
+            <?php endif; ?>
+        </div>
+    </div>
 </div>
 <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php'; ?>

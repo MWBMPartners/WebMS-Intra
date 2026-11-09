@@ -165,11 +165,14 @@ $isGlobalAdmin = App::isRootAdmin();
 // REFUSAL 2 — the key "public" on its own, and keys beginning "public.".
 //   (The bare name is included because a row called just "public" replaces
 //   every "public." setting when settings are loaded; see $isPublicKey.)
-//   Those keys will control a genuinely public website that anybody on the
-//   internet can read, with no sign-in at all. None of them exist yet. The
-//   gate is being put in place BEFORE the feature that needs it, so that the
-//   feature cannot arrive into a page that already lets the wrong people
-//   switch it on. Note this is checked against the key STORED IN THE DATABASE
+//   Those keys control a genuinely public website that anybody on the
+//   internet can read, with no sign-in at all. The gate was put in place
+//   BEFORE the feature that needed it, so that the feature could not arrive
+//   into a page that already let the wrong people switch it on. The first such
+//   key, `public.events.copiedRule` (#493, migration 258), has its own card on
+//   Admin, Outside calendars, and its reader (`PublicWebsite::copiedRuleFor()`)
+//   holds an organisation to the installation's choice whatever row it finds.
+//   (Until #493 this said "None of them exist yet".) Note this is checked against the key STORED IN THE DATABASE
 //   for an edit, never the key sent with the form — otherwise somebody could
 //   send a harmless-looking key alongside the row number of a "public." row
 //   and slip straight past.
@@ -345,6 +348,21 @@ if ($settingId > 0) {
     //    leave an organisation unreachable; here one typed word would change
     //    which organisation every address on the installation opens. See
     //    Site::lockedInGeneralEditor().
+    // 🔒 Nor the rule for copied-in events on the public website (#493 P1,
+    //    round 7): its own card re-works every outside calendar when it is
+    //    saved, and saving it here would not. See
+    //    PublicWebsite::lockedInGeneralEditor().
+    if (\Portal\Core\PublicWebsite::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is changed only on Admin, Outside calendars',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
     if (Site::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -826,6 +844,20 @@ if ($settingId > 0) {
     //    settings be ADDED here as one organisation's own row (#502).
     //    Nothing reads such a row, so it would only mislead whoever found
     //    it. See Site::lockedInGeneralEditor().
+    // 🔒 Nor the copied-in events rule (#493 P1, round 7): ADDING it here
+    //    would skip the re-work its own card runs. tools/settings-locks-selftest.php
+    //    found this path and the delete path missing when it first ran.
+    if (\Portal\Core\PublicWebsite::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" is set only on Admin, Outside calendars',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
     if (Site::lockedInGeneralEditor($settingKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',

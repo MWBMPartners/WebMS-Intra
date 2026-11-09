@@ -273,6 +273,12 @@ $zoneArg = Site::timezone();
 //    `git log -S"issssssiiiss" -- web/_apps/calendar/submit-save.php`. It is
 //    fixed here because round 5 rewrote 87 lines of this file and read this
 //    very INSERT to establish that `isAllDay` is a literal `0`.
+// 🌐 #493 P1: `showOnWebsite`, `websiteFrom` and `websiteUntil` are NOT in this
+//    column list, on purpose, so a submission from the public form always takes
+//    their defaults — off, no dates — whatever it posts. Only a person allowed
+//    to publish (`PublicWebsite::mayPublish()`) can put an event on the website,
+//    and `tools/public-website-tick-selftest.php` posts the fields here to prove
+//    they are ignored.
 $stmt = $mysqli->prepare(
     'INSERT INTO tblEvents '
     . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, isAllDay, '

@@ -90,6 +90,7 @@ use Portal\Core\EventVisibility;
 use Portal\Core\ExternalAudience;
 use Portal\Core\FeedAdmin;
 use Portal\Core\FeedResolver;
+use Portal\Core\PublicWebsite;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -109,6 +110,12 @@ if (EventVisibility::isAdminOfSite($mysqli, $userId, $siteId) === false) {
 $idRaw    = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT);
 $feedId   = ($idRaw === false || $idRaw === null || $idRaw <= 0) ? 0 : (int) $idRaw;
 $calendar = ($feedId > 0) ? FeedAdmin::calendar($mysqli, $feedId, $siteId) : null;
+// 🌐 The rule this organisation is held to for copied-in events (#493 P1;
+//    D-080, D-081), read once with the reader the countdown and the sitemap
+//    use. Every "on the public website" word on this page asks it through
+//    EventVisibility::copiedTickCounts(), so no badge claims what the website
+//    does not show.
+$copiedRule = PublicWebsite::copiedRuleFor($mysqli, $siteId);
 if ($calendar === null) {
     Router::renderError(404);
     return;
@@ -260,7 +267,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 
     <div class="mb-3 text-break" id="summary">
-        <p class="mb-1">Who can see its events: <?php echo $esc(FeedAdmin::audienceLabel($calendar)); ?></p>
+        <p class="mb-1">Who can see its events: <?php echo $esc(FeedAdmin::audienceLabel($calendar, $copiedRule)); ?></p>
         <?php if ($calendar['audienceLevel'] === 'groups' && $calendar['list'] !== []): ?>
             <?php // The NAMES are read live from the saved list, so a person
                   // taken off it, or erased, disappears from here at once. ?>
@@ -377,8 +384,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="portal-data-row" id="event-<?php echo (int) $ev['eventID']; ?>">
                     <div class="portal-data-row-main text-break" style="flex: 1 1 auto; min-width: 0;">
                         <strong><?php echo $esc($ev['eventName']); ?></strong>
-                        <?php if ((int) $ev['importWebsite'] === 1): ?>
-                            <span class="badge bg-info text-dark ms-1">On the public website</span>
+                        <?php if ((int) $ev['importWebsite'] === 1 && EventVisibility::copiedTickCounts($ev['importSource'] === null ? null : (string) $ev['importSource'], $copiedRule) === true): ?>
+                            <span class="badge bg-info text-dark ms-1" data-website-badge="on">On the public website</span>
+                        <?php elseif ((int) $ev['importWebsite'] === 1): ?>
+                            <?php // 🌐 #493 P1: the yes came from the calendar or a rule, which counts for
+                                  //    nothing under "one tick per event" — say so rather than claim it. ?>
+                            <span class="badge bg-light text-dark border ms-1" data-website-badge="inert">Website box ticked, but not on the website under "one tick per event"</span>
                         <?php endif; ?>
                         <?php if ((int) $ev['importApiOptOut'] === 1): ?>
                             <span class="badge bg-secondary ms-1">Not sent to API keys</span>
@@ -462,8 +473,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="portal-data-row-main text-break" style="flex: 1 1 auto; min-width: 0;">
                         <strong><?php echo $esc($rule['name']); ?></strong>
                         <span class="badge <?php echo (int) $rule['isActive'] === 1 ? 'bg-success' : 'bg-secondary'; ?> ms-1"><?php echo (int) $rule['isActive'] === 1 ? 'On' : 'Off'; ?></span>
-                        <?php if ((int) $rule['websiteOptIn'] === 1): ?>
-                            <span class="badge bg-info text-dark ms-1">On the public website</span>
+                        <?php if ((int) $rule['websiteOptIn'] === 1 && EventVisibility::copiedTickCounts('rule', $copiedRule) === true): ?>
+                            <span class="badge bg-info text-dark ms-1" data-rule-website-badge="on">On the public website</span>
+                        <?php elseif ((int) $rule['websiteOptIn'] === 1): ?>
+                            <span class="badge bg-light text-dark border ms-1" data-rule-website-badge="inert">Website box ticked, but a rule's box does nothing under "one tick per event"</span>
                         <?php endif; ?>
                         <?php if ((int) $rule['apiOptOut'] === 1): ?>
                             <span class="badge bg-secondary ms-1">Not sent to API keys</span>
@@ -609,6 +622,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 'showCalendar' => false,
                 'orgZone'      => $orgZone,
                 'prefix'       => 'waiting',
+                'copiedRule'   => $copiedRule,
             ]);
             ?>
         <?php endif; ?>

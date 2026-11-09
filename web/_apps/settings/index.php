@@ -167,6 +167,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
         //
         //    It uses the row looked up just above, so a row belonging to
         //    another organisation still reads as "not found" further down.
+        // 🔒 Nor the copied-in events rule (#493 P1, round 7): deleting it
+        //    here would skip the re-work its own card runs. What the reader
+        //    falls to then depends on the row: an installation's row missing
+        //    reads as the stricter rule, but an organisation's row missing
+        //    means "follow the installation", which may be the looser one.
+        if ($lockedKey !== null && \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is changed only on Admin, Outside calendars and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
         if ($lockedKey !== null && Site::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
             Logger::activity(
                 'SettingsDeleteRefused',
@@ -720,6 +736,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    Registration retention (the installation's rows only a
                                     //    global administrator can change there).
                                     $registrationsLocked = \Portal\Core\RegistrationRetention::lockedInGeneralEditor((string) $row['settingKey']);
+                                    $copiedRuleLocked = \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $row['settingKey']);
                                     ?>
                                     <?php if ($zoneLocked === true && Site::timezoneFacts()['inRow'] === false): ?>
                                         <?php // Before migration 217 has run, neither page takes a zone: the way on is the upgrade. ?>
@@ -744,6 +761,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                         <span class="small text-secondary">Changed by a global administrator, at Admin, Organisations</span>
                                     <?php elseif ($outsideLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Outside services</a>
+                                    <?php elseif ($copiedRuleLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Outside calendars</a>
                                     <?php elseif ($registrationsLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Registration retention</a>
                                     <?php elseif ($givingLocked === true): ?>
@@ -761,7 +780,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php /* 🔒 `$capabilityLocksLocked` joined this list with #727: the delete handler
                                              refuses the row anyway, so drawing the button would offer a
                                              control that cannot work. */ ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false && $outsideLocked === false && $registrationsLocked === false): ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false && $outsideLocked === false && $registrationsLocked === false && $copiedRuleLocked === false): ?>
                                         <form method="post" action="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

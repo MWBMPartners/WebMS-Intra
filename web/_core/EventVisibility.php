@@ -98,6 +98,18 @@
  * public AND ticked for the website, with full detail only on a Public
  * calendar (owner answer 3 of 17 September); the owner replaced that.
  *
+ * THE PUBLIC WEBSITE ("website" mode) — #493 package P1, 7 November 2026.
+ * The portal's own events reach it only when public AND ticked "Show on the
+ * public website" (`showOnWebsite`, D-057) AND today is inside the optional
+ * `websiteFrom`/`websiteUntil` dates (D-078); until migration 258 `isPublic`
+ * alone was enough, so every published event went to the countdown widget and
+ * the sitemap. A copied-in event follows the rule its organisation is held to
+ * (D-080, D-081): one box per calendar, or one tick per event — the caller
+ * passes it, from `PublicWebsite::copiedRuleFor()`. `FeedAdmin::whoCanSee()`
+ * asks the same test for the copied-in half (`copiedTickCounts()`) rather
+ * than keeping a copy; `ExternalAudience` and the
+ * audience picker model the "selected groups" list only and did not.
+ *
  * HOW THE NUMBER OF PLACEHOLDERS IS KEPT RIGHT
  * -------------------------------------------
  * Every piece of SQL is built through `add()`, which refuses (with a
@@ -152,6 +164,57 @@ final class EventVisibility
     public const MODE_ANONYMOUS = 'anonymous';
     /** Feeds meant for the organisation's public website (countdown, sitemap). */
     public const MODE_WEBSITE = 'website';
+
+    /**
+     * How an event COPIED IN from an outside calendar reaches the public
+     * website (D-080, D-081 — #493). Handed to `where()` by every caller in
+     * "website" mode, worked out by `Portal\Core\PublicWebsite::copiedRuleFor()`
+     * (the installation's choice caps the organisation's). Kept HERE, not in
+     * that class, so this file still loads on its own with nothing set up.
+     *
+     *   COPIED_BY_CALENDAR — the #514 behaviour: the calendar's "Also show on
+     *       the public website" box (or a rule's, or a choice's) sends every
+     *       public event it covers, future ones nobody has looked at included.
+     *   COPIED_BY_EVENT — the stricter: only a choice made about THAT event (a
+     *       date or a series choice, `importSource` 'date' or 'series') can put
+     *       it there; the calendar's box and the rules' boxes count for nothing.
+     *
+     * Anything else a caller passes is read as COPIED_BY_EVENT: a rule that
+     * cannot be read must never read as the looser one.
+     */
+    public const COPIED_BY_CALENDAR = 'calendar';
+    public const COPIED_BY_EVENT    = 'event';
+
+    /**
+     * The `importSource` values that mean "a choice made about THIS event"
+     * (a date choice, or a choice about its repeating series). Under
+     * COPIED_BY_EVENT only these let a copied-in event's website "yes" count.
+     * The SQL below is BUILT from this list and `copiedTickCounts()` reads it,
+     * so the database and every page agree by construction.
+     */
+    public const PER_EVENT_SOURCES = ['date', 'series'];
+
+    /**
+     * The PHP half of the website rule for a copied-in event: does its stored
+     * website "yes" count under this rule? The ONE place a page or
+     * `FeedAdmin::whoCanSee()` asks it (#493 P1, round 1: badges that said
+     * "On the public website" under a rule where the event was not). The SQL
+     * in buildWhere() is the same test, made from the same constant.
+     *
+     * Asks only about WHERE the yes came from: the caller still needs
+     * `importWebsite = 1` and the level and freshness tests.
+     *
+     * @param string|null $importSource The row's `importSource` (or, for an
+     *                                  approval row, 'date' for a choice and
+     *                                  'rule' for a rule).
+     * @param string      $copiedRule   From `PublicWebsite::copiedRuleFor()`;
+     *                                  anything unreadable is the stricter.
+     */
+    public static function copiedTickCounts(?string $importSource, string $copiedRule): bool
+    {
+        return self::checkCopiedRule($copiedRule) === self::COPIED_BY_CALENDAR
+            || in_array((string) $importSource, self::PER_EVENT_SOURCES, true) === true;
+    }
     /** A personal calendar feed, reminder emails and push: the holder, never administrator powers. */
     public const MODE_TOKEN = 'token';
     /** The invitation link page: the organisation's own events are not restricted there (owner decision, 14 September 2026). */
@@ -338,18 +401,31 @@ final class EventVisibility
      *                         always nobody.
      * @param string $today    Today's date as Y-m-d, from PHP date() (used
      *                         for leadership terms; the same "today" as
-     *                         leadership/index.php).
+     *                         leadership/index.php). In "website" mode it is
+     *                         ALSO the day an event's public-website dates
+     *                         (`websiteFrom`/`websiteUntil`, D-078) are judged
+     *                         against — so it is the ORGANISATION's today,
+     *                         which is what `date('Y-m-d')` gives once start-up
+     *                         has set PHP's zone to `Site::timezone()`.
+     * @param string $copiedRule "website" mode only: COPIED_BY_CALENDAR or
+     *                         COPIED_BY_EVENT, from
+     *                         `PublicWebsite::copiedRuleFor()`. Bound as a
+     *                         value, so the SQL TEXT still depends on the mode
+     *                         alone (the #503 rule). Defaults to the STRICTER
+     *                         rule, so a website caller that forgets it shows
+     *                         fewer copied-in events, never more. Ignored by
+     *                         every other mode.
      *
      * @return array{sql: string, types: string, params: list<int|string>}
      *
      * @throws \InvalidArgumentException For an unknown mode, a bad alias or a bad date.
      */
-    public static function where(string $alias, string $mode, int $viewerId, string $today): array
+    public static function where(string $alias, string $mode, int $viewerId, string $today, string $copiedRule = self::COPIED_BY_EVENT): array
     {
         $spec = self::modeSpec($mode);
         $viewer = self::boundViewer($spec['viewer'] === 'person' ? $viewerId : 0);
 
-        return self::buildWhere(self::checkAlias($alias), $mode, $viewer, self::checkToday($today));
+        return self::buildWhere(self::checkAlias($alias), $mode, $viewer, self::checkToday($today), self::checkCopiedRule($copiedRule));
     }
 
     /**
@@ -375,7 +451,10 @@ final class EventVisibility
     {
         self::requirePersonMode($mode);
 
-        return self::buildWhere(self::checkAlias($alias), $mode, self::columnViewer($viewerColumn), self::checkToday($today));
+        // A column viewer is never "website" mode (requirePersonMode() above
+        // refuses it), so the copied-in rule plays no part; the stricter is
+        // passed only because the parameter must hold something.
+        return self::buildWhere(self::checkAlias($alias), $mode, self::columnViewer($viewerColumn), self::checkToday($today), self::COPIED_BY_EVENT);
     }
 
     /**
@@ -579,10 +658,11 @@ final class EventVisibility
      * @param string                                                  $mode   Checked mode.
      * @param array{expr: string, type: string, params: list<int>}   $viewer The viewer.
      * @param string                                                  $today  Checked date.
+     * @param string                                                  $copiedRule Checked rule (website mode only).
      *
      * @return array{sql: string, types: string, params: list<int|string>}
      */
-    private static function buildWhere(string $e, string $mode, array $viewer, string $today): array
+    private static function buildWhere(string $e, string $mode, array $viewer, string $today, string $copiedRule): array
     {
         $admin = self::admin($e, $mode, $viewer);
         $member = self::piece('member', $e, $viewer, $today);
@@ -593,6 +673,43 @@ final class EventVisibility
         //    the newsletter going only to active members.
         if (in_array($mode, [self::MODE_INVITE, self::MODE_KEY, self::MODE_BULK_MEMBERS], true) === true) {
             $manual = self::seq(['( ', $e, '.externalFeedID IS NULL )']);
+        } elseif ($mode === self::MODE_WEBSITE) {
+            // 🌐 THE PUBLIC WEBSITE (#493, P1; D-057, D-078). Until migration
+            //    258 this was the general line below — `isPublic = 1 OR admin
+            //    OR member`, which for a viewer who is always nobody is
+            //    `isPublic = 1` alone — so the countdown widget and the
+            //    sitemap, both open to anybody, published EVERY published
+            //    event unless somebody unticked a box labelled "visible on
+            //    calendar". That is the default exposure D-057 rejects.
+            //
+            //    Now ALL of these, and the failure mode is silence:
+            //      isPublic = 1        a members-only event can never reach
+            //                          the website, even if somebody ticked
+            //                          it (the box means nothing without it);
+            //      showOnWebsite = 1   somebody allowed to publish ticked it
+            //                          (D-077; starts at 0 on every row);
+            //      websiteFrom/Until   today is inside the dates, both ends
+            //                          inclusive, an empty date meaning no
+            //                          limit on that side (D-078). The dates
+            //                          only NARROW the switch: with the
+            //                          switch off nothing they say matters.
+            //    `today` is the caller's, which is the ORGANISATION's calendar
+            //    (see where()'s @param); judging each event on its own clock
+            //    would make this text depend on the installation's zones,
+            //    which the #503 rule above forbids. Measured cost, said
+            //    plainly: for an event kept on a clock other than the
+            //    organisation's, the window opens and closes at the
+            //    ORGANISATION's midnight.
+            //
+            //    The admin and member pieces are left out rather than kept:
+            //    in this mode the viewer is always nobody, so both were
+            //    always false, and keeping them only bound values that could
+            //    never matter.
+            $manual = self::seq([
+                '( ', $e, '.externalFeedID IS NULL AND ', $e, '.isPublic = 1 AND ', $e, '.showOnWebsite = 1',
+                ' AND (', $e, '.websiteFrom IS NULL OR ', self::add($e . '.websiteFrom <= ?', 's', [$today]), ')',
+                ' AND (', $e, '.websiteUntil IS NULL OR ', self::add($e . '.websiteUntil >= ?', 's', [$today]), ') )',
+            ]);
         } else {
             $manual = self::seq(['( ', $e, '.externalFeedID IS NULL AND ( ', $e, '.isPublic = 1 OR ', $admin, ' OR ', $member, ' ) )']);
         }
@@ -607,7 +724,27 @@ final class EventVisibility
             //    The "Don't show via API" box plays no part here: it is about
             //    API keys only, so an event can be on the website and not in
             //    the API, or the other way round.
-            $level = self::seq(['( (', $fresh, ') AND ', $e, ".importLevel = 'public' AND ", $e, '.importWebsite = 1 )']);
+            //
+            //    🧾 AND WHICH TICK COUNTS IS A CHOSEN RULE (D-080, D-081; #493
+            //    P1). Under COPIED_BY_EVENT the stored "yes" must come from a
+            //    choice about THIS event — `importSource` 'date' or 'series',
+            //    which FeedResolver writes only when such a choice decided the
+            //    answer — so the calendar's own box, a rule's box and a
+            //    duplicate's inherited answer all count for nothing. Under
+            //    COPIED_BY_CALENDAR the #514 behaviour is unchanged. The rule
+            //    is BOUND, never written into the text, so the statement is
+            //    the same for both (the #503 rule).
+            //
+            //    A series choice counts as one tick for the event: an outside
+            //    calendar's repeating entry is ONE event there, and a choice
+            //    about it was made by a person looking at that entry. A date
+            //    choice is narrower still. What does NOT count is anything
+            //    that applies to events nobody has looked at. Owner: D-090.
+            $level = self::seq([
+                '( (', $fresh, ') AND ', $e, ".importLevel = 'public' AND ", $e, '.importWebsite = 1',
+                ' AND (', self::add("? = '" . self::COPIED_BY_CALENDAR . "'", 's', [$copiedRule]), ' OR ', $e, ".importSource IN ('"
+                . implode("','", self::PER_EVENT_SOURCES) . "')) )",
+            ]);
         } elseif ($mode === self::MODE_KEY) {
             // 🔑 API keys (owner, 24 September 2026): exactly the signed-out
             //    visitor's imported events — public, stored answer still fresh
@@ -1031,6 +1168,22 @@ final class EventVisibility
         }
 
         return $today;
+    }
+
+    /**
+     * The copied-in rule for "website" mode. Anything other than the looser
+     * COPIED_BY_CALENDAR, spelt exactly, is the stricter COPIED_BY_EVENT: a
+     * rule that cannot be read must never read as "everything from the
+     * calendar". Never throws — a typo here should hide events, not break a
+     * public page.
+     *
+     * @param string $rule
+     *
+     * @return string
+     */
+    private static function checkCopiedRule(string $rule): string
+    {
+        return $rule === self::COPIED_BY_CALENDAR ? self::COPIED_BY_CALENDAR : self::COPIED_BY_EVENT;
     }
 
     /**

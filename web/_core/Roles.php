@@ -206,6 +206,21 @@ final class Roles
             'description' => 'Answerable for personal data: reviews the free text an erasure cannot '
                 . 'decide about on its own, and decides what goes',
         ],
+        // 🌐 ADDED 7 November 2026 (#493, D-077), by migration 258. The role the
+        //    permission `website.publish` ships pointing at. Granted to NOBODY:
+        //    D-077 says that out of the box only an organisation's
+        //    administrators may publish, and they may through the permission's
+        //    own gate (`PublicWebsite::mayPublish()`), not through this role.
+        //    It exists so an organisation can hand the job to somebody who is
+        //    not an administrator. LAST on purpose — `check_role_keys.py` and
+        //    `tools/roles-selftest.php` compare the order.
+        'website_editor' => [
+            'label'       => 'Website Editor',
+            // Said as it is today (round 1): no page a non-administrator can open
+            // asks for the permission yet, so promising more would be untrue.
+            'description' => 'Holds "Choose what appears on the public website"; until a page a '
+                . 'non-administrator can open asks for it, this changes nothing',
+        ],
     ];
 
     // =========================================================================

@@ -335,7 +335,9 @@ $coreDir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR 
 foreach (['App.php', 'Site.php', 'ErrorMonitor.php', 'Logger.php', 'SafeFetch.php', 'ApiKey.php', 'Roles.php', 'UserGroups.php', 'Departments.php',
     // `I18n.php` since #777 part two: `FeedAdmin::showWallClock()` now asks
     // `I18n::formatClockDateTime()` for its words (#784).
-    'EventVisibility.php', 'FeedResolver.php', 'FeedImporter.php', 'ExternalAudience.php', 'I18n.php', 'FeedAdmin.php'] as $classFile) {
+    // `PublicWebsite.php` since #493 P1: `FeedAdmin::whoCanSee()` asks it which
+    // website tick counts for copied-in events (D-080, D-081).
+    'EventVisibility.php', 'PublicWebsite.php', 'FeedResolver.php', 'FeedImporter.php', 'ExternalAudience.php', 'I18n.php', 'FeedAdmin.php'] as $classFile) {
     require_once $coreDir . $classFile;
 }
 
@@ -343,6 +345,7 @@ use Portal\Core\EventVisibility;
 use Portal\Core\ExternalAudience;
 use Portal\Core\FeedAdmin;
 use Portal\Core\FeedResolver;
+use Portal\Core\PublicWebsite;
 use Portal\Core\SafeFetch;
 use Portal\Core\Site;
 
@@ -390,8 +393,8 @@ if (($argv[1] ?? '') === '--hold-lock') {
 //    running" in the header). Change them only together with a check.
 // =============================================================================
 const EXPECTED_S      = 11;   // part S: S1 pages never write around the service layer (4); S2 the importer's UTC writes (2, fix round 1); S3 the server filter (1, chunk P8-3, + its call site 2, P8-3 fix round 1) and S4 message boxes (2, chunk P8-3)
-const EXPECTED_D      = 609;  // part D: 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
-const EXPECTED_W      = 314;  // part W: 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back); #514 part 10 adds W60 (9); #514 part 11 adds 2 to W50 (the guide's "told" section, and the approvals help's two switches)
+const EXPECTED_D      = 612;  // part D: (#493 P1 adds 2 to D39: the copy's website half under both copied-in rules; and 1 to D5: the label under the stricter rule) 500 from chunk P8-1, + D25's R13-L1 case and D33's three (chunk P8-2), + D34 (chunk P8-3), + D35 (2) and D36 (2) (P8-3 fix round 1), + D37 (3) (fix round 2), + D38 (fix round 3), + D39 (6, chunk P8-4; + 2 in its fix round 1; + 1 in fix round 2; + 1 after the final fault run, m-X05; + 3 after the final whole-part check, F1 and F3); #514 part 10 (roles, user groups and departments, 13 October 2026) adds 71: D1 (1), D3 (3), D7 (16), D8 (5), D15 (1) and D17 (45: its second control, and the R5 oracle cases); the fixes after part 10's independent check add 12 more to D17: six for rows of the new kinds filed under another organisation, and six for "one number, six kinds" (R9)
+const EXPECTED_W      = 315;  // part W: (#493 P1 round 12 adds 1 to W30: a save drawn as new refused under the lock) 81 for chunk P8-2's pages (W0-W16, W18-W25); chunk P8-3 grows W21 by 6 and adds W26-W38 (82); its fix round 1 adds a W31 check, W39 (4) and W40 (4); fix round 2 adds W41 (5); fix round 3 adds W42 (3); fix round 4 grows W21 by 2 and adds W43 (1); chunk P8-4 grows W21 by 5 and adds W44 (5), W45 (6), W46 (5), W47 (2), W48 (5), W49 (5), W50 (4), W51 (2) and W52 (5); its fix round 1 adds 2 to W45, 3 to W46, 3 to W48, 1 to W49, 1 to W50, 1 to W52, and W53 (2) and W54 (1); fix round 2 adds 2 to W45, 1 to W48 and 1 to W53; fix round 3 adds 1 to W45; the final whole-part check's fixes add 1 to W50, and W55 (2) and W56 (1); the last narrow check's fixes add 1 to W55, and W57 (4) and W58 (1); W59, the #534 table (roll-out package B, 11 October 2026), adds 32: its set-up (1), six viewers by four addresses (24), its own control (2), an API key answered as before (2, added after the independent check) and the venue booking card (3); roll-out package B2a (12 October 2026) adds a seventh W59 viewer, on a crew (4), and changes the Team Hub and venue card rows it made stricter; roll-out package F2 adds 5 "W59 at the door" checks (the members-only gate put back); #514 part 10 adds W60 (9); #514 part 11 adds 2 to W50 (the guide's "told" section, and the approvals help's two switches)
 const EXPECTED_CHECKS = EXPECTED_S + EXPECTED_D + EXPECTED_W;
 
 // 🧩 One part only (SELFTEST_ONLY=S, D or W), or all of them. A one-part run
@@ -3904,6 +3907,19 @@ function pw_run(): void
         $d4  = pa_event($c30, 'w30c@p8', 'W30 date 4', ['day' => 28, 'key' => 'W3']);
         $set30   = $resolve($c30);
         $first30 = FeedAdmin::saveChoice($mysqli, $d1, 'series', ORG_A, SA, ['audienceLevel' => 'public', 'seen' => [$d1 . ':' . pa_cf($d1), $d2 . ':' . pa_cf($d2)]]);
+        // #493 P1, round 12: a save from a form drawn as NEW ('mustBeNew') is
+        // refused UNDER THE LOCK when the choice already exists, and writes
+        // nothing — the page's own earlier read is outside the lock, so two
+        // saves pressed together both pass it, and only this ask stops the
+        // second replacing an answer its person never saw.
+        $again30 = FeedAdmin::saveChoice($mysqli, $d1, 'series', ORG_A, SA, ['mustBeNew' => true, 'audienceLevel' => 'members', 'websiteOptIn' => '0']);
+        $row30   = pa_one("SELECT audienceLevel AS l FROM tblExternalEventChoices WHERE feedID = ? AND scope = 'series'", 'i', [$c30]);
+        pa_ok(
+            'W30 a save from a form drawn as new is refused under the lock when the choice already exists ("appeared"), and the stored choice is untouched (#493 P1)',
+            $first30['ok'] === true && $again30['ok'] === false && $again30['status'] === 'appeared'
+            && $again30['message'] === FeedAdmin::CHOICE_APPEARED && ($row30['l'] ?? null) === 'public',
+            pa_show([$again30['status'] ?? null, $row30])
+        );
         $pend30  = pa_pending($d4);
         $decl30  = ($pend30 === null) ? ['decided' => -1] : FeedAdmin::decide($mysqli, ORG_A, SA, 'declined', '', [pa_item($pend30)]);
         // A SUMMER decision time, set by hand as W13 does (fix round 1 of chunk
@@ -3945,7 +3961,7 @@ function pw_run(): void
         $set30b = $resolve($c30);
         $xUrl = $choice . '?event=' . $x30[0] . '&scope=date';
         $t30  = pw_req($sa, 'POST', $xUrl, [
-            'csrf_token' => pw_freshToken($sa, $xUrl), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic',
+            'csrf_token' => pw_freshToken($sa, $xUrl), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'websiteOptIn' => '0',
             'seen' => [$x30[0] . ':' . pa_cf($x30[0]), $x30[1] . ':' . pa_cf($x30[1]), $eB30 . ':' . pa_cf($eB30), $s1 . ':' . pa_cf($s1)],
         ]);
         pa_ok(
@@ -3969,13 +3985,13 @@ function pw_run(): void
             && str_contains($pvPage, '<label class="form-check-label" for="choice-private">I have checked, and I want to show it</label>')
         );
         $fp30   = pa_fp();
-        $noTick = pw_req($sa, 'POST', $pvUrl, ['csrf_token' => pw_token($pvPage), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'seen' => $seenOn($pvPage), 'note' => 'W30 typed note']);
+        $noTick = pw_req($sa, 'POST', $pvUrl, ['csrf_token' => pw_token($pvPage), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'websiteOptIn' => '0', 'seen' => $seenOn($pvPage), 'note' => 'W30 typed note']);
         pa_ok(
             'W30 saved without the tick: 200, the warning as the refusal, the typed note kept, nothing written',
             $noTick['status'] === 200 && str_contains($noTick['body'], 'role="alert">' . pw_esc(MSG_PRIVATE)) && str_contains($noTick['body'], 'value="W30 typed note"') && pa_fp() === $fp30,
             'HTTP ' . $noTick['status']
         );
-        $tick = pw_req($sa, 'POST', $pvUrl, ['csrf_token' => pw_token($noTick['body']), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'seen' => $seenOn($pvPage), 'overridesPrivateMark' => '1']);
+        $tick = pw_req($sa, 'POST', $pvUrl, ['csrf_token' => pw_token($noTick['body']), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'websiteOptIn' => '0', 'seen' => $seenOn($pvPage), 'overridesPrivateMark' => '1']);
         $pvChoice = pa_one("SELECT overridesPrivateMark AS o FROM tblExternalEventChoices WHERE feedID = ? AND scope = 'date'", 'i', [$c30p]);
         pa_ok(
             'W30 with the tick: 302 to the calendar page, the choice stores overridesPrivateMark = 1, and the date is Everyone',
@@ -4578,7 +4594,7 @@ function pw_run(): void
         $beforeA = [$sees($a1, 'W36a first Kv8'), $sees($a2, 'W36a second Kv8')];
         pa_ok('W36 before: a signed-out visitor sees neither date of the Members calendar\'s repeating event', $set36 === true && $beforeA === [false, false], pa_show($beforeA));
         $pageA  = pw_req($sa, 'GET', $choice . '?event=' . $a1 . '&scope=series')['body'];
-        $saveA  = pw_req($sa, 'POST', $choice . '?event=' . $a1 . '&scope=series', ['csrf_token' => pw_token($pageA), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'seen' => $seenOn($pageA)]);
+        $saveA  = pw_req($sa, 'POST', $choice . '?event=' . $a1 . '&scope=series', ['csrf_token' => pw_token($pageA), 'action' => 'save', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'websiteOptIn' => '0', 'seen' => $seenOn($pageA)]);
         $afterA = [$sees($a1, 'W36a first Kv8'), $sees($a2, 'W36a second Kv8')];
         pa_ok('W36 a choice for every date saved through the page as Everyone, "title, date and time only": 302, and the visitor now sees both dates', $saveA['status'] === 302 && $afterA === [true, true], pa_show([$saveA['status'], $saveA['location'], $afterA]));
         $evOut = pw_req($out, 'GET', PW_A . '/calendar/event?slug=imp-selftest-p8-' . $a1);
@@ -5336,7 +5352,12 @@ function pw_run(): void
         );
         $b7 = 'An API key now receives an event from an outside calendar exactly when a signed-out visitor to your portal could see it, and in the same detail: '
             . 'every event from a calendar set to Public, whether or not "Also show on the public website" is ticked. That website box now controls only the '
-            . 'countdown widget and the sitemap. To stop a calendar\'s events being sent through API keys, tick "Don\'t show via API" on that calendar (you can '
+            // #493 P1 (round 2): the box also governs the event page's search-engine
+            // markup, and a calendar's or rule's box counts only under the looser
+            // rule. The help page and this pin changed together.
+            . 'organisation\'s public website — the countdown widget, the sitemap and the search-engine markup on the event\'s own page — and a calendar\'s '
+            . 'or a rule\'s box does so only while the organisation\'s rule for copied-in events is "one box per subscribed calendar". '
+            . 'To stop a calendar\'s events being sent through API keys, tick "Don\'t show via API" on that calendar (you can '
             . 'also tick it on a single date, a repeating event or a rule — one tick anywhere is enough).';
         $item9 = 'When a choice or rule starts or ends, the events it covers are shown only to administrators until the scheduled refresh next runs. '
             . 'If the scheduled refresh is not set up, they stay that way.';
@@ -5852,6 +5873,14 @@ function pw_run(): void
         //     Once the date is gone from the outside calendar, whether it was
         //     private is unknown — so the page stops claiming anything about
         //     people inside.
+        //     ⚠️ Made under the LOOSER rule (#493 P1, round 4 of its check):
+        //     under "one tick per event", migration 258's default, a rule's
+        //     website box is dropped where the answer is formed, so it makes
+        //     no request at all. This case is about the preview's words for a
+        //     request, so it runs under "one box per calendar", put back after.
+        $rule57Was = pa_one("SELECT settingValue FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL");
+        pa_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'public.events.copiedRule', 'calendar', 'event', 0) "
+            . "ON DUPLICATE KEY UPDATE settingValue = 'calendar'");
         $e57  = pa_newFeed(ORG_A, 'public', ['name' => 'W57 everyone calendar']);
         $ev57 = pa_event($e57, 'w57-e@p8', 'W57 website evening');
         $er57 = FeedAdmin::saveRule($mysqli, $e57, 0, ORG_A, SA, ['name' => 'W57 website', 'audienceLevel' => 'public', 'detailLevel' => 'basic', 'websiteOptIn' => '1', 'isActive' => '1', 'conditions' => [['matchField' => 'title', 'matchType' => 'contains', 'matchValue' => 'W57 website']]]);
@@ -5866,6 +5895,11 @@ function pw_run(): void
             && str_contains($te57, $goneWords57) === true && str_contains($te57, $insideWords57) === false,
             pa_show([mb_substr($td57, 0, 400), mb_substr($te57, 0, 400)])
         );
+        if ($rule57Was === null) {
+            pa_q("DELETE FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL");
+        } else {
+            pa_q("UPDATE tblSettings SET settingValue = ? WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL", 's', [(string) $rule57Was['settingValue']]);
+        }
 
         // ---------------------------------------------------------------------
         pa_heading('W58 — "A request was declined on …" is worded as history, true even when the dates show to everyone again (the last narrow check before the commit)');
@@ -7025,9 +7059,20 @@ $ev51 = pa_event(FA2, 'd5-1@p8', 'D5 event 1');
 $ev52 = pa_event(FA2, 'd5-2@p8', 'D5 event 2');
 $r5   = FeedAdmin::saveCalendar($mysqli, FA2, ORG_A, SA, pa_calPost(FA2, ['apiOptOut' => '1', 'websiteOptIn' => '1']));
 pa_ok('D5 ticking the API box: every live event importApiOptOut = 1', $r5['ok'] === true && (int) pa_ev($ev51)['importApiOptOut'] === 1 && (int) pa_ev($ev52)['importApiOptOut'] === 1, pa_show($r5));
+// 🌐 #493 P1 (round 1): the label says "also on the public website" only
+//    where the organisation's rule lets a calendar's own box count. Under
+//    "one tick per event" — and with no rule passed, which is the stricter
+//    default — it says the box does nothing, because the website shows none
+//    of these events.
 pa_ok(
-    'D5 audienceLabel(): exactly "Everyone · also on the public website · not sent to API keys"',
-    FeedAdmin::audienceLabel(FeedAdmin::calendar($mysqli, FA2, ORG_A)) === 'Everyone · also on the public website · not sent to API keys',
+    'D5 audienceLabel(), under "one box per calendar": exactly "Everyone · also on the public website · not sent to API keys"',
+    FeedAdmin::audienceLabel(FeedAdmin::calendar($mysqli, FA2, ORG_A), EventVisibility::COPIED_BY_CALENDAR) === 'Everyone · also on the public website · not sent to API keys',
+    FeedAdmin::audienceLabel(FeedAdmin::calendar($mysqli, FA2, ORG_A), EventVisibility::COPIED_BY_CALENDAR)
+);
+pa_ok(
+    'D5 audienceLabel(), under "one tick per event" and with no rule given: the box is said to do nothing, and the website is NOT claimed',
+    FeedAdmin::audienceLabel(FeedAdmin::calendar($mysqli, FA2, ORG_A), EventVisibility::COPIED_BY_EVENT) === 'Everyone · website box ticked, but it does nothing under "one tick per event" · not sent to API keys'
+    && FeedAdmin::audienceLabel(FeedAdmin::calendar($mysqli, FA2, ORG_A)) === FeedAdmin::audienceLabel(FeedAdmin::calendar($mysqli, FA2, ORG_A), EventVisibility::COPIED_BY_EVENT),
     FeedAdmin::audienceLabel(FeedAdmin::calendar($mysqli, FA2, ORG_A))
 );
 $r5b = FeedAdmin::saveCalendar($mysqli, FA2, ORG_A, SA, pa_calPost(FA2, ['apiOptOut' => '0']));
@@ -8191,8 +8236,13 @@ function pa_full(int $feedId, ?string $today = null): array
     foreach (pa_q('SELECT eventID FROM tblEvents WHERE externalFeedID = ? AND isDeleted = 0 ORDER BY eventID', 'i', [$feedId]) as $r) {
         $out[(int) $r['eventID']] = [];
     }
+    // 🌐 #493 P1: "website" mode is handed the copied-in rule the organisation
+    //    is really held to (D-080, D-081), read with the same reader the
+    //    countdown and the sitemap use, so the oracle follows a rule change.
+    $ruleSite = (int) (pa_one('SELECT siteID FROM tblExternalFeeds WHERE feedID = ?', 'i', [$feedId])['siteID'] ?? 0);
+    $rule     = PublicWebsite::copiedRuleFor($GLOBALS['mysqli'], $ruleSite);
     foreach ($views as $name => [$mode, $viewer]) {
-        $w = EventVisibility::where('e', $mode, $viewer, $today);
+        $w = EventVisibility::where('e', $mode, $viewer, $today, $rule);
         foreach (pa_q('SELECT e.eventID FROM tblEvents e WHERE e.externalFeedID = ? AND e.isDeleted = 0' . $w['sql'], 'i' . $w['types'], array_merge([$feedId], $w['params'])) as $r) {
             $out[(int) $r['eventID']][] = $name;
         }
@@ -10884,6 +10934,49 @@ pa_ok(
     $wr39['ok'] === true && pa_ls($wc39) === 'members/calendar' && $zone39 !== 'UTC' && $zone39 !== '+00:00'
     && $wNone39 === 'members' && $wSoon39 === $wNone39 && $wGone39 === 'admins',
     pa_show(['zone' => $zone39, 'none' => $wNone39, 'in 2 hours' => $wSoon39, '2 hours ago' => $wGone39])
+);
+
+// 🌐 #493 P1 (D-080, D-081): the copy's website half follows the copied-in
+// rule exactly as the real rule does. Three events on one switched-on
+// calendar, all public with the website box ticked, differing ONLY in where
+// that "yes" came from — the calendar, a rule, a date choice — so the rule is
+// the one thing that can decide. Asked under both rules, copy against the
+// real rule (pa_realSigs(pa_full())), and against answers written by hand.
+// Planted, dropping the rule from whoCanSee() turns the "one tick per event"
+// half red (the calendar's and the rule's events read website=1).
+pa_resetWorld();
+$wbCal  = pa_event(FA1, 'd39-web-cal@p8', 'D39 web calendar');
+$wbRule = pa_event(FA1, 'd39-web-rule@p8', 'D39 web rule');
+$wbDate = pa_event(FA1, 'd39-web-date@p8', 'D39 web date');
+pa_q('UPDATE tblExternalFeeds SET isActive = 1 WHERE feedID = ?', 'i', [FA1]);
+foreach ([[$wbCal, 'calendar'], [$wbRule, 'rule'], [$wbDate, 'date']] as [$wbId, $wbSource]) {
+    pa_q("UPDATE tblEvents SET importLevel = 'public', importWebsite = 1, importApiOptOut = 0, importRecheckAt = NULL, importSource = ? WHERE eventID = ?",
+        'si', [$wbSource, $wbId]);
+}
+$wbRuleWas = pa_one("SELECT settingValue FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL")['settingValue'] ?? null;
+$wbAsk = static function (string $rule) use ($wbCal, $wbRule, $wbDate): array {
+    pa_q("UPDATE tblSettings SET settingValue = ? WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL", 's', [$rule]);
+    pa_q("DELETE FROM tblSettings WHERE settingKey = 'public.events.copiedRule' AND siteID = ?", 'i', [ORG_A]);
+    $copy = pa_copySig(FA1);
+    $real = pa_realSigs(pa_full(FA1));
+
+    return [
+        'copy' => [$copy[$wbCal] ?? '', $copy[$wbRule] ?? '', $copy[$wbDate] ?? ''],
+        'real' => [$real[$wbCal] ?? '', $real[$wbRule] ?? '', $real[$wbDate] ?? ''],
+    ];
+};
+$wbEvent = $wbAsk('event');
+$wbWideOpen = $wbAsk('calendar');
+pa_q("UPDATE tblSettings SET settingValue = ? WHERE settingKey = 'public.events.copiedRule' AND siteID IS NULL", 's', [$wbRuleWas ?? 'event']);
+pa_ok(
+    'D39 #493: under "one tick per event" only the DATE choice\'s event is on the website, in the copy (whoCanSee()) and in the real rule alike',
+    $wbEvent['copy'] === ['public|website=0|keys=1', 'public|website=0|keys=1', 'public|website=1|keys=1'] && $wbEvent['real'] === $wbEvent['copy'],
+    pa_show($wbEvent)
+);
+pa_ok(
+    'D39 #493: under "one box per calendar" all three are, in the copy and in the real rule alike',
+    $wbWideOpen['copy'] === ['public|website=1|keys=1', 'public|website=1|keys=1', 'public|website=1|keys=1'] && $wbWideOpen['real'] === $wbWideOpen['copy'],
+    pa_show($wbWideOpen)
 );
 
 // The final whole-part check, F1: removing a choice from a date the outside

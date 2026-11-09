@@ -266,11 +266,16 @@ if (
 //    It is never replaced by a guess. This sits before the uploads below, so
 //    a refusal leaves nothing behind.
 $storedZone = null;
+// 🌐 The event's public-website fields as they are stored now (#493 P1), read
+//    in the same statement as its zone, so "did it CHANGE" (#687) is judged
+//    against the row being edited. A new event starts from OFF, no dates.
+$storedWebsite = \Portal\Core\PublicWebsite::NEW_EVENT_VALUES;
+$storedWebsiteFound = false;
 if ($action === 'update') {
     // The portal's own events only (`externalFeedID IS NULL`): an event copied in
     // from an outside calendar cannot be edited here at all (the UPDATE below
     // refuses one too), so its zone is none of this form's business.
-    $zoneStmt = $mysqli->prepare('SELECT timezone FROM tblEvents WHERE eventID = ? AND siteID = ? AND externalFeedID IS NULL LIMIT 1');
+    $zoneStmt = $mysqli->prepare('SELECT `timezone`, `showOnWebsite`, `websiteFrom`, `websiteUntil` FROM `tblEvents` WHERE `eventID` = ? AND `siteID` = ? AND `externalFeedID` IS NULL LIMIT 1');
     if ($zoneStmt !== false) {
         $zoneEventId = (int) ($_POST['eventID'] ?? 0);
         $zoneSiteId  = Site::id();
@@ -279,6 +284,14 @@ if ($action === 'update') {
         $zoneRow = $zoneStmt->get_result()->fetch_assoc();
         $zoneStmt->close();
         $storedZone = $zoneRow !== null ? (string) $zoneRow['timezone'] : null;
+        if ($zoneRow !== null) {
+            $storedWebsiteFound = true;
+            $storedWebsite = [
+                'showOnWebsite' => (int) $zoneRow['showOnWebsite'],
+                'websiteFrom'   => $zoneRow['websiteFrom'] === null ? null : (string) $zoneRow['websiteFrom'],
+                'websiteUntil'  => $zoneRow['websiteUntil'] === null ? null : (string) $zoneRow['websiteUntil'],
+            ];
+        }
     }
 }
 $keepsStoredZone = $storedZone !== null && Site::phpCanOpenZone($storedZone) === true
@@ -296,6 +309,66 @@ if ($keepsStoredZone === true) {
     header('Location: ' . Site::url('calendar/manage'));
     exit();
 }
+
+// 🌐 THE PUBLIC WEBSITE SWITCH AND DATES (#493 P1; D-057, D-077, D-078).
+//    Judged by `PublicWebsite::judgeEventFields()` — the ONE judgement, which
+//    the events API asks too — on facts gathered here:
+//      - which fields ARRIVED (#677). The form puts a hidden `websiteFields`
+//        marker beside its controls, and draws them only for somebody who may
+//        publish; with the marker absent nothing here is touched, so an
+//        ordinary Save by anybody else neither refuses nor clears it. With it
+//        present an unticked box (which a browser sends as nothing) is "off";
+//      - what is stored now (read with the zone, above);
+//      - whether this person may publish, asked LIVE of the database.
+//    A real change by somebody who may not is REFUSED with the reason and
+//    recorded, never quietly dropped (#668). Sits before the uploads, so a
+//    refusal leaves nothing behind.
+$websiteArrived = [];
+if (array_key_exists('websiteFields', $_POST) === true) {
+    // The box's VALUE decides, not whether it arrived (round 3 of the check). A
+    // browser sends nothing for an unticked box, so absent is "off"; but the
+    // common pattern of a hidden "0" placed before the box posts "0" when it is
+    // unticked, and testing presence read that as ON. The judgement refuses
+    // anything that is not a plain true/false value, so nothing odd reads as on.
+    $websiteArrived['showOnWebsite'] = array_key_exists('showOnWebsite', $_POST) === true ? $_POST['showOnWebsite'] : '0';
+    foreach (['websiteFrom', 'websiteUntil'] as $websiteField) {
+        if (array_key_exists($websiteField, $_POST) === true) {
+            $websiteArrived[$websiteField] = is_string($_POST[$websiteField]) === true ? $_POST[$websiteField] : false;
+        }
+    }
+} else {
+    // A hand-made post carrying the fields WITHOUT the marker is still judged:
+    // only a field that did not arrive at all is "leave it alone".
+    // The box is passed as it arrived, as in the branch above, so an array is
+    // refused as not true-or-false rather than read as "off" (round 4).
+    foreach (\Portal\Core\PublicWebsite::EVENT_FIELDS as $websiteField) {
+        if (array_key_exists($websiteField, $_POST) === true) {
+            $websiteArrived[$websiteField] = ($websiteField === 'showOnWebsite' || is_string($_POST[$websiteField]) === true)
+                ? $_POST[$websiteField] : false;
+        }
+    }
+}
+$websiteJudged = \Portal\Core\PublicWebsite::judgeEventFields(
+    $websiteArrived,
+    $storedWebsite,
+    \Portal\Core\PublicWebsite::mayPublish($mysqli, (int) ($_SESSION['user_id'] ?? 0), Site::id())
+);
+if ($websiteJudged['ok'] === false) {
+    if ($websiteJudged['kind'] === 'forbidden') {
+        \Portal\Core\PublicWebsite::recordRefusal(
+            $action === 'update' ? (int) ($_POST['eventID'] ?? 0) : null,
+            $eventName,
+            $websiteJudged,
+            isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null,
+            'the Manage Events form'
+        );
+    }
+    $_SESSION['flash_msg']  = $websiteJudged['reason'];
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('calendar/manage'));
+    exit();
+}
+$websiteValues = $websiteJudged['values'];
 
 // 🔤 Generate slug
 $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
@@ -561,14 +634,21 @@ if ($action === 'create') {
         'locationName', 'locationAddress', 'locationWebURL', 'locationGeoLat', 'locationGeoLng',
         'locationW3W', 'locationPhone', 'locationEmail',
         'hostOrgName', 'partnerOrgs', 'heroImage', 'posterImage', 'profileImage',
+        // 🌐 #493 P1: always written, from the judgement above — OFF and no
+        //    dates unless somebody who may publish set them. Being in this
+        //    list is what makes the repeat copies below carry them: the
+        //    person who ticked it ticked it for the series they were making
+        //    in this same request, and that is recorded in the log.
+        'showOnWebsite', 'websiteFrom', 'websiteUntil',
     ];
-    $insertTypes = 'ssssssiiiisissssddssssssss';
+    $insertTypes = 'ssssssiiiisissssddssssssssiss';
     $insertValues = [
         $eventName, $slug, $description, $startDateTime, $endDt, $timezone, $isAllDay,
         $categoryID, $typeID, $seriesID, $status, $isPublic, $isFeatured,
         $locationName, $locationAddress, $locationWebURL, $locationGeoLat, $locationGeoLng,
         $locationW3W, $locationPhone, $locationEmail,
         $hostOrgName, $partnerOrgs, $heroImage, $posterImage, $profileImage,
+        $websiteValues['showOnWebsite'], $websiteValues['websiteFrom'], $websiteValues['websiteUntil'],
     ];
 
     if ($venueLinkActive === true) {
@@ -1300,6 +1380,13 @@ if ($action === 'create') {
     }
 
     Logger::activity('EventCreated', 'Created event: ' . $eventName . ' (ID:' . $newEventId . ')', $userId);
+    \Portal\Core\PublicWebsite::recordChange(
+        (int) $newEventId,
+        $eventName,
+        $websiteJudged['changes'],
+        $userId === null ? null : (int) $userId,
+        'the Manage Events form, a new event' . ($repeatMade > 0 ? ' and the ' . $repeatMade . ' other dates of its series' : '')
+    );
 
     $_SESSION['flash_msg']  = 'Event "' . $eventName . '" created successfully.' . $repeatNote . ($geoWarning !== null ? ' ' . $geoWarning : '');
     $_SESSION['flash_type'] = 'success';
@@ -1371,6 +1458,19 @@ if ($action === 'update') {
         $paramValues[] = $eventRoomID;
     }
 
+    // 🌐 #493 P1: only when the judgement found a CHANGE, which it allows
+    //    only for somebody who may publish. Otherwise the three columns are
+    //    left out of the SET entirely, so an edit can never clear them.
+    if ($websiteJudged['changed'] === true) {
+        $setClauses[]  = '`showOnWebsite` = ?';
+        $setClauses[]  = '`websiteFrom` = ?';
+        $setClauses[]  = '`websiteUntil` = ?';
+        $paramTypes   .= 'iss';
+        $paramValues[] = $websiteValues['showOnWebsite'];
+        $paramValues[] = $websiteValues['websiteFrom'];
+        $paramValues[] = $websiteValues['websiteUntil'];
+    }
+
     $paramTypes   .= 'ii';
     $paramValues[] = $eventID;
     $paramValues[] = $siteId;
@@ -1390,6 +1490,12 @@ if ($action === 'update') {
     }
 
     Logger::activity('EventUpdated', 'Updated event #' . $eventID . ': ' . $eventName, $userId);
+    // Recorded only when the row was really found: a change judged against an
+    // event that does not exist here (`$storedWebsiteFound` false) was judged
+    // from OFF and wrote nothing, and saying it was published would be untrue.
+    if ($storedWebsiteFound === true) {
+        \Portal\Core\PublicWebsite::recordChange($eventID, $eventName, $websiteJudged['changes'], $userId === null ? null : (int) $userId, 'the Manage Events form');
+    }
 
     $_SESSION['flash_msg']  = 'Event "' . $eventName . '" updated successfully.' . ($geoWarning !== null ? ' ' . $geoWarning : '');
     $_SESSION['flash_type'] = 'success';
