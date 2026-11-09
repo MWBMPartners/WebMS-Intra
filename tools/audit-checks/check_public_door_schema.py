@@ -200,7 +200,7 @@ def validate(instance, schema, root: dict, where: str, out: list[str]) -> None:
 ORG = {"name": "Example Church", "timezone": "Europe/London"}
 GOOD_EVENT = {
     "id": "harvest-supper", "title": "Harvest supper", "startsAt": "2026-11-20T19:00:00+00:00",
-    "endsAt": None, "allDay": False, "timezone": "Europe/London", "detailsLimited": False,
+    "endsAt": None, "startsOnClock": "2026-11-20T19:00:00", "endsOnClock": None, "allDay": False, "timezone": "Europe/London", "detailsLimited": False,
     "description": "Bring a dish.", "location": {"name": "Hall", "address": None, "url": "https://example.org/hall"},
 }
 GOOD_POSTER = {
@@ -241,6 +241,8 @@ MUST_FAIL = [
     ("events", "a database number leaking out", events_doc([with_change(GOOD_EVENT, eventID=42)])),
     ("events", "a creator leaking out", events_doc([with_change(GOOD_EVENT, createdByID=7)])),
     ("events", "a start time with no offset", events_doc([with_change(GOOD_EVENT, startsAt="2026-11-20 19:00:00")])),
+    # #493 P4b: the stored reading carries NO offset (it is a reading, not a moment).
+    ("events", "a stored reading given an offset", events_doc([with_change(GOOD_EVENT, startsOnClock="2026-11-20T19:00:00+00:00")])),
     ("events", "a plain-http place address",
      events_doc([with_change(GOOD_EVENT, location={"name": None, "address": None, "url": "http://x.org"})])),
     ("events", "a telephone number inside the location",

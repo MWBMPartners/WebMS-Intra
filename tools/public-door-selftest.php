@@ -42,7 +42,12 @@
  *      /door.js on a public address: the file kept outside the web root,
  *      byte for byte, as text/javascript with its headers; the same gate
  *      (Calendar OR Noticeboard needed, both off refused), the same 404 and
- *      503; no session file; the card's three lines to paste, as text. What
+ *      503; no session file; the card's three lines to paste, as text; the
+ *      script refused after a replaced name and with the door off — on the
+ *      approved public address too, where "is the door on?" is the only
+ *      guard (J09, PJ9); and on the morning a clock goes forward the feed's
+ *      startsOnClock keeps the stored reading while startsAt moves (J10,
+ *      PJ10). What
  *      the script DRAWS is driven in a real browser by
  *      tools/public-door-script-selftest.mjs, not here.
  *   W  (#493 P4b, D-084) the old widget folder is gone: /widget, its old
@@ -121,7 +126,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 191; // 170 in P4a; #493 P4b adds J01-J08, W01-W04, T10 and PJ1-PJ8
+const PDS_EXPECTED_CHECKS = 195; // 170 in P4a; #493 P4b adds J01-J10, W01-W04, T10 and PJ1-PJ10
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1336,7 +1341,7 @@ check('C02 an event still running on its own clock IS shown, and they come soone
 check('C03 one event carries exactly the published fields, its id is its slug (not a number), and its full details where allowed',
     [array_keys($shown ?? []), is_string($shown['id'] ?? null) && str_starts_with((string) $shown['id'], 'pds-'), $shown['description'] ?? null,
         $shown['location'] ?? null, $shown['detailsLimited'] ?? null],
-    [['id', 'title', 'startsAt', 'endsAt', 'allDay', 'timezone', 'detailsLimited', 'description', 'location'], true, 'Bring a dish.',
+    [['id', 'title', 'startsAt', 'endsAt', 'startsOnClock', 'endsOnClock', 'allDay', 'timezone', 'detailsLimited', 'description', 'location'], true, 'Bring a dish.',
         ['name' => 'PDS Hall', 'address' => '1 PDS Street', 'url' => 'https://hall.selftest.invalid/'], false]);
 $leaks = [];
 foreach (['01234 PDS PHONE', 'pds-hall-secret', '51.1234567', 'pds.secret.words', 'PDS HOST ORG', '"eventID"', '"siteID"', 'createdBy', '"capacity"'] as $needle) {
@@ -1509,6 +1514,55 @@ check('J08 with the door on, the card prints the line to paste for each of the t
     [str_contains($jCard, $jPaste('events')), str_contains($jCard, $jPaste('posters')), str_contains($jCard, $jPaste('next')),
         str_contains($jCard, '<script src="https://' . $hostA . '/door.js"')],
     [true, true, true, false]);
+
+// Round 1 of P4b's check: the script was never asked for on a switched-off
+// door's APPROVED PUBLIC ADDRESS. On /w/{name}/ switching off deletes the name
+// row, so the name stops resolving and the "door on?" question is never the
+// one that refuses; on a public address it is the ONLY guard. So every way the
+// script can be asked for after a replace and a switch-off joins $refusals,
+// which R01 compares byte for byte, and PJ9 takes the question out.
+$jOldName = $nameA;
+$card('root', 'door_replace', ['understood' => '1']);
+$refusals['the script on a replaced name'] = $http('GET', '/w/' . $jOldName . '/door.js');
+$jLastName = (string) $doorName($siteA);
+$card('root', 'door_off', ['understood' => '1']);
+$refusals['the script on a switched-off door\'s public address'] = $http('GET', '/door.js', ['host' => $hostA]);
+$refusals['the script on a switched-off door\'s last name'] = $http('GET', '/w/' . $jLastName . '/door.js');
+$card('root', 'door_on');
+$nameA = (string) $doorName($siteA);
+check('J09 the script after a replaced name (the old name), and with the door switched off (on A\'s approved public address AND on the last name), is the door\'s 404 — and served again once the door is back on',
+    [$refusals['the script on a replaced name']['status'], $refusals['the script on a switched-off door\'s public address']['status'],
+        $refusals['the script on a switched-off door\'s last name']['status'], $feedA('door.js')['status'], $http('GET', '/door.js', ['host' => $hostA])['status']],
+    [404, 404, 404, 200, 200]);
+
+// Round 1 of P4b's check (#777): on the morning a clock goes forward, a stored
+// reading inside the missing hour must reach a website AS WRITTEN — the portal's
+// own pages show it so (I18n::formatClockDateTime()) — while the instant moves
+// past the gap. The next such morning in London is worked out, not typed, so
+// the test does not expire.
+$jLondon = new DateTimeZone('Europe/London');
+$jYear   = (int) (new DateTimeImmutable('now', $jLondon))->format('Y');
+$jGapDay = '';
+for ($y = $jYear; $y <= $jYear + 1 && $jGapDay === ''; $y++) {
+    $candidate = (new DateTimeImmutable('last sunday of march ' . $y, $jLondon))->format('Y-m-d');
+    if ($candidate > (new DateTimeImmutable('now', $jLondon))->modify('+1 day')->format('Y-m-d')) {
+        $jGapDay = $candidate;
+    }
+}
+$jGapEvent = $makeEvent('PDS A in the missing hour', $siteA, 'Europe/London', $jGapDay . ' 01:30:00', $jGapDay . ' 03:00:00');
+$jGapFeed  = $feedA('events.json?limit=50');
+$capture('events', 'a-missing-hour', $jGapFeed);
+$jGapRow = null;
+foreach (json_decode($jGapFeed['body'], true)['events'] ?? [] as $one) {
+    if ($one['title'] === 'PDS A in the missing hour') {
+        $jGapRow = $one;
+    }
+}
+$db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$jGapEvent}");
+check('J10 on the morning London\'s clocks go forward (' . $jGapDay . '), an event stored at 01:30 reaches a website as 01:30 to SHOW (startsOnClock, as the portal\'s own pages show it) while its instant has moved past the gap (startsAt 02:30+01:00, for counting down) — the premise first: PHP really moves that reading',
+    [(new DateTimeImmutable($jGapDay . ' 01:30:00', $jLondon))->format('H:i'), $jGapRow['startsOnClock'] ?? null, $jGapRow['startsAt'] ?? null,
+        $jGapRow['endsOnClock'] ?? null],
+    ['02:30', $jGapDay . 'T01:30:00', $jGapDay . 'T02:30:00+01:00', $jGapDay . 'T03:00:00']);
 
 // =============================================================================
 echo "W. The old widget folder is gone, and its addresses answer nothing (D-084)\n";
@@ -2424,6 +2478,35 @@ $wFolder = $scnWidgetGone();
 @rmdir(dirname($oldScript));
 check('PJ7 with the web root\'s widget folder put back, W01 sees /widget/countdown.js served from disk again', $wFolder['/widget/countdown.js'], "200 /* PLANTED old countdown.js */\n");
 check('PJ8 with both put away again, W01\'s answer is "gone" once more', $scnWidgetGone(), $widgetGoneWant);
+// Round 1 of P4b's check: the "door on?" question exempting the script. On a
+// public address that question is the ONLY guard (switching off deletes the
+// name row, so /w/{name}/ is refused for another reason).
+$p = $plant('_core/PublicDoor.php', "if (PublicWebsiteSetup::doorStateFor(\$db, \$siteId)['state'] !== 'on') {",
+    "if (\$surface !== self::SURFACE_SCRIPT && PublicWebsiteSetup::doorStateFor(\$db, \$siteId)['state'] !== 'on') {",
+    static function () use ($db, $siteA, $http, $hostA): int {
+        $was = $db->query("SELECT `publicName` FROM `tblPublicDoorNames` WHERE `siteID` = {$siteA}")->fetch_assoc();
+        $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` = {$siteA}");
+        $s = $http('GET', '/door.js', ['host' => $hostA])['status'];
+        if ($was !== null) {
+            $db->query("INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES ({$siteA}, '{$was['publicName']}', UTC_TIMESTAMP())");
+        }
+        return $s;
+    });
+check('PJ9 with the script let past the "door on?" question, a switched-off door serves it on its approved public address (J09 catches it)', [$p['applied'], $p['result']], [true, 200]);
+// #777: the reading to SHOW taken from the moved instant instead of the store.
+$p = $plant('_core/PublicDoor.php', "        return \$m[1] . 'T' . \$m[2];", "        return substr((string) self::instantText(\$reading, \$zone), 0, 19);",
+    static function () use ($makeEvent, $siteA, $jGapDay, $feedA, $db): ?string {
+        $id  = $makeEvent('PDS A in the missing hour', $siteA, 'Europe/London', $jGapDay . ' 01:30:00', $jGapDay . ' 03:00:00');
+        $got = null;
+        foreach (json_decode($feedA('events.json?limit=50')['body'], true)['events'] ?? [] as $one) {
+            if ($one['title'] === 'PDS A in the missing hour') {
+                $got = $one['startsOnClock'];
+            }
+        }
+        $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+        return $got;
+    });
+check('PJ10 with the reading to show taken from the instant, the missing-hour event reaches websites as 02:30 (J10 catches it)', [$p['applied'], $p['result']], [true, $jGapDay . 'T02:30:00']);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

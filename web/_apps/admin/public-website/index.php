@@ -167,7 +167,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <p class="small mb-1"><?php echo $esc($paste['words']); ?>:</p>
                             <pre class="small bg-body-tertiary border rounded p-2 mb-2" data-door-script="<?php echo $esc($show); ?>"><code><?php echo $esc($paste['code']); ?></code></pre>
                         <?php endforeach; ?>
-                        <p class="small text-muted">Add <code>data-limit="5"</code> to show fewer (up to <?php echo (int) PublicDoor::MAX_LIMIT; ?>), or <code>data-target="#my-box"</code> to draw inside a part of your page you name. If your website has a content security policy, it must allow this portal's address for scripts, for reading data and for images. Some website builders do not allow scripts at all; the feed addresses above still work for whoever builds your website.</p>
+                        <p class="small text-muted">Add <code>data-limit="5"</code> to show fewer (up to <?php echo (int) PublicDoor::MAX_LIMIT; ?>), or <code>data-target="#my-box"</code> to draw inside a part of your page you name. If your website has a content security policy, it must allow this portal's address for scripts (script-src) and for reading data (connect-src), and for images (img-src) both this portal's address and the address of any outside picture a poster uses — allowing <code>https:</code> for images covers both. Some website builders do not allow scripts at all; the feed addresses above still work for whoever builds your website.</p>
                     <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($doorTestersOnly === true): ?>

@@ -417,6 +417,15 @@ final class PublicDoor
                 'title'          => (string) $row['eventName'],
                 'startsAt'       => self::instantText($row['startDateTime'], $zone),
                 'endsAt'         => self::instantText($row['endDateTime'], $zone),
+                // #493 P4b: the readings AS STORED, for showing. On the morning
+                // a clock goes forward a reading inside the missing hour is
+                // still the time the organisation typed (#777: a clock reading
+                // is not a moment), while startsAt — an instant — has had to
+                // move past the gap (I18n::wallClockInstant()). A reader that
+                // SHOWS a time uses these, so it agrees with the portal's own
+                // pages; one that counts down uses startsAt.
+                'startsOnClock'  => self::clockText($row['startDateTime'], $zone),
+                'endsOnClock'    => self::clockText($row['endDateTime'], $zone),
                 'allDay'         => (int) $row['isAllDay'] === 1,
                 'timezone'       => $zone->getName(),
                 'detailsLimited' => $row['detailsLimited'] === true,
@@ -849,6 +858,22 @@ final class PublicDoor
     private static function nowUtc(): string
     {
         return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d\TH:i:s\Z');
+    }
+
+    /**
+     * A stored wall-clock reading exactly as stored, "YYYY-MM-DDTHH:MM:SS"
+     * with NO offset (it is a reading, not a moment), or null. Null whenever
+     * instantText() is null too, so a reading the portal cannot read is not
+     * shown in one field and refused in the other.
+     */
+    private static function clockText(mixed $reading, \DateTimeZone $zone): ?string
+    {
+        if ($reading === null || self::instantText($reading, $zone) === null
+            || preg_match('/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})$/D', (string) $reading, $m) !== 1) {
+            return null;
+        }
+
+        return $m[1] . 'T' . $m[2];
     }
 
     /** A stored wall-clock reading as an instant with its offset, on the event's own clock, or null. */

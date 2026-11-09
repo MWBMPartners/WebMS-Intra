@@ -10,11 +10,15 @@
 --     REMOVED, each explained where it stands. This line used to read "No
 --     DROP, TRUNCATE, or DELETE — existing data is never removed", which was
 --     untrue. Run over an existing database, this file:
---       - removes seeded rows that should not be there (seven DELETEs: surplus
---         copies of portal-wide settings, four settings for API actions that
---         have no handler, the old `portal.version` setting, the `widget`
---         address, and — since #493 P4b, migration 264 — the old countdown
---         widget's two addresses and the `widget` address again, in three DELETEs);
+--       - removes seeded rows that should not be there: surplus copies of
+--         portal-wide settings, four settings for API actions that have no
+--         handler, the old `portal.version` setting, the old `email.provider`
+--         and `email.from` settings, the `widget` address, and — since #493
+--         P4b, migration 264 — the old countdown widget's two addresses and the
+--         `widget` address again. Deliberately NO count here: it said "four"
+--         and then "seven" and was wrong both times (it missed the e-mail
+--         settings). Count them from the file instead:
+--         grep -c '^DELETE' web/_sql/full_schema.sql
 --       - marks the built-in roles as built-in and fills in a description
 --         where one is empty (one UPDATE);
 --       - empties an attendance session's pointer to an event that no longer

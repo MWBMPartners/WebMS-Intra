@@ -25,16 +25,20 @@
  * a time converted to the visitor's zone would come out visibly wrong.
  *
  * WHAT IT COVERS (names below are the checks)
- *   E  events: titles, places and descriptions full of markup appear as the
- *      very characters sent and NOTHING runs; a link only to https:, opened
- *      away, telling the other side nothing; a time on the event's OWN clock,
- *      with its zone named where it differs from the organisation's.
+ *   E  events: EVERY drawn field (title, description, place, address, the
+ *      zone label; and in the other copies the poster's title, kicker, place
+ *      and time, and the countdown's title) carries markup, and each appears
+ *      as the very characters sent (E09) and NOTHING runs; a link only to
+ *      https:, opened away, telling the other side nothing; a time on the
+ *      event's OWN clock, its zone named only where it differs from the
+ *      organisation's (E06, E07); and inside the hour a clock skips, the
+ *      reading as STORED is shown, not the moved instant (E08, #777).
  *   P  posters: pictures only from https:, no referrer; "Every Tuesday";
  *      a javascript: link dropped; a second copy on the same page (another
  *      organisation, drawn into a named place) does not cross with the first.
  *   N  "next" (the countdown, D-084): the soonest by REAL instant across two
- *      clocks, not the feed's order; the clock ticks; an event under way says
- *      "Happening now".
+ *      clocks, not the feed's order; EVERY box (2 days, 03 hours, 25 minutes,
+ *      and the seconds moving); an event under way says "Happening now".
  *   O  the door off (its feed refuses): nothing drawn, no error; an empty
  *      feed: "No upcoming events."
  *   I  isolation: exactly one empty element added to the website per copy,
@@ -46,8 +50,11 @@
  *   R  what the portal received: the feed was asked for with NO Referer, and
  *      the limit asked for. (No cookie half: see the note above R01.)
  *   X  the plants: each rule broken in a copy of the script served in its
- *      place, and the check that must notice required to go red; one control
- *      edit (a comment) required to stay green.
+ *      place, and the check that must notice required to go red — innerHTML
+ *      on each drawn field ON ITS OWN (X14-X19), the zone label on every
+ *      event (X20), the shown time taken from the instant (X21), and each
+ *      countdown box (X22-X25) among them; one control edit (a comment)
+ *      required to stay green.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It serves made-up feeds, not the portal's: the gate, the headers and
@@ -82,7 +89,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 /** How many checks a full run makes; a different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 39;
+const EXPECTED_CHECKS = 54; // 39 in the first build; round 1 of P4b's check added E07-E09 and X14-X25
 
 /* Any Chromium-family browser (see tools/csrf-carriers-selftest.mjs for why). */
 const BROWSERS = [
@@ -125,16 +132,46 @@ function stampIn(ms, zone) {
     return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${off}`;
 }
 
+/* ⚠️ HOSTILE TEXT IN EVERY FIELD THE SCRIPT DRAWS — round 1 of P4b's check.
+      The first version put markup only in the event's title, description and
+      place name and the poster's title and link; the poster's kicker,
+      location and time and the event's address were plain words. So putting
+      innerHTML on ONE of those fields alone left every check green: the shared
+      `el()` plant (X01) could not see a field-by-field fault. Each field below
+      now carries its own markup, MISSING_* lists them, and X14-X19 break each
+      field on its own. (The zone is drawn too, as "(<place> time)", so it has
+      one; it is written without a "/" because the label takes the part after
+      the last one.) */
 const EVIL_TITLE = '<img src=x onerror="window.__pwned=1">Evil & "quotes" </script>';
 const EVIL_ABOUT = '<script>window.__pwned=2</script><b>bold?</b>';
 const EVIL_POSTER = '<svg onload="window.__pwned=4"></svg>Toddlers';
+const EVIL_PLACE_NAME = '<b>Hall</b>';
+const EVIL_ADDRESS = '<i onclick="window.__pwned=9">1 Street</i>';
+// No "_" in it either: the label turns underscores into spaces ("New_York").
+const EVIL_ZONE_PLACE = '<img src=x onerror=window.pwnedSix=1>Nowhere';
+const EVIL_KICKER = '<u onmouseover="window.__pwned=7">Weekly</u>';
+const EVIL_POSTER_PLACE = '<script>window.__pwned=8</script>Hall';
+const EVIL_TIME = '<b>10:30</b>';
+const EVIL_NEXT = '<em>New York sooner</em>';
+/** Every hostile value that must appear, character for character, in each copy's text. */
+const MUST_APPEAR = {
+    events: [EVIL_TITLE, EVIL_ABOUT, EVIL_PLACE_NAME, EVIL_ADDRESS, `(${EVIL_ZONE_PLACE} time)`],
+    posters: [EVIL_POSTER, EVIL_KICKER, EVIL_POSTER_PLACE, EVIL_TIME],
+    next: [EVIL_NEXT],
+};
+
+/** How far ahead the "next" event is: 2 days, 3 hours, 25 minutes and 30 seconds. */
+const NEXT_IN_MS = ((2 * 24 + 3) * 3600 + 25 * 60 + 30) * 1000;
 
 function feeds() {
     const now = Date.now();
     const org = (zone) => ({ name: 'Made-up organisation <i>', timezone: zone });
+    // startsOnClock is the reading as stored (#493 P4b): the same reading as
+    // startsAt's, without its offset, except inside the hour a clock skips.
     const ev = (title, startMs, endMs, zone, extra = {}) => ({
         id: title.toLowerCase().replace(/[^a-z]+/g, '-'), title, startsAt: stampIn(startMs, zone),
-        endsAt: endMs === null ? null : stampIn(endMs, zone), allDay: false, timezone: zone, detailsLimited: false,
+        endsAt: endMs === null ? null : stampIn(endMs, zone), startsOnClock: stampIn(startMs, zone).slice(0, 19),
+        endsOnClock: endMs === null ? null : stampIn(endMs, zone).slice(0, 19), allDay: false, timezone: zone, detailsLimited: false,
         description: null, location: null, ...extra,
     });
     const events = (zone, list) => ({ format: 'webms-public-events', version: 1, organisation: org(zone), generatedAt: new Date().toISOString(), events: list });
@@ -142,16 +179,30 @@ function feeds() {
         EVENTSAAAAAAAAAAAAAAAAAAA: events('Europe/London', [
             {
                 id: 'evil', title: EVIL_TITLE, startsAt: '2030-06-01T10:30:00-04:00', endsAt: '2030-06-01T12:00:00-04:00',
+                startsOnClock: '2030-06-01T10:30:00', endsOnClock: '2030-06-01T12:00:00',
                 allDay: false, timezone: 'America/New_York', detailsLimited: false, description: EVIL_ABOUT,
-                location: { name: '<b>Hall</b>', address: '1 Street', url: 'javascript:window.__pwned=3' },
+                location: { name: EVIL_PLACE_NAME, address: EVIL_ADDRESS, url: 'javascript:window.__pwned=3' },
             },
             ev('Https venue', now + 86400000, null, 'Europe/London', { location: { name: 'Venue', address: null, url: 'https://venue.example.invalid/' } }),
             ev('Plain venue', now + 2 * 86400000, null, 'Europe/London', { location: { name: 'Plain', address: null, url: 'http://plain.example.invalid/' } }),
+            {
+                id: 'zone', title: 'Zone markup', startsAt: '2030-07-01T09:00:00+00:00', endsAt: null,
+                startsOnClock: '2030-07-01T09:00:00', endsOnClock: null, allDay: false, timezone: `Atlantic/${EVIL_ZONE_PLACE}`,
+                detailsLimited: false, description: null, location: null,
+            },
+            // The morning London's clocks go forward: stored at 01:30, which
+            // does not exist, so its INSTANT has moved to 02:30+01:00. A
+            // website must SHOW 01:30, as the portal's own pages do (#777).
+            {
+                id: 'gap', title: 'Missing hour', startsAt: '2031-03-30T02:30:00+01:00', endsAt: '2031-03-30T03:00:00+01:00',
+                startsOnClock: '2031-03-30T01:30:00', endsOnClock: '2031-03-30T03:00:00', allDay: false, timezone: 'Europe/London',
+                detailsLimited: false, description: null, location: null,
+            },
         ]),
         POSTERSBBBBBBBBBBBBBBBBBB: {
             format: 'webms-public-posters', version: 1, organisation: org('Europe/London'), generatedAt: new Date().toISOString(),
             posters: [
-                { title: EVIL_POSTER, kicker: 'Weekly', category: null, when: { type: 'weekly', weekday: 2 }, time: '10:30', location: 'Hall',
+                { title: EVIL_POSTER, kicker: EVIL_KICKER, category: null, when: { type: 'weekly', weekday: 2 }, time: EVIL_TIME, location: EVIL_POSTER_PLACE,
                     link: 'javascript:window.__pwned=5', media: { type: 'image', url: 'https://pictures.example.invalid/a.png' }, thumbUrl: null, canvaUrl: null },
                 { title: 'Second poster', kicker: null, category: null, when: null, time: null, location: null,
                     link: 'https://more.example.invalid/', media: { type: 'image', url: 'http://pictures.example.invalid/plain.png' }, thumbUrl: null, canvaUrl: null },
@@ -160,9 +211,14 @@ function feeds() {
         // The NEXT case: listed in the feed's own order Auckland FIRST (as a
         // feed sorted by clock reading would), though New York's starts
         // sooner by the real instant.
+        // ⚠️ Round 1 of P4b's check: the event was two hours away, so the
+        //    days box read 0 and the minutes box was never compared, and
+        //    `left / 60` for the minutes (~"119") stayed green. Now it is 2
+        //    days, 3 hours and 25 minutes (and a half) away, so every box
+        //    holds a value no wrong formula gives.
         NEXTCCCCCCCCCCCCCCCCCCCCC: events('Europe/London', [
-            ev('Auckland later', now + 5 * 3600000, now + 6 * 3600000, 'Pacific/Auckland'),
-            ev('New York sooner', now + 2 * 3600000, now + 3 * 3600000, 'America/New_York'),
+            ev('Auckland later', now + 5 * 86400000, now + 5 * 86400000 + 3600000, 'Pacific/Auckland'),
+            ev(EVIL_NEXT, now + NEXT_IN_MS, now + NEXT_IN_MS + 3600000, 'America/New_York'),
         ]),
         NOWDDDDDDDDDDDDDDDDDDDDDD: events('Europe/London', [
             ev('Under way', now - 3600000, now + 3600000, 'Europe/London'),
@@ -282,6 +338,7 @@ const READ = `
         out.push({ show: h.getAttribute('data-webms-door'), parent: h.parentNode && h.parentNode.id ? h.parentNode.id : (h.parentNode ? h.parentNode.tagName.toLowerCase() : null),
             style: h.getAttribute('style'), lightChildren: h.childNodes.length, shadow: !!r,
             titles: box ? Array.prototype.map.call(box.querySelectorAll('.door__title'), function (t) { return t.textContent; }) : [],
+            whens: box ? Array.prototype.map.call(box.querySelectorAll('.door__when'), function (t) { return t.textContent; }) : [],
             text: box ? box.textContent : null, links: links, pics: pics, tags: Object.keys(tags).sort(),
             empty: box ? box.children.length === 0 : null });
     }
@@ -427,6 +484,12 @@ async function main() {
                     localHourOf1030NY: new Date('2030-06-01T10:30:00-04:00').getHours() };`);
             f.events = ev[0] ?? null;
             f.posters = ev[1] ?? null;
+            // A field put through innerHTML no longer shows its markup as
+            // characters, so its value goes missing from the text.
+            f.missing = {
+                events: MUST_APPEAR.events.filter((one) => (f.events?.text ?? '').includes(one) === false),
+                posters: MUST_APPEAR.posters.filter((one) => (f.posters?.text ?? '').includes(one) === false),
+            };
             f.copies = ev.length;
             f.evPage = evPage;
             f.evErrors = browser.errors.slice();
@@ -444,6 +507,7 @@ async function main() {
             const clocks = await browser.evaluate(`return Array.prototype.map.call(document.querySelectorAll('[data-webms-door]'), function (h) {
                 var c = h.shadowRoot.querySelector('.door__clock'); return c ? (c.hidden ? 'hidden' : c.getAttribute('role')) : null; });`);
             f.next = nx.map((one) => ({ titles: one.titles, text: one.text }));
+            f.missing.next = MUST_APPEAR.next.filter((one) => (nx[0]?.text ?? '').includes(one) === false);
             f.nextTick = { first: t1, second: t2 };
             f.nextClocks = clocks;
             f.nextLimit = seen.map((s) => s.limit);
@@ -470,29 +534,39 @@ async function main() {
         check('E00 the premise: the browser\'s own clock is Kiritimati\'s (UTC+14), so 10:30 in New York would read as some other hour if converted',
             base.evPage.localHourOf1030NY !== 10, true);
         check('E01 the page drew, two copies, each in its own shadow root on an element of its own', [base.eventsReady, base.copies, base.events?.shadow, base.posters?.shadow], [true, 2, true, true]);
-        check('E02 a title full of markup appears as those very characters — nothing turned into HTML', base.events?.titles, [EVIL_TITLE, 'Https venue', 'Plain venue']);
+        check('E02 a title full of markup appears as those very characters — nothing turned into HTML', base.events?.titles, [EVIL_TITLE, 'Https venue', 'Plain venue', 'Zone markup', 'Missing hour']);
         check('E03 nothing in the feed ran: no onerror, no <script>, no javascript: link (window.__pwned never set)', base.evPage.pwned, null);
         check('E04 the description and place also appear as text, and the ONLY elements drawn are the script\'s own (no img, script, b or svg from the feed)',
-            [base.events?.text?.includes(EVIL_ABOUT), base.events?.text?.includes('<b>Hall</b>'), base.events?.tags], [true, true, ['a', 'li', 'p', 'ul']]);
+            [base.events?.text?.includes(EVIL_ABOUT), base.events?.text?.includes(EVIL_PLACE_NAME), base.events?.tags], [true, true, ['a', 'li', 'p', 'ul']]);
         check('E05 one link, to the https: venue only (the javascript: and http: ones dropped), opened in a new tab with noopener, noreferrer and no referrer',
             base.events?.links, [{ href: 'https://venue.example.invalid/', target: '_blank', rel: 'noopener noreferrer nofollow', ref: 'no-referrer', text: 'Venue details' }]);
         check('E06 the New York event\'s time is 10:30 on New York\'s own clock, with its zone named because it is not the organisation\'s',
-            [base.events?.text?.includes('10:30'), base.events?.text?.includes('2030'), base.events?.text?.includes(`(${expectNY} time)`)], [true, true, true]);
+            [base.events?.whens?.[0]?.includes('10:30'), base.events?.whens?.[0]?.includes('2030'), base.events?.whens?.[0]?.endsWith(`(${expectNY} time)`)], [true, true, true]);
+        check('E07 an event on the ORGANISATION\'s own clock carries no zone label at all (round 1 of P4b\'s check: only the labelled case was looked at)',
+            [base.events?.whens?.[1]?.includes('('), base.events?.whens?.[2]?.includes('('), base.events?.whens?.[4]?.includes('(')], [false, false, false]);
+        // en-GB writes the hour without a leading zero ("1:30"), so the check
+        // is on the hour and minute as written, and on 2:30 being nowhere.
+        check('E08 on the morning the clocks go forward, an event stored at 01:30 is SHOWN at 1:30 (startsOnClock, as the portal shows it), not 2:30 (its instant) (#777)',
+            [/\b0?1:30$/.test(base.events?.whens?.[4] ?? ''), /2:30/.test(base.events?.whens?.[4] ?? '')], [true, false]);
+        check('E09 EVERY hostile value appears character for character in the text drawn — every field the script draws (title, description, place, address, zone label; poster title, kicker, place, time; the countdown\'s title)',
+            base.missing, { events: [], posters: [], next: [] });
 
         console.log('P. Posters, and a second copy on the same page');
         check('P01 the posters copy drew into the place its data-target named; the events copy just before its own script tag', [base.posters?.parent, base.events?.parent], ['spot', 'body']);
         check('P02 the poster title with markup is text, and its javascript: link is dropped; the https: one is kept',
-            [base.posters?.titles, base.posters?.links?.map((l) => l.href)], [[EVIL_POSTER, 'Second poster'], ['https://more.example.invalid/']]);
+            [base.posters?.titles, base.posters?.links?.map((l) => l.href), base.posters?.tags], [[EVIL_POSTER, 'Second poster'], ['https://more.example.invalid/'], ['a', 'img', 'li', 'p', 'ul']]);
         check('P03 a picture only from https: (the http: one dropped), sent with no referrer', base.posters?.pics, [{ src: 'https://pictures.example.invalid/a.png', ref: 'no-referrer' }]);
-        check('P04 a weekly poster says "Every Tuesday, 10:30"', base.posters?.text?.includes('Every Tuesday, 10:30'), true);
+        check('P04 a weekly poster says "Every Tuesday, " and its time, which arrived as markup and is shown as those characters', base.posters?.whens?.[0], `Every Tuesday, ${EVIL_TIME}`);
         check('P05 the two copies did not cross: the events copy holds no poster, the posters copy no event',
             [base.events?.text?.includes('Second poster'), base.posters?.text?.includes('Https venue')], [false, false]);
 
         console.log('N. "next" — the countdown (D-084)');
         check('N01 the soonest by REAL instant (New York, in two hours) though the feed lists Auckland first; the other copy says an event is under way',
             [base.nextReady, base.next.map((n) => n.titles), base.next[0]?.text?.startsWith('Next'), base.next[1]?.text?.startsWith('Happening now')],
-            [true, [['New York sooner'], ['Under way']], true, true]);
-        check('N02 the countdown reads one hour and some minutes, and its seconds move', [base.nextTick.first[0], base.nextTick.first[1], base.nextTick.first.join() !== base.nextTick.second.join()], ['0', '01', true]);
+            [true, [[EVIL_NEXT], ['Under way']], true, true]);
+        check('N02 every box of the countdown: 2 days, 03 hours, 25 minutes, and the seconds box moving (round 1 of P4b\'s check: only days and hours were looked at, on an event two hours away)',
+            [base.nextTick.first[0], base.nextTick.first[1], base.nextTick.first[2], /^[0-5][0-9]$/.test(base.nextTick.first[3] ?? ''),
+                base.nextTick.first[3] !== base.nextTick.second[3]], ['2', '03', '25', true, true]);
         check('N03 the clock is a timer for assistive technology, and hidden for the event under way', base.nextClocks, ['timer', 'hidden']);
         check('N04 "next" asks for 50 events, so it can choose by instant rather than by the feed\'s order', base.nextLimit, ['50', '50']);
 
@@ -551,6 +625,36 @@ async function main() {
             (r) => r.events?.style !== null);
         await plant('X12 the door-off case drawing an apology instead of silence: O01 notices', "                clear();\n                warn('could not read '",
             "                clear();\n                box.appendChild(el('p', '', 'Sorry'));\n                warn('could not read '", (r) => r.off[0]?.empty !== true);
+        // Round 1 of P4b's check: each drawn field broken ON ITS OWN, because
+        // the shared el() plant (X01) cannot tell one field from another.
+        const asHtml = (cls, value) => `(function () { var n = document.createElement('p'); n.className = '${cls}'; n.innerHTML = ${value}; item.appendChild(n); })();`;
+        await plant('X14 innerHTML on the poster\'s KICKER alone: E09 notices', "item.appendChild(el('p', 'door__kicker', text(p.kicker)));",
+            asHtml('door__kicker', 'text(p.kicker)'), (r) => r.missing.posters.includes(EVIL_KICKER));
+        await plant('X15 innerHTML on the poster\'s LOCATION alone: E09 notices', "item.appendChild(el('p', 'door__where', text(p.location)));",
+            asHtml('door__where', 'text(p.location)'), (r) => r.missing.posters.includes(EVIL_POSTER_PLACE));
+        await plant('X16 innerHTML on the poster\'s day-and-time line alone: E09 notices',
+            "var when = whenOfPoster(p);\n            if (when !== '') {\n                item.appendChild(el('p', 'door__when', when));",
+            "var when = whenOfPoster(p);\n            if (when !== '') {\n                " + asHtml('door__when', 'when'), (r) => r.missing.posters.includes(EVIL_TIME));
+        await plant('X17 innerHTML on the event\'s place-and-ADDRESS line alone: E09 notices', "item.appendChild(el('p', 'door__where', where));",
+            asHtml('door__where', 'where'), (r) => r.missing.events.includes(EVIL_ADDRESS));
+        await plant('X18 innerHTML on the event\'s DESCRIPTION alone: E09 notices', "item.appendChild(el('p', 'door__about', text(ev.description)));",
+            asHtml('door__about', 'text(ev.description)'), (r) => r.missing.events.includes(EVIL_ABOUT));
+        await plant('X19 innerHTML on the event\'s day-and-time line (with its ZONE label) alone: E09 notices',
+            "var when = whenOfEvent(ev);\n            if (when !== '') {\n                item.appendChild(el('p', 'door__when', when));",
+            "var when = whenOfEvent(ev);\n            if (when !== '') {\n                " + asHtml('door__when', 'when'), (r) => r.missing.events.includes(`(${EVIL_ZONE_PLACE} time)`));
+        await plant('X20 a zone label on EVERY event, the organisation\'s own clock included: E07 notices', "if (zone !== '' && org !== '' && zone !== org) {", "if (zone !== '') {",
+            (r) => r.events?.whens?.[1]?.includes('(') === true);
+        await plant('X21 the time SHOWN taken from the instant (startsAt) rather than the stored reading: E08 sees 02:30', "var shown = typeof ev.startsOnClock === 'string' ? ev.startsOnClock : ev.startsAt;",
+            'var shown = ev.startsAt;', (r) => /2:30/.test(r.events?.whens?.[4] ?? ''));
+        // Round 1 of P4b's check: each box of the countdown, one at a time.
+        await plant('X22 the DAYS box counting hours: N02 notices', 'parts.days.textContent = String(Math.floor(left / 86400));',
+            'parts.days.textContent = String(Math.floor(left / 3600));', (r) => r.nextTick.first[0] !== '2');
+        await plant('X23 the HOURS box not wrapping at a day: N02 notices', 'parts.hours.textContent = two(Math.floor((left % 86400) / 3600));',
+            'parts.hours.textContent = two(Math.floor(left / 3600));', (r) => r.nextTick.first[1] !== '03');
+        await plant('X24 the MINUTES box not wrapping at an hour (round 1\'s own plant): N02 notices', 'parts.minutes.textContent = two(Math.floor((left % 3600) / 60));',
+            'parts.minutes.textContent = two(Math.floor(left / 60));', (r) => r.nextTick.first[2] !== '25');
+        await plant('X25 the SECONDS box frozen: N02 notices', 'parts.seconds.textContent = two(left % 60);', 'parts.seconds.textContent = two(0);',
+            (r) => r.nextTick.first[3] === r.nextTick.second[3]);
         // The control: an edit that changes nothing a visitor can see must stay GREEN,
         // or "red" above would mean only "the file changed".
         served = realScript.replace('// 🛟 Too old a browser', '// 🛟 Too old a browser (a harmless edit)');
@@ -565,7 +669,7 @@ async function main() {
         const steady = (f) => {
             const out = { ...f, nextTick: null, feedRequests: null };
             for (const k of ['events', 'posters']) {
-                out[k] = f[k] === null ? null : { ...f[k], text: null };
+                out[k] = f[k] === null ? null : { ...f[k], text: null, whens: null };
             }
             out.next = f.next.map((n) => n.titles);
             return out;

@@ -61,7 +61,8 @@
  *
  * TIMES
  *   Each event's time is written on the event's OWN clock, read straight from
- *   the feed's text (which already carries that clock's offset), so a
+ *   the feed's text — `startsOnClock`, the reading as stored, which inside the
+ *   hour a clock skips is still the time the organisation wrote — so a
  *   visitor in another country sees the time the event happens where it
  *   happens, not a converted one. Where an event's clock differs from the
  *   organisation's, its zone's name is added. The countdown is the one place
@@ -392,7 +393,11 @@
     }
 
     function whenOfEvent(ev) {
-        var words = clockWords(ev.startsAt, ev.allDay !== true);
+        // The reading AS STORED (startsOnClock) is what is shown: inside the
+        // hour a clock skips it is still the time the organisation wrote,
+        // where startsAt — an instant — has moved past the gap (#777).
+        var shown = typeof ev.startsOnClock === 'string' ? ev.startsOnClock : ev.startsAt;
+        var words = clockWords(shown, ev.allDay !== true);
         if (words === '') {
             return '';
         }
