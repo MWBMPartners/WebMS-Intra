@@ -4,6 +4,63 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Admin → Public website, and only a global administrator hands the job out (#493, package P3, migration 262)
+
+- **Admin → Public website** (`/admin/public-website`, #493 package P3; D-085,
+  D-093, D-094, D-095). An organisation records its **main website**, an
+  **optional public address** for the portal's own public pages (such as
+  `events.ourchurch.org`; no two organisations may share one — a database
+  unique key enforces it; it cannot be an address members sign in at), and
+  **which outside websites may show its public pages in a frame** (https only,
+  scheme + host + optional port, no wildcards, paths, keywords or numbers in
+  place of a name, at most 20; one bad line refuses the whole list, naming the
+  line). The installation's global administrator can **forbid framing for
+  every organisation** with one switch (on by default; the stricter wins).
+  Every value is checked, refused with its reason, and recorded; every value
+  is checked again whenever it is read. **Nothing from the portal appears on
+  any outside website yet** — the public door that uses these settings is
+  package P4, and the page says so.
+- **"Check my set-up"** (POST, form token, at most six runs in ten minutes per
+  person; its result is shown once and kept nowhere else). It says what is
+  certainly known and names no cause it cannot be sure of. For the main
+  website: "it answered" for a complete HTTP 200; "it could not be checked on
+  this server" when PHP's curl extension is not installed or is switched off;
+  "it uses port N, which is not the standard https port, so this check cannot
+  reach it" for a website stored at another port (it is not fetched); and
+  otherwise one sentence — "This check did not get a normal page from your
+  main website. That can happen, for example, when a website is down, its name
+  does not exist or points at a private or internal address, it sends visitors
+  on to another address this check will not follow, it has a
+  security-certificate problem, it turns away automated visitors, or this
+  server is not allowed to make outside connections. Open it in your own
+  browser to see what your visitors get." — plus, where one was received, "The
+  last answer this check received was HTTP N." 403 and 429 are shown "For
+  information" (the website answered and turned the check away); everything
+  else, including no answer at all, is "Needs attention". It also reports the public
+  address (unique, not a sign-in address, whether its name exists — and that
+  whether it reaches THIS portal cannot be known until the public door
+  exists), each framing website, how many events and posters are marked to
+  appear on the public website today, whether the portal's own address is set,
+  and a door row that always says it cannot be tested yet.
+- **A new permission, "Set up the public website"** (`website.setup`), shipped
+  pointing at a new standard role **Website Set-up** that nobody holds
+  (migration 262). Out of the box only a **global** administrator (of the
+  installation or of the organisation) opens the page; an ordinary
+  administrator does not.
+- **Only a global administrator may hand that job out** (D-093): changing which
+  roles open "Set up the public website" on the Roles page, forgetting that
+  choice, deleting a role that opens it, and giving or taking away a role that
+  opens it on the Users page are refused for an ordinary administrator, with
+  the reason, and recorded. The Users page draws those role boxes locked for
+  them.
+- The general settings editor refuses `public.website.address`,
+  `public.frame.origins` and `public.frame.permitted`, names Admin, Public
+  website as the place they are changed, and — where the viewer cannot change
+  one there — says who can (the installation's global administrator for the
+  framing switch; a global administrator or somebody given "Set up the public
+  website" for the other two).
+- **Tests:** section W of `tools/public-website-tick-selftest.php` (W1-W23) with plants P66-P108: 240 checks. Ten check rounds by fresh Claude agents (protected arm); the set-up check's verdict was simplified after failing two rounds running, and round 10 was clean. Raised from it: #866, #873.
+
 ### A receipt that is not attached is said out loud, and no saved claim loses its receipt (#649)
 
 - **Fixed:** submitting an expense claim used to skip, without a word, any receipt that was too big, of a

@@ -3198,6 +3198,10 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   `Portal\Core\NoticeboardFoyer` is the ONE place for the noticeboard's foyer screen (#493 P2b, D-086):
   its secret link, what it shows (public posters only unless the installation permits a choice), and
   its two settings, which the general editor refuses.
+  `Portal\Core\PublicWebsiteSetup` is the ONE place for Admin → Public website (#493 P3; D-085, D-093,
+  D-094, D-095): its gate `maySetUp()` (an ordinary administrator does not pass), the D-093 hand-out rule,
+  the stored addresses and framing list (re-checked on every read), and `frameAncestorsFor()`, which the public
+  door must send rather than building its own. Test: section W of `tools/public-website-tick-selftest.php`.
   The technical record is DEV_NOTES.md, "Show on the public website, for events (#493, package P1)".
 
 ## A time on a clock is not a moment, and the test for it cannot work (#777 part one)

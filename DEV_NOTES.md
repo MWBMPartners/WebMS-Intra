@@ -21180,6 +21180,111 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### Setting up the public website (#493 P3)
+
+- `Portal\Core\PublicWebsiteSetup` is the ONE place: the page gate
+  `maySetUp()`, the D-093 rule (`mayHandOut()`, `whyRoleChangeRefused()`,
+  `whyMappingChangeRefused()`), the readers (`websiteAddressFor()`,
+  `frameOriginsStored()`, `frameOriginsInForce()`, `frameAncestorsFor()`,
+  `framingPermitted()`, `publicHostFor()`), the writers, the pure checkers,
+  `frameAncestorsValue()` (empty → `'none'`; never `*`, `;`, a quote or a line
+  break — every entry is re-checked inside the builder), and the set-up check
+  (`checkSetUp()`, `mainWebsiteFetchOptions()`, `mainWebsiteVerdict()`). P4
+  should send `frame-ancestors <frameAncestorsFor()>` and nothing it builds
+  itself.
+- **The main-website verdict names no cause, on purpose.** Three rounds of the
+  independent check each found the previous version naming causes that were
+  untrue for real answers — by status alone, then by SafeFetch's own fixed
+  sentences and status (a 301 whose body was cut off, two-step chains ending at
+  http:// or at a missing name, a 300 with an address, a 304, a redirect
+  followed by a dead address). SafeFetch reports the FAILING step's own status,
+  so a redirect followed by a dead address or a bad certificate comes back as
+  status 0, exactly like a first address failing; its answer does not carry
+  enough to tell causes apart. The repository's rule — an item failing two
+  rounds running is simplified, not refined again — settled it: one sentence
+  that is always true, worded "for example", plus the last status as a fact.
+  403 and 429 (`TURNED_AWAY_STATUSES`) are "For information" — the website
+  answered and turned the check away, which is what bot protection and rate
+  limits send an automated check; everything else, including no answer at
+  all, is "Needs attention": a 401 means every visitor is asked for a
+  password, a 5xx is the website's own server failing, and a 404, 410 or 421
+  often means a lapsed or misconfigured domain (a hosting service answering
+  "no site here"). Round 4 drew the line at "400 or more", round 5 at
+  "400-499" and round 6 at 401/403/429; each called something "For
+  information" that was not. The self-test asks EVERY status SafeFetch can
+  return — 0-999, because its header reader accepts any three digits, leading
+  zeros included (W17): samples let a rule singling out one status pass.
+- **No test hooks on the real path.** `checkSetUp()` calls `SafeFetch::get()`
+  once with `mainWebsiteFetchOptions()`, and `mainWebsiteVerdict()` asks PHP
+  itself whether curl exists. Both used to take a test-only argument; each time,
+  every test passed it and the path the portal really takes was exercised by
+  nothing. The self-test instead records the real options by running
+  `checkSetUp()` against a scratch copy of SafeFetch that logs what it is
+  handed (W22), and reaches "no curl" by running it in a PHP started with
+  `-d disable_functions=curl_init` (W23).
+- **Testing real answers needs no outside network.** W21 drives the real
+  SafeFetch in-process: a TLS server of the test's own (PHP's
+  `stream_socket_server`), a certificate the test makes with PHP's openssl,
+  SafeFetch's `$testResolverOverride` naming it, and a scratch copy of
+  SafeFetch whose only changes are `CURLOPT_CAINFO` (to trust that
+  certificate) and recording its options. Over HTTP only a refused loopback
+  address can be shown (W11), because SafeFetch rightly refuses loopback.
+- A main website stored at a port other than 443 is accepted (it is a real
+  address) but not fetched; `http://host:443` keeps its port (443 is not
+  http's usual one) and IS checked, because 443 is the standard https port.
+- A "number" host — any host whose LAST part is digits or `0x` + hex (the URL
+  standard's "ends in a number": `127.1`, `127.1.2`, `0x7f.1`, `0x7f.0.0.1`) —
+  is refused as a framing website and as a public address (`endsInANumber()`).
+- **The public address is written with a plain UPDATE or INSERT, never
+  `INSERT … ON DUPLICATE KEY UPDATE`.** `tblPublicHosts` has two unique keys
+  (the organisation, the name); a new row clashing with both lets MySQL update
+  whichever clashing row it meets first, which could be ANOTHER organisation's
+  row — a silent "saved". A plain statement fails with 1062; the code then
+  asks WHOSE row clashed before saying "another organisation" (two saves for
+  the same organisation clash too), and an UPDATE that changed no row is
+  refused rather than reported as saved.
+- The settings keys are declared on `PublicWebsite` (not `PublicWebsiteSetup`),
+  in ONE constant, `PublicWebsite::LOCKED_KEYS`, read by both
+  `lockedInGeneralEditor()` and `lockedPageFor()`: the settings-locks self-test
+  finds a lock's keys by reading the lock method's own `self::` constants, so a
+  key held in another class's constant would be invisible to it.
+  `lockedPageFor()` is the ONE place that says which page a locked key belongs
+  to and who can change it there; the first version had the page typed into
+  four places, all saying "Admin, Outside calendars".
+- `public.frame.permitted`: a missing installation row counts as "yes" (the
+  shipped default, D-094); any value other than exactly `yes`/`no`, or a
+  database that cannot be read, counts as "no" — the stricter wins.
+- Migration 262 marks a hand-made `website_setup` role standard only when
+  nobody holds it; a held one is left as it is, and its holders DO pass the
+  gate, because the permission is matched by the role's key. The migration's
+  header says so; it cannot arise today (no customer installation exists and
+  the key is new).
+- `capabilities-selftest.php` pinned that NO capability's `emptyMeans` says
+  "Only a global administrator". `website.setup` is the one where that
+  sentence is TRUE (an ordinary administrator is not let in), so the check is
+  turned round for it rather than skipped. The Roles page's "nobody holds these
+  roles" sentence likewise has its own branch for this door (W16, P90).
+- D-093's role paths, all found with
+  `grep -rniE '(INSERT|DELETE|UPDATE|REPLACE)[^;]{0,80}tblUserRoles([^U]|$)|Roles::(grant|revoke)\(' web`:
+  gated — `admin/roles/save.php` (capability, capability_reset, delete) and
+  `admin/users/roles-save.php`; already global-administrator only and left
+  alone — `admin/users/roles-unplaced-save.php`, `admin/sites/users.php`
+  (membership removal), `admin/sites/save.php` (seeds `data_controller` only);
+  deliberately not gated — `offboarding/do.php` (a whole-person exit removing
+  every role) and `GdprEraser` (erasure), because refusing those would block a
+  leaver's exit or an erasure on a role, and neither can GIVE the role; the
+  installer. The race between an ordinary administrator giving themselves a
+  role and a global administrator pointing the permission at it is #866.
+- What section W cannot do: run the Users page's script (P86 records that the
+  hidden carrier is not driven); reach a website outside the machine (real
+  answers are driven in-process against the test's own TLS server, W21-W23,
+  and over HTTP only a refused loopback address, W11); drive two saves of one
+  organisation's public address at the same moment (one web worker); prove a
+  public address reaches this portal (needs P4).
+- Tests: section W of `tools/public-website-tick-selftest.php` (W1-W23) and
+  plants P66-P108; 240 checks. The test needs PHP's curl and openssl
+  extensions and `proc_open()`, and refuses without them.
+
 ### A receipt that is not attached is said, and once a save is sent no receipt is deleted (#649)
 
 - `ExpenseRules` is the one place for the receipt rule (`whyReceiptRefused()`), its words

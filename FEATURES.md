@@ -219,6 +219,11 @@ screens and didn't say what it meant.
   database details in before that) and refuses to continue only when the
   verdict is `crit`. Anything else is shown and never blocks, because on
   shared hosting the customer usually cannot change the database version.
+- **Admin → Public website** (`/admin/public-website`, #493 P3): the organisation's main website, an optional
+  public address for the portal's own public pages (one organisation each, D-095), which outside websites may
+  frame its public pages (D-082), the installation's framing switch (D-094), and "Check my set-up". Gate:
+  `website.setup` (D-085), held out of the box by global administrators only; only a global administrator may
+  hand it out (D-093). Not yet used by any public page — that is the public door (P4).
 - **Admin → Server Information** (`/admin/system-info`, any
   administrator): PHP version, the database verdict, connection facts
   asked of the live connection itself rather than read from the
