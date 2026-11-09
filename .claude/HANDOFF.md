@@ -4,20 +4,15 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: `2cf919b5` (D-089, #850 closed),
-`de32d26` (#493 P1), `52a7c6b` (D-088 to D-091), `747e2ef` (#852). Nothing uncommitted.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: `87f6fa8a` (D-091, #852 closed),
+`2cf919b5` (D-089, #850 closed), `de32d26` (#493 P1). Nothing uncommitted.
 
 ## Next, in this order
 
-1. **D-091 (#852 item 3)** — dark-mode hover/selected/faint shades follow the organisation's colour,
-   with a contrast check. MEASURED (notes in the session scratchpad `d091/notes.md`): the colour is
-   written inline on `<html>`, so dark mode's brighter `#7b86e8` never applies; the three shades are
-   fixed indigo; text on the main colour is a fixed `#0f1115` in dark mode (about 3.8:1 on the default
-   colour) and Bootstrap's white on `.btn-primary` in both themes; the main colour is used AS text in
-   28 rules. So the contrast work covers text on the colour, the colour as text, and the shades. Check
-   the CSP's `style-src` before choosing how to print per-theme tokens.
-2. D-079 (new events start members-only), then #493 P2 (noticeboard), P3 (admin page, delegation,
-   D-085), P4 (the public door; delete the old widget folder, D-084).
+1. **D-079** — new events start members-only: the column default plus a migration, the Manage Events
+   form, the events API, the CSV import, and the test files that make events assuming they are public.
+2. #493 P2 (noticeboard), P3 (admin page, delegation, D-085), P4 (the public door; delete the old
+   widget folder, D-084).
 3. #569 — the page findings left. 4. The backlog (D-055). 5. #754. 6. The Codex review (D-007), then
    the merge.
 
@@ -85,6 +80,5 @@ index there. **Codex has reviewed none of this work.**
 | #844 | The series bulk-edit page has no website control (#493) |
 | #847 | A repeating series copies one website date window onto every date (#493) |
 | #851 | Ten gaps in the top-bar and phone-width self-test (#832/#833 rounds 2 and 3) |
-| #852 | Item 3 only (dark-mode shades): decided D-091, queued as its own package |
 | #856 | Some public-website-tick plant checks pass when their scenario fails for any reason |
 | #858 | Without JavaScript, a saved outside-calendar choice's redraw can show a Yes the person unticked |
