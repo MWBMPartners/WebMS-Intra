@@ -980,11 +980,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    too long (1406), out of range (1264), cut short
                     //    (1265), of the wrong kind (1366) or not a real date or
                     //    time (1292), an empty required value (1048), a
-                    //    category or type that is not there (1452), a CHECK rule
-                    //    the row breaks (MySQL 3819, MariaDB 4025), and a
-                    //    trigger's own refusal (1644, which is how a trigger
-                    //    says "not this row"). Each is decided by the row's own
-                    //    values.
+                    //    category or type that is not there (1452), or a CHECK
+                    //    rule the row breaks (MySQL 3819, MariaDB 4025). Each of
+                    //    those is decided by the row's own values.
+                    //
+                    //    1644 IS DIFFERENT AND IS ON THIS SIDE BY CHOICE. It is
+                    //    ANY trigger's or stored procedure's refusal, whatever
+                    //    the reason: a SIGNAL with SQLSTATE '45000', 'HY000' or
+                    //    '22000' and no MYSQL_ERRNO raises 1644 every time
+                    //    (measured by the third independent check). The portal
+                    //    ships no trigger on `tblEvents`, so a 1644 here comes
+                    //    only from code the people running the installation
+                    //    added. It is kept as "Notification" because that
+                    //    trigger's own message is shown to the administrator on
+                    //    the results list, which is the trigger's way of
+                    //    explaining itself. An installation whose trigger
+                    //    signals a condition about the SERVER rather than the
+                    //    row should give that SIGNAL its own MYSQL_ERRNO, and it
+                    //    will then be recorded as "Error" like any other.
                     //
                     //    EVERY OTHER refusal is about the database itself — a
                     //    full table or disk (1114, 1021), a database set to
@@ -1263,8 +1276,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    a lost connection are the portal's problems, so they
                     //    are "Error". The titles carry no count, so the alert's
                     //    cool-down (keyed on platform, code and title) treats
-                    //    repeated imports as the same thing; only "row" and
-                    //    "rows" differ. The lost connection's record says the
+                    //    repeated imports as the same thing — EXCEPT that the
+                    //    singular title ("A row …") and the plural ("Rows …")
+                    //    are two different keys, so one import refusing one row
+                    //    and the next refusing two can send two alerts in one
+                    //    cool-down window. The lost connection's record says the
                     //    connection was lost — never "refused" — and it
                     //    usually lands only in PHP's own log, because the
                     //    database it would be written to is the one that went.
