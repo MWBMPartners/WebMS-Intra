@@ -256,7 +256,7 @@ jobs:
             sleep 1
           done
           docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
-          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords; do
+          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords selftest_calimport; do
             docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
             docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -385,3 +385,16 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_notifier
         run: php -d memory_limit=512M tools/import-notifier-selftest.php
+
+      # 📥 The calendar FILE import when the database refuses one row (#790).
+      #    It drives the real import page over HTTP with a file whose middle
+      #    row a trigger on tblEvents refuses, and reads the database back:
+      #    every row ends imported or refused with a true reason, the rows
+      #    after the refusal are still saved, and the activity record is
+      #    written. It creates a TRIGGER (root may) and removes it on exit,
+      #    and its web server takes a random port between 8790 and 8940.
+      - name: Calendar file import self-test (#790)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_calimport
+        run: php -d memory_limit=512M tools/calendar-import-selftest.php

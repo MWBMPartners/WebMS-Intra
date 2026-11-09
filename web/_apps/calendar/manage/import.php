@@ -51,6 +51,8 @@ $preview  = [];
 $results  = [];
 $error    = '';
 $imported = false;
+// The spreadsheet row at which the database connection was lost, or 0 (#790).
+$lostAtRow = 0;
 
 /** Parse + validate CSV. Returns array{rows:list<array>, errors:list<string>} */
 // 🕐 ONE PLACE PUTS A CELL INTO THE COLUMN'S SHAPE, used by the row CHECK and
@@ -109,7 +111,11 @@ $fmtStore = static function (string $text, ?string &$why = null) use (&$fmtClock
     //        and under this portal's reporting mode that throw escapes the
     //        insert loop — stopping the import part-way with earlier rows
     //        already written. Requiring exactly four year digits catches every
-    //        one of them.
+    //        one of them. (Since #790 the loop catches a throw and refuses
+    //        that ONE row instead of stopping, so this no longer guards the
+    //        whole import — it still decides that the row is refused at
+    //        PREVIEW, with a reason a person can act on, rather than at the
+    //        insert with the database's.)
     //
     //    (2) THE FLOOR TEST REFUSES WHAT THE DATABASE WOULD HAVE ACCEPTED, so
     //        it is this portal's own rule and is worded as one. A year from
@@ -546,10 +552,11 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //
     //    The last is the worst: `-0001-11-30` is out of range for a DATETIME,
     //    and with the portal's strict mysqli reporting `execute()` THROWS. The
-    //    insert loop has no try/catch there, so the whole import stops
+    //    insert loop had no try/catch then, so the whole import stopped
     //    part-way with earlier rows already written, no per-row report and no
     //    activity record — where round 13 had refused the cell politely at
-    //    preview time. A CSV exported from a legacy MySQL dump contains
+    //    preview time. (#790 has since given the loop one: a throw now
+    //    refuses that one row and the rest carry on.) A CSV exported from a legacy MySQL dump contains
     //    exactly that value.
     //
     // 🧮 SO THE RANGE TEST IS WHAT IT SHOULD ALWAYS HAVE BEEN: anything a
@@ -609,10 +616,12 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        `-0001-12-31 …` is the SAME SHAPE round 14 wrote up as the worst
     //        thing in this package (`-0001-11-30`, from a MySQL zero date).
     //        Under the portal's strict mysqli reporting `execute()` THROWS on
-    //        such a literal, and the insert loop has no try/catch of its own —
-    //        so the import stops part-way **with earlier rows already
+    //        such a literal, and the insert loop had no try/catch of its own
+    //        then — so the import stopped part-way **with earlier rows already
     //        written**, no per-row report, and the activity record never
-    //        reached. An administrator sees a preview saying every row is fine
+    //        reached. (#790 has since given the loop one, so a throw now
+    //        refuses only its own row; the shape test still matters, because
+    //        it refuses the row at preview with a reason a person can act on.) An administrator sees a preview saying every row is fine
     //        and then an import that half happened, with no list of which half.
     //
     //        Round 14 closed `0000-00-00`, the one spelling it was handed.
@@ -874,102 +883,270 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    every imported row is OFF the website with no dates: a
                 //    spreadsheet cannot put events in front of the internet,
                 //    and a column the file happens to carry is never read.
-                $stmt = $mysqli->prepare(
-                    'INSERT INTO tblEvents '
-                    . '(siteID, eventName, eventSlug, description, startDateTime, endDateTime, timezone, '
-                    . 'isAllDay, locationName, status, isPublic, isFeatured, categoryID, typeID, createdByID) '
-                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-                );
+                //
+                // ⚠️ `prepare()` THROWS under the portal's strict reporting
+                //    (`MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR` — it takes
+                //    BOTH), so the `=== false` test that used to follow it
+                //    could never be reached. It is caught here instead: nothing
+                //    has been written yet, so "nothing was imported" is true,
+                //    and the file's rows stay in the session so Confirm can be
+                //    pressed again once the fault is put right (#790).
+                $stmt = false;
+                try {
+                    $stmt = $mysqli->prepare(
+                        'INSERT INTO `tblEvents` '
+                        . '(`siteID`, `eventName`, `eventSlug`, `description`, `startDateTime`, `endDateTime`, `timezone`, '
+                        . '`isAllDay`, `locationName`, `status`, `isPublic`, `isFeatured`, `categoryID`, `typeID`, `createdByID`) '
+                        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    );
+                } catch (\Throwable $prepareFault) {
+                    $stmt = false;
+                    Logger::errorPlatform(
+                        'MySQL',
+                        'Error',
+                        'CALENDAR_IMPORT_PREPARE',
+                        'A calendar file import could not start: the database refused to prepare the insert',
+                        $prepareFault->getMessage()
+                    );
+                }
                 if ($stmt === false) {
-                    $error = t('error.db_import_prepare');
+                    $error = t('error.db_import_prepare') . ' Nothing was imported. Press Confirm to try again.';
+                    $preview = $rows;
                 } else {
-                    $okCount = 0;
+                    $okCount     = 0;
+                    $notCount    = 0;
+                    // 🔌 Set when the CONNECTION is lost part-way. From then on
+                    //    nothing more is sent: every later row would fail the
+                    //    same way, and saying so once, truthfully, is better
+                    //    than a list of identical failures.
+                    $lostAtRow   = 0;
                     foreach ($rows as $r) {
                         if (count($r['errors'] ?? []) > 0) {
                             $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => implode('; ', $r['errors'])];
+                            $notCount++;
                             continue;
                         }
-                        $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', (string) $r['eventName']), '-'));
-                        $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
+                        if ($lostAtRow > 0) {
+                            $results[] = [
+                                'ok'  => false,
+                                'row' => $r['rowNum'],
+                                'msg' => 'Not imported: the connection to the database was lost at row ' . $lostAtRow
+                                    . ', so this row was never sent. Nothing from it was saved.',
+                            ];
+                            $notCount++;
+                            continue;
+                        }
 
-                        // 🕐 STORE THE READING, DO NOT ROUND-TRIP IT (#777).
-                        //    `tblEvents.startDateTime` holds a WALL-CLOCK
-                        //    reading. This was
-                        //    `date('Y-m-d H:i:s', strtotime($r['startDateTime']))`
-                        //    -- a moment built and formatted back -- so on the
-                        //    morning the clocks go forward a row reading 01:30
-                        //    was imported as 02:30, permanently, and the
-                        //    comment above described that round trip as the
-                        //    design. Measured in Europe/London: `2026-03-29
-                        //    01:30` came out `2026-03-29 02:30`.
+                        // 🧱 ONE ROW, ONE OUTCOME (#790). Everything that can
+                        //    throw for this row is inside this `try`, so a
+                        //    throw ends THIS ROW — reported, with its reason —
+                        //    and never the import.
                         //
-                        //    A spreadsheet column has no offset in it, so
-                        //    every value here is a reading on the clock named
-                        //    by `$importZone` -- which is exactly why building
-                        //    a moment was never needed. `$fmtStore()` puts the
-                        //    text into the column's shape without resolving
-                        //    anything; a row whose value cannot be read at all
-                        //    was already refused upstream (line 133).
-                        // 📌 `$fmtStore` is defined ONCE near the top of this file, so
-                        //    the row CHECK and the row STORE cannot disagree (#777 round 9).
-
-                        $startSql = $fmtStore((string) $r['startDateTime']);
-                        $hasEnd   = $r['endDateTime'] !== null && $r['endDateTime'] !== '';
-                        $endSql   = $hasEnd === true ? $fmtStore((string) $r['endDateTime']) : null;
-                        if ($startSql === null) {
-                            $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'startDateTime could not be read'];
-                            continue;
-                        }
-                        // 🚨 AN END TIME THAT CANNOT BE READ REFUSES THE ROW.
-                        //    It used to be impossible to reach: the row check
-                        //    upstream guaranteed `strtotime($end) !== false`.
-                        //    The first version of this closure could answer
-                        //    null for a value that check had passed, and only
-                        //    the START was guarded -- so the row imported with
-                        //    `ok => true` and the message "Imported as event
-                        //    #N", **with no end time at all**, bound as SQL
-                        //    NULL. Of the three harms that version caused, this
-                        //    was the one nobody could see afterwards: the
-                        //    preview screen prints the cell raw, so the
-                        //    administrator reviewing the file sees exactly what
-                        //    they typed and nothing warns them.
+                        //    WHAT WAS WRONG. There was no `try` here at all.
+                        //    Under strict reporting `execute()` throws rather
+                        //    than answering false, so ONE refused row stopped
+                        //    the whole run: the rows before it were already
+                        //    saved and stayed saved, the rows after it were
+                        //    never tried, the administrator got an error page
+                        //    instead of this list, and the activity record
+                        //    below was never written. The `'DB error: '`
+                        //    message beside `execute()` could never be shown.
+                        //    Measured before the change, with the database
+                        //    refusing the middle row of a three-row file: an
+                        //    HTTP 500, row 2 saved, row 4 never tried, no
+                        //    activity record — and because the rows stayed in
+                        //    the session, pressing Confirm again tried row 2 a
+                        //    SECOND time and was refused on its web address.
                         //
-                        //    A refused row is visible and recoverable. A
-                        //    silently emptied column is neither.
-                        if ($hasEnd === true && $endSql === null) {
-                            $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'endDateTime could not be read'];
-                            continue;
+                        //    #777 round 21 closed the one cause anybody had
+                        //    measured (a date a DATETIME cannot hold). This
+                        //    closes the SHAPE: any cause — a column too long,
+                        //    a duplicate web address, a server setting —
+                        //    now refuses one row, visibly.
+                        //
+                        //    WHY EACH ROW ON ITS OWN, NOT ALL OR NOTHING. The
+                        //    page already promised a list of which rows were
+                        //    imported and which were skipped, and a long file
+                        //    failing whole on one bad row is worse for somebody
+                        //    importing a year of events. Whether to switch to
+                        //    all-or-nothing is the owner's choice and is asked
+                        //    on #790.
+                        //
+                        //    A single INSERT is saved whole or not at all, so a
+                        //    row refused by the database leaves nothing behind.
+                        //    The one case where that cannot be promised is a
+                        //    connection lost WHILE the row was being saved:
+                        //    the server may have saved it before the
+                        //    connection went, and this page cannot ask. That
+                        //    case says so instead of guessing.
+                        $savedAs = 0;
+                        $refusal = '';
+                        $unknown = false;
+                        $slug    = '';
+                        try {
+                            $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', (string) $r['eventName']), '-'));
+                            $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
+
+                            // 🕐 STORE THE READING, DO NOT ROUND-TRIP IT (#777).
+                            //    `tblEvents.startDateTime` holds a WALL-CLOCK
+                            //    reading. This was
+                            //    `date('Y-m-d H:i:s', strtotime($r['startDateTime']))`
+                            //    -- a moment built and formatted back -- so on the
+                            //    morning the clocks go forward a row reading 01:30
+                            //    was imported as 02:30, permanently, and the
+                            //    comment above described that round trip as the
+                            //    design. Measured in Europe/London: `2026-03-29
+                            //    01:30` came out `2026-03-29 02:30`.
+                            //
+                            //    A spreadsheet column has no offset in it, so
+                            //    every value here is a reading on the clock named
+                            //    by `$importZone` -- which is exactly why building
+                            //    a moment was never needed. `$fmtStore()` puts the
+                            //    text into the column's shape without resolving
+                            //    anything; a row whose value cannot be read at all
+                            //    was already refused upstream (line 133).
+                            // 📌 `$fmtStore` is defined ONCE near the top of this file, so
+                            //    the row CHECK and the row STORE cannot disagree (#777 round 9).
+
+                            $startSql = $fmtStore((string) $r['startDateTime']);
+                            $hasEnd   = $r['endDateTime'] !== null && $r['endDateTime'] !== '';
+                            $endSql   = $hasEnd === true ? $fmtStore((string) $r['endDateTime']) : null;
+                            if ($startSql === null) {
+                                $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'startDateTime could not be read'];
+                                $notCount++;
+                                continue;
+                            }
+                            // 🚨 AN END TIME THAT CANNOT BE READ REFUSES THE ROW.
+                            //    It used to be impossible to reach: the row check
+                            //    upstream guaranteed `strtotime($end) !== false`.
+                            //    The first version of this closure could answer
+                            //    null for a value that check had passed, and only
+                            //    the START was guarded -- so the row imported with
+                            //    `ok => true` and the message "Imported as event
+                            //    #N", **with no end time at all**, bound as SQL
+                            //    NULL. Of the three harms that version caused, this
+                            //    was the one nobody could see afterwards: the
+                            //    preview screen prints the cell raw, so the
+                            //    administrator reviewing the file sees exactly what
+                            //    they typed and nothing warns them.
+                            //
+                            //    A refused row is visible and recoverable. A
+                            //    silently emptied column is neither.
+                            if ($hasEnd === true && $endSql === null) {
+                                $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => 'endDateTime could not be read'];
+                                $notCount++;
+                                continue;
+                            }
+
+                            $name    = (string) $r['eventName'];
+                            $desc    = (string) $r['description'];
+                            $allDay  = (int) $r['isAllDay'];
+                            $loc     = (string) $r['locationName'];
+                            $status  = (string) $r['status'];
+                            $isPub   = (int) $r['isPublic'];
+                            $isFeat  = (int) $r['isFeatured'];
+                            $catId   = $r['categoryID'] !== null ? (int) $r['categoryID'] : null;
+                            $typeId  = $r['typeID']     !== null ? (int) $r['typeID']     : null;
+
+                            $stmt->bind_param(
+                                'issssssisssiiii',
+                                $siteId, $name, $slug, $desc, $startSql, $endSql, $importZone,
+                                $allDay, $loc, $status, $isPub, $isFeat,
+                                $catId, $typeId, $userId
+                            );
+                            // 🧷 `execute()` answering false is turned into the
+                            //    SAME refusal as a throw. Under today's strict
+                            //    reporting it never answers false; the line is
+                            //    here so that changing the reporting mode one
+                            //    day cannot bring back a second, untested path
+                            //    — the old `'DB error: '` branch was exactly
+                            //    that, dead beside the line that mattered.
+                            if ($stmt->execute() !== true) {
+                                throw new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
+                            }
+                            $savedAs = (int) $stmt->insert_id;
+                        } catch (\mysqli_sql_exception $refused) {
+                            $code = (int) $refused->getCode();
+                            // 🔌 2000 and above are the CLIENT's codes — the
+                            //    connection, not the row. 2006 "gone away" and
+                            //    2013 "lost during query" are the ones that
+                            //    matter, and for those the server may already
+                            //    have saved the row, so nothing is promised.
+                            if ($code >= 2000) {
+                                $lostAtRow = (int) $r['rowNum'];
+                                $unknown   = true;
+                                $refusal   = 'Not known: the connection to the database was lost while this row was being '
+                                    . 'saved (error ' . $code . '), so this page cannot tell whether it was saved. Check '
+                                    . 'Manage Events before importing this row again.';
+                            } elseif ($code === 1062 && str_contains($refused->getMessage(), 'uq_event_site_slug') === true) {
+                                // 🔤 The commonest cause, in words a person can
+                                //    act on. The web address of an imported
+                                //    event is made from its NAME alone, so two
+                                //    rows with the same name — or a name an
+                                //    existing event already has — ask for the
+                                //    same address, and the second is refused.
+                                $refusal = 'Not imported: the database refused this row because another event already has '
+                                    . 'the web address made from this name ("' . $slug . '") — possibly an event that has since been '
+                                    . 'deleted. Nothing from this row was saved. Give the event a different name and import '
+                                    . 'it again.';
+                            } else {
+                                $refusal = 'Not imported: the database refused this row (error ' . $code . ': '
+                                    . $refused->getMessage() . '). Nothing from this row was saved.';
+                            }
+                            Logger::errorPlatform(
+                                'MySQL',
+                                'Error',
+                                (string) $code,
+                                'A row of a calendar file import was refused by the database',
+                                'row ' . (int) $r['rowNum'] . ': ' . $refused->getMessage()
+                            );
+                        } catch (\Throwable $fault) {
+                            // 🧯 Anything else: a fault in THIS PAGE's own code
+                            //    while getting the row ready. The insert is the
+                            //    last thing in the `try` and only a database
+                            //    refusal stops it part-way, so anything caught
+                            //    here happened before the row was sent.
+                            $refusal = 'Not imported: this row could not be got ready for saving because of a fault in '
+                                . 'the portal, which has been recorded for whoever looks after it. Nothing from this '
+                                . 'row was saved.';
+                            Logger::errorPlatform(
+                                'PHP',
+                                'Error',
+                                'CALENDAR_IMPORT_ROW',
+                                'A row of a calendar file import could not be got ready for saving',
+                                'row ' . (int) $r['rowNum'] . ': ' . get_class($fault) . ': ' . $fault->getMessage()
+                                    . "\n" . $fault->getFile() . ':' . $fault->getLine()
+                            );
                         }
 
-                        $name    = (string) $r['eventName'];
-                        $desc    = (string) $r['description'];
-                        $allDay  = (int) $r['isAllDay'];
-                        $loc     = (string) $r['locationName'];
-                        $status  = (string) $r['status'];
-                        $isPub   = (int) $r['isPublic'];
-                        $isFeat  = (int) $r['isFeatured'];
-                        $catId   = $r['categoryID'] !== null ? (int) $r['categoryID'] : null;
-                        $typeId  = $r['typeID']     !== null ? (int) $r['typeID']     : null;
-
-                        $stmt->bind_param(
-                            'issssssisssiiii',
-                            $siteId, $name, $slug, $desc, $startSql, $endSql, $importZone,
-                            $allDay, $loc, $status, $isPub, $isFeat,
-                            $catId, $typeId, $userId
-                        );
-                        $okThis = $stmt->execute();
-                        $results[] = [
-                            'ok'  => $okThis,
-                            'row' => $r['rowNum'],
-                            'msg' => $okThis ? 'Imported as event #' . $stmt->insert_id : 'DB error: ' . $stmt->error,
-                        ];
-                        if ($okThis === true) {
+                        if ($savedAs > 0) {
+                            $results[] = ['ok' => true, 'row' => $r['rowNum'], 'msg' => 'Imported as event #' . $savedAs];
                             $okCount++;
+                        } else {
+                            $results[] = ['ok' => false, 'row' => $r['rowNum'], 'msg' => $refusal, 'unknown' => $unknown];
+                            $notCount++;
                         }
                     }
-                    $stmt->close();
+                    // 🧹 Closing a statement on a connection that has gone can
+                    //    throw too, and must not take the results list with it.
+                    try {
+                        $stmt->close();
+                    } catch (\Throwable $ignored) {
+                        // Nothing to do: the statement goes with the request.
+                    }
                     $imported = true;
-                    Logger::activity('EventsImported', 'Bulk import: ' . $okCount . ' events created');
+                    // 📝 BOTH counts (#790). "N events created" alone read the
+                    //    same for a clean import and for one that refused
+                    //    half the file. `Logger::activity()` never throws; if
+                    //    the connection has gone it cannot write either, and
+                    //    the results list below says so.
+                    Logger::activity(
+                        'EventsImported',
+                        'Bulk import: ' . $okCount . ' events created, ' . $notCount . ' rows not imported'
+                    );
+                    // The rows leave the session whatever happened: every row
+                    // has an outcome above, and pressing Confirm again would
+                    // otherwise try the IMPORTED rows a second time.
                     unset($_SESSION['eventsImportPreview']);
                 }
             }
@@ -992,6 +1169,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php endif; ?>
 
 <?php if ($imported === true): ?>
+    <?php if ($lostAtRow > 0): ?>
+        <div class="alert alert-warning">
+            <i class="fa-solid fa-triangle-exclamation me-1"></i>
+            The connection to the database was lost at row <?php echo (int) $lostAtRow; ?>, so the import stopped
+            there. The rows marked OK below were saved; the rows after it were not sent. This import may also be
+            missing from the activity log, because that is written to the same database.
+        </div>
+    <?php endif; ?>
     <div class="card shadow-sm mb-3">
         <div class="card-header"><h2 class="h6 mb-0">Import results</h2></div>
         <div class="card-body p-0">
@@ -1007,6 +1192,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-12 col-md-2">
                             <?php if ($r['ok'] === true): ?>
                                 <span class="badge bg-success">OK</span>
+                            <?php elseif (($r['unknown'] ?? false) === true): ?>
+                                <span class="badge bg-warning text-dark">Not known</span>
                             <?php else: ?>
                                 <span class="badge bg-danger">Skipped</span>
                             <?php endif; ?>
