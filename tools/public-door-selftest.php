@@ -99,7 +99,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 124;
+const PDS_EXPECTED_CHECKS = 126;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1115,6 +1115,48 @@ foreach ($refusals as $kind => $r) {
 }
 check('R01 all ' . count($refusals) . ' refusals give the same status, headers (Date and the test server\'s Host aside) and body', $differ, []);
 
+/**
+ * One request sent over a raw socket with an ABSOLUTE-FORM request line
+ * (`GET http://host/path HTTP/1.1`), which HTTP servers must accept and curl
+ * will not send. Same answer shape as $http. Round 3 of P4a's check: the door
+ * step had stopped recognising these, so a valid name got a portal 404 and a
+ * session file.
+ */
+$rawAbsolute = static function (string $host, string $path) use ($port): array {
+    $sock = @fsockopen('127.0.0.1', $port, $errno, $errstr, 5);
+    if ($sock === false) {
+        return ['status' => 0, 'headers' => [], 'lines' => [], 'body' => 'no answer'];
+    }
+    fwrite($sock, 'GET http://' . $host . $path . " HTTP/1.1\r\nHost: " . $host . "\r\nConnection: close\r\n\r\n");
+    $raw = (string) stream_get_contents($sock);
+    fclose($sock);
+    [$head, $body] = array_pad(explode("\r\n\r\n", $raw, 2), 2, '');
+    $rows  = explode("\r\n", $head);
+    $first = array_shift($rows);
+    $named = [];
+    $lines = [];
+    foreach ($rows as $line) {
+        if ($line === '') {
+            continue;
+        }
+        $lines[] = $line;
+        [$n, $v] = array_pad(explode(':', $line, 2), 2, '');
+        $named[strtolower(trim($n))] = trim($v);
+    }
+    // PHP's test server answers HTTP/1.1 with a chunked body only when it has
+    // no length; the door always knows its length, so the body is plain.
+    return ['status' => (int) (explode(' ', (string) $first)[1] ?? 0), 'headers' => $named, 'lines' => $lines, 'body' => $body];
+};
+$absBefore = $sessionFiles();
+$absValid   = $rawAbsolute('127.0.0.1:' . $port, '/w/' . $nameA . '/events.json');
+$absUnknown = $rawAbsolute('127.0.0.1:' . $port, '/w/' . str_repeat('ab', 12) . '/events.json');
+$absPublic  = $rawAbsolute($hostA, '/events.json');
+$absLogin   = $rawAbsolute($hostA, '/login');
+check('R02 an ABSOLUTE-FORM request line (GET http://host/…) is the door too: a valid name 200 JSON, an unknown name the identical 404, a public address 200, a portal page on a public address the identical 404 — and no session file',
+    [$absValid['status'], json_decode($absValid['body'], true)['format'] ?? null, $signature($absUnknown) === $ref, $absPublic['status'],
+        $signature($absLogin) === $ref, $sessionFiles() - $absBefore],
+    [200, 'webms-public-events', true, 200, true, 0]);
+
 // =============================================================================
 echo "S. Every captured answer satisfies its schema\n";
 // =============================================================================
@@ -1480,17 +1522,27 @@ $hostFault = ["SELECT h.`siteID`, h.`hostName`, s.`isActive` FROM", "SELECT h.`s
 $failureState = static function () use ($http, $feedA, $sessionFiles): array {
     $before = $sessionFiles();
     $out    = [];
-    foreach ([['/login', 'door-a.selftest.test'], ['/api-docs/index.php', 'door-b.selftest.test'],
-        ['/api-docs/index.php', 'door-c.selftest.test'], ['/error.php?code=404', 'door-b.selftest.test'], ['/login', null]] as [$path, $host]) {
-        $r = $http('GET', $path, $host === null ? [] : ['host' => $host]);
+    // Round 3 of P4a's check: a request carrying a STALE session cookie made
+    // an empty session file in this state (Site::preDetect()'s session peek),
+    // so the last two carry one, on the members' address and a public one.
+    $stale = 'PHPSESSID=' . str_repeat('k', 32);
+    foreach ([['/login', 'door-a.selftest.test', null], ['/api-docs/index.php', 'door-b.selftest.test', null],
+        ['/api-docs/index.php', 'door-c.selftest.test', null], ['/error.php?code=404', 'door-b.selftest.test', null], ['/login', null, null],
+        ['/login', null, $stale], ['/error.php?code=404', 'door-a.selftest.test', $stale]] as [$path, $host, $cookie]) {
+        $opt = $host === null ? [] : ['host' => $host];
+        if ($cookie !== null) {
+            $opt['cookie'] = $cookie;
+        }
+        $r = $http('GET', $path, $opt);
         $out[] = [$r['status'], $r['body'], $r['headers']['set-cookie'] ?? ''];
     }
     return ['answers' => $out, 'door' => $feedA()['status'], 'session files made' => $sessionFiles() - $before];
 };
 $tryAgain = [503, "Please try again in a moment.\n", ''];
 $p = $plant('_core/PublicWebsiteSetup.php', $hostFault[0], $hostFault[1], $failureState);
-check('P43 with the public-address look-up FAILING (a planted database fault), EVERY way in — index.php on a public and on the members\' address, the API description on B\'s and switched-off C\'s address, error.php — gives the same plain "try again": no page, no organisation named, no cookie, no session file; and the door refuses',
-    [$p['applied'], $p['result']], [true, ['answers' => [$tryAgain, $tryAgain, $tryAgain, $tryAgain, $tryAgain], 'door' => 404, 'session files made' => 0]]);
+check('P43 with the public-address look-up FAILING (a planted database fault), EVERY way in — index.php on a public and on the members\' address, the API description on B\'s and switched-off C\'s address, error.php — gives the same plain "try again": no page, no organisation named, no cookie, and no session file even for a request carrying a stale session cookie; and the door refuses',
+    [$p['applied'], $p['result']], [true, ['answers' => [$tryAgain, $tryAgain, $tryAgain, $tryAgain, $tryAgain, $tryAgain, $tryAgain],
+        'door' => 404, 'session files made' => 0]]);
 /** Several edits across files at once, each found exactly once, then put back byte for byte. */
 $plantMany = static function (array $edits, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
     $was = [];
@@ -1535,6 +1587,13 @@ check('P47 with error.php\'s failure-state answer taken out, the same fault leav
 $p = $plantMany([$faultEdit, ['public_html/api-docs/index.php', 'if (\\Portal\\Core\\Site::publicAddressUnknown() === true) {', 'if (false) {']],
     static fn (): int => $http('GET', '/api-docs/index.php', ['host' => 'door-c.selftest.test'])['status']);
 check('P48 with the API description\'s failure-state answer taken out, the same fault draws it (200) on switched-off C\'s address', [$p['applied'], $p['result']], [true, 200]);
+$p = $plantMany([$faultEdit, ['_core/Site.php', "        if (\$doorLookupFailed === true) {\n            if (\$multi !== null) {", "        if (false) {\n            if (\$multi !== null) {"]],
+    static function () use ($http, $sessionFiles): int {
+        $before = $sessionFiles();
+        $http('GET', '/login', ['cookie' => 'PHPSESSID=' . str_repeat('m', 32)]);
+        return $sessionFiles() - $before;
+    });
+check('P49 with Site::preDetect() no longer stopping before its session peek in the failure state, a stale session cookie makes a session file', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
 $p = (static function () use ($child, $sep, $hostFault, $startServer, $waitForServer, $http): array {
     $site  = $child . $sep . 'web' . $sep . '_core' . $sep . 'Site.php';
     $setup = $child . $sep . 'web' . $sep . '_core' . $sep . 'PublicWebsiteSetup.php';

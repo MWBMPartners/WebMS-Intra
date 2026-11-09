@@ -1787,6 +1787,21 @@ class Site
         // and SiteGate shows "try again".
         $doorLookupFailed = $door === 'failed';
         self::$publicAddressUnknown = $doorLookupFailed;
+        // 🔁 The look-up FAILED: this host may be a public address, and every
+        //    way in answers PublicDoor::tryAgain() without a session. So stop
+        //    HERE, before the detections below — the session-mode one takes a
+        //    read-only look at the session (Auth::peekSession()), and PHP's
+        //    session start makes an empty session file for a cookie naming no
+        //    session (round 3 of P4a's check measured exactly that). Detection
+        //    stays FAILED, so nothing can be shown on a guess.
+        if ($doorLookupFailed === true) {
+            if ($multi !== null) {
+                self::$preEnabled = $multi;
+                self::$preMode    = $multi === true ? $mode : null;
+            }
+
+            return 1;
+        }
 
         if ($enabled === false) {
             return 1;
@@ -1862,14 +1877,25 @@ class Site
         //    parse_url('//w/x/events.json') answers host "w" and path
         //    "/x/events.json" — so //w/… slipped past this step (measured by
         //    P4a's own test, round 2). The path is everything before the "?".
+        // ⚠️ BUT AN ABSOLUTE-FORM REQUEST LINE carries the scheme and host in
+        //    front of the path (`GET http://host/w/{name}/events.json`, which
+        //    HTTP servers must accept), and cutting at "?" alone left
+        //    "http://host/w/…" — not a door request at all, so it reached the
+        //    portal's pages with a session (round 3 of P4a's check, which is
+        //    why parse_url() was there before). A leading scheme and host are
+        //    taken off first; a path beginning "//" has no scheme, so it is
+        //    left for the slash rule below.
         $uri  = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+        $uri  = (string) preg_replace('#^[A-Za-z][A-Za-z0-9+.\-]*://[^/?\#]*#', '', $uri);
         $cut  = strcspn($uri, '?#');
         $path = substr($uri, 0, $cut);
         $path = $path === '' ? '/' : $path;
-        // Repeated slashes count as one, exactly as Router::extractPath()
-        // counts them — otherwise //w/… or /{key}//w/… was not a door request
-        // here, reached the router after the session had started, and was
-        // answered with a session cookie (round 2 of P4a's check).
+        // Repeated slashes count as one — otherwise //w/… or /{key}//w/… was
+        //    not a door request here, reached the router after the session
+        //    had started, and was answered with a session cookie (round 2 of
+        //    P4a's check). Router::extractPath() means to do the same, but it
+        //    still reads the path with parse_url() and so mis-reads a path
+        //    beginning "//" (#884): the two are NOT yet the same rule.
         $path = (string) preg_replace('#/{2,}#', '/', $path);
         // Case-insensitive like every other address: /W/… is a door request
         // too (and is then refused, because a name is lower case).

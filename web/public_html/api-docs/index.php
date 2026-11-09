@@ -101,8 +101,6 @@ if (defined('PORTAL_ROOT') === false) {
     }
     define('PORTAL_WEBROOT', dirname(__DIR__));
     require_once $portalStartUp;
-    // Start-up switches error text ON for a pre-release copy; off again.
-    ini_set('display_errors', '0');
 
     // 🚪 ON AN ORGANISATION'S PUBLIC ADDRESS (or under /w/) THIS PAGE DOES NOT
     //    EXIST (#493 P4a, D-098): a public address answers the public door's
@@ -120,6 +118,11 @@ if (defined('PORTAL_ROOT') === false) {
     if (\Portal\Core\Site::publicAddressUnknown() === true) {
         \Portal\Core\PublicDoor::tryAgain();
     }
+    // Start-up switches error text ON for a pre-release copy; off again. It
+    // comes AFTER the two hand-offs above, which must be the first thing after
+    // start-up (tools/audit-checks/check_webroot_door_handoff.py) and print
+    // nothing that could carry an error.
+    ini_set('display_errors', '0');
 
     // 🚧 The same two gates, in the same order, as index.php: closed for an
     //    upgrade, then the staff gate on a pre-release copy. Without them

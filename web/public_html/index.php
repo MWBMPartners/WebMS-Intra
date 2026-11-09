@@ -71,7 +71,13 @@ if (Site::isDoorRequest() === true) {
 //    public address (the look-up failed), nothing is drawn and no session is
 //    started: the same plain "try again" from every way in (round 2 of P4a's
 //    check). The organisation gate would have said "try again" a moment later
-//    anyway, but only after a session cookie and file had been made.
+//    anyway, but only after a session cookie and file had been made; and
+//    Site::preDetect() stops before its session peek in this state (round 3).
+//    /logout is NOT let through, unlike the organisation gate's own "try
+//    again": in this state nobody can tell whether the host is a members'
+//    address or an organisation's public one, and signing out needs a session
+//    — exactly what must not start on a public address. Signing out works
+//    again the moment the look-up does.
 if (Site::publicAddressUnknown() === true) {
     PublicDoor::tryAgain();
 }
