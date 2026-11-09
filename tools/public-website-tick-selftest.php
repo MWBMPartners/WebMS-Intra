@@ -129,7 +129,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 239;
+const PWT_EXPECTED_CHECKS = 240;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2047,14 +2047,15 @@ echo json_encode([
         'too big'    => \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => 404, 'capped' => true,
             'message' => 'The file is bigger than the size limit, so it was not read.']),
     ] + (static function (): array {
-        // Rounds 6-8: EVERY status SafeFetch can return, not a sample — 0
-        // (asked above as 'nothing') and every three-digit status from 100 to
-        // 999, because SafeFetch's header reader accepts any three digits
-        // (measured in round 8; 999 is what one large website sends automated
-        // visitors). A rule singling out any one status cannot pass. The
-        // function is pure, so asking all 900 costs nothing.
+        // Rounds 6-9: EVERY status SafeFetch can return, not a sample — every
+        // number from 0 to 999, because SafeFetch's header reader accepts any
+        // three digits, leading zeros included (measured: 999 in round 8,
+        // which one large website sends automated visitors; 42 and 99 in round
+        // 9, from `HTTP/1.1 099` or a header line that looks like a status).
+        // A rule singling out any one status cannot pass. The function is
+        // pure, so asking all 1,000 costs nothing.
         $out = [];
-        foreach (range(100, 999) as $code) {
+        foreach (range(0, 999) as $code) {
             $out['HTTP ' . $code] = \Portal\Core\PublicWebsiteSetup::mainWebsiteVerdict(['ok' => false, 'status' => $code, 'capped' => false]);
         }
         return $out;
@@ -2558,10 +2559,10 @@ $scnPwVerdicts = static function () use ($askSetup, $siteOne): array {
 };
 $wVerdictsWant = ['nothing' => $pwSaid(0), 'ok' => ['ok', 'it answered.'], 'big page' => ['ok', 'it answered.'],
     'forbidden' => $pwSaid(403), 'too slow' => $pwSaid(200), 'too big' => $pwSaid(404)];
-foreach (range(100, 999) as $code) {
+foreach (range(0, 999) as $code) {
     $wVerdictsWant['HTTP ' . $code] = $pwSaid($code);
 }
-check('W17 the wording function, asked directly, for every status SafeFetch can return (0 and 100-999): a 200 answered — including one this check stopped reading at its own size limit; every other answer, a 200 that stalled, and nothing at all get the one sentence plus the status where there is one — "For information" ONLY for 403 and 429',
+check('W17 the wording function, asked directly, for every status SafeFetch can return (0-999): a 200 answered — including one this check stopped reading at its own size limit; every other answer, a 200 that stalled, and nothing at all get the one sentence plus the status where there is one — "For information" ONLY for 403 and 429',
     $scnPwVerdicts(), $wVerdictsWant);
 
 // W21 (rounds 2 and 3): the words for REAL answers, driven IN-PROCESS. A TLS
@@ -3389,6 +3390,11 @@ $p = $plant('_core/PublicWebsiteSetup.php', "        \$status = (int) (\$got['st
     $scnPwVerdicts);
 $plantCheck('P107 (round 8, the checker\'s plant) with every status from 601 up called "For information", W17 — which now asks up to 999 — notices', $p,
     static fn (array $r): mixed => [$r['HTTP 601'][0] ?? null, $r['HTTP 999'][0] ?? null], ['note', 'note']);
+$p = $plant('_core/PublicWebsiteSetup.php', "        \$status = (int) (\$got['status'] ?? 0);\n        if (function_exists('curl_init') === false) {",
+    "        \$status = (int) (\$got['status'] ?? 0);\n        if (\$status > 0 && \$status < 100) {\n            return ['state' => 'note', 'words' => self::NOT_A_NORMAL_PAGE . ' The last answer this check received was HTTP ' . \$status . '.'];\n        }\n        if (function_exists('curl_init') === false) {",
+    $scnPwVerdicts);
+$plantCheck('P108 (round 9, the checker\'s plant) with every status from 1 to 99 called "For information", W17 — which now asks from 0 — notices', $p,
+    static fn (array $r): mixed => [$r['HTTP 1'][0] ?? null, $r['HTTP 42'][0] ?? null, $r['HTTP 99'][0] ?? null], ['note', 'note', 'note']);
 $p = $plant('_core/PublicWebsiteSetup.php', "if (\$status === 200 && ((\$got['ok'] ?? false) === true || (\$got['capped'] ?? false) === true)) {", 'if ($status === 200) {', $scnPwLive);
 check('P97 with any 200 counted as answered, a 200 whose connection was cut off is said to have answered', [$p['applied'], $p['result']['cut off'] ?? null], [true, [200, 'ok', 'it answered.']]);
 $p = $plant('_apps/admin/roles/index.php', '<?php if ($capFallsOpen === true && $capKey === Capabilities::WEBSITE_SETUP): ?>', '<?php if (false): ?>', $scnPwRolesWarning);
