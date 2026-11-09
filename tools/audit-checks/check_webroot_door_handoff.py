@@ -39,9 +39,10 @@ a stale session cookie, and requires no cookie, no session file and no
 organisation named — with plants for a new entry point that starts a session
 before or after start-up.
 
-This gate now holds only what a static reading can honestly hold, in every PHP
-file under web/public_html/ whose code names `bootstrap.php` (in a plain or an
-interpolated string):
+This gate now holds only what a static reading can honestly hold, in every
+file under web/public_html/ ending .php, .php5, .phtml or .phar whose code names
+`bootstrap.php` (in a plain string, an interpolated one such as "{$d}/..." or
+"${d}/...", or a heredoc):
 
   1. the two hand-offs are PRESENT -- an `if` whose condition calls
      `Site::isDoorRequest()` and whose body begins with a call to
@@ -62,7 +63,10 @@ the hand-offs -- a call above the require, a call inside the condition or the
 body, a dead branch, an ignored answer, start-up loaded through another file --
 is tools/public-door-selftest.php's job (sections E and F, FS01, P37-P52), not
 this gate's. A green run here means "the hand-offs are written in the right
-place", never "nothing runs before them".
+place", never "nothing runs before them". And the self-test itself cannot reach
+a branch keyed on a particular parameter VALUE (`if (($_GET['x'] ?? '') ===
+'letmein')`), a method other than GET, HEAD and POST, or a header it does not
+send: it says so in its own section F.
 
 USAGE
     python3 -I tools/audit-checks/check_webroot_door_handoff.py
@@ -86,6 +90,7 @@ WEBROOT = REPO / "web/public_html"
 # The three known entry points. One that stops loading start-up, or
 # disappears, is reported too: the list must stay true.
 KNOWN = {"index.php", "error.php", "api-docs/index.php"}
+PHP_ENDINGS = ("php", "php5", "phtml", "phar")
 REQUIRES = {"T_REQUIRE", "T_REQUIRE_ONCE", "T_INCLUDE", "T_INCLUDE_ONCE"}
 # A start-up path in a plain string, or in the literal part of an
 # interpolated one ("$dir/_core/bootstrap.php"): round 4 found the second not
@@ -200,15 +205,21 @@ def check_file(rel: str, toks: list) -> list[str]:
     at = next((k for k, t in enumerate(toks) if t[0] in STRING_TOKENS and "bootstrap.php" in t[1]), -1)
     if at < 0:
         return []
-    # The require that loads it: in the string's own statement, or the next one after it.
-    start = at
-    while start > 0 and toks[start - 1][1] not in (";", "{", "}"):
-        start -= 1
-    req = next((k for k in range(start, at) if toks[k][0] in REQUIRES), -1)
+    # The require that loads it, found by TOKEN SPAN (round 5 of the check):
+    # the require statement whose own tokens CONTAIN the path, else the first
+    # require after the path (the path held in a variable first). The first
+    # version walked BACK from the path to the previous `;`, `{` or `}`, and
+    # an interpolated "{$d}/..." or "${d}/..." holds a brace of its own, so the
+    # walk stopped inside the string and picked the wrong require.
+    req = -1
+    for k, tok in enumerate(toks):
+        if tok[0] in REQUIRES and k <= at <= statement_end(toks, k):
+            req = k
+            break
     if req < 0:
         req = next((k for k in range(at, len(toks)) if toks[k][0] in REQUIRES), -1)
     if req < 0:
-        return ["web/public_html/%s names bootstrap.php but no require of it could be found" % rel]
+        return ["web/public_html/%s names bootstrap.php in its code but has no require at or after that point" % rel]
     i = statement_end(toks, req) + 1
     while i < len(toks) and toks[i][0] == "T_USE":
         i = statement_end(toks, i) + 1
@@ -247,7 +258,10 @@ def main() -> int:
         return 1
     problems: list[str] = []
     found: set[str] = set()
-    for path in sorted(WEBROOT.rglob("*.php")):
+    # Every ending a server may run as PHP: .htaccess refuses only `\.php$`,
+    # and the self-test's router treats these four alike (round 5).
+    candidates = sorted(p for ext in PHP_ENDINGS for p in WEBROOT.rglob("*." + ext))
+    for path in candidates:
         rel = path.relative_to(WEBROOT).as_posix()
         try:
             toks = tokens(php, path)

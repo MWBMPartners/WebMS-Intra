@@ -47,6 +47,16 @@
  *      (`tools/audit-checks/check_public_door_schema.py --answers`).
  *   E  error.php and the API description, which start the portal WITHOUT
  *      index.php: on a public address both give the door's 404 (D-098).
+ *   F  EVERY file in the web root the server could run as PHP, found by
+ *      walking the folder and run DIRECTLY (as a server ignoring .htaccess
+ *      would) in eight shapes — GET, HEAD, POST, a query string, each with and
+ *      without a stale session cookie — on A's and switched-off C's public
+ *      address and in the failure state (FS01): no cookie, no session file,
+ *      no organisation named; each file's statuses recorded (F02). Plants for
+ *      new entry points that start a session first, above start-up, only on
+ *      POST, only with a query string, on any method but GET, or as .phtml.
+ *      It cannot reach a branch keyed on a particular parameter VALUE, a
+ *      method other than GET/HEAD/POST, or a header it does not send.
  *   T  a test copy (PORTAL_ENV=alpha, D-087): no sign-in, a member who may
  *      not use the test copy, a made-up cookie, a tester whose session has
  *      outlived PHP's session lifetime — all refused; a tester
@@ -99,7 +109,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 131;
+const PDS_EXPECTED_CHECKS = 136;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -249,6 +259,19 @@ $cleanUp = static function () use (&$state, $setInstallation, $db): void {
     }
 };
 register_shutdown_function($cleanUp);
+// Ctrl-C, a kill or a closed terminal run the SAME shutdown functions (they
+// put the settings, organisation 1's name and the test accounts back): exit()
+// inside the handler is what makes PHP run them. Without the pcntl extension
+// only the shutdown functions are there (the #649 and #667 tests do the same).
+if (function_exists('pcntl_async_signals') === true && function_exists('pcntl_signal') === true) {
+    pcntl_async_signals(true);
+    foreach ([SIGINT, SIGTERM, SIGHUP] as $signal) {
+        pcntl_signal($signal, static function (int $which): void {
+            echo "\nStopped by a signal ({$which}); putting things back.\n";
+            exit(3);
+        });
+    }
+}
 mkdir($child, 0700, true);
 $copied = 0;
 $walk = new RecursiveIteratorIterator(
@@ -296,7 +319,9 @@ if ($direct === false && preg_match('#\.(php\d?|phtml|phar)$#i', $uri) === 1 && 
 $target = $root . '/index.php';
 $real   = ($uri === '/' || preg_match('#^/assets/?$#', $uri) === 1) ? false : realpath($root . $uri);
 if ($real !== false && str_starts_with($real, $root . DIRECTORY_SEPARATOR) === true && is_file($real) === true) {
-    if (strtolower(pathinfo($real, PATHINFO_EXTENSION)) === 'php') { $target = $real; } else { readfile($real); return true; }
+    // Every ending a server may run as PHP (section F plants a .phtml); the
+    // refusal above still turns them all away unless the request is "direct".
+    if (in_array(strtolower(pathinfo($real, PATHINFO_EXTENSION)), ['php', 'php5', 'phtml', 'phar'], true) === true) { $target = $real; } else { readfile($real); return true; }
 }
 $_SERVER['SCRIPT_NAME']     = substr($target, strlen($root));
 $_SERVER['PHP_SELF']        = $_SERVER['SCRIPT_NAME'];
@@ -446,17 +471,44 @@ $siteA = 1;
 // section F looks for every organisation's name in what each web-root file
 // answers, and the seeded name "Portal" is a word the offline page uses on
 // its own (round 4's first run of section F found exactly that).
-$state['siteOneName'] = (string) ($db->query('SELECT `siteName` FROM `tblSites` WHERE `siteID` = 1')->fetch_assoc()['siteName'] ?? '');
-register_shutdown_function(static function () use (&$state, $db): void {
-    if (($state['siteOneName'] ?? null) !== null) {
+//
+// THE ORIGINAL NAME IS WRITTEN TO A FILE FIRST, so a run that dies before
+// putting it back (a crash, a kill -9 that no handler can catch) leaves the
+// next run something to trust: it restores from that file, never from
+// "whatever is there now", which would by then be the test's own name (round 5
+// of P4a's check). The file is removed only once the name is back.
+$nameTest = 'Selftest Door A Organisation';
+$nameFile = sys_get_temp_dir() . $sep . 'public-door-selftest-' . $dbName . '-site1-name.txt';
+if (is_file($nameFile) === true) {
+    $state['siteOneName'] = (string) file_get_contents($nameFile);
+    echo "  ! a previous run did not put organisation 1's name back; it is restored from {$nameFile} at the end.\n";
+} else {
+    $state['siteOneName'] = (string) ($db->query('SELECT `siteName` FROM `tblSites` WHERE `siteID` = 1')->fetch_assoc()['siteName'] ?? '');
+    if ($state['siteOneName'] === $nameTest) {
+        refuse("organisation 1 is called '{$nameTest}', this test's own name, and no record of its real name exists. Set its real name by hand");
+    }
+    if (file_put_contents($nameFile, $state['siteOneName']) === false) {
+        refuse("could not record organisation 1's real name in {$nameFile} before changing it");
+    }
+}
+register_shutdown_function(static function () use (&$state, $db, $nameFile): void {
+    if (($state['siteOneName'] ?? null) === null) {
+        return;
+    }
+    // try/catch: a failed put-back must not stop the shutdown functions after
+    // this one (removing the test accounts) from running.
+    try {
         $u = $db->prepare('UPDATE `tblSites` SET `siteName` = ? WHERE `siteID` = 1');
         $u->bind_param('s', $state['siteOneName']);
         $u->execute();
         $u->close();
+        @unlink($nameFile);
         $state['siteOneName'] = null;
+    } catch (Throwable $e) {
+        echo "  ! could not put organisation 1's name back; its real name is kept in {$nameFile} for the next run.\n";
     }
 });
-$db->query("UPDATE `tblSites` SET `siteName` = 'Selftest Door A Organisation' WHERE `siteID` = 1");
+$db->query("UPDATE `tblSites` SET `siteName` = '{$nameTest}' WHERE `siteID` = 1");
 $zoneA = (string) ($db->query('SELECT `timezone` FROM `tblSites` WHERE `siteID` = 1')->fetch_assoc()['timezone'] ?? 'UTC');
 try {
     $clockA = new DateTimeZone($zoneA);
@@ -1179,18 +1231,31 @@ check('R02 an ABSOLUTE-FORM request line (GET http://host/…) is the door too: 
     [200, 'webms-public-events', true, 200, true, 0]);
 
 // =============================================================================
-echo "F. Every PHP file in the web root, driven (round 4 of P4a's check)\n";
+echo "F. Every PHP file in the web root, driven (rounds 4 and 5 of P4a's check)\n";
 // =============================================================================
 // "Does anything run before the hand-off?" is BEHAVIOURAL (D-065): a static
-// gate sharpened round after round kept losing to the next spelling (a call
-// above the require, inside the condition, inside the body, a path built by
-// interpolation). So EVERY *.php file under the copy's web root is found here
-// — no hand-kept list — and run DIRECTLY, as a web server that does not honour
-// .htaccess would, on a public address, with and without a stale session
-// cookie. None may set a cookie, make a session file, or show any
-// organisation's name. A NEW web-root entry point is caught by what it does,
-// whatever its spelling. The failure state is the same sweep under the P43
-// fault (FS01, in section P).
+// gate sharpened round after round kept losing to the next spelling. So EVERY
+// file under the copy's web root that the server could run as PHP (.php,
+// .php5, .phtml, .phar — the endings this test's router treats as PHP;
+// .htaccess refuses only `\.php$`) is found here by walking the folder — no
+// hand-kept list — and run DIRECTLY, as a web server that does not honour
+// .htaccess would, in EIGHT shapes: GET, HEAD, POST with a body and GET with a
+// query string, each with and without a stale session cookie (round 5: a GET
+// alone let an entry point that starts a session only on POST, only with a
+// query string, or on any method but GET walk past). On A's public address,
+// on switched-off C's, and — FS01 in section P — in the failure state. None
+// may set a cookie, make a session file, or show any organisation's name.
+//
+// WHAT IT CANNOT REACH, said plainly: a branch keyed on a PARTICULAR value
+// (`if (($_GET['debug'] ?? '') === 'letmein') { session_start(); }`) — no test
+// can guess the value; methods other than GET, HEAD and POST; cookies other
+// than PHP's session cookie; and request headers it does not send. It also
+// cannot tell "behaved" from "crashed" by status alone, which is why F02
+// records each file's statuses: only the three entry points start the portal;
+// the other files are reached through index.php (where the door has already
+// answered), and run DIRECTLY most of them crash (500, nothing printed)
+// because the classes they use are not loaded — they leak nothing, but they
+// are not "behaving", they are failing.
 $orgNames = [];
 foreach ($db->query("SELECT `siteName` FROM `tblSites` WHERE `siteID` IN (1, {$siteB}, {$siteC})")->fetch_all(MYSQLI_ASSOC) as $row) {
     $orgNames[] = (string) $row['siteName'];
@@ -1200,24 +1265,43 @@ $webRootFiles = static function () use ($child, $sep): array {
     $out  = [];
     $walk = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
     foreach ($walk as $file) {
-        if ($file->isFile() === true && strtolower($file->getExtension()) === 'php') {
+        if ($file->isFile() === true && in_array(strtolower($file->getExtension()), ['php', 'php5', 'phtml', 'phar'], true) === true) {
             $out[] = '/' . str_replace(DIRECTORY_SEPARATOR, '/', substr($file->getPathname(), strlen($root) + 1));
         }
     }
     sort($out);
     return $out;
 };
-/** Every web-root PHP file, run directly on $host with and without a stale cookie: the files that misbehaved, and why. */
-$sweepWebRoot = static function (string $host) use ($http, $webRootFiles, $sessionFiles, $orgNames): array {
-    $bad = [];
+/** The eight request shapes: [label, method, query, post body, cookie]. */
+$shapes = [];
+foreach ([null, 'PHPSESSID=' . str_repeat('s', 32)] as $cookie) {
+    $tag = $cookie === null ? '' : ' + stale cookie';
+    $shapes[] = ['GET' . $tag, 'GET', '', null, $cookie];
+    $shapes[] = ['HEAD' . $tag, 'HEAD', '', null, $cookie];
+    $shapes[] = ['POST' . $tag, 'POST', '', ['a' => '1', 'action' => 'save', 'csrf_token' => 'x', 'value' => 'y'], $cookie];
+    $shapes[] = ['GET ?query' . $tag, 'GET', '?a=1&action=x&code=404&lang=cy&page=2', null, $cookie];
+}
+/**
+ * Every web-root PHP file, run directly on $host in every shape. Answers the
+ * files that misbehaved (and why), and each file's statuses per shape.
+ *
+ * @return array{bad:list<string>, statuses:array<string,array<string,int>>}
+ */
+$sweepWebRoot = static function (string $host) use ($http, $webRootFiles, $sessionFiles, $orgNames, $shapes): array {
+    $bad      = [];
+    $statuses = [];
     foreach ($webRootFiles() as $path) {
-        foreach ([null, 'PHPSESSID=' . str_repeat('s', 32)] as $cookie) {
+        foreach ($shapes as [$label, $method, $query, $post, $cookie]) {
             $before = $sessionFiles();
             $opt    = ['host' => $host, 'direct' => true];
             if ($cookie !== null) {
                 $opt['cookie'] = $cookie;
             }
-            $r   = $http('GET', $path, $opt);
+            if ($post !== null) {
+                $opt['post'] = $post;
+            }
+            $r   = $http($method, $path . $query, $opt);
+            $statuses[$path][$label] = $r['status'];
             $why = [];
             if (($r['headers']['set-cookie'] ?? '') !== '') {
                 $why[] = 'set a cookie';
@@ -1231,23 +1315,49 @@ $sweepWebRoot = static function (string $host) use ($http, $webRootFiles, $sessi
                 }
             }
             if ($why !== []) {
-                $bad[] = $path . ($cookie === null ? '' : ' (stale cookie)') . ': ' . implode(', ', $why);
+                $bad[] = $path . ' (' . $label . '): ' . implode(', ', $why);
             }
         }
     }
-    return $bad;
+    return ['bad' => $bad, 'statuses' => $statuses];
+};
+/** One status per file when every shape agreed, else the list (HEAD carries no body, but the same status). */
+$statusLine = static function (array $byShape): string {
+    $unique = array_values(array_unique(array_values($byShape)));
+    return count($unique) === 1 ? (string) $unique[0] : implode('/', array_map('strval', $byShape));
 };
 $found = $webRootFiles();
-check('F01 every PHP file found in the web root (' . count($found) . ', found by walking the folder) run DIRECTLY on a public address, with and without a stale session cookie: none sets a cookie, makes a session file or names any organisation',
-    [count($found) >= 8, in_array('/index.php', $found, true), $sweepWebRoot($hostA)], [true, true, []]);
-// The plants: a NEW entry point, which the static gate may or may not see,
-// must be caught by what it DOES.
-$planted = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'zz-planted-entry.php';
-$plantFile = static function (string $code) use ($planted, $sweepWebRoot): array {
-    file_put_contents($planted, $code);
-    $bad = $sweepWebRoot('door-a.selftest.test');
-    @unlink($planted);
-    return array_values(array_filter($bad, static fn (string $l): bool => str_starts_with($l, '/zz-planted-entry.php')));
+$sweepA = $sweepWebRoot($hostA);
+$sweepC = $sweepWebRoot($hostC);
+check('F01 every file the server could run as PHP in the web root (' . count($found) . ', found by walking the folder), run DIRECTLY in 8 shapes (GET, HEAD, POST, a query string; with and without a stale cookie) on A\'s AND switched-off C\'s public address: none sets a cookie, makes a session file or names any organisation',
+    [count($found) >= 8, in_array('/index.php', $found, true), $sweepA['bad'], $sweepC['bad']], [true, true, [], []]);
+echo "      statuses when run directly on A's public address (every shape alike unless shown per shape):\n";
+foreach ($sweepA['statuses'] as $path => $byShape) {
+    echo '        ' . $path . ': ' . $statusLine($byShape) . "\n";
+}
+$entryPoints = ['/api-docs/index.php', '/error.php', '/index.php'];
+$entryStatuses = [];
+foreach ([$sweepA, $sweepC] as $sweep) {
+    foreach ($entryPoints as $path) {
+        $entryStatuses[] = array_values(array_unique(array_values($sweep['statuses'][$path] ?? [])));
+    }
+}
+$others = array_values(array_diff($found, $entryPoints));
+$otherStatuses = [];
+foreach ($others as $path) {
+    $otherStatuses[$path] = array_values(array_unique(array_values($sweepA['statuses'][$path] ?? [])));
+}
+check('F02 the three entry points answer only the door\'s 404 in every shape on both addresses; every OTHER file run directly either fails (500, nothing printed — its classes are not loaded) or is a page that starts nothing — recorded, not assumed: ' . json_encode($otherStatuses),
+    [$entryStatuses, array_values(array_filter($otherStatuses, static fn (array $st): bool => array_diff($st, [200, 500]) !== []))],
+    [array_fill(0, 6, [404]), []]);
+// The plants: a NEW entry point must be caught by what it DOES, in every
+// shape the sweep sends.
+$plantFile = static function (string $code, string $name = 'zz-planted-entry.php') use ($child, $sep, $sweepWebRoot): array {
+    $file = $child . $sep . 'web' . $sep . 'public_html' . $sep . $name;
+    file_put_contents($file, $code);
+    $bad = $sweepWebRoot('door-a.selftest.test')['bad'];
+    @unlink($file);
+    return array_values(array_filter($bad, static fn (string $l): bool => str_starts_with($l, '/' . $name)));
 };
 $bootLine = "require dirname(__DIR__) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';\n";
 check('P50 a NEW web-root file that loads start-up and starts a session first is caught by behaviour',
@@ -1256,6 +1366,14 @@ check('P51 a NEW web-root file that starts a session ABOVE the require of start-
     count($plantFile("<?php\nsession_start();\ndefine('PORTAL_WEBROOT', __DIR__);\n" . $bootLine . "echo 'x';\n")) > 0, true);
 check('P52 a NEW web-root file that starts the portal and prints the organisation\'s name, with no session at all, is caught by behaviour',
     count($plantFile("<?php\ndefine('PORTAL_WEBROOT', __DIR__);\n" . $bootLine . "echo \\Portal\\Core\\Site::branding('name');\n")) > 0, true);
+check('P53 a NEW web-root file that starts a session ONLY ON POST is caught (round 5: a GET-only sweep passed it)',
+    count($plantFile("<?php\nif ((\$_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {\n    session_start();\n}\necho 'x';\n")) > 0, true);
+check('P54 a NEW web-root file that starts a session ONLY WITH A QUERY STRING is caught',
+    count($plantFile("<?php\nif (\$_GET !== []) {\n    session_start();\n}\necho 'x';\n")) > 0, true);
+check('P55 a NEW web-root file that starts a session on ANY METHOD BUT GET is caught (HEAD and POST both reach it)',
+    count($plantFile("<?php\nif ((\$_SERVER['REQUEST_METHOD'] ?? '') !== 'GET') {\n    session_start();\n}\necho 'x';\n")) > 0, true);
+check('P56 a NEW web-root file ending .phtml (which .htaccess does not refuse) that starts a session is found and caught',
+    count($plantFile("<?php\nsession_start();\necho 'x';\n", 'zz-planted-entry.phtml')) > 0, true);
 
 // =============================================================================
 echo "S. Every captured answer satisfies its schema\n";
@@ -1694,9 +1812,16 @@ $p = $plantMany([$faultEdit, ['_core/Site.php', "        if (\$doorLookupFailed 
         return $sessionFiles() - $before;
     });
 check('P49 with Site::preDetect() no longer stopping before its session peek in the failure state, a stale session cookie makes a session file', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
-$p = $plant('_core/PublicWebsiteSetup.php', $hostFault[0], $hostFault[1], static fn (): array => $sweepWebRoot('door-b.selftest.test'));
-check('FS01 in the FAILURE state (the P43 fault) every web-root PHP file, run directly on B\'s public address with and without a stale cookie, sets no cookie, makes no session file and names nobody',
-    [$p['applied'], $p['result']], [true, []]);
+$p = $plant('_core/PublicWebsiteSetup.php', $hostFault[0], $hostFault[1], static function () use ($sweepWebRoot, $entryPoints): array {
+    $sweep = $sweepWebRoot('door-b.selftest.test');
+    $entry = [];
+    foreach ($entryPoints as $path) {
+        $entry[] = array_values(array_unique(array_values($sweep['statuses'][$path] ?? [])));
+    }
+    return ['bad' => $sweep['bad'], 'entry points' => $entry];
+});
+check('FS01 in the FAILURE state (the P43 fault) every web-root PHP file, run directly on B\'s public address in all 8 shapes, sets no cookie, makes no session file and names nobody; the three entry points answer only the plain 503',
+    [$p['applied'], $p['result']], [true, ['bad' => [], 'entry points' => [[503], [503], [503]]]]);
 $p = (static function () use ($child, $sep, $hostFault, $startServer, $waitForServer, $http): array {
     $site  = $child . $sep . 'web' . $sep . '_core' . $sep . 'Site.php';
     $setup = $child . $sep . 'web' . $sep . '_core' . $sep . 'PublicWebsiteSetup.php';
