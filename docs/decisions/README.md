@@ -152,7 +152,9 @@ appended with its real date and a note that it was added later.
 | [D-094](094-the-installation-can-forbid-framing-for-every-organisation.md) | 2026-11-09 | The installation can forbid every organisation's public pages being framed | in force |
 | [D-095](095-the-public-website-page-stores-both-addresses.md) | 2026-11-09 | The public-website page stores the organisation's main website and, optionally, a public address for the portal's public pages | in force |
 | [D-096](096-iphone-heic-receipts-are-accepted.md) | 2026-11-09 | iPhone photos (HEIC/HEIF) are accepted as expense receipts | in force |
+| [D-097](097-the-public-door-starts-switched-off.md) | 2026-11-09 | Each organisation's public door starts switched off | in force |
+| [D-098](098-other-public-pages-stay-off-the-public-address.md) | 2026-11-09 | The portal's other public pages do not answer on an organisation's public address in the first release | in force |
 
-*96 decisions. This index is checked against the folder by
+*98 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
