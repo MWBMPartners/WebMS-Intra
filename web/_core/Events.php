@@ -1089,7 +1089,14 @@ class Events
                 }
             }
         } finally {
-            $probe->close();
+            // Closing on a connection that has gone can throw too, and must
+            // not replace the fault that got us here (the import words a lost
+            // connection by its code).
+            try {
+                $probe->close();
+            } catch (\Throwable $ignored) {
+                // Nothing to do: the statement goes with the request.
+            }
         }
 
         return $stem . '-' . bin2hex(random_bytes(4));
@@ -1162,7 +1169,14 @@ class Events
             $ask->execute();
             $row = $ask->get_result()->fetch_assoc();
         } finally {
-            $ask->close();
+            // Closing on a connection that has gone can throw too, and must
+            // not replace the fault that got us here (the import words a lost
+            // connection by its code).
+            try {
+                $ask->close();
+            } catch (\Throwable $ignored) {
+                // Nothing to do: the statement goes with the request.
+            }
         }
         if ($row === null) {
             return null;

@@ -40,7 +40,10 @@
  *      a re-upload adds nothing, the tick imports every row again at the next
  *      free addresses, a mixed file imports only the new rows, a DELETED event
  *      does not count, a COPIED-IN event of the organisation does, and an
- *      event added between preview and Confirm is caught at Confirm
+ *      event added between preview and Confirm is caught at Confirm; only
+ *      the exact value "1" counts as ticked
+ *   X  a row the FILE repeats exactly is marked "repeats row N" in the
+ *      preview and left out at Confirm unless ticked, so the two pages agree
  *   R  another writer taking the web address between the import asking
  *      whether it is free and saving the row (#877). First stood in for by
  *      the trigger: taken once, the row is saved on its second try; taken
@@ -67,7 +70,15 @@
  *      red for each. Six more (D-100) remove the already-in-the-calendar
  *      question, ignore the tick, make Confirm trust the preview's mark,
  *      count deleted events, leave copied-in events out, and ignore
- *      capitals — and section V goes red for each.
+ *      capitals — and section V goes red for each. Three more count any
+ *      value as ticked and make each page forget the file's own repeats
+ *      (sections V and X go red).
+ *   L  a connection lost BEFORE a row's INSERT is sent (during one of the two
+ *      questions asked first) is reported as "not imported, nothing saved",
+ *      never as "may have been saved". Driven by one line injected into the
+ *      CHILD copy of `Events::freeSlug()` that throws a lost connection's own
+ *      error code; a last plant calls every lost connection "not known"
+ *      again and L goes red.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It does not drive a LOST CONNECTION part-way through (the "whether it
@@ -208,7 +219,14 @@ $db->query('DROP TABLE IF EXISTS `p877_slug_tries`');
 try {
     $db->query(
         'CREATE TABLE `p877_slug_tries` (`eventName` VARCHAR(100) NOT NULL PRIMARY KEY, `tries` INT NOT NULL) '
-        . 'ENGINE=MEMORY'
+        // ⚠️ THE COLLATION IS NAMED, and must match `tblEvents.eventName`'s
+        //    (`utf8mb4_general_ci`), because the trigger compares the two. Left
+        //    to the database's default, a database made with a plain CREATE
+        //    DATABASE — as the workflows do — gets MySQL 8.0's
+        //    utf8mb4_0900_ai_ci or MariaDB 11.4's utf8mb4_uca1400_ai_ci, and the
+        //    comparison fails with 1267 "Illegal mix of collations" (found by
+        //    the second independent check: 98 of 106 on both engines).
+        . 'ENGINE=MEMORY DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci'
     );
 } catch (Throwable $e) {
     refuse('could not create the test table p877_slug_tries (' . $e->getMessage() . ')');
@@ -809,9 +827,9 @@ echo "V. A row ALREADY IN THE CALENDAR is left out unless the manager ticks to i
  * Section S's file imported once from clean, then uploaded AGAIN without
  * clearing — with or without the tick. Returns the second import's outcome.
  */
-$scnReimport = static function (bool $tick) use ($runImport, $dup, $db): array {
+$scnReimport = static function (bool $tick, string $tickValue = '1') use ($runImport, $dup, $db): array {
     $first  = $runImport($dup);
-    $second = $runImport($dup, false, $tick === true ? ['importExisting' => '1'] : []);
+    $second = $runImport($dup, false, $tick === true ? ['importExisting' => $tickValue] : []);
     return [
         'firstLines'   => array_map(static fn (array $line): string => $line[0], $first['report']),
         'lines'        => array_map(static fn (array $line): string => $line[0], $second['report']),
@@ -834,11 +852,16 @@ check('V3 ...and offers ONE "Import these anyway" tick, NOT ticked',
 check('V4 THE WHOLE POINT: confirmed without the tick, every row is left out as already in the calendar',
     $v['lines'], $allPresent);
 check('V5 ...so the calendar still holds exactly the five events, not ten', $v['count'], 5);
-check('V6 ...each row says which event it matched and how to import it anyway',
-    [str_contains($v['msg2'], 'Already in the calendar: event #'), str_contains($v['msg2'], 'Import these anyway')],
-    [true, true]);
+check('V6 ...each row says which event it matched, and to import a file holding ONLY that row with the tick '
+    . '(the tick covers the whole file, so re-importing this one with it would repeat every row)',
+    [
+        str_contains($v['msg2'], 'Already in the calendar: event #'),
+        str_contains($v['msg2'], 'import a file holding only this row and tick "Import these anyway"'),
+        str_contains($v['msg2'], 'upload the file again and tick'),
+    ],
+    [true, true, false]);
 check('V7 ...and the activity record counts them on their own, not as refused',
-    $v['activity'], ['Bulk import: 0 events created, 5 already in the calendar, 0 rows not imported']);
+    $v['activity'], ['Bulk import: 0 events created, 5 already in the calendar, 0 repeated in the file, 0 rows not imported']);
 
 $v = $scnReimport(true);
 check('V8 WITH the tick, every row is imported again', $v['lines'], $allOk);
@@ -852,6 +875,10 @@ check('V10 ...and the second copies get the next free addresses',
         'p790-sunday-service-2031-03-16-4',
         'p790-after-the-services-2031-03-17-2',
     ]);
+
+$v = $scnReimport(true, 'on');
+check('V18 only the exact value the box sends ("1") counts as ticked: "on" — what a box with no value sends — '
+    . 'imports nothing', $v['lines'], $allPresent);
 
 // 🧩 A file mixing rows already there with new ones, and the three edges of
 //    what "already there" means: capitals, a DELETED event, and an event
@@ -913,6 +940,48 @@ check('V15 PREMISE: the preview did NOT mark the row, because the event did not 
 check('V16 the event added between preview and Confirm is caught at Confirm, and the row is left out',
     $lt['lines'], [2 => 'Already in the calendar']);
 check('V17 ...so the calendar holds that event once', $lt['count'], 1);
+
+echo "X. A row the FILE repeats is marked in the preview and left out at Confirm, so the two pages agree (D-100)\n";
+// 🔁 Found by the second independent check: such a row showed "Ready" in the
+//    preview and was then skipped at Confirm as "Already in the calendar",
+//    because its first copy had just been saved. Row 3 repeats row 2 exactly;
+//    row 4 differs only in capitals and row 5 only in date, so neither is a
+//    repeat.
+$twice = $child . $sep . 'p790-twice.csv';
+file_put_contents(
+    $twice,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 twice\",2031-10-01 10:00:00,2031-10-01 11:00:00,published\n"
+    . "\"P790 twice\",2031-10-01 10:00:00,2031-10-01 11:00:00,published\n"
+    . "\"P790 TWICE\",2031-10-01 10:00:00,2031-10-01 11:00:00,published\n"
+    . "\"P790 twice\",2031-10-02 10:00:00,2031-10-02 11:00:00,published\n"
+);
+/** The file with a repeated row, with or without the tick. */
+$scnTwice = static function (bool $tick) use ($runImport, $twice): array {
+    $r = $runImport($twice, true, $tick === true ? ['importExisting' => '1'] : []);
+    return [
+        'repeatMarks' => substr_count($r['previewBody'], '>Repeats an earlier row</span>'),
+        'saysRow2'    => str_contains($r['previewBody'], 'row 2 of this file'),
+        'ready'       => substr_count($r['previewBody'], '>Ready</span>'),
+        'lines'       => array_map(static fn (array $line): string => $line[0], $r['report']),
+        'msg3'        => $r['report'][3][1] ?? '',
+        'count'       => count($r['events']),
+        'activity'    => $r['activity'],
+    ];
+};
+$x = $scnTwice(false);
+check('X1 the preview marks the repeated row "Repeats an earlier row", naming row 2, and calls the other three Ready',
+    [$x['repeatMarks'], $x['saysRow2'], $x['ready']], [1, true, 3]);
+check('X2 Confirm, without the tick, leaves out exactly the row the preview marked — the two pages agree',
+    $x['lines'], [2 => 'OK', 3 => 'Repeats an earlier row', 4 => 'OK', 5 => 'OK']);
+check('X3 ...says which row it repeats, and how to import it anyway',
+    [str_contains($x['msg3'], 'Repeats row 2 of this file'), str_contains($x['msg3'], 'import a file holding only this row')],
+    [true, true]);
+check('X4 ...three events are saved: different capitals and a different date are not repeats', $x['count'], 3);
+check('X5 ...and the activity record counts the repeat on its own',
+    $x['activity'], ['Bulk import: 3 events created, 0 already in the calendar, 1 repeated in the file, 0 rows not imported']);
+$x = $scnTwice(true);
+check('X6 WITH the tick, the repeated row is imported too', [$x['lines'], $x['count']], [[2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK'], 4]);
 
 echo "R. Another writer takes the address between asking and saving (#877)\n";
 // 🏁 Stood in for by the trigger (see RACE_ONCE_NAME at the top): the database
@@ -1355,7 +1424,15 @@ $restoreBoth();
 
 // 📌 D-100's plants. Each takes one part of "already in the calendar" away.
 // (f) NO QUESTION AT CONFIRM: the re-upload doubles every event again.
-$plant($pagePath, $before, 'if ($importExisting === false) {', 'if (false) {', 'the already-in-the-calendar question');
+// (The find text carries the next line too: `$importExisting === false` also
+// guards the in-file repeat above it, so the condition alone is not unique.)
+$plant(
+    $pagePath,
+    $before,
+    "if (\$importExisting === false) {\n                                \$there = Events::alreadyInCalendar(",
+    "if (false) {\n                                \$there = Events::alreadyInCalendar(",
+    'the already-in-the-calendar question'
+);
 $v = $scnReimport(false);
 check('P26 with the question removed, a re-upload imports every row a second time, so V4 would have gone red',
     [$v['lines'], $v['count']], [$allOk, 10]);
@@ -1402,10 +1479,10 @@ $plant(
     $eventsBefore,
     'AND `isDeleted` = 0 AND `startDateTime`',
     'AND `isDeleted` = 0 AND `externalFeedID` IS NULL AND `startDateTime`',
-    'the deleted-event rule'
+    'the place to leave copied-in events out'
 );
 $mx = $scnMixed();
-check('P31 with copied-in events left out, the copied-in event is imported a second time, so V14 would have gone red',
+check('P31 with copied-in events left out, the row matching the copied-in event is imported beside it, so V14 would have gone red',
     $mx[6] ?? null, 'OK');
 $restoreBoth();
 
@@ -1420,6 +1497,90 @@ $plant(
 $mx = $scnMixed();
 check('P32 with capitals ignored, "P790 SUNDAY SERVICE" is left out, so V12 would have gone red',
     $mx[4] ?? null, 'Already in the calendar');
+$restoreBoth();
+
+// (l) ANY VALUE COUNTS AS TICKED.
+$plant(
+    $pagePath,
+    $before,
+    "\$importExisting = ((\$_POST['importExisting'] ?? '') === '1');",
+    "\$importExisting = ((\$_POST['importExisting'] ?? '') !== '');",
+    'the exact tick value'
+);
+$v = $scnReimport(true, 'on');
+check('P33 with any value counted as ticked, "on" imports every row again, so V18 would have gone red', $v['lines'], $allOk);
+$restoreBoth();
+
+// (m) CONFIRM FORGETS THE FILE'S OWN REPEATS: the repeated row falls through
+//     to the calendar question and is called "Already in the calendar" —
+//     the disagreement X2 exists to catch.
+$plant($pagePath, $before, '$repeatOf  = $firstRowSeen[$repeatKey] ?? 0;', '$repeatOf  = 0;', 'the in-file repeat at Confirm');
+$x = $scnTwice(false);
+check('P34 with Confirm forgetting the file\'s repeats, the repeated row is described as already in the calendar, so X2 would have gone red',
+    $x['lines'][3] ?? null, 'Already in the calendar');
+$restoreBoth();
+
+// (n) THE PREVIEW FORGETS THE FILE'S OWN REPEATS: it calls the row Ready again.
+$plant(
+    $pagePath,
+    $before,
+    "\$preview[\$i]['repeatsRow'] = \$firstRowFor[\$repeatKey];",
+    "\$preview[\$i]['repeatsRow'] = 0;",
+    'the in-file repeat in the preview'
+);
+$x = $scnTwice(false);
+check('P35 with the preview forgetting the file\'s repeats, the repeated row shows Ready while Confirm skips it, so X1 would have gone red',
+    [$x['repeatMarks'], $x['ready'], $x['lines'][3] ?? null], [0, 4, 'Repeats an earlier row']);
+$restoreBoth();
+
+echo "L. A connection lost BEFORE the row is sent is not reported as \"may have been saved\" (#877)\n";
+// 🔌 Two questions now go to the database before a row's INSERT (is it
+//    already there, is the address free). A connection lost during either
+//    cannot have saved anything. Nothing in one test process can drop the
+//    page's connection at that exact moment, so the CHILD copy of
+//    `Events::freeSlug()` is given one injected line that throws the error
+//    code of a lost connection (2006) for one row's name — the import cannot
+//    tell it from the real thing, because it judges by the code. The row after
+//    it is then "never sent", as for any lost connection.
+$lostFile = $child . $sep . 'p790-lost.csv';
+file_put_contents(
+    $lostFile,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 L before\",2031-11-01 10:00:00,2031-11-01 11:00:00,published\n"
+    . "\"P790 lost before send\",2031-11-02 10:00:00,2031-11-02 11:00:00,published\n"
+    . "\"P790 L after\",2031-11-03 10:00:00,2031-11-03 11:00:00,published\n"
+);
+$inject = "    public static function freeSlug(mysqli \$db, int \$siteId, string \$stem): string\n    {\n";
+$injected = $inject
+    . "        if (str_starts_with(\$stem, 'p790-lost-before-send') === true) {\n"
+    . "            throw new \\mysqli_sql_exception('injected by the self-test: MySQL server has gone away', 2006);\n"
+    . "        }\n";
+/** The lost-connection file, run against a page whose Events.php carries the injection. */
+$scnLost = static function () use ($runImport, $lostFile): array {
+    $r = $runImport($lostFile);
+    return [
+        'lines'    => array_map(static fn (array $line): string => $line[0], $r['report']),
+        'msg3'     => $r['report'][3][1] ?? '',
+        'events'   => array_values($r['events']),
+        'activity' => $r['activity'],
+    ];
+};
+$plant($eventsPath, $eventsBefore, $inject, $injected, 'the start of freeSlug()');
+$lo = $scnLost();
+check('L1 the row whose connection was lost before it was sent is "Skipped", not "Not known", and the row after is never sent',
+    $lo['lines'], [2 => 'OK', 3 => 'Skipped', 4 => 'Skipped']);
+check('L2 ...it says the connection was lost BEFORE the row was sent, so nothing was saved',
+    [str_contains($lo['msg3'], 'lost before this row was sent'), str_contains($lo['msg3'], 'cannot tell whether it was saved')],
+    [true, false]);
+check('L3 ...only the row before it is in the database', $lo['events'], ['P790 L before']);
+check('L4 ...and the activity record counts it as not imported, with no row "whose outcome is not known"',
+    $lo['activity'], ['Bulk import: 1 events created, 0 already in the calendar, 0 repeated in the file, 2 rows not imported']);
+
+// (o) EVERY LOST CONNECTION CALLED "NOT KNOWN" again — the old wording.
+$plant($pagePath, $before, '$unknown   = $insertSent;', '$unknown   = true;', 'the sent-or-not test');
+$lo = $scnLost();
+check('P36 with every lost connection called "not known", the row that was never sent says it may have been saved, '
+    . 'so L1 would have gone red', $lo['lines'][3] ?? null, 'Not known');
 $restoreBoth();
 
 $startServer();

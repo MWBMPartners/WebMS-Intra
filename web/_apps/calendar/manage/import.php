@@ -858,8 +858,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    A fault asking is not a reason to refuse the preview:
                 //    the row is simply not marked, and the confirm step asks
                 //    again (and reports a fault there, row by row).
+                //
+                // 🔁 A ROW THE FILE ITSELF REPEATS (same name, capitals
+                //    included, and same start as an EARLIER row) is marked
+                //    too, as "repeats row N". Confirm leaves it out unless the
+                //    tick is set, exactly as it does a row already in the
+                //    calendar. Before this, the preview called such a row
+                //    "Ready" while Confirm then skipped it — because its first
+                //    copy had just been saved — so the two pages disagreed
+                //    (found by the second independent check). The key is
+                //    built the same way on both pages: the stored start, then
+                //    the name's exact bytes.
+                $firstRowFor = [];
                 foreach ($preview as $i => $r) {
                     $preview[$i]['alreadyThere'] = null;
+                    $preview[$i]['repeatsRow']   = 0;
                     if (count($r['errors']) > 0) {
                         continue;
                     }
@@ -867,6 +880,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($storedStart === null) {
                         continue;
                     }
+                    $repeatKey = $storedStart . "\0" . (string) $r['eventName'];
+                    if (isset($firstRowFor[$repeatKey]) === true) {
+                        $preview[$i]['repeatsRow'] = $firstRowFor[$repeatKey];
+                        continue;
+                    }
+                    $firstRowFor[$repeatKey] = (int) $r['rowNum'];
                     try {
                         $preview[$i]['alreadyThere'] = Events::alreadyInCalendar(
                             $mysqli,
@@ -954,6 +973,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    same event (D-100), counted apart from refusals: the
                     //    row was fine, the import chose not to repeat it.
                     $presentCount = 0;
+                    // 🔁 Rows left out because they repeat an earlier row of
+                    //    the same file (D-100), and the first row of the file
+                    //    for each name and start.
+                    $repeatCount  = 0;
+                    $firstRowSeen = [];
                     // ☑️ "Import these anyway" (D-100). An unticked box is not
                     //    sent at all, and NOT SENT MEANS NO here — the safe
                     //    default the owner chose — so this asks for the exact
@@ -1133,6 +1157,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $refusal = '';
                         $unknown = false;
                         $slug    = '';
+                        // 📤 Whether the row's INSERT was ever SENT. Two
+                        //    questions go to the database before it (is the
+                        //    event already there, is the address free), and a
+                        //    connection lost during either of THOSE cannot have
+                        //    saved anything — so "whether it was saved is not
+                        //    known" would be untrue there (found by the second
+                        //    independent check on #877). Set immediately before
+                        //    each `execute()` of the INSERT.
+                        $insertSent = false;
                         try {
                             // 🕐 STORE THE READING, DO NOT ROUND-TRIP IT (#777).
                             //    `tblEvents.startDateTime` holds a WALL-CLOCK
@@ -1219,6 +1252,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             //    out as already there once its first copy has
                             //    been saved a moment earlier in this same run.
                             //    That is deliberate: it is the same event twice.
+                            // 🔁 A repeat of an EARLIER ROW OF THIS FILE (same
+                            //    stored start, same name byte for byte) is
+                            //    left out unless the tick is set — the same
+                            //    rule, worked out the same way, as the
+                            //    preview's "repeats row N" mark, so the two
+                            //    pages agree. Asked BEFORE the database, so the
+                            //    row is described as what it is (a repeat in
+                            //    the file) even when its first copy was saved
+                            //    a moment ago, and even when that first copy
+                            //    was refused.
+                            $repeatKey = $startSql . "\0" . $name;
+                            $repeatOf  = $firstRowSeen[$repeatKey] ?? 0;
+                            if ($repeatOf === 0) {
+                                $firstRowSeen[$repeatKey] = (int) $r['rowNum'];
+                            } elseif ($importExisting === false) {
+                                $results[] = [
+                                    'ok'     => false,
+                                    'repeat' => true,
+                                    'row'    => $r['rowNum'],
+                                    'msg'    => 'Repeats row ' . $repeatOf . ' of this file (the same name and the same '
+                                        . 'start date and time), so it was not imported. Nothing from it was saved. '
+                                        . 'To import it as well, import a file holding only this row and tick '
+                                        . '"Import these anyway".',
+                                ];
+                                $repeatCount++;
+                                continue;
+                            }
+
                             if ($importExisting === false) {
                                 $there = Events::alreadyInCalendar($mysqli, $siteId, $name, $startSql);
                                 if ($there !== null) {
@@ -1232,7 +1293,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                             . ' has this name and starts at the same date and time ('
                                             . substr($there['startDateTime'], 0, 16) . '), so this row was not '
                                             . 'imported again. Nothing from it was saved. To import it as well, '
-                                            . 'upload the file again and tick "Import these anyway".',
+                                            . 'import a file holding only this row and tick "Import these anyway". '
+                                            . '(Importing this whole file again with the tick would also repeat '
+                                            . 'every row it has just imported.)',
                                     ];
                                     $presentCount++;
                                     continue;
@@ -1296,6 +1359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     //    path — the old `'DB error: '` branch
                                     //    was exactly that, dead beside the line
                                     //    that mattered.
+                                    $insertSent = true;
                                     if ($stmt->execute() !== true) {
                                         throw new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
                                     }
@@ -1321,10 +1385,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $lostAtRow = (int) $r['rowNum'];
                                 $lostCode  = $code;
                                 $lostLine  = $refused->getMessage();
-                                $unknown   = true;
-                                $refusal   = 'Not known: the connection to the database was lost while this row was being '
-                                    . 'saved (error ' . $code . '), so this page cannot tell whether it was saved. Check '
-                                    . 'Manage Events before importing this row again.';
+                                // Not known ONLY when the INSERT itself was
+                                // sent; lost while asking a question first
+                                // means nothing was sent, so nothing was saved.
+                                $unknown   = $insertSent;
+                                $refusal   = $insertSent === true
+                                    ? 'Not known: the connection to the database was lost while this row was being '
+                                        . 'saved (error ' . $code . '), so this page cannot tell whether it was saved. '
+                                        . 'Check Manage Events before importing this row again.'
+                                    : 'Not imported: the connection to the database was lost before this row was sent '
+                                        . '(error ' . $code . '), so nothing from it was saved. Import it again once '
+                                        . 'the database is back.';
                             } elseif ($code === 1062 && str_contains($refused->getMessage(), 'uq_event_site_slug') === true) {
                                 // 🔤 Reached only when the address was taken
                                 //    EVERY time it was asked for (`$slugTries`
@@ -1359,7 +1430,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     . 'problem with the database, not with the row, and it has been recorded for '
                                     . 'whoever looks after the portal.';
                             }
-                            if ($unknown === false) {
+                            // A lost connection has its own record below,
+                            // whether or not the INSERT was sent.
+                            if ($lostTheLine($code) === false) {
                                 $line = 'row ' . (int) $r['rowNum'] . ' (error ' . $code . '): ' . $refused->getMessage();
                                 if ($describesTheRow($code) === true) {
                                     $rowLines[] = $line;
@@ -1416,7 +1489,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     Logger::activity(
                         'EventsImported',
                         'Bulk import: ' . $okCount . ' events created, ' . $presentCount . ' already in the calendar, '
-                        . $notCount . ' rows not imported'
+                        . $repeatCount . ' repeated in the file, ' . $notCount . ' rows not imported'
                         . ($unknownCount > 0 ? ', ' . $unknownCount . ' row whose outcome is not known' : '')
                     );
 
@@ -1538,6 +1611,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <span class="badge bg-warning text-dark">Not known</span>
                             <?php elseif (($r['present'] ?? false) === true): ?>
                                 <span class="badge bg-secondary">Already in the calendar</span>
+                            <?php elseif (($r['repeat'] ?? false) === true): ?>
+                                <span class="badge bg-secondary">Repeats an earlier row</span>
                             <?php else: ?>
                                 <span class="badge bg-danger">Skipped</span>
                             <?php endif; ?>
@@ -1583,6 +1658,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <?php $there = $r['alreadyThere']; ?>
                                 <span class="badge bg-secondary">Already in the calendar</span>
                                 <a href="<?php echo htmlspecialchars(Site::url('calendar/event') . '?slug=' . rawurlencode((string) $there['eventSlug']), ENT_QUOTES, 'UTF-8'); ?>">event #<?php echo (int) $there['eventID']; ?>, <?php echo htmlspecialchars(substr((string) $there['startDateTime'], 0, 16), ENT_QUOTES, 'UTF-8'); ?></a>
+                            <?php elseif (count($r['errors']) === 0 && (int) ($r['repeatsRow'] ?? 0) > 0): ?>
+                                <span class="badge bg-secondary">Repeats an earlier row</span>
+                                row <?php echo (int) $r['repeatsRow']; ?> of this file
                             <?php elseif (count($r['errors']) === 0): ?>
                                 <span class="badge bg-success">Ready</span>
                             <?php else: ?>
@@ -1604,13 +1682,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         $preview,
         static fn (array $row): bool => count($row['errors']) === 0 && ($row['alreadyThere'] ?? null) !== null
     ));
+    $repeatRowsCount = count(array_filter(
+        $preview,
+        static fn (array $row): bool => count($row['errors']) === 0 && (int) ($row['repeatsRow'] ?? 0) > 0
+    ));
     ?>
-    <?php if ($alreadyCount > 0): ?>
+    <?php if ($alreadyCount > 0 || $repeatRowsCount > 0): ?>
         <div class="alert alert-warning">
             <i class="fa-solid fa-calendar-check me-1"></i>
-            <strong><?php echo (int) $alreadyCount; ?></strong> row(s) match an event already in the calendar — the
-            same name and the same start date and time — so they will NOT be imported again unless you tick
-            <em>Import these anyway</em> below.
+            <?php if ($alreadyCount > 0): ?>
+                <strong><?php echo (int) $alreadyCount; ?></strong> row(s) match an event already in the calendar.
+            <?php endif; ?>
+            <?php if ($repeatRowsCount > 0): ?>
+                <strong><?php echo (int) $repeatRowsCount; ?></strong> row(s) repeat an earlier row of this file.
+            <?php endif; ?>
+            "The same" means the same name, capitals included, and the same start date and time. These rows will
+            NOT be imported unless you tick <em>Import these anyway</em> below.
         </div>
     <?php endif; ?>
     <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>">
@@ -1624,8 +1711,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="form-check mb-3">
             <input class="form-check-input" type="checkbox" name="importExisting" value="1" id="importExisting">
             <label class="form-check-label" for="importExisting">
-                Import these anyway: also import rows that match an event already in the calendar (the same
-                name and the same start date and time). Each gets its own web address.
+                Import these anyway: also import rows that match an event already in the calendar, or an
+                earlier row of this file (the same name, capitals included, and the same start date and time).
+                Each gets its own web address.
             </label>
         </div>
         <button type="submit" class="btn btn-success">
@@ -1641,8 +1729,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <p class="small">Required columns: <code>eventName</code>, <code>startDateTime</code>. Optional: <code>endDateTime</code>, <code>isAllDay</code>, <code>locationName</code>, <code>description</code>, <code>status</code> (draft|published|cancelled|postponed), <code>category</code>, <code>type</code>, <code>isPublic</code> (yes, y, true or 1 to make it public; empty or anything else means members-only), <code>isFeatured</code>. First row must be the header.</p>
             <p class="small">
                 The same event can appear on many dates; each gets its own web address. A row with the same name
-                and the same start date and time as an event already in the calendar is left out, so uploading a
-                corrected file again adds only what is missing. The preview offers a tick to import such rows anyway.
+                (capitals included) and the same start date and time as an event already in the calendar, or as an
+                earlier row of the file, is left out, so uploading a corrected file again adds only what is missing.
+                The preview offers a tick to import such rows anyway.
             </p>
             <p class="small text-muted mb-0">
                 Excel users: open your file in Excel, choose <em>File → Save As → CSV (Comma delimited) (.csv)</em>.

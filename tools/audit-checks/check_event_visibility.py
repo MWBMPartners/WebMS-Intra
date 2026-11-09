@@ -392,7 +392,9 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # the SAME organisation count on purpose (narrowing it would let one be
     # imported a second time); the question is scoped by siteID and returns
     # only the event's number, address and start, to that calendar's manager.
-    ("_core/Events.php", 1154): (
+    # Keyed by line number: moved 1154 -> 1161 when #877's second round wrapped
+    # the free-address question's statement close in a try/catch above it.
+    ("_core/Events.php", 1161): (
         "SELECT `eventID`, `eventSlug`, `startDateTime` FROM `tblEvents` WHERE `siteID` = ? AND `isDeleted` = 0",
         "asks whether this organisation's calendar already holds the same event, for its own manager importing a file (D-100); copied-in events of the same organisation count on purpose",
     ),
