@@ -2283,6 +2283,11 @@ check('W7 organisation 2\'s main website, framing list and public address never 
 $scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $recorded, $people, $signIn, $http, $pwClean): array {
     $pwClean();
     $out = [];
+    // #493 P4a (D-101): a public address cannot be saved while the portal's
+    // own address is unset, so it is set for the whole scenario and put back.
+    $siteUrl = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL")->fetch_assoc();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'site.url', 'https://portal.pwt.example.org', '', 0) "
+        . "ON DUPLICATE KEY UPDATE `settingValue` = 'https://portal.pwt.example.org'");
     $pwPost('setup', 'public_host', 'Events.PWT-One.example.org');
     $out['stored'] = $pwHost($siteOne);
     foreach (['a scheme' => 'https://e.pwt.example.org', 'a port' => 'e.pwt.example.org:8443', 'a path' => 'e.pwt.example.org/x',
@@ -2297,20 +2302,17 @@ $scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, 
     $out['another organisation\'s refused'] = $pwHost($siteOne);
     $out['the refusal says so'] = str_contains($page, 'already used by another organisation');
     $out['the refusal names nobody'] = str_contains($page, 'Selftest PWT Two') === false;
-    $siteUrl = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL")->fetch_assoc();
-    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'site.url', 'https://portal.pwt.example.org', '', 0) "
-        . "ON DUPLICATE KEY UPDATE `settingValue` = 'https://portal.pwt.example.org'");
     $pwPost('setup', 'public_host', 'portal.pwt.example.org');
     $out['the portal\'s own address refused'] = $pwHost($siteOne);
+    $out['refusals recorded'] = $recorded('PublicWebsiteSetupRefused', $people['setup']['id'], 'public address') >= 9;
+    $pwPost('setup', 'public_host', '');
+    $out['empty deletes'] = $pwHost($siteOne);
+    $out['organisation 2 untouched'] = $pwHost($siteTwo);
     $restore = $siteUrl === null ? '' : (string) $siteUrl['settingValue'];
     $st = $db->prepare("UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
     $st->bind_param('s', $restore);
     $st->execute();
     $st->close();
-    $out['refusals recorded'] = $recorded('PublicWebsiteSetupRefused', $people['setup']['id'], 'public address') >= 9;
-    $pwPost('setup', 'public_host', '');
-    $out['empty deletes'] = $pwHost($siteOne);
-    $out['organisation 2 untouched'] = $pwHost($siteTwo);
     return $out;
 };
 $wHostWant = ['stored' => 'events.pwt-one.example.org'];
@@ -2852,6 +2854,11 @@ check('W18 with a hand-edited framing list holding "*", a ";" line and an http l
 //      none) is replaced by an UPDATE, not refused as a clash.
 $scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $signIn, $http, $pwClean): array {
     $pwClean();
+    // #493 P4a (D-101): set the portal's own address for the scenario (a public
+    // address cannot be saved without it), and put it back at the end.
+    $siteUrl = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL")->fetch_assoc();
+    $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'site.url', 'https://portal.pwt.example.org', '', 0) "
+        . "ON DUPLICATE KEY UPDATE `settingValue` = 'https://portal.pwt.example.org'");
     $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteTwo}, 'shared.pwt.example.org', '2020-01-01 00:00:00')");
     $pwPost('setup', 'public_host', 'shared.pwt.example.org');
     $page  = $http('GET', '/admin/public-website')['body'];
@@ -2869,6 +2876,11 @@ $scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pw
     $out['a spoiled row is shown as none'] = str_contains($http('GET', '/admin/public-website')['body'], 'NOT A HOST') === false;
     $pwPost('setup', 'public_host', 'events.fresh.pwt.example.org');
     $out['a spoiled row is replaced'] = $pwHost($siteOne);
+    $restore = $siteUrl === null ? '' : (string) $siteUrl['settingValue'];
+    $st = $db->prepare("UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
+    $st->bind_param('s', $restore);
+    $st->execute();
+    $st->close();
     $pwClean();
     return $out;
 };
@@ -3339,8 +3351,10 @@ $p = $plant('_core/PublicWebsiteSetup.php', "if (\$one['problem'] !== '' || \$on
     '', $scnPwHandEdited);
 check('P89 with the stored list no longer checked again on read, the page and the check would show a hand edit\'s spoiled lines as valid entries (round 1: this plant used to stay green, because it only asked the header builder)',
     [$p['applied'], count($p['result']['what the check says about framing'] ?? []) > 1], [true, true]);
-$p = $plant('_core/PublicWebsiteSetup.php', "'INSERT INTO `' . self::HOSTS_TABLE . '` (`hostName`, `siteID`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP())'",
-    "'INSERT INTO `' . self::HOSTS_TABLE . '` (`hostName`, `siteID`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE `siteID` = VALUES(`siteID`)'", $scnPwHostInsert);
+// #493 P4a (D-101) added the two approval columns to this INSERT, so the
+// plant names the statement as it now stands.
+$p = $plant('_core/PublicWebsiteSetup.php', "'VALUES (?, ?, UTC_TIMESTAMP(), NULL, NULL)'",
+    "'VALUES (?, ?, UTC_TIMESTAMP(), NULL, NULL) ON DUPLICATE KEY UPDATE `siteID` = VALUES(`siteID`)'", $scnPwHostInsert);
 check('P91 with the public address INSERTED as an upsert, choosing another organisation\'s name takes it from them', [$p['applied'], $p['result']['this organisation'] ?? null], [true, 'shared.pwt.example.org']);
 $p = $plant('_core/PublicWebsiteSetup.php', "\$stmt = \$was !== '' || self::hasHostRow(\$db, \$siteId) === true", "\$stmt = \$was !== ''", $scnPwHostInsert);
 check('P92 with a spoiled row not looked for, replacing it is refused as a clash and the spoiled row stays', [$p['applied'], $p['result']['a spoiled row is replaced'] ?? null], [true, 'NOT A HOST!']);

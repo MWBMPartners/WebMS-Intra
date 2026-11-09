@@ -11393,9 +11393,15 @@ CREATE TABLE IF NOT EXISTS `tblPublicHosts` (
     `siteID`       INT          NOT NULL COMMENT 'The ONE organisation this public address belongs to (#493 P3, D-095). One address per organisation.',
     `hostName`     VARCHAR(253) NOT NULL COMMENT 'The public address for the organisation''s public pages: a host name only, lower case, letters a to z, digits, hyphens and dots (a name with other letters in its xn-- form). Checked by Portal\\Core\\PublicWebsiteSetup::checkPublicHost(), and again whenever it is read.',
     `changedAtUtc` DATETIME     NOT NULL COMMENT 'A moment in UTC, written with UTC_TIMESTAMP(): when this address was last set. Nothing compares it; who set it is in the activity log.',
+    -- The two approval columns come from migration 263 (D-101); a fresh
+    -- install gets them here, in the table's final shape, and 263's guarded
+    -- ALTERs replay as no-ops.
+    `approvedAtUtc` DATETIME    NULL DEFAULT NULL COMMENT 'A moment in UTC, written with UTC_TIMESTAMP(): when the installation''s global administrator approved this public address (D-101). NULL = not approved, and then the address does NOTHING: it is not the public door. Saving or changing the address empties it.',
+    `approvedByID` INT          NULL DEFAULT NULL COMMENT 'FK to tblUsers: the installation''s global administrator who approved this public address (D-101); NULL when not approved, or when that account is gone. Who approved or withdrew is also in the activity log.',
     PRIMARY KEY (`siteID`),
     UNIQUE KEY `uq_public_host_name` (`hostName`),
-    CONSTRAINT `fk_public_host_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
+    CONSTRAINT `fk_public_host_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
+    CONSTRAINT `fk_public_host_approver` FOREIGN KEY (`approvedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Each organisation''s optional public address for its public pages; no two may share one (#493 P3, D-095)';
 
@@ -11447,6 +11453,10 @@ COMMENT='Each organisation''s public door name; a row means the door is on (#493
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'public.door.testCopies.permitted', 'testers', 'testers', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+-- D-101: the two approval columns of tblPublicHosts are declared in that
+-- table's CREATE above, so a fresh install has the final shape; migration 263
+-- adds them to an existing database with information_schema guards.
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('263_public_door.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

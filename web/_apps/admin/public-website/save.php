@@ -89,6 +89,22 @@ if ($action === 'frame_add_main') {
     $finish($out['message'], $out['type']);
 }
 
+// ✅ D-101: approving or withdrawing approval of ANY organisation's public
+//    address — the installation's global administrator only, asked here AND
+//    in the class (the installation and an organisation may be different
+//    parties). Every refusal is recorded by the class.
+if ($action === 'public_host_approve' || $action === 'public_host_withdraw') {
+    $target = is_string($_POST['site'] ?? null) === true && preg_match('/^[1-9][0-9]{0,9}$/D', $_POST['site']) === 1 ? (int) $_POST['site'] : 0;
+    $host   = is_string($_POST['host'] ?? null) === true ? $_POST['host'] : '';
+    if ($target <= 0) {
+        $finish('That form did not arrive whole. Nothing was changed.', 'danger');
+    }
+    $out = $action === 'public_host_approve'
+        ? PublicWebsiteSetup::approvePublicHost($mysqli, $target, $host, App::isRootAdmin(), $actorId)
+        : PublicWebsiteSetup::withdrawPublicHostApproval($mysqli, $target, App::isRootAdmin(), $actorId);
+    $finish($out['message'], $out['type']);
+}
+
 // 🚪 The public door (#493 P4a, D-097): on, a new name, off. Each writer
 //    records what it did, and refuses with its reason. Replacing the name and
 //    switching the door off both stop every copy pasted into a website, so the

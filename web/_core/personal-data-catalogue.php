@@ -909,11 +909,14 @@ return [
         'columns'  => [],
     ],
     'tblPublicHosts' => [
-        'decision' => 'not-personal',
+        'decision' => 'unlink',
         'reason'   => 'Each organisation\'s optional public address for its public pages (#493 P3, D-095): an '
-                    . 'organisation, a host name such as events.example.org, and the moment it was set. It names an '
-                    . 'organisation\'s web address, not a person; who set it is recorded in the activity log, not here.',
-        'columns'  => [],
+                    . 'organisation, a host name such as events.example.org, the moment it was set, and — since D-101 '
+                    . '(#493 P4a) — the moment and the account of the installation\'s global administrator who approved '
+                    . 'it. The address is the organisation\'s, so the row stays; only the approver\'s link to their '
+                    . 'account is emptied when they are erased (the approval itself stands, and who approved is also in '
+                    . 'the activity log).',
+        'columns'  => ['approvedByID'],
     ],
     'tblPublicDoorNames' => [
         'decision' => 'not-personal',

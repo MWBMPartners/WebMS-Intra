@@ -600,7 +600,8 @@ final class PublicDoor
     /**
      * 🔗 The whole address of one of the organisation's door addresses —
      * THE ONE PLACE they are built:
-     *   - on the organisation's public address when it has one (D-095):
+     *   - on the organisation's public address when it has one AND the
+     *     installation's global administrator has approved it (D-095, D-101):
      *     https://events.example.org/events.json;
      *   - otherwise the portal's own address for the organisation
      *     (`PortalAddress::base()`) plus /w/{name}/: never `Site::url()`,
@@ -617,7 +618,9 @@ final class PublicDoor
         if ($door['state'] !== 'on') {
             return '';
         }
-        $host = PublicWebsiteSetup::publicHostFor($db, $siteId);
+        // D-101: only an APPROVED public address is the door, so only an
+        // approved one is written into the door's own addresses.
+        $host = PublicWebsiteSetup::publicHostApproved($db, $siteId) === true ? PublicWebsiteSetup::publicHostFor($db, $siteId) : '';
         if ($host !== '') {
             return 'https://' . $host . '/' . $what;
         }
@@ -643,7 +646,7 @@ final class PublicDoor
     public static function whyNoAddress(\mysqli $db, int $siteId): string
     {
         if (PublicWebsiteSetup::doorStateFor($db, $siteId)['state'] !== 'on'
-            || PublicWebsiteSetup::publicHostFor($db, $siteId) !== '') {
+            || PublicWebsiteSetup::publicHostApproved($db, $siteId) === true) {
             return '';
         }
         if (PortalAddress::state() === PortalAddress::STATE_UNREADABLE) {

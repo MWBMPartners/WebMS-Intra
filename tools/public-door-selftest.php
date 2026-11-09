@@ -109,7 +109,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 136;
+const PDS_EXPECTED_CHECKS = 149;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -315,7 +315,7 @@ if (preg_match('#(^|/)\.(?!well-known)#', $uri) === 1) { http_response_code(403)
 // Section F's "direct" requests run ANY .php file, as a web server that does
 // not honour .htaccess (nginx, IIS, a misconfigured host) would.
 $direct = ($_SERVER['HTTP_X_SELFTEST_DIRECT'] ?? '') === '1';
-if ($direct === false && preg_match('#\.(php\d?|phtml|phar)$#i', $uri) === 1 && in_array($uri, ['/index.php', '/api-docs/index.php', '/error.php'], true) === false) { http_response_code(404); exit('404'); }
+if ($direct === false && preg_match('#\.(php\d?|phtml|phar)(/|$)#i', $uri) === 1 && in_array($uri, ['/index.php', '/api-docs/index.php', '/error.php'], true) === false) { http_response_code(404); exit('404'); }
 $target = $root . '/index.php';
 $real   = ($uri === '/' || preg_match('#^/assets/?$#', $uri) === 1) ? false : realpath($root . $uri);
 if ($real !== false && str_starts_with($real, $root . DIRECTORY_SEPARATOR) === true && is_file($real) === true) {
@@ -570,6 +570,11 @@ foreach ([
     'tester'  => ['isAdmin' => 1, 'isRoot' => 0, 'site' => $siteA],
     'member'  => ['isAdmin' => 0, 'isRoot' => 0, 'site' => $siteA],
     'memberB' => ['isAdmin' => 0, 'isRoot' => 0, 'site' => $siteB],
+    // D-101: the installation's global administrator (the ONLY one who may
+    // approve a public address), and somebody given "Set up the public
+    // website" in A (who may save one, and may not approve it).
+    'instroot' => ['isAdmin' => 0, 'isRoot' => 1, 'site' => $siteA],
+    'setup'    => ['isAdmin' => 0, 'isRoot' => 0, 'site' => $siteA],
 ] as $role => $flags) {
     $email = "pds.{$role}@selftest.invalid";
     $old   = $db->prepare('SELECT `userID` FROM `tblUsers` WHERE `emailAddress` = ?');
@@ -603,6 +608,11 @@ register_shutdown_function(static function () use (&$state, $removeMember): void
     }
 });
 
+$setupRole = (int) ($db->query("SELECT `roleID` FROM `tblRoles` WHERE `siteID` = 1 AND `roleKey` = 'website_setup'")->fetch_assoc()['roleID'] ?? 0);
+if ($setupRole <= 0) {
+    refuse('organisation 1 has no Website Set-up role — migration 262 did not seed it');
+}
+$db->query("INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES ({$people['setup']['id']}, {$setupRole}, 1)");
 $tokenOn = static function (string $html): string {
     if (preg_match('/name="csrf_token"\s+value="([^"]+)"/', $html, $m) === 1) {
         return html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
@@ -880,7 +890,10 @@ check('G08b "Check my set-up" says the door is on and gives its events address �
 $nameB = bin2hex(random_bytes(12));
 $nameC = bin2hex(random_bytes(12));
 $db->query("INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES ({$siteB}, '{$nameB}', UTC_TIMESTAMP()), ({$siteC}, '{$nameC}', UTC_TIMESTAMP())");
-$db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteA}, '{$hostA}', UTC_TIMESTAMP()), ({$siteB}, '{$hostB}', UTC_TIMESTAMP()), ({$siteC}, '{$hostC}', UTC_TIMESTAMP())");
+// Written APPROVED (D-101): sections G onwards test the door on an approved
+// address; section D tests approval itself.
+$db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`, `approvedAtUtc`) VALUES ({$siteA}, '{$hostA}', UTC_TIMESTAMP(), UTC_TIMESTAMP()), "
+    . "({$siteB}, '{$hostB}', UTC_TIMESTAMP(), UTC_TIMESTAMP()), ({$siteC}, '{$hostC}', UTC_TIMESTAMP(), UTC_TIMESTAMP())");
 $refusals['an inactive organisation by name'] = $http('GET', '/w/' . $nameC . '/events.json');
 $refusals['an inactive organisation by public address'] = $http('GET', '/events.json', ['host' => $hostC]);
 check('G09 an INACTIVE organisation answers nothing, by name or by its public address (it has a door, a public address and a ticked event)',
@@ -937,6 +950,91 @@ check('E01 on a public address error.php (404 and 500) and the API description a
 $eMembers = $http('GET', '/error.php?code=404');
 check('E02 on the members\' own address error.php still draws the portal\'s own error page (the hand-off reaches door requests only)',
     [$eMembers['status'], str_contains($eMembers['body'], '<html'), $eMembers['body'] === "Not found.\n"], [404, true, false]);
+
+// =============================================================================
+echo "D. D-101: a public address takes effect only once the installation approves it\n";
+// =============================================================================
+// Round 6 of P4a's check: an organisation's administrator could save an
+// address members really sign in at that the portal had no record of (an
+// alias of the portal's own address), and every page there — sign-in included
+// — became the door's 404, with no way back from that address. Now an address
+// does NOTHING until the installation's global administrator approves it.
+$instroot = static function () use ($http, $tokenOn, $signIn): string {
+    $jar = $signIn('instroot');
+    // The installation's global administrator belongs to every organisation,
+    // so in this mode they choose one first.
+    $page = $http('GET', '/site/choose', ['jar' => $jar]);
+    $http('POST', '/site/switch', ['jar' => $jar, 'post' => ['csrf_token' => $tokenOn($page['body']), 'site_id' => '1']]);
+    return $jar;
+};
+$hostRow = static function (int $site) use ($db): ?array {
+    return $db->query("SELECT `hostName`, `approvedAtUtc`, `approvedByID` FROM `tblPublicHosts` WHERE `siteID` = {$site}")->fetch_assoc();
+};
+/** Is this answer the door's (its 404 or a feed)? Only the door sends this content rule; no portal page does. */
+/** The approval moment of an organisation's address: null when waiting, 'no row' when it has none (never `??`, which reads null as absent). */
+$approvedAt = static function (int $site) use ($hostRow): ?string {
+    $row = $hostRow($site);
+    return $row === null ? 'no row' : ($row['approvedAtUtc'] === null ? null : (string) $row['approvedAtUtc']);
+};
+$isDoor = static function (array $r): bool {
+    return ($r['headers']['content-security-policy'] ?? '') === "default-src 'none'; frame-ancestors 'none'; sandbox";
+};
+$alias = 'intranet.selftest.test';
+$signIn('setup');
+$cardAs = static function (string $role, string $action, array $more = []) use ($http, $tokenOn, $people): array {
+    $jar   = $people[$role]['jar'];
+    $page  = $http('GET', '/admin/public-website', ['jar' => $jar]);
+    $r     = $http('POST', '/admin/public-website/save', ['jar' => $jar, 'post' => ['csrf_token' => $tokenOn($page['body']), 'action' => $action] + $more]);
+    return ['status' => $r['status'], 'page' => $http('GET', '/admin/public-website', ['jar' => $jar])['body']];
+};
+// The takeover scenario: A's "Set up the public website" holder saves an alias
+// members sign in at, which the portal has no record of.
+$d1 = $cardAs('setup', 'public_host', ['value' => $alias]);
+$aliasLogin  = $http('GET', '/login', ['host' => $alias]);
+$aliasEvents = $http('GET', '/events.json', ['host' => $alias]);
+check('D01 an organisation saving an address the portal has no record of (an alias members sign in at) gets a row that waits — and until approved the alias is NOT the door: its sign-in page still answers, and /events.json there is not the door',
+    [$hostRow($siteA)['hostName'] ?? null, $approvedAt($siteA), str_contains($d1['page'], 'data-public-host-approval="waiting"'),
+        $aliasLogin['status'], str_contains($aliasLogin['body'], 'name="password"'), $isDoor($aliasEvents)],
+    [$alias, null, true, 200, true, false]);
+check('D02 the address A used before (approved) stopped being the door the moment it was changed — saving a new address drops approval',
+    $isDoor($http('GET', '/events.json', ['host' => $hostA])), false);
+$refusedBefore = $logged('PublicWebsiteSetupRefused', $people['setup']['id']) + $logged('PublicWebsiteSetupRefused', $people['root']['id']);
+$d3a = $cardAs('setup', 'public_host_approve', ['site' => '1', 'host' => $alias]);
+$d3b = $cardAs('root', 'public_host_approve', ['site' => '1', 'host' => $alias]);
+$signIn('tester');
+$d3c = $cardAs('tester', 'public_host_approve', ['site' => '1', 'host' => $alias]);
+check('D03 nobody but the installation\'s global administrator can approve: the "Set up the public website" holder and A\'s own global administrator are refused and it is recorded; an ordinary administrator cannot even open the page',
+    [$approvedAt($siteA), $logged('PublicWebsiteSetupRefused', $people['setup']['id']) + $logged('PublicWebsiteSetupRefused', $people['root']['id']) - $refusedBefore,
+        str_contains($d3a['page'], 'Only a global administrator of the whole installation can approve'), $d3c['status']],
+    [null, 2, true, 403]);
+$jarRootI = $instroot();
+$instPage = $http('GET', '/admin/public-website', ['jar' => $jarRootI])['body'];
+$stale = $cardAs('instroot', 'public_host_approve', ['site' => '1', 'host' => 'something-else.selftest.test']);
+check('D04 the installation\'s global administrator sees every organisation\'s address in one list, waiting; approving an address that is no longer the one stored changes nothing',
+    [str_contains($instPage, 'data-public-host-approvals="1"'), str_contains($instPage, $alias), $approvedAt($siteA),
+        str_contains($stale['page'], 'no longer the one waiting')],
+    [true, true, null, true]);
+$cardAs('instroot', 'public_host_approve', ['site' => '1', 'host' => $alias]);
+$row = $hostRow($siteA);
+check('D05 approved by the installation\'s global administrator, the address IS the door — recorded with who approved',
+    [$row['approvedAtUtc'] !== null, (int) ($row['approvedByID'] ?? 0), $logged('PublicWebsitePublicAddressApproved', $people['instroot']['id']),
+        $http('GET', '/events.json', ['host' => $alias])['status']],
+    [true, $people['instroot']['id'], 1, 200]);
+$cardAs('instroot', 'public_host_withdraw', ['site' => '1']);
+check('D06 withdrawing approval takes effect AT ONCE: the next request is not the door, and the members\' pages answer there again; recorded',
+    [$isDoor($http('GET', '/events.json', ['host' => $alias])), $http('GET', '/login', ['host' => $alias])['status'],
+        $logged('PublicWebsitePublicAddressApprovalWithdrawn', $people['instroot']['id'])],
+    [false, 200, 1]);
+// Back to A's own address, approved, for the sections that follow.
+$cardAs('setup', 'public_host', ['value' => $hostA]);
+check('D07 changing the address again leaves it waiting, whatever was approved before', $approvedAt($siteA), null);
+$cardAs('instroot', 'public_host_approve', ['site' => '1', 'host' => $hostA]);
+check('D08 approved again, A\'s own address is the door again', $http('GET', '/events.json', ['host' => $hostA])['status'], 200);
+$setInstallation('site.url', null);
+$d9 = $cardAs('setup', 'public_host', ['value' => 'another.selftest.test']);
+$setInstallation('site.url', $base);
+check('D09 while the portal\'s own address is not set, no public address can be saved (the portal cannot tell which addresses members sign in at)',
+    [$hostRow($siteA)['hostName'] ?? null, str_contains($d9['page'], 'own address is not set, so it cannot tell')], [$hostA, true]);
 
 $setOwn($siteA, 'calendar.enabled', 'false');
 $refusals['Calendar switched off'] = $feedA();
@@ -1253,9 +1351,12 @@ echo "F. Every PHP file in the web root, driven (rounds 4 and 5 of P4a's check)\
 // cannot tell "behaved" from "crashed" by status alone, which is why F02
 // records each file's statuses: only the three entry points start the portal;
 // the other files are reached through index.php (where the door has already
-// answered), and run DIRECTLY most of them crash (500, nothing printed)
-// because the classes they use are not loaded — they leak nothing, but they
-// are not "behaving", they are failing.
+// answered), and run DIRECTLY most of them crash (500) because the classes
+// they use are not loaded. This test runs PHP with display_errors OFF, so
+// nothing is printed; with display_errors ON the fatal error is printed and
+// names the server's file path (round 6 measured it on real Apache through
+// /robots.php/x, which .htaccess now refuses — check_htaccess_php_denied.py).
+// They leak no organisation's data, but they are not "behaving", they fail.
 $orgNames = [];
 foreach ($db->query("SELECT `siteName` FROM `tblSites` WHERE `siteID` IN (1, {$siteB}, {$siteC})")->fetch_all(MYSQLI_ASSOC) as $row) {
     $orgNames[] = (string) $row['siteName'];
@@ -1347,7 +1448,7 @@ $otherStatuses = [];
 foreach ($others as $path) {
     $otherStatuses[$path] = array_values(array_unique(array_values($sweepA['statuses'][$path] ?? [])));
 }
-check('F02 the three entry points answer only the door\'s 404 in every shape on both addresses; every OTHER file run directly either fails (500, nothing printed — its classes are not loaded) or is a page that starts nothing — recorded, not assumed: ' . json_encode($otherStatuses),
+check('F02 the three entry points answer only the door\'s 404 in every shape on both addresses; every OTHER file run directly either fails (500 — its classes are not loaded; nothing printed only because display_errors is off here) or is a page that starts nothing — recorded, not assumed: ' . json_encode($otherStatuses),
     [$entryStatuses, array_values(array_filter($otherStatuses, static fn (array $st): bool => array_diff($st, [200, 500]) !== []))],
     [array_fill(0, 6, [404]), []]);
 // The plants: a NEW entry point must be caught by what it DOES, in every
@@ -1539,7 +1640,7 @@ check('P08 with "active organisations only" taken out of the name look-up, the i
 $p = $plant('_core/Site.php', "if (\$hostRow['active'] === true && self::doorOrganisationAllowed(", 'if (self::doorOrganisationAllowed(',
     static fn (): int => $http('GET', '/events.json', ['host' => 'door-c.selftest.test'])['status']);
 check('P08b with "active organisations only" taken out of the public-address step, the inactive organisation answers on its public address', [$p['applied'], $p['result']], [true, 200]);
-$p = $plant('_core/Site.php', "if (\$hostRow !== null && \$hostRow['usable'] === true) {", 'if (false) {',
+$p = $plant('_core/Site.php', "if (\$hostRow !== null && \$hostRow['usable'] === true && \$hostRow['approved'] === true) {", 'if (false) {',
     static fn (): int => $http('GET', '/w/' . $nameB . '/events.json', ['host' => 'door-a.selftest.test'])['status']);
 check('P09 if a public address stopped being recognised first, B\'s name on A\'s public address would be served', [$p['applied'], $p['result']], [true, 200]);
 $p = $plant('_core/Site.php', "if (\$owner !== null && (int) \$owner['siteID'] !== \$siteId) {", 'if (false) {',
@@ -1736,7 +1837,9 @@ $p = $plant('_core/Site.php', "if (\$isW === false && \$multi === true && \$mode
         return $sessionFiles() - $before;
     });
 check('P42 with the prefixed /w/ form left to the router, the refusal comes after the session start and leaves a session file', [$p['applied'], ($p['result'] ?? 0) > 0], [true, true]);
-$hostFault = ["SELECT h.`siteID`, h.`hostName`, s.`isActive` FROM", "SELECT h.`siteID`, h.`hostNameX`, s.`isActive` FROM"];
+$hostFault = ["SELECT h.`siteID`, h.`hostName`, h.`approvedAtUtc`, s.`isActive` FROM", "SELECT h.`siteID`, h.`hostNameX`, h.`approvedAtUtc`, s.`isActive` FROM"];
+// (An unknown column is thrown, not swallowed: publicHostRow() treats error 1054 as
+// "no public address" ONLY when the approval column itself is missing.)
 $failureState = static function () use ($http, $feedA, $sessionFiles): array {
     $before = $sessionFiles();
     $out    = [];
@@ -1848,6 +1951,50 @@ $p = $plant('_core/PublicWebsite.php', "self::FRAME_PERMITTED_KEY,\n        self
     static fn (): array => array_map(static fn (array $one): bool => $one[0], (array) $askLocks()));
 check('P45 with D-087\'s two settings taken out of the editor lock, the general settings editor would store them', [$p['applied'], $p['result']],
     [true, ['public.door.testCopies.permitted' => false, 'public.door.testCopies.open' => false]]);
+
+// D-101's guards, each planted out.
+$p = $plant('_core/Site.php', "if (\$hostRow !== null && \$hostRow['usable'] === true && \$hostRow['approved'] === true) {",
+    "if (\$hostRow !== null && \$hostRow['usable'] === true) {",
+    static function () use ($db, $siteA, $http): int {
+        $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+        $s = $http('GET', '/events.json', ['host' => 'door-a.selftest.test'])['status'];
+        $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+        return $s;
+    });
+check('P57 with "approved" taken out of the door step, an UNAPPROVED public address is the door', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicWebsiteSetup.php', "`changedAtUtc` = UTC_TIMESTAMP(), '\n                        . '`approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` = ?')",
+    "`changedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = ?')",
+    static function () use ($cardAs, $approvedAt, $siteA, $hostA): mixed {
+        $cardAs('setup', 'public_host', ['value' => 'changed.selftest.test']);
+        $after = $approvedAt($siteA);
+        $cardAs('setup', 'public_host', ['value' => $hostA]);
+        return $after !== null;
+    });
+check('P58 with "saving clears approval" taken out, a CHANGED address keeps the old approval', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$isRootAdmin === false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can approve",
+    "        if (false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can approve",
+    static function () use ($db, $siteA, $cardAs, $hostRow, $hostA): mixed {
+        $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+        $cardAs('setup', 'public_host_approve', ['site' => '1', 'host' => $hostA]);
+        $approved = ($hostRow($siteA)['approvedAtUtc'] ?? null) !== null;
+        $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+        return $approved;
+    });
+check('P59 with "the installation\'s global administrator only" taken out of approving, a "Set up the public website" holder approves their own address', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', "                if (PortalAddress::visitorCanChooseHost() === true) {\n                    return self::refusedAndRecorded('public address'",
+    "                if (false) {\n                    return self::refusedAndRecorded('public address'",
+    static function () use ($setInstallation, $base, $cardAs, $hostRow, $siteA, $hostA): mixed {
+        $setInstallation('site.url', null);
+        $cardAs('setup', 'public_host', ['value' => 'another.selftest.test']);
+        $setInstallation('site.url', $base);
+        $saved = $hostRow($siteA)['hostName'] ?? null;
+        $cardAs('setup', 'public_host', ['value' => $hostA]);
+        return $saved;
+    });
+check('P60 with "the portal\'s own address must be set" taken out, a public address is saved while the portal cannot tell members\' addresses', [$p['applied'], $p['result']], [true, 'another.selftest.test']);
+// P58 and P60 put A's own address back, which (rightly) leaves it waiting:
+// approve it again directly so the tidy-up starts from the state it expects.
+$db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

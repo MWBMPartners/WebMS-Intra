@@ -1841,7 +1841,8 @@ class Site
      * looked at — so a door request never starts, reads or depends on one.
      *
      * A request is a door request in exactly two ways:
-     *   1. ITS HOST IS A STORED PUBLIC ADDRESS (`tblPublicHosts`, D-095).
+     *   1. ITS HOST IS A STORED PUBLIC ADDRESS (`tblPublicHosts`, D-095)
+     *      THAT THE INSTALLATION'S GLOBAL ADMINISTRATOR HAS APPROVED (D-101).
      *      Then EVERY path on it is a door request (D-098: a public address
      *      answers door requests only), and the organisation is the one
      *      holding the address. A path beginning /w/ is NOT read as a name
@@ -1914,7 +1915,12 @@ class Site
 
             return 'door';
         }
-        if ($hostRow !== null && $hostRow['usable'] === true) {
+        // D-101: only an APPROVED public address is a door request. An
+        // unapproved one is not the door at all: the host behaves exactly as
+        // it did before #493 P4a (round 6 of P4a's check: an organisation's
+        // administrator could otherwise turn an address members sign in at,
+        // which the portal had no record of, into the door's 404).
+        if ($hostRow !== null && $hostRow['usable'] === true && $hostRow['approved'] === true) {
             self::$doorRequest      = true;
             self::$doorOnPublicHost = true;
             self::$doorSurface      = ltrim($path, '/');

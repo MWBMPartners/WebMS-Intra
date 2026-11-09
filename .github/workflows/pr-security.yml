@@ -1377,6 +1377,14 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_webroot_door_handoff.py
 
+      # #493 P4a, round 6 of its check: .htaccess refuses every direct PHP
+      # address — /robots.php/x and the like (extra path information), other
+      # PHP endings and capitals included — except the three entry points.
+      - name: '.htaccess refuses every direct PHP address (hard gate, #493)'
+        id: htaccess_php_denied
+        if: always()
+        run: python3 tools/audit-checks/check_htaccess_php_denied.py
+
       # Every page that writes its own <head> must also write the description,
       # canonical address and preview card (#569). Those pages are the ones a
       # stranger sees — the sign-in page and the public forms — and before #569

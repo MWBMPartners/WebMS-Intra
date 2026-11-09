@@ -674,6 +674,133 @@ final class PublicWebsiteSetup
         return $stored;
     }
 
+    /**
+     * Is this organisation's public address APPROVED by the installation's
+     * global administrator (D-101)? Only an approved address is the public
+     * door, and only an approved one is used in the door's own addresses.
+     * False when there is no address, it is not approved, the column is not
+     * there yet (before migration 263) or the database cannot be asked.
+     * Never throws.
+     */
+    public static function publicHostApproved(\mysqli $db, int $siteId): bool
+    {
+        try {
+            $stmt = $db->prepare('SELECT `approvedAtUtc` FROM `' . self::HOSTS_TABLE . '` WHERE `siteID` = ? LIMIT 1');
+            $stmt->bind_param('i', $siteId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            return false;
+        }
+
+        return $row !== null && $row['approvedAtUtc'] !== null && self::publicHostFor($db, $siteId) !== '';
+    }
+
+    /**
+     * Every organisation's public address, for the installation's global
+     * administrator's approval list (D-101): organisation, its name, the
+     * address as stored, and whether it is approved. Never throws: [] when it
+     * cannot be read.
+     *
+     * @return list<array{siteId:int, siteName:string, host:string, approved:bool}>
+     */
+    public static function allPublicHosts(\mysqli $db): array
+    {
+        try {
+            $rs = $db->query(
+                'SELECT h.`siteID`, s.`siteName`, h.`hostName`, h.`approvedAtUtc` FROM `' . self::HOSTS_TABLE . '` h '
+                . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` ORDER BY (h.`approvedAtUtc` IS NOT NULL), s.`siteName`, h.`siteID`'
+            );
+            $out = [];
+            while (is_array($row = $rs->fetch_assoc()) === true) {
+                $out[] = ['siteId' => (int) $row['siteID'], 'siteName' => (string) $row['siteName'],
+                    'host' => (string) $row['hostName'], 'approved' => $row['approvedAtUtc'] !== null];
+            }
+
+            return $out;
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the public addresses could not be listed: ' . $e->getMessage());
+
+            return [];
+        }
+    }
+
+    /**
+     * ✅ APPROVE an organisation's public address (D-101): the installation's
+     * global administrator ONLY — asked here as well as on the page, because
+     * the installation and an organisation may be different parties. The
+     * address approved must be the one still stored (`$host`), so an address
+     * changed while the page was open is never approved by accident. Recorded,
+     * and so is every refusal.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function approvePublicHost(\mysqli $db, int $siteId, string $host, bool $isRootAdmin, ?int $actorId): array
+    {
+        if ($isRootAdmin === false) {
+            return self::refusedAndRecorded('public address approval', $siteId, 'Only a global administrator of the whole '
+                . 'installation can approve a public address. Nothing was changed.', $actorId);
+        }
+        try {
+            $stmt = $db->prepare('UPDATE `' . self::HOSTS_TABLE . '` SET `approvedAtUtc` = UTC_TIMESTAMP(), `approvedByID` = ? '
+                . 'WHERE `siteID` = ? AND `hostName` = ? AND `approvedAtUtc` IS NULL');
+            $stmt->bind_param('iis', $actorId, $siteId, $host);
+            $stmt->execute();
+            $changed = $stmt->affected_rows;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: a public address could not be approved: ' . $e->getMessage());
+
+            return self::refusedAndRecorded('public address approval', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
+        }
+        if ($changed < 1) {
+            return self::refusedAndRecorded('public address approval', $siteId, 'That address is no longer the one waiting '
+                . 'for approval (it was changed, removed or approved already). Nothing was changed; look at the page again.', $actorId);
+        }
+        Logger::activity('PublicWebsitePublicAddressApproved', 'Organisation #' . $siteId . '\'s public address ' . $host
+            . ' was approved by the installation\'s global administrator. It answers as the public door from now on.', $actorId);
+
+        return ['saved' => true, 'type' => 'success', 'message' => 'Approved: ' . $host . ' now answers as that organisation\'s '
+            . 'public door, while its door is on.'];
+    }
+
+    /**
+     * Withdraw approval of an organisation's public address (D-101): the
+     * installation's global administrator only. Takes effect on the very next
+     * request: the address stops being the public door at once. Recorded.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function withdrawPublicHostApproval(\mysqli $db, int $siteId, bool $isRootAdmin, ?int $actorId): array
+    {
+        if ($isRootAdmin === false) {
+            return self::refusedAndRecorded('public address approval', $siteId, 'Only a global administrator of the whole '
+                . 'installation can withdraw approval of a public address. Nothing was changed.', $actorId);
+        }
+        $host = self::publicHostFor($db, $siteId);
+        try {
+            $stmt = $db->prepare('UPDATE `' . self::HOSTS_TABLE . '` SET `approvedAtUtc` = NULL, `approvedByID` = NULL '
+                . 'WHERE `siteID` = ? AND `approvedAtUtc` IS NOT NULL');
+            $stmt->bind_param('i', $siteId);
+            $stmt->execute();
+            $changed = $stmt->affected_rows;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: approval of a public address could not be withdrawn: ' . $e->getMessage());
+
+            return self::refusedAndRecorded('public address approval', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
+        }
+        if ($changed < 1) {
+            return ['saved' => true, 'type' => 'info', 'message' => 'That address was not approved. Nothing was changed.'];
+        }
+        Logger::activity('PublicWebsitePublicAddressApprovalWithdrawn', 'Approval of organisation #' . $siteId . '\'s public '
+            . 'address ' . ($host === '' ? '(unreadable)' : $host) . ' was withdrawn by the installation\'s global administrator. '
+            . 'It is not the public door any more.', $actorId);
+
+        return ['saved' => true, 'type' => 'success', 'message' => 'Approval withdrawn: that address is not the public door any more.'];
+    }
+
     // =========================================================================
     // 3b. The public door's name, and the test-copy setting (#493 P4a)
     // =========================================================================
@@ -730,7 +857,9 @@ final class PublicWebsiteSetup
     /**
      * The stored public-address row for a host name, for `Site::preDetect()`:
      * null when no organisation holds it, else the organisation, whether that
-     * organisation is active, and whether the stored row is USABLE — exactly
+     * organisation is active, whether the installation's global administrator
+     * has APPROVED it (D-101: an unapproved address is not the door at all),
+     * and whether the stored row is USABLE — exactly
      * what `checkPublicHost()` would accept, and not an address members sign
      * in at (a hand edit could put either there; a members' address must never
      * be turned into a door, or every member would be locked out).
@@ -738,7 +867,7 @@ final class PublicWebsiteSetup
      * Throws on a database fault, except 1146 (no table yet: nothing can hold
      * a public address, so null is the true answer). See siteForDoorName().
      *
-     * @return array{siteId:int, active:bool, usable:bool}|null
+     * @return array{siteId:int, active:bool, usable:bool, approved:bool}|null
      */
     public static function publicHostRow(\mysqli $db, string $host): ?array
     {
@@ -747,12 +876,23 @@ final class PublicWebsiteSetup
         }
         try {
             $stmt = $db->prepare(
-                'SELECT h.`siteID`, h.`hostName`, s.`isActive` FROM `' . self::HOSTS_TABLE . '` h '
+                'SELECT h.`siteID`, h.`hostName`, h.`approvedAtUtc`, s.`isActive` FROM `' . self::HOSTS_TABLE . '` h '
                 . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` WHERE h.`hostName` = ? LIMIT 1'
             );
         } catch (\mysqli_sql_exception $e) {
+            // 1146: no table yet; 1054 BECAUSE migration 263's approval
+            // column is not there yet. Either way no address can have been
+            // APPROVED (D-101), so "no public address" is the true answer.
+            // Any OTHER unknown column is a real fault and is thrown, so it
+            // fails closed (P4a's own test plants one).
             if ($e->getCode() === 1146) {
                 return null;
+            }
+            if ($e->getCode() === 1054) {
+                $col = $db->query("SHOW COLUMNS FROM `" . self::HOSTS_TABLE . "` LIKE 'approvedAtUtc'");
+                if ($col !== false && $col->num_rows === 0) {
+                    return null;
+                }
             }
             throw $e;
         }
@@ -772,7 +912,8 @@ final class PublicWebsiteSetup
             $usable = false;
         }
 
-        return ['siteId' => (int) $row['siteID'], 'active' => (int) $row['isActive'] === 1, 'usable' => $usable];
+        return ['siteId' => (int) $row['siteID'], 'active' => (int) $row['isActive'] === 1, 'usable' => $usable,
+            'approved' => $row['approvedAtUtc'] !== null];
     }
 
     /**
@@ -901,7 +1042,7 @@ final class PublicWebsiteSetup
             return self::refusedAndRecorded('public door', $siteId, 'Somebody switched the public door off at the same moment. '
                 . 'Nothing was changed; look at the page again.', $actorId);
         }
-        $publicHost = self::publicHostFor($db, $siteId);
+        $publicHost = self::publicHostApproved($db, $siteId) === true ? self::publicHostFor($db, $siteId) : '';
         Logger::activity('PublicDoorNameReplaced', 'Organisation #' . $siteId . '\'s public door name was replaced: '
             . ($now['name'] === '' ? '(a name the portal would not make)' : $now['name']) . ' → ' . $name
             . '. Every copy using the old name on the portal\'s own address stopped working'
@@ -1162,6 +1303,15 @@ final class PublicWebsiteSetup
                 $del->execute();
                 $del->close();
             } else {
+                // D-101, round 6 of P4a's check: with the portal's own address
+                // NOT stored, the portal cannot tell which addresses members
+                // sign in at — the members' address itself could be saved as
+                // a public one (the /w/ form refuses in this state too).
+                if (PortalAddress::visitorCanChooseHost() === true) {
+                    return self::refusedAndRecorded('public address', $siteId, 'The portal\'s own address is not set, so it '
+                        . 'cannot tell which addresses members sign in at. A global administrator sets it on Admin, Settings, '
+                        . 'Organisation first. Nothing was saved.', $actorId);
+                }
                 if (in_array($host, self::hostsMembersUse($db, $requestHost), true) === true) {
                     return self::refusedAndRecorded('public address', $siteId, 'That is an address the portal already '
                         . 'answers on for signing in. The public address has to be a different name, so public visitors '
@@ -1177,8 +1327,13 @@ final class PublicWebsiteSetup
                 //    be ANOTHER organisation's row, quietly "saving" a name that
                 //    is theirs. A plain UPDATE or INSERT fails with 1062 instead.
                 $stmt = $was !== '' || self::hasHostRow($db, $siteId) === true
-                    ? $db->prepare('UPDATE `' . self::HOSTS_TABLE . '` SET `hostName` = ?, `changedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = ?')
-                    : $db->prepare('INSERT INTO `' . self::HOSTS_TABLE . '` (`hostName`, `siteID`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP())');
+                    // D-101: saving or CHANGING the address empties its
+                    // approval — a new address waits for the installation's
+                    // global administrator like a first one.
+                    ? $db->prepare('UPDATE `' . self::HOSTS_TABLE . '` SET `hostName` = ?, `changedAtUtc` = UTC_TIMESTAMP(), '
+                        . '`approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` = ?')
+                    : $db->prepare('INSERT INTO `' . self::HOSTS_TABLE . '` (`hostName`, `siteID`, `changedAtUtc`, `approvedAtUtc`, `approvedByID`) '
+                        . 'VALUES (?, ?, UTC_TIMESTAMP(), NULL, NULL)');
                 $stmt->bind_param('si', $host, $siteId);
                 try {
                     $stmt->execute();
@@ -1232,8 +1387,9 @@ final class PublicWebsiteSetup
 
         return ['saved' => true, 'type' => 'success', 'message' => $host === ''
             ? 'Saved: no public address is set, so the public pages will use the portal\'s own address.'
-            : 'Saved. The public door answers on this address once whoever looks after your domain points it at this portal, '
-                . 'and only while the public door is on.'];
+            : 'Saved. It does nothing yet: it waits for the installation\'s global administrator to approve it. Once approved, '
+                . 'the public door answers on it — after whoever looks after your domain points it at this portal, and only '
+                . 'while the public door is on.'];
     }
 
     /**
@@ -1345,9 +1501,13 @@ final class PublicWebsiteSetup
                     . ($reserved === true ? ', and it is an address members sign in at' : '') . '.'];
             $rows[] = ['label' => 'Public address', 'state' => $resolves === true ? 'ok' : 'problem',
                 'words' => $resolves === true ? 'Its name exists on the internet.' : 'Its name could not be found on the internet, or it points at a private network. Ask whoever looks after your domain to point it at this portal.'];
+            $rows[] = self::publicHostApproved($db, $siteId) === true
+                ? ['label' => 'Public address', 'state' => 'ok', 'words' => 'Approved by the installation\'s administrator.']
+                : ['label' => 'Public address', 'state' => 'problem', 'words' => 'Waiting for the installation\'s administrator to '
+                    . 'approve it. Until then it does nothing.'];
             $rows[] = ['label' => 'Public address', 'state' => 'untested',
-                'words' => 'Whether it reaches THIS portal is not checked in this version. With the public door on, open https://'
-                    . $public . '/events.json in your own browser: it should show your events.'];
+                'words' => 'Whether it reaches THIS portal is not checked in this version. With the public door on and the address '
+                    . 'approved, open https://' . $public . '/events.json in your own browser: it should show your events.'];
         }
 
         // 🖼️ Framing.

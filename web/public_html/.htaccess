@@ -32,6 +32,17 @@
 # the backend language, no way to bypass the router's auth + CSRF gates by
 # hitting handler files directly.
 #
+# EXTRA PATH INFORMATION IS COVERED TOO (#493 P4a, round 6 of its check). The
+# rule used to match only addresses ENDING in .php, and Apache runs
+# /robots.php/x as robots.php with "/x" as extra path information — so
+# /manifest.php/x, /robots.php/x, /sitemap.php/x and /openapi.php/x ran
+# directly (measured on Apache 2.4 with php:8.4-apache: 200 with a fatal error
+# naming the server's file path when display_errors is on). The rule now
+# matches ".php" followed by "/" or the end, case-insensitively, and the other
+# endings a server may run as PHP (.php5 and the like, .phtml, .phar). The
+# three entry points are allowed only EXACTLY, so /index.php/x is refused as
+# well. tools/audit-checks/check_htaccess_php_denied.py holds this.
+#
 # @see https://httpd.apache.org/docs/2.4/mod/mod_rewrite.html
 # @see https://owasp.org/www-community/Security_by_Design_Principles
 # =============================================================================
@@ -63,7 +74,7 @@ RewriteRule ^index\.php$ / [R=301,L]
 #     of them, and the other five are meant to be 404'd here and reached
 #     through the router instead. See the header for which, and why adding a
 #     file here never means adding a line to this list.
-RewriteCond %{REQUEST_URI} \.php$
+RewriteCond %{REQUEST_URI} \.(php[0-9]?|phtml|phar)(/|$) [NC]
 RewriteCond %{REQUEST_URI} !^/index\.php$
 RewriteCond %{REQUEST_URI} !^/api-docs/index\.php$
 RewriteCond %{REQUEST_URI} !^/error\.php$

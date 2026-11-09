@@ -70,6 +70,9 @@ $csrf = Auth::csrfToken();
 // 📖 What is stored, each read back CHECKED (a hand edit is dropped, not shown as if it were in force).
 $website     = PublicWebsiteSetup::websiteAddressFor($mysqli, $siteId);
 $publicHost  = PublicWebsiteSetup::publicHostFor($mysqli, $siteId);
+// D-101: an organisation's public address does nothing until the
+// installation's global administrator approves it.
+$publicHostApproved = PublicWebsiteSetup::publicHostApproved($mysqli, $siteId);
 $origins     = PublicWebsiteSetup::frameOriginsStored($mysqli, $siteId);
 $permitted   = PublicWebsiteSetup::framingPermitted($mysqli);
 $isRootAdmin = App::isRootAdmin();
@@ -150,7 +153,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-2" data-door-form="replace">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                     <input type="hidden" name="action" value="door_replace">
-                    <?php if ($publicHost !== ''): ?>
+                    <?php if ($publicHost !== '' && $publicHostApproved === true): ?>
                         <?php // Round 1 of P4a's check: the public address carries no name, so replacing the name does NOT stop it. Said plainly, and the replace advice is not offered as the remedy. ?>
                         <p class="small mb-1" data-door-replace-public="1"><strong>Replace the name</strong> stops only copies that use the portal's own address, with <code>/w/</code> and the name in it. Your public address, <?php echo $esc($publicHost); ?>, carries no name, so copies that use it are <strong>not</strong> affected. To stop those, switch the door off below, or change or remove the public address.</p>
                         <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-replace-ok" required><label class="form-check-label" for="pw-door-replace-ok">I understand copies using the old name on the portal's own address will stop working, and copies using the public address will not</label></div>
@@ -235,9 +238,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <input type="hidden" name="action" value="public_host">
                 <label class="form-label" for="pw-host">Name</label>
                 <input type="text" class="form-control" id="pw-host" name="value" maxlength="253" value="<?php echo $esc($publicHost); ?>" placeholder="events.example.org" autocomplete="off">
-                <div class="form-text">Only the name, without https:// in front. Leave it empty and save to remove it.</div>
+                <div class="form-text">Only the name, without https:// in front. Leave it empty and save to remove it. A new or changed address waits for the installation's administrator to approve it.</div>
                 <button type="submit" class="btn btn-primary btn-sm mt-2">Save</button>
             </form>
+            <?php if ($publicHost !== ''): ?>
+                <?php // D-101: an address does NOTHING until the installation's global administrator approves it. Said here, on the organisation's own card. ?>
+                <p class="mt-2 mb-0" data-public-host-approval="<?php echo $publicHostApproved === true ? 'approved' : 'waiting'; ?>">
+                    <?php if ($publicHostApproved === true): ?>
+                        <span class="badge text-bg-success me-1">Approved</span> The installation's administrator has approved this address, so the public door answers on it while the door is on.
+                    <?php else: ?>
+                        <span class="badge text-bg-warning me-1">Waiting</span> Waiting for the installation's administrator to approve it. Until then it does nothing: it is not the public door.
+                    <?php endif; ?>
+                </p>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -269,6 +282,34 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 
     <?php if ($isRootAdmin === true): ?>
+        <!-- ✅ Public addresses awaiting approval (D-101), for the installation's global administrator only: every organisation's, in one list. -->
+        <?php $allPublicHosts = PublicWebsiteSetup::allPublicHosts($mysqli); ?>
+        <div class="card mb-3" data-public-host-approvals="1">
+            <div class="card-body">
+                <h2 class="h5">Public addresses (every organisation)</h2>
+                <p class="text-muted">An organisation's public address does nothing until you approve it here. Before approving, make sure the address is NOT one members sign in at — an alias of the portal's own address, say — because once approved, every page there answers only the public door. Withdrawing approval takes effect at once.</p>
+                <?php if ($allPublicHosts === []): ?>
+                    <p class="mb-0">No organisation has entered a public address.</p>
+                <?php else: ?>
+                    <ul class="list-unstyled mb-0">
+                        <?php foreach ($allPublicHosts as $one): ?>
+                            <li class="mb-2" data-public-host-row="<?php echo (int) $one['siteId']; ?>">
+                                <span class="badge <?php echo $one['approved'] === true ? 'text-bg-success' : 'text-bg-warning'; ?> me-1"><?php echo $one['approved'] === true ? 'Approved' : 'Waiting'; ?></span>
+                                <strong><?php echo $esc($one['host']); ?></strong> — <?php echo $esc($one['siteName']); ?>
+                                <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="d-inline ms-2">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                                    <input type="hidden" name="action" value="<?php echo $one['approved'] === true ? 'public_host_withdraw' : 'public_host_approve'; ?>">
+                                    <input type="hidden" name="site" value="<?php echo (int) $one['siteId']; ?>">
+                                    <input type="hidden" name="host" value="<?php echo $esc($one['host']); ?>">
+                                    <button type="submit" class="btn btn-sm <?php echo $one['approved'] === true ? 'btn-outline-danger' : 'btn-outline-success'; ?>"><?php echo $one['approved'] === true ? 'Withdraw approval' : 'Approve'; ?></button>
+                                </form>
+                            </li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- 🏢 The installation's switch (D-094), for its global administrator only. -->
         <div class="card mb-3" data-installation-switch="1">
             <div class="card-body">
