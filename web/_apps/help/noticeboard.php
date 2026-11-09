@@ -160,6 +160,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
 </section>
 
+<!-- 📺 The foyer screen (#493 P2b, D-086) -->
+<section id="foyer-screen" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-tv me-2"></i>The foyer screen</h2>
+    <p>
+        A screen in your building can play the posters full-screen, one after another, with nobody signed in.
+        An administrator opens <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('noticeboard/foyer/setup'), ENT_QUOTES, 'UTF-8'); ?>">Noticeboard, Foyer screen</a>,
+        makes a link, and opens it on the screen (or scans its QR code with it). Each poster shows for twelve
+        seconds. Every thirty minutes the screen checks for changes and shows them; if the portal is closed for an
+        upgrade or cannot be reached at that moment, it keeps showing what it has and tries again a minute later.
+    </p>
+    <p class="text-muted small">
+        Anybody who has the link can see the screen, so keep it to the screens it is for. If it reaches somebody it
+        should not, press <strong>Make a new link</strong>: the old one stops working, and a screen still showing it
+        stops within half an hour. (Restoring a backup taken before that brings the old link back, so make a new link
+        again after such a restore.) Switching the Noticeboard off for your organisation stops the screen too. A
+        stopped screen shows &ldquo;Not found&rdquo; and does not start again by itself: open the link on it again
+        when it should. Unless you choose otherwise, the screen shows only
+        posters on the public website. Your installation may let your organisation's global administrator choose to
+        show every poster on the board instead; that choice is on the same page, and it is worth remembering that
+        anybody walking into the building can read the screen.
+    </p>
+</section>
+
 <!-- 5️⃣ Viewing & QR share -->
 <section id="viewing" class="mb-5">
     <h2 class="h4 mb-3"><i class="fa-solid fa-qrcode me-2"></i>Viewing &amp; QR Share</h2>

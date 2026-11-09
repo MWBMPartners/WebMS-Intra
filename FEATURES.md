@@ -846,9 +846,10 @@ Visual poster wall — pinboard of event posters. Distinct from the text-based A
 - QR share panel — links to poster's deep-link URL, server-encoded via `Portal\Core\Qr` and pinned to the current host
 - Site-admin gated writes; any authenticated user can view
 - Posters on the public website (#493 P2a): a per-poster "Show on the public website" switch with optional first/last day, set on `/noticeboard/website` by whoever holds `website.publish` (D-077). Every poster starts off (migration 260); the board's own editor never puts one on, and deleting a poster takes it off. One rule, `PublicWebsite::posterWhere()`, decides which posters are on the website
+- Foyer screen (#493 P2b, D-086): `/noticeboard/foyer?token=<secret>` plays the posters full-screen with no sign-in; the link (one per organisation, `tblNoticeboardFoyer`, migration 261) is made, replaced and shown with its QR code on `/noticeboard/foyer/setup`. Public posters only, unless the installation permits a choice (`noticeboard.foyer.permitted`) and the organisation's global administrator chose every poster (`noticeboard.foyer.shows`). `NoticeboardFoyer` is the one place for all of it
 - Real media upload pipeline (#363) — finfo-sniffed, size-capped (`noticeboard.upload.maxBytes`, default 15 MB), server-generated filename; served back publicly (no login) via `/noticeboard/media?f=<token>` so posters keep rendering for an anonymous QR scanner. Orphaned uploads (abandoned in the editor, or whose poster was later soft-deleted) are purged automatically after each save.
 
-**Tables:** `tblNoticeboardPosters`, `tblNoticeboardUploads`
+**Tables:** `tblNoticeboardPosters`, `tblNoticeboardUploads`, `tblNoticeboardFoyer`
 
 **Routes / API:**
 - `GET  /noticeboard`             — board page (authed)

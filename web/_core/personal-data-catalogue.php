@@ -902,6 +902,12 @@ return [
                 . 'the reason it is not',
         ],
     ],
+    'tblNoticeboardFoyer' => [
+        'decision' => 'not-personal',
+        'reason'   => 'The foyer slideshow\'s secret link, one per organisation (#493 P2b): an organisation, a random '
+                    . 'token and the time it was made. Who made or replaced it is recorded in the activity log, not here.',
+        'columns'  => [],
+    ],
     'tblOffboarding' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',

@@ -21180,6 +21180,50 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### The noticeboard's foyer screen (#493 P2b, migration 261)
+
+- **`Portal\Core\NoticeboardFoyer` is the one place** that makes, replaces and checks the secret link,
+  decides what the screen shows, lists its posters, and locks its two settings out of the general editor.
+  In "public posters only" the list comes from `PublicWebsite::posterWhere()`, so the screen and the
+  public website cannot disagree about which posters are public.
+- **The organisation comes from the secret**, never from the address the request arrived at, and a
+  switched-off organisation's link answers 404 (checks S7, plants P56 and P57). **That includes the
+  Noticeboard's own on/off switch, and round 1 of the check found it did not:** `Router::dispatch()`
+  tests an app's switch for the organisation the ADDRESS resolves to, and a signed-out screen always
+  resolves to the default organisation — so a screen played on after its own organisation switched the
+  Noticeboard off, and every screen stopped when the default organisation did. The route is now in
+  `AppRegistry::ROUTES_JUDGING_THEIR_OWN_ORGANISATION`, which the router skips, and the page asks
+  `AppRegistry::isEnabledForSite()` for the token's organisation (S11, plants P60 and P61). Any future
+  page that takes its organisation from something other than the address needs the same two halves.
+- **The parameter is `token` because the log scrubber knows that name.** `Logger::withoutJobToken()`
+  blanks `key` and `token` before an address reaches the error log, an alert e-mail or the outside error
+  service; the first version used `k`, so a fault on the screen would have recorded the secret (S12, P63).
+- **The reload asks before it reloads.** A blind `location.reload()` that met the upgrade page, an error
+  page or no connection left the screen there for good — and the portal closes for every release with a
+  migration. It fetches its own address first and reloads only on a 200 or 404 carrying `X-Portal-Foyer: 1`,
+  which only this page sends; otherwise it keeps playing and asks again a minute later. **The header is what
+  round 2 added, and status alone is not enough:** the portal's service worker (`sw.js`, registered by
+  `footer.php` on every ordinary page — not the login page, which draws its own — so on any screen whose
+  browser was ever signed in) answers a page it cannot reach with the
+  offline page and status 200, so a status-only check reloaded straight into it for good. **A status code
+  says the request was answered, not who answered it.** **And round 3 found the worker could answer AS this
+  page:** it keeps a copy of any signed-out page (it ignores `no-store` on purpose and refuses only
+  `private`), and the copy carries the header, so an outage still reloaded the screen — from the copy, which
+  also outlived a replaced link. The page now sends `Cache-Control: no-store, private` (S5, plant P65).
+  Measured by the checker in headless Edge against the real `sw.js`. S13 reads the script as TEXT; no
+  browser runs the real page.
+- **The secret is in the address, so the page sends `Referrer-Policy: no-referrer`**: a poster's picture
+  may come from another website, which would otherwise be told the address. The page draws its own head,
+  so it sends its own script rule too (#623) and is on `check_page_head_tags.py`'s exemption list.
+- **The tiers follow D-086 and "the stricter wins":** `showsFor()` asks the installation first and
+  answers "public" for anything it cannot read. The save is refused with the reason, never quietly
+  changed (#668); the setup page asks `App::isSiteRootAdmin()` and `App::isRootAdmin()` for the two
+  levels, as P1's rule card does.
+- **What it cannot do:** nothing here proves a screen in a real browser plays the slides or reloads; the
+  page's script was not driven (the HTTP test reads the markup, the headers and the script as text). A
+  whole-database restore from before a link was replaced brings the old link back; the help page says so. P59 records that the token's shape
+  test is a backstop: with it removed, a malformed secret is still refused because the lookup finds nothing.
+
 ### Noticeboard posters on the public website (#493 P2a, migration 260)
 
 - **The board's editor cannot carry the tick.** The editor is a generated bundle (`dc-runtime`, not in this

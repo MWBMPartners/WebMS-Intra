@@ -4,6 +4,25 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A foyer screen can play the noticeboard's posters, opened by a secret link (#493, package P2b, migration 261)
+
+- **Added:** `/noticeboard/foyer?token=…` plays an organisation's posters full-screen in a loop with nobody
+  signed in, for a screen in the building. An administrator makes the link on **Noticeboard, Foyer
+  screen** (`/noticeboard/foyer/setup`), which shows it and draws its QR code into the page; making a new
+  link stops the old one at once. The link names one organisation, so one organisation's screen can never
+  show another's posters.
+- **What it shows (D-086):** posters on the public website only, unless the installation's global
+  administrator permits a choice and the organisation's global administrator then chooses every poster.
+  The stricter wins, and anything that cannot be read counts as public posters only. Both settings are
+  changed only on that page; the general settings editor refuses them.
+- **The screen** sends no referrer (its address is the secret), asks not to be indexed or stored, and
+  runs only its own script. A missing, wrong or replaced link answers a bare 404.
+- **Switching the Noticeboard off** for an organisation stops its screen, and only its screen. If the
+  portal is closed for an upgrade when the screen checks for changes, it keeps playing and tries again.
+- **Tests:** section S of `tools/public-website-tick-selftest.php` (fourteen checks) with eighteen plants
+  (P48-P65), seventeen going red when their guard is taken out and one measured to stay green. The screen's
+  script is read as text; no browser runs it.
+
 ### Noticeboard posters can go on the public website, one at a time (#493, package P2a, migration 260)
 
 - **Added:** each poster has "Show on the public website" and an optional first and last day (D-057,

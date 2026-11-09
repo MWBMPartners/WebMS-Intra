@@ -11359,6 +11359,30 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VAL
 INSERT INTO `tblMigrations` (`filename`) VALUES ('260_noticeboard_posters_on_public_website.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 261_noticeboard_foyer_slideshow.sql (#493, P2b; D-086) ──────────────
+CREATE TABLE IF NOT EXISTS `tblNoticeboardFoyer` (
+    `siteID`    INT       NOT NULL COMMENT 'The ONE organisation this foyer link shows (#493 P2b). One link per organisation.',
+    `token`     CHAR(48)  NOT NULL COMMENT 'The secret in the foyer slideshow''s address: 48 lower-case hex characters from random_bytes(24). Replacing it stops the old address at once. Checked only by Portal\\Core\\NoticeboardFoyer.',
+    `createdAt` DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'A moment on the database server''s clock: when this link was made or last replaced. Nothing compares it; who did it is in the activity log.',
+    PRIMARY KEY (`siteID`),
+    UNIQUE KEY `uq_foyer_token` (`token`),
+    CONSTRAINT `fk_foyer_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The noticeboard foyer slideshow''s secret link, one per organisation (#493 P2b)';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'noticeboard.foyer.permitted', 'public', 'public', 0),
+    (NULL, 'noticeboard.foyer.shows',     'public', 'public', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`) VALUES
+    ('noticeboard/foyer',       'noticeboard/foyer.php',       0),
+    ('noticeboard/foyer/setup', 'noticeboard/foyer-setup.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('261_noticeboard_foyer_slideshow.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
 -- WHY THESE ARE HERE AND NOT BESIDE tblEvents. `tblEvents` is declared near the
 -- top of this file; `tblVenues` and `tblVenueRooms` are declared about seven

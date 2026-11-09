@@ -116,6 +116,11 @@ LIVE_REQUIRE = re.compile(r"(?:require|include)(?:_once)?\s[^;]*head-meta\.php",
 #    another person. A preview card for them would be drawn by nothing, and a
 #    canonical address would be wrong or meaningless.
 EXEMPT = {
+    # 📺 The noticeboard's foyer slideshow (#493 P2b): opened by a SECRET link on
+    #    a screen in the building. It must not be shared or listed — it sends
+    #    noindex and no-referrer — so a description, canonical address or
+    #    social-preview card would be the wrong thing to give it.
+    "noticeboard/foyer.php": "a secret-link foyer screen; never a shared link, sent noindex",
     # 📄 Printed to paper or turned into a PDF. There is no browser tab, no
     #    link to share, and a canonical address on a printout means nothing.
     "assets/labels-pdf.php": "becomes a PDF of sticky labels; never a shared link",

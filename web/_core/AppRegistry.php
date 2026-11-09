@@ -179,6 +179,30 @@ class AppRegistry
         'visit'                 => 'visitors',   // the public "I'm new" form
     ];
 
+    /**
+     * Pages that decide their OWN organisation and so ask its switch
+     * THEMSELVES, with isEnabledForSite(). Router::dispatch() does not apply
+     * its usual switch test to them.
+     *
+     * WHY (#493 P2b, round 1 of the check). The router's test reads the
+     * organisation the ADDRESS resolves to, and a signed-out visitor always
+     * resolves to the default organisation. The noticeboard's foyer screen is
+     * always signed out and takes its organisation from the secret in its
+     * address, so the router's test asked the wrong organisation: a screen
+     * kept playing after its own organisation switched the noticeboard off,
+     * and every screen stopped when the DEFAULT organisation did.
+     *
+     * A page listed here MUST call isEnabledForSite() for the organisation it
+     * decided, before it shows anything; section S of
+     * tools/public-website-tick-selftest.php drives that for the foyer (S11)
+     * and plants each half out (P60, P61).
+     *
+     * @var array<string, string>
+     */
+    public const ROUTES_JUDGING_THEIR_OWN_ORGANISATION = [
+        'noticeboard/foyer' => 'noticeboard', // the foyer screen: its organisation is the one its secret names
+    ];
+
     /** @var array<string, array<string, mixed>>|null Cached registry */
     private static ?array $registry = null;
 

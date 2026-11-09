@@ -49,6 +49,13 @@
  *      sitemap following the rule for a copied-in event.
  *   V  what the calendar's page SAYS: every "on the public website" badge,
  *      label and approval sentence is true under the rule in force.
+ *   S  the noticeboard's foyer screen (#493 P2b, D-086): no secret, a bad one
+ *      or a replaced one answers a bare 404; the setup page is for the
+ *      noticeboard's managers; a link shows only ITS organisation's posters,
+ *      public ones only unless the installation permits a choice AND the
+ *      organisation chose every poster; who may save each choice; the
+ *      headers that keep the secret address out of other websites' logs and
+ *      search engines; poster dates on the organisation's own calendar.
  *   P  the plants: each guard taken out of a COPY of the portal, and the
  *      scenario that should catch it re-run and required to go red.
  *
@@ -68,7 +75,7 @@
  *         [SELFTEST_WEB_PORT=9493] php tools/public-website-tick-selftest.php
  *
  *         The database must already hold `web/_sql/full_schema.sql` (with
- *         migration 258). Needs PHP's curl extension and `proc_open()`. It
+ *         migration 261). Needs PHP's curl extension and `proc_open()`. It
  *         REFUSES rather than skipping when anything is missing.
  *
  * Exit:   0 only when every check ran and passed AND the number of checks is
@@ -86,7 +93,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 143;
+const PWT_EXPECTED_CHECKS = 175;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -153,6 +160,10 @@ $hasRule = (int) ($db->query(
 )->fetch_assoc()['n'] ?? 0);
 if ($hasColumn !== 3 || $hasRule !== 1) {
     refuse('this database was not built from the current install script (migration 258 is missing)');
+}
+// Section S needs the foyer screen's table (#493 P2b, migration 261).
+if ((int) ($db->query("SELECT COUNT(*) AS `n` FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblNoticeboardFoyer'")->fetch_assoc()['n'] ?? 0) !== 1) {
+    refuse('this database was not built from the current install script (migration 261 is missing)');
 }
 
 // ── A copy of web/, so a planted fault never touches the repository ─────────
@@ -289,6 +300,8 @@ $http = static function (string $method, string $path, array|string $post = [], 
         'status'   => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
         'location' => preg_match('/^Location:\s*(\S+)\s*$/mi', $head, $m) === 1 ? $m[1] : '',
         'body'     => substr((string) $raw, $headSize),
+        // Section S reads the foyer screen's response headers (#493 P2b).
+        'head'     => $head,
     ];
 };
 
@@ -1613,6 +1626,312 @@ check('Q7 deleting a ticked poster on the board takes it off the website, and a 
     $scnDeleteRevive(), ['deleted' => 1, 'off when deleted' => 0, 'back on the board' => 0, 'still off the website' => 0]);
 
 // =============================================================================
+echo "S. The foyer screen: a secret link, and what it shows (#493 P2b, D-086)\n";
+// =============================================================================
+// Each scenario builds its own posters (titles 'PWT S …'), so it gives the same
+// answer when a plant re-runs it after section Q has emptied the board.
+$foyerSet = static function (string $permitted, ?string $ownOne) use ($db, $siteOne): void {
+    $db->query("UPDATE `tblSettings` SET `settingValue` = '" . $db->real_escape_string($permitted) . "' WHERE `settingKey` = 'noticeboard.foyer.permitted' AND `siteID` IS NULL");
+    $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'noticeboard.foyer.shows' AND `siteID` = {$siteOne}");
+    if ($ownOne !== null) {
+        $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$siteOne}, 'noticeboard.foyer.shows', '"
+            . $db->real_escape_string($ownOne) . "', 'public', 0)");
+    }
+};
+$foyerWorld = static function () use ($db, $poster, $siteOne, $siteTwo): void {
+    $db->query("DELETE FROM `tblNoticeboardPosters` WHERE `title` LIKE 'PWT S %'");
+    $poster('PWT S on', $siteOne, ['showOnWebsite' => '1']);
+    $poster('PWT S off', $siteOne);
+    $poster('PWT S deleted', $siteOne, ['showOnWebsite' => '1', 'isDeleted' => '1']);
+    $poster('PWT S two on', $siteTwo, ['showOnWebsite' => '1']);
+    $poster('PWT S two off', $siteTwo);
+};
+$foyerToken = static function (int $site) use ($db): ?string {
+    $row = $db->query("SELECT `token` FROM `tblNoticeboardFoyer` WHERE `siteID` = {$site}")->fetch_assoc();
+    return $row === null ? null : (string) $row['token'];
+};
+/** The 'PWT S …' titles a foyer address shows, sorted, or its status when it is not 200. */
+$foyerShows = static function (string $k) use ($http): array|int {
+    $r = $http('GET', '/noticeboard/foyer?token=' . rawurlencode($k), [], [], false);
+    if ($r['status'] !== 200) {
+        return $r['status'];
+    }
+    preg_match_all('/>(PWT S [^<]+)</', $r['body'], $m);
+    $titles = array_values(array_unique(array_map(static fn (string $t): string => html_entity_decode($t, ENT_QUOTES, 'UTF-8'), $m[1])));
+    sort($titles);
+    return $titles;
+};
+$foyerPost = static function (string $role, array $fields) use ($signIn, $http, $tokenOn): array {
+    $signIn($role);
+    $page = $http('GET', '/noticeboard/foyer/setup');
+    $r = $http('POST', '/noticeboard/foyer/setup', ['csrf_token' => $tokenOn($page['body'])] + $fields);
+    return ['page' => $page, 'post' => $r];
+};
+$ownShows = static function () use ($db, $siteOne): ?string {
+    $row = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'noticeboard.foyer.shows' AND `siteID` = {$siteOne}")->fetch_assoc();
+    return $row === null ? null : (string) $row['settingValue'];
+};
+$permittedNow = static function () use ($db): ?string {
+    $row = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'noticeboard.foyer.permitted' AND `siteID` IS NULL")->fetch_assoc();
+    return $row === null ? null : (string) $row['settingValue'];
+};
+$db->query("DELETE FROM `tblNoticeboardFoyer` WHERE `siteID` IN ({$siteOne}, {$siteTwo})");
+$foyerSet('public', null);
+$foyerWorld();
+
+// S1: nothing is shown without a real secret, and the refusal says nothing.
+$scnFoyerNoKey = static function () use ($http): array {
+    $out = [];
+    foreach (['none' => '/noticeboard/foyer', 'malformed' => '/noticeboard/foyer?token=abc', 'array' => '/noticeboard/foyer?token[]=x',
+        'unknown' => '/noticeboard/foyer?token=' . str_repeat('a', 48)] as $name => $path) {
+        $r = $http('GET', $path, [], [], false);
+        $out[$name] = [$r['status'], trim($r['body'])];
+    }
+    return $out;
+};
+check('S1 the foyer screen with no secret, a malformed one, an array, or an unknown one answers a plain 404 that says nothing more',
+    $scnFoyerNoKey(), ['none' => [404, 'Not found.'], 'malformed' => [404, 'Not found.'], 'array' => [404, 'Not found.'], 'unknown' => [404, 'Not found.']]);
+
+// S2: the setup page is for whoever manages the noticeboard.
+$scnFoyerSetupGate = static function () use ($signIn, $http): array {
+    $signIn('member');
+    $member = $http('GET', '/noticeboard/foyer/setup');
+    $signIn('orgadmin');
+    $admin = $http('GET', '/noticeboard/foyer/setup');
+    return ['member' => $member['status'], 'administrator' => $admin['status'], 'says no link yet' => str_contains($admin['body'], 'There is no foyer screen link yet')];
+};
+check('S2 a plain member is refused the setup page (403); an administrator of the organisation opens it and is told there is no link yet',
+    $scnFoyerSetupGate(), ['member' => 403, 'administrator' => 200, 'says no link yet' => true]);
+
+$scnFoyerMake = static function () use ($foyerPost, $http, $foyerToken, $siteOne, $logged, $people): array {
+    $r = $foyerPost('orgadmin', ['action' => 'replace']);
+    $token = $foyerToken($siteOne);
+    $page = $http('GET', '/noticeboard/foyer/setup')['body'];
+    return ['status' => $r['post']['status'], 'token shape' => $token !== null && preg_match('/^[a-f0-9]{48}$/', $token) === 1,
+        'link on the page' => $token !== null && str_contains($page, 'noticeboard/foyer?token=' . $token),
+        'QR drawn into the page' => str_contains($page, 'src="data:image/'),
+        'recorded' => $logged('NoticeboardFoyerLinkMade', (int) $people['orgadmin']['id'], 'organisation ' . $siteOne) > 0];
+};
+check('S3 an administrator makes the link: a 48-character secret is stored, the page shows the link and draws its QR code into the page, and it is recorded',
+    $scnFoyerMake(), ['status' => 302, 'token shape' => true, 'link on the page' => true, 'QR drawn into the page' => true, 'recorded' => true]);
+$tokOne = (string) $foyerToken($siteOne);
+
+$scnFoyerPublic = static function () use ($foyerSet, $foyerWorld, $foyerShows, $foyerToken, $siteOne): array|int {
+    $foyerSet('public', null);
+    $foyerWorld();
+    return $foyerShows((string) $foyerToken($siteOne));
+};
+check('S4 by default the screen shows ONLY this organisation\'s posters on the public website (not an unticked, deleted or other organisation\'s one)',
+    $scnFoyerPublic(), ['PWT S on']);
+
+$scnFoyerHeaders = static function () use ($http, $foyerToken, $siteOne): array {
+    $r = $http('GET', '/noticeboard/foyer?token=' . (string) $foyerToken($siteOne), [], [], false);
+    $csp = preg_match('/^Content-Security-Policy:\s*(.+)$/mi', $r['head'], $m) === 1 ? trim($m[1]) : '';
+    $cspNonce = preg_match("/script-src 'nonce-([^']+)'/", $csp, $n) === 1 ? $n[1] : '';
+    $scriptNonce = preg_match('/<script nonce="([^"]+)"/', $r['body'], $sm) === 1 ? $sm[1] : '';
+    return [
+        'no referrer'      => preg_match('/^Referrer-Policy:\s*no-referrer\s*$/mi', $r['head']) === 1,
+        'not indexed'      => preg_match('/^X-Robots-Tag:\s*noindex, nofollow\s*$/mi', $r['head']) === 1,
+        // `private` as well as `no-store`: the portal's service worker ignores
+        // no-store on a signed-out page and refuses only private (round 3).
+        'not stored'       => preg_match('/^Cache-Control:\s*no-store, private\s*$/mi', $r['head']) === 1,
+        'script by nonce'  => $cspNonce !== '' && $cspNonce === $scriptNonce,
+        'nothing else'     => str_contains($csp, "default-src 'none'"),
+        // Round 1: a poster's own picture, video or Canva design must still be
+        // allowed, and the reload's own question to the page (connect-src).
+        'posters allowed'  => str_contains($csp, "img-src 'self' https: data:") && str_contains($csp, "media-src 'self' https:")
+            && str_contains($csp, 'frame-src https://www.canva.com') && str_contains($csp, "connect-src 'self'"),
+        'robots meta'      => str_contains($r['body'], '<meta name="robots" content="noindex, nofollow">'),
+    ];
+};
+check('S5 the screen tells the browser to send no referrer (the secret is in its address), not to index or store it, and to run only its own script',
+    $scnFoyerHeaders(), ['no referrer' => true, 'not indexed' => true, 'not stored' => true, 'script by nonce' => true, 'nothing else' => true, 'posters allowed' => true, 'robots meta' => true]);
+
+$scnFoyerReplace = static function () use ($foyerPost, $foyerToken, $foyerShows, $siteOne, $logged, $people): array {
+    $old = (string) $foyerToken($siteOne);
+    $foyerPost('orgadmin', ['action' => 'replace']);
+    $new = (string) $foyerToken($siteOne);
+    return ['changed' => $old !== $new, 'old link' => $foyerShows($old), 'new link' => $foyerShows($new),
+        'recorded' => $logged('NoticeboardFoyerLinkReplaced', (int) $people['orgadmin']['id'], 'organisation ' . $siteOne) > 0];
+};
+check('S6 making a new link stops the old one at once (404) while the new one works, and it is recorded',
+    $scnFoyerReplace(), ['changed' => true, 'old link' => 404, 'new link' => ['PWT S on'], 'recorded' => true]);
+
+// S7: one organisation's link shows that organisation's posters and no other's.
+$scnFoyerTwo = static function () use ($db, $foyerWorld, $foyerSet, $foyerShows, $foyerToken, $siteOne, $siteTwo): array {
+    $foyerSet('public', null);
+    $foyerWorld();
+    $two = bin2hex(random_bytes(24));
+    $db->query("INSERT INTO `tblNoticeboardFoyer` (`siteID`, `token`, `createdAt`) VALUES ({$siteTwo}, '{$two}', CURRENT_TIMESTAMP) "
+        . "ON DUPLICATE KEY UPDATE `token` = VALUES(`token`)");
+    $out = ['one' => $foyerShows((string) $foyerToken($siteOne)), 'two' => $foyerShows($two)];
+    $db->query("UPDATE `tblSites` SET `isActive` = 0 WHERE `siteID` = {$siteTwo}");
+    $out['two, organisation switched off'] = $foyerShows($two);
+    $db->query("UPDATE `tblSites` SET `isActive` = 1 WHERE `siteID` = {$siteTwo}");
+    return $out;
+};
+check('S7 each organisation\'s link shows only its own posters, and a switched-off organisation\'s link answers 404',
+    $scnFoyerTwo(), ['one' => ['PWT S on'], 'two' => ['PWT S two on'], 'two, organisation switched off' => 404]);
+
+// S8: "every poster" only when the installation permits it AND the organisation chose it.
+$scnFoyerTiers = static function () use ($foyerSet, $foyerWorld, $foyerShows, $foyerToken, $siteOne): array {
+    $foyerWorld();
+    $k = (string) $foyerToken($siteOne);
+    $out = [];
+    foreach (['installation public, organisation all' => ['public', 'all'], 'installation either, nothing chosen' => ['either', null],
+        'installation either, organisation all' => ['either', 'all'], 'installation either, organisation garbage' => ['either', 'everything']] as $name => [$perm, $own]) {
+        $foyerSet($perm, $own);
+        $out[$name] = $foyerShows($k);
+    }
+    $foyerSet('public', null);
+    return $out;
+};
+check('S8 every poster (never a deleted one) only where the installation permits a choice AND the organisation chose it; the stricter wins, and an unknown value counts as public',
+    $scnFoyerTiers(), [
+        'installation public, organisation all' => ['PWT S on'],
+        'installation either, nothing chosen' => ['PWT S on'],
+        'installation either, organisation all' => ['PWT S off', 'PWT S on'],
+        'installation either, organisation garbage' => ['PWT S on'],
+    ]);
+
+// S9: who may save which choice, read back from the database.
+$scnFoyerWho = static function () use ($foyerSet, $foyerPost, $ownShows, $permittedNow, $logged, $people, $siteOne): array {
+    $out = [];
+    $foyerSet('public', null);
+    $foyerPost('orgadmin', ['action' => 'installation', 'value' => 'either']);
+    $out['administrator sets the installation'] = $permittedNow();
+    $foyerPost('siteroot', ['action' => 'installation', 'value' => 'either']);
+    $out['organisation global administrator sets the installation'] = $permittedNow();
+    $foyerPost('siteroot', ['action' => 'organisation', 'value' => 'all']);
+    $out['organisation choice beyond what is permitted'] = $ownShows();
+    $foyerPost('root', ['action' => 'installation', 'value' => 'either']);
+    $out['installation global administrator sets the installation'] = $permittedNow();
+    $foyerPost('orgadmin', ['action' => 'organisation', 'value' => 'all']);
+    $out['administrator chooses for the organisation'] = $ownShows();
+    $foyerPost('siteroot', ['action' => 'organisation', 'value' => 'all']);
+    $out['organisation global administrator chooses'] = $ownShows();
+    $out['refusal recorded'] = $logged('NoticeboardFoyerChoiceRefused', (int) $people['orgadmin']['id'], 'organisation ' . $siteOne) > 0;
+    $foyerSet('public', null);
+    return $out;
+};
+check('S9 only a global administrator of the installation sets what it permits; only the organisation\'s global administrator chooses for it, and only within that; refusals are recorded',
+    $scnFoyerWho(), [
+        'administrator sets the installation' => 'public',
+        'organisation global administrator sets the installation' => 'public',
+        'organisation choice beyond what is permitted' => null,
+        'installation global administrator sets the installation' => 'either',
+        'administrator chooses for the organisation' => null,
+        'organisation global administrator chooses' => 'all',
+        'refusal recorded' => true,
+    ]);
+
+// S10: "today" is the TOKEN's organisation's date.
+$scnFoyerToday = static function () use ($inZoneApart, $db, $poster, $foyerSet, $foyerShows, $foyerToken, $siteOne): mixed {
+    return $inZoneApart(static function (array $z) use ($db, $poster, $foyerSet, $foyerShows, $foyerToken, $siteOne): array|int {
+        $foyerSet('public', null);
+        $db->query("DELETE FROM `tblNoticeboardPosters` WHERE `title` LIKE 'PWT S %'");
+        $poster('PWT S org today', $siteOne, ['showOnWebsite' => '1', 'websiteFrom' => $z['orgToday'], 'websiteUntil' => $z['orgToday']]);
+        $poster('PWT S utc today', $siteOne, ['showOnWebsite' => '1', 'websiteFrom' => $z['utcToday'], 'websiteUntil' => $z['utcToday']]);
+        return $foyerShows((string) $foyerToken($siteOne));
+    });
+};
+check('S10 a poster\'s website dates are judged on the organisation\'s own calendar, not UTC\'s', $scnFoyerToday(), ['PWT S org today']);
+// S11 (round 1): the Noticeboard's on/off switch is the switch of the
+// organisation the SECRET names. The router's own test reads the address's
+// organisation, which for a signed-out screen is always organisation 1.
+$switchOff = static function (int $site, bool $off) use ($db): void {
+    if ($off === true) {
+        $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES ({$site}, 'noticeboard.enabled', '0', '1', 0) "
+            . "ON DUPLICATE KEY UPDATE `settingValue` = '0'");
+    } else {
+        $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'noticeboard.enabled' AND `siteID` = {$site}");
+    }
+};
+$scnFoyerSwitch = static function () use ($db, $foyerWorld, $foyerSet, $foyerShows, $foyerToken, $switchOff, $siteOne, $siteTwo, $signIn, $http): array {
+    $foyerSet('public', null);
+    $foyerWorld();
+    $two = bin2hex(random_bytes(24));
+    $db->query("INSERT INTO `tblNoticeboardFoyer` (`siteID`, `token`, `createdAt`) VALUES ({$siteTwo}, '{$two}', CURRENT_TIMESTAMP) "
+        . "ON DUPLICATE KEY UPDATE `token` = VALUES(`token`)");
+    $one = (string) $foyerToken($siteOne);
+    $out = [];
+    try {
+        $switchOff($siteTwo, true);
+        $out['two switched off: two'] = $foyerShows($two);
+        $out['two switched off: one'] = $foyerShows($one);
+        $switchOff($siteTwo, false);
+        $switchOff($siteOne, true);
+        $out['one switched off: two'] = $foyerShows($two);
+        $out['one switched off: one'] = $foyerShows($one);
+        // Round 2: the router still applies the switch to the noticeboard's
+        // OTHER pages — only the foyer screen is let through.
+        $signIn('orgadmin');
+        $out['one switched off: setup page'] = $http('GET', '/noticeboard/foyer/setup')['status'];
+    } finally {
+        $switchOff($siteOne, false);
+        $switchOff($siteTwo, false);
+    }
+    return $out;
+};
+check('S11 an organisation that switches the Noticeboard off stops ITS screen (404) and nobody else\'s — including when it is the organisation a signed-out screen\'s address resolves to — and the Noticeboard\'s other pages stay switched off',
+    $scnFoyerSwitch(), ['two switched off: two' => 404, 'two switched off: one' => ['PWT S on'], 'one switched off: two' => ['PWT S two on'], 'one switched off: one' => 404,
+        'one switched off: setup page' => 403]);
+// The list of pages the router lets through is pinned whole, so a page added
+// to it is a deliberate, visible change (round 2: it was pinned by nothing).
+$scnRouteList = static function () use ($child, $sep): string {
+    $probe = $child . $sep . 's-routes.php';
+    file_put_contents($probe, '<?php declare(strict_types=1); require ' . var_export($child . $sep . 'web' . $sep . '_core' . $sep . 'AppRegistry.php', true) . ';'
+        . 'echo json_encode(\\Portal\\Core\\AppRegistry::ROUTES_JUDGING_THEIR_OWN_ORGANISATION);');
+    return trim((string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($probe) . ' 2>&1'));
+};
+check('S11b the router lets exactly one page decide its own organisation\'s switch: the foyer screen', $scnRouteList(), '{"noticeboard\\/foyer":"noticeboard"}');
+
+// S12 (round 1): the link's secret is blanked by the portal's own scrubber
+// before an address is written to the error log, an alert e-mail or the
+// outside error service — asked of the COPY's Logger with the address the
+// setup page really shows.
+$scnFoyerScrubbed = static function () use ($signIn, $http, $child, $sep, $foyerToken, $siteOne): array {
+    $signIn('orgadmin');
+    $page = $http('GET', '/noticeboard/foyer/setup')['body'];
+    $token = (string) $foyerToken($siteOne);
+    if (preg_match('#<code id="foyer-link"[^>]*>([^<]+)</code>#', $page, $m) !== 1) {
+        return ['link found' => false];
+    }
+    $link = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+    $path = (string) (parse_url($link, PHP_URL_PATH) ?? '') . '?' . (string) (parse_url($link, PHP_URL_QUERY) ?? '');
+    $probe = $child . $sep . 's-scrub.php';
+    file_put_contents($probe, '<?php declare(strict_types=1); require ' . var_export($child . $sep . 'web' . $sep . '_core' . $sep . 'Logger.php', true) . ';'
+        . 'echo \\Portal\\Core\\Logger::withoutJobToken(' . var_export($path, true) . ');');
+    $recorded = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($probe) . ' 2>&1');
+    // The screen must still OPEN at that address, or a renamed parameter on
+    // one side only would pass the half above.
+    $opens = $http('GET', $path, [], [], false)['status'];
+    return ['link found' => true, 'secret in link' => $token !== '' && str_contains($link, $token),
+        'secret left in what is recorded' => $token !== '' && str_contains($recorded, $token), 'link opens the screen' => $opens];
+};
+check('S12 the link the setup page shows opens the screen, and the portal\'s log scrubber removes its secret from anything it records',
+    $scnFoyerScrubbed(), ['link found' => true, 'secret in link' => true, 'secret left in what is recorded' => false, 'link opens the screen' => 200]);
+
+// S13 (round 1): the screen never reloads blindly. NOT DRIVEN in a browser —
+// nothing here runs the page's script — so this reads the script as text:
+// the reload is asked of the address first and retried, and the old blind
+// reload is gone.
+$scnFoyerReload = static function () use ($http, $foyerToken, $siteOne): array {
+    $ok   = $http('GET', '/noticeboard/foyer?token=' . (string) $foyerToken($siteOne), [], [], false);
+    $gone = $http('GET', '/noticeboard/foyer?token=' . str_repeat('b', 48), [], [], false);
+    $body = $ok['body'];
+    $mark = '/^X-Portal-Foyer:\s*1\s*$/mi';
+    return ['marks its 200' => preg_match($mark, $ok['head']) === 1, 'marks its 404' => $gone['status'] === 404 && preg_match($mark, $gone['head']) === 1,
+        'asks first' => str_contains($body, "fetch(window.location.href, { cache: 'no-store', credentials: 'same-origin' })"),
+        'reloads only on its own 200 or 404' => str_contains($body, "if (r.headers.get('X-Portal-Foyer') === '1' && (r.status === 200 || r.status === 404)) {"),
+        'retries on anything else' => substr_count($body, 'setTimeout(tryReload, 60 * 1000);') === 2,
+        'no blind reload' => str_contains($body, 'setTimeout(function () { window.location.reload(); }') === false];
+};
+check('S13 (script read as text, not run) the screen marks its own answers, asks its address before reloading, reloads only on a 200 or 404 it gave itself, and otherwise keeps playing and asks again',
+    $scnFoyerReload(), ['marks its 200' => true, 'marks its 404' => true, 'asks first' => true, 'reloads only on its own 200 or 404' => true, 'retries on anything else' => true, 'no blind reload' => true]);
+$foyerWorld();
+
+// =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario goes red\n";
 // =============================================================================
 $plant = static function (string $relPath, string|array $from, string|array $to, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
@@ -1874,6 +2193,59 @@ $p = $plant('_apps/admin/calendar/feeds-website-rule.php',
     "\$reworkAfter = \$outcome['saved'] === true;",
     "\$reworkAfter = \$outcome['saved'] === true && \$outcome['change'] !== '';", $scnSameSaveReworks);
 check('P29 with the re-work run only when the rule CHANGED (round 6\'s condition), saving the same rule again re-works nothing', [$p['applied'], $p['result']['source'] ?? null], [true, 'waiting']);
+// #493 P2b: the foyer screen's guards, each taken out of the copy.
+$p = $plant('_core/NoticeboardFoyer.php', "if (\$shows === 'all') {", 'if (true) {', $scnFoyerPublic);
+check('P48 with the foyer screen always taking the "every poster" branch, it shows an unticked poster by default', [$p['applied'], $p['result'] === ['PWT S on']], [true, false]);
+$p = $plant('_core/NoticeboardFoyer.php', "if (self::permitted(\$db) !== 'either') {\n                return 'public';\n            }", '', $scnFoyerTiers);
+check('P49 with the installation\'s limit no longer asked, an organisation\'s stored "all" shows every poster where only public posters are permitted',
+    [$p['applied'], $p['result']['installation public, organisation all'] ?? null], [true, ['PWT S off', 'PWT S on']]);
+$p = $plant('_core/NoticeboardFoyer.php', "if (\$value === 'all' && self::permitted(\$db) !== 'either') {", 'if (false) {', $scnFoyerWho);
+check('P50 with the save no longer holding the organisation to what is permitted, its global administrator stores "all" beyond it',
+    [$p['applied'], $p['result']['organisation choice beyond what is permitted'] ?? null], [true, 'all']);
+$p = $plant('_apps/noticeboard/foyer-setup.php', 'NoticeboardFoyer::saveForOrganisation($mysqli, $siteId, $value, App::isSiteRootAdmin())',
+    'NoticeboardFoyer::saveForOrganisation($mysqli, $siteId, $value, true)', $scnFoyerWho);
+check('P51 with the page no longer asking for the organisation\'s global administrator, an ordinary administrator chooses for it',
+    [$p['applied'], $p['result']['administrator chooses for the organisation'] ?? null], [true, 'all']);
+$p = $plant('_apps/noticeboard/foyer-setup.php', 'NoticeboardFoyer::saveForInstallation($mysqli, $value, App::isRootAdmin())',
+    'NoticeboardFoyer::saveForInstallation($mysqli, $value, true)', $scnFoyerWho);
+check('P52 with the page no longer asking for the installation\'s global administrator, an organisation\'s administrator changes what the installation permits',
+    [$p['applied'], $p['result']['administrator sets the installation'] ?? null], [true, 'either']);
+$p = $plant('_apps/noticeboard/foyer-setup.php', 'if (App::isSiteAdmin() === false) {', 'if (false) {', $scnFoyerSetupGate);
+check('P53 with the setup page\'s gate gone, a plain member opens it', [$p['applied'], $p['result']['member'] ?? null], [true, 200]);
+$p = $plant('_apps/noticeboard/foyer.php', "header('Referrer-Policy: no-referrer');", '', static fn (): bool => ($scnFoyerHeaders()['no referrer'] ?? null) === true);
+check('P54 with the no-referrer header gone, the screen would tell other websites its secret address', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/NoticeboardFoyer.php', '`token` = VALUES(`token`), `createdAt` = VALUES(`createdAt`)', '`createdAt` = VALUES(`createdAt`)', $scnFoyerReplace);
+check('P55 with "make a new link" keeping the stored secret, the old link still works', [$p['applied'], $p['result']['old link'] ?? null], [true, ['PWT S on']]);
+$p = $plant('_core/NoticeboardFoyer.php', "WHERE f.`token` = ? AND s.`isActive` = 1'", "WHERE f.`token` = ?'", $scnFoyerTwo);
+check('P56 with "the organisation is switched on" dropped, a switched-off organisation\'s screen still shows its posters',
+    [$p['applied'], $p['result']['two, organisation switched off'] ?? null], [true, ['PWT S two on']]);
+$p = $plant('_core/NoticeboardFoyer.php', "'FROM `tblNoticeboardPosters` p WHERE p.`siteID` = ?'", "'FROM `tblNoticeboardPosters` p WHERE (p.`siteID` = ? OR 1 = 1)'", $scnFoyerTwo);
+check('P57 with the organisation filter dropped from the poster list, one organisation\'s screen shows another\'s posters',
+    [$p['applied'], $p['result']['one'] ?? null], [true, ['PWT S on', 'PWT S two on']]);
+$p = $plant('_core/NoticeboardFoyer.php', 'new \DateTimeZone(Site::timezone($siteId))', "new \\DateTimeZone('UTC')", $scnFoyerToday);
+check('P58 with "today" taken from UTC, the poster dates are judged on the wrong calendar', [$p['applied'], $p['result']], [true, ['PWT S utc today']]);
+$p = $plant('_core/NoticeboardFoyer.php', "if (is_string(\$token) === false || preg_match(self::TOKEN_PATTERN, \$token) !== 1) {", 'if (is_string($token) === false) {', $scnFoyerNoKey);
+check('P59 (measured, expected to stay GREEN) with the shape test dropped, a malformed secret is still refused — the lookup finds nothing',
+    [$p['applied'], $p['result']['malformed'] ?? null], [true, [404, 'Not found.']]);
+$p = $plant('_apps/noticeboard/foyer.php', "if (\$siteId === null || AppRegistry::isEnabledForSite('noticeboard', \$siteId) === false) {", 'if ($siteId === null) {', $scnFoyerSwitch);
+check('P60 with the page no longer asking its own organisation\'s switch, a switched-off organisation\'s screen keeps playing',
+    [$p['applied'], $p['result']['two switched off: two'] ?? null], [true, ['PWT S two on']]);
+$p = $plant('_core/Router.php', "isset(AppRegistry::ROUTES_JUDGING_THEIR_OWN_ORGANISATION[\$path]) === false\n            && ", '', $scnFoyerSwitch);
+check('P61 with the router applying the address\'s switch again, organisation 1 switching off stops another organisation\'s screen',
+    [$p['applied'], $p['result']['one switched off: two'] ?? null], [true, 403]);
+$p = $plant('_apps/noticeboard/foyer.php', "\$_GET['token'] ?? null", "\$_GET['k'] ?? null", $scnFoyerScrubbed);
+check('P62 with the screen reading a parameter the setup page does not write, the link it shows no longer opens the screen',
+    [$p['applied'], $p['result']['link opens the screen'] ?? null], [true, 404]);
+$p = $plant('_apps/noticeboard/foyer-setup.php', "'noticeboard/foyer?token=' . \$token", "'noticeboard/foyer?k=' . \$token", $scnFoyerScrubbed);
+check('P63 with the link\'s parameter renamed away from "token", the secret survives into what the log scrubber records',
+    [$p['applied'], $p['result']['secret left in what is recorded'] ?? null], [true, true]);
+$p = $plant('_apps/noticeboard/foyer.php', "header('Cache-Control: no-store, private');", "header('Cache-Control: no-store');",
+    static fn (): bool => ($scnFoyerHeaders()['not stored'] ?? null) === true);
+check('P65 with "private" dropped, the portal\'s service worker may keep a copy of the screen (round 3)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_apps/noticeboard/foyer.php', "header('X-Portal-Foyer: 1');", '', $scnFoyerReload);
+check('P64 with the page no longer marking its answers, its own 404 cannot be told from anybody else\'s (round 2)',
+    [$p['applied'], $p['result']['marks its 404'] ?? null], [true, false]);
+$foyerWorld();
 $setEv($cEvent, ['showOnWebsite' => '0']);
 check('P11 with every plant removed again, the unticked event is off the countdown once more', $scnUnticked(), true);
 
@@ -1912,6 +2284,10 @@ $db->query("DELETE FROM `tblExternalFeedRules` WHERE `name` = 'PWT rule'");
 $db->query("DELETE FROM `tblExternalFeeds` WHERE `name` = 'PWT outside calendar'");
 $setRule($ruleWas ?? 'event', null);
 $db->query("DELETE FROM `tblSettings` WHERE `siteID` = {$siteTwo}");
+// Section S's rows (#493 P2b).
+$db->query("DELETE FROM `tblNoticeboardPosters` WHERE `title` LIKE 'PWT S %'");
+$db->query("DELETE FROM `tblNoticeboardFoyer` WHERE `siteID` IN ({$siteOne}, {$siteTwo})");
+$foyerSet('public', null);
 try {
     $db->query("DELETE FROM `tblSites` WHERE `siteID` = {$siteTwo}");
 } catch (Throwable $e) {

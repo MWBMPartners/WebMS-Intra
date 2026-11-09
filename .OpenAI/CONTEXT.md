@@ -3190,6 +3190,9 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   capping the organisation at READ time). Every website-mode caller passes `copiedRuleFor()`; the
   parameter's default is the stricter rule, so a caller — or a test — that omits it silently narrows.
   The public submission form never names the three columns. Test: `tools/public-website-tick-selftest.php`.
+  `Portal\Core\NoticeboardFoyer` is the ONE place for the noticeboard's foyer screen (#493 P2b, D-086):
+  its secret link, what it shows (public posters only unless the installation permits a choice), and
+  its two settings, which the general editor refuses.
   The technical record is DEV_NOTES.md, "Show on the public website, for events (#493, package P1)".
 
 ## A time on a clock is not a moment, and the test for it cannot work (#777 part one)

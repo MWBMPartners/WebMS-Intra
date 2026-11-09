@@ -171,8 +171,13 @@ class Router
         //    registered AND disabled, render a friendly 403 explaining why
         //    instead of letting the user hit a half-broken handler.
         //    Routes not owned by any registered app pass through unchanged.
+        //    A page that decides its own organisation asks that organisation's
+        //    switch itself (AppRegistry::ROUTES_JUDGING_THEIR_OWN_ORGANISATION,
+        //    #493 P2b): this test reads the ADDRESS's organisation, which for
+        //    such a page is the wrong one.
         $owningApp = AppRegistry::appForRoute($path);
-        if ($owningApp !== null && AppRegistry::isEnabled((string) $owningApp['slug']) === false) {
+        if ($owningApp !== null && isset(AppRegistry::ROUTES_JUDGING_THEIR_OWN_ORGANISATION[$path]) === false
+            && AppRegistry::isEnabled((string) $owningApp['slug']) === false) {
             self::renderAppDisabled($owningApp);
             return;
         }

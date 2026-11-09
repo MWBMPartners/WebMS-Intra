@@ -363,6 +363,21 @@ if ($settingId > 0) {
         header('Location: ' . Site::url('settings'));
         exit();
     }
+    // 🔒 Nor what the noticeboard's foyer screen shows (#493 P2b, D-086): its
+    //    own page holds an organisation's choice to what the installation
+    //    permits, which this editor cannot judge. See
+    //    NoticeboardFoyer::lockedInGeneralEditor().
+    if (\Portal\Core\NoticeboardFoyer::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is changed only on Noticeboard, Foyer screen',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\NoticeboardFoyer::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
     if (Site::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -854,6 +869,21 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\PublicWebsite::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+    // 🔒 Nor what the noticeboard's foyer screen shows (#493 P2b, D-086): its
+    //    own page holds an organisation's choice to what the installation
+    //    permits, which this editor cannot judge. See
+    //    NoticeboardFoyer::lockedInGeneralEditor().
+    if (\Portal\Core\NoticeboardFoyer::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" is set only on Noticeboard, Foyer screen',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\NoticeboardFoyer::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

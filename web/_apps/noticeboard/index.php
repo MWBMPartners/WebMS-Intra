@@ -43,6 +43,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <?php // 🌐 #493 P2a: the board's own editor cannot set the website tick (it is a generated bundle), so it lives on its own page. ?>
 <p class="small mb-2"><a href="<?php echo htmlspecialchars(Site::url('noticeboard/website'), ENT_QUOTES, 'UTF-8'); ?>"><i class="fa-solid fa-globe me-1"></i>Choose which posters are on the public website</a></p>
 <?php endif; ?>
+<?php if ($isAdmin === true): ?>
+<?php // 📺 #493 P2b: the foyer screen's link and choice, for whoever manages the board. ?>
+<p class="small mb-2"><a href="<?php echo htmlspecialchars(Site::url('noticeboard/foyer/setup'), ENT_QUOTES, 'UTF-8'); ?>"><i class="fa-solid fa-tv me-1"></i>Set up the foyer screen</a></p>
+<?php endif; ?>
 <!-- The board mounts full-bleed inside the portal content area. -->
 <div id="noticeboard-root" style="position:relative; min-height:70vh;"></div>
 
