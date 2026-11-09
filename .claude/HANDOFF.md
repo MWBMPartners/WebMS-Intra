@@ -4,15 +4,14 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: `87f6fa8a` (D-091, #852 closed),
-`2cf919b5` (D-089, #850 closed), `de32d26` (#493 P1). Nothing uncommitted.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: `0fcdf53c` (D-079 + D-092, migration
+259), `87f6fa8a` (D-091), `2cf919b5` (D-089), `de32d26` (#493 P1). Nothing uncommitted.
 
 ## Next, in this order
 
-1. **D-079** — new events start members-only: the column default plus a migration, the Manage Events
-   form, the events API, the CSV import, and the test files that make events assuming they are public.
-2. #493 P2 (noticeboard), P3 (admin page, delegation, D-085), P4 (the public door; delete the old
-   widget folder, D-084).
+1. **#493 P2** — the noticeboard: which items reach the public website, decided one item at a time
+   (D-057) by somebody holding `website.publish` (D-077); the delegation and admin page are P3 (D-085).
+2. #493 P3 (admin page, delegation, D-085), P4 (the public door; delete the old widget folder, D-084).
 3. #569 — the page findings left. 4. The backlog (D-055). 5. #754. 6. The Codex review (D-007), then
    the merge.
 
@@ -82,3 +81,4 @@ index there. **Codex has reviewed none of this work.**
 | #851 | Ten gaps in the top-bar and phone-width self-test (#832/#833 rounds 2 and 3) |
 | #856 | Some public-website-tick plant checks pass when their scenario fails for any reason |
 | #858 | Without JavaScript, a saved outside-calendar choice's redraw can show a Yes the person unticked |
+| #859 | The public event-suggestion form promises an e-mail on approval, and nothing sends one |
