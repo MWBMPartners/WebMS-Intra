@@ -1821,7 +1821,12 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     "nobody has, go ahead"); and ownership is answered BEFORE the status, so a
     stranger is never told that a claim exists or where it has got to.
     `/expenses/submit` lists the claimant's own claims (#834); editability is
-    still asked only on the claim's own page. Only the
+    still asked only on the claim's own page. **Receipts (#649): once a claim's
+    COMMIT has been sent, the submit handler never deletes a receipt file** — the
+    server may have committed with only the reply lost; files are kept and logged
+    by path, and a fresh connection only chooses the claimant's MESSAGE. Two
+    earlier designs that let that look delete a saved claim's receipt are
+    recorded in DEV_NOTES.md. Only the
     claimant may change a claim — not an administrator, for the same reason as
     #545.
 

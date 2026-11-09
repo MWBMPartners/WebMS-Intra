@@ -771,7 +771,11 @@ Service-type-aware headcount tracker.
 
 Full claim lifecycle with multi-approver, treasury, PDF, CSV.
 
-- Submit (`/expenses/submit`) — claim with line items, receipt uploads, auto-attached PDF.
+- Submit (`/expenses/submit`) — claim with line items, receipt uploads, auto-attached PDF. Receipts: JPG,
+  PNG, GIF, HEIC/HEIF (D-096), PDF, Word, Excel or CSV, up to 10 MB each (or the server's lower limit). A
+  file that cannot be attached is named to the claimant with the reason and what to change, and the claim is
+  still saved; files past the server's per-submission count are reported, unnamed (#649). The rules and words
+  are in `ExpenseRules` (`whyReceiptRefused()`, `submittedMessage()`).
 - Approve (`/expenses/approve`) — multi-approver workflow with comments.
 - **Download every claim as a spreadsheet** — an **Export** button on the approvals page hands back a
   CSV of the organisation's claims (claim number, claimant, department, title, date, amount, status),

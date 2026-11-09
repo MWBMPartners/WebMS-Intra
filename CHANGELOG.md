@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A receipt that is not attached is said out loud, and no saved claim loses its receipt (#649)
+
+- **Fixed:** submitting an expense claim used to skip, without a word, any receipt that was too big, of a
+  kind not on the list, refused by the server, or could not be stored — then save the claim as though every
+  receipt had gone, and show no message at all. The claim is still saved, and the claimant is now told which
+  files were not attached, why, and what to change; files beyond the server's per-submission limit
+  (`max_file_uploads`) are reported too (unnamed — PHP never passes their names on). The claim is refused
+  outright only when the receipts folder cannot be made. A successful submission says "Your claim #N has
+  been submitted."
+- **Fixed:** a claim that fails before it is saved takes its receipt files with it, even on a lost database
+  connection. **Once the save has been sent, no receipt file is ever deleted**: if no confirmation comes
+  back, the files are kept and logged for the administrator, and the claimant is told either that the claim
+  WAS saved (approvers not e-mailed; do not submit again) or that it is not known and to check their claims
+  list first. The cost, chosen deliberately: a commit that truly failed leaves its files on disk, logged by
+  path — an orphan can be removed, a saved claim's lost evidence cannot be recovered.
+- **Changed:** HEIC/HEIF photos (an iPhone's default) are accepted as receipts (D-096); an empty file is not.
+  Claimants' file names never reach a log or the database (#714).
+- **Tests:** new `tools/expense-receipts-selftest.php`, 148 checks over real HTTP, real files and a real
+  database, including a proxy that drops the reply to a COMMIT; 31 planted faults, 28 caught and three
+  stated as beyond reach. Five check rounds by fresh Claude agents; the after-commit design was simplified
+  after failing two rounds running. Raised from it: #867-#872.
+
 ### One page, one canonical address; an error page carries none (#823)
 
 - **Fixed:** Settings answers both `/settings` and `/admin/settings`, and the Dashboard both `/` and

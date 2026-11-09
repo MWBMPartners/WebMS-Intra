@@ -21180,6 +21180,38 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### A receipt that is not attached is said, and once a save is sent no receipt is deleted (#649)
+
+- `ExpenseRules` is the one place for the receipt rule (`whyReceiptRefused()`), its words
+  (`receiptRefusalWords()`, each saying what to change), the claimant's message (`submittedMessage()`, whole
+  sentences per case, #694's lesson), the reader of the upload field (`receiptsFromUpload()`), whether PHP
+  dropped files (`uploadsCutShort()`), and the words when a save cannot be confirmed (`claimIsSaved()`,
+  `unconfirmedMessage()` — which choose a MESSAGE and can never delete anything).
+- **`max_file_uploads`:** PHP drops files past the limit before any script runs. Its start-up warning is a
+  bonus when it survives, but start-up, the session and the router run first and a session clean-up notice
+  was measured replacing it, so the fallback ("as many files arrived as are allowed", said with "if") is what
+  the handler relies on and must not be deleted. PHP does not count an empty file box towards its limit.
+- **The failure path has two halves, and the second is the lesson.** Before COMMIT is sent: remove the moved
+  files (no database needed), then roll back in its own try (it throws on a lost connection), then log, then
+  tell the claimant. **Once COMMIT has been sent, no receipt file is ever deleted**: the server may have
+  committed with only the reply lost, or refused it with the connection up. Files are kept and logged by
+  stored path through a NEW connection (`DbServer::connectAgain()`, 3 s to connect and for each answer —
+  `default_socket_timeout` and `mysqlnd.net_read_timeout` set for that one `new mysqli` and put back, because
+  `tools/db-strict-mode-selftest.php` allows one way of opening a connection), with the logger moved to it
+  (`Logger::useConnection()`). That connection is asked only which message to show. **Two earlier designs
+  deleted a SAVED claim's receipt:** removing files on every failure (measured with a proxy that forwards
+  COMMIT and drops the reply), and asking "is the claim there?" then "has the old connection gone?" at two
+  moments (a commit landing between them read as "not saved", 10 of 60 runs). Any answer that can delete has
+  that shape, so the look only chooses words. The honest cost: a commit that truly failed leaves orphan files,
+  logged by path.
+- **PHP's defaults:** connecting waits 60 s (`default_socket_timeout`); every answer waits 86,400 s, a day
+  (`mysqlnd.net_read_timeout`) — the request's own connection has no read deadline at all (#872).
+- **Testing tricks:** while a trigger runs, the process list shows the TRIGGER's statement, not the INSERT;
+  a connection lost AT the commit is produced by `tools/expense-receipts-commit-proxy.py`, which reads MySQL's
+  packet framing; an account may KILL its own connections with no extra right. The "approvers not e-mailed"
+  rule is held by the handler's structure (the e-mail step is after the catch, which always exits), not by a
+  check — plant P31 stays green, and the test header says so.
+
 ### An error page has no canonical address, and one page names one (#823)
 
 - `head-meta.php` leaves the canonical address and og:url out when `http_response_code()` is 400 or more —
