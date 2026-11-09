@@ -41,7 +41,15 @@
 # matches ".php" followed by "/" or the end, case-insensitively, and the other
 # endings a server may run as PHP (.php5 and the like, .phtml, .phar). The
 # three entry points are allowed only EXACTLY, so /index.php/x is refused as
-# well. tools/audit-checks/check_htaccess_php_denied.py holds this.
+# well. tools/htaccess-apache-selftest.php is the guard: it serves this file
+# from a real Apache and requires every such address to be refused with no
+# PHP file run (round 8 of P4a's check — three static readings of this file
+# were each beaten by the next shape: a rule written ABOVE RewriteEngine On
+# still runs, and a comment ending in a backslash continues onto the next
+# line and swallows it). tools/audit-checks/check_htaccess_php_denied.py is
+# a cheap early warning that pins the block's text.
+#
+# ⚠️ So never end a comment line in this file with a backslash.
 #
 # @see https://httpd.apache.org/docs/2.4/mod/mod_rewrite.html
 # @see https://owasp.org/www-community/Security_by_Design_Principles

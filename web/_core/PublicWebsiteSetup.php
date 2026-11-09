@@ -709,24 +709,56 @@ final class PublicWebsiteSetup
      *     or an organisation's own) — `publicHostRow()` refuses such an
      *     address at request time, so the door never answers there even when
      *     approved, and nothing may claim it does.
-     * Never throws: '' when anything cannot be read.
+     * Never throws: '' when anything cannot be read. Built on
+     * `publicHostStatus()`, so the two can never disagree.
      */
     public static function publicHostInEffect(\mysqli $db, int $siteId): string
     {
-        if (self::publicHostApproved($db, $siteId) === false) {
-            return '';
-        }
+        return self::publicHostStatus($db, $siteId) === self::HOST_APPROVED ? self::publicHostFor($db, $siteId) : '';
+    }
+
+    /** `publicHostStatus()`'s answers. */
+    public const HOST_NONE = 'none';
+    public const HOST_WAITING = 'waiting';
+    public const HOST_APPROVED = 'approved';
+    public const HOST_MEMBERS = 'members';
+    public const HOST_UNCHECKED = 'unchecked';
+
+    /**
+     * Where the organisation's public address stands — the ONE answer the
+     * card, the set-up check and `publicHostInEffect()` give words to (round
+     * 8 of P4a's check: an approved address whose members' check could not be
+     * READ was reported as an address members sign in at, the wrong reason):
+     *   HOST_NONE       no address (or a stored one this page would refuse);
+     *   HOST_WAITING    not approved by the installation (D-101), or whether
+     *                   it is approved could not be read — either way, not
+     *                   the door;
+     *   HOST_APPROVED   approved, and not an address members sign in at:
+     *                   the door answers on it;
+     *   HOST_MEMBERS    approved, but it IS an address members sign in at,
+     *                   which `publicHostRow()` refuses at request time;
+     *   HOST_UNCHECKED  approved, but the members' addresses could not be
+     *                   read, so it is NOT counted as the door's address.
+     * Never throws.
+     */
+    public static function publicHostStatus(\mysqli $db, int $siteId): string
+    {
         $host = self::publicHostFor($db, $siteId);
         if ($host === '') {
-            return '';
+            return self::HOST_NONE;
+        }
+        if (self::publicHostApproved($db, $siteId) === false) {
+            return self::HOST_WAITING;
         }
         try {
             $members = self::hostsMembersUse($db, '');
         } catch (\Throwable $e) {
-            return '';
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the addresses members sign in at could not be read: ' . $e->getMessage());
+
+            return self::HOST_UNCHECKED;
         }
 
-        return in_array($host, $members, true) === true ? '' : $host;
+        return in_array($host, $members, true) === true ? self::HOST_MEMBERS : self::HOST_APPROVED;
     }
 
     /**
@@ -737,7 +769,11 @@ final class PublicWebsiteSetup
      * organisation has entered one", untrue exactly when the installation's
      * administrator needs the list (round 7 of P4a's check).
      *
-     * @return list<array{siteId:int, siteName:string, host:string, approved:bool}>|null
+     * Each row also says whether the address is one members sign in at
+     * (`membersAddress`: true, false, or null when that could not be read),
+     * so the list can say an approved address is "not in use".
+     *
+     * @return list<array{siteId:int, siteName:string, host:string, approved:bool, membersAddress:?bool}>|null
      */
     public static function allPublicHosts(\mysqli $db): ?array
     {
@@ -747,9 +783,15 @@ final class PublicWebsiteSetup
                 . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` ORDER BY (h.`approvedAtUtc` IS NOT NULL), s.`siteName`, h.`siteID`'
             );
             $out = [];
+            try {
+                $members = self::hostsMembersUse($db, '');
+            } catch (\Throwable $e) {
+                $members = null;
+            }
             while (is_array($row = $rs->fetch_assoc()) === true) {
                 $out[] = ['siteId' => (int) $row['siteID'], 'siteName' => (string) $row['siteName'],
-                    'host' => (string) $row['hostName'], 'approved' => $row['approvedAtUtc'] !== null];
+                    'host' => (string) $row['hostName'], 'approved' => $row['approvedAtUtc'] !== null,
+                    'membersAddress' => $members === null ? null : in_array((string) $row['hostName'], $members, true)];
             }
 
             return $out;
@@ -1554,13 +1596,16 @@ final class PublicWebsiteSetup
                     . ($reserved === true ? ', and it is an address members sign in at' : '') . '.'];
             $rows[] = ['label' => 'Public address', 'state' => $resolves === true ? 'ok' : 'problem',
                 'words' => $resolves === true ? 'Its name exists on the internet.' : 'Its name could not be found on the internet, or it points at a private network. Ask whoever looks after your domain to point it at this portal.'];
-            $rows[] = self::publicHostApproved($db, $siteId) === false
-                ? ['label' => 'Public address', 'state' => 'problem', 'words' => 'Waiting for the installation\'s administrator to '
-                    . 'approve it. Until then it does nothing.']
-                : (self::publicHostInEffect($db, $siteId) === ''
-                    ? ['label' => 'Public address', 'state' => 'problem', 'words' => 'Approved, but it is also an address members '
-                        . 'sign in at, so the public door does NOT answer on it.']
-                    : ['label' => 'Public address', 'state' => 'ok', 'words' => 'Approved by the installation\'s administrator.']);
+            $rows[] = match (self::publicHostStatus($db, $siteId)) {
+                self::HOST_APPROVED  => ['label' => 'Public address', 'state' => 'ok', 'words' => 'Approved by the installation\'s administrator.'],
+                self::HOST_MEMBERS   => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Approved, but it is also an '
+                    . 'address members sign in at, so the public door does NOT answer on it.'],
+                self::HOST_UNCHECKED => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Approved, but whether it is '
+                    . 'also an address members sign in at could not be checked just now, so it is not counted as the public door\'s '
+                    . 'address. Try again later.'],
+                default              => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Waiting for the '
+                    . 'installation\'s administrator to approve it. Until then it does nothing.'],
+            };
             $rows[] = ['label' => 'Public address', 'state' => 'untested',
                 'words' => 'Whether it reaches THIS portal is not checked in this version. With the public door on and the address '
                     . 'approved, open https://' . $public . '/events.json in your own browser: it should show your events.'];

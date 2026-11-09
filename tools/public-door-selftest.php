@@ -109,7 +109,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 164;
+const PDS_EXPECTED_CHECKS = 168;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1084,15 +1084,17 @@ $scnUnapprovedNotShown = static function () use ($db, $siteA, $hostA, $cardAs, $
 check('D12 with A\'s address WAITING, the card gives the /w/ address and not the public one, offers no "public address is not affected" advice, the missing-tick refusal says every copy stops, and with no portal address the card still says why there is none',
     $scnUnapprovedNotShown(), [false, true, false, true, true]);
 /** An APPROVED address that is also an address members sign in at is not the door (publicHostRow() refuses it), and the card must not claim it is. */
-$scnMembersAddress = static function () use ($db, $siteB, $hostA, $people, $http, $isDoor): array {
+$scnMembersAddress = static function () use ($db, $siteA, $siteB, $hostA, $people, $http, $isDoor): array {
     $db->query("UPDATE `tblSites` SET `hostPattern` = '{$hostA}' WHERE `siteID` = {$siteB}");
     $page = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
     $door = $isDoor($http('GET', '/events.json', ['host' => $hostA]));
+    $list = $http('GET', '/admin/public-website', ['jar' => $people['instroot']['jar']])['body'];
     $db->query("UPDATE `tblSites` SET `hostPattern` = NULL WHERE `siteID` = {$siteB}");
-    return [str_contains($page, 'data-public-host-approval="approved-members-address"'), str_contains($page, 'https://' . $hostA . '/events.json'), $door];
+    return [str_contains($page, 'data-public-host-approval="approved-members-address"'), str_contains($page, 'https://' . $hostA . '/events.json'), $door,
+        str_contains($list, 'data-public-host-row="' . $siteA . '" data-public-host-row-state="approved-members-address"')];
 };
-check('D13 an approved address that is ALSO an address members sign in at: the card says the door does not answer on it and does not offer it as the door\'s address, and it is not the door',
-    $scnMembersAddress(), [true, false, false]);
+check('D13 an approved address that is ALSO an address members sign in at: the card says the door does not answer on it and does not offer it as the door\'s address, it is not the door, and the installation\'s list says "not in use" (round 8)',
+    $scnMembersAddress(), [true, false, false, true]);
 /** The installation's list says when it could not be read, never "no organisation has entered one". */
 $scnListUnreadable = static function () use ($db, $http, $people): array {
     $db->query('RENAME TABLE `tblPublicHosts` TO `tblPublicHostsPdsAside`');
@@ -1137,6 +1139,60 @@ $d16Said = (string) ($db->query("SELECT `activityDescription` FROM `tblActivityL
 check('D16 an approval must name the address exactly as stored (MySQL would match other capitals and trailing spaces): a different spelling changes nothing, and the approval recorded names the STORED address',
     [$d16Waiting, str_contains($d16['page'], 'no longer the one waiting'), $approvedAt($siteA) !== null, str_contains($d16Said, ' ' . $hostA . ' ')],
     [null, true, true, true]);
+
+// ── Round 8 of P4a's check: two publicHostInEffect() callers were pinned by
+// nothing (reverting either left 164/164). Each is driven in the three states
+// an approved-or-not address can be in, with a plant in section P.
+/** The members' address state, for the scenarios below: B's members sign in at A's public address. */
+$asMembersAddress = static function (bool $on) use ($db, $siteB, $hostA): void {
+    $db->query("UPDATE `tblSites` SET `hostPattern` = " . ($on === true ? "'{$hostA}'" : 'NULL') . " WHERE `siteID` = {$siteB}");
+};
+/** X7: what "Replace the name" SAYS and RECORDS about the public address, waiting / a members' address / in effect. */
+$scnReplaceWords = static function () use ($db, $siteA, $hostA, $card, $doorName, $people, $asMembersAddress): array {
+    $was    = (string) $doorName($siteA);
+    $record = static function () use ($db, $people): string {
+        return (string) ($db->query("SELECT `activityDescription` FROM `tblActivityLogs` WHERE `activityType` = 'PublicDoorNameReplaced' "
+            . "AND `userID` = {$people['root']['id']} ORDER BY `logID` DESC LIMIT 1")->fetch_assoc()['activityDescription'] ?? '');
+    };
+    $press = static function () use ($card, $record, $hostA): array {
+        $r = $card('root', 'door_replace', ['understood' => '1']);
+        return [str_contains($r['page'], 'is NOT affected by the name'), str_contains($record(), 'copies using the public address ' . $hostA)];
+    };
+    $out = [];
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+    $out['waiting'] = $press();
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+    $asMembersAddress(true);
+    $out['a members\' address'] = $press();
+    $asMembersAddress(false);
+    $out['in effect'] = $press();
+    // Put A's name back, so every later section still holds the name it read.
+    $db->query("UPDATE `tblPublicDoorNames` SET `publicName` = '{$was}' WHERE `siteID` = {$siteA}");
+    return $out;
+};
+check('D17 "Replace the name" claims a public address is NOT affected — in its message AND its record — only when that address is the door\'s (approved, not a members\' address), never while it waits or is a members\' address',
+    $scnReplaceWords(), ['waiting' => [false, false], 'a members\' address' => [false, false], 'in effect' => [true, true]]);
+/** X5: the set-up check's row about approval, in the same three states. */
+$scnCheckRow = static function () use ($db, $siteA, $http, $tokenOn, $people, $asMembersAddress): array {
+    $run = static function () use ($http, $tokenOn, $people): array {
+        $jar  = $people['root']['jar'];
+        $page = $http('GET', '/admin/public-website', ['jar' => $jar]);
+        $http('POST', '/admin/public-website/check', ['jar' => $jar, 'post' => ['csrf_token' => $tokenOn($page['body'])]]);
+        $body = $http('GET', '/admin/public-website', ['jar' => $jar])['body'];
+        return [str_contains($body, 'Approved by the installation'), str_contains($body, 'does NOT answer on it'), str_contains($body, 'Waiting for the installation')];
+    };
+    $out = [];
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+    $out['waiting'] = $run();
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+    $asMembersAddress(true);
+    $out['a members\' address'] = $run();
+    $asMembersAddress(false);
+    $out['in effect'] = $run();
+    return $out;
+};
+check('D18 "Check my set-up" says Waiting, "approved but members sign in at it, so the door does NOT answer", or Approved — each in its own state and only there',
+    $scnCheckRow(), ['waiting' => [false, false, true], 'a members\' address' => [false, true, false], 'in effect' => [true, false, false]]);
 
 $setOwn($siteA, 'calendar.enabled', 'false');
 $refusals['Calendar switched off'] = $feedA();
@@ -2115,6 +2171,15 @@ check('P67 with an unreadable list answered as an empty one, the installation\'s
 $p = $plant('_core/PublicWebsiteSetup.php', "        if (PortalAddress::visitorCanChooseHost() === true) {\n            return self::refusedAndRecorded('public address approval'",
     "        if (false) {\n            return self::refusedAndRecorded('public address approval'", $scnApproveNoSiteUrl);
 check('P68 with "the portal\'s own address must be set" taken out of approving, an address is approved while nobody can tell members\' addresses', [$p['applied'], $p['result'][0] ?? null], [true, true]);
+// Round 8 of P4a's check: the two publicHostInEffect() callers nothing pinned.
+$p = $plant('_core/PublicWebsiteSetup.php', "        \$publicHost = self::publicHostInEffect(\$db, \$siteId);\n        Logger::activity('PublicDoorNameReplaced',",
+    "        \$publicHost = self::publicHostFor(\$db, \$siteId);\n        Logger::activity('PublicDoorNameReplaced',", $scnReplaceWords);
+check('P69 with "Replace the name" back on any stored address, it tells an organisation a WAITING address and a members\' address are not affected, and records that',
+    [$p['applied'], $p['result']['waiting'] ?? null, $p['result']['a members\' address'] ?? null], [true, [true, true], [true, true]]);
+$p = $plant('_core/PublicWebsiteSetup.php', "self::HOST_MEMBERS   => ['label' => 'Public address', 'state' => 'problem'",
+    "'not-a-status'       => ['label' => 'Public address', 'state' => 'problem'", $scnCheckRow);
+check('P70 with the set-up check\'s "a members\' address" row taken out, it no longer says the door does not answer on such an address',
+    [$p['applied'], $p['result']['a members\' address'][1] ?? null], [true, false]);
 // P58 and P60 put A's own address back, which (rightly) leaves it waiting:
 // approve it again directly so the tidy-up starts from the state it expects.
 $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");

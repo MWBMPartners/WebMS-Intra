@@ -2002,3 +2002,31 @@ jobs:
             echo "- Foreign-key target check (#552, check 23): ${{ steps.check23.outputs.hits }} finding section(s) — runs on every pull request, even when an earlier step failed (blank only if the run was cancelled)"
             echo "- Backup column-type check (#577, check 24): ${{ steps.check24.outputs.hits }} finding section(s) — runs on every pull request, even when an earlier step failed (blank only if the run was cancelled)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # ===========================================================================
+  # The web root's .htaccess, run by a REAL Apache (#493 P4a, round 8; D-065)
+  # ===========================================================================
+  # Whether the deny rule RUNS cannot be read off the file: three rounds of
+  # P4a's check each beat a static reading with the next shape (a rule above
+  # RewriteEngine On, a comment ending in a backslash, which Apache continues
+  # onto the next line). This job serves the repository's real .htaccess from
+  # php:8.4-apache in Docker, with every PHP file a stub that prints its own
+  # name, requires every refused form to be refused with no stub run and every
+  # must-work address to work, and plants each known dead rule into a copy.
+  # Its own job because it needs Docker; it has no ${{ }} in any script, so it
+  # adds nothing to the expression-length ceiling (#745).
+  htaccess-apache:
+    name: '.htaccess on a real Apache (hard gate, #493)'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Run the real .htaccess on a real Apache (hard gate)
+        run: php tools/htaccess-apache-selftest.php

@@ -16,6 +16,22 @@ error naming the server's file path when display_errors is on. The rule now
 matches ".php" (and .php5-style endings, .phtml, .phar) followed by "/" or the
 end, case-insensitively.
 
+THIS IS AN EARLY WARNING. THE GUARD IS tools/htaccess-apache-selftest.php
+-------------------------------------------------------------------------
+Round 8 of P4a's check defeated this file's reading a third time, measured on
+a real Apache 2.4.69: a rule ABOVE `RewriteEngine On` (Apache collects rules
+in file order whatever line switches the engine on), and a comment ending in
+a backslash, which Apache CONTINUES onto the next line, swallowing the deny
+rule or `RewriteEngine On`. Three rounds running a static reading of
+.htaccess lost to the next shape, so per D-065 whether the rule RUNS is now
+DRIVEN: tools/htaccess-apache-selftest.php serves the real file from a real
+Apache and requires every refused form to be refused with no PHP file run,
+and plants each known dead rule. This check is kept because it is cheap and
+runs before a push with no Docker; it now also knows the round-8 shapes
+(continuations are folded first, comments included, and any Rewrite*
+directive before `RewriteEngine On` is refused). A green run here is NOT
+proof the rule works on Apache — the Apache test is.
+
 WHY IT PINS THE TEXT (round 7 of P4a's check)
 ---------------------------------------------
 Version 1 read only the deny rule's RewriteCond lines and judged them against
@@ -30,15 +46,23 @@ while the rule does nothing, each green:
 Nothing in the tests executes the real .htaccess (the self-tests use PHP's
 built-in server, which ignores it), so whether the rule RUNS cannot be driven
 here (D-065): the source is PINNED instead.
-  1. Exactly one RewriteEngine directive, and it says On.
+  1. Exactly one RewriteEngine directive, and it says On — or, beside it,
+     only further `RewriteEngine On` lines inside a later
+     `<IfModule mod_rewrite.c>` section, which change nothing. No Rewrite*
+     directive may come before it (round 8: Apache still runs a rule written
+     above it).
   2. No section (`<If…>`, `<IfModule …>`, …) is open where it stands, and
      none opens inside the pinned region — a section could make the whole
      block conditional.
   3. Every directive from `RewriteEngine On` to the end of the deny rule is
      EXACTLY the pinned list below (whitespace runs collapsed — Apache splits
      a directive's arguments on whitespace, so a run of spaces means the same
-     as one). So no rule can be added before the deny rule, no condition
-     changed, no [OR] added, and the rule itself cannot change.
+     as one), read AFTER folding every line that ends in a backslash into
+     the next, comments included, because Apache does (round 8). So no rule
+     can be added between `RewriteEngine On` and the deny rule, no condition
+     changed, no [OR] added, and the rule itself cannot change. (Round 7's
+     docstring said "no rule can be added before the deny rule"; a rule above
+     `RewriteEngine On` was not covered until round 8.)
   4. The address table, as before: the deny rule's conditions, applied with
      Python's regular expressions, refuse every address that must be refused
      and none that must be let through. (A change to the pinned text fails 3
@@ -106,11 +130,34 @@ MUST_ALLOW = [
 ]
 
 
-def directives(text: str) -> list[tuple[int, str]]:
-    """(line number, directive with whitespace runs collapsed) for every line
-    Apache reads: a comment is a line whose first non-blank character is #."""
+def logical_lines(text: str) -> list[tuple[int, str]]:
+    """(first line number, text) for each line as Apache reads it: a line
+    ending in a backslash continues onto the next one — a COMMENT included,
+    which is how a comment ending in "\\" swallows the directive below it
+    (measured on Apache 2.4.69, round 8 of P4a's check)."""
     out = []
+    buf = ""
+    start = 0
     for n, line in enumerate(text.splitlines(), start=1):
+        if buf == "":
+            start = n
+        stripped = line.rstrip()
+        if stripped.endswith("\\"):
+            buf += stripped[:-1] + " "
+            continue
+        out.append((start, buf + line))
+        buf = ""
+    if buf != "":
+        out.append((start, buf))
+    return out
+
+
+def directives(text: str) -> list[tuple[int, str]]:
+    """(line number, directive with whitespace runs collapsed) for every
+    logical line Apache reads: a comment is one whose first non-blank
+    character is #, and it runs to the end of its continued line."""
+    out = []
+    for n, line in logical_lines(text):
         s = line.strip()
         if s == "" or s.startswith("#"):
             continue
@@ -125,15 +172,37 @@ def name_of(directive: str) -> str:
 def structure_problems(text: str) -> list[str]:
     ds = directives(text)
     problems = []
-    engines = [(n, d) for n, d in ds if name_of(d) == "rewriteengine"]
-    if len(engines) != 1:
-        problems.append("there must be exactly ONE RewriteEngine line, and there are %d (in .htaccess the last one decides "
-                        "for the whole file, so a second can switch the deny rule off)" % len(engines))
-    if engines == [] or engines[0][1].split(" ")[1:] != ["On"]:
-        if engines != []:
-            problems.append("line %d says %r: the rewrite engine must be On, or no rule runs" % engines[0])
+    # Which section each directive sits in (the innermost opening tag, lower case).
+    sections = []
+    stack: list[str] = []
+    for _n, d in ds:
+        if d.startswith("</"):
+            if stack:
+                stack.pop()
+            sections.append(stack[-1] if stack else "")
+            continue
+        if d.startswith("<"):
+            stack.append(d.lower())
+        sections.append(stack[-1] if stack else "")
+    engines = [i for i, (_n, d) in enumerate(ds) if name_of(d) == "rewriteengine"]
+    if engines == []:
+        problems.append("there is no RewriteEngine line, so no rule runs")
         return problems
-    start = next(i for i, (n, d) in enumerate(ds) if name_of(d) == "rewriteengine")
+    start = engines[0]
+    if ds[start][1].split(" ")[1:] != ["On"]:
+        problems.append("line %d says %r: the rewrite engine must be On, or no rule runs" % ds[start])
+        return problems
+    for i in engines[1:]:
+        # A later `RewriteEngine On` inside <IfModule mod_rewrite.c> changes
+        # nothing; anything else can switch the engine off for the whole file
+        # (in .htaccess the last one decides).
+        if ds[i][1].split(" ")[1:] != ["On"] or sections[i].replace(" ", "") != "<ifmodulemod_rewrite.c>":
+            problems.append("line %d: a second RewriteEngine line, %r, outside <IfModule mod_rewrite.c> — in .htaccess the "
+                            "last one decides for the whole file, so it can switch the deny rule off" % ds[i])
+    for n, d in ds[:start]:
+        if name_of(d).startswith("rewrite"):
+            problems.append("line %d: %r comes BEFORE RewriteEngine On — Apache still runs a rule written above it (round 8 "
+                            "of P4a's check, measured), so it could let a request through before the deny rule" % (n, d))
     depth = 0
     for _n, d in ds[:start]:
         if d.startswith("</"):
@@ -209,8 +278,13 @@ def self_test(text: str) -> int:
         "an earlier rule ends processing first": ("RewriteBase /", "RewriteBase /\nRewriteRule ^ - [L]"),
         "[OR] on the first condition": (r"\.(php[0-9]?|phtml|phar)(/|$) [NC]", r"\.(php[0-9]?|phtml|phar)(/|$) [NC,OR]"),
         "the old rule, ending in .php only (round 6)": (r"\.(php[0-9]?|phtml|phar)(/|$) [NC]", r"\.php$ [NC]"),
-        "the block wrapped in a section": ("RewriteEngine On", "<If \"false\">\nRewriteEngine On"),
-        "RewriteEngine Off in place of On": ("RewriteEngine On", "RewriteEngine Off"),
+        # These name the DIRECTIVE's own line, never the bare words, which a
+        # comment may quote (the .htaccess header does).
+        "the block wrapped in a section": ("\nRewriteEngine On\n", "\n<If \"false\">\nRewriteEngine On\n"),
+        "RewriteEngine Off in place of On": ("\nRewriteEngine On\n", "\nRewriteEngine Off\n"),
+        "(round 8, v1) a comment ending in a backslash before the deny rule": (DENY_RULE, "# the deny rule \\\n" + DENY_RULE),
+        "(round 8, v2) a pass-through rule above RewriteEngine On": (None, "PREPEND:RewriteRule ^ - [L]\n"),
+        "(round 8, v3) a comment ending in a backslash before RewriteEngine On": ("\nRewriteEngine On\n", "\n# switch it on \\\nRewriteEngine On\n"),
     }
     bad = 0
     reported = 0
@@ -219,7 +293,9 @@ def self_test(text: str) -> int:
         print("✗ self-test: the real file is reported: %s" % real[0])
         bad += 1
     for label, (old, new) in plants.items():
-        if old is None:
+        if old is None and new.startswith("PREPEND:"):
+            planted = new[len("PREPEND:"):] + text
+        elif old is None:
             planted = text + new
         else:
             if text.count(old) != 1:
@@ -231,8 +307,16 @@ def self_test(text: str) -> int:
         print(("✓" if found != [] else "✗") + " plant: %s — %s" % (label, found[0][:110] if found else "NOT REPORTED"))
         bad += 0 if found != [] else 1
         reported += 1 if found != [] else 0
-    print("check_htaccess_php_denied self-test: %d of %d plants reported, real file %s."
-          % (reported, len(plants), "clean" if real == [] else "REPORTED"))
+    # The control: a later `RewriteEngine On` inside <IfModule mod_rewrite.c>
+    # changes nothing and must NOT be reported (a check that cries wolf gets
+    # switched off, #483).
+    control = text + "\n<IfModule mod_rewrite.c>\n    RewriteEngine On\n</IfModule>\n"
+    found = problems_in(control)
+    print(("✓" if found == [] else "✗") + " control: a second RewriteEngine On inside <IfModule mod_rewrite.c> — "
+          + ("not reported" if found == [] else "REPORTED: " + found[0][:110]))
+    bad += 0 if found == [] else 1
+    print("check_htaccess_php_denied self-test: %d of %d plants reported, control %s, real file %s."
+          % (reported, len(plants), "green" if found == [] else "RED", "clean" if real == [] else "REPORTED"))
     return 1 if bad else 0
 
 
@@ -249,7 +333,8 @@ def main() -> int:
         for p in problems:
             print("✗ " + p)
         return 1
-    print("check_htaccess_php_denied: OK — RewriteEngine On once and in no section, the %d directives up to the deny rule "
+    print("check_htaccess_php_denied: OK (an early warning; tools/htaccess-apache-selftest.php is the guard) — RewriteEngine On "
+          "in no section with no Rewrite directive above it, the %d directives up to the deny rule "
           "exactly as pinned, and the rule refuses all %d direct PHP addresses tried (extra path information, capitals "
           "and the other PHP endings included) and none of the %d it must let through."
           % (len(PINNED_REGION), len(MUST_REFUSE), len(MUST_ALLOW)))

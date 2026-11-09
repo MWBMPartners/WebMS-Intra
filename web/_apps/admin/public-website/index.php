@@ -74,7 +74,7 @@ $publicHost  = PublicWebsiteSetup::publicHostFor($mysqli, $siteId);
 // installation's global administrator approves it, and an approved one that
 // is also an address members sign in at is not the door either. The card asks
 // the ONE helper the handler and PublicDoor ask (round 7 of P4a's check).
-$publicHostApproved = PublicWebsiteSetup::publicHostApproved($mysqli, $siteId);
+$publicHostStatus   = PublicWebsiteSetup::publicHostStatus($mysqli, $siteId);
 $publicHostInEffect = PublicWebsiteSetup::publicHostInEffect($mysqli, $siteId);
 $origins     = PublicWebsiteSetup::frameOriginsStored($mysqli, $siteId);
 $permitted   = PublicWebsiteSetup::framingPermitted($mysqli);
@@ -246,11 +246,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </form>
             <?php if ($publicHost !== ''): ?>
                 <?php // D-101: an address does NOTHING until the installation's global administrator approves it. Said here, on the organisation's own card. ?>
-                <p class="mt-2 mb-0" data-public-host-approval="<?php echo $publicHostInEffect !== '' ? 'approved' : ($publicHostApproved === true ? 'approved-members-address' : 'waiting'); ?>">
-                    <?php if ($publicHostInEffect !== ''): ?>
+                <?php // Words for PublicWebsiteSetup::publicHostStatus(), the ONE answer (round 8 of P4a's check). ?>
+                <p class="mt-2 mb-0" data-public-host-approval="<?php echo match ($publicHostStatus) {
+                    PublicWebsiteSetup::HOST_APPROVED => 'approved', PublicWebsiteSetup::HOST_MEMBERS => 'approved-members-address',
+                    PublicWebsiteSetup::HOST_UNCHECKED => 'approved-unchecked', default => 'waiting'}; ?>">
+                    <?php if ($publicHostStatus === PublicWebsiteSetup::HOST_APPROVED): ?>
                         <span class="badge text-bg-success me-1">Approved</span> The installation's administrator has approved this address, so the public door answers on it while the door is on.
-                    <?php elseif ($publicHostApproved === true): ?>
+                    <?php elseif ($publicHostStatus === PublicWebsiteSetup::HOST_MEMBERS): ?>
                         <span class="badge text-bg-warning me-1">Approved, not in use</span> The installation's administrator approved this address, but it is also an address members sign in at, so the public door does <strong>not</strong> answer on it. Change it to a name members do not use.
+                    <?php elseif ($publicHostStatus === PublicWebsiteSetup::HOST_UNCHECKED): ?>
+                        <span class="badge text-bg-warning me-1">Approved, not checked</span> The installation's administrator approved this address, but whether it is also an address members sign in at could not be checked just now, so the portal does not count it as the public door's address. Try again later.
                     <?php else: ?>
                         <span class="badge text-bg-warning me-1">Waiting</span> Waiting for the installation's administrator to approve it. Until then it does nothing: it is not the public door.
                     <?php endif; ?>
@@ -300,8 +305,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php else: ?>
                     <ul class="list-unstyled mb-0">
                         <?php foreach ($allPublicHosts as $one): ?>
-                            <li class="mb-2" data-public-host-row="<?php echo (int) $one['siteId']; ?>">
-                                <span class="badge <?php echo $one['approved'] === true ? 'text-bg-success' : 'text-bg-warning'; ?> me-1"><?php echo $one['approved'] === true ? 'Approved' : 'Waiting'; ?></span>
+                            <?php
+                            // An approved address that is ALSO an address members sign in at is not the door
+                            // (round 8 of P4a's check): said here too, not only on the organisation's card.
+                            $rowState = $one['approved'] === false ? 'waiting'
+                                : ($one['membersAddress'] === true ? 'approved-members-address' : ($one['membersAddress'] === null ? 'approved-unchecked' : 'approved'));
+                            ?>
+                            <li class="mb-2" data-public-host-row="<?php echo (int) $one['siteId']; ?>" data-public-host-row-state="<?php echo $esc($rowState); ?>">
+                                <span class="badge <?php echo $rowState === 'approved' ? 'text-bg-success' : 'text-bg-warning'; ?> me-1"><?php echo $esc(match ($rowState) {
+                                    'approved' => 'Approved', 'approved-members-address' => 'Approved, not in use (members sign in at it)',
+                                    'approved-unchecked' => 'Approved, not checked', default => 'Waiting'}); ?></span>
                                 <strong><?php echo $esc($one['host']); ?></strong> — <?php echo $esc($one['siteName']); ?>
                                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="d-inline ms-2">
                                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
