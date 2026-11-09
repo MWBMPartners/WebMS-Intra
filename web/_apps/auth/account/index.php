@@ -1215,8 +1215,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 //    list and wrote it over the top, dropping any key this card owned, and
 //    this card's handler had no lock.
 //
-//    SINCE #667 BOTH GO THROUGH `NotifyPrefs::merge()`, the ONE writer of the
-//    column, which changes only the switches a form marked as drawn and keeps
+//    SINCE #667 BOTH GO THROUGH `NotifyPrefs::merge()`, the one writer of a
+//    member's choices (an erasure empties the column; a restore replaces it),
+//    which changes only the switches a form marked as drawn and keeps
 //    every other stored choice. So beside each switch below sits
 //    `NotifyPrefs::shownMarker()`, and the switch is named `prefs[<key>]`
 //    exactly as on the full page. Without the marker, pressing Save here would

@@ -23,16 +23,23 @@
  *      reads off, and the retired `emailDigest` / `expenseUpdates` are no
  *      longer written
  *   D  a field that did not ARRIVE changes nothing (#677): a post with no
- *      markers, a marker for a key nobody may set, and the Sabbath choice when
- *      its buttons were not drawn
+ *      markers, a marker for a key nobody may set, markers naming ONLY such
+ *      keys (which must not unsubscribe the member from the newsletter
+ *      either), and the Sabbath choice when its buttons were not drawn; and a
+ *      tick counts only when it is exactly '1'
  *   E  a stored value that is valid JSON but not a set of named choices is
- *      replaced by the keys just saved, and the replacement is RECORDED
+ *      replaced by the keys just saved, and the replacement is RECORDED — on
+ *      BOTH pages
  *   F  two saves at once lose nothing: the real `merge()` runs in its own
  *      PROCESS while this test holds the row, the way
- *      `erasure-review-selftest.php` section T does it
- *   G  THE PLANTS: the old whole-column rebuild, the lock removed, and the
- *      "no marker means nothing" rule removed — each put into a COPY of the
- *      code, and each must turn the check that guards it RED
+ *      `erasure-review-selftest.php` section T does it; and F3 MEASURES that
+ *      its read and write are one transaction, which no before-and-after
+ *      comparison of the keys can see (a scratch trigger records when the
+ *      writing connection's transaction began)
+ *   G  when the database refuses the save (a scratch trigger refuses it for
+ *      real), both pages say so and nothing changes
+ *   H  THE PLANTS: ten faults, each put into a COPY of the code, each of which
+ *      must turn the check that guards it RED, and all green again after
  *
  * WHY SECTION F IS NOT AN HTTP TEST. The page harness runs PHP's built-in
  * server with ONE worker, so two requests never overlap and a race test built
@@ -652,23 +659,115 @@ $saveFullPage([]);
 $sabbath = (string) ($db->query("SELECT `sabbathHonour` FROM `tblUsers` WHERE `userID` = {$userId}")->fetch_assoc()['sabbathHonour'] ?? '');
 check('D6 so saving the page leaves the member\'s Sabbath choice ("off") alone — it used to be reset to "inherit"', $sabbath === 'off', 'is ' . $sabbath);
 
-// =============================================================================
-echo "\nE. A stored value that is not a set of named choices\n";
-// =============================================================================
-$db->query("DELETE FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'");
-foreach (['E1' => ['a JSON list', '[false, true]'], 'E2' => ['a bare number', '5']] as $label => [$words, $raw]) {
-    $setStored($raw);
-    $answer = $saveCard(false);
+// Whatever happens below, the scratch triggers and the probe table this test
+// makes on `tblUsers` must not outlive the run: a leftover BEFORE UPDATE
+// trigger would refuse or record every later test's writes to that table.
+register_shutdown_function(static function () use ($db): void {
+    foreach (['DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`', 'DROP TRIGGER IF EXISTS `zzNotifyPrefsRefuseTrg`', 'DROP TABLE IF EXISTS `zzNotifyPrefsProbe`'] as $sql) {
+        try {
+            $db->query($sql);
+        } catch (Throwable $e) {
+            // The connection has gone; nothing more can be done from here.
+        }
+    }
+});
+
+/** Create a scratch trigger, refusing loudly when the database will not let us. */
+$makeTrigger = static function (string $sql) use ($db): void {
+    try {
+        $db->query($sql);
+    } catch (Throwable $e) {
+        refuse('the database refused to create a scratch trigger on tblUsers (' . $e->getMessage() . '), which sections F and G need');
+    }
+};
+
+/**
+ * D7: the tick must be EXACTLY '1'. A marked switch posted as "on" is off.
+ *
+ * @return array{0:bool, 1:string}
+ */
+$scenarioTick = static function () use ($setStored, $stored, $saveCard, $fmt): array {
+    $setStored('{"eventReminders": true}');
+    $answer = $saveCard(false, ['prefs[eventReminders]' => 'on']);
     $now    = $stored();
-    check($label . ' ' . $words . ' is replaced by the one choice just saved (every other choice still reads as ON, as it already did)',
-        $answer['status'] === 302 && $now === ['eventReminders' => false], 'save HTTP ' . $answer['status'] . '; stored ' . $fmt($now));
-}
-$recorded = (int) ($db->query("SELECT COUNT(*) AS n FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'")->fetch_assoc()['n'] ?? 0);
-check('E3 ...and each replacement is RECORDED, never silent (two rows)', $recorded === 2, 'rows ' . $recorded);
+    return [$answer['status'] === 302 && $now === ['eventReminders' => false], 'save HTTP ' . $answer['status'] . '; stored ' . $fmt($now)];
+};
+[$okTick, $detailTick] = $scenarioTick();
+check('D7 a marked switch posted as "on" rather than "1" is stored as OFF — only the exact value a page sends switches a choice on', $okTick, $detailTick);
+
+/**
+ * D8: markers that name ONLY keys nobody may set are no markers. With the
+ * newsletter switched on, the old answer ("saved") also unsubscribed the
+ * member, because the post carried no newsletter checkbox.
+ *
+ * @return array{0:bool, 1:string, 2:bool}  ok, detail, premise (the newsletter box is drawn)
+ */
+$scenarioOnlyUnsettable = static function () use ($db, $http, $formOn, $setStored, $stored, $userId, $siteId, $beforeD, $fmt): array {
+    $db->query("UPDATE `tblSettings` SET `settingValue` = '1' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+    $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+    $token = bin2hex(random_bytes(20));
+    $db->query("INSERT INTO `tblNewsletterSubscription` (`siteID`, `userID`, `optedIn`, `unsubToken`) VALUES ({$siteId}, {$userId}, 1, '{$token}')");
+    try {
+        $setStored($beforeD);
+        $want    = $stored();
+        $page    = $http('GET', '/account/notifications');
+        $premise = str_contains($page['body'], 'name="newsletterOptedIn"') === true;
+        $form    = $formOn($page['body'], 'account/notifications/save');
+        $answer  = $http('POST', '/account/notifications/save', [
+            'csrf_token'              => $form['fields']['csrf_token'] ?? '',
+            'prefsShown[isAdmin]'     => '1',
+            'prefs[isAdmin]'          => '1',
+            'prefsShown[emailDigest]' => '1',
+        ]);
+        $now   = $stored();
+        $subs  = $db->query("SELECT COUNT(*) AS n, MIN(`optedIn`) AS lowest FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}")->fetch_assoc();
+        $told  = str_contains($http('GET', '/account/notifications')['body'], 'This page was out of date, so nothing was changed.') === true;
+        $ok    = $answer['status'] === 302 && $now === $want && (int) $subs['n'] === 1 && (int) $subs['lowest'] === 1 && $told === true;
+        return [$ok, 'save HTTP ' . $answer['status'] . '; stored ' . $fmt($now) . '; newsletter rows ' . $subs['n'] . ', lowest optedIn ' . $subs['lowest'] . '; told out of date: ' . ($told ? 'yes' : 'no'), $premise];
+    } finally {
+        $db->query("UPDATE `tblSettings` SET `settingValue` = '0' WHERE `settingKey` = 'newsletter.enabled' AND `siteID` IS NULL");
+        $db->query("DELETE FROM `tblNewsletterSubscription` WHERE `userID` = {$userId}");
+    }
+};
+[$okUnsettable, $detailUnsettable, $premiseUnsettable] = $scenarioOnlyUnsettable();
+check('D8 (the premise) with the newsletter switched on, the page draws its checkbox', $premiseUnsettable);
+check('D9 a post whose markers name ONLY keys nobody may set changes nothing, does NOT unsubscribe the member from the newsletter, and says the page was out of date',
+    $okUnsettable, $detailUnsettable);
+
+// =============================================================================
+echo "\nE. A stored value that is not a set of named choices, on BOTH pages\n";
+// =============================================================================
+/**
+ * Save on one page over a stored value that is valid JSON but not a set of
+ * named choices, and read back what was stored and how many replacements
+ * were recorded.
+ *
+ * @return array{0:bool, 1:string}
+ */
+$scenarioUnreadable = static function (string $raw, callable $save, array $want) use ($db, $setStored, $stored, $fmt): array {
+    $db->query("DELETE FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'");
+    $setStored($raw);
+    $answer   = $save();
+    $now      = $stored();
+    $recorded = (int) ($db->query("SELECT COUNT(*) AS n FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'")->fetch_assoc()['n'] ?? 0);
+    ksort($want);
+    return [$answer['status'] === 302 && $now === $want && $recorded === 1, 'save HTTP ' . $answer['status'] . '; stored ' . $fmt($now) . '; recorded ' . $recorded . ' time(s)'];
+};
+$fullDrawnOn = array_fill_keys($fullForm['markers'], true);
+$scenarioECard = static fn (): array => $scenarioUnreadable('[false, true]', static fn (): array => $saveCard(false), ['eventReminders' => false]);
+$scenarioEFull = static fn (): array => $scenarioUnreadable('[1, 2]', static fn (): array => $saveFullPage([]), $fullDrawnOn);
+
+[$okE1, $detailE1] = $scenarioECard();
+check('E1 on the CARD, a stored JSON list is replaced by the one choice just saved, and the replacement is RECORDED (every other choice still reads as ON, as it already did)', $okE1, $detailE1);
+[$okE2, $detailE2] = $scenarioUnreadable('5', static fn (): array => $saveCard(true), ['eventReminders' => true]);
+check('E2 ...and a bare number the same way', $okE2, $detailE2);
+[$okE3, $detailE3] = $scenarioEFull();
+check('E3 on the FULL PAGE, a stored JSON list is replaced by the switches it drew, and the replacement is RECORDED there too', $okE3, $detailE3);
+$db->query("DELETE FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'");
 $setStored(null);
 $saveCard(true);
 $quiet = (int) ($db->query("SELECT COUNT(*) AS n FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'")->fetch_assoc()['n'] ?? 0);
-check('E4 an EMPTY column is "nothing chosen yet", saved without any record', $quiet === 2 && $stored() === ['eventReminders' => true], 'rows ' . $quiet . '; stored ' . $fmt($stored()));
+check('E4 an EMPTY column is "nothing chosen yet", saved without any record', $quiet === 0 && $stored() === ['eventReminders' => true], 'rows ' . $quiet . '; stored ' . $fmt($stored()));
 
 // =============================================================================
 echo "\nF. Two saves at once lose nothing\n";
@@ -680,70 +779,164 @@ echo "\nF. Two saves at once lose nothing\n";
  * different key and commits. With the lock, the worker reads the committed
  * value afterwards and keeps that change. Without it, the worker reads the
  * old value straight away, then waits only at its write, and writes the old
- * value back over this connection's change.
+ * value back over this connection's change (F2).
  *
- * @return array{0:bool, 1:string, 2:bool}  ok, detail, premise (the worker really waited)
+ * ⚠️ F2 CANNOT SEE THE TRANSACTION GO, and the independent check proved it:
+ *    with `begin_transaction()` removed, the worker's `FOR UPDATE` read still
+ *    BLOCKS here (this connection holds the row), then autocommits, reads the
+ *    committed value and writes it — so the keys come out right. The lock
+ *    still evaporated between the read and the write; it is just that THIS
+ *    interleaving cannot exploit it. So F3 measures the transaction itself:
+ *    a scratch BEFORE UPDATE trigger records, for the connection doing the
+ *    write, when its InnoDB transaction BEGAN (`INNODB_TRX.trx_started`).
+ *    With the transaction, it began at the blocked read — held here for
+ *    seconds on purpose — so it began well before the write. Without it, it
+ *    began AT the write. `trx_started` has whole seconds only, hence the
+ *    2.5-second hold and the 1.5-second threshold.
+ *
+ * @return array{0:bool, 1:string, 2:bool, 3:bool, 4:string}  ok, detail, premise, one transaction, its detail
  */
-$scenarioF = static function () use (&$state, $setStored, $stored, $userId, $child, $sep, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $fmt): array {
+$scenarioF = static function () use (&$state, $db, $makeTrigger, $setStored, $stored, $userId, $child, $sep, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $fmt): array {
     $setStored('{"rotaReminders": true, "taskReminders": true, "zzFutureChoice": "kept"}');
-    $a = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
-    $a->begin_transaction();
-    $held = $a->query("SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = {$userId} FOR UPDATE")->fetch_assoc();
+    $db->query('CREATE TABLE IF NOT EXISTS `zzNotifyPrefsProbe` (`probeID` INT NOT NULL AUTO_INCREMENT PRIMARY KEY, `connID` BIGINT NULL, `trxStarted` DATETIME NULL, `seenAt` DATETIME(6) NOT NULL) ENGINE=InnoDB');
+    $db->query('DELETE FROM `zzNotifyPrefsProbe`');
+    $db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`');
+    try {
+        $a = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+        $aId = (int) $a->thread_id;
+        // ⚠️ THE TRIGGER MUST NOT READ INNODB_TRX FOR THIS TEST'S OWN WRITE.
+        //    MySQL serves INNODB_TRX from a cache that is refreshed only when it
+        //    has not been read for 0.1 s. This connection's write comes a
+        //    moment before the worker's, so when the first version recorded
+        //    BOTH, the worker's lookup was answered from the cache filled by
+        //    this connection's lookup a few milliseconds earlier — which still
+        //    showed the worker's transaction from its blocked READ. So the
+        //    plant that removes the transaction measured as "began at the
+        //    read" and passed. Only the worker's own write reads it now, and
+        //    nothing else here reads INNODB_TRX during the 2.5-second hold.
+        $makeTrigger(
+            'CREATE TRIGGER `zzNotifyPrefsProbeTrg` BEFORE UPDATE ON `tblUsers` FOR EACH ROW BEGIN '
+            . "IF CONNECTION_ID() <> {$aId} THEN "
+            . 'INSERT INTO `zzNotifyPrefsProbe` (`connID`, `trxStarted`, `seenAt`) '
+            . 'SELECT CONNECTION_ID(), (SELECT `trx_started` FROM information_schema.INNODB_TRX WHERE `trx_mysql_thread_id` = CONNECTION_ID() LIMIT 1), NOW(6); '
+            . 'END IF; END'
+        );
+        $a->begin_transaction();
+        $held = $a->query("SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = {$userId} FOR UPDATE")->fetch_assoc();
 
-    $out = $child . $sep . 'worker-' . bin2hex(random_bytes(4)) . '.out';
-    $env = getenv();
-    $env['NP_HOST'] = $dbHost;
-    $env['NP_USER'] = $dbUser;
-    $env['NP_PASS'] = $dbPass;
-    $env['NP_NAME'] = $dbName;
-    $env['NP_PORT'] = (string) $dbPort;
-    $state['worker'] = proc_open(
-        [PHP_BINARY, $child . $sep . 'worker.php', $child . $sep . 'web' . $sep . '_core' . $sep . 'NotifyPrefs.php', (string) $userId],
-        [0 => ['file', '/dev/null', 'r'], 1 => ['file', $out, 'w'], 2 => ['file', $out . '.err', 'w']],
-        $pipes,
-        $child,
-        $env
-    );
-    // ⚠️ A SLEEP IS A HOPE; THE CHECK AFTER IT IS THE PREMISE. The worker must
-    //    be connected and waiting on this row before this connection writes,
-    //    or neither version of the code is being tested (#735).
-    $waiting = false;
-    for ($i = 0; $i < 60 && $waiting === false; $i++) {
-        usleep(100000);
-        $probe   = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
-        $waiting = (int) ($probe->query("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE `trx_state` = 'LOCK WAIT'")->fetch_assoc()['n'] ?? 0) > 0;
-        $probe->close();
+        $out = $child . $sep . 'worker-' . bin2hex(random_bytes(4)) . '.out';
+        $env = getenv();
+        $env['NP_HOST'] = $dbHost;
+        $env['NP_USER'] = $dbUser;
+        $env['NP_PASS'] = $dbPass;
+        $env['NP_NAME'] = $dbName;
+        $env['NP_PORT'] = (string) $dbPort;
+        $state['worker'] = proc_open(
+            [PHP_BINARY, $child . $sep . 'worker.php', $child . $sep . 'web' . $sep . '_core' . $sep . 'NotifyPrefs.php', (string) $userId],
+            [0 => ['file', '/dev/null', 'r'], 1 => ['file', $out, 'w'], 2 => ['file', $out . '.err', 'w']],
+            $pipes,
+            $child,
+            $env
+        );
+        // ⚠️ A SLEEP IS A HOPE; THE CHECK AFTER IT IS THE PREMISE. The worker
+        //    must be connected and waiting on this row before this connection
+        //    writes, or neither version of the code is being tested (#735).
+        $waiting = false;
+        for ($i = 0; $i < 60 && $waiting === false; $i++) {
+            usleep(100000);
+            $probe   = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+            $waiting = (int) ($probe->query("SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE `trx_state` = 'LOCK WAIT'")->fetch_assoc()['n'] ?? 0) > 0;
+            $probe->close();
+        }
+        $running = proc_get_status($state['worker'])['running'] === true;
+        // Hold the row long enough that a transaction begun at the worker's
+        // read is measurably older than its write (see F3 above).
+        usleep(2500000);
+
+        $mine = json_decode((string) $held['notifyPrefs'], true);
+        $mine['rotaReminders'] = false;
+        $json = json_encode($mine);
+        $w = $a->prepare('UPDATE `tblUsers` SET `notifyPrefs` = ? WHERE `userID` = ?');
+        $w->bind_param('si', $json, $userId);
+        $w->execute();
+        $w->close();
+        $a->commit();
+        $a->close();
+
+        for ($i = 0; $i < 300 && proc_get_status($state['worker'])['running'] === true; $i++) {
+            usleep(100000);
+        }
+        proc_close($state['worker']);
+        $state['worker'] = null;
+        $said = (string) @file_get_contents($out);
+        $now  = $stored() ?? [];
+        $ok   = str_contains($said, '"outcome":"saved"') === true
+            && ($now['rotaReminders'] ?? null) === false && ($now['taskReminders'] ?? null) === false && ($now['zzFutureChoice'] ?? null) === 'kept';
+
+        $probeRow = $db->query(
+            'SELECT `trxStarted`, `seenAt`, TIMESTAMPDIFF(MICROSECOND, `trxStarted`, `seenAt`) AS `gap` '
+            . "FROM `zzNotifyPrefsProbe` WHERE `connID` <> {$aId} ORDER BY `probeID` DESC LIMIT 1"
+        )->fetch_assoc();
+        $gap      = ($probeRow !== null && $probeRow['gap'] !== null) ? ((int) $probeRow['gap']) / 1000000 : null;
+        $oneTrx   = $gap !== null && $gap >= 1.5;
+        $trxWords = $probeRow === null
+            ? 'the worker\'s write was never recorded'
+            : 'the worker\'s transaction began ' . ($probeRow['trxStarted'] ?? 'NOT RECORDED') . ', its write ran ' . $probeRow['seenAt']
+                . ($gap === null ? '' : ' (' . number_format($gap, 2) . ' s later)');
+
+        return [$ok, 'worker said ' . $said . ' ' . (string) @file_get_contents($out . '.err') . '; stored ' . $fmt($now), $waiting && $running, $oneTrx, $trxWords];
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsProbeTrg`');
     }
-    $running = proc_get_status($state['worker'])['running'] === true;
-
-    $mine = json_decode((string) $held['notifyPrefs'], true);
-    $mine['rotaReminders'] = false;
-    $json = json_encode($mine);
-    $w = $a->prepare('UPDATE `tblUsers` SET `notifyPrefs` = ? WHERE `userID` = ?');
-    $w->bind_param('si', $json, $userId);
-    $w->execute();
-    $w->close();
-    $a->commit();
-    $a->close();
-
-    for ($i = 0; $i < 300 && proc_get_status($state['worker'])['running'] === true; $i++) {
-        usleep(100000);
-    }
-    proc_close($state['worker']);
-    $state['worker'] = null;
-    $said = (string) @file_get_contents($out);
-    $now  = $stored() ?? [];
-    $ok   = str_contains($said, '"outcome":"saved"') === true
-        && ($now['rotaReminders'] ?? null) === false && ($now['taskReminders'] ?? null) === false && ($now['zzFutureChoice'] ?? null) === 'kept';
-
-    return [$ok, 'worker said ' . $said . ' ' . (string) @file_get_contents($out . '.err') . '; stored ' . $fmt($now), $waiting && $running];
 };
-[$okF, $detailF, $premiseF] = $scenarioF();
-check('F1 (the premise) the real merge() was connected and WAITING on the row while this test held it — otherwise F2 proves nothing', $premiseF);
+[$okF, $detailF, $premiseF, $oneTrxF, $trxDetailF] = $scenarioF();
+check('F1 (the premise) the real merge() was connected and WAITING on the row while this test held it — otherwise F2 and F3 prove nothing', $premiseF);
 check('F2 THE LOCK: both saves landed — this connection\'s rotaReminders=off AND the worker\'s taskReminders=off — and the unknown key survived', $okF, $detailF);
+check('F3 THE TRANSACTION: merge()\'s read and write are ONE transaction — it began at the blocked read, well before the write — so its lock is held across both (#647, #694)',
+    $oneTrxF, $trxDetailF);
+echo "      ({$trxDetailF})\n";
 
 // =============================================================================
-echo "\nG. The plants: each fault put back into a COPY must turn its check RED\n";
+echo "\nG. When the database refuses the save, both pages say so and nothing changes\n";
+// =============================================================================
+/**
+ * A scratch trigger refuses any change to THIS member's choices, so the real
+ * `merge()` meets a real refusal inside its transaction — no stand-in. Both
+ * pages must then report the failure (the card by `?error=notify_db`, the
+ * full page by its message) and the column must be as it was.
+ *
+ * @return array{0:bool, 1:string}
+ */
+$scenarioRefused = static function () use ($db, $makeTrigger, $http, $setStored, $stored, $saveCard, $saveFullPage, $userId, $fmt): array {
+    $setStored('{"eventReminders": true, "taskReminders": true, "zzFutureChoice": "kept"}');
+    $want = $stored();
+    $db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsRefuseTrg`');
+    $makeTrigger(
+        'CREATE TRIGGER `zzNotifyPrefsRefuseTrg` BEFORE UPDATE ON `tblUsers` FOR EACH ROW BEGIN '
+        . "IF NEW.`userID` = {$userId} AND NOT (NEW.`notifyPrefs` <=> OLD.`notifyPrefs`) THEN "
+        . "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'refused by tools/notify-prefs-selftest.php'; END IF; END"
+    );
+    try {
+        $card      = $saveCard(false);
+        $afterCard = $stored();
+        $cardSays  = str_contains($http('GET', '/account?error=notify_db')['body'], 'could not be saved, and nothing was changed') === true;
+        $full      = $saveFullPage(['taskReminders']);
+        $afterFull = $stored();
+        $fullSays  = str_contains($http('GET', '/account/notifications')['body'], 'Database error saving preferences.') === true;
+    } finally {
+        $db->query('DROP TRIGGER IF EXISTS `zzNotifyPrefsRefuseTrg`');
+    }
+    $ok = str_contains($card['location'], 'error=notify_db') === true && $afterCard === $want && $cardSays === true
+        && $full['status'] === 302 && $afterFull === $want && $fullSays === true;
+    return [$ok, 'card to ' . $card['location'] . ', stored after ' . $fmt($afterCard) . ', card page says it: ' . ($cardSays ? 'yes' : 'no')
+        . '; full page HTTP ' . $full['status'] . ', stored after ' . $fmt($afterFull) . ', page says it: ' . ($fullSays ? 'yes' : 'no')];
+};
+[$okG, $detailG] = $scenarioRefused();
+check('G1 the card answers ?error=notify_db and the Account page says nothing was saved; the full page says "Database error saving preferences."; the column is unchanged by either',
+    $okG, $detailG);
+
+// =============================================================================
+echo "\nH. The plants: each fault put back into a COPY must turn its check RED\n";
 // =============================================================================
 /**
  * Replace `$from` with `$to` in a file of the COPY, run `$scenario`, put the
@@ -761,13 +954,18 @@ $plant = static function (string $relative, string $from, string $to, callable $
     }
     file_put_contents($path, str_replace($from, $to, $before));
     clearstatcache(true, $path);
-    $result = $scenario();
-    file_put_contents($path, $before);
-    clearstatcache(true, $path);
+    try {
+        $result = $scenario();
+    } finally {
+        file_put_contents($path, $before);
+        clearstatcache(true, $path);
+    }
     return ['applied' => true, 'red' => $result[0] === false, 'detail' => $result[1], 'restored' => (string) file_get_contents($path) === $before];
 };
 
-$g1 = $plant(
+$plants = [];
+
+$plants['H1 the OLD whole-column rebuild, in the full page\'s handler, turns B1 RED'] = $plant(
     '_apps/auth/account/notifications-save.php',
     '$merged = NotifyPrefs::merge($mysqli, $userId, $changes);',
     '$rebuilt = []; foreach (NotifyPrefs::SETTABLE as $k) { $rebuilt[$k] = ($changes[$k] ?? false); }'
@@ -776,10 +974,8 @@ $g1 = $plant(
     . ' $merged = [\'outcome\' => NotifyPrefs::SAVED, \'replacedUnreadable\' => false];',
     $scenarioB
 );
-check('G1 the OLD whole-column rebuild, planted in the full page\'s handler, turns B1 RED', $g1['applied'] === true && $g1['red'] === true && $g1['restored'] === true,
-    ($g1['applied'] ? 'applied' : 'NOT applied') . '; ' . $g1['detail']);
 
-$g2 = $plant(
+$plants['H2 the LOCK removed from merge() turns F2 RED (one key is lost)'] = $plant(
     '_core/NotifyPrefs.php',
     "'SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE'",
     "'SELECT `notifyPrefs` FROM `tblUsers` WHERE `userID` = ?'",
@@ -788,23 +984,28 @@ $g2 = $plant(
         return [$r[0], $r[1]];
     }
 );
-check('G2 the LOCK removed from merge() turns F2 RED (one key is lost)', $g2['applied'] === true && $g2['red'] === true && $g2['restored'] === true,
-    ($g2['applied'] ? 'applied' : 'NOT applied') . '; ' . $g2['detail']);
 
-$g3 = $plant(
+$plants['H3 the TRANSACTION removed from merge() (so FOR UPDATE autocommits) turns F3 RED'] = $plant(
+    '_core/NotifyPrefs.php',
+    '$began = $db->begin_transaction();',
+    '$began = true;',
+    static function () use ($scenarioF): array {
+        $r = $scenarioF();
+        return [$r[3], $r[4] . '; keys: ' . ($r[0] ? 'both landed' : 'one LOST')];
+    }
+);
+
+$plants['H4 "no marker means change nothing" removed (a missing marker read as every switch drawn) turns D1 RED'] = $plant(
     '_core/NotifyPrefs.php',
     "        if (array_key_exists(self::SHOWN_FIELD, \$post) === false || is_array(\$post[self::SHOWN_FIELD]) === false) {\n            return null;\n        }",
     "        if (array_key_exists(self::SHOWN_FIELD, \$post) === false || is_array(\$post[self::SHOWN_FIELD]) === false) {\n            \$post[self::SHOWN_FIELD] = array_fill_keys(self::SETTABLE, '1');\n        }",
     $scenarioD
 );
-check('G3 "no marker means change nothing" removed (a missing marker read as every switch drawn) turns D1 RED',
-    $g3['applied'] === true && $g3['red'] === true && $g3['restored'] === true,
-    ($g3['applied'] ? 'applied' : 'NOT applied') . '; ' . $g3['detail']);
 
 // The card's handler as it stood after #612 and before #667: read, change its
 // own keys (including the two it no longer draws, written as off because an
 // absent box looks unticked), write back, with no lock and no marker.
-$g4 = $plant(
+$plants['H5 the card\'s OLD handler (#612\'s read-then-write, still writing the two retired keys as off) turns C1 RED'] = $plant(
     '_apps/auth/account/save.php',
     '    $merged = NotifyPrefs::merge($mysqli, $userId, $changes);',
     '    $oldRead = $mysqli->prepare(\'SELECT notifyPrefs FROM tblUsers WHERE userID = ? LIMIT 1\'); $oldRead->bind_param(\'i\', $userId);'
@@ -816,27 +1017,72 @@ $g4 = $plant(
     . ' $oldWrite->execute(); $oldWrite->close(); $merged = [\'outcome\' => NotifyPrefs::SAVED, \'replacedUnreadable\' => false];',
     $scenarioC
 );
-check('G4 the card\'s OLD handler (#612\'s read-then-write, still writing the two retired keys as off) turns C1 RED',
-    $g4['applied'] === true && $g4['red'] === true && $g4['restored'] === true,
-    ($g4['applied'] ? 'applied' : 'NOT applied') . '; ' . $g4['detail']);
 
-// What each plant did to the column, printed whether or not the check above
-// passed, so a reader can see each went red for the RIGHT reason.
-foreach (['G1' => $g1, 'G2' => $g2, 'G3' => $g3, 'G4' => $g4] as $label => $g) {
-    echo "      {$label} with the plant in: " . $g['detail'] . "\n";
+$plants['H6 the FULL PAGE\'s record of a replaced value switched off turns E3 RED'] = $plant(
+    '_apps/auth/account/notifications-save.php',
+    "if (\$merged['replacedUnreadable'] === true) {",
+    'if (false) {',
+    $scenarioEFull
+);
+
+$plants['H7 the CARD\'s record of a replaced value switched off turns E1 RED'] = $plant(
+    '_apps/auth/account/save.php',
+    "    if (\$merged['replacedUnreadable'] === true) {",
+    '    if (false) {',
+    $scenarioECard
+);
+
+$plants['H8 merge() answering "saved" when the database refused turns G1 RED'] = $plant(
+    '_core/NotifyPrefs.php',
+    "rolls back for us.\n                }\n            }\n            return ['outcome' => self::FAILED, 'replacedUnreadable' => false];",
+    "rolls back for us.\n                }\n            }\n            return ['outcome' => self::SAVED, 'replacedUnreadable' => false];",
+    $scenarioRefused
+);
+
+$plants['H9 the tick loosened from exactly \'1\' to "anything truthy" turns D7 RED'] = $plant(
+    '_core/NotifyPrefs.php',
+    "\$ticked[\$key] === '1');",
+    '(bool) $ticked[$key] === true);',
+    $scenarioTick
+);
+
+$plants['H10 markers naming only unsettable keys treated as a save (not as out of date) turns D9 RED'] = $plant(
+    '_core/NotifyPrefs.php',
+    "        if (\$changes === []) {\n            return null;\n        }",
+    "        if (\$changes === []) {\n        }",
+    static function () use ($scenarioOnlyUnsettable): array {
+        $r = $scenarioOnlyUnsettable();
+        return [$r[0], $r[1]];
+    }
+);
+
+foreach ($plants as $words => $g) {
+    check($words, $g['applied'] === true && $g['red'] === true && $g['restored'] === true,
+        ($g['applied'] ? 'applied' : 'NOT applied') . '; ' . $g['detail']);
 }
 
-// With every plant taken out, all four are green again — so a red above can
-// never be mistaken for a plant left behind.
-check('G5 with the plants removed, B, C, D and F are green again',
-    $scenarioB()[0] === true && $scenarioC()[0] === true && $scenarioD()[0] === true && $scenarioF()[0] === true);
+// What each plant did, printed whether or not its check passed, so a reader
+// can see each went red for the RIGHT reason.
+foreach ($plants as $words => $g) {
+    echo '      ' . substr($words, 0, 3) . ' with the plant in: ' . $g['detail'] . "\n";
+}
+
+// With every plant taken out, all are green again — so a red above can never
+// be mistaken for a plant left behind.
+$againF = $scenarioF();
+check('H11 with the plants removed, every scenario they broke is green again',
+    $scenarioB()[0] === true && $scenarioC()[0] === true && $scenarioD()[0] === true && $againF[0] === true && $againF[3] === true
+    && $scenarioEFull()[0] === true && $scenarioECard()[0] === true && $scenarioRefused()[0] === true && $scenarioTick()[0] === true
+    && $scenarioOnlyUnsettable()[0] === true);
 
 // ── Tidy up the rows this test made ─────────────────────────────────────────
+$db->query("DELETE FROM `tblErrors` WHERE `errorCode` = 'NOTIFY_PREFS_UNREADABLE'");
+$db->query('DROP TABLE IF EXISTS `zzNotifyPrefsProbe`');
 if ($removeMember($userId) === -1) {
     echo "  ! could not remove the test member ({$userId}). Remove it by hand in {$dbName}.\n";
 }
 
 echo "\n" . ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
-echo "Sections A-E drive the REAL pages over HTTP with ONE worker; F races the real\n";
-echo "merge() from two processes, because one worker can never run two saves at once.\n";
+echo "Sections A-E and G drive the REAL pages over HTTP with ONE worker; F races the\n";
+echo "real merge() from two processes, because one worker can never run two saves at once.\n";
 exit($failed === 0 ? 0 : 1);

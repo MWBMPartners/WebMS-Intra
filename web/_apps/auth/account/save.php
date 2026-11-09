@@ -71,11 +71,13 @@ if ($action === 'update_notifications') {
     //    for `expenseStatusUpdates`); nothing writes them, and what a member
     //    had stored is left alone.
     //
-    //    NOW this card writes through `NotifyPrefs::merge()`, the ONE writer of
-    //    the column, exactly as the full Notification preferences page does:
-    //    only the switches the card marked as drawn (`prefsShown[<key>]`) are
-    //    changed, under a row lock, and every other key is kept as stored. A
-    //    post with no marker at all changes nothing (#677).
+    //    NOW this card writes through `NotifyPrefs::merge()`, the one writer of
+    //    a member's choices (an erasure empties the column; a restore replaces
+    //    it), exactly as the full Notification preferences page does: only the
+    //    switches the card marked as drawn (`prefsShown[<key>]`) are changed,
+    //    under a row lock, and every other key is kept as stored. A post with
+    //    no marker at all, or with markers naming only keys nobody may set,
+    //    changes nothing (#677).
     //
     // 📨 THE ANSWER GOES IN THE ADDRESS, not the session. This branch used to
     //    put its message in `$_SESSION['flash_msg']`, which the Account page

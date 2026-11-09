@@ -2,12 +2,20 @@
 // Path: _core/NotifyPrefs.php
 /**
  * -----------------------------------------------------------------------------
- * A member's notification choices — the ONE writer of tblUsers.notifyPrefs 🔔
+ * A member's notification choices — the one writer of a member's choices 🔔
  * -----------------------------------------------------------------------------
  * A member's notification choices live in one column, `tblUsers.notifyPrefs`,
  * as a JSON object such as `{"eventReminders": true, "pushLivestream": false}`.
  * Every sender reads it through `WebPush::notifyPrefAllows()` (or one of its
  * older copies), where a key that is MISSING means YES.
+ *
+ * BE EXACT ABOUT "ONE WRITER". This class is the one place a member's CHOICES
+ * are written. It is NOT the only thing that ever changes the column: an
+ * erasure empties it (`GdprEraser`, the `tblUsers` instruction's `nullCols`),
+ * and a whole-database restore replaces it with the snapshot's copy
+ * (`DbBackup`). Neither writes a choice, which is why neither goes through
+ * here — but a sentence saying "nothing else touches this column" would be
+ * untrue, and the next reader would stop looking.
  *
  * WHAT WAS WRONG (#667). Two pages wrote the column, in two different ways:
  *
@@ -169,7 +177,9 @@ final class NotifyPrefs
      * Read a posted form into the changes it asks for.
      *
      * Returns NULL when the form carried no `prefsShown` at all — the field
-     * did not ARRIVE, so nothing may change (#677). Otherwise returns
+     * did not ARRIVE, so nothing may change (#677) — and ALSO when its
+     * markers name no key on `SETTABLE`, which carries no choice either and
+     * is treated the same way (see the note at the end). Otherwise returns
      * `[key => bool]` for every key that is both marked as shown and on
      * `SETTABLE`: true where `prefs[key]` is exactly '1', false otherwise.
      * A marked key that is not on `SETTABLE` is ignored, never written.
@@ -192,7 +202,23 @@ final class NotifyPrefs
             if (is_string($key) === false || in_array($key, self::SETTABLE, true) === false) {
                 continue;
             }
+            // ⚠️ EXACTLY '1', nothing looser. The switch's own value is '1';
+            //    "on", "true" or an array is not what any page sends, and a
+            //    looser test (`!empty()`, a `(bool)` cast) would switch a
+            //    choice ON from a value nobody chose. Pinned by section D of
+            //    the self-test, with a plant that loosens it.
             $changes[$key] = (array_key_exists($key, $ticked) === true && $ticked[$key] === '1');
+        }
+
+        // ⚠️ MARKERS THAT NAME NOTHING SETTABLE COUNT AS NO MARKERS. A post
+        //    whose `prefsShown` holds only keys nobody may set — a crafted
+        //    request, or a page drawing a switch that has since been retired —
+        //    carries no choice at all. Answering `[]` here let the handler
+        //    carry on as if the member had saved, which also wrote the
+        //    newsletter choice from a checkbox the post never carried, i.e.
+        //    unsubscribed them. NULL makes it "out of date, nothing changed".
+        if ($changes === []) {
+            return null;
         }
 
         return $changes;
@@ -207,7 +233,13 @@ final class NotifyPrefs
      * second merges into what the first wrote (#647). Without the lock both
      * would read the old value and the second write would throw away the
      * first's change — `tools/notify-prefs-selftest.php` section F proves the
-     * difference with two real processes.
+     * difference with two real processes. And the lock is only real INSIDE the
+     * transaction: without `begin_transaction()` the `FOR UPDATE` read
+     * autocommits and lets go of the row before the write, which no
+     * before-and-after comparison can see when the race happens to fall the
+     * other way — so F3 MEASURES it, by recording when this connection's
+     * transaction began (at the read, held for seconds) against when its
+     * write ran.
      *
      * It never throws for a database fault: it rolls back and answers
      * `FAILED`, so a caller can tell the member honestly that nothing was

@@ -5,8 +5,9 @@
  * Account — Notification preferences save handler 📬
  * -----------------------------------------------------------------------------
  * POST-only. Saves the switches on the Notification preferences page into
- * `tblUsers.notifyPrefs` through `NotifyPrefs::merge()` — the ONE writer of
- * that column — plus the Sabbath choice and the newsletter opt-in.
+ * `tblUsers.notifyPrefs` through `NotifyPrefs::merge()` — the one writer of a
+ * member's choices (an erasure empties the column; a restore replaces it) —
+ * plus the Sabbath choice and the newsletter opt-in.
  *
  * Only the switches the page marked as DRAWN are changed; every other stored
  * choice is kept exactly as it was (#667). See the long note below.
@@ -59,13 +60,15 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 //
 //    NOW: `NotifyPrefs::changesFromPost()` reads ONLY the keys this form
 //    marked as drawn (`prefsShown[<key>]`, written beside each switch on the
-//    page), and `NotifyPrefs::merge()` — the ONE writer of this column —
-//    changes just those, under a row lock inside its own transaction, keeping
+//    page), and `NotifyPrefs::merge()` — the one writer of a member's choices
+//    (an erasure empties the column; a restore replaces it) — changes just
+//    those, under a row lock inside its own transaction, keeping
 //    every other key exactly as stored. The list of keys a member can set is
 //    `NotifyPrefs::SETTABLE`; there is no second list here to keep in step.
 //
 //    A post that carries NO `prefsShown` at all — a page left open from before
-//    this change, or a request made by hand — changes NOTHING and says so
+//    this change, or a request made by hand — or whose markers name only keys
+//    nobody may set, changes NOTHING and says so
 //    (#677: ask whether a field ARRIVED, never what it contains). The Sabbath
 //    choice and the newsletter below are not saved either, because the same
 //    out-of-date page would carry those as well, and one honest refusal is
