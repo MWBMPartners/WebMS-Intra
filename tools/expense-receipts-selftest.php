@@ -82,8 +82,11 @@
  * the claim TITLE printed without escaping (R02, R04 — before R01's title
  * carried markup, this one left every check green); the success path not
  * clearing kept typing (R18 — green before R17/R18 existed); kept typing given
- * to any account (A55b, R15); what was sent always rounded up (A59, R11); and
- * no fallback when the two figures read the same (A59b).
+ * to any account (A55b, A55c, R15); what was sent always rounded up (A59,
+ * R11); and no fallback when the sent figure would not read larger (A59b).
+ * Round 2 added two: the LIMIT rounded to the nearest, which overstated it
+ * (A59a); and the "nobody" guard removed (A55c — A55b could not catch it,
+ * because its draft belonged to a real account).
  *
  * R7 HANDS THE SESSION TO A SECOND MEMBER BY EDITING ITS FILE, because no
  * test here can drive a real Microsoft or Google sign-in, which is the route
@@ -147,7 +150,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 199;
+const EXPECTED_CHECKS = 201;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -377,9 +380,16 @@ check('A55 (#870) the kept claim is offered back only to the SAME organisation',
 // second person can sign in on it while kept typing waits.
 $noOwner = $kept;
 unset($noOwner['userId']);
-check('A55b (#870) ...and only to the SAME PERSON: never another account, never "nobody", never a draft that names nobody',
+check('A55b (#870) ...and only to the SAME PERSON: never another account, never a draft that names nobody, never an owner written as text',
     [R::draftForForm($kept, 5, 78), R::draftForForm($kept, 5, 0), R::draftForForm($noOwner, 5, 77),
         R::draftForForm(['userId' => '77'] + $kept, 5, 77)], [null, null, null, null]);
+// Round 2 of the independent check: A55b's "never nobody" could not fail —
+// its draft belonged to account 77, so a page drawn for account 0 was refused
+// by the ACCOUNT comparison whether or not "nobody" was refused. These two are
+// the cases where only the "nobody" rule stands in the way: a draft kept FOR
+// account 0 read BY account 0, and one naming no owner read by account 0.
+check('A55c (#870) "nobody" never matches "nobody": a draft kept for account 0 is not given to account 0, nor one with no owner',
+    [R::draftForForm(['userId' => 0] + $kept, 5, 0), R::draftForForm($noOwner, 5, 0)], [null, null]);
 check('A56 (#870) a POST that PHP emptied, declaring more than post_max_size, is "too large"',
     R::postWasTooLarge('POST', 0, 0, '2097152', '1M'), true);
 check('A57 (#870) ...but not when anything arrived (a post that merely lost its token keeps its other fields)',
@@ -392,14 +402,20 @@ $sizesSaid = static function (int $sent, string $limit): string {
     return ($m[1] ?? '?') . ' / ' . ($m[2] ?? '?');
 };
 // Round 1 of the independent check: the first version always rounded what was
-// sent UP, so exactly 1.5 MB was told "1.6 MB" — untrue. Nearest, unless the
-// two figures would then read the same.
-check('A59 (#870) the sizes are rounded to the NEAREST: exactly 1.5 MB reads "1.5 MB", well over reads its own figure, and kilobytes round too',
+// sent UP, so exactly 1.5 MB was told "1.6 MB" — untrue. What was sent is
+// rounded to the nearest.
+check('A59 (#870) what was SENT is rounded to the NEAREST: exactly 1.5 MB reads "1.5 MB", well over reads its own figure, kilobytes round too',
     [$sizesSaid(1536 * 1024, '1M'), $sizesSaid(10 * 1024 * 1024, '1M'), $sizesSaid(1536 * 1024 + 51, '1M'), $sizesSaid(700 * 1024 + 600, '500K')],
     ['1.5 MB / 1 MB', '10 MB / 1 MB', '1.5 MB / 1 MB', '701 KB / 500 KB']);
-check('A59b (#870) ...and only where nearest would make them read the SAME is what was sent rounded up and the limit down, so the gap is real',
-    [$sizesSaid(1024 * 1024 + 1, '1M'), $sizesSaid(1024 * 1024 + 40000, '1M'), $sizesSaid(500 * 1024 + 1, '500K')],
-    ['1.1 MB / 1 MB', '1.1 MB / 1 MB', '501 KB / 500 KB']);
+// Round 2: rounding the LIMIT to the nearest overstated it — a server allowing
+// 1500K (1.46 MB) was said to accept "1.5 MB", and a claimant keeping under
+// that was refused again. The limit is ALWAYS rounded DOWN.
+check('A59a (#870) the LIMIT is always rounded DOWN, never overstated: 1500K reads 1.4 MB, 100000000 bytes reads 95.3 MB, 1048500 bytes reads 1023 KB',
+    [$sizesSaid(2 * 1024 * 1024, '1500K'), $sizesSaid(200 * 1024 * 1024, '100000000'), $sizesSaid(1024 * 1024, '1048500')],
+    ['2 MB / 1.4 MB', '200 MB / 95.3 MB', '1 MB / 1023 KB']);
+check('A59b (#870) ...and only where the nearest figure would NOT read larger than the limit, compared as amounts not words, is what was sent rounded up',
+    [$sizesSaid(1024 * 1024 + 1, '1M'), $sizesSaid(1024 * 1024 + 40000, '1M'), $sizesSaid(500 * 1024 + 1, '500K'), $sizesSaid(1509950, '1464K')],
+    ['1.1 MB / 1 MB', '1.1 MB / 1 MB', '501 KB / 500 KB', '1.5 MB / 1.4 MB']);
 $tooLargeWords = R::postTooLargeMessage(2 * 1024 * 1024, '1M');
 check('A59c (#870) ...and the words say nothing was kept, and never mention the form token',
     [str_contains($tooLargeWords, 'not your receipts, and not what you typed'), str_contains($tooLargeWords, 'CSRF')], [true, false]);

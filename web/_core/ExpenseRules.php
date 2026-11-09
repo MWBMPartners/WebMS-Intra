@@ -1381,40 +1381,76 @@ final class ExpenseRules
     /** Round a size to the nearest tenth (or whole kilobyte): what a person expects. */
     public const SIZE_NEAREST = 'nearest';
 
-    /** Round a size UP. Used only to keep two figures from reading the same. */
+    /** Round a size UP: what was sent, only when nearest would not read larger than the limit. */
     public const SIZE_UP = 'up';
 
-    /** Round a size DOWN. Used only to keep two figures from reading the same. */
+    /** Round a size DOWN: ALWAYS for a limit, so the limit is never overstated. */
     public const SIZE_DOWN = 'down';
 
     /**
-     * A number of bytes as a person would say it: "2.5 MB", "640 KB", to one
-     * decimal place at most.
+     * A number of bytes as a person would say it: "1.5 GB", "2.5 MB",
+     * "640 KB", "512 bytes" — to one decimal place at most.
      *
-     * Rounded to the NEAREST by default. The first version always rounded what
-     * was sent UP and the limit DOWN, so an upload of exactly 1.5 MB was told
-     * it "came to 1.6 MB" — an untrue figure in a message whose whole point is
-     * to be believed (round 1 of the independent check). Rounding up or down
-     * is now used only where nearest would make the two figures read the
-     * same; see `postTooLargeMessage()`.
+     * Rounded to the NEAREST by default. See `postTooLargeMessage()` for when
+     * each direction is used, and why a LIMIT is always rounded down.
      *
      * @param int    $bytes The size.
      * @param string $how   SIZE_NEAREST, SIZE_UP or SIZE_DOWN.
      */
     public static function sizeInWords(int $bytes, string $how = self::SIZE_NEAREST): string
     {
+        return self::sizeShown($bytes, $how)['words'];
+    }
+
+    /**
+     * A size as shown, AND the number of bytes those words stand for — so two
+     * shown sizes can be compared in ONE unit. Comparing the WORDS is not
+     * enough (round 2 of the independent check): "1 MB" and "1024 KB" are
+     * different text and the same amount.
+     *
+     * The unit is chosen from the size itself (GB from 1 GB, MB from 1 MB, KB
+     * from 1 KB, otherwise bytes), so a rounding never moves a size into a
+     * unit it is not in. Below 1 KB it is a whole number of bytes, which needs
+     * no rounding at all — the first version said "1 KB" for anything under
+     * a kilobyte, which overstates a limit that small.
+     *
+     * @param int    $bytes The size.
+     * @param string $how   SIZE_NEAREST, SIZE_UP or SIZE_DOWN.
+     *
+     * @return array{words:string,bytes:float}
+     */
+    public static function sizeShown(int $bytes, string $how = self::SIZE_NEAREST): array
+    {
+        $bytes = max(0, $bytes);
         $round = static fn (float $x, int $places): float => match ($how) {
             self::SIZE_UP   => ceil($x * (10 ** $places)) / (10 ** $places),
             self::SIZE_DOWN => floor($x * (10 ** $places)) / (10 ** $places),
             default         => round($x, $places),
         };
-        if ($bytes >= 1024 * 1024) {
-            $mb = $round($bytes / (1024 * 1024), 1);
+        $units = [
+            ['GB', 1024 * 1024 * 1024, 1],
+            ['MB', 1024 * 1024, 1],
+            ['KB', 1024, 0],
+        ];
+        foreach ($units as [$name, $size, $places]) {
+            if ($bytes >= $size) {
+                $value  = $round($bytes / $size, $places);
+                $number = number_format($value, $places, '.', '');
+                // A trailing ".0" is dropped ("1 MB", not "1.0 MB"). Only when
+                // there IS a decimal point: trimming zeros from "700" or
+                // "1020" would change the number itself.
+                if ($places > 0) {
+                    $number = rtrim(rtrim($number, '0'), '.');
+                }
 
-            return rtrim(rtrim(number_format($mb, 1, '.', ''), '0'), '.') . ' MB';
+                return [
+                    'words' => $number . ' ' . $name,
+                    'bytes' => $value * $size,
+                ];
+            }
         }
 
-        return max(1, (int) $round($bytes / 1024, 0)) . ' KB';
+        return ['words' => $bytes . ($bytes === 1 ? ' byte' : ' bytes'), 'bytes' => (float) $bytes];
     }
 
     /**
@@ -1424,24 +1460,33 @@ final class ExpenseRules
      * here and nowhere else: PHP threw the whole request away before the
      * portal saw any of it, so the form cannot be filled in again.
      *
-     * Both figures are rounded to the nearest. Only when that makes them read
-     * the SAME ("came to 1 MB, and this server accepts at most 1 MB", which
-     * explains nothing) is what was sent rounded up and the limit down, so the
-     * gap the claimant reads is real; it cannot then read the same, because
-     * what was sent is strictly larger than the limit.
+     * THE LIMIT IS ALWAYS ROUNDED DOWN. The claimant acts on it — "together
+     * they must come to less than this" — so a limit read too high sends them
+     * back to be refused again. Rounding it to the nearest, as one version
+     * did, told a server allowing 1500K (1.46 MB) that it accepts "1.5 MB"
+     * (round 2 of the independent check). Down can only understate it, which
+     * is the safe direction.
+     *
+     * WHAT WAS SENT IS ROUNDED TO THE NEAREST, because always rounding it up
+     * told an upload of exactly 1.5 MB that it "came to 1.6 MB" (round 1).
+     * Only when that would NOT read larger than the limit — compared in BYTES,
+     * because "1 MB" and "1024 KB" are different words for the same amount —
+     * is it rounded up instead. It then always reads larger, because what was
+     * sent is strictly more than the limit: up can only raise it, and the
+     * limit's figure can only be at or below the real limit.
      *
      * @param int    $sentBytes   What the browser declared it was sending.
      * @param string $postMaxSize `ini_get('post_max_size')`.
      */
     public static function postTooLargeMessage(int $sentBytes, string $postMaxSize): string
     {
-        $limitBytes = self::postLimitBytes($postMaxSize);
-        $sent       = self::sizeInWords($sentBytes);
-        $limit      = self::sizeInWords($limitBytes);
-        if ($sent === $limit) {
-            $sent  = self::sizeInWords($sentBytes, self::SIZE_UP);
-            $limit = self::sizeInWords($limitBytes, self::SIZE_DOWN);
+        $limitShown = self::sizeShown(self::postLimitBytes($postMaxSize), self::SIZE_DOWN);
+        $sentShown  = self::sizeShown($sentBytes);
+        if ($sentShown['bytes'] <= $limitShown['bytes']) {
+            $sentShown = self::sizeShown($sentBytes, self::SIZE_UP);
         }
+        $sent  = $sentShown['words'];
+        $limit = $limitShown['words'];
 
         return 'Your claim was NOT saved, because everything you sent together came to '
             . $sent . ', and this server accepts at most '
