@@ -4,28 +4,33 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: `5c19a8cd`/`4362a1bd`/`6209c0f0` (#823,
-closed), `e077b1f8` (#821 docs + D-093/D-094/D-095), `f934c7df`/`e0cee3bb` (#821 items 1-3), `9c1cecfb`
-(#493 P2b, migration 261). Nothing uncommitted in the main checkout. Whole suite 93/93.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: #493 P3 (ten commits from its worktree +
+docs; migration 262), #649 (`3e111466..a00ca32a` + docs), D-096, #823, #821 items 1-3. Whole suite 94/94;
+migration harness 42/42 on MySQL 8.4.11 and MariaDB 11.4.13. Nothing uncommitted in the main checkout.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
-- **#493 P3** — the Admin → Public website page (D-085, D-093, D-094, D-095), migration 262. Built in
-  worktree `.claude/worktrees/agent-a9965bc08d040d0f1`, branch `p3-build`, commit `61ba3808` (on
-  `f934c7df`); its test 216/216. **Check round 1 running** (protected arm: runs until clean). Its
-  CHANGELOG/DEV_NOTES/FEATURES entries are in that worktree's `.claude-work/evidence/p3/notes.md`; add them
-  when it is cherry-picked here.
-- **#649** — a receipt that fails to attach (money: protected arm). Being built in its own worktree, branch
-  `p649-build`.
-- Worktrees for #821 (`agent-a94ac…`) and #823 (`agent-aacab…`) are finished and merged; their notes are in.
+- **#667** — one writer of a member's notification choices (`NotifyPrefs`), merging only the keys a form
+  showed. Worktree `.claude/worktrees/agent-ab53a7bdf5c7e4f44`, branch `p667-build`, commits `8fe7944c`,
+  `7be0f1e4`; test 41/41. **Check round 2 running** (protected arm: stored data). Its doc entries and a
+  replacement for CLAUDE.md's "Removing a preference switch is two changes" bullet are in that worktree's
+  `.claude-work/evidence/667/notes.md`.
 
 ## Next, in this order
 
-1. P3 to commit; then **P4** (the public door, D-056/D-084/D-087; it makes the door answer on
-   `tblPublicHosts` and sends `frame-ancestors` from `PublicWebsiteSetup::frameAncestorsValue()`).
-2. The rest of the backlog (D-055), two at a time where files do not overlap and only one package at a
-   time changes `web/_sql/` (migration numbers and full_schema.sql clash otherwise).
-3. #821 items 4-8 (the issue stays open). 4. #754 (waits on the merge). 5. The Codex review (D-007), the merge.
+1. **#493 P4** — the public door (D-056: script, frame, feed; D-084: delete `web/public_html/widget/` with a
+   test that `/widget` answers nothing; D-087: the test-copy door setting, a card on Admin → Public website).
+   It must send `PublicWebsiteSetup::frameAncestorsFor()` and answer on `tblPublicHosts`. Plan it first and
+   post the plan on #493. It shares files with P3, so nothing touching those runs beside it.
+2. The rest of the backlog (D-055), two at a time where files do not overlap; only one package at a time
+   changes `web/_sql/`.
+3. #821 items 4-8 (open). 4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
+
+## Working pattern that is paying off
+
+Builders and checkers run in their own worktrees; the commissioning session cherry-picks a clean package,
+adds its docs from the worktree's notes, runs the whole suite, pushes. When the same item fails two check
+rounds running, simplify the design (P3's verdict, #649's after-commit path both landed that way).
 
 ## Blocked on the owner
 
@@ -95,3 +100,8 @@ index there. **Codex has reviewed none of this work.**
 | #858 | Without JavaScript, a saved outside-calendar choice's redraw can show a Yes the person unticked |
 | #859 | The public event-suggestion form promises an e-mail on approval, and nothing sends one |
 | #865 | The offline page never retries by itself; nothing tests that the service worker refuses `private` |
+| #866 | D-093's hand-out rule is not judged inside the transaction that writes |
+| #867-#871 | Expense receipts: cannot be opened, added later, PDF after rollback, refused form loses typing, chooser hides types |
+| #872 | The portal's own database connection has no read deadline |
+| #873 | SafeFetch reads any 'HTTP/x NNN' header line as a new status |
+| #874 | tblUsers.notifyPrefs' column comment names two retired keys |
