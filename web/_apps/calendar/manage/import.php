@@ -846,6 +846,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = implode('; ', $parsed['errors']);
                 }
 
+                // 📌 ALREADY IN THE CALENDAR? (D-100, #877). Each row with no
+                //    error is asked about, so the preview can say which rows
+                //    the import will leave out unless "Import these anyway" is
+                //    ticked. This mark is for the PERSON only: the confirm
+                //    step asks the database again and never reads it, because
+                //    the calendar can change in the minutes between the two
+                //    pages. The start compared is `$fmtStore`'s output — what
+                //    the import will store — never a moment (#777).
+                //
+                //    A fault asking is not a reason to refuse the preview:
+                //    the row is simply not marked, and the confirm step asks
+                //    again (and reports a fault there, row by row).
+                foreach ($preview as $i => $r) {
+                    $preview[$i]['alreadyThere'] = null;
+                    if (count($r['errors']) > 0) {
+                        continue;
+                    }
+                    $storedStart = $fmtStore((string) $r['startDateTime']);
+                    if ($storedStart === null) {
+                        continue;
+                    }
+                    try {
+                        $preview[$i]['alreadyThere'] = Events::alreadyInCalendar(
+                            $mysqli,
+                            $siteId,
+                            (string) $r['eventName'],
+                            $storedStart
+                        );
+                    } catch (\Throwable $notAsked) {
+                        $preview[$i]['alreadyThere'] = null;
+                    }
+                }
+
                 // 🧊 Stash parsed rows in the session so the confirm step
                 //    doesn't need a second upload. Trim to JSON-safe shape.
                 $_SESSION['eventsImportPreview'] = array_map(static function ($r) {
@@ -917,6 +950,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     $okCount     = 0;
                     $notCount    = 0;
+                    // 📌 Rows left out because the calendar already holds the
+                    //    same event (D-100), counted apart from refusals: the
+                    //    row was fine, the import chose not to repeat it.
+                    $presentCount = 0;
+                    // ☑️ "Import these anyway" (D-100). An unticked box is not
+                    //    sent at all, and NOT SENT MEANS NO here — the safe
+                    //    default the owner chose — so this asks for the exact
+                    //    value the box sends rather than whether a field
+                    //    arrived.
+                    $importExisting = (($_POST['importExisting'] ?? '') === '1');
                     // 🔌 Set when the CONNECTION is lost part-way. From then on
                     //    nothing more is sent: every later row would fail the
                     //    same way, and saying so once, truthfully, is better
@@ -1152,6 +1195,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $catId   = $r['categoryID'] !== null ? (int) $r['categoryID'] : null;
                             $typeId  = $r['typeID']     !== null ? (int) $r['typeID']     : null;
 
+                            // 📌 ALREADY IN THE CALENDAR? ASKED NOW, AT CONFIRM
+                            //    (D-100, #877). The preview's mark is never
+                            //    read here: an event added between the preview
+                            //    and this press would otherwise be imported a
+                            //    second time. `Events::alreadyInCalendar()` says
+                            //    what counts (same name letter for letter, same
+                            //    stored start, this organisation, not deleted,
+                            //    copied-in events included) and why.
+                            //
+                            //    WHY THIS EXISTS AT ALL. Until #877 a second
+                            //    import of the same file was refused row by row
+                            //    because the web address was the name alone — a
+                            //    safety net by accident, which #877 removed by
+                            //    giving every row its own address. Without this,
+                            //    re-uploading a file after fixing one bad row
+                            //    (what D-099 tells a manager to do) silently
+                            //    doubled every event. The owner chose: skip such
+                            //    a row unless "Import these anyway" is ticked.
+                            //
+                            //    Asked in turn, row by row, so a row the file
+                            //    repeats EXACTLY (same name, same start) is left
+                            //    out as already there once its first copy has
+                            //    been saved a moment earlier in this same run.
+                            //    That is deliberate: it is the same event twice.
+                            if ($importExisting === false) {
+                                $there = Events::alreadyInCalendar($mysqli, $siteId, $name, $startSql);
+                                if ($there !== null) {
+                                    $results[] = [
+                                        'ok'      => false,
+                                        'present' => true,
+                                        'row'     => $r['rowNum'],
+                                        'eventID' => $there['eventID'],
+                                        'slug'    => $there['eventSlug'],
+                                        'msg'     => 'Already in the calendar: event #' . $there['eventID']
+                                            . ' has this name and starts at the same date and time ('
+                                            . substr($there['startDateTime'], 0, 16) . '), so this row was not '
+                                            . 'imported again. Nothing from it was saved. To import it as well, '
+                                            . 'upload the file again and tick "Import these anyway".',
+                                    ];
+                                    $presentCount++;
+                                    continue;
+                                }
+                            }
+
                             // 🔤 THE WEB ADDRESS: NAME, DATE, AND A FREE ONE
                             //    ASKED OF THE DATABASE (#877).
                             //
@@ -1321,10 +1408,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    same for a clean import and for one that refused
                     //    half the file. `Logger::activity()` never throws; if
                     //    the connection has gone it cannot write either, and
-                    //    the results list below says so.
+                    //    the results list below says so. Rows left out as
+                    //    already in the calendar (D-100) are a THIRD count:
+                    //    they were not refused, and folding them into "not
+                    //    imported" would make a harmless re-upload read like
+                    //    a failing one.
                     Logger::activity(
                         'EventsImported',
-                        'Bulk import: ' . $okCount . ' events created, ' . $notCount . ' rows not imported'
+                        'Bulk import: ' . $okCount . ' events created, ' . $presentCount . ' already in the calendar, '
+                        . $notCount . ' rows not imported'
                         . ($unknownCount > 0 ? ', ' . $unknownCount . ' row whose outcome is not known' : '')
                     );
 
@@ -1444,12 +1536,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 <span class="badge bg-success">OK</span>
                             <?php elseif (($r['unknown'] ?? false) === true): ?>
                                 <span class="badge bg-warning text-dark">Not known</span>
+                            <?php elseif (($r['present'] ?? false) === true): ?>
+                                <span class="badge bg-secondary">Already in the calendar</span>
                             <?php else: ?>
                                 <span class="badge bg-danger">Skipped</span>
                             <?php endif; ?>
                         </div>
                         <div class="col-12 col-md-8 small">
                             <?php echo htmlspecialchars((string) $r['msg'], ENT_QUOTES, 'UTF-8'); ?>
+                            <?php if (($r['present'] ?? false) === true): ?>
+                                <a href="<?php echo htmlspecialchars(Site::url('calendar/event') . '?slug=' . rawurlencode((string) $r['slug']), ENT_QUOTES, 'UTF-8'); ?>">See the event</a>
+                            <?php endif; ?>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -1482,7 +1579,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-6 col-md-2 small"><?php echo htmlspecialchars((string) ($r['endDateTime'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-6 col-md-2 small"><?php echo htmlspecialchars((string) $r['status'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-12 col-md-2 small">
-                            <?php if (count($r['errors']) === 0): ?>
+                            <?php if (count($r['errors']) === 0 && ($r['alreadyThere'] ?? null) !== null): ?>
+                                <?php $there = $r['alreadyThere']; ?>
+                                <span class="badge bg-secondary">Already in the calendar</span>
+                                <a href="<?php echo htmlspecialchars(Site::url('calendar/event') . '?slug=' . rawurlencode((string) $there['eventSlug']), ENT_QUOTES, 'UTF-8'); ?>">event #<?php echo (int) $there['eventID']; ?>, <?php echo htmlspecialchars(substr((string) $there['startDateTime'], 0, 16), ENT_QUOTES, 'UTF-8'); ?></a>
+                            <?php elseif (count($r['errors']) === 0): ?>
                                 <span class="badge bg-success">Ready</span>
                             <?php else: ?>
                                 <span class="badge bg-danger" title="<?php echo htmlspecialchars(implode('; ', $r['errors']), ENT_QUOTES, 'UTF-8'); ?>">
@@ -1495,9 +1596,38 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <?php
+    // 📌 D-100: how many rows the import will leave out as already in the
+    //    calendar. A count for the person only — the confirm step asks the
+    //    database again.
+    $alreadyCount = count(array_filter(
+        $preview,
+        static fn (array $row): bool => count($row['errors']) === 0 && ($row['alreadyThere'] ?? null) !== null
+    ));
+    ?>
+    <?php if ($alreadyCount > 0): ?>
+        <div class="alert alert-warning">
+            <i class="fa-solid fa-calendar-check me-1"></i>
+            <strong><?php echo (int) $alreadyCount; ?></strong> row(s) match an event already in the calendar — the
+            same name and the same start date and time — so they will NOT be imported again unless you tick
+            <em>Import these anyway</em> below.
+        </div>
+    <?php endif; ?>
     <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/import'), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
         <input type="hidden" name="action" value="confirm">
+        <?php
+        // ☑️ D-100: ONE tick, off unless somebody ticks it. A PHP comment, not
+        //    an HTML one, so the note is not sent to the browser. The rows it
+        //    covers are asked about again on Confirm.
+        ?>
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="importExisting" value="1" id="importExisting">
+            <label class="form-check-label" for="importExisting">
+                Import these anyway: also import rows that match an event already in the calendar (the same
+                name and the same start date and time). Each gets its own web address.
+            </label>
+        </div>
         <button type="submit" class="btn btn-success">
             <i class="fa-solid fa-upload me-1"></i> Confirm &amp; import valid rows
         </button>
@@ -1509,6 +1639,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card-body">
             <h2 class="h5">CSV format</h2>
             <p class="small">Required columns: <code>eventName</code>, <code>startDateTime</code>. Optional: <code>endDateTime</code>, <code>isAllDay</code>, <code>locationName</code>, <code>description</code>, <code>status</code> (draft|published|cancelled|postponed), <code>category</code>, <code>type</code>, <code>isPublic</code> (yes, y, true or 1 to make it public; empty or anything else means members-only), <code>isFeatured</code>. First row must be the header.</p>
+            <p class="small">
+                The same event can appear on many dates; each gets its own web address. A row with the same name
+                and the same start date and time as an event already in the calendar is left out, so uploading a
+                corrected file again adds only what is missing. The preview offers a tick to import such rows anyway.
+            </p>
             <p class="small text-muted mb-0">
                 Excel users: open your file in Excel, choose <em>File → Save As → CSV (Comma delimited) (.csv)</em>.
             </p>

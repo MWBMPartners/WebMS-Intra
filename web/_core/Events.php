@@ -1094,4 +1094,84 @@ class Events
 
         return $stem . '-' . bin2hex(random_bytes(4));
     }
+
+    /**
+     * The event already in this organisation's calendar that a calendar file
+     * row would repeat — the SAME NAME and the SAME START, date and time — or
+     * null when there is none (D-100, #877).
+     *
+     * WHY THIS EXISTS. Before #877 the import made an event's web address
+     * from its name alone, so importing the same file twice was refused row
+     * by row on the address — a safety net nobody designed. #877 gave every
+     * row its own address, which removed it: re-uploading a file (the very
+     * thing D-099 tells a manager to do after fixing one bad row) quietly
+     * made a second copy of every event. The owner chose to skip such a row
+     * unless the manager ticks "import these anyway" (D-100).
+     *
+     * WHAT COUNTS AS "ALREADY IN THE CALENDAR", each choice deliberate:
+     *   - THE NAME, LETTER FOR LETTER. Compared as bytes, so "Sunday Service"
+     *     and "SUNDAY SERVICE" are different events. A re-uploaded file
+     *     carries exactly the bytes it carried the first time, so the exact
+     *     test catches every re-upload; a looser one would also skip rows
+     *     nobody meant to repeat, and a wrongly skipped row is the harder
+     *     mistake to notice.
+     *   - THE START, EXACTLY AS STORED. `$startReading` must be what the
+     *     import stores (`YYYY-MM-DD HH:MM:SS`, the wall-clock reading), and it
+     *     is compared as that reading: nothing is turned into a moment (#777).
+     *   - A DELETED EVENT DOES NOT COUNT. The manager deleted it; importing it
+     *     again is a way of putting it back, and refusing would leave no way
+     *     but the tick to do that.
+     *   - AN EVENT COPIED IN FROM AN OUTSIDE CALENDAR DOES COUNT — but only
+     *     one belonging to THIS organisation (every row here is), because it
+     *     is in this organisation's calendar, and a manager importing the
+     *     same service from a spreadsheet would otherwise show members two of
+     *     it. Another organisation's events never count: the question is
+     *     scoped by `siteID`.
+     *
+     * WHAT IT CANNOT PROMISE. It is a question, not a lock: an event added by
+     * somebody else between this answer and the import's INSERT is not seen.
+     * The import asks at CONFIRM time, not only at preview, which closes the
+     * window that matters (minutes between the two pages), not the
+     * millisecond one.
+     *
+     * 🛡️ No `EventVisibility::where()` and no `externalFeedID IS NULL` — the
+     *    question is "is it in this organisation's calendar at all", asked
+     *    for a manager of that calendar, and narrowing it would let a
+     *    copied-in event be imported twice. It returns the event's number,
+     *    address and start, nothing more, and is listed on
+     *    `check_event_visibility.py`'s LINE_ALLOWLIST with that reason.
+     *
+     * @param mysqli $db           The connection.
+     * @param int    $siteId       The organisation importing.
+     * @param string $eventName    The row's name, as it would be stored.
+     * @param string $startReading The row's start, as it would be stored.
+     *
+     * @return array{eventID:int, eventSlug:string, startDateTime:string}|null
+     */
+    public static function alreadyInCalendar(mysqli $db, int $siteId, string $eventName, string $startReading): ?array
+    {
+        $ask = $db->prepare(
+            'SELECT `eventID`, `eventSlug`, `startDateTime` FROM `tblEvents` WHERE `siteID` = ? AND `isDeleted` = 0 AND `startDateTime` = ? AND CAST(`eventName` AS BINARY) = CAST(? AS BINARY) ORDER BY `eventID` LIMIT 1'
+        );
+        if ($ask === false) {
+            // Only reachable if the reporting mode ever stops throwing.
+            throw new \RuntimeException('the question "is this event already in the calendar" could not be prepared');
+        }
+        try {
+            $ask->bind_param('iss', $siteId, $startReading, $eventName);
+            $ask->execute();
+            $row = $ask->get_result()->fetch_assoc();
+        } finally {
+            $ask->close();
+        }
+        if ($row === null) {
+            return null;
+        }
+
+        return [
+            'eventID'       => (int) $row['eventID'],
+            'eventSlug'     => (string) $row['eventSlug'],
+            'startDateTime' => (string) $row['startDateTime'],
+        ];
+    }
 }

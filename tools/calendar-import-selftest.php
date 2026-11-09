@@ -35,11 +35,21 @@
  *      with a numbered ending where two share a day or a DELETED event
  *      already holds the address (the database's unique key covers deleted
  *      rows). Until #877 every row after the first was refused.
+ *   V  a row ALREADY IN THE CALENDAR (same name letter for letter, same
+ *      start) is left out unless "Import these anyway" is ticked (D-100):
+ *      a re-upload adds nothing, the tick imports every row again at the next
+ *      free addresses, a mixed file imports only the new rows, a DELETED event
+ *      does not count, a COPIED-IN event of the organisation does, and an
+ *      event added between preview and Confirm is caught at Confirm
  *   R  another writer taking the web address between the import asking
- *      whether it is free and saving the row (#877), stood in for by the
- *      trigger: taken once, the row is saved on its second try; taken every
- *      time, it is refused after three tries and says why, and the rest of
- *      the file is still saved
+ *      whether it is free and saving the row (#877). First stood in for by
+ *      the trigger: taken once, the row is saved on its second try; taken
+ *      every time, it is refused after three tries and says why, and the rest
+ *      of the file is still saved. Then a REAL second writer: this test holds
+ *      the address in an open transaction while the real page saves, so the
+ *      page's "is it free" question cannot see it and its INSERT waits on the
+ *      key; once the test commits, the INSERT is refused and the page must
+ *      ask again and save the event at the next free address (`-2`)
  *   T  a refusal carrying a SERVER code above 3000 (3819, a broken CHECK rule)
  *      is a refusal, not a lost connection: the row after it is still saved
  *   U  a refusal about the DATABASE (1114, a full table) is recorded as
@@ -49,10 +59,15 @@
  *      Then the plant is taken out and the scenario is green again. A second
  *      plant puts back "every code from 2000 up is a lost connection", and
  *      section T's file goes red. Two more collapse the row-or-database
- *      split, once each way, and sections U and G go red. Four more (#877)
+ *      split, once each way, and sections U and G go red. Five more (#877)
  *      put back the name-only address, leave deleted events out of the
- *      "is it free" question, drop the date from the address, and allow only
- *      one try — and sections S and R go red for each.
+ *      "is it free" question, drop the date from the address, allow only
+ *      one try, and ask "is it free" only ONCE before the tries (so every
+ *      try repeats an address already refused) — and sections S and R go
+ *      red for each. Six more (D-100) remove the already-in-the-calendar
+ *      question, ignore the tick, make Confirm trust the preview's mark,
+ *      count deleted events, leave copied-in events out, and ignore
+ *      capitals — and section V goes red for each.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It does not drive a LOST CONNECTION part-way through (the "whether it
@@ -60,13 +75,15 @@
  *     connection mid-row needs a second request running alongside, and the
  *     rest of the page then cannot draw either, because the page's header
  *     reads the database too. That branch is read, not driven.
- *   - It runs ONE web worker, so two administrators importing at once is
- *     untested, and such a test would pass on broken code. Section R stands
- *     in for the one part of that which matters to the web address — the
- *     address taken between asking and saving — with a trigger giving the
- *     unique key's own refusal. It proves the import asks again and stops;
- *     it cannot prove a REAL second writer's address is then skipped, because
- *     in the stand-in nobody really holds the address.
+ *   - It runs ONE web worker, so two administrators pressing Confirm at once
+ *     is not driven as two requests. What matters to the web address is not
+ *     how many people there are but which two things happen in which order:
+ *     another writer's row arriving between the page asking "is it free" and
+ *     the page saving. Section R makes exactly that order happen with ONE
+ *     page request and a transaction held open by this test, and checks the
+ *     premise (the page's INSERT really is waiting on the key) before it
+ *     believes the outcome. Anything else two simultaneous imports could do
+ *     to each other is not covered.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_… SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/calendar-import-selftest.php
@@ -552,10 +569,22 @@ $reportOf = static function (string $html): array {
 /**
  * One whole import: upload, preview, confirm. Returns everything the checks
  * need, read from the page AND from the database.
+ *
+ * `$clear` false keeps the events already there (D-100's re-import checks);
+ * `$confirmExtra` adds fields to the Confirm press (the "Import these anyway"
+ * tick); `$between` runs after the preview and before Confirm (an event added
+ * in between).
  */
-$runImport = static function (?string $file = null) use ($http, $tokenOn, $signIn, $csv, $db, $reportOf, $userId): array {
+$runImport = static function (
+    ?string $file = null,
+    bool $clear = true,
+    array $confirmExtra = [],
+    ?callable $between = null
+) use ($http, $tokenOn, $signIn, $csv, $db, $reportOf, $userId): array {
     $file ??= $csv;
-    $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'");
+    if ($clear === true) {
+        $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'");
+    }
     $db->query('DELETE FROM `p877_slug_tries`');
     $mark = (int) ($db->query('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')->fetch_assoc()['m'] ?? 0);
     $errMark = (int) ($db->query('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')->fetch_assoc()['m'] ?? 0);
@@ -564,7 +593,10 @@ $runImport = static function (?string $file = null) use ($http, $tokenOn, $signI
     $page    = $http('GET', '/calendar/manage/import');
     $preview = $http('POST', '/calendar/manage/import', ['csrf_token' => $tokenOn($page['body']), 'action' => 'preview'], ['csv_file' => $file]);
     $token   = $tokenOn($preview['body']) !== '' ? $tokenOn($preview['body']) : $tokenOn($page['body']);
-    $confirm = $http('POST', '/calendar/manage/import', ['csrf_token' => $token, 'action' => 'confirm']);
+    if ($between !== null) {
+        $between();
+    }
+    $confirm = $http('POST', '/calendar/manage/import', ['csrf_token' => $token, 'action' => 'confirm'] + $confirmExtra);
 
     $events = [];
     $slugs  = [];
@@ -597,6 +629,7 @@ $runImport = static function (?string $file = null) use ($http, $tokenOn, $signI
     return [
         'previewStatus' => $preview['status'],
         'previewReady'  => str_contains($preview['body'], 'Confirm &amp; import valid rows'),
+        'previewBody'   => $preview['body'],
         'status'        => $confirm['status'],
         'whole'         => str_contains($confirm['body'], '</html>'),
         'report'        => $reportOf($confirm['body']),
@@ -764,6 +797,123 @@ check('S7 the deleted event still holds its address, untouched, and nothing else
     array_map(static fn (array $row): array => [(int) $row['eventID'], (int) $row['isDeleted']], $heldBy),
     [[$holderId, 1]]);
 
+echo "V. A row ALREADY IN THE CALENDAR is left out unless the manager ticks to import it (D-100)\n";
+// 📌 #877 removed an accidental safety net: with the address made from the
+//    name alone, importing the same file twice was refused row by row. With
+//    every row given its own address, a re-upload (what D-099 tells a manager
+//    to do after fixing one bad row) would quietly double every event. The
+//    owner chose (D-100): a row with the same name and the same start as an
+//    event already in the organisation's calendar is left out unless
+//    "Import these anyway" is ticked — asked at CONFIRM, not only at preview.
+/**
+ * Section S's file imported once from clean, then uploaded AGAIN without
+ * clearing — with or without the tick. Returns the second import's outcome.
+ */
+$scnReimport = static function (bool $tick) use ($runImport, $dup, $db): array {
+    $first  = $runImport($dup);
+    $second = $runImport($dup, false, $tick === true ? ['importExisting' => '1'] : []);
+    return [
+        'firstLines'   => array_map(static fn (array $line): string => $line[0], $first['report']),
+        'lines'        => array_map(static fn (array $line): string => $line[0], $second['report']),
+        'msg2'         => $second['report'][2][1] ?? '',
+        'slugs'        => array_values($second['slugs']),
+        'count'        => count($second['events']),
+        'activity'     => $second['activity'],
+        'marked'       => substr_count($second['previewBody'], '>Already in the calendar</span>'),
+        'tick'         => preg_match('/<input[^>]*name="importExisting"[^>]*>/', $second['previewBody'], $m) === 1 ? $m[0] : '',
+    ];
+};
+$allPresent = [2 => 'Already in the calendar', 3 => 'Already in the calendar', 4 => 'Already in the calendar',
+    5 => 'Already in the calendar', 6 => 'Already in the calendar'];
+$allOk = [2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK', 6 => 'OK'];
+$v = $scnReimport(false);
+check('V1 PREMISE: the first import of the file saved every row', $v['firstLines'], $allOk);
+check('V2 the second upload\'s preview marks all five rows "Already in the calendar"', $v['marked'], 5);
+check('V3 ...and offers ONE "Import these anyway" tick, NOT ticked',
+    [$v['tick'] !== '', str_contains($v['tick'], 'checked')], [true, false]);
+check('V4 THE WHOLE POINT: confirmed without the tick, every row is left out as already in the calendar',
+    $v['lines'], $allPresent);
+check('V5 ...so the calendar still holds exactly the five events, not ten', $v['count'], 5);
+check('V6 ...each row says which event it matched and how to import it anyway',
+    [str_contains($v['msg2'], 'Already in the calendar: event #'), str_contains($v['msg2'], 'Import these anyway')],
+    [true, true]);
+check('V7 ...and the activity record counts them on their own, not as refused',
+    $v['activity'], ['Bulk import: 0 events created, 5 already in the calendar, 0 rows not imported']);
+
+$v = $scnReimport(true);
+check('V8 WITH the tick, every row is imported again', $v['lines'], $allOk);
+check('V9 ...the calendar now holds ten events', $v['count'], 10);
+check('V10 ...and the second copies get the next free addresses',
+    array_slice($v['slugs'], 5),
+    [
+        'p790-sunday-service-2031-03-02-3',
+        'p790-sunday-service-2031-03-09-2',
+        'p790-sunday-service-2031-03-16-3',
+        'p790-sunday-service-2031-03-16-4',
+        'p790-after-the-services-2031-03-17-2',
+    ]);
+
+// 🧩 A file mixing rows already there with new ones, and the three edges of
+//    what "already there" means: capitals, a DELETED event, and an event
+//    COPIED IN from an outside calendar of the same organisation.
+$mixed = $child . $sep . 'p790-mixed.csv';
+file_put_contents(
+    $mixed,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 Sunday Service\",2031-03-02 10:00:00,2031-03-02 11:00:00,published\n"
+    . "\"P790 Sunday Service\",2031-03-23 10:00:00,2031-03-23 11:00:00,published\n"
+    . "\"P790 SUNDAY SERVICE\",2031-03-09 10:00:00,2031-03-09 11:00:00,published\n"
+    . "\"P790 deleted twin\",2031-09-01 10:00:00,2031-09-01 11:00:00,published\n"
+    . "\"P790 copied in\",2031-09-02 10:00:00,2031-09-02 11:00:00,published\n"
+);
+/** Section S's file imported, two edge events added, then the mixed file. */
+$scnMixed = static function () use ($runImport, $dup, $mixed, $db, $siteId): array {
+    $runImport($dup);
+    $db->query(
+        'INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `isDeleted`, `deletedAt`) '
+        . "VALUES ({$siteId}, 'P790 deleted twin', 'p877-deleted-twin', '2031-09-01 10:00:00', 'Europe/London', 'published', 1, NOW())"
+    );
+    $db->query(
+        'INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, `externalFeedID`) '
+        . "VALUES ({$siteId}, 'P790 copied in', 'p877-copied-in', '2031-09-02 10:00:00', 'Europe/London', 'published', 987654)"
+    );
+    $r = $runImport($mixed, false);
+    return array_map(static fn (array $line): string => $line[0], $r['report']);
+};
+$mx = $scnMixed();
+check('V11 a mixed file imports only the new rows: the existing service is left out, a new date is imported',
+    [$mx[2] ?? null, $mx[3] ?? null], ['Already in the calendar', 'OK']);
+check('V12 ...the same name in DIFFERENT CAPITALS is a different event, and is imported', $mx[4] ?? null, 'OK');
+check('V13 ...a DELETED event with the same name and start does not count — the manager deleted it', $mx[5] ?? null, 'OK');
+check('V14 ...an event COPIED IN from an outside calendar of this organisation does count', $mx[6] ?? null, 'Already in the calendar');
+
+// ⏱️ Asked at CONFIRM: an event added between the preview and the press.
+$late = $child . $sep . 'p790-late.csv';
+file_put_contents(
+    $late,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 late arrival\",2031-08-01 10:00:00,2031-08-01 11:00:00,published\n"
+);
+/** The late file: previewed while the calendar is clear, the event added, then Confirm. */
+$scnLate = static function () use ($runImport, $late, $db, $siteId): array {
+    $r = $runImport($late, true, [], static function () use ($db, $siteId): void {
+        $db->query(
+            'INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`) '
+            . "VALUES ({$siteId}, 'P790 late arrival', 'p877-late-arrival', '2031-08-01 10:00:00', 'Europe/London', 'published')"
+        );
+    });
+    return [
+        'marked' => substr_count($r['previewBody'], '>Already in the calendar</span>'),
+        'lines'  => array_map(static fn (array $line): string => $line[0], $r['report']),
+        'count'  => count($r['events']),
+    ];
+};
+$lt = $scnLate();
+check('V15 PREMISE: the preview did NOT mark the row, because the event did not exist yet', $lt['marked'], 0);
+check('V16 the event added between preview and Confirm is caught at Confirm, and the row is left out',
+    $lt['lines'], [2 => 'Already in the calendar']);
+check('V17 ...so the calendar holds that event once', $lt['count'], 1);
+
 echo "R. Another writer takes the address between asking and saving (#877)\n";
 // 🏁 Stood in for by the trigger (see RACE_ONCE_NAME at the top): the database
 //    refuses the row exactly as the unique key would if somebody else had just
@@ -819,6 +969,128 @@ check('R9 TWO refused rows make ONE error record for the import, not one per row
 check('R10 ...which counts both rows', str_contains($rr['records'][0] ?? '', '2 row(s) refused'), true);
 check('R11 ...under a title that speaks of rows, and at "Notification" (a taken address is the row\'s problem)',
     str_starts_with($rr['records'][0] ?? '', 'Notification | Rows of a calendar file import were refused by the database |'), true);
+
+// 🏁 A REAL SECOND WRITER, NOT A STAND-IN. The trigger above refuses the row
+//    whatever address it carries, so it cannot tell a page that asks "is it
+//    free" again before each try from one that asks ONCE and then re-sends
+//    the same, already-refused address three times — both pass R1-R11
+//    (measured by the independent check: R stayed 75/75 with the question
+//    moved above the tries). Here somebody really holds the address:
+//
+//      1. this test, on its OWN connection, inserts an event at the address
+//         the file's row will want, and leaves the transaction OPEN;
+//      2. the real page is sent Confirm in the background. Its "is it free"
+//         question cannot see an uncommitted row, so it calls the address
+//         free, and its INSERT then WAITS on the unique key;
+//      3. the test confirms that wait really is happening (otherwise every
+//         check below would be about some other order of events), and only
+//         then commits;
+//      4. the waiting INSERT is refused (1062), and the page must ask again —
+//         now seeing the committed row — and save the event at `-2`.
+//
+//    One page request and one held transaction are enough: what matters is
+//    the ORDER of two things (another row arriving between asking and
+//    saving), not how many people are importing.
+$raceReal = $child . $sep . 'p790-race-real.csv';
+file_put_contents(
+    $raceReal,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 real race\",2031-07-01 10:00:00,2031-07-01 11:00:00,published\n"
+);
+/** Section R's real race, reduced to what the checks and the plant compare. */
+$scnRealRace = static function () use (
+    $http, $tokenOn, $signIn, $raceReal, $db, $reportOf, $port, $jar, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $siteId
+): array {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P790 %' OR `eventName` = 'P877 race holder'");
+    $signIn();
+    $page    = $http('GET', '/calendar/manage/import');
+    $preview = $http('POST', '/calendar/manage/import', ['csrf_token' => $tokenOn($page['body']), 'action' => 'preview'], ['csv_file' => $raceReal]);
+    $token   = $tokenOn($preview['body']) !== '' ? $tokenOn($preview['body']) : $tokenOn($page['body']);
+
+    // 1. Hold the address in an open transaction, on a connection of our own.
+    $holder = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+    $holder->begin_transaction();
+    $holder->query(
+        'INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`) '
+        . "VALUES ({$siteId}, 'P877 race holder', 'p790-real-race-2031-07-01', '2031-07-01 10:00:00', "
+        . "'Europe/London', 'published')"
+    );
+
+    // 2. Confirm, in the background.
+    $mh = curl_multi_init();
+    $h  = curl_init('http://127.0.0.1:' . $port . '/calendar/manage/import');
+    curl_setopt_array($h, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HEADER         => true,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT        => 90,
+        CURLOPT_CONNECTTIMEOUT => 5,
+        CURLOPT_PROXY          => '',
+        CURLOPT_NOPROXY        => '*',
+        CURLOPT_COOKIEJAR      => $jar,
+        CURLOPT_COOKIEFILE     => $jar,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => http_build_query(['csrf_token' => $token, 'action' => 'confirm']),
+    ]);
+    curl_multi_add_handle($mh, $h);
+
+    // 3. Wait until the page's INSERT is really waiting on the key — asked of
+    //    the database, never assumed from a sleep (#735: a sleep is a hope).
+    $running = 1;
+    $waiting = false;
+    $until   = microtime(true) + 15;
+    while (microtime(true) < $until) {
+        curl_multi_exec($mh, $running);
+        if ($running === 0) {
+            break;
+        }
+        $n = (int) ($db->query(
+            "SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX WHERE `trx_state` = 'LOCK WAIT' "
+            . "AND `trx_query` LIKE '%INSERT INTO `tblEvents`%'"
+        )->fetch_assoc()['n'] ?? 0);
+        if ($n > 0) {
+            $waiting = true;
+            break;
+        }
+        curl_multi_select($mh, 0.1);
+    }
+    $stillWaiting = $running > 0;
+    $holder->commit();
+    $holder->close();
+
+    // 4. Let the page finish.
+    while ($running > 0) {
+        curl_multi_exec($mh, $running);
+        if ($running > 0) {
+            curl_multi_select($mh, 0.2);
+        }
+    }
+    $raw  = (string) curl_multi_getcontent($h);
+    $size = (int) curl_getinfo($h, CURLINFO_HEADER_SIZE);
+    curl_multi_remove_handle($mh, $h);
+    curl_multi_close($mh);
+    $report = $reportOf(substr($raw, $size));
+
+    $rows = $db->query(
+        "SELECT `eventName`, `eventSlug` FROM `tblEvents` WHERE `eventName` IN ('P790 real race', 'P877 race holder') "
+        . 'ORDER BY `eventID`'
+    )->fetch_all(MYSQLI_ASSOC);
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'P877 race holder'");
+
+    return [
+        'waiting'      => $waiting,
+        'stillWaiting' => $stillWaiting,
+        'lines'        => array_map(static fn (array $line): string => $line[0], $report),
+        'rows'         => array_map(static fn (array $row): string => $row['eventName'] . ' = ' . $row['eventSlug'], $rows),
+    ];
+};
+$real = $scnRealRace();
+check('R12 PREMISE: the page\'s INSERT was really waiting on the address this test held, before the test let go',
+    [$real['waiting'], $real['stillWaiting']], [true, true]);
+check('R13 THE REAL RACE: once the other writer\'s row is committed, the page asks again and imports the row',
+    $real['lines'], [2 => 'OK']);
+check('R14 ...at the next free address, `-2`, beside the other writer\'s event at the plain one',
+    $real['rows'], ['P877 race holder = p790-real-race-2031-07-01', 'P790 real race = p790-real-race-2031-07-01-2']);
 
 echo "T. A server code above 3000 is a REFUSAL, not a lost connection\n";
 $csv3819 = $child . $sep . 'p790-3819.csv';
@@ -1057,6 +1329,99 @@ check('P20 ...having been tried once, so section R\'s R2 and R3 would have gone 
     $rp['tries'][RACE_ONCE_NAME] ?? null, 1);
 $restoreBoth();
 
+// (e) "IS IT FREE" ASKED ONCE, BEFORE THE TRIES: every try then re-sends the
+//     address the database has just refused. The trigger in R1-R11 cannot see
+//     this (it refuses whatever the address); only the real race can.
+$plant(
+    $pagePath,
+    $before,
+    "for (\$slugTry = 1; ; \$slugTry++) {\n"
+    . "                                \$slug = Events::freeSlug(\$mysqli, \$siteId, \$slugStem);",
+    "\$slug = Events::freeSlug(\$mysqli, \$siteId, \$slugStem);\n"
+    . "                            for (\$slugTry = 1; ; \$slugTry++) {",
+    'the free-address question inside the tries'
+);
+$rp = $scnRace();
+check('P22 with "is it free" asked only once, the trigger\'s stand-in race is still green — which is why the real one exists',
+    $rp['lines'], [2 => 'OK', 3 => 'OK', 4 => 'Skipped', 5 => 'Skipped', 6 => 'OK']);
+$realPlanted = $scnRealRace();
+check('P23 ...the real race still reaches its premise (the page\'s INSERT waits on the held address)',
+    [$realPlanted['waiting'], $realPlanted['stillWaiting']], [true, true]);
+check('P24 ...and the row is REFUSED, because every try repeats the address already taken, so R13 would have gone red',
+    $realPlanted['lines'], [2 => 'Skipped']);
+check('P25 ...and only the other writer\'s event is in the database',
+    $realPlanted['rows'], ['P877 race holder = p790-real-race-2031-07-01']);
+$restoreBoth();
+
+// 📌 D-100's plants. Each takes one part of "already in the calendar" away.
+// (f) NO QUESTION AT CONFIRM: the re-upload doubles every event again.
+$plant($pagePath, $before, 'if ($importExisting === false) {', 'if (false) {', 'the already-in-the-calendar question');
+$v = $scnReimport(false);
+check('P26 with the question removed, a re-upload imports every row a second time, so V4 would have gone red',
+    [$v['lines'], $v['count']], [$allOk, 10]);
+$restoreBoth();
+
+// (g) THE TICK IGNORED: "Import these anyway" does nothing.
+$plant(
+    $pagePath,
+    $before,
+    "\$importExisting = ((\$_POST['importExisting'] ?? '') === '1');",
+    '$importExisting = false;',
+    'the tick'
+);
+$v = $scnReimport(true);
+check('P27 with the tick ignored, ticking it imports nothing, so V8 would have gone red', $v['lines'], $allPresent);
+$restoreBoth();
+
+// (h) CONFIRM TRUSTS THE PREVIEW'S MARK instead of asking again.
+$plant(
+    $pagePath,
+    $before,
+    '$there = Events::alreadyInCalendar($mysqli, $siteId, $name, $startSql);',
+    "\$there = \$r['alreadyThere'] ?? null;",
+    'the confirm-time question'
+);
+$lt = $scnLate();
+check('P28 with Confirm trusting the preview, the event added in between is imported a second time, so V16 would have gone red',
+    [$lt['lines'], $lt['count']], [[2 => 'OK'], 2]);
+$v = $scnReimport(false);
+check('P29 ...while a plain re-upload is still caught by the preview\'s mark — which is why V16 exists',
+    $v['lines'], $allPresent);
+$restoreBoth();
+
+// (i) A DELETED EVENT COUNTS.
+$plant($eventsPath, $eventsBefore, 'AND `isDeleted` = 0 AND `startDateTime`', 'AND `startDateTime`', 'the deleted-event rule');
+$mx = $scnMixed();
+check('P30 with deleted events counted, the deleted twin is left out, so V13 would have gone red',
+    $mx[5] ?? null, 'Already in the calendar');
+$restoreBoth();
+
+// (j) COPIED-IN EVENTS LEFT OUT of the question.
+$plant(
+    $eventsPath,
+    $eventsBefore,
+    'AND `isDeleted` = 0 AND `startDateTime`',
+    'AND `isDeleted` = 0 AND `externalFeedID` IS NULL AND `startDateTime`',
+    'the deleted-event rule'
+);
+$mx = $scnMixed();
+check('P31 with copied-in events left out, the copied-in event is imported a second time, so V14 would have gone red',
+    $mx[6] ?? null, 'OK');
+$restoreBoth();
+
+// (k) CAPITALS IGNORED.
+$plant(
+    $eventsPath,
+    $eventsBefore,
+    'CAST(`eventName` AS BINARY) = CAST(? AS BINARY)',
+    '`eventName` = ?',
+    'the letter-for-letter name test'
+);
+$mx = $scnMixed();
+check('P32 with capitals ignored, "P790 SUNDAY SERVICE" is left out, so V12 would have gone red',
+    $mx[4] ?? null, 'Already in the calendar');
+$restoreBoth();
+
 $startServer();
 $waitForServer();
 $sameAgain = $scnSameName();
@@ -1078,5 +1443,6 @@ echo "\n";
 echo ($passed + $failed) . " checks: {$passed} passed, {$failed} failed.\n";
 echo "It drives the REAL import page over HTTP and reads the database back. It does\n";
 echo "NOT drive a database connection lost part-way through, and it runs ONE web\n";
-echo "worker, so two administrators importing at once is untested.\n";
+echo "worker, so two Confirm requests at once are not driven (section R drives the\n";
+echo "one ordering that matters to the web address with a transaction held open).\n";
 exit($failed === 0 ? 0 : 1);

@@ -386,6 +386,16 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
         "SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1",
         "asks only whether an event web address is taken, across every row the unique key covers (#877); no event is returned",
     ),
+    # Not shown to a viewer (D-100, #877): Events::alreadyInCalendar() asks,
+    # for the calendar file import, whether this organisation's calendar
+    # already holds an event with the same name and start. Copied-in events of
+    # the SAME organisation count on purpose (narrowing it would let one be
+    # imported a second time); the question is scoped by siteID and returns
+    # only the event's number, address and start, to that calendar's manager.
+    ("_core/Events.php", 1154): (
+        "SELECT `eventID`, `eventSlug`, `startDateTime` FROM `tblEvents` WHERE `siteID` = ? AND `isDeleted` = 0",
+        "asks whether this organisation's calendar already holds the same event, for its own manager importing a file (D-100); copied-in events of the same organisation count on purpose",
+    ),
 }
 
 
