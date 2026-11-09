@@ -4,20 +4,21 @@
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: `de32d26` (#493 P1),
-`52a7c6b` (D-088 to D-091), `747e2ef` (#852). Nothing uncommitted.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest: `2cf919b5` (D-089, #850 closed),
+`de32d26` (#493 P1), `52a7c6b` (D-088 to D-091), `747e2ef` (#852). Nothing uncommitted.
 
 ## Next, in this order
 
-1. **D-089 (#850)** — an own event's search-engine markup also needs the website tick, inside its
-   website dates. Draft in the session scratchpad `d089/new-block.php`; `web/_apps/calendar/event.php`.
-2. **D-091 (#852 item 3)** — dark-mode hover/selected/faint shades follow the organisation's colour,
-   with a contrast check. Notes in the scratchpad `d091/notes.md`: the organisation's colour is written
-   inline on `<html>`, so dark mode's brighter `#7b86e8` probably never applies, and the text drawn on
-   the main colour is a fixed dark colour — MEASURE both in a browser first.
-3. D-079 (new events start members-only), then #493 P2 (noticeboard), P3 (admin page, delegation,
+1. **D-091 (#852 item 3)** — dark-mode hover/selected/faint shades follow the organisation's colour,
+   with a contrast check. MEASURED (notes in the session scratchpad `d091/notes.md`): the colour is
+   written inline on `<html>`, so dark mode's brighter `#7b86e8` never applies; the three shades are
+   fixed indigo; text on the main colour is a fixed `#0f1115` in dark mode (about 3.8:1 on the default
+   colour) and Bootstrap's white on `.btn-primary` in both themes; the main colour is used AS text in
+   28 rules. So the contrast work covers text on the colour, the colour as text, and the shades. Check
+   the CSP's `style-src` before choosing how to print per-theme tokens.
+2. D-079 (new events start members-only), then #493 P2 (noticeboard), P3 (admin page, delegation,
    D-085), P4 (the public door; delete the old widget folder, D-084).
-4. #569 — the page findings left. 5. The backlog (D-055). 6. #754. 7. The Codex review (D-007), then
+3. #569 — the page findings left. 4. The backlog (D-055). 5. #754. 6. The Codex review (D-007), then
    the merge.
 
 ## Blocked on the owner
