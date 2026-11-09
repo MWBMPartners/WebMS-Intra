@@ -35,9 +35,10 @@
  *      `erasure-review-selftest.php` section T does it; and F3 MEASURES that
  *      its read and write are one transaction, which no before-and-after
  *      comparison of the keys can see (a scratch trigger records when the
- *      writing connection's transaction began); and F5 has two real saves
- *      READ before either WRITES, which only an EXCLUSIVE lock survives (a
- *      shared one deadlocks and loses a save)
+ *      writing connection's transaction began); and F4/F5 have two real
+ *      saves both WAITING at their read before either writes — an EXCLUSIVE
+ *      lock then lets them read one after the other and both land, while a
+ *      shared one would let both read at once, deadlock, and lose a save
  *   G  when the database refuses the save (a scratch trigger refuses it for
  *      real), both pages say so and nothing changes
  *   H  THE PLANTS: eleven faults, each put into a COPY of the code, each of
@@ -68,11 +69,17 @@
  *         The database must already hold `web/_sql/full_schema.sql`. Needs
  *         PHP's curl extension and `proc_open()`, and a database account that
  *         may read `information_schema.INNODB_TRX` (the PROCESS privilege) and
- *         create scratch tables and TRIGGERs — both asked up front. It
- *         REFUSES rather than skipping when anything is missing, because a
- *         skipped test reads exactly like a passing one. Stopped with Ctrl-C it
- *         puts everything back when PHP has pcntl; what a `kill -9` leaves is
- *         listed beside the clean-up.
+ *         create scratch tables and TRIGGERs — both asked up front. On MySQL 8
+ *         with binary logging on (the default), creating a trigger needs SUPER
+ *         or `log_bin_trust_function_creators = 1` as well as the TRIGGER
+ *         right, so in practice this means the root account. It REFUSES
+ *         rather than skipping when anything is missing, because a skipped
+ *         test reads exactly like a passing one. Stopped with Ctrl-C (when PHP
+ *         has pcntl) it removes its triggers, scratch table, web server,
+ *         workers and copy of web/, and switches the newsletter back off — but
+ *         NOT the test member and their rows, which stay until the next run
+ *         removes them first. What a `kill -9` leaves is listed beside the
+ *         clean-up.
  *
  * Exit:   0 only when every check ran and passed.
  *
@@ -175,11 +182,13 @@ if ($tables < 100) {
 // WHAT A HARD KILL (`kill -9`) STILL LEAVES, because nothing can run then:
 //   - two possible scratch triggers on `tblUsers` (`zzNotifyPrefsProbeTrg`,
 //     `zzNotifyPrefsRefuseTrg`) and the table `zzNotifyPrefsProbe` — the
-//     next run drops all three before it uses them, but until then a refusing
-//     trigger would refuse writes to the test member's choices;
+//     next run drops the two triggers before it uses them and REUSES the
+//     table (CREATE TABLE IF NOT EXISTS, then DELETE FROM), but until then a
+//     refusing trigger would refuse writes to the test member's choices;
 //   - the folder `notify-prefs-<random>` under the system temp folder,
 //     holding the database password and a key — delete it by hand;
-//   - the web server (`php -S 127.0.0.1:103xx`) and any worker, which the
+//   - the web server (`php -S 127.0.0.1:<port>`, a port from 10300 to 10500)
+//     and any worker, which the
 //     operating system may leave running — stop them by hand;
 //   - `newsletter.enabled` set to '1' if the kill landed inside D8/D9;
 //   - the test member and their rows, which the next run removes first.
@@ -1100,9 +1109,10 @@ $scenarioF = static function () use ($db, $makeTrigger, $setStored, $stored, $us
 };
 
 /**
- * F4-F5. BOTH saves READ before EITHER writes. This test's connection holds
- * the row while two workers start, each switching a different key off, and
- * both wait at their read; then it lets go. With an EXCLUSIVE lock (`FOR
+ * F4-F5. BOTH saves are WAITING at their read before EITHER writes (F4 is
+ * that premise, measured on each worker's own connection). This test's
+ * connection holds the row while two workers start, each switching a
+ * different key off, and both wait at their read; then it lets go. With an EXCLUSIVE lock (`FOR
  * UPDATE`) only one may hold the row, so the second reads only after the
  * first has written: both changes land. With a SHARED lock (`LOCK IN SHARE
  * MODE` / `FOR SHARE`) both read at once, both then need the row to write,
@@ -1148,7 +1158,7 @@ check('F3 THE TRANSACTION: merge()\'s read and write are ONE transaction — it 
 echo "      ({$trxDetailF})\n";
 [$okBoth, $detailBoth, $premiseBoth] = $scenarioBoth();
 check('F4 (the premise) BOTH workers were connected and waiting at their read at the same moment', $premiseBoth);
-check('F5 THE LOCK IS EXCLUSIVE: when both saves have read before either writes, both still land and both answer "saved" — a shared lock would deadlock and lose one',
+check('F5 THE LOCK IS EXCLUSIVE: with both saves waiting at their read before either writes, both still land and both answer "saved" — a shared lock would let both read at once, deadlock and lose one',
     $okBoth, $detailBoth);
 
 // =============================================================================
