@@ -60,6 +60,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\Events;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
 use Portal\Core\PublicWebsite;
@@ -254,9 +255,25 @@ if ($websiteJudged['ok'] === false) {
 }
 $websiteValues = $websiteJudged['values'];
 
-// 🐢 Slug from name (server-side; truncated to 100 chars to fit the column)
-$slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
-$slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
+// 🔤 THE WEB ADDRESS: NAME, DATE, AND A FREE ONE ASKED OF THE DATABASE (#883).
+//
+//    WHAT WAS WRONG. This made the address from the NAME ALONE, and the
+//    database allows one address per organisation (`uq_event_site_slug`), a
+//    DELETED event's included. So a second event created here with a name any
+//    event had ever had — the same service next week — was refused by the
+//    database, and the refusal escaped as a bare HTTP 500 with nothing
+//    created; `api-spec.json` said exactly that. The calendar file import had
+//    the same fault until #877.
+//
+//    NOW the address is the name plus the start DATE (`Events::slugStem()`,
+//    the shape the Manage Events form always used), and
+//    `Events::saveUnderFreeSlug()` asks the database for the first one free —
+//    `-2`, `-3` … — and asks again if another writer takes it between the
+//    question and the INSERT. The ONE place both are decided is
+//    `Portal\Core\Events`; this handler, the form, the series pattern page
+//    and the public suggestion form all ask it.
+$slugStem = Events::slugStem($eventName, $startSql);
+$slug     = '';
 
 $siteId    = Site::id();
 // 🕐 `$startSql` and `$endSql` were settled above: a reading with no offset is
@@ -281,6 +298,8 @@ if ($stmt === false) {
 // +locationPhone[s], +locationEmail[s], +locationGeoLat[d], +locationGeoLng[d], +locationW3W[s]).
 // 🕰️ #604: 21 -> 22 (+timezone[s], after endDateTime).
 // 🌐 #493 P1: 22 -> 25 (+showOnWebsite[i], +websiteFrom[s], +websiteUntil[s]).
+// 🔗 BOUND BY REFERENCE: `bind_param()` holds a reference to `$slug`, so
+//    each try below only has to change `$slug` before it sends.
 $stmt->bind_param(
     'issssssisssiiiissssddsiss',
     $siteId, $eventName, $slug, $description, $startSql, $endSql, $zoneName,
@@ -289,14 +308,36 @@ $stmt->bind_param(
     $locationAddress, $locationWebURL, $locationPhone, $locationEmail, $locationGeoLat, $locationGeoLng, $locationW3W,
     $websiteValues['showOnWebsite'], $websiteValues['websiteFrom'], $websiteValues['websiteUntil']
 );
-$ok    = $stmt->execute();
-$newId = (int) $stmt->insert_id;
-$stmt->close();
-
-if ($ok === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_CREATE_FAIL', $db->error, '');
+try {
+    $slug = Events::saveUnderFreeSlug($db, $siteId, $slugStem, static function (string $candidate) use ($stmt, &$slug): void {
+        $slug = $candidate;
+        // 🧷 `execute()` answering false becomes the same refusal as a throw,
+        //    so a change of reporting mode cannot open an untested path.
+        if ($stmt->execute() !== true) {
+            throw new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
+        }
+    });
+} catch (\mysqli_sql_exception $refused) {
+    $stmt->close();
+    if (Events::slugWasTaken($refused) === true) {
+        // 🏁 Reached only when the address was taken EVERY time it was asked
+        //    for: the database said it was free, then another event took it
+        //    before this one could be saved, `Events::SLUG_SAVE_TRIES` times.
+        //    Something else is adding events with the same name on the same
+        //    day at the same moment. That is a clash with another writer, not
+        //    a fault in the request, so it is 409 and safe to send again.
+        ApiResponse::error(
+            'Every web address tried for this event was taken by another event at the moment it was being '
+            . 'saved — most likely something else is creating events with the same name on the same day at the '
+            . 'same time. Nothing was created; send the request again.',
+            409
+        );
+    }
+    Logger::errorPlatform('MySQL', 'Error', 'API_EVENT_CREATE_FAIL', $refused->getMessage(), '');
     ApiResponse::error('Failed to create event', 500);
 }
+$newId = (int) $stmt->insert_id;
+$stmt->close();
 
 Logger::activity('ApiEventCreate', 'API: created event #' . $newId . ' "' . $eventName . '"');
 PublicWebsite::recordChange($newId, $eventName, $websiteJudged['changes'], $websiteActor, 'the events API, a new event');

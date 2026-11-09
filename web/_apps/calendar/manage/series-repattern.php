@@ -57,6 +57,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\EventRecurrence;
+use Portal\Core\Events;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
 use Portal\Core\Router;
@@ -707,11 +708,6 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                     throw new RuntimeException('the statement that adds a date could not be prepared');
                 }
 
-                $slugBase = substr(preg_replace('/[^a-z0-9\-]/', '', strtolower((string) $template['eventSlug'])) ?? 'event', 0, 150);
-                if ($slugBase === '') {
-                    $slugBase = 'event';
-                }
-
                 // 🔑 A FREE ADDRESS, ASKED OF THE DATABASE rather than guessed.
                 //
                 //    `uq_event_site_slug (siteID, eventSlug)` applies to
@@ -724,54 +720,51 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                 //    again", and retrying could never succeed. It was also
                 //    INTERMITTENT, because the position in the list changes from
                 //    one run to the next, so the same day got a different
-                //    suffix and sometimes happened to miss.
+                //    suffix and sometimes happened to miss. Measured by the
+                //    independent check on 31 October 2026.
                 //
-                //    Measured by the independent check on 31 October 2026, two
-                //    pattern changes past what the test harness performed.
+                // 🔤 ONE PLACE NOW (#883). This page kept its own copy of the
+                //    question — the TEMPLATE'S ADDRESS plus the date, then
+                //    `-2` … `-50`, then a random ending — and `Events::freeSlug()`
+                //    was lifted from it for the calendar file import (#877).
+                //    The page now asks `Events::saveUnderFreeSlug()`, with the
+                //    stem the Manage Events form gives (`Events::slugStem()`,
+                //    the series' name and the new date's own date). Two things
+                //    change:
                 //
-                //    Bounded on purpose: after 50 tries it gives up and lets the
-                //    insert fail, which rolls the whole change back. A loop that
-                //    could run for ever against a unique key is worse than a
-                //    refusal, and 50 dates on one day in one series is not a
-                //    real calendar.
-                // 🛡️ NO `externalFeedID IS NULL` HERE, AND ADDING ONE WOULD BE A
-                //    BUG. This asks one question only — "is this address already
-                //    taken" — and `uq_event_site_slug (siteID, eventSlug)` does
-                //    not care who owns the row: an IMPORTED event's address
-                //    occupies that key exactly as a portal-owned one does, and so
-                //    does a soft-deleted row. Narrowing this read to
-                //    portal-owned rows would let the probe report an address as
-                //    free when the database is about to refuse it, which is the
-                //    very collision this block exists to avoid.
+                //      * THE SHAPE. A date added here was
+                //        `sunday-service-2026-06-07-2026-07-12` (the template's
+                //        whole address, its own date in it, then the new date);
+                //        it is now `sunday-service-2026-07-12`, as if the form
+                //        had made it. No installation exists yet, so no link
+                //        anybody has kept changes.
+                //      * A RACE IS ANSWERED. Another writer taking the address
+                //        between the question and the INSERT used to refuse
+                //        the INSERT and roll the whole change back. It is now
+                //        asked again. INSIDE THIS TRANSACTION that needs the
+                //        list of addresses already refused (`freeSlug()`'s
+                //        `$refused`): the question reads this transaction's
+                //        snapshot, which cannot see the other writer's row, so
+                //        without the list every retry sent the same address.
                 //
-                //    It shows no event to anybody and returns no event detail —
-                //    it returns a number it then throws away. So it needs
-                //    neither `EventVisibility::where()` nor the imported-event
-                //    refusal, and this comment is here because the automatic
-                //    check cannot tell those two cases apart.
-                $freeSlug = $mysqli->prepare(
-                    'SELECT eventID FROM tblEvents WHERE siteID = ? AND eventSlug = ? LIMIT 1'
-                );
-                if ($freeSlug === false) {
-                    throw new RuntimeException('the addresses of the new dates could not be checked');
-                }
-                $slugFor = static function (string $start) use ($freeSlug, $siteId, $slugBase): string {
-                    $stem = $slugBase . '-' . substr($start, 0, 10);
-                    for ($try = 1; $try <= 50; $try++) {
-                        $candidate = $try === 1 ? $stem : $stem . '-' . $try;
-                        $freeSlug->bind_param('is', $siteId, $candidate);
-                        $freeSlug->execute();
-                        $taken = $freeSlug->get_result()->fetch_row();
-                        if ($taken === null) {
-                            return $candidate;
-                        }
-                    }
-
-                    return $stem . '-' . substr(bin2hex(random_bytes(4)), 0, 8);
-                };
+                // 🛡️ NO `externalFeedID IS NULL` IN THAT QUESTION, AND ADDING ONE
+                //    WOULD BE A BUG. It asks only "is this address already
+                //    taken", and the unique key does not care who owns the
+                //    row: an IMPORTED event's address occupies the key exactly
+                //    as a portal-owned one does, and so does a soft-deleted
+                //    row. It returns no event detail, so it needs neither
+                //    `EventVisibility::where()` nor the imported-event refusal.
+                //
+                //    Bounded on purpose: fifty numbered tries, then a random
+                //    ending, then `Events::SLUG_SAVE_TRIES` saves. If every one
+                //    is refused the throw reaches the `catch` below, which
+                //    rolls the whole change back — a loop that could run for
+                //    ever against a unique key is worse than a refusal.
+                $slugName = (string) $template['eventName'];
 
                 foreach ($plan['add'] as $date) {
                     $values = [];
+                    $slugAt = -1;
                     foreach ($columns as $column) {
                         if ($column === 'startDateTime') {
                             $values[] = (string) $date['start'];
@@ -873,19 +866,31 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                         } elseif (isset($freshDate[$column]) === true) {
                             $values[] = null;
                         } elseif ($column === 'eventSlug') {
-                            $values[] = $slugFor((string) $date['start']);
+                            // Filled in by `Events::saveUnderFreeSlug()` below;
+                            // its position is remembered so each try can set it.
+                            $slugAt   = count($values);
+                            $values[] = '';
                         } else {
                             $values[] = $template[$column];
                         }
                     }
-                    $ins->bind_param(str_repeat('s', count($values)), ...$values);
-                    $ins->execute();
+                    Events::saveUnderFreeSlug(
+                        $mysqli,
+                        $siteId,
+                        Events::slugStem($slugName, (string) $date['start']),
+                        static function (string $candidate) use ($ins, $values, $slugAt): void {
+                            $values[$slugAt] = $candidate;
+                            $ins->bind_param(str_repeat('s', count($values)), ...$values);
+                            if ($ins->execute() !== true) {
+                                throw new \mysqli_sql_exception((string) $ins->error, (int) $ins->errno);
+                            }
+                        }
+                    );
                     if ($ins->affected_rows > 0) {
                         $added++;
                     }
                 }
                 $ins->close();
-                $freeSlug->close();
             }
 
             // 3️⃣ Dates the new pattern drops. SOFT-DELETED, never removed:

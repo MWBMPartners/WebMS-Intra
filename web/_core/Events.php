@@ -1052,7 +1052,21 @@ class Events
      *    somebody else (a second import, the Manage Events form) can take the
      *    same address. The unique key still refuses the second writer, so no
      *    address is ever stored twice; the CALLER must catch that refusal and
-     *    ask again, a bounded number of times. The calendar file import does.
+     *    ask again, a bounded number of times. `saveUnderFreeSlug()` below is
+     *    that loop for every writer except the calendar file import, which
+     *    keeps its own because it also records whether a row was SENT (#877).
+     *
+     * 🚫 `$refused`: ADDRESSES THE DATABASE HAS ALREADY REFUSED THIS WRITER
+     *    (#883). Never offered again, even when the question calls them free.
+     *    It matters only INSIDE A TRANSACTION, and there it is the whole
+     *    difference: under REPEATABLE READ the question reads the
+     *    transaction's own snapshot, which cannot see another writer's row
+     *    committed after the snapshot was taken, so it would call the refused
+     *    address free again and every retry would send the same address and
+     *    be refused the same way. The series pattern page writes inside one
+     *    transaction; its real race in `tools/event-address-selftest.php`
+     *    goes red without this list. Outside a transaction each question sees
+     *    the latest committed rows and the list changes nothing.
      *
      * Bounded on purpose: a loop that could run for ever against a unique key
      * is worse than a refusal. Fifty events with the same name on the same
@@ -1066,11 +1080,13 @@ class Events
      *
      * @param mysqli $db     The connection the event will be written on.
      * @param int    $siteId The organisation the event belongs to.
-     * @param string $stem   What `slugStem()` gave.
+     * @param string        $stem    What `slugStem()` gave.
+     * @param array<string>   $refused Addresses already refused to this
+     *                                 writer; never offered again (#883).
      *
      * @return string An address no event in the organisation held when asked.
      */
-    public static function freeSlug(mysqli $db, int $siteId, string $stem): string
+    public static function freeSlug(mysqli $db, int $siteId, string $stem, array $refused = []): string
     {
         $probe = $db->prepare(
             'SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1'
@@ -1082,6 +1098,9 @@ class Events
         try {
             for ($try = 1; $try <= self::SLUG_NUMBERED_TRIES; $try++) {
                 $candidate = $try === 1 ? $stem : $stem . '-' . $try;
+                if (in_array($candidate, $refused, true) === true) {
+                    continue;
+                }
                 $probe->bind_param('is', $siteId, $candidate);
                 $probe->execute();
                 if ($probe->get_result()->fetch_row() === null) {
@@ -1103,6 +1122,98 @@ class Events
         }
 
         return $stem . '-' . bin2hex(random_bytes(4));
+    }
+
+    /**
+     * How many times `saveUnderFreeSlug()` sends an event before it gives up
+     * because the address it was given was taken each time between asking
+     * and saving. The calendar file import's own loop uses the same number.
+     */
+    public const SLUG_SAVE_TRIES = 3;
+
+    /**
+     * Whether a refusal from the database is the unique key on an event's web
+     * address (`uq_event_site_slug`) — "another event took this address" —
+     * rather than anything else (#883).
+     *
+     * The ONE place that question is answered for `saveUnderFreeSlug()`'s
+     * callers, so each of them can tell an administrator the true reason when
+     * the tries run out. Both engines name the key in the message: MySQL as
+     * `tblEvents.uq_event_site_slug`, MariaDB as `uq_event_site_slug`, and the
+     * test is "contains", which matches both. Any OTHER duplicate key, and any
+     * other refusal (a trigger, a broken link to a category), answers false,
+     * so it is never retried and never reworded as a taken address.
+     */
+    public static function slugWasTaken(\Throwable $refusal): bool
+    {
+        return $refusal instanceof \mysqli_sql_exception
+            && (int) $refusal->getCode() === 1062
+            && str_contains($refusal->getMessage(), 'uq_event_site_slug') === true;
+    }
+
+    /**
+     * Save a new event under the first free web address, asking again if
+     * another writer takes it between the question and the save (#883).
+     *
+     * WHY ONE PLACE. Before #883 four places made an event's address, each
+     * with its own code: the events API (from the name alone, so a second
+     * event with any name already used — a deleted event's included — was
+     * refused as a bare 500, which `api-spec.json` even said), the Manage
+     * Events form (`-1`, `-2` … with no upper bound and no retry), the series
+     * pattern page (its own probe, `-2` … `-50`, no retry) and the public
+     * suggestion form (four random characters, never asked of the database).
+     * The calendar file import already used `slugStem()` and `freeSlug()`.
+     * Copies drift; that is how the import came to differ from the form.
+     *
+     * HOW. Ask `freeSlug()` for an address; hand it to `$save`, which binds it
+     * and SENDS the INSERT; if the database refuses it because the address was
+     * taken in between (`slugWasTaken()`), remember that address and ask
+     * again, `SLUG_SAVE_TRIES` times in all. The remembered addresses are why
+     * this also works inside a transaction — see `freeSlug()`'s `$refused`.
+     * Any other refusal is thrown straight back, unchanged, on the first try;
+     * so is the address refusal once the tries run out, and the caller words
+     * it (`slugWasTaken()` tells it which it has).
+     *
+     * `$save` MUST THROW when the database refuses. Under the portal's strict
+     * reporting `execute()` does; a caller turns an `execute()` that answers
+     * false into a `mysqli_sql_exception` itself, so that changing the
+     * reporting mode one day cannot open a second, untested path (the
+     * calendar file import's precedent).
+     *
+     * NOT USED BY THE CALENDAR FILE IMPORT, deliberately: its loop also
+     * records whether each attempt's INSERT was SENT, which decides what it
+     * tells the administrator when the connection is lost (#877, D-099), and
+     * its tests pin that loop's text. It asks `slugStem()` and `freeSlug()`
+     * like everybody else, with the same number of tries.
+     *
+     * @param mysqli                  $db     The connection the event is written on.
+     * @param int                     $siteId The organisation the event belongs to.
+     * @param string                  $stem   What `slugStem()` gave.
+     * @param callable(string): void  $save   Binds the address it is given and
+     *                                        sends the INSERT; throws on refusal.
+     *
+     * @return string The address the event was saved under.
+     *
+     * @throws \mysqli_sql_exception The database's refusal: an address
+     *                               refusal only after every try was taken.
+     */
+    public static function saveUnderFreeSlug(mysqli $db, int $siteId, string $stem, callable $save): string
+    {
+        $refused = [];
+        for ($try = 1; ; $try++) {
+            $slug = self::freeSlug($db, $siteId, $stem, $refused);
+            try {
+                $save($slug);
+
+                return $slug;
+            } catch (\mysqli_sql_exception $refusal) {
+                if ($try < self::SLUG_SAVE_TRIES && self::slugWasTaken($refusal) === true) {
+                    $refused[] = $slug;
+                    continue;
+                }
+                throw $refusal;
+            }
+        }
     }
 
     /**

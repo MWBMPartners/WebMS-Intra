@@ -170,8 +170,8 @@ FILE_ALLOWLIST: dict[str, str] = {
     # look one up by until this statement itself creates one — D5 is
     # about existing rows, not ones a form is in the middle of making.
     "_apps/calendar/manage/import.php": "bulk-creates the organisation's OWN events from a CSV; the only existing rows it reads are through Events::alreadyInCalendar() and Events::freeSlug() (#877, D-100), which are line-allowlisted below with their reasons",
-    "_apps/calendar/submit-save.php": "creates the organisation's OWN event from the public submission form; never reads an existing row",
-    "_apps/events/api/create.php": "REST create endpoint for the organisation's OWN events; never reads an existing row",
+    "_apps/calendar/submit-save.php": "creates the organisation's OWN event from the public submission form; never reads an existing row itself — whether its web address is free is asked by Events::saveUnderFreeSlug() (#883), line-allowlisted in Events.php below",
+    "_apps/events/api/create.php": "REST create endpoint for the organisation's OWN events; never reads an existing row itself — whether its web address is free is asked by Events::saveUnderFreeSlug() (#883), line-allowlisted in Events.php below",
     # 🔢 Counting and erasure only — these touch tblEvents to count rows
     # or to remove/export personal data FROM other tables that happen to
     # be joined to it for scoping, never to show an event's own content
@@ -314,33 +314,12 @@ FILE_ALLOWLIST: dict[str, str] = {
 # something harmless (comment reworded, whitespace) does not silently
 # stop being watched either; the entry itself must be moved to match.
 LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
-    # Moved from 393 to 476 by #604, which added the event form's zone check
-    # and the "old events marked Europe/London" button above it, and from 476 to
-    # 478 by #569, which added TWO `use` lines above it (the repeating-event
-    # generator and the installation-settings layer). The probe itself is
-    # unchanged both times. Moving the entry by hand is the point: see this
-    # list's own comment above. (This comment said "477" and "one `use` line"
-    # while the key below said 478 — corrected after the independent check
-    # noticed it contradicted its own entry. Moved 478 -> 491 on 30 October
-    # 2026: #676 added an eleven-line status allow-list above it, and keying
-    # this list by LINE NUMBER is exactly why that shows up here as a stale
-    # entry rather than as a silent pass. Moved 491 -> 506 on 6 November 2026:
-    # #777 round 10 added a `use` line and fifteen lines of comment above it,
-    # explaining why four date parts are now SLICED out of the posted reading
-    # rather than derived with `strtotime()`. The probe itself is unchanged
-    # again, which is the third time this entry has moved for a reason that had
-    # nothing to do with it. Moved 537 -> 602 -> 607 -> 610 on 7-8 November
-    # 2026: #493 P1 added the public-website handling above this probe, and two
-    # rounds of its check added comments there. Moved 506 -> 537 on 6 November 2026: #777 round 11
-    # sanitised the slug's own date part, which added thirty-one lines of
-    # comment and code above this probe. FOURTH move, probe still unchanged --
-    # and note what it cost to learn: the comment two entries down warns that
-    # ANY change higher up moves these, and this one went red on the very next
-    # edit to the file. That is the list working as designed, not a nuisance.)
-    ("_apps/calendar/manage/save.php", 610): (
-        "SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ?",
-        "the slug-uniqueness probe on event CREATE must search every event, imported ones included, so two events can never share a slug regardless of origin",
-    ),
+    # `calendar/manage/save.php`'s own slug-uniqueness probe stood here, keyed
+    # by line number and moved by hand five times (393 -> 476 -> 478 -> 491 ->
+    # 506 -> 537 -> 602 -> 607 -> 610) for edits that had nothing to do with
+    # it. #883 (9 November 2026) REMOVED it: the form now asks
+    # `Events::saveUnderFreeSlug()`, whose question is the `_core/Events.php`
+    # entry below, so the probe has one home and this entry has gone with it.
     # Not a query at all (#604): the backup's list of columns a migration has
     # removed NAMES the table, so that a snapshot taken before migration 217
     # can still be put back. It reads no event.
@@ -376,15 +355,19 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
         "reads only one organisation's zone texts, to work out each event's clock (#804); no event is returned",
     ),
     # Not an event read at all (#877): Events::freeSlug() asks only whether a
-    # web address is already taken in the organisation, for the calendar file
-    # import. It must count EVERY row the unique key `uq_event_site_slug`
+    # web address is already taken in the organisation — for the calendar file
+    # import and, since #883, for every other writer of an event through
+    # `Events::saveUnderFreeSlug()`. It must count EVERY row the unique key `uq_event_site_slug`
     # counts — deleted ones and ones copied in from an outside calendar
     # included — or it would call an address free that the database is about
     # to refuse. It returns no event and no detail of one. It sits at the END
     # of Events.php, so it does not move the two entries above.
-    ("_core/Events.php", 1076): (
+    # Moved 1076 -> 1092 by #883, which added the `$refused` list to
+    # `freeSlug()`'s comment and loop; the question itself is unchanged, and
+    # since #883 it serves every writer of an event, not only the import.
+    ("_core/Events.php", 1092): (
         "SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1",
-        "asks only whether an event web address is taken, across every row the unique key covers (#877); no event is returned",
+        "asks only whether an event web address is taken, across every row the unique key covers (#877, #883); no event is returned",
     ),
     # Not shown to a viewer (D-100, #877): Events::alreadyInCalendar() asks,
     # for the calendar file import, whether this organisation's calendar
@@ -395,7 +378,9 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # Keyed by line number: moved 1154 -> 1161 when #877's second round wrapped
     # the free-address question's statement close in a try/catch above it, and
     # 1161 -> 1164 when round 3 reworded that try's comment.
-    ("_core/Events.php", 1164): (
+    # Moved 1164 -> 1275 by #883, which added `slugWasTaken()` and
+    # `saveUnderFreeSlug()` above it.
+    ("_core/Events.php", 1275): (
         "SELECT `eventID`, `eventSlug`, `startDateTime` FROM `tblEvents` WHERE `siteID` = ? AND `isDeleted` = 0",
         "asks whether this organisation's calendar already holds the same event, for its own manager importing a file (D-100); copied-in events of the same organisation count on purpose",
     ),

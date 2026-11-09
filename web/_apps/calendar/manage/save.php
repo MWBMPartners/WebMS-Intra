@@ -370,53 +370,32 @@ if ($websiteJudged['ok'] === false) {
 }
 $websiteValues = $websiteJudged['values'];
 
-// 🔤 Generate slug
-$slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
-// 📅 Append date for uniqueness.
+// 🔤 THE WEB ADDRESS IT WOULD LIKE: NAME AND DATE (`Events::slugStem()`, #883).
 //
-// 🕐 THE DATE IS SLICED OUT OF THE TEXT, NOT RESOLVED (#777 round 10). This
-//    was `date('Y-m-d', strtotime($startDateTime))`, and a date part looks
-//    safe to derive that way until you measure it: in TWO zones of 419 the
-//    clocks go forward at 23:00, so a reading of 23:00-23:59 that night lands
-//    on the NEXT DAY. Measured in America/Nuuk --
+//    This file made the stem itself until #883 — the same shape, the name
+//    made address-safe and the start DATE after it — and `Events::slugStem()`
+//    was lifted from it for the calendar file import (#877). Now there is one
+//    copy, so an event made here, by the import, by the events API or by the
+//    public suggestion form gets an address of the same shape.
 //
-//        2026-03-28 23:30  ->  strtotime  ->  2026-03-29 00:30
+// 🕐 TWO THINGS #777 FOUND HERE STILL HOLD, AND NOW LIVE IN `slugStem()`.
+//    The date is SLICED out of the text, never resolved: `strtotime()` put a
+//    reading of 23:00-23:59 on the NEXT DAY on the night the clocks go
+//    forward at 23:00 (`America/Nuuk` and `America/Scoresbysund`, measured
+//    across every IANA zone, round 10). And anything in the date part that is
+//    not a digit becomes one hyphen: `$startDateTime` is shape-checked
+//    nowhere in this file, MySQL accepts any punctuation as a DATETIME
+//    delimiter, so `2026/06/01 10:00` used to be stored with the slash in its
+//    address, which made the event unreachable at its own clean address
+//    (round 11). `slugStem()` also cuts the name to 100 characters, which
+//    this file never did: a name longer than about 188 characters made an
+//    address too long for the 200-character column, and the INSERT failed.
 //
-//    -- and `America/Scoresbysund` does the same, 64 quarter-hour readings
-//    each between 2026 and 2041 (swept across every IANA zone rather than
-//    reasoned about). So the slug would carry the wrong day for that hour.
-//
-// ⚠️ AND THE FALLBACK IS SANITISED, which round 10 left out (#777 round 11).
-//    `$startDateTime` is shape-checked NOWHERE in this file -- only against
-//    '' -- so when `wallClockFromInput()` refuses it the raw POSTED TEXT was
-//    sliced straight into a stored URL slug. The old `date('Y-m-d', ...)` line
-//    could only ever produce `YYYY-MM-DD`, so replacing it opened this.
-//
-//    It matters because MySQL accepts ANY punctuation as a DATETIME
-//    delimiter, so the INSERT succeeds and the slug is really stored:
-//    measured on 8.0.36 in strict mode, `2026/06/01 10:00`, `2026"06"01
-//    10:00:00` and `2026.06.01 10*00*00` all insert cleanly as
-//    `2026-06-01 10:00:00` while the slug kept the slash or the quote. A `/`
-//    makes the event unreachable at its own clean address.
-//
-//    NOT an injection or a scripting hole -- every reader of `eventSlug` uses
-//    `rawurlencode()` or `htmlspecialchars(..., ENT_QUOTES)`, which was
-//    checked rather than assumed -- but it is corrupted stored data and a
-//    broken link, which is the "stores something wrong" direction this
-//    package's own round-10 lesson says to look at first.
-//
-//    The date part now gets exactly the treatment the NAME part above already
-//    gets: runs of anything that is not a digit become a single hyphen. A
-//    valid reading is unchanged (`2026-06-01` stays `2026-06-01`), and every
-//    punctuation MySQL would have accepted collapses to the same safe shape.
-$slug .= '-' . trim(
-    (string) preg_replace(
-        '/[^0-9]+/',
-        '-',
-        substr(I18n::wallClockFromInput($startDateTime) ?? $startDateTime, 0, 10)
-    ),
-    '-'
-);
+//    `$slug` here is only the STEM: whether it is free is asked when the
+//    event is saved (see "Create event" below). The image uploads below name
+//    their files after the stem, as they always did.
+$slugStem = Events::slugStem($eventName, I18n::wallClockFromInput($startDateTime) ?? $startDateTime);
+$slug     = $slugStem;
 
 // 🖼️ Handle image uploads
 $uploadsDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'calendar';
@@ -600,27 +579,6 @@ $appendVenueCoverageFlash = function (string $eventStart, ?string $eventEnd, str
 // ➕ Create event
 // -----------------------------------------------------------------------------
 if ($action === 'create') {
-    // 🔍 Ensure slug is unique
-    $originalSlug = $slug;
-    $counter = 1;
-    while (true) {
-        // 🌐 #339 — scope the uniqueness probe to the current site so a slug
-        //    already taken on another site doesn't needlessly suffix this one
-        //    (and so this isn't a cross-tenant existence oracle).
-        $stmt = $mysqli->prepare('SELECT eventID FROM tblEvents WHERE eventSlug = ? AND siteID = ? LIMIT 1');
-        if ($stmt !== false) {
-            $stmt->bind_param('si', $slug, $siteId);
-            $stmt->execute();
-            $exists = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-            if ($exists === null) {
-                break;
-            }
-        }
-        $slug = $originalSlug . '-' . $counter;
-        $counter++;
-    }
-
     $endDt = $endDateTime !== '' ? $endDateTime : null;
 
     // 📋 #436 — column/type/value lists built as arrays (rather than one
@@ -687,8 +645,54 @@ if ($action === 'create') {
         exit();
     }
 
-    $stmt->bind_param($insertTypes, ...$insertValues);
-    $stmt->execute();
+    // 🔤 A FREE ADDRESS, ASKED OF THE DATABASE AT THE MOMENT OF SAVING (#883).
+    //
+    //    WHAT WAS HERE. A loop asked "is `stem`, `stem-1`, `stem-2` … taken"
+    //    with NO upper bound, then sent the INSERT once. Two things wrong with
+    //    that: a loop that can run for ever against a unique key is worse than
+    //    a refusal; and between its answer and the INSERT another writer (a
+    //    second administrator, an import, the API) could take the address, so
+    //    the INSERT was refused and the administrator got an error page with
+    //    nothing saved. It also had its own copy of the question, and copies
+    //    drift. `Events::saveUnderFreeSlug()` is the one place now: the first
+    //    free address of `stem`, `stem-2`, `stem-3` … (bounded, then a random
+    //    ending), and if it is taken between asking and saving, the next one,
+    //    `Events::SLUG_SAVE_TRIES` times in all.
+    //
+    // ⚠️ The second event of a name on a day is now `-2`, not `-1` — the shape
+    //    the import, the series page and the API give. No installation exists
+    //    yet, so no link anybody has kept changes; this is recorded for the
+    //    day one does.
+    $slugAt = (int) array_search('eventSlug', $insertColumns, true);
+    try {
+        $slug = Events::saveUnderFreeSlug(
+            $mysqli,
+            $siteId,
+            $slugStem,
+            static function (string $candidate) use ($stmt, $insertTypes, $insertValues, $slugAt): void {
+                $values           = $insertValues;
+                $values[$slugAt]  = $candidate;
+                $stmt->bind_param($insertTypes, ...$values);
+                if ($stmt->execute() !== true) {
+                    throw new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
+                }
+            }
+        );
+    } catch (\mysqli_sql_exception $refused) {
+        $stmt->close();
+        if (Events::slugWasTaken($refused) === false) {
+            // Any other refusal goes where it always went: the portal's own
+            // error handling. Only the address clash gets words of its own.
+            throw $refused;
+        }
+        $_SESSION['flash_msg']  = 'The event was not saved: every web address tried for it was taken by another '
+            . 'event at the moment it was being saved — most likely somebody else was adding an event with the '
+            . 'same name on the same day at the same time. Nothing was saved. Check the calendar, then save it '
+            . 'again if it is not there.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('calendar/manage'));
+        exit();
+    }
     $newEventId = $stmt->insert_id;
     $stmt->close();
 
@@ -1218,7 +1222,17 @@ if ($action === 'create') {
                     foreach ($extra as $index => $occurrence) {
                         $occStart = (string) $occurrence['start'];
                         $occEnd   = $occurrence['end'];
-                        $occSlug  = $slug . '-' . ($index + 2);
+                        // 🔤 EACH DATE GETS ITS OWN ADDRESS, NAME AND ITS OWN
+                        //    DATE, ASKED OF THE DATABASE (#883). It was the
+                        //    FIRST date's address plus `-2`, `-3` … — so the
+                        //    fourth Sunday's address named the first Sunday's
+                        //    date — and it was never asked of the database, so
+                        //    an address somebody already held made that one
+                        //    date fail to save (caught below and logged, the
+                        //    repeat rule then withdrawn). The value is filled
+                        //    in by `Events::saveUnderFreeSlug()` below.
+                        $occSlug   = '';
+                        $occSlugAt = -1;
                         $params   = [];
                         foreach ($copyColumns as $column) {
                             if ($column === 'startDateTime') {
@@ -1226,7 +1240,11 @@ if ($action === 'create') {
                             } elseif ($column === 'endDateTime') {
                                 $params[] = $occEnd;
                             } elseif ($column === 'eventSlug') {
-                                $params[] = $occSlug;
+                                // Its position among the PLACEHOLDERS, which is
+                                // not its position in `$copyColumns`: most
+                                // columns are copied by name, not bound.
+                                $occSlugAt = count($params);
+                                $params[]  = $occSlug;
                             } elseif ($column === 'seriesID') {
                                 $params[] = $seriesIdForRule;
                             } elseif ($column === 'patternStart') {
@@ -1242,9 +1260,19 @@ if ($action === 'create') {
                         }
                         $params[] = $newEventId;
                         $types    = str_repeat('s', count($params) - 1) . 'i';
-                        $copyStmt->bind_param($types, ...$params);
                         try {
-                            $copyStmt->execute();
+                            Events::saveUnderFreeSlug(
+                                $mysqli,
+                                $siteId,
+                                Events::slugStem($eventName, $occStart),
+                                static function (string $candidate) use ($copyStmt, $types, $params, $occSlugAt): void {
+                                    $params[$occSlugAt] = $candidate;
+                                    $copyStmt->bind_param($types, ...$params);
+                                    if ($copyStmt->execute() !== true) {
+                                        throw new \mysqli_sql_exception((string) $copyStmt->error, (int) $copyStmt->errno);
+                                    }
+                                }
+                            );
                             // affected_rows, not a blind increment: the
                             // `externalFeedID IS NULL` guard in the SELECT can
                             // match nothing, and reporting dates that were

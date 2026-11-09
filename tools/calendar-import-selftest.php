@@ -1676,7 +1676,9 @@ file_put_contents(
     . "\"P790 lost before send\",2031-11-02 10:00:00,2031-11-02 11:00:00,published\n"
     . "\"P790 L after\",2031-11-03 10:00:00,2031-11-03 11:00:00,published\n"
 );
-$inject = "    public static function freeSlug(mysqli \$db, int \$siteId, string \$stem): string\n    {\n";
+// (#883 gave `freeSlug()` a fourth parameter, the addresses already refused
+// to a writer; the import does not pass it, so nothing else here changes.)
+$inject = "    public static function freeSlug(mysqli \$db, int \$siteId, string \$stem, array \$refused = []): string\n    {\n";
 $injected = $inject
     . "        if (str_starts_with(\$stem, 'p790-lost-before-send') === true) {\n"
     . "            throw new \\mysqli_sql_exception('injected by the self-test: MySQL server has gone away', 2006);\n"

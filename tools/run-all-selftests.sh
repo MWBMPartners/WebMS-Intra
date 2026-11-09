@@ -227,6 +227,7 @@ feed-resolver|tools/feed-resolver-selftest.php|selftest_resolver|
 import-notifier|tools/import-notifier-selftest.php|selftest_notifier|
 feed-admin|tools/feed-admin-selftest.php|selftest_feedadmin|web:feed-admin
 calendar-import|tools/calendar-import-selftest.php|selftest_calimport|
+event-address|tools/event-address-selftest.php|selftest_eventaddress|
 page-head|tools/page-head-selftest.php|selftest_pagehead|SELFTEST_WEB_PORT=9674
 site-modes|tools/site-modes-selftest.php|selftest_sitemodes|web:site-modes SELFTEST_WEB_PORT=9461
 channel|tools/channel-selftest.php|selftest_channel|web:channel SELFTEST_WEB_PORT=9590

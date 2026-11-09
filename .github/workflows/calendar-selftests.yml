@@ -258,7 +258,7 @@ jobs:
             sleep 1
           done
           docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e 'SELECT VERSION(), @@collation_server'
-          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords selftest_calimport; do
+          for db in selftest_visibility selftest_resolver selftest_importer selftest_feedadmin selftest_notifier selftest_reservedwords selftest_calimport selftest_eventaddress; do
             docker exec -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE ${db}"
             docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" "$DB_CLIENT" -uroot -h 127.0.0.1 --protocol=TCP "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -403,3 +403,20 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_calimport
         run: php -d memory_limit=512M tools/calendar-import-selftest.php
+
+      # 🔤 Every way an event is created gets a free web address (#883): the
+      #    events API (with a key and signed in), the Manage Events form and
+      #    the dates of a repeating event, the public suggestion form and the
+      #    series pattern page, each driven over HTTP with a repeated name and
+      #    a deleted event holding the address. Then a REAL second writer for
+      #    three of them: the test holds the address in an open transaction,
+      #    confirms the page's INSERT is waiting on it, commits, and the page
+      #    must save at `-2`. Its web server takes a random port between
+      #    18830 and 18980. ⚠️ Like every step here, not yet a live gate
+      #    (#754). Run locally on MySQL 8.0.36, MariaDB 11.4.13 and
+      #    MariaDB 12.3.3, all green.
+      - name: Event web address self-test (#883)
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_eventaddress
+        run: php -d memory_limit=512M tools/event-address-selftest.php

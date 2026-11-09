@@ -22,6 +22,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\Events;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
@@ -226,12 +227,24 @@ $descArg     = $description  !== '' ? $description  : null;
 $nameArg     = $isLoggedIn === true ? null : $submitterName;
 $emailArg    = $isLoggedIn === true ? null : $submitterEmail;
 
-// 🛡️ Slug generation — strip non-alphanumerics, lowercase, plus a 4-char
-//     random suffix to avoid collisions during the moderation window.
-$base  = preg_replace('/[^a-z0-9]+/', '-', strtolower($eventName));
-$base  = trim((string) $base, '-');
-$base  = $base === '' ? 'event' : mb_substr($base, 0, 180);
-$slug  = $base . '-' . substr(bin2hex(random_bytes(2)), 0, 4);
+// 🔤 THE WEB ADDRESS: NAME, DATE, AND A FREE ONE ASKED OF THE DATABASE (#883).
+//
+//    WHAT WAS HERE. The name plus four random characters, never asked of the
+//    database: 65,536 endings, so two suggestions with the same name met on
+//    the same address sooner than anybody would guess (worked out, not
+//    measured: among 100 suggestions of one name, about a 7% chance that two
+//    share an ending), and the database then refused the later one, so
+//    nothing of it was saved. It was also its own copy of the
+//    "which address is free" question, and copies drift.
+//
+//    NOW the stem is the name and the start date (`Events::slugStem()`, the
+//    shape the Manage Events form gives) and `Events::saveUnderFreeSlug()`
+//    asks for the first free one at the moment of saving — the one place
+//    every writer of an event asks. The address of a suggestion is never
+//    shown to the person suggesting it (they are sent back to the form), so
+//    the answer tells them nothing about other events.
+$slugStem = Events::slugStem($eventName, $startUtc);
+$slug     = '';
 
 // 🕰️ THE ZONE (#604, reworded by #777 round 7). `Site::timezone()` is the zone
 //    recorded beside the start and end because **this form belongs to this
@@ -292,16 +305,25 @@ if ($stmt === false) {
     header('Location: ' . Site::url('calendar/submit') . '?err=db', true, 302);
     exit();
 }
+// 🔗 `$slug` is bound by reference, so each try below only changes `$slug`.
 $stmt->bind_param('isssssssiiss', $siteId, $eventName, $slug, $descArg, $startUtc, $endUtc, $zoneArg, $locArg, $categoryArg, $submitterId, $nameArg, $emailArg);
-$ok = $stmt->execute();
-$newId = (int) $stmt->insert_id;
-$stmt->close();
-
-if ($ok === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'EVENT_SUBMIT_FAIL', $mysqli->error, '');
+try {
+    $slug = Events::saveUnderFreeSlug($mysqli, $siteId, $slugStem, static function (string $candidate) use ($stmt, &$slug): void {
+        $slug = $candidate;
+        if ($stmt->execute() !== true) {
+            throw new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
+        }
+    });
+} catch (\mysqli_sql_exception $refused) {
+    // 🛡️ Never the fault's own words in the record: it can quote the value
+    //    it refused, which here is a stranger's typing. The code says which.
+    $stmt->close();
+    Logger::errorPlatform('MySQL', 'Error', 'EVENT_SUBMIT_FAIL', 'error ' . (int) $refused->getCode(), '');
     header('Location: ' . Site::url('calendar/submit') . '?err=save', true, 302);
     exit();
 }
+$newId = (int) $stmt->insert_id;
+$stmt->close();
 
 Logger::activity('EventSubmitted', 'Event #' . $newId . ' submitted by ' . ($isLoggedIn ? 'user ' . $submitterId : 'anonymous ' . $submitterEmail));
 

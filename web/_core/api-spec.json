@@ -180,8 +180,8 @@
           },
           "eventSlug": {
             "type": "string",
-            "example": "sunday-service",
-            "description": "The address-safe short name, so an event can be fetched by name instead of by number (`?slug=sunday-service`). Built by the portal from the title and unique within the organisation; a caller cannot choose it. **There is no collision handling:** two events given the same title in one organisation produce the same short name, and the second is refused by the database as a 500 rather than with a clear message."
+            "example": "sunday-service-2026-06-07",
+            "description": "The address-safe short name, so an event can be fetched by name instead of by number (`?slug=sunday-service-2026-06-07`). Built by the portal and unique within the organisation; a caller cannot choose it. **Its shape:** the title made address-safe (letters and digits kept, everything else a single hyphen, lower case, cut to 100 characters; `event` when nothing is left), then the date the event starts on. When an event in the organisation already holds that address — one with the same title on the same day, **including a deleted event, which keeps its address for ever** — the next free one is used: `-2`, `-3` and so on, and after fifty a random ending of eight hex characters. Whether an address is free is asked of the database at the moment of saving, and asked again if another writer takes it in between, so a repeated title is never refused (#883). Events created before #883 through the API kept the title alone (`sunday-service`), and that address does not change. Read it from the create response; do not build it yourself."
           },
           "description": {
             "type": "string",
@@ -1992,7 +1992,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "Fetch the event by its address-safe short name instead of by number — `?slug=sunday-service`. Give either this or `id`."
+            "description": "Fetch the event by its address-safe short name instead of by number — `?slug=sunday-service-2026-06-07`. Give either this or `id`."
           }
         ],
         "responses": {
@@ -2072,13 +2072,16 @@
         },
         "responses": {
           "201": {
-            "description": "Created"
+            "description": "Created. The reply carries the new event's number (`eventID`) and its web address (`eventSlug`): the title and the start date, ending `-2`, `-3` … when another event in the organisation — a deleted one included — already holds that address."
           },
           "400": {
             "description": "Validation error"
           },
           "403": {
             "description": "Admin required, or CSRF failed, or a request asked to change whether the event is on the public website (`showOnWebsite`, `websiteFrom`, `websiteUntil`) without the permission \"Choose what appears on the public website\" — which an API key never has (#493, D-077). Nothing was saved."
+          },
+          "409": {
+            "description": "Every web address tried for the event was taken by another event at the moment it was being saved, three times running — something else was creating events with the same title on the same day at the same time. Nothing was created; sending the request again is safe. A title already used, even by a deleted event, is NOT this: that event simply gets the next free address (#883)."
           },
           "422": {
             "description": "A field is not a value the portal accepts — among them `showOnWebsite`, `websiteFrom` or `websiteUntil`, or a last website day before the first (#493), an unknown time zone, an incomplete map position or a malformed what3words address. The message says which. Nothing was saved."
@@ -4631,6 +4634,16 @@
           },
           "403": {
             "description": "Forbidden — bearer key missing the required scope, session caller failing the role gate, or the endpoint disabled via the api.{app}.{action}.enabled setting (same flag as the legacy alias). On events, also: the request asked to change `showOnWebsite`, `websiteFrom` or `websiteUntil` without the permission \"Choose what appears on the public website\", which an API key never has (#493, D-077); nothing was saved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/V1ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Every web address tried for the event was taken by another event at the moment it was being saved, three times running — something else was creating events with the same title on the same day at the same time. Nothing was created; sending the request again is safe. A title already used, even by a deleted event, is NOT this: that event simply gets the next free address (#883).",
             "content": {
               "application/json": {
                 "schema": {
