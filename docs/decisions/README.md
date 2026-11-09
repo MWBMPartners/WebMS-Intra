@@ -155,7 +155,8 @@ appended with its real date and a note that it was added later.
 | [D-097](097-the-public-door-starts-switched-off.md) | 2026-11-09 | Each organisation's public door starts switched off | in force |
 | [D-098](098-other-public-pages-stay-off-the-public-address.md) | 2026-11-09 | The portal's other public pages do not answer on an organisation's public address in the first release | in force |
 | [D-099](099-a-calendar-import-saves-every-row-it-can.md) | 2026-11-09 | A calendar import saves every row it can, and lists the ones it could not | in force |
+| [D-100](100-a-reimported-row-already-in-the-calendar-is-skipped.md) | 2026-11-09 | A calendar-import row already in the calendar is skipped unless the manager ticks to import it | in force |
 
-*99 decisions. This index is checked against the folder by
+*100 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
