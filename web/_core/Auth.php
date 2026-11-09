@@ -2217,9 +2217,12 @@ class Auth
      *   it for the whole wait. The ordinary "too many at once" case.
      * - LOCK_FAULT: the database refused the statement (it threw), or
      *   GET_LOCK() answered NULL, which MySQL documents as "an error
-     *   occurred". An error record is written, with the exception's class
-     *   and code and NEVER the visitor's address, which a lock name is built
-     *   from and a fault's own words could quote.
+     *   occurred". An error record is written whose title and detail hold
+     *   only the exception's class and code — never the database's own
+     *   words, which could quote the lock name and so the hash of the
+     *   visitor's address. (The record's own `visitorIP` column holds the
+     *   address, as every error record's does; the title, the detail, the
+     *   alert e-mail and the outside error monitor never carry it.)
      *
      * This used to be one method answering true or false, with every
      * exception swallowed into false — so a missing SQL function read as

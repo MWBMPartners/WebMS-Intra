@@ -1200,7 +1200,7 @@ ok(
     'LoginUnavailable records: ' . records(ip(7), 'LoginUnavailable')
 );
 ok(
-    '...and exactly ONE error record says so, at Critical, naming the exception\'s class and code (1305, an unknown function) and NOT the visitor\'s address',
+    '...and exactly ONE error record says so, at Critical, naming the exception\'s class and code (1305, an unknown function), with the visitor\'s address NOT in its title or detail (its visitorIP column holds it, as every error record\'s does)',
     count($faultRows) === 1
         && (string) $faultRows[0]['errorSeverity'] === 'Critical'
         && (string) $faultRows[0]['errorCode'] === 'SIGN_IN_LOCK'
