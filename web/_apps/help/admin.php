@@ -1070,14 +1070,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
 </div>
 
-<!-- Section: Setting up the public website (#493 P3; D-082, D-085, D-093,
-     D-094, D-095). Every statement here is held true by section W of
-     tools/public-website-tick-selftest.php. If Admin, Public website changes,
-     change this with it. -->
+<!-- Section: Setting up the public website (#493 P3 and P4a; D-082, D-085,
+     D-093, D-094, D-095, D-097). Every statement here is held true by section
+     W of tools/public-website-tick-selftest.php and by
+     tools/public-door-selftest.php (the public door). If Admin, Public website
+     or the door changes, change this with it. -->
 <div class="portal-card p-4 mb-4" id="public-website-setup">
     <h2 class="h4 mb-3"><i class="fa-solid fa-globe me-2 text-primary"></i>Setting Up the Public Website</h2>
 
-    <p><strong>Nothing from the portal is shown on any outside website yet.</strong> The piece you will paste into your own website (the &ldquo;public door&rdquo;) is not part of this version. What you set here is kept ready for it.</p>
+    <p><strong>Nothing from the portal is shown on any outside website until you turn on the public door.</strong> It starts off for every organisation.</p>
+
+    <h3 class="h5 mt-4 mb-3">The public door</h3>
+    <ul class="mb-3">
+        <li>The public door is how your own website reads the events and noticeboard posters you have put on the public website. Nothing else the portal holds goes through it: only items somebody ticked, only while their dates allow, never anything members-only, deleted or still a draft, and never an event that has already finished.</li>
+        <li><strong>Turn on the public door</strong> on Admin, Public website. The page then shows two addresses: one for your events and one for your posters. Each gives the information as data (JSON) for your website, or whoever builds it, to read. A poster&rsquo;s picture or video is given at an address of the door&rsquo;s own, which stops answering the moment the poster is taken off the public website.</li>
+        <li>The addresses use a random name, not your organisation&rsquo;s name. If you have set a public address (below), they use that instead.</li>
+        <li>A change reaches websites within about a minute, because websites and browsers may keep a copy that long.</li>
+        <li><strong>Replace the name</strong> if the addresses have gone somewhere they should not: every copy using the old name stops at once. <strong>Switch the public door off</strong> to stop everything; turning it on again gives it a new name. Each of these is recorded in the activity log.</li>
+        <li>If the calendar or the noticeboard is switched off for your organisation, its half of the door answers nothing.</li>
+        <li>On a test copy of the portal (alpha or beta), the door answers only people signed in there who may use the test copy. Browsers do not send that sign-in to another website, so trying it from a real website shows nothing; open the addresses in your own browser instead.</li>
+        <li>The pasted-in script and the page you can frame are not part of this version yet.</li>
+    </ul>
 
     <h3 class="h5 mt-4 mb-3">Who can do it</h3>
     <ul class="mb-3">
@@ -1094,7 +1107,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </ul>
 
     <h3 class="h5 mt-4 mb-3">Check my set-up</h3>
-    <p class="mb-0">The button checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched, and it says so), whether your public address&rsquo;s name exists, whether each framing website is valid and allowed, how many events and posters are marked to appear on the public website today, and whether the portal&rsquo;s own address is set. It always says the public door cannot be tested yet, because it is not part of this version. It changes no setting, and its result is shown to you once and not kept. The portal does count how many times you have run it (at most six in ten minutes), and if your main website does not answer normally, the portal's error log (Admin, Error log) may note the website's name and the reply it gave.</p>
+    <p class="mb-0">The button checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched, and it says so), whether your public address&rsquo;s name exists, whether each framing website is valid and allowed, how many events and posters are marked to appear on the public website today, whether the portal&rsquo;s own address is set, and whether the public door is on, with its addresses. It does not fetch the door itself, so it always says it cannot tell whether your website really shows it. It changes no setting, and its result is shown to you once and not kept. The portal does count how many times you have run it (at most six in ten minutes), and if your main website does not answer normally, the portal's error log (Admin, Error log) may note the website's name and the reply it gave.</p>
 </div>
 
 <!-- Section: Time zones (#604).

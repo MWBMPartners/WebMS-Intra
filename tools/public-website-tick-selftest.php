@@ -2387,7 +2387,10 @@ $scnPwCheck = static function () use ($db, $siteOne, $signIn, $http, $freshToken
     $page = $http('GET', '/admin/public-website')['body'];
     $s = $states($page);
     $out['nothing set: no row reads fine'] = in_array('ok', $s, true);
-    $out['the door row cannot be tested'] = str_contains($page, 'Not part of this version, so it cannot be tested.') && in_array('untested', $s, true);
+    // #493 P4a: the door exists now, so the row says whether it is on and
+    // that this check does not fetch it — still 'untested', never a tick.
+    $out['the door row cannot be tested'] = str_contains($page, 'Whether your website really shows it is not tested by this check')
+        && in_array('untested', $s, true);
     $out['shown once'] = $states($http('GET', '/admin/public-website')['body']);
     $pwPost('setup', 'website', 'https://127.0.0.1');
     $http('POST', '/admin/public-website/check', ['csrf_token' => $freshToken()]);

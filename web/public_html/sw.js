@@ -295,6 +295,18 @@ self.addEventListener('fetch', function (event) {
         return;
     }
 
+    // 🚪 Skip the public door (#493 P4a): /w/{name}/events.json, posters.json
+    //    and media/{file}. Its live answers say "public, max-age=60" and are
+    //    not pages, so mayKeepCopy() below WOULD keep them — and the media
+    //    addresses end in .png, .jpg and so on, so they would even be served
+    //    cache-FIRST, letting an administrator's browser go on showing a
+    //    poster's picture after the poster was taken off the public website.
+    //    The door is for other websites; this worker has nothing to add to
+    //    it, so it never touches one.
+    if (url.pathname.indexOf('/w/') === 0) {
+        return;
+    }
+
     // 📋 Determine strategy based on resource type.
     //    A page load (mode 'navigate') never takes the static-file path, even
     //    when its address looks like one (#507): the Asset Tracker's pages

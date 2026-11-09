@@ -915,6 +915,13 @@ return [
                     . 'organisation\'s web address, not a person; who set it is recorded in the activity log, not here.',
         'columns'  => [],
     ],
+    'tblPublicDoorNames' => [
+        'decision' => 'not-personal',
+        'reason'   => 'Each organisation\'s public door name (#493 P4a, D-097): an organisation, a random 24-character '
+                    . 'name the portal made, and the moment it was set. It names no person; who turned the door on, '
+                    . 'replaced its name or switched it off is recorded in the activity log, not here.',
+        'columns'  => [],
+    ],
     'tblOffboarding' => [
         'decision' => 'erase',
         'reason'   => 'Holds information about the person themselves',

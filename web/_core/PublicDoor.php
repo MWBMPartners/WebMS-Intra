@@ -1,0 +1,789 @@
+<?php
+// Path: _core/PublicDoor.php
+/**
+ * -----------------------------------------------------------------------------
+ * The PUBLIC DOOR: what an organisation's own website may read 🚪🌐
+ * -----------------------------------------------------------------------------
+ * #493, package P4a (D-056, D-057, D-087, D-094, D-095, D-097, D-098). The ONE
+ * gate through which an organisation's ticked events and noticeboard posters
+ * reach websites the portal does not run. In this package it answers:
+ *
+ *   events.json       the organisation's events that are on the public website
+ *                     and have not finished yet, as JSON
+ *                     (`web/_core/data/public-door-events.schema.json`);
+ *   posters.json      its posters on the public website, as JSON
+ *                     (`web/_core/data/public-door-posters.schema.json`);
+ *   media/{file}      a poster's uploaded picture or video, ONLY while a
+ *                     poster on the public website uses it.
+ *
+ * They are reached at /w/{name}/… on the portal's own address, where {name}
+ * is the organisation's random public name (`tblPublicDoorNames`), or at /…
+ * on the organisation's own public address (`tblPublicHosts`, D-095). Which
+ * organisation a request is for is decided by `Site::preDetect()` — the ONE
+ * place that decides it — before any session is looked at; this class reads
+ * ONLY `Site::doorSiteId()`, never `Site::id()`, so a refused request can
+ * never fall back to organisation 1. Packages P4b (the script you paste in)
+ * and P4c (the page you can frame) add to this class; until then nothing
+ * else answers here.
+ *
+ * THE QUESTIONS, IN THIS ORDER (answer())
+ * -----------------------------------------------------------------------------
+ *   1. Is the request well formed? GET or HEAD only, one of the addresses
+ *      above, and `limit` (feeds only) a whole number from 1 to 50.
+ *   2. Is the portal closed for maintenance or an upgrade
+ *      (`Maintenance::isActive()`)? Then 503 with Retry-After, the same for
+ *      every organisation. The one answer that is not a refusal.
+ *   3. Whose door is it? `Site::doorSiteId()` must name an organisation, its
+ *      door must be ON (D-097: no name row, no door), and on the /w/ form the
+ *      portal's own address must be stored — otherwise the door would build
+ *      its links from whatever host the visitor sent
+ *      (`PortalAddress::visitorCanChooseHost()`), and an answer kept by a
+ *      cache for a minute could point every reader at somebody else's server.
+ *   4. Is the app switched on FOR THAT ORGANISATION
+ *      (`AppRegistry::isEnabledForSite()`): events need Calendar and Events,
+ *      posters and their media need the Noticeboard.
+ *   5. D-087, on a test copy only (`Gatekeeper::shouldEnforce()`): unless the
+ *      organisation's door is open to anybody there
+ *      (`PublicWebsiteSetup::testCopyDoorOpenToAnybody()`), only somebody the
+ *      test-copy gate itself lets in (`Gatekeeper::mayUseTestCopy()`), found
+ *      by a READ-ONLY look at the session (`Auth::peekSession()`). In this
+ *      version nothing can choose "anybody", so every test copy's door is for
+ *      signed-in testers only — the stricter answer, on purpose.
+ *   6. Read, only through the three readers here: events() asks
+ *      `EventVisibility::where()` and `fullDetailSelect()` in website mode with
+ *      `PublicWebsite::copiedRuleFor()`, then `redact()`; posters() and
+ *      media() ask `PublicWebsite::posterWhere()`, on the ORGANISATION's own
+ *      calendar date. The renderers are given arrays, never the connection
+ *      (`tools/audit-checks/check_public_door_reads.py` holds both rules).
+ *   7. Send the headers for that kind of answer, then the answer.
+ *
+ * EVERY REFUSAL IS ONE IDENTICAL 404 (notFound()), whatever the cause — an
+ * unknown, replaced or removed name, an inactive organisation, the door off,
+ * an app off, D-087, a bad address or parameter, a wrong method, a database
+ * fault, or media no public poster uses — so a refusal says nothing about
+ * which organisations exist or what they hold. It carries
+ * `Access-Control-Allow-Origin: *`, so a script on another website sees a 404
+ * rather than a CORS error. A fault is written to PHP's error log, never to
+ * the activity log: a database write per anonymous request would make
+ * flooding the door cheap.
+ *
+ * WHAT IS NEVER SENT: database numbers; who created, edited, submitted or
+ * moderated anything; a cancellation reason; capacity, registration or
+ * attendance; telephone, e-mail, map position or what3words; host and partner
+ * names; series, import and website-date columns; a poster's sort order; and
+ * anything deleted, draft, cancelled, postponed, unticked, outside its dates,
+ * members-only, finished, or another organisation's.
+ *
+ * WHAT IT CANNOT DO, said plainly
+ * -----------------------------------------------------------------------------
+ *   - Refusals at different questions take different times. That is accepted:
+ *     names cannot be guessed (2^96 of them).
+ *   - It cannot stop a browser or a cache in between keeping a live answer for
+ *     the minute `max-age=60` allows, so a change can take that long to reach
+ *     a website — an unticked poster's picture included.
+ *   - `/noticeboard/media` itself is unchanged and still serves any upload to
+ *     whoever holds its token (#363). Only the DOOR's media address follows
+ *     the website tick.
+ *   - Event pictures are not sent in this version.
+ *
+ * @package   Portal\Core
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.0.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/493
+ * -----------------------------------------------------------------------------
+ */
+
+declare(strict_types=1);
+
+namespace Portal\Core;
+
+final class PublicDoor
+{
+    /** The events feed's address, after the name (or the public address's host). */
+    public const SURFACE_EVENTS = 'events.json';
+
+    /** The posters feed's address. */
+    public const SURFACE_POSTERS = 'posters.json';
+
+    /** A poster's media, followed by its stored file name. */
+    public const MEDIA_PREFIX = 'media/';
+
+    /** How many items a feed gives when `limit` is not sent. */
+    public const DEFAULT_LIMIT = 20;
+
+    /** The most a feed gives; a larger `limit` is refused, never shortened. */
+    public const MAX_LIMIT = 50;
+
+    /** The two feeds' format names and version, written into every answer. */
+    public const EVENTS_FORMAT  = 'webms-public-events';
+    public const POSTERS_FORMAT = 'webms-public-posters';
+    public const FORMAT_VERSION = 1;
+
+    /** The one refusal's body. */
+    public const NOT_FOUND_BODY = "Not found.\n";
+
+    /** The 503's body. */
+    public const CLOSED_BODY = "Closed for maintenance. Please try again shortly.\n";
+
+    /**
+     * The media the door serves, by the stored file's ending, with the ONE
+     * type each is sent as. A stored upload whose recorded type is not the
+     * one listed for its ending is refused (it would be a hand edit).
+     */
+    public const MEDIA_TYPES = [
+        'png' => 'image/png', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'gif' => 'image/gif',
+        'webp' => 'image/webp', 'mp4' => 'video/mp4', 'webm' => 'video/webm',
+    ];
+
+    /** Every feed and media answer's content rule: it is data, never a page. */
+    public const DATA_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
+
+    /**
+     * Headers start-up (and PHP's session start) may have queued that the
+     * door replaces or must never send. `Set-Cookie` above all: a door
+     * answer never sets a cookie.
+     */
+    private const REMOVED_HEADERS = [
+        'Set-Cookie', 'X-Frame-Options', 'Cross-Origin-Opener-Policy', 'Cross-Origin-Resource-Policy',
+        'Cross-Origin-Embedder-Policy', 'X-Robots-Tag', 'Referrer-Policy', 'Content-Security-Policy',
+        'Cache-Control', 'Expires', 'Pragma', 'Vary', 'Last-Modified', 'Access-Control-Allow-Origin',
+        'Access-Control-Allow-Credentials', 'Access-Control-Allow-Methods',
+    ];
+
+    // =========================================================================
+    // 🚪 The gate
+    // =========================================================================
+
+    /**
+     * Answer a door request and stop. Called by `web/public_html/index.php`
+     * BEFORE `Auth::ensureSession()`, so no session is ever started, and in
+     * place of the maintenance gate, the test-copy gate and `SiteGate`, which
+     * it asks for itself (see the file header for the order).
+     *
+     * ANYTHING THAT THROWS is a refusal: the identical 404, with the fault in
+     * PHP's error log. Nothing is sent before the whole answer is ready, so a
+     * fault can never leave half an answer behind.
+     */
+    public static function answer(\mysqli $db): never
+    {
+        try {
+            self::answerOrThrow($db);
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicDoor: a request was refused because of a fault: ' . get_class($e) . ': '
+                . $e->getMessage());
+            self::notFound();
+        }
+        exit();
+    }
+
+    /** The questions, in order. Returns only by sending an answer; refusals end the request. */
+    private static function answerOrThrow(\mysqli $db): void
+    {
+        // 1️⃣ The request.
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        if ($method !== 'GET' && $method !== 'HEAD') {
+            self::notFound();
+        }
+        $surface = Site::doorSurface();
+        $media   = '';
+        if ($surface === self::SURFACE_EVENTS || $surface === self::SURFACE_POSTERS) {
+            $limit = self::limitFrom($_GET['limit'] ?? null);
+            if ($limit === null) {
+                self::notFound();
+            }
+        } elseif (str_starts_with($surface, self::MEDIA_PREFIX) === true) {
+            $media = substr($surface, strlen(self::MEDIA_PREFIX));
+            if (self::isMediaName($media) === false) {
+                self::notFound();
+            }
+            $limit = 0;
+        } else {
+            self::notFound();
+        }
+
+        // 2️⃣ Closed for maintenance or an upgrade: the same 503 for everybody.
+        if (Maintenance::isActive() === true) {
+            self::closed();
+        }
+
+        // 3️⃣ Whose door, and is it on?
+        $siteId = Site::doorSiteId();
+        if ($siteId === null) {
+            self::notFound();
+        }
+        if (PublicWebsiteSetup::doorStateFor($db, $siteId)['state'] !== 'on') {
+            self::notFound();
+        }
+        if (Site::doorOnPublicHost() === false && PortalAddress::visitorCanChooseHost() === true) {
+            self::notFound();
+        }
+
+        // 4️⃣ The app, switched on for THIS organisation.
+        $app = $surface === self::SURFACE_EVENTS ? 'calendar' : 'noticeboard';
+        if (AppRegistry::isEnabledForSite($app, $siteId) === false) {
+            self::notFound();
+        }
+
+        // 5️⃣ D-087: a test copy's door is for signed-in testers only unless
+        //    the organisation opened it to anybody (not possible until P4d).
+        $testCopy    = in_array(PORTAL_ENV, Channel::PRE_RELEASE, true);
+        $testersOnly = false;
+        $source      = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : '';
+        if (Gatekeeper::shouldEnforce(PORTAL_ENV, $source) === true
+            && PublicWebsiteSetup::testCopyDoorOpenToAnybody($db, $siteId) === false
+        ) {
+            $testersOnly = true;
+            if (Gatekeeper::mayUseTestCopy($db, self::peekSignedInAccount(), PORTAL_ENV) === false) {
+                self::notFound();
+            }
+        }
+
+        // 6️⃣ Read, then 7️⃣ answer.
+        if ($media !== '') {
+            $file = self::media($db, $siteId, $media);
+            if ($file === null) {
+                self::notFound();
+            }
+            self::sendDataHeaders($file['type'], $testCopy, $testersOnly);
+            header('Content-Length: ' . (string) $file['size']);
+            readfile($file['path']);
+            exit();
+        }
+        $body = $surface === self::SURFACE_EVENTS
+            ? self::renderEvents(self::events($db, $siteId, $limit), self::nowUtc())
+            : self::renderPosters(self::posters($db, $siteId, $limit), self::nowUtc());
+        self::sendDataHeaders('application/json; charset=utf-8', $testCopy, $testersOnly);
+        echo $body;
+        exit();
+    }
+
+    /**
+     * The `limit` a feed was asked for: the default when none was sent, a
+     * whole number from 1 to MAX_LIMIT, or null — refused — for anything else
+     * (a list, a sign, a leading zero, a decimal point, too large).
+     */
+    public static function limitFrom(mixed $raw): ?int
+    {
+        if ($raw === null) {
+            return self::DEFAULT_LIMIT;
+        }
+        if (is_string($raw) === false || preg_match('/^[1-9][0-9]{0,2}$/D', $raw) !== 1) {
+            return null;
+        }
+        $n = (int) $raw;
+
+        return $n <= self::MAX_LIMIT ? $n : null;
+    }
+
+    /** Is this a stored upload's name as the noticeboard makes them: 32 hex characters and a known ending? */
+    public static function isMediaName(string $name): bool
+    {
+        if (preg_match('/^[a-f0-9]{32}\.([a-z0-9]+)$/D', $name, $m) !== 1) {
+            return false;
+        }
+
+        return array_key_exists($m[1], self::MEDIA_TYPES) === true;
+    }
+
+    /**
+     * Who is signed in, by a READ-ONLY look at the session (D-087's tester
+     * test), or 0. It never makes a session file: with PHP's usual "files"
+     * store, a cookie naming a session that has no file is answered "nobody"
+     * WITHOUT starting PHP's session at all — PHP's strict mode would
+     * otherwise mint a new, empty session file for a made-up cookie. For any
+     * other store this guard cannot see, and `Auth::peekSession()` is asked
+     * as it is; whatever it queues (a cookie, cache headers) is removed
+     * before the answer is sent.
+     */
+    private static function peekSignedInAccount(): int
+    {
+        $cookie = $_COOKIE[session_name()] ?? null;
+        if (is_string($cookie) === false || preg_match('/^[A-Za-z0-9,\-]{16,256}$/D', $cookie) !== 1) {
+            return 0;
+        }
+        if (ini_get('session.save_handler') === 'files') {
+            $path = (string) session_save_path();
+            $semi = strrpos($path, ';');
+            $path = $semi === false ? $path : substr($path, $semi + 1);
+            $path = $path === '' ? sys_get_temp_dir() : $path;
+            if (is_file($path . DIRECTORY_SEPARATOR . 'sess_' . $cookie) === false) {
+                return 0;
+            }
+        }
+
+        return Auth::peekSession()['userId'];
+    }
+
+    // =========================================================================
+    // 📖 The three readers — the ONLY database reads in this file
+    // =========================================================================
+
+    /**
+     * The organisation's events on the public website that have not finished
+     * yet on their OWN clock (`Events::nowOnItsOwnClock()`), soonest first,
+     * at most `$limit`. Website mode with the copied-in rule in force for the
+     * organisation; published only; full detail only where the rule allows it,
+     * cut with `EventVisibility::redact()` otherwise.
+     *
+     * @return array{organisation:array{name:string, timezone:string}, events:list<array<string,mixed>>}
+     */
+    public static function events(\mysqli $db, int $siteId, int $limit): array
+    {
+        $org   = self::organisationFacts($db, $siteId);
+        $today = self::organisationToday($siteId);
+        $vis   = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today, PublicWebsite::copiedRuleFor($db, $siteId));
+        $full  = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_WEBSITE, 0, $today, 'canSeeFull');
+        $now   = Events::nowOnItsOwnClock($db, 'e', $siteId);
+        $stmt  = $db->prepare(
+            'SELECT e.`eventSlug`, e.`eventName`, e.`description`, e.`startDateTime`, e.`endDateTime`, e.`timezone`, '
+            . 'e.`isAllDay`, e.`locationName`, e.`locationAddress`, e.`locationWebURL`, ' . $full['sql'] . ' '
+            . 'FROM `tblEvents` e WHERE e.`siteID` = ? AND e.`isDeleted` = 0 AND e.`status` = \'published\' '
+            . 'AND COALESCE(e.`endDateTime`, e.`startDateTime`) >= ' . $now['sql']
+            . $vis['sql'] . ' ORDER BY e.`startDateTime` ASC, e.`eventID` ASC LIMIT ?'
+        );
+        $stmt->bind_param(
+            $full['types'] . 'i' . $now['types'] . $vis['types'] . 'i',
+            ...array_merge($full['params'], [$siteId], $now['params'], $vis['params'], [$limit])
+        );
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        $events = [];
+        foreach ($rows as $row) {
+            $row  = EventVisibility::redact($row, (int) $row['canSeeFull'] === 1);
+            $zone = Site::zoneFor((string) $row['timezone'], $siteId);
+            $events[] = [
+                'id'             => (string) $row['eventSlug'],
+                'title'          => (string) $row['eventName'],
+                'startsAt'       => self::instantText($row['startDateTime'], $zone),
+                'endsAt'         => self::instantText($row['endDateTime'], $zone),
+                'allDay'         => (int) $row['isAllDay'] === 1,
+                'timezone'       => $zone->getName(),
+                'detailsLimited' => $row['detailsLimited'] === true,
+                'description'    => $row['detailsLimited'] === true ? null : self::textOrNull($row['description'] ?? null),
+                'location'       => $row['detailsLimited'] === true ? null : self::locationFrom($row),
+            ];
+        }
+
+        return ['organisation' => $org, 'events' => $events];
+    }
+
+    /**
+     * The organisation's posters on the public website TODAY on its own
+     * calendar (`PublicWebsite::posterWhere()`), in the board's own order, at
+     * most `$limit`. A poster's uploaded media is pointed at the door's own
+     * media address, and only when the upload is this organisation's.
+     *
+     * @return array{organisation:array{name:string, timezone:string}, posters:list<array<string,mixed>>}
+     */
+    public static function posters(\mysqli $db, int $siteId, int $limit): array
+    {
+        $org  = self::organisationFacts($db, $siteId);
+        $pw   = PublicWebsite::posterWhere('p', self::organisationToday($siteId));
+        $stmt = $db->prepare(
+            'SELECT p.`title`, p.`kicker`, p.`category`, p.`scheduleType`, p.`eventDate`, p.`weekday`, p.`eventTime`, '
+            . 'p.`location`, p.`link`, p.`mediaType`, p.`mediaUrl`, p.`canvaUrl`, p.`thumbUrl` '
+            . 'FROM `tblNoticeboardPosters` p WHERE p.`siteID` = ?' . $pw['sql']
+            . ' ORDER BY p.`sortOrder` ASC, p.`posterID` ASC LIMIT ?'
+        );
+        $stmt->bind_param('i' . $pw['types'] . 'i', ...array_merge([$siteId], $pw['params'], [$limit]));
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        // Which of the uploads these posters name are THIS organisation's.
+        $named = [];
+        foreach ($rows as $row) {
+            foreach ([(string) $row['mediaUrl'], (string) $row['thumbUrl']] as $url) {
+                $stored = NoticeboardMedia::extractStoredName($url);
+                if ($stored !== null) {
+                    $named[$stored] = true;
+                }
+            }
+        }
+        $own = [];
+        if ($named !== []) {
+            $marks = implode(',', array_fill(0, count($named), '?'));
+            $up    = $db->prepare('SELECT `storedName` FROM `tblNoticeboardUploads` WHERE `siteID` = ? AND `storedName` IN (' . $marks . ')');
+            $up->bind_param('i' . str_repeat('s', count($named)), ...array_merge([$siteId], array_keys($named)));
+            $up->execute();
+            foreach ($up->get_result()->fetch_all(MYSQLI_ASSOC) as $one) {
+                $own[(string) $one['storedName']] = true;
+            }
+            $up->close();
+        }
+        // The door's own media address, worked out once: '' when none can be built.
+        $mediaBase    = self::addressFor($db, $siteId, self::MEDIA_PREFIX);
+        $mediaAddress = static function (string $url) use ($mediaBase, $own): ?string {
+            $stored = NoticeboardMedia::extractStoredName($url);
+            if ($stored !== null) {
+                if (isset($own[$stored]) === false || self::isMediaName($stored) === false || $mediaBase === '') {
+                    return null;
+                }
+
+                return $mediaBase . $stored;
+            }
+
+            return self::httpsOrNull($url);
+        };
+
+        $posters = [];
+        foreach ($rows as $row) {
+            $type  = (string) $row['mediaType'];
+            $media = null;
+            if ($type === 'image' || $type === 'video') {
+                $url = $mediaAddress((string) $row['mediaUrl']);
+                $media = $url === null ? null : ['type' => $type, 'url' => $url];
+            }
+            $canva = $type === 'canva' ? self::httpsOrNull((string) $row['canvaUrl']) : null;
+            if ($canva !== null && str_starts_with($canva, 'https://www.canva.com/') === false) {
+                $canva = null;
+            }
+            $posters[] = [
+                'title'    => (string) $row['title'],
+                'kicker'   => self::textOrNull($row['kicker']),
+                'category' => self::textOrNull($row['category']),
+                'when'     => self::posterWhen($row),
+                'time'     => self::clockOrNull($row['eventTime']),
+                'location' => self::textOrNull($row['location']),
+                'link'     => self::httpsOrNull((string) $row['link']),
+                'media'    => $media,
+                'thumbUrl' => trim((string) $row['thumbUrl']) === '' ? null : $mediaAddress((string) $row['thumbUrl']),
+                'canvaUrl' => $canva,
+            ];
+        }
+
+        return ['organisation' => $org, 'posters' => $posters];
+    }
+
+    /**
+     * One poster upload, for the door's media address: only when the upload
+     * is THIS organisation's AND a poster on the public website right now
+     * uses it (as its picture or video, or as its thumbnail). The moment the
+     * poster is unticked, deleted or outside its dates, this answers null.
+     *
+     * @return array{path:string, type:string, size:int}|null
+     */
+    public static function media(\mysqli $db, int $siteId, string $stored): ?array
+    {
+        if (self::isMediaName($stored) === false) {
+            return null;
+        }
+        $stmt = $db->prepare('SELECT `mimeType` FROM `tblNoticeboardUploads` WHERE `siteID` = ? AND `storedName` = ? LIMIT 1');
+        $stmt->bind_param('is', $siteId, $stored);
+        $stmt->execute();
+        $upload = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $type = self::MEDIA_TYPES[(string) pathinfo($stored, PATHINFO_EXTENSION)];
+        if ($upload === null || (string) $upload['mimeType'] !== $type) {
+            return null;
+        }
+
+        $pw   = PublicWebsite::posterWhere('p', self::organisationToday($siteId));
+        $like = '%' . $stored;
+        $stmt = $db->prepare(
+            'SELECT p.`mediaType`, p.`mediaUrl`, p.`thumbUrl` FROM `tblNoticeboardPosters` p WHERE p.`siteID` = ?' . $pw['sql']
+            . ' AND (p.`mediaUrl` LIKE ? OR p.`thumbUrl` LIKE ?)'
+        );
+        $stmt->bind_param('i' . $pw['types'] . 'ss', ...array_merge([$siteId], $pw['params'], [$like, $like]));
+        $stmt->execute();
+        $posters = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        $used = false;
+        foreach ($posters as $poster) {
+            $asMedia = in_array((string) $poster['mediaType'], ['image', 'video'], true) === true
+                && NoticeboardMedia::extractStoredName((string) $poster['mediaUrl']) === $stored;
+            if ($asMedia === true || NoticeboardMedia::extractStoredName((string) $poster['thumbUrl']) === $stored) {
+                $used = true;
+                break;
+            }
+        }
+        if ($used === false) {
+            return null;
+        }
+
+        $path = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'noticeboard' . DIRECTORY_SEPARATOR . basename($stored);
+        if (is_file($path) === false || is_readable($path) === false) {
+            return null;
+        }
+
+        return ['path' => $path, 'type' => $type, 'size' => (int) filesize($path)];
+    }
+
+    /**
+     * The organisation's name and zone, for the feeds' heading. Read by the
+     * readers only.
+     *
+     * ⚠️ IT DOES NOT ASK WHETHER THE ORGANISATION IS ACTIVE, on purpose. That
+     *    is decided ONCE, in `Site::preDetect()` (the name and the public
+     *    address both look up active organisations only). A second copy here
+     *    was tried and taken out (P4a's own test): it made the real guard
+     *    impossible to test, because taking either one out left the other
+     *    standing, so neither could be shown to matter — and a guard that no
+     *    test can fail is how a guard quietly disappears.
+     */
+    private static function organisationFacts(\mysqli $db, int $siteId): array
+    {
+        $stmt = $db->prepare('SELECT `siteName` FROM `tblSites` WHERE `siteID` = ? LIMIT 1');
+        $stmt->bind_param('i', $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($row === null) {
+            throw new \RuntimeException('the organisation does not exist');
+        }
+
+        return ['name' => (string) $row['siteName'], 'timezone' => Site::timezone($siteId)];
+    }
+
+    // =========================================================================
+    // 🖨️ The renderers — given arrays, never the connection
+    // =========================================================================
+
+    /**
+     * The events feed, as JSON. Pure: what it is given is what it writes.
+     *
+     * @param array{organisation:array{name:string, timezone:string}, events:list<array<string,mixed>>} $read
+     */
+    public static function renderEvents(array $read, string $generatedAt): string
+    {
+        return self::json([
+            'format'       => self::EVENTS_FORMAT,
+            'version'      => self::FORMAT_VERSION,
+            'organisation' => $read['organisation'],
+            'generatedAt'  => $generatedAt,
+            'events'       => $read['events'],
+        ]);
+    }
+
+    /**
+     * The posters feed, as JSON. Pure.
+     *
+     * @param array{organisation:array{name:string, timezone:string}, posters:list<array<string,mixed>>} $read
+     */
+    public static function renderPosters(array $read, string $generatedAt): string
+    {
+        return self::json([
+            'format'       => self::POSTERS_FORMAT,
+            'version'      => self::FORMAT_VERSION,
+            'organisation' => $read['organisation'],
+            'generatedAt'  => $generatedAt,
+            'posters'      => $read['posters'],
+        ]);
+    }
+
+    // =========================================================================
+    // 🔗 Addresses
+    // =========================================================================
+
+    /**
+     * 🔗 The whole address of one of the organisation's door addresses —
+     * THE ONE PLACE they are built:
+     *   - on the organisation's public address when it has one (D-095):
+     *     https://events.example.org/events.json;
+     *   - otherwise the portal's own address for the organisation
+     *     (`PortalAddress::base()`) plus /w/{name}/: never `Site::url()`,
+     *     which would add the members' path part, and never the request's
+     *     host.
+     * '' when the door is off, or no address can be built without trusting a
+     * host the visitor chose — and then the door answers nothing on /w/.
+     *
+     * @param string $what 'events.json', 'posters.json' or 'media/{file}'.
+     */
+    public static function addressFor(\mysqli $db, int $siteId, string $what): string
+    {
+        $door = PublicWebsiteSetup::doorStateFor($db, $siteId);
+        if ($door['state'] !== 'on') {
+            return '';
+        }
+        $host = PublicWebsiteSetup::publicHostFor($db, $siteId);
+        if ($host !== '') {
+            return 'https://' . $host . '/' . $what;
+        }
+        if (PortalAddress::visitorCanChooseHost() === true) {
+            return '';
+        }
+        $base = PortalAddress::base($siteId);
+        if ($base === '') {
+            return '';
+        }
+
+        return $base . '/w/' . $door['name'] . '/' . $what;
+    }
+
+    // =========================================================================
+    // 📤 Answers and headers
+    // =========================================================================
+
+    /**
+     * ⛔ The ONE refusal: identical for every cause, so it says nothing. Also
+     * used by the router for a /w/ address that reached it (a path-mode
+     * prefix in front, for example).
+     */
+    public static function notFound(): never
+    {
+        self::clearHeaders();
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-store');
+        header('Access-Control-Allow-Origin: *');
+        header('Cross-Origin-Resource-Policy: cross-origin');
+        header('Content-Security-Policy: ' . self::DATA_CSP);
+        header('Referrer-Policy: no-referrer');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Robots-Tag: noindex, nofollow, noarchive');
+        echo self::NOT_FOUND_BODY;
+        exit();
+    }
+
+    /** 🚧 Closed for maintenance or an upgrade: the same for every organisation and every address. */
+    private static function closed(): never
+    {
+        self::clearHeaders();
+        http_response_code(503);
+        header('Retry-After: 60');
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-store');
+        header('Access-Control-Allow-Origin: *');
+        header('Cross-Origin-Resource-Policy: cross-origin');
+        header('Content-Security-Policy: ' . self::DATA_CSP);
+        header('Referrer-Policy: no-referrer');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Robots-Tag: noindex, nofollow, noarchive');
+        echo self::CLOSED_BODY;
+        exit();
+    }
+
+    /**
+     * The headers on a feed or media answer:
+     *   - readable by any website (`Access-Control-Allow-Origin: *`, never a
+     *     credentials header) and loadable from one
+     *     (`Cross-Origin-Resource-Policy: cross-origin`);
+     *   - data, never a page (`DATA_CSP`), never framed;
+     *   - no Referer sent on, nothing sniffed;
+     *   - kept by browsers and caches for one minute, so a change reaches
+     *     websites within about a minute — EXCEPT on a test copy whose door is
+     *     for testers only, where the answer depends on who asked, so it is
+     *     `private, no-store` with `Vary: Cookie`;
+     *   - `noindex` on the live portal; on a test copy `noindex, nofollow,
+     *     noarchive` on every answer (D-087).
+     */
+    private static function sendDataHeaders(string $contentType, bool $testCopy, bool $testersOnly): void
+    {
+        self::clearHeaders();
+        http_response_code(200);
+        header('Content-Type: ' . $contentType);
+        header('Access-Control-Allow-Origin: *');
+        header('Cross-Origin-Resource-Policy: cross-origin');
+        header('Content-Security-Policy: ' . self::DATA_CSP);
+        header('Referrer-Policy: no-referrer');
+        header('X-Content-Type-Options: nosniff');
+        if ($testersOnly === true) {
+            header('Cache-Control: private, no-store');
+            header('Vary: Cookie');
+        } else {
+            header('Cache-Control: public, max-age=60');
+        }
+        header('X-Robots-Tag: ' . ($testCopy === true ? 'noindex, nofollow, noarchive' : 'noindex'));
+    }
+
+    /** Take away every header the door replaces or must never send (REMOVED_HEADERS). */
+    private static function clearHeaders(): void
+    {
+        foreach (self::REMOVED_HEADERS as $name) {
+            header_remove($name);
+        }
+    }
+
+    // =========================================================================
+    // 🧹 Small helpers
+    // =========================================================================
+
+    /** "Today" on the ORGANISATION's calendar, the one the website dates are kept on. */
+    private static function organisationToday(int $siteId): string
+    {
+        return (new \DateTimeImmutable('now', new \DateTimeZone(Site::timezone($siteId))))->format('Y-m-d');
+    }
+
+    /** This moment in UTC, as the feeds write it. */
+    private static function nowUtc(): string
+    {
+        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d\TH:i:s\Z');
+    }
+
+    /** A stored wall-clock reading as an instant with its offset, on the event's own clock, or null. */
+    private static function instantText(mixed $reading, \DateTimeZone $zone): ?string
+    {
+        if ($reading === null) {
+            return null;
+        }
+        $instant = I18n::wallClockInstant((string) $reading, $zone);
+
+        return $instant === null ? null : $instant->format('Y-m-d\TH:i:sP');
+    }
+
+    /** Where an event is, from its full-detail columns: nothing that could reach a person (no phone, e-mail or map position). */
+    private static function locationFrom(array $row): ?array
+    {
+        $name    = self::textOrNull($row['locationName'] ?? null);
+        $address = self::textOrNull($row['locationAddress'] ?? null);
+        $url     = self::httpsOrNull((string) ($row['locationWebURL'] ?? ''));
+        if ($name === null && $address === null && $url === null) {
+            return null;
+        }
+
+        return ['name' => $name, 'address' => $address, 'url' => $url];
+    }
+
+    /** A poster's day: once on a date, or every week on a weekday (0 = Sunday), or null when it says neither. */
+    private static function posterWhen(array $row): ?array
+    {
+        if ((string) $row['scheduleType'] === 'weekly' && $row['weekday'] !== null
+            && (int) $row['weekday'] >= 0 && (int) $row['weekday'] <= 6) {
+            return ['type' => 'weekly', 'weekday' => (int) $row['weekday']];
+        }
+        if ((string) $row['scheduleType'] === 'once' && $row['eventDate'] !== null
+            && preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string) $row['eventDate']) === 1) {
+            return ['type' => 'once', 'date' => (string) $row['eventDate']];
+        }
+
+        return null;
+    }
+
+    /** A TIME column as HH:MM, from the text itself — a clock reading, never a moment (#777). */
+    private static function clockOrNull(mixed $time): ?string
+    {
+        if ($time === null || preg_match('/^(\d{2}):(\d{2})/', (string) $time, $m) !== 1) {
+            return null;
+        }
+
+        return $m[1] . ':' . $m[2];
+    }
+
+    private static function textOrNull(mixed $text): ?string
+    {
+        $text = trim((string) ($text ?? ''));
+
+        return $text === '' ? null : $text;
+    }
+
+    /** An address only when it is a plain https:// web address; anything else (http, javascript:, a page path) is null. */
+    private static function httpsOrNull(string $url): ?string
+    {
+        $url = trim($url);
+        if (str_starts_with(strtolower($url), 'https://') === false || preg_match('/[\x00-\x20\x7F"<>\\\\]/', $url) === 1) {
+            return null;
+        }
+        $host = parse_url($url, PHP_URL_HOST);
+
+        return is_string($host) === true && $host !== '' ? $url : null;
+    }
+
+    private static function json(array $data): string
+    {
+        return json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR) . "\n";
+    }
+}

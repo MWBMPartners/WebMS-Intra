@@ -202,6 +202,18 @@ class Site
     /** @var string One of the SESSION_* answers above. */
     private static string $sessionState = self::SESSION_NOT_USED;
 
+    /** @var bool Is this request for the public door (#493 P4a)? See detectDoor(). */
+    private static bool $doorRequest = false;
+
+    /** @var int|null The organisation a door request is for; null = refuse. */
+    private static ?int $doorSiteId = null;
+
+    /** @var string What the door request asks for, after the name or the host. */
+    private static string $doorSurface = '';
+
+    /** @var bool Did the door request arrive on a public address (D-095)? */
+    private static bool $doorOnPublicHost = false;
+
     /**
      * Session mode only: the account the organisation was worked out FOR
      * (0 = nobody signed in). SiteGate compares it with the account that is
@@ -1687,7 +1699,9 @@ class Site
      * load.
      *
      * It reads the two portal-wide settings (is multi-organisation on, and
-     * which way), then asks exactly one of the three detections below.
+     * which way), then asks whether the request is for the PUBLIC DOOR
+     * (detectDoor(), #493 P4a) — before any session is looked at — and only
+     * when it is not, asks exactly one of the three detections below.
      *
      * WHEN IT CANNOT FIND OUT. It still returns 1, because start-up needs a
      * number to carry on with, but it leaves $detectionFailed set. SiteGate
@@ -1717,28 +1731,64 @@ class Site
         self::$preMode         = null;
         self::$sessionState    = self::SESSION_NOT_USED;
         self::$resolvedUserId  = 0;
+        self::$doorRequest     = false;
+        self::$doorSiteId      = null;
+        self::$doorSurface     = '';
+        self::$doorOnPublicHost = false;
 
         // 🔍 Check if multisite is enabled (direct query, settings not loaded yet)
         $enabled = self::portalWideSetting($db, 'multisite.enabled');
+
+        // 🔍 Which way — read only when it is on. `$stored` false means the
+        //    question could not be asked.
+        $stored = null;
+        $mode   = self::MODE_SESSION;
+        if ($enabled === 'true') {
+            $stored = self::portalWideSetting($db, 'multisite.detectionMode');
+            if ($stored !== false) {
+                $mode = self::knownMode($stored ?? self::MODE_SESSION);
+                if ($stored !== null && $stored !== $mode) {
+                    error_log('[WebMS-Intra] The setting multisite.detectionMode holds "' . $stored
+                        . '", which is not one of the three ways. Using the sign-in session instead.');
+                }
+            }
+        }
+        // Is multi-organisation on? true, false, or null for "could not tell".
+        $multi = ($enabled === false || ($enabled === 'true' && $stored === false)) ? null : ($enabled === 'true');
+
+        // 🚪 THE PUBLIC DOOR (#493 P4a) — decided HERE, before any session is
+        //    looked at, and from nothing but the address. See detectDoor().
+        $door = self::detectDoor($db, $multi, $mode);
+        if ($door === 'door') {
+            if ($multi !== null) {
+                self::$preEnabled = $multi;
+                self::$preMode    = $multi === true ? $mode : null;
+            }
+            // A door request never reaches SiteGate (index.php answers it
+            // first), so "failed" here only means "the door must refuse",
+            // which doorSiteId() null already says.
+            self::$detectionFailed = $multi === null;
+
+            return self::$doorSiteId ?? 1;
+        }
+        // 'failed': the public-address look-up could not be made, so this
+        // request might be a public address. It must never fall through to
+        // the sign-in pages: detection stays FAILED whatever happens below,
+        // and SiteGate shows "try again".
+        $doorLookupFailed = $door === 'failed';
+
         if ($enabled === false) {
             return 1;
         }
         if ($enabled !== 'true') {
             self::$preEnabled      = false;
-            self::$detectionFailed = false;
+            self::$detectionFailed = $doorLookupFailed;
 
             return 1;
         }
 
-        // 🔍 Which way
-        $stored = self::portalWideSetting($db, 'multisite.detectionMode');
         if ($stored === false) {
             return 1;
-        }
-        $mode = self::knownMode($stored ?? self::MODE_SESSION);
-        if ($stored !== null && $stored !== $mode) {
-            error_log('[WebMS-Intra] The setting multisite.detectionMode holds "' . $stored
-                . '", which is not one of the three ways. Using the sign-in session instead.');
         }
         self::$preEnabled = true;
         self::$preMode    = $mode;
@@ -1753,9 +1803,166 @@ class Site
         if ($siteId === null) {
             return 1;
         }
-        self::$detectionFailed = false;
+        self::$detectionFailed = $doorLookupFailed;
 
         return $siteId;
+    }
+
+    /**
+     * 🚪 Is this request for the PUBLIC DOOR, and if so whose? (#493 P4a;
+     * D-056, D-095, D-097, D-098). Part of preDetect(), the ONE place a
+     * request's organisation is decided, and asked BEFORE any session is
+     * looked at — so a door request never starts, reads or depends on one.
+     *
+     * A request is a door request in exactly two ways:
+     *   1. ITS HOST IS A STORED PUBLIC ADDRESS (`tblPublicHosts`, D-095).
+     *      Then EVERY path on it is a door request (D-098: a public address
+     *      answers door requests only), and the organisation is the one
+     *      holding the address. A path beginning /w/ is NOT read as a name
+     *      there: a public address never resolves a name, so organisation A's
+     *      public address can never be made to serve organisation B.
+     *   2. ITS PATH BEGINS /w/ on any other host: /w/{name}/{what}. The
+     *      organisation is the one holding that random public name
+     *      (`tblPublicDoorNames`). In "own address each" mode, a name used on
+     *      an address that belongs to ANOTHER active organisation is refused,
+     *      so B's name never answers on A's members' address.
+     * Either way only an ACTIVE organisation counts, and with
+     * multi-organisation switched off only organisation 1 does.
+     *
+     * The door reads only doorSiteId(), never id(): a refused request is
+     * null there, so it can never fall back to organisation 1.
+     *
+     * WHAT IT DOES NOT DECIDE: whether the door is switched on, whether the
+     * app is on, maintenance, D-087, or which addresses after the name exist.
+     * `Portal\Core\PublicDoor` asks all of those, in its own order, and
+     * answers every refusal with one identical 404.
+     *
+     * @param bool|null $multi Multi-organisation on, off, or null (could not tell).
+     * @param string    $mode  The way organisations are told apart.
+     *
+     * @return string 'door', 'not' (an ordinary request), or 'failed' (the
+     *                public-address look-up could not be made, and the path
+     *                is not a /w/ one).
+     */
+    private static function detectDoor(\mysqli $db, ?bool $multi, string $mode): string
+    {
+        $host = self::normaliseHost((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+        $path = is_string($path) === true ? $path : '/';
+        // Case-insensitive like every other address: /W/… is a door request
+        // too (and is then refused, because a name is lower case).
+        $isW  = preg_match('#^/w(/|$)#i', $path) === 1;
+
+        // 1. A public address?
+        try {
+            $hostRow = $host === '' ? null : PublicWebsiteSetup::publicHostRow($db, $host);
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] Site::preDetect could not look the request\'s host up among the public addresses: '
+                . $e->getMessage());
+            if ($isW === false) {
+                return 'failed';
+            }
+            self::$doorRequest = true;
+
+            return 'door';
+        }
+        if ($hostRow !== null && $hostRow['usable'] === true) {
+            self::$doorRequest      = true;
+            self::$doorOnPublicHost = true;
+            self::$doorSurface      = ltrim($path, '/');
+            if ($hostRow['active'] === true && self::doorOrganisationAllowed($hostRow['siteId'], $multi) === true) {
+                self::$doorSiteId = $hostRow['siteId'];
+            }
+
+            return 'door';
+        }
+
+        // 2. A /w/{name}/{what} address on any other host?
+        if ($isW === false) {
+            return 'not';
+        }
+        self::$doorRequest = true;
+        if (preg_match('#^/w/([^/]+)/(.+)$#', $path, $m) !== 1) {
+            return 'door';
+        }
+        // What is asked for is kept WHETHER OR NOT the name is known, so the
+        // door asks its questions in the same order for both: an unknown name
+        // must meet maintenance's 503 exactly as a known one does, or the
+        // answer during an upgrade would tell names that exist from names
+        // that do not (round 1 of P4a's own test found this).
+        self::$doorSurface = $m[2];
+        try {
+            $siteId = PublicWebsiteSetup::siteForDoorName($db, $m[1]);
+            if ($siteId === null || self::doorOrganisationAllowed($siteId, $multi) === false) {
+                return 'door';
+            }
+            // "Own address each": refuse a name on an address that belongs to
+            // ANOTHER active organisation (B's name on A's members' address).
+            if ($multi === true && $mode === self::MODE_HOST && $host !== '') {
+                $stmt = $db->prepare('SELECT `siteID` FROM `tblSites` WHERE `hostPattern` = ? AND `isActive` = 1 ORDER BY `siteID` ASC LIMIT 1');
+                $stmt->bind_param('s', $host);
+                $stmt->execute();
+                $owner = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                if ($owner !== null && (int) $owner['siteID'] !== $siteId) {
+                    return 'door';
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] Site::preDetect could not look a public door name up, so the door refuses: ' . $e->getMessage());
+
+            return 'door';
+        }
+        self::$doorSiteId = $siteId;
+
+        return 'door';
+    }
+
+    /** With multi-organisation off only organisation 1 counts; unknown counts nobody. */
+    private static function doorOrganisationAllowed(int $siteId, ?bool $multi): bool
+    {
+        if ($multi === null) {
+            return false;
+        }
+
+        return $multi === true || $siteId === 1;
+    }
+
+    /**
+     * Is this request for the public door (#493 P4a)? index.php asks this
+     * before the session is started, and hands such a request to
+     * `PublicDoor::answer()`. See detectDoor().
+     */
+    public static function isDoorRequest(): bool
+    {
+        return self::$doorRequest;
+    }
+
+    /**
+     * The organisation a door request is for, or null when it must be
+     * refused (unknown, replaced or removed name; inactive organisation;
+     * another organisation's address; a look-up that failed). The door reads
+     * ONLY this, never id().
+     */
+    public static function doorSiteId(): ?int
+    {
+        return self::$doorSiteId;
+    }
+
+    /**
+     * What a door request asks for, after the name (or, on a public address,
+     * after the host): 'events.json', 'media/{file}', and so on, exactly as
+     * sent. '' when nothing usable was found. PublicDoor decides which exist.
+     */
+    public static function doorSurface(): string
+    {
+        return self::$doorSurface;
+    }
+
+    /** Did this door request arrive on the organisation's own public address (D-095), rather than /w/{name}/? */
+    public static function doorOnPublicHost(): bool
+    {
+        return self::$doorOnPublicHost;
     }
 
     /**
@@ -2048,5 +2255,9 @@ class Site
         self::$oldZoneSetting = null;
         self::$settingsSiteId = 1;
         self::$zoneTextCache = [];
+        self::$doorRequest = false;
+        self::$doorSiteId = null;
+        self::$doorSurface = '';
+        self::$doorOnPublicHost = false;
     }
 }

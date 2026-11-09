@@ -238,6 +238,7 @@ help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFT
 outside-services|tools/outside-services-selftest.php|selftest_outside|SELFTEST_WEB_PORT=9778
 registration-retention|tools/registration-retention-selftest.php|selftest_regret|SELFTEST_WEB_PORT=9816
 public-website-tick|tools/public-website-tick-selftest.php|selftest_pwtick|SELFTEST_WEB_PORT=9493
+public-door|tools/public-door-selftest.php|selftest_pubdoor|SELFTEST_WEB_PORT=9497
 settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_PORT=9836
 content-translation|tools/content-translation-selftest.php|selftest_cttrans|web:content-translation SELFTEST_WEB_PORT=9671
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071

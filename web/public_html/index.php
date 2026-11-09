@@ -48,8 +48,25 @@ use Portal\Core\Gatekeeper;
 //    line only fails when it RUNS — `php -l` is happy without it (#536).
 use Portal\Core\I18n;
 use Portal\Core\Maintenance;
+use Portal\Core\PublicDoor;
 use Portal\Core\Router;
+use Portal\Core\Site;
 use Portal\Core\SiteGate;
+
+// 🚪 THE PUBLIC DOOR (#493 P4a; D-056, D-097, D-098), answered BEFORE the
+//    session is started. A request on an organisation's public address, or to
+//    /w/{name}/… on any other, was recognised by Site::preDetect() while the
+//    portal started up — from the address alone, before any session was
+//    looked at. It never reaches the session start below, the maintenance
+//    gate, the test-copy gate, the organisation gate or the router: the door
+//    asks maintenance, D-087 and its own questions itself, in its own order,
+//    sets no cookie, and answers every refusal with one identical 404 (see
+//    web/_core/PublicDoor.php). Placed above Auth::ensureSession() on
+//    purpose: below it, every door answer would carry a session cookie and
+//    leave a session file behind.
+if (Site::isDoorRequest() === true) {
+    PublicDoor::answer($mysqli);
+}
 
 // 🔑 Start (or resume) the session BEFORE the maintenance gate below.
 //    Maintenance::currentUserCanBypass() → App::isUmbrellaAdmin() → App::user()

@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public-door-events.schema.json",
+  "title": "The public door's events feed",
+  "description": "What an organisation's own website reads from the portal's public door at events.json (/w/{name}/events.json on the portal's address, or /events.json on the organisation's public address): the organisation's events that somebody put on the public website, that are inside their website dates today, and that have not finished yet on their own clock, soonest first. Nothing members-only, draft, cancelled, postponed, deleted, unticked or another organisation's ever appears. Written by Portal\\Core\\PublicDoor::renderEvents() (web/_core/PublicDoor.php) and checked by tools/audit-checks/check_public_door_schema.py.",
+  "$comment": "FOR MAINTAINERS. JSON has no comments, so every explanation lives here. A change to the shape is a change to what other people's websites read: add fields rather than rename or remove them, and raise `version` (and FORMAT_VERSION in PublicDoor.php) for anything a reader written against version 1 would misread. The check reads this file with a validator of its own that understands ONLY the keywords it lists in UNDERSTOOD, and fails on any other, so a keyword it cannot enforce can never sit here as decoration. Database numbers, who created or changed anything, contact details, map positions, capacity and registration are deliberately absent and must stay so (#493 plan, section 3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "organisation", "generatedAt", "events"],
+  "properties": {
+    "format": {
+      "description": "Always the text webms-public-events, so a reader can tell this feed from the posters feed.",
+      "const": "webms-public-events"
+    },
+    "version": {
+      "description": "The version of this shape. 1 today.",
+      "type": "integer",
+      "const": 1
+    },
+    "organisation": {
+      "$ref": "#/$defs/organisation"
+    },
+    "generatedAt": {
+      "description": "The moment this answer was made, in UTC, as YYYY-MM-DDTHH:MM:SSZ. Browsers and caches may keep an answer for up to a minute.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "events": {
+      "description": "The events, soonest first. At most the `limit` asked for (20 when none was asked, 50 at most). Empty when there are none.",
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/event" }
+    }
+  },
+  "$defs": {
+    "organisation": {
+      "description": "The organisation the feed belongs to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "timezone"],
+      "properties": {
+        "name": {
+          "description": "The organisation's name as the portal holds it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "timezone": {
+          "description": "The organisation's own time zone, an IANA name such as Europe/London. Each event carries its own zone as well, which may differ.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "event": {
+      "description": "One event.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "startsAt", "endsAt", "allDay", "timezone", "detailsLimited", "description", "location"],
+      "properties": {
+        "id": {
+          "description": "The event's short name in the portal's own addresses (its slug), which stays the same while the event exists. Not a database number.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "title": {
+          "description": "The event's title.",
+          "type": "string",
+          "maxLength": 255
+        },
+        "startsAt": {
+          "description": "When it starts, on the event's own clock, with that clock's offset from UTC: YYYY-MM-DDTHH:MM:SS+HH:MM. null only if the stored time could not be read.",
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+        },
+        "endsAt": {
+          "description": "When it ends, in the same form, or null when it has no end time.",
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
+        },
+        "allDay": {
+          "description": "true when the event lasts the whole day, so its times are not meant to be shown.",
+          "type": "boolean"
+        },
+        "timezone": {
+          "description": "The time zone the event's times are a clock reading in, an IANA name such as Europe/London.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "detailsLimited": {
+          "description": "true when only the title, date and time may be shown publicly (an event copied in from an outside calendar under a rule that withholds its details). description and location are then null.",
+          "type": "boolean"
+        },
+        "description": {
+          "description": "What the event is, as plain text the organisation wrote. null when there is none, or when detailsLimited is true. Show it as text, never as HTML.",
+          "type": ["string", "null"]
+        },
+        "location": {
+          "description": "Where it is, or null when nothing is recorded or detailsLimited is true. Never a telephone number, an e-mail address or a map position.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["name", "address", "url"],
+          "properties": {
+            "name": {
+              "description": "The place's name, or null.",
+              "type": ["string", "null"]
+            },
+            "address": {
+              "description": "The place's postal address as text, or null.",
+              "type": ["string", "null"]
+            },
+            "url": {
+              "description": "The place's web page, only when it is an https:// address, else null.",
+              "type": ["string", "null"],
+              "pattern": "^https://"
+            }
+          }
+        }
+      }
+    }
+  }
+}

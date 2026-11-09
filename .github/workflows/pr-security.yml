@@ -1347,6 +1347,26 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_outside_services_gated.py
 
+      # #493 P4a: the public door's two feeds keep the shape their schemas
+      # promise to other people's websites, every property is described, and
+      # the check's own validator is proved both ways. The self-test
+      # tools/public-door-selftest.php runs it again over the answers it
+      # captures from the real door.
+      - name: 'The public door''s feeds match their schemas (hard gate, #493)'
+        id: public_door_schema
+        if: always()
+        run: python3 tools/audit-checks/check_public_door_schema.py
+
+      # #493 P4a: the public door reads no session and never Site::id(), runs
+      # its database statements only inside its readers, asks EventVisibility
+      # and PublicWebsite for what is public, gives its renderers no
+      # connection, and is answered before any session starts. Reads PHP with
+      # PHP's own tokeniser and refuses without php.
+      - name: 'The public door reads only through its readers (hard gate, #493)'
+        id: public_door_reads
+        if: always()
+        run: python3 tools/audit-checks/check_public_door_reads.py
+
       # Every page that writes its own <head> must also write the description,
       # canonical address and preview card (#569). Those pages are the ones a
       # stranger sees — the sign-in page and the public forms — and before #569

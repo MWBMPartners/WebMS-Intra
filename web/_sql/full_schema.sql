@@ -11429,6 +11429,28 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VAL
 INSERT INTO `tblMigrations` (`filename`) VALUES ('262_public_website_setup.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 263_public_door.sql (#493, P4a; D-056, D-087, D-097) ───────────────
+-- Each organisation's public door name. A row means the door is ON; no row
+-- means it is off, which is how every organisation starts (D-097). The
+-- installation's D-087 limit for test copies is seeded 'testers', the stricter;
+-- the organisation's own choice is not seeded (no row means 'testers').
+CREATE TABLE IF NOT EXISTS `tblPublicDoorNames` (
+    `siteID`       INT      NOT NULL COMMENT 'The ONE organisation whose public door this is (#493 P4a, D-097). A row here means the door is switched ON; no row means it is off.',
+    `publicName`   CHAR(24) NOT NULL COMMENT 'The organisation''s public name in its door addresses (/w/{name}/...): 24 lower-case hex characters made by the portal from random_bytes(12), never typed by anybody. Not a secret: it is pasted into public websites. Replacing it stops every old copy at once. Checked again by Portal\\Core\\PublicWebsiteSetup whenever it is read.',
+    `changedAtUtc` DATETIME NOT NULL COMMENT 'A moment in UTC, written with UTC_TIMESTAMP(): when the door was turned on or its name last replaced. Nothing compares it; who did it is in the activity log.',
+    PRIMARY KEY (`siteID`),
+    UNIQUE KEY `uq_public_door_name` (`publicName`),
+    CONSTRAINT `fk_public_door_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='Each organisation''s public door name; a row means the door is on (#493 P4a, D-097)';
+
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'public.door.testCopies.permitted', 'testers', 'testers', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('263_public_door.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
 -- WHY THESE ARE HERE AND NOT BESIDE tblEvents. `tblEvents` is declared near the
 -- top of this file; `tblVenues` and `tblVenueRooms` are declared about seven

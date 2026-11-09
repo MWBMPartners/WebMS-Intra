@@ -101,6 +101,16 @@ ALLOWED = {
 }
 
 
+# Addresses answered by PHP itself rather than by a row in tblRoutes, which a
+# real file or folder of the same name would hide just as surely. #493 P4a:
+# the public door's /w/{name}/... is recognised by Site::preDetect() and
+# answered by web/public_html/index.php — but only if the request reaches
+# index.php at all, and a folder web/public_html/w/ would stop it.
+CODE_ANSWERED = {
+    "w": ("the public door, /w/{name}/... (Site::preDetect() and PublicDoor)", "web/_core/Site.php"),
+}
+
+
 def seeded_addresses() -> dict[str, tuple[str, Path, int]]:
     """
     Every address the portal registers, from full_schema.sql and the numbered
@@ -160,6 +170,8 @@ def check() -> int:
         return 0
 
     addresses = seeded_addresses()
+    for address, (target, where) in CODE_ANSWERED.items():
+        addresses.setdefault(address, (target, REPO_ROOT / where, 0))
     on_disk = webroot_entries()
     findings = []
 

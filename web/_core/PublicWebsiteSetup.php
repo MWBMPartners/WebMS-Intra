@@ -39,9 +39,18 @@
  *                                and no two organisations may share one — the
  *                                database's unique key is the real guard.
  *   4. THE SET-UP CHECK (`checkSetUp()`): what can be known today, and
- *      nothing more. The public door itself is package P4, so its row ALWAYS
- *      reads "not part of this version, so it cannot be tested" — never a
- *      tick.
+ *      nothing more. Since #493 P4a it says whether the public door is on
+ *      and gives its addresses, but it does NOT fetch the door, so whether a
+ *      website really shows it is ALWAYS "not tested" — never a tick. (P4d
+ *      adds the fetch that confirms a public address reaches this door.)
+ *   5. THE PUBLIC DOOR'S NAME (#493 P4a, D-097): whether the door is on, its
+ *      random public name, and the three writers that turn it on, replace
+ *      its name and switch it off (`turnDoorOn()`, `replaceDoorName()`,
+ *      `turnDoorOff()`), each recorded. The two look-ups start-up makes
+ *      before any session is looked at (`siteForDoorName()`,
+ *      `publicHostRow()`), and D-087's reader for test copies
+ *      (`testCopyDoorOpenToAnybody()`). The door itself — what it answers —
+ *      is `Portal\Core\PublicDoor`.
  *
  * EVERY BAD VALUE IS REFUSED WITH ITS REASON, never quietly corrected (#668).
  * Tidying that cannot change what an address means (capitals, one closing
@@ -51,12 +60,12 @@
  *
  * WHAT IT CANNOT DO, said plainly
  * -----------------------------------------------------------------------------
- *   - Nothing here SENDS a header or answers on the public address. Package P4
- *     does both; until then nothing from the portal is shown on any outside
- *     website, and the page says so.
- *   - It cannot tell whether a public address really points at THIS portal:
- *     that needs the public door to answer on it. It reports only whether the
- *     name exists.
+ *   - Nothing here SENDS a header or answers on the public address:
+ *     `Portal\Core\PublicDoor` does both (#493 P4a), asking this class for
+ *     the framing rule (`frameAncestorsFor()`) and the public address.
+ *   - It cannot yet tell whether a public address really points at THIS
+ *     portal: the set-up check does not fetch the door in this version (P4d
+ *     adds that). It reports only whether the name exists.
  *   - It cannot stop a row being changed straight in the database. That is
  *     why every reader checks the stored value again and drops (and logs)
  *     anything it would have refused.
@@ -89,6 +98,22 @@ final class PublicWebsiteSetup
 
     /** The table holding each organisation's optional public address (D-095). */
     public const HOSTS_TABLE = 'tblPublicHosts';
+
+    /**
+     * The table holding each organisation's public door name (#493 P4a,
+     * migration 263). A row means the door is on; no row means off (D-097).
+     */
+    public const DOOR_TABLE = 'tblPublicDoorNames';
+
+    /**
+     * D-087's two settings. The installation's limit ('testers' or 'either',
+     * installation row only, seeded 'testers' by migration 263) and the
+     * organisation's own choice ('testers' or 'anybody', its own row only, not
+     * seeded). Read by `testCopyDoorOpenToAnybody()`; written by nothing in
+     * this version (package P4d adds the card).
+     */
+    public const KEY_DOOR_TEST_PERMITTED = 'public.door.testCopies.permitted';
+    public const KEY_DOOR_TEST_OPEN      = 'public.door.testCopies.open';
 
     /**
      * The most websites one organisation may list as allowed to frame its
@@ -648,6 +673,312 @@ final class PublicWebsiteSetup
     }
 
     // =========================================================================
+    // 3b. The public door's name, and the test-copy setting (#493 P4a)
+    // =========================================================================
+
+    /**
+     * Is this text shaped like a public door name: exactly 24 lower-case hex
+     * characters? Every name the portal makes is (`bin2hex(random_bytes(12))`).
+     * Capitals are NOT accepted: the column's collation ignores capitals, so
+     * accepting them would give one name 2^24 spellings, and a door address
+     * is only ever copied, never typed.
+     */
+    public static function isDoorName(string $text): bool
+    {
+        return preg_match('/^[0-9a-f]{24}$/D', $text) === 1;
+    }
+
+    /**
+     * Which ACTIVE organisation holds this public door name, or null when none
+     * does (an unknown, replaced or removed name, a name of a switched-off
+     * organisation, or text that is not a name at all). Asked by
+     * `Site::preDetect()` while the portal starts up, before any session is
+     * looked at.
+     *
+     * ⚠️ IT THROWS on a database fault, on purpose: start-up must tell "no such
+     *    name" (a 404) apart from "could not ask" (also a 404 for the door, but
+     *    logged). The one exception is error 1146, the table not existing yet
+     *    (files reach a server before anybody presses "Run migrations"): then
+     *    no organisation can have a door, so null is the true answer.
+     */
+    public static function siteForDoorName(\mysqli $db, string $name): ?int
+    {
+        if (self::isDoorName($name) === false) {
+            return null;
+        }
+        try {
+            $stmt = $db->prepare(
+                'SELECT n.`siteID` FROM `' . self::DOOR_TABLE . '` n INNER JOIN `tblSites` s ON s.`siteID` = n.`siteID` '
+                . 'WHERE n.`publicName` = ? AND s.`isActive` = 1 LIMIT 1'
+            );
+        } catch (\mysqli_sql_exception $e) {
+            if ($e->getCode() === 1146) {
+                return null;
+            }
+            throw $e;
+        }
+        $stmt->bind_param('s', $name);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row === null ? null : (int) $row['siteID'];
+    }
+
+    /**
+     * The stored public-address row for a host name, for `Site::preDetect()`:
+     * null when no organisation holds it, else the organisation, whether that
+     * organisation is active, and whether the stored row is USABLE — exactly
+     * what `checkPublicHost()` would accept, and not an address members sign
+     * in at (a hand edit could put either there; a members' address must never
+     * be turned into a door, or every member would be locked out).
+     *
+     * Throws on a database fault, except 1146 (no table yet: nothing can hold
+     * a public address, so null is the true answer). See siteForDoorName().
+     *
+     * @return array{siteId:int, active:bool, usable:bool}|null
+     */
+    public static function publicHostRow(\mysqli $db, string $host): ?array
+    {
+        if ($host === '') {
+            return null;
+        }
+        try {
+            $stmt = $db->prepare(
+                'SELECT h.`siteID`, h.`hostName`, s.`isActive` FROM `' . self::HOSTS_TABLE . '` h '
+                . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` WHERE h.`hostName` = ? LIMIT 1'
+            );
+        } catch (\mysqli_sql_exception $e) {
+            if ($e->getCode() === 1146) {
+                return null;
+            }
+            throw $e;
+        }
+        $stmt->bind_param('s', $host);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($row === null) {
+            return null;
+        }
+        $stored  = (string) $row['hostName'];
+        $checked = self::checkPublicHost($stored);
+        $usable  = $checked['problem'] === '' && $checked['host'] === $stored && $stored === $host;
+        if ($usable === true && in_array($stored, self::hostsMembersUse($db, ''), true) === true) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: organisation #' . (int) $row['siteID'] . '\'s stored public address '
+                . 'is an address members sign in at, so it is NOT treated as a public address.');
+            $usable = false;
+        }
+
+        return ['siteId' => (int) $row['siteID'], 'active' => (int) $row['isActive'] === 1, 'usable' => $usable];
+    }
+
+    /**
+     * Is this organisation's public door on, and what is its name? Never
+     * throws.
+     *   'on'         a row holding a name the portal could have made;
+     *   'off'        no row (D-097: how every organisation starts);
+     *   'spoiled'    a row whose name is not one the portal makes (a hand
+     *                edit). The door does NOT answer: a public address needs
+     *                the door on, and no request can carry that name;
+     *   'unreadable' the database could not be asked. The door does not
+     *                answer, and the card says it could not be read.
+     *
+     * @return array{state:string, name:string}
+     */
+    public static function doorStateFor(\mysqli $db, int $siteId): array
+    {
+        try {
+            $stmt = $db->prepare('SELECT `publicName` FROM `' . self::DOOR_TABLE . '` WHERE `siteID` = ? LIMIT 1');
+            $stmt->bind_param('i', $siteId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: whether the public door is on could not be read: ' . $e->getMessage());
+
+            return ['state' => 'unreadable', 'name' => ''];
+        }
+        if ($row === null) {
+            return ['state' => 'off', 'name' => ''];
+        }
+        $name = (string) $row['publicName'];
+        if (self::isDoorName($name) === false) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteId . '\'s stored public door name is not one '
+                . 'the portal makes, so the door does not answer.');
+
+            return ['state' => 'spoiled', 'name' => ''];
+        }
+
+        return ['state' => 'on', 'name' => $name];
+    }
+
+    /**
+     * 🚪 Turn the organisation's public door on (D-097): give it a new random
+     * name. Already on → nothing changes, and it says so. Recorded.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function turnDoorOn(\mysqli $db, int $siteId, ?int $actorId): array
+    {
+        $now = self::doorStateFor($db, $siteId);
+        if ($now['state'] === 'on') {
+            return ['saved' => true, 'type' => 'info', 'message' => 'The public door is already on. Nothing was changed.'];
+        }
+        if ($now['state'] === 'spoiled') {
+            return self::refusedAndRecorded('public door', $siteId, 'The stored public door name is not one the portal makes, '
+                . 'so it cannot simply be switched on. Use "Replace the name" to give it a new one. Nothing was changed.', $actorId);
+        }
+        if ($now['state'] === 'unreadable') {
+            return self::refusedAndRecorded('public door', $siteId, 'Whether the public door is on could not be read. Nothing was changed.', $actorId);
+        }
+        $name = bin2hex(random_bytes(12));
+        try {
+            $stmt = $db->prepare('INSERT INTO `' . self::DOOR_TABLE . '` (`siteID`, `publicName`, `changedAtUtc`) VALUES (?, ?, UTC_TIMESTAMP())');
+            $stmt->bind_param('is', $siteId, $name);
+            $stmt->execute();
+            $stmt->close();
+        } catch (\mysqli_sql_exception $e) {
+            if ($e->getCode() === 1062 && self::doorStateFor($db, $siteId)['state'] === 'on') {
+                // Turned on at the same moment, probably from another tab.
+                return ['saved' => true, 'type' => 'info', 'message' => 'The public door is already on (it was turned on at the same '
+                    . 'moment, probably from another tab). Nothing was changed.'];
+            }
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the public door could not be turned on: ' . $e->getMessage());
+
+            return self::refusedAndRecorded('public door', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
+        }
+        Logger::activity('PublicDoorTurnedOn', 'Organisation #' . $siteId . '\'s public door was turned on, with the public name '
+            . $name . '.', $actorId);
+
+        return ['saved' => true, 'type' => 'success', 'message' => 'The public door is on. Your website can now read the events and '
+            . 'posters you have put on the public website, at the addresses shown below.'];
+    }
+
+    /**
+     * Give the organisation's public door a NEW name. Every copy pasted into
+     * another website with the old name stops at once, and the page warns so
+     * before the button is pressed. Recorded with both names.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function replaceDoorName(\mysqli $db, int $siteId, ?int $actorId): array
+    {
+        $now = self::doorStateFor($db, $siteId);
+        if ($now['state'] === 'off') {
+            return self::refusedAndRecorded('public door', $siteId, 'The public door is off, so there is no name to replace. '
+                . 'Nothing was changed.', $actorId);
+        }
+        if ($now['state'] === 'unreadable') {
+            return self::refusedAndRecorded('public door', $siteId, 'Whether the public door is on could not be read. Nothing was changed.', $actorId);
+        }
+        $name = bin2hex(random_bytes(12));
+        try {
+            $stmt = $db->prepare('UPDATE `' . self::DOOR_TABLE . '` SET `publicName` = ?, `changedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = ?');
+            $stmt->bind_param('si', $name, $siteId);
+            $stmt->execute();
+            $changed = $stmt->affected_rows;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the public door name could not be replaced: ' . $e->getMessage());
+
+            return self::refusedAndRecorded('public door', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
+        }
+        if ($changed < 1) {
+            // ⚠️ The row vanished between the read and the write (switched off
+            //    at the same moment): say so rather than report a new name.
+            return self::refusedAndRecorded('public door', $siteId, 'Somebody switched the public door off at the same moment. '
+                . 'Nothing was changed; look at the page again.', $actorId);
+        }
+        Logger::activity('PublicDoorNameReplaced', 'Organisation #' . $siteId . '\'s public door name was replaced: '
+            . ($now['name'] === '' ? '(a name the portal would not make)' : $now['name']) . ' → ' . $name
+            . '. Every copy using the old name stopped working.', $actorId);
+
+        return ['saved' => true, 'type' => 'warning', 'message' => 'The public door has a new name. Every copy pasted into a '
+            . 'website with the old name has stopped working; paste the new addresses shown below wherever you use them.'];
+    }
+
+    /**
+     * Switch the organisation's public door off: delete its name. Every copy
+     * pasted into another website stops at once, and so does its public
+     * address. Already off → nothing changes, and it says so. Recorded.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function turnDoorOff(\mysqli $db, int $siteId, ?int $actorId): array
+    {
+        $was = self::doorStateFor($db, $siteId);
+        if ($was['state'] === 'unreadable') {
+            return self::refusedAndRecorded('public door', $siteId, 'Whether the public door is on could not be read. Nothing was changed.', $actorId);
+        }
+        try {
+            $stmt = $db->prepare('DELETE FROM `' . self::DOOR_TABLE . '` WHERE `siteID` = ?');
+            $stmt->bind_param('i', $siteId);
+            $stmt->execute();
+            $gone = $stmt->affected_rows;
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the public door could not be switched off: ' . $e->getMessage());
+
+            return self::refusedAndRecorded('public door', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
+        }
+        if ($gone < 1) {
+            return ['saved' => true, 'type' => 'info', 'message' => 'The public door is already off. Nothing was changed.'];
+        }
+        Logger::activity('PublicDoorTurnedOff', 'Organisation #' . $siteId . '\'s public door was switched off (its name was '
+            . ($was['name'] === '' ? 'not one the portal makes' : $was['name']) . '). Nothing reaches any outside website now.', $actorId);
+
+        return ['saved' => true, 'type' => 'success', 'message' => 'The public door is off. Nothing the portal holds reaches any '
+            . 'outside website now, and every copy pasted into one has stopped working.'];
+    }
+
+    /**
+     * D-087, THE READER: on a test copy of the portal (the alpha, beta or dev
+     * channel), is this organisation's public door open to ANYBODY, rather
+     * than to signed-in testers only? The stricter of two answers wins:
+     *   - the installation's limit, `public.door.testCopies.permitted`
+     *     (installation row only): 'either' lets an organisation choose,
+     *     'testers' (seeded) does not;
+     *   - the organisation's own choice, `public.door.testCopies.open` (its
+     *     own row only — an installation-wide row of it is ignored, so one
+     *     organisation's choice never becomes everybody's): 'anybody' or
+     *     'testers'; no row means 'testers'.
+     * True only when the installation says exactly 'either' AND the
+     * organisation says exactly 'anybody'. Anything else, any spelling nobody
+     * saved, and a database that cannot be asked, is 'testers' — the stricter.
+     * Never throws.
+     *
+     * ⚠️ NOTHING WRITES EITHER SETTING YET. The card that does is package P4d.
+     *    Until it exists no page can store an organisation's 'anybody'
+     *    (Admin, Settings refuses to add an organisation's row for a key the
+     *    installation already holds, and migration 263 seeds the installation's
+     *    row), so in this version every test copy's door is for signed-in
+     *    testers only. On the live portal nothing asks this at all.
+     */
+    public static function testCopyDoorOpenToAnybody(\mysqli $db, int $siteId): bool
+    {
+        try {
+            $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL LIMIT 1');
+            $key  = self::KEY_DOOR_TEST_PERMITTED;
+            $stmt->bind_param('s', $key);
+            $stmt->execute();
+            $limit = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            if ($limit === null || (string) ($limit['settingValue'] ?? '') !== 'either') {
+                return false;
+            }
+            $own = self::organisationRow($db, $siteId, self::KEY_DOOR_TEST_OPEN, false);
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the test-copy door setting could not be read, so the door is for testers only: '
+                . $e->getMessage());
+
+            return false;
+        }
+
+        return $own === 'anybody';
+    }
+
+    // =========================================================================
     // 4️⃣ Saving — every save and every refusal is recorded
     // =========================================================================
 
@@ -879,7 +1210,8 @@ final class PublicWebsiteSetup
 
         return ['saved' => true, 'type' => 'success', 'message' => $host === ''
             ? 'Saved: no public address is set, so the public pages will use the portal\'s own address.'
-            : 'Saved. Nothing answers on this address yet: the public door that will is not part of this version.'];
+            : 'Saved. The public door answers on this address once whoever looks after your domain points it at this portal, '
+                . 'and only while the public door is on.'];
     }
 
     /**
@@ -929,7 +1261,9 @@ final class PublicWebsiteSetup
     /**
      * Run the set-up check for one organisation. Read-only: it changes no
      * setting. Each row is `[label, state, words]` where state is 'ok',
-     * 'problem', 'note' or 'untested'. The door row is ALWAYS 'untested'.
+     * 'problem', 'note' or 'untested'. The door is reported as on or off
+     * ('note'), and whether a website really shows it is ALWAYS 'untested':
+     * this check does not fetch the door (P4d adds that).
      *
      * ⚠️ IT TAKES NO "FETCH" ARGUMENT ANY MORE (round 3 of P3's check). A test
      *    hook that replaced the fetch let the real path pass different options
@@ -990,7 +1324,8 @@ final class PublicWebsiteSetup
             $rows[] = ['label' => 'Public address', 'state' => $resolves === true ? 'ok' : 'problem',
                 'words' => $resolves === true ? 'Its name exists on the internet.' : 'Its name could not be found on the internet, or it points at a private network. Ask whoever looks after your domain to point it at this portal.'];
             $rows[] = ['label' => 'Public address', 'state' => 'untested',
-                'words' => 'Whether it reaches THIS portal cannot be known until the public door exists, which is not part of this version.'];
+                'words' => 'Whether it reaches THIS portal is not checked in this version. With the public door on, open https://'
+                    . $public . '/events.json in your own browser: it should show your events.'];
         }
 
         // 🖼️ Framing.
@@ -1011,12 +1346,15 @@ final class PublicWebsiteSetup
             }
         }
 
-        // 📋 What is on the public website today, counted by the rules the door will use.
+        // 📋 What is on the public website today, counted by the rules the door uses.
+        $door = self::doorStateFor($db, $siteId);
         [$events, $posters] = self::countsOnWebsiteToday($db, $siteId);
         $rows[] = ['label' => 'On the public website today', 'state' => 'note', 'words' => $events === null
             ? 'The events and posters could not be counted.'
             : $events . ' event' . ($events === 1 ? '' : 's') . ' and ' . $posters . ' noticeboard poster' . ($posters === 1 ? '' : 's')
-                . ' are marked to show today. Nothing is actually shown anywhere until the public door is added.'];
+                . ' are marked to show today' . ($door['state'] === 'on'
+                    ? ' (the door leaves out events that have already finished).'
+                    : '. Nothing is shown anywhere while the public door is off.')];
 
         // 🧭 The portal's own address.
         $state = PortalAddress::state();
@@ -1025,8 +1363,22 @@ final class PublicWebsiteSetup
             : ['label' => 'The portal\'s own address', 'state' => 'problem', 'words' => $state === PortalAddress::STATE_UNREADABLE
                 ? 'It could not be read.' : 'Not set, or not usable. A global administrator sets it on Admin, Settings, Organisation.'];
 
-        // 🚪 The public door — ALWAYS untested in this version. Never a tick.
-        $rows[] = ['label' => 'The public door', 'state' => 'untested', 'words' => 'Not part of this version, so it cannot be tested.'];
+        // 🚪 The public door (#493 P4a): on or off, with its addresses — said,
+        //    never ticked. Whether a website really shows it is ALWAYS
+        //    untested here, because this check does not fetch the door.
+        if ($door['state'] === 'on') {
+            $eventsAt  = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);
+            $postersAt = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_POSTERS);
+            $rows[] = ['label' => 'The public door', 'state' => 'note', 'words' => $eventsAt === ''
+                ? 'Switched on, but the portal cannot build its addresses: the portal\'s own address is not set. Until it is, the door answers nothing.'
+                : 'Switched on. Its events are read from ' . $eventsAt . ' and its posters from ' . $postersAt . '.'];
+        } else {
+            $rows[] = ['label' => 'The public door', 'state' => 'note', 'words' => $door['state'] === 'unreadable'
+                ? 'Whether it is on could not be read.'
+                : 'Switched off, so nothing the portal holds reaches any outside website.'];
+        }
+        $rows[] = ['label' => 'The public door', 'state' => 'untested', 'words' => 'Whether your website really shows it is not '
+            . 'tested by this check, which does not fetch the door. Open its addresses in your own browser to see what a website gets.'];
 
         return $rows;
     }

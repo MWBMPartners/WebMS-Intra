@@ -20,10 +20,13 @@
  * of the installation or of this organisation, or somebody holding "Set up
  * the public website" (D-085). An ORDINARY administrator is refused.
  *
- * ⚠️ NOTHING FROM THE PORTAL IS SHOWN ON ANY OUTSIDE WEBSITE YET. The public
- *    door that will use these settings is package P4, and the page says so at
- *    the top, because a page of settings that seem to do something they do not
- *    is #671's "a lie with a Save button".
+ * 🚪 THE PUBLIC DOOR CARD (#493 P4a, D-097) is at the top: whether the door is
+ *    on (it starts OFF), its addresses, and the three buttons — turn it on,
+ *    replace its name, switch it off. The last two stop every copy pasted
+ *    into a website, so they say so before they are pressed and need a tick.
+ *    Until the door is on, nothing from the portal is shown on any outside
+ *    website, and the card says so: a page of settings that seem to do
+ *    something they do not is #671's "a lie with a Save button".
  *
  * Every value is checked, refused with its reason, and recorded, by
  * `Portal\Core\PublicWebsiteSetup` — the ONE place. This page only draws.
@@ -41,7 +44,10 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Channel;
+use Portal\Core\Gatekeeper;
 use Portal\Core\PortalAddress;
+use Portal\Core\PublicDoor;
 use Portal\Core\PublicWebsiteSetup;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -67,6 +73,19 @@ $publicHost  = PublicWebsiteSetup::publicHostFor($mysqli, $siteId);
 $origins     = PublicWebsiteSetup::frameOriginsStored($mysqli, $siteId);
 $permitted   = PublicWebsiteSetup::framingPermitted($mysqli);
 $isRootAdmin = App::isRootAdmin();
+$door        = PublicWebsiteSetup::doorStateFor($mysqli, $siteId);
+$doorEvents  = $door['state'] === 'on' ? PublicDoor::addressFor($mysqli, $siteId, PublicDoor::SURFACE_EVENTS) : '';
+$doorPosters = $door['state'] === 'on' ? PublicDoor::addressFor($mysqli, $siteId, PublicDoor::SURFACE_POSTERS) : '';
+// D-087 on a test copy: the door answers signed-in testers only in this
+// version (nothing can choose "anybody" until package P4d), and the card says
+// what that means for trying it from a real website.
+$portalChannelSource = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : '';
+// The channel is asked FIRST: on a live portal shouldEnforce() writes a line to
+// the error log when the channel was only assumed, and index.php has already
+// written it for this request.
+$doorTestersOnly     = in_array(PORTAL_ENV, Channel::PRE_RELEASE, true) === true
+    && Gatekeeper::shouldEnforce(PORTAL_ENV, $portalChannelSource) === true
+    && PublicWebsiteSetup::testCopyDoorOpenToAnybody($mysqli, $siteId) === false;
 
 // The one-click suggestion: the main website as an https framing website, when
 // it would be accepted and is not on the list yet.
@@ -105,22 +124,71 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="container py-3">
     <h1 class="h3 mb-2"><i class="fa-solid fa-globe me-2" aria-hidden="true"></i>Public website</h1>
 
-    <div class="alert alert-info" role="note" data-public-door-note="1">
-        <i class="fa-solid fa-circle-info me-1" aria-hidden="true"></i>
-        <strong>Nothing from the portal is shown on any outside website yet.</strong>
-        These settings are kept ready for the public door — the piece you will paste into your website — which is
-        not part of this version. Until it is added, saving here changes nothing anybody outside the portal can see.
-    </div>
-
     <?php if ($flashMsg !== ''): ?>
         <div class="alert alert-<?php echo $esc($flashType); ?>" role="alert"><?php echo $esc($flashMsg); ?></div>
     <?php endif; ?>
+
+    <!-- 🚪 The public door (#493 P4a, D-097): on or off, its addresses, and the three buttons. -->
+    <div class="card mb-3 border-primary" data-public-door="<?php echo $esc($door['state']); ?>">
+        <div class="card-body">
+            <h2 class="h5">The public door</h2>
+            <p class="text-muted">The public door is how your own website reads the events and noticeboard posters you have put on the public website — only those, and only while their dates allow. Nothing else the portal holds goes through it.</p>
+            <?php if ($door['state'] === 'on'): ?>
+                <p><span class="badge text-bg-success me-1">On</span> Your website can read:</p>
+                <?php if ($doorEvents === ''): ?>
+                    <div class="alert alert-warning" data-door-no-address="1">The door is on, but the portal cannot build its addresses because the portal's own address is not set, so it answers nothing yet. A global administrator sets it on Admin, Settings, Organisation.</div>
+                <?php else: ?>
+                    <ul class="mb-2">
+                        <li>Events: <code data-door-address="events"><?php echo $esc($doorEvents); ?></code></li>
+                        <li>Noticeboard posters: <code data-door-address="posters"><?php echo $esc($doorPosters); ?></code></li>
+                    </ul>
+                    <p class="small text-muted">Each gives at most <?php echo (int) PublicDoor::DEFAULT_LIMIT; ?> items; add <code>?limit=</code> and a number up to <?php echo (int) PublicDoor::MAX_LIMIT; ?> for more. A change reaches websites within about a minute.</p>
+                <?php endif; ?>
+                <?php if ($doorTestersOnly === true): ?>
+                    <div class="alert alert-warning" data-door-testers-only="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. Browsers do not send your sign-in to another website, so a copy pasted into a real website shows nothing from this test copy; open the addresses above in this browser instead.</div>
+                <?php endif; ?>
+                <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-2" data-door-form="replace">
+                    <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                    <input type="hidden" name="action" value="door_replace">
+                    <p class="small mb-1"><strong>Replace the name</strong> if the addresses have gone somewhere they should not. Every copy pasted into a website with the old name stops working at once, and you will need to paste the new addresses in again.</p>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-replace-ok" required><label class="form-check-label" for="pw-door-replace-ok">I understand every copy using the old name will stop working</label></div>
+                    <button type="submit" class="btn btn-outline-warning btn-sm mt-1">Replace the name</button>
+                </form>
+                <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-3" data-door-form="off">
+                    <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                    <input type="hidden" name="action" value="door_off">
+                    <p class="small mb-1"><strong>Switch the door off</strong> to stop your website showing anything from the portal. Every copy pasted into a website stops working, and turning the door on again gives it a new name.</p>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-off-ok" required><label class="form-check-label" for="pw-door-off-ok">I understand every copy pasted into a website will stop working</label></div>
+                    <button type="submit" class="btn btn-outline-danger btn-sm mt-1">Switch the public door off</button>
+                </form>
+            <?php elseif ($door['state'] === 'unreadable'): ?>
+                <div class="alert alert-warning" data-door-unreadable="1">Whether the public door is on could not be read. Try again later; nothing was changed.</div>
+            <?php else: ?>
+                <p><span class="badge text-bg-secondary me-1">Off</span> <strong>Nothing from the portal is shown on any outside website.</strong> The door starts off, and stays off until somebody turns it on here.</p>
+                <?php if ($door['state'] === 'spoiled'): ?>
+                    <div class="alert alert-warning" data-door-spoiled="1">A public door name is stored that the portal would not make, so the door does not answer. Replace the name to give it a new one.</div>
+                    <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" data-door-form="replace">
+                        <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                        <input type="hidden" name="action" value="door_replace">
+                        <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-replace-ok" required><label class="form-check-label" for="pw-door-replace-ok">I understand every copy using the old name will stop working</label></div>
+                        <button type="submit" class="btn btn-primary btn-sm mt-1">Replace the name</button>
+                    </form>
+                <?php else: ?>
+                    <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" data-door-form="on">
+                        <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                        <input type="hidden" name="action" value="door_on">
+                        <button type="submit" class="btn btn-primary btn-sm">Turn on the public door</button>
+                    </form>
+                <?php endif; ?>
+            <?php endif; ?>
+        </div>
+    </div>
 
     <?php if ($checkRows !== null): ?>
         <div class="card mb-3 border-primary" data-setup-check="1">
             <div class="card-body">
                 <h2 class="h5">What the set-up check found</h2>
-                <p class="small text-muted">Shown once. It changed no setting, and nothing here is a promise that the public door works — that cannot be tested until it exists.</p>
+                <p class="small text-muted">Shown once. It changed no setting, and nothing here is a promise that your website shows the public door — this check does not fetch it.</p>
                 <ul class="list-unstyled mb-0">
                     <?php foreach ($checkRows as $row): ?>
                         <?php [$word, $colour] = $stateWords[(string) ($row['state'] ?? 'note')] ?? $stateWords['note']; ?>
@@ -139,7 +207,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h5">Your main website</h2>
-            <p class="text-muted">The website your organisation already has, which the portal does not run — for example https://www.ourchurch.org. The portal's events and posters will appear inside it once the public door is added.</p>
+            <p class="text-muted">The website your organisation already has, which the portal does not run — for example https://www.ourchurch.org. The portal's events and posters appear inside it through the public door above, once it is on.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                 <input type="hidden" name="action" value="website">
@@ -215,7 +283,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h5">Check my set-up</h2>
-            <p class="text-muted">Checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched), whether your public address's name exists, whether each framing website is valid, what is marked to appear on the public website today, and whether the portal's own address is set. It cannot test the public door, because that is not part of this version. It changes no setting.</p>
+            <p class="text-muted">Checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched), whether your public address's name exists, whether each framing website is valid, what is marked to appear on the public website today, whether the portal's own address is set, and whether the public door is on, with its addresses. It does not fetch the door, so it cannot say whether your website really shows it. It changes no setting.</p>
             <p class="small text-muted mb-2">The portal's own address is <?php echo PortalAddress::state() === PortalAddress::STATE_SET ? 'set' : 'not set'; ?>.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/check')); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">

@@ -186,6 +186,45 @@ class Gatekeeper
         global $mysqli;
         $userId = (int) $_SESSION['user_id'];
 
+        // 1 and 2 — who may use a test copy — are decided in ONE place,
+        // mayUseTestCopy(), since #493 P4a: the public door asks the same
+        // question (D-087, "signed-in testers only") without going through
+        // this method, and two copies of the rule would drift apart.
+        if (self::mayUseTestCopy($mysqli, $userId, $channel) === true) {
+            return; // permit
+        }
+
+        // 3. 🚫 Deny -- log and show the 403 error page
+        Logger::activity('GatekeeperDenied', 'User denied to ' . $channel . ' area', $userId);
+        Router::renderError(403);
+        exit();
+    }
+
+    /**
+     * 🧪 May this account use a TEST copy of the portal (the dev, alpha or
+     * beta channel)? THE ONE RULE (#493 P4a), moved here out of enforce() so
+     * that the gate and the public door (D-087: on a test copy the door may
+     * be for signed-in testers only) cannot disagree. One thing was added in
+     * the move, said rather than hidden: an account that is switched off, or
+     * gone, now answers no before either step is asked (see below).
+     *
+     * Yes for an ACTIVE account holding the Admin or Root Admin flag on its
+     * own user record, or a role named in the installation-wide setting
+     * `portal.{channel}AccessRoles`. No for anybody else, for nobody (0),
+     * and for a channel that is not a test copy's. It decides nothing about
+     * WHETHER the gate runs (shouldEnforce()) and records nothing: each
+     * caller records its own refusal.
+     *
+     * @param \mysqli $db      The connection.
+     * @param int     $userId  The account, 0 for nobody.
+     * @param string  $channel PORTAL_ENV: 'dev', 'alpha' or 'beta'.
+     */
+    public static function mayUseTestCopy(\mysqli $db, int $userId, string $channel): bool
+    {
+        if ($userId <= 0 || in_array($channel, self::VALID_CHANNELS, true) === false) {
+            return false;
+        }
+
         // 1. Administrators named on the user record are always allowed.
         //
         //    WHAT WAS WRONG: the two flags were compared with === '1'. A
@@ -211,7 +250,7 @@ class Gatekeeper
         //    If such a person does need access, step 2 below grants it by
         //    role, deliberately.
         $row  = null;
-        $stmt = $mysqli->prepare('SELECT isRootAdmin, isAdmin FROM tblUsers WHERE userID = ? LIMIT 1');
+        $stmt = $db->prepare('SELECT `isRootAdmin`, `isAdmin`, `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
         if ($stmt !== false) {
             $stmt->bind_param('i', $userId);
             $stmt->execute();
@@ -219,10 +258,15 @@ class Gatekeeper
             $stmt->close();
         }
 
-        if (is_array($row) === true
-            && ((int) $row['isRootAdmin'] === 1 || (int) $row['isAdmin'] === 1)
-        ) {
-            return; // permit
+        // An account that is switched off, or gone, is nobody (#493 P4a). The
+        // gate itself never meets one — Auth::ensureSession() has ended such a
+        // session before enforce() runs — but the public door reads the
+        // session with a read-only look that does not end anything.
+        if (is_array($row) === false || (int) $row['isActive'] !== 1) {
+            return false;
+        }
+        if ((int) $row['isRootAdmin'] === 1 || (int) $row['isAdmin'] === 1) {
+            return true;
         }
 
         // 2. Additional roles, from the setting portal.{channel}AccessRoles
@@ -236,15 +280,12 @@ class Gatekeeper
         $rolesCsv = self::portalWideSetting('portal.' . $channel . 'AccessRoles') ?? '';
         if ($rolesCsv !== '') {
             $allowedRoles = array_map('trim', explode(',', $rolesCsv));
-            if (self::userHasRole($userId, $allowedRoles) === true) {
-                return;
+            if (self::userHasRole($db, $userId, $allowedRoles) === true) {
+                return true;
             }
         }
 
-        // 3. 🚫 Deny -- log and show the 403 error page
-        Logger::activity('GatekeeperDenied', 'User denied to ' . $channel . ' area', $userId);
-        Router::renderError(403);
-        exit();
+        return false;
     }
 
     /**
@@ -423,9 +464,8 @@ class Gatekeeper
      * "open" — something a channel gate running before routing even starts
      * cannot assume.
      */
-    private static function userHasRole(int $userId, array $roleKeys): bool
+    private static function userHasRole(\mysqli $db, int $userId, array $roleKeys): bool
     {
-        global $mysqli;
-        return Roles::hasAnywhere($mysqli, $userId, $roleKeys);
+        return Roles::hasAnywhere($db, $userId, $roleKeys);
     }
 }

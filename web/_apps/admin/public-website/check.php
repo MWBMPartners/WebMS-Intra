@@ -25,8 +25,10 @@
  * `PublicWebsiteSetup::CHECK_LIMIT` times in `CHECK_WINDOW_SECONDS`
  * (`RateLimiter`, the portal's generic limiter).
  *
- * THE DOOR ROW ALWAYS SAYS IT CANNOT BE TESTED. The public door is package P4;
- * a tick here would be a claim nobody can stand behind.
+ * THE DOOR IS NEVER TICKED. Since #493 P4a the check says whether the public
+ * door is on and gives its addresses, but it does not fetch the door, so
+ * whether a website really shows it is always "not tested": a tick here would
+ * be a claim nobody can stand behind. (P4d adds the fetch.)
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)

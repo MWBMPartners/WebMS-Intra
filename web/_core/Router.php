@@ -63,7 +63,7 @@ class Router
      * @var list<string>
      */
     public const SPECIAL_ROUTE_FIRST_SEGMENTS = [
-        '01', '8003', '8004', 'a', 'api', 'e', 'f', 'health', 'login', 'logout', 'offline', 'os',
+        '01', '8003', '8004', 'a', 'api', 'e', 'f', 'health', 'login', 'logout', 'offline', 'os', 'w',
     ];
 
     /**
@@ -338,6 +338,17 @@ class Router
         if (str_starts_with($path, 'api/') === true) {
             ApiRouter::dispatch($path);
             return true;
+        }
+
+        // 🚪 'w' is the public door's (#493 P4a). A door address is answered
+        //    by web/public_html/index.php long before the router, so this is
+        //    reached only by a /w/ address the door did not recognise — one
+        //    behind a path-mode organisation prefix, say (/cambridge/w/…). It
+        //    gets the door's own 404, never a page: 'w' must never fall
+        //    through to tblRoutes, and reserving it here also reserves it as
+        //    an organisation key (ReservedKeys).
+        if ($path === 'w' || str_starts_with($path, 'w/') === true) {
+            PublicDoor::notFound();
         }
 
         // 📣 Per-event public landing page (#346) — short URL /e/<slug>.

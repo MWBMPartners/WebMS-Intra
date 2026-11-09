@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public-door-posters.schema.json",
+  "title": "The public door's posters feed",
+  "description": "What an organisation's own website reads from the portal's public door at posters.json (/w/{name}/posters.json on the portal's address, or /posters.json on the organisation's public address): the noticeboard posters somebody put on the public website that are inside their website dates today, on the organisation's own calendar, in the board's own order. Nothing deleted, unticked or another organisation's ever appears. Written by Portal\\Core\\PublicDoor::renderPosters() (web/_core/PublicDoor.php) and checked by tools/audit-checks/check_public_door_schema.py.",
+  "$comment": "FOR MAINTAINERS. JSON has no comments, so every explanation lives here. Add fields rather than rename or remove them, and raise `version` (and FORMAT_VERSION in PublicDoor.php) for anything a version-1 reader would misread. A poster's uploaded picture or video is given at the door's own media address, which answers only while a poster on the public website uses it; an outside https:// address is passed through unchanged; anything else is null. The check's validator understands ONLY the keywords it lists, and fails on any other. Database numbers, who made the poster and its sort position are deliberately absent.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "organisation", "generatedAt", "posters"],
+  "properties": {
+    "format": {
+      "description": "Always the text webms-public-posters, so a reader can tell this feed from the events feed.",
+      "const": "webms-public-posters"
+    },
+    "version": {
+      "description": "The version of this shape. 1 today.",
+      "type": "integer",
+      "const": 1
+    },
+    "organisation": {
+      "$ref": "#/$defs/organisation"
+    },
+    "generatedAt": {
+      "description": "The moment this answer was made, in UTC, as YYYY-MM-DDTHH:MM:SSZ. Browsers and caches may keep an answer for up to a minute.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    },
+    "posters": {
+      "description": "The posters, in the order the noticeboard shows them. At most the `limit` asked for (20 when none was asked, 50 at most). Empty when there are none.",
+      "type": "array",
+      "maxItems": 50,
+      "items": { "$ref": "#/$defs/poster" }
+    }
+  },
+  "$defs": {
+    "organisation": {
+      "description": "The organisation the feed belongs to.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "timezone"],
+      "properties": {
+        "name": {
+          "description": "The organisation's name as the portal holds it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "timezone": {
+          "description": "The organisation's own time zone, an IANA name such as Europe/London. A poster's date and time are on this clock.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "poster": {
+      "description": "One poster.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "kicker", "category", "when", "time", "location", "link", "media", "thumbUrl", "canvaUrl"],
+      "properties": {
+        "title": {
+          "description": "The poster's title.",
+          "type": "string",
+          "maxLength": 255
+        },
+        "kicker": {
+          "description": "The short line above the title, or null.",
+          "type": ["string", "null"],
+          "maxLength": 120
+        },
+        "category": {
+          "description": "The poster's category as the noticeboard names it, such as Worship, or null.",
+          "type": ["string", "null"],
+          "maxLength": 40
+        },
+        "when": {
+          "description": "Which day the poster is about: once on a date, or every week on a weekday. null when it says neither.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "description": "once: on `date`. weekly: every week on `weekday`.",
+              "enum": ["once", "weekly"]
+            },
+            "date": {
+              "description": "For once: the calendar date, YYYY-MM-DD, on the organisation's calendar.",
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            "weekday": {
+              "description": "For weekly: the day of the week, 0 for Sunday to 6 for Saturday.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6
+            }
+          }
+        },
+        "time": {
+          "description": "The time of day it is about, HH:MM on the organisation's clock, or null.",
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{2}:[0-9]{2}$"
+        },
+        "location": {
+          "description": "Where, as the poster says it, or null.",
+          "type": ["string", "null"],
+          "maxLength": 255
+        },
+        "link": {
+          "description": "The event's own web page, only when it is an https:// address, else null.",
+          "type": ["string", "null"],
+          "pattern": "^https://"
+        },
+        "media": {
+          "description": "The poster's picture or video, or null when it has none the door can give.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["type", "url"],
+          "properties": {
+            "type": {
+              "description": "image or video.",
+              "enum": ["image", "video"]
+            },
+            "url": {
+              "description": "Where to fetch it: the door's own media address for an upload, or the outside https:// address the poster names.",
+              "type": "string",
+              "pattern": "^https?://"
+            }
+          }
+        },
+        "thumbUrl": {
+          "description": "A small picture for the poster (used for designs made in Canva), or null. Same rules as media.url.",
+          "type": ["string", "null"],
+          "pattern": "^https?://"
+        },
+        "canvaUrl": {
+          "description": "For a poster designed in Canva: its https://www.canva.com/ address, or null.",
+          "type": ["string", "null"],
+          "pattern": "^https://www\\.canva\\.com/"
+        }
+      }
+    }
+  }
+}

@@ -17,6 +17,10 @@
  * ⚠️ ASK WHETHER A FIELD ARRIVED (#677). A post with no `value` field at all is
  *    refused rather than read as "empty", because empty DELETES a setting.
  *
+ * THE PUBLIC DOOR (#493 P4a, D-097): `door_on`, `door_replace` and `door_off`
+ * hand over to `PublicWebsiteSetup`'s three writers. The last two stop every
+ * copy pasted into a website, so they need the `understood` tick, asked here.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -82,6 +86,23 @@ if ($action === 'frame_add_main') {
     $list   = PublicWebsiteSetup::frameOriginsStored($mysqli, $siteId);
     $list[] = 'https://' . substr($website, (int) strpos($website, '://') + 3);
     $out    = PublicWebsiteSetup::saveFrameOrigins($mysqli, $siteId, implode("\n", $list), $actorId);
+    $finish($out['message'], $out['type']);
+}
+
+// 🚪 The public door (#493 P4a, D-097): on, a new name, off. Each writer
+//    records what it did, and refuses with its reason. Replacing the name and
+//    switching the door off both stop every copy pasted into a website, so the
+//    form carries a tick-box saying the person understands, and a post without
+//    it changes nothing — asked HERE, because anything can be posted.
+if ($action === 'door_on' || $action === 'door_replace' || $action === 'door_off') {
+    if ($action !== 'door_on' && ($_POST['understood'] ?? null) !== '1') {
+        $finish('Nothing was changed: tick the box to say you understand that every copy pasted into a website will stop working.', 'danger');
+    }
+    $out = match ($action) {
+        'door_on'      => PublicWebsiteSetup::turnDoorOn($mysqli, $siteId, $actorId),
+        'door_replace' => PublicWebsiteSetup::replaceDoorName($mysqli, $siteId, $actorId),
+        default        => PublicWebsiteSetup::turnDoorOff($mysqli, $siteId, $actorId),
+    };
     $finish($out['message'], $out['type']);
 }
 
