@@ -106,7 +106,7 @@ Auth::requireLogin();
 $sendBack = static function (string $message, bool $keepTyped): never {
     unset($_SESSION[ExpenseRules::DRAFT_SESSION_KEY]);
     if ($keepTyped === true) {
-        $_SESSION[ExpenseRules::DRAFT_SESSION_KEY] = ExpenseRules::claimDraftFrom($_POST, Site::id());
+        $_SESSION[ExpenseRules::DRAFT_SESSION_KEY] = ExpenseRules::claimDraftFrom($_POST, Site::id(), (int) ($_SESSION['user_id'] ?? 0));
     }
     $_SESSION['flash_msg']  = $message;
     $_SESSION['flash_type'] = 'danger';

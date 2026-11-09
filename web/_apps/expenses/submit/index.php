@@ -85,8 +85,12 @@ $siteId = Site::id();
 //    The save handler keeps it on every refusal after the form token was
 //    accepted; `ExpenseRules` says which refusals keep nothing, and why. It
 //    never holds the receipts — a page cannot choose files for somebody —
-//    and the form says so when it has been filled in again.
-$draft = ExpenseRules::draftForForm($_SESSION[ExpenseRules::DRAFT_SESSION_KEY] ?? null, $siteId);
+//    and the form says so when it has been filled in again. It is given
+//    back ONLY to the account it was kept for: the session belongs to the
+//    browser, and a second person can sign in on it while it waits (see
+//    `ExpenseRules::claimDraftFrom()`). Kept typing for anybody else is
+//    cleared here unseen, never shown.
+$draft = ExpenseRules::draftForForm($_SESSION[ExpenseRules::DRAFT_SESSION_KEY] ?? null, $siteId, (int) ($_SESSION['user_id'] ?? 0));
 unset($_SESSION[ExpenseRules::DRAFT_SESSION_KEY]);
 $draftTitle = $draft['claimTitle'] ?? '';
 $draftDept  = $draft['deptID'] ?? 0;

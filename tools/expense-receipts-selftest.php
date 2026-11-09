@@ -77,7 +77,19 @@
  * the typing (R06); the too-large check removed (R11); the form not clearing
  * the kept claim (G03c); the old hand-written accept list (S02); a kept
  * description printed as markup (R03, R04); and the unconfirmed path keeping
- * the typing (K06e).
+ * the typing (K06e). Round 1 of the independent check added five, run ONE AT
+ * A TIME (side-by-side runs interfere: section J kills database connections):
+ * the claim TITLE printed without escaping (R02, R04 — before R01's title
+ * carried markup, this one left every check green); the success path not
+ * clearing kept typing (R18 — green before R17/R18 existed); kept typing given
+ * to any account (A55b, R15); what was sent always rounded up (A59, R11); and
+ * no fallback when the two figures read the same (A59b).
+ *
+ * R7 HANDS THE SESSION TO A SECOND MEMBER BY EDITING ITS FILE, because no
+ * test here can drive a real Microsoft or Google sign-in, which is the route
+ * that leaves an earlier person's session data in place. The edit refuses
+ * when it changes nothing; the server's `session.serialize_handler` is set to
+ * `php` so the format it edits is stated rather than assumed.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - A partly-arrived file (`UPLOAD_ERR_PARTIAL`) and PHP having no temporary
@@ -108,6 +120,10 @@
  * Usage:  SELFTEST_DB_NAME=selftest_expreceipts SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/expense-receipts-selftest.php
  *
+ *         SELFTEST_WEB_PORT chooses the test server's port (section K's commit
+ *         proxy then listens exactly 1000 above it); without it a random port
+ *         between 8960 and 9210 is used.
+ *
  *         The database must already hold `web/_sql/full_schema.sql`. Needs
  *         PHP's curl and fileinfo extensions, `proc_open()`, python3 (for
  *         section K's proxy), permission to CREATE TRIGGER, and, for section
@@ -131,7 +147,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 191;
+const EXPECTED_CHECKS = 199;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -345,18 +361,25 @@ $kept = R::claimDraftFrom([
     'itemQty'    => ['2', '1', '1', '1'],
     'itemUnit'   => ['10.50', '0.00', '7', '3'],
     'csrf_token' => 'never kept',
-], 5);
-check('A53 (#870) a refused claim keeps its title, department and the lines that hold anything — a blank line priced 0.00 is dropped, a priced line with no words is kept',
-    $kept, ['siteId' => 5, 'claimTitle' => 'Trip to York', 'deptID' => 12, 'items' => [
+], 5, 77);
+check('A53 (#870) a refused claim keeps its title, department and the lines that hold anything — a blank line priced 0.00 is dropped, a priced line with no words is kept — and WHOSE it is',
+    $kept, ['siteId' => 5, 'userId' => 77, 'claimTitle' => 'Trip to York', 'deptID' => 12, 'items' => [
         ['desc' => 'Train', 'qty' => '2', 'unit' => '10.50'],
         ['desc' => '<b>Lunch</b>', 'qty' => '1', 'unit' => '7'],
         ['desc' => '', 'qty' => '1', 'unit' => '3'],
     ]]);
 check('A54 (#870) a field of the wrong TYPE is kept as nothing, never trusted (#642)',
-    R::claimDraftFrom(['claimTitle' => ['x'], 'deptID' => '0x1', 'itemDesc' => 'not a list'], 5),
-    ['siteId' => 5, 'claimTitle' => '', 'deptID' => 0, 'items' => []]);
+    R::claimDraftFrom(['claimTitle' => ['x'], 'deptID' => '0x1', 'itemDesc' => 'not a list'], 5, 77),
+    ['siteId' => 5, 'userId' => 77, 'claimTitle' => '', 'deptID' => 0, 'items' => []]);
 check('A55 (#870) the kept claim is offered back only to the SAME organisation',
-    [R::draftForForm($kept, 5) !== null, R::draftForForm($kept, 6), R::draftForForm('rubbish', 5)], [true, null, null]);
+    [R::draftForForm($kept, 5, 77) !== null, R::draftForForm($kept, 6, 77), R::draftForForm('rubbish', 5, 77)], [true, null, null]);
+// Round 1 of the independent check: the session is the BROWSER's, and a
+// second person can sign in on it while kept typing waits.
+$noOwner = $kept;
+unset($noOwner['userId']);
+check('A55b (#870) ...and only to the SAME PERSON: never another account, never "nobody", never a draft that names nobody',
+    [R::draftForForm($kept, 5, 78), R::draftForForm($kept, 5, 0), R::draftForForm($noOwner, 5, 77),
+        R::draftForForm(['userId' => '77'] + $kept, 5, 77)], [null, null, null, null]);
 check('A56 (#870) a POST that PHP emptied, declaring more than post_max_size, is "too large"',
     R::postWasTooLarge('POST', 0, 0, '2097152', '1M'), true);
 check('A57 (#870) ...but not when anything arrived (a post that merely lost its token keeps its other fields)',
@@ -364,10 +387,22 @@ check('A57 (#870) ...but not when anything arrived (a post that merely lost its 
 check('A58 (#870) ...nor when it is within the limit, nor with no limit, nor for a GET',
     [R::postWasTooLarge('POST', 0, 0, '1000', '1M'), R::postWasTooLarge('POST', 0, 0, '2097152', '0'),
         R::postWasTooLarge('GET', 0, 0, '2097152', '1M'), R::postWasTooLarge('POST', 0, 0, 'lots', '1M')], [false, false, false, false]);
-$tooLargeWords = R::postTooLargeMessage(1048577, '1M');
-check('A59 (#870) the words give both sizes with a real gap — what was sent rounded UP, the limit DOWN — and say nothing was kept',
-    [str_contains($tooLargeWords, 'came to 1.1 MB, and this server accepts at most 1 MB'),
-        str_contains($tooLargeWords, 'not your receipts, and not what you typed'), str_contains($tooLargeWords, 'CSRF')], [true, true, false]);
+$sizesSaid = static function (int $sent, string $limit): string {
+    preg_match('/came to (.*?), and this server accepts at most (.*?) in one/', R::postTooLargeMessage($sent, $limit), $m);
+    return ($m[1] ?? '?') . ' / ' . ($m[2] ?? '?');
+};
+// Round 1 of the independent check: the first version always rounded what was
+// sent UP, so exactly 1.5 MB was told "1.6 MB" — untrue. Nearest, unless the
+// two figures would then read the same.
+check('A59 (#870) the sizes are rounded to the NEAREST: exactly 1.5 MB reads "1.5 MB", well over reads its own figure, and kilobytes round too',
+    [$sizesSaid(1536 * 1024, '1M'), $sizesSaid(10 * 1024 * 1024, '1M'), $sizesSaid(1536 * 1024 + 51, '1M'), $sizesSaid(700 * 1024 + 600, '500K')],
+    ['1.5 MB / 1 MB', '10 MB / 1 MB', '1.5 MB / 1 MB', '701 KB / 500 KB']);
+check('A59b (#870) ...and only where nearest would make them read the SAME is what was sent rounded up and the limit down, so the gap is real',
+    [$sizesSaid(1024 * 1024 + 1, '1M'), $sizesSaid(1024 * 1024 + 40000, '1M'), $sizesSaid(500 * 1024 + 1, '500K')],
+    ['1.1 MB / 1 MB', '1.1 MB / 1 MB', '501 KB / 500 KB']);
+$tooLargeWords = R::postTooLargeMessage(2 * 1024 * 1024, '1M');
+check('A59c (#870) ...and the words say nothing was kept, and never mention the form token',
+    [str_contains($tooLargeWords, 'not your receipts, and not what you typed'), str_contains($tooLargeWords, 'CSRF')], [true, false]);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // The pages. A COPY of web/, so changing a folder's permissions never touches
@@ -531,7 +566,19 @@ return true;
 ROUTER;
 file_put_contents($child . $sep . 'router.php', $router);
 
-$port = 8960 + random_int(0, 250);
+// 🔌 THE WEB PORT: SELFTEST_WEB_PORT when it is set, as every other page test
+//    here reads it (the whole-suite runner hands each test its own), and a
+//    random one between 8960 and 9210 only when it is not (round 1 of the
+//    independent check: this test used to ignore the setting and could land
+//    on a port another test had been given). Section K's commit proxy listens
+//    1000 above it — exactly, when the port was given, so a runner that hands
+//    out ports knows both; with a random port, a random step above that.
+$portRaw   = getenv('SELFTEST_WEB_PORT');
+$portGiven = $portRaw !== false && $portRaw !== '';
+$port      = $portGiven === true ? (int) $portRaw : 8960 + random_int(0, 250);
+if ($port < 1024 || $port > 64535) {
+    refuse('SELFTEST_WEB_PORT must be between 1024 and 64535 (section K\'s proxy listens 1000 above it)');
+}
 $jar  = $child . $sep . 'cookies.txt';
 
 // 📏 The server's own limit for ONE file is set to 12 MB on purpose: above the
@@ -560,6 +607,8 @@ $startServer = static function (array $extraIni = []) use (&$state, $child, $sep
             [
                 PHP_BINARY,
                 '-d', 'session.save_path=' . $child . $sep . 'sessions',
+                // The format R7 reads and edits (#870, round 1): stated, never assumed.
+                '-d', 'session.serialize_handler=php',
                 '-d', 'error_log=' . $child . $sep . 'php-errors.log',
                 '-d', 'log_errors=1', '-d', 'display_errors=0',
                 '-d', 'max_execution_time=120',
@@ -1301,7 +1350,7 @@ if ($python === '') {
 if ($dbHost !== '127.0.0.1' && $dbHost !== 'localhost') {
     refuse("section K's proxy forwards to 127.0.0.1, and this database is on {$dbHost}");
 }
-$proxyPort = $port + 1000 + random_int(0, 200);
+$proxyPort = $port + 1000 + ($portGiven === true ? 0 : random_int(0, 200));
 $arm       = $child . $sep . 'proxy-arm';
 $refuseNew = $child . $sep . 'proxy-refuse';
 $proxyLog  = $child . $sep . 'proxy.log';
@@ -1589,7 +1638,10 @@ echo "\nR. #870: a refused claim comes back filled in; a submission too large is
 // below sends an empty file box too, as the real form does when nothing is
 // chosen, and reads the form as drawn straight afterwards.
 $tricky = 'Coffee <b>&"x\' café';
-$r1 = $submit('P870 R1 zero total', [['files[]', '', '']], null, null, [
+// The TITLE carries markup too (round 1 of the independent check): with only
+// plain-text titles, removing the escaping from the title box left R04 green.
+$trickyTitle = 'P870 R1 <i>zero</i> & "total" \'x\'';
+$r1 = $submit($trickyTitle, [['files[]', '', '']], null, null, [
     'itemDesc[]' => [$tricky, ''],
     'itemQty[]'  => ['3', '1'],
     'itemUnit[]' => ['0', '0.00'],
@@ -1598,10 +1650,12 @@ $r1Form = $formState($r1['page']);
 check('R01 the premise: refused as a total of zero, and nothing saved', [$r1['message'], $r1['claim']], ['Total must be greater than zero.', null]);
 check('R02 THE FORM IS FILLED IN AGAIN: title, department, and the line typed — the blank line priced 0.00 is not brought back',
     [$r1Form['note'], $r1Form['title'], $r1Form['dept'], $r1Form['prompt'], $r1Form['items']],
-    [true, 'P870 R1 zero total', [(string) $deptId], false, [['desc' => $tricky, 'qty' => '3', 'unit' => '0']]]);
+    [true, $trickyTitle, [(string) $deptId], false, [['desc' => $tricky, 'qty' => '3', 'unit' => '0']]]);
 check('R03 ...in the plain rows shown with JavaScript off as well', $r1Form['noscript'], [$tricky]);
-check('R04 ...and what was typed is printed as TEXT, never as markup (no raw "<b>" anywhere in the page)',
-    str_contains($r1['page'], 'Coffee <b>'), false);
+check('R04 ...and what was typed is printed as TEXT, never as markup — neither the description\'s "<b>" nor the title\'s "<i>" appears raw, and the title comes back escaped in its box',
+    [str_contains($r1['page'], 'Coffee <b>'), str_contains($r1['page'], '<i>zero</i>'),
+        str_contains($r1['page'], 'name="claimTitle" value="P870 R1 &lt;i&gt;zero&lt;/i&gt; &amp; &quot;total&quot; &#039;x&#039;"')],
+    [false, false, true]);
 
 $r2 = $submit('P870 R2 bad token', [['files[]', '', '']], null, null, ['csrf_token' => 'not-the-token']);
 $r2Form = $formState($r2['page']);
@@ -1634,7 +1688,7 @@ $r5Form = $formState($r5['page']);
 check('R10 the premise: PHP really threw the post away for its size (its own warning names the 1 MB limit)',
     str_contains(substr((string) @file_get_contents($phpErrorLog), $phpLogBefore), 'exceeds the limit of 1048576 bytes'), true);
 check('R11 THE CLAIMANT IS TOLD IT WAS TOO LARGE, with both sizes — not "Invalid CSRF token."',
-    [$r5['alert'], str_starts_with($r5['message'], 'Your claim was NOT saved, because everything you sent together came to 1.6 MB, and this server accepts at most 1 MB in one submission.'),
+    [$r5['alert'], str_starts_with($r5['message'], 'Your claim was NOT saved, because everything you sent together came to 1.5 MB, and this server accepts at most 1 MB in one submission.'),
         str_contains($r5['message'], 'CSRF')], ['danger', true, false]);
 check('R12 ...nothing is saved, and the form says nothing was kept (nothing arrived to keep)',
     [(int) ($db->query("SELECT COUNT(*) AS n FROM tblExpenseClaims WHERE userID = {$userId}")->fetch_assoc()['n'] ?? -1), $r5Form['note'], $r5Form['title']],
@@ -1646,6 +1700,96 @@ check('R13 ...and on the same server a small post with a wrong token is still to
     $r6['message'], 'Invalid CSRF token.');
 $startServer();
 $waitUp();
+
+// ── R7, R8: kept typing belongs to ONE person, and a saved claim clears it ──
+// Round 1 of the independent check. Both need kept typing to be WAITING when
+// something else happens, so neither may load the claim form in between —
+// loading it is what uses the kept typing up. `$submit` always loads it, so
+// these post directly, taking the form token from another page.
+$sessionFile = static function () use ($jar, $child, $sep): string {
+    foreach ((array) @file($jar) as $line) {
+        $columns = explode("\t", rtrim((string) $line, "\r\n"));
+        if (count($columns) === 7 && $columns[5] === 'PHPSESSID') {
+            return $child . $sep . 'sessions' . $sep . 'sess_' . $columns[6];
+        }
+    }
+    refuse('the cookie jar holds no session identifier, so the session could not be read');
+};
+$sessionBody = static function () use ($sessionFile): string {
+    $file = $sessionFile();
+    clearstatcache(true, $file);
+    return (string) @file_get_contents($file);
+};
+/**
+ * Make the browser's session belong to another account, as a second person
+ * signing in on the same browser would (the single-sign-on routes do not
+ * refuse an already-signed-in session, and `session_regenerate_id(true)`
+ * keeps its data). REFUSES when the edit changes nothing, because an edit
+ * that did not apply would make the check below pass for the wrong reason.
+ */
+$sessionBecomes = static function (int $from, int $to) use ($sessionFile, $sessionBody): void {
+    $before = $sessionBody();
+    $after  = str_replace('user_id|i:' . $from . ';', 'user_id|i:' . $to . ';', $before);
+    if ($after === $before) {
+        refuse("the session file names no account {$from}, so it could not be handed to {$to}");
+    }
+    file_put_contents($sessionFile(), $after);
+    clearstatcache();
+};
+/** A claim posted with a token taken from the Dashboard, never from the claim form. */
+$postWithoutTheForm = static function (string $title, array $override = []) use ($http, $makeRequest, $answerOf, $tokenOn, $deptId): array {
+    $token   = $tokenOn($http('GET', '/')['body']);
+    $request = $makeRequest('POST', '/expenses/submit/save', array_merge([
+        'csrf_token' => $token,
+        'deptID'     => (string) $deptId,
+        'claimTitle' => $title,
+        'itemDesc[]' => ['Train fare'],
+        'itemQty[]'  => ['1'],
+        'itemUnit[]' => ['12.50'],
+    ], $override), [['files[]', '', '']]);
+
+    return $answerOf($request, curl_exec($request)) + ['token' => $token];
+};
+
+// A second member of the same organisation, who never types anything.
+$otherEmail = 'expense.receipts.other@selftest.invalid';
+$oldOther   = $db->prepare('SELECT userID FROM tblUsers WHERE emailAddress = ?');
+$oldOther->bind_param('s', $otherEmail);
+$oldOther->execute();
+foreach ($oldOther->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+    $removeMember((int) $row['userID']);
+}
+$oldOther->close();
+$ins = $db->prepare("INSERT INTO tblUsers (fullName, emailAddress, isActive, isAdmin, createdAt) VALUES ('Receipts Other Member', ?, 1, 0, NOW())");
+$ins->bind_param('s', $otherEmail);
+$ins->execute();
+$otherId = (int) $db->insert_id;
+$ins->close();
+$db->query("INSERT IGNORE INTO tblUserSites (siteID, userID, isActive) VALUES ({$siteId}, {$otherId}, 1)");
+
+$r7 = $postWithoutTheForm('P870 R7 not yours', ['itemUnit[]' => ['0']]);
+check('R14 the premise: the token came from another page, the claim was refused, and its kept typing IS waiting in the session',
+    [$r7['token'] !== '', $r7['status'], str_contains($sessionBody(), 'P870 R7 not yours')], [true, 302, true]);
+$sessionBecomes($userId, $otherId);
+$r7Other = $http('GET', '/expenses/submit');
+$r7OtherForm = $formState($r7Other['body']);
+check('R15 ANOTHER PERSON signed in on the same browser is NOT shown it: no note, no title, no lines, and the title appears nowhere on their page',
+    [$r7Other['status'], str_contains($r7Other['body'], 'Receipts Other Member') || str_contains($r7Other['body'], 'id="submit-a-claim"'),
+        $r7OtherForm['note'], $r7OtherForm['title'], $r7OtherForm['items'], str_contains($r7Other['body'], 'P870 R7 not yours')],
+    [200, true, false, '', [], false]);
+check('R16 ...and it is cleared unseen, not left waiting for the first person to come back to',
+    str_contains($sessionBody(), 'P870 R7 not yours'), false);
+$sessionBecomes($otherId, $userId);
+
+$r8 = $postWithoutTheForm('P870 R8 refused first', ['itemUnit[]' => ['0']]);
+$r8Saved = $postWithoutTheForm('P870 R8 then saved');
+$r8Claim = $db->query("SELECT claimID FROM tblExpenseClaims WHERE userID = {$userId} AND claimTitle = 'P870 R8 then saved'")->fetch_assoc();
+check('R17 the premise: a refusal left kept typing waiting, and a claim was then SAVED without the form being loaded in between',
+    [$r8['status'], $r8Claim !== null, str_contains((string) $r8Saved['location'], '?success=')], [302, true, true]);
+$r8Form = $formState($http('GET', '/expenses/submit')['body']);
+check('R18 A SAVED CLAIM CLEARS EARLIER KEPT TYPING: the form after it is empty, so the claim is not offered to be submitted twice',
+    [$r8Form['note'], $r8Form['title'], $r8Form['items']], [false, '', []]);
+$removeMember($otherId);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nS. #871: the file chooser offers every kind of receipt the rule accepts\n";

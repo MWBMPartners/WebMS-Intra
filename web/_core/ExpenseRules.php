@@ -1197,12 +1197,22 @@ final class ExpenseRules
      * Text that is not valid UTF-8 is repaired, never dropped, so the page
      * that prints it cannot fail on it.
      *
+     * WHOSE IT IS IS STORED WITH IT (round 1 of the independent check). The
+     * session is the BROWSER's, not the person's: the two single-sign-on
+     * routes do not refuse somebody already signed in, and
+     * `session_regenerate_id(true)` keeps the session's data, so a second
+     * person signing in on the same browser while kept typing waits would
+     * otherwise be shown the first person's claim — their name for it,
+     * their figures. `draftForForm()` gives it back only to the account
+     * (and the organisation) it was kept for.
+     *
      * @param array<mixed> $post   The request's posted fields (`$_POST`).
      * @param int          $siteId The organisation the claim was for.
+     * @param int          $userId The account the claim was typed by.
      *
-     * @return array{siteId:int,claimTitle:string,deptID:int,items:list<array{desc:string,qty:string,unit:string}>}
+     * @return array{siteId:int,userId:int,claimTitle:string,deptID:int,items:list<array{desc:string,qty:string,unit:string}>}
      */
-    public static function claimDraftFrom(array $post, int $siteId): array
+    public static function claimDraftFrom(array $post, int $siteId, int $userId): array
     {
         $text = static function (mixed $value, int $max): string {
             if (is_string($value) === false) {
@@ -1237,6 +1247,7 @@ final class ExpenseRules
 
         return [
             'siteId'     => $siteId,
+            'userId'     => $userId,
             'claimTitle' => $text($post['claimTitle'] ?? '', self::DRAFT_MAX_TEXT),
             'deptID'     => (is_string($dept) === true && preg_match('/^[1-9][0-9]{0,9}$/', $dept) === 1) ? (int) $dept : 0,
             'items'      => $items,
@@ -1244,23 +1255,30 @@ final class ExpenseRules
     }
 
     /**
-     * The kept claim, if there is one for THIS organisation, ready for the
-     * form; otherwise null.
+     * The kept claim, if there is one for THIS person in THIS organisation,
+     * ready for the form; otherwise null.
      *
      * The session is the portal's own, but it is read defensively all the
      * same: anything not in the shape `claimDraftFrom()` writes is no draft.
      * A draft kept for another organisation is not shown — a member of two
      * sees each one's form on its own address, and a department number from
-     * one means nothing in the other.
+     * one means nothing in the other. A draft kept for another ACCOUNT is
+     * never shown (see `claimDraftFrom()` for how one can be in the same
+     * session), and neither is one with no account recorded, or one being
+     * drawn for nobody (`$userId` 0): "unknown" never matches "unknown".
      *
      * @param mixed $stored The session's value under DRAFT_SESSION_KEY.
      * @param int   $siteId The organisation the form is being drawn for.
+     * @param int   $userId The account the form is being drawn for.
      *
      * @return array{claimTitle:string,deptID:int,items:list<array{desc:string,qty:string,unit:string}>}|null
      */
-    public static function draftForForm(mixed $stored, int $siteId): ?array
+    public static function draftForForm(mixed $stored, int $siteId, int $userId): ?array
     {
         if (is_array($stored) === false || ($stored['siteId'] ?? null) !== $siteId) {
+            return null;
+        }
+        if ($userId <= 0 || ($stored['userId'] ?? null) !== $userId) {
             return null;
         }
         $items = [];
@@ -1360,28 +1378,43 @@ final class ExpenseRules
         return 0;
     }
 
+    /** Round a size to the nearest tenth (or whole kilobyte): what a person expects. */
+    public const SIZE_NEAREST = 'nearest';
+
+    /** Round a size UP. Used only to keep two figures from reading the same. */
+    public const SIZE_UP = 'up';
+
+    /** Round a size DOWN. Used only to keep two figures from reading the same. */
+    public const SIZE_DOWN = 'down';
+
     /**
      * A number of bytes as a person would say it: "2.5 MB", "640 KB", to one
      * decimal place at most.
      *
-     * `$roundUp` exists so the too-large message can never read "came to
-     * 8 MB, and this server accepts at most 8 MB": what was SENT is rounded
-     * up and the LIMIT down, so the gap the claimant reads is always real.
+     * Rounded to the NEAREST by default. The first version always rounded what
+     * was sent UP and the limit DOWN, so an upload of exactly 1.5 MB was told
+     * it "came to 1.6 MB" — an untrue figure in a message whose whole point is
+     * to be believed (round 1 of the independent check). Rounding up or down
+     * is now used only where nearest would make the two figures read the
+     * same; see `postTooLargeMessage()`.
      *
-     * @param int  $bytes   The size.
-     * @param bool $roundUp True to round up, false to round down.
+     * @param int    $bytes The size.
+     * @param string $how   SIZE_NEAREST, SIZE_UP or SIZE_DOWN.
      */
-    public static function sizeInWords(int $bytes, bool $roundUp): string
+    public static function sizeInWords(int $bytes, string $how = self::SIZE_NEAREST): string
     {
-        $round = static fn (float $x): float => $roundUp === true ? ceil($x * 10) / 10 : floor($x * 10) / 10;
+        $round = static fn (float $x, int $places): float => match ($how) {
+            self::SIZE_UP   => ceil($x * (10 ** $places)) / (10 ** $places),
+            self::SIZE_DOWN => floor($x * (10 ** $places)) / (10 ** $places),
+            default         => round($x, $places),
+        };
         if ($bytes >= 1024 * 1024) {
-            $mb = $round($bytes / (1024 * 1024));
+            $mb = $round($bytes / (1024 * 1024), 1);
 
             return rtrim(rtrim(number_format($mb, 1, '.', ''), '0'), '.') . ' MB';
         }
-        $kb = $roundUp === true ? (int) ceil($bytes / 1024) : (int) floor($bytes / 1024);
 
-        return max(1, $kb) . ' KB';
+        return max(1, (int) $round($bytes / 1024, 0)) . ' KB';
     }
 
     /**
@@ -1391,15 +1424,27 @@ final class ExpenseRules
      * here and nowhere else: PHP threw the whole request away before the
      * portal saw any of it, so the form cannot be filled in again.
      *
+     * Both figures are rounded to the nearest. Only when that makes them read
+     * the SAME ("came to 1 MB, and this server accepts at most 1 MB", which
+     * explains nothing) is what was sent rounded up and the limit down, so the
+     * gap the claimant reads is real; it cannot then read the same, because
+     * what was sent is strictly larger than the limit.
+     *
      * @param int    $sentBytes   What the browser declared it was sending.
      * @param string $postMaxSize `ini_get('post_max_size')`.
      */
     public static function postTooLargeMessage(int $sentBytes, string $postMaxSize): string
     {
-        $limit = self::sizeInWords(self::postLimitBytes($postMaxSize), false);
+        $limitBytes = self::postLimitBytes($postMaxSize);
+        $sent       = self::sizeInWords($sentBytes);
+        $limit      = self::sizeInWords($limitBytes);
+        if ($sent === $limit) {
+            $sent  = self::sizeInWords($sentBytes, self::SIZE_UP);
+            $limit = self::sizeInWords($limitBytes, self::SIZE_DOWN);
+        }
 
         return 'Your claim was NOT saved, because everything you sent together came to '
-            . self::sizeInWords($sentBytes, true) . ', and this server accepts at most '
+            . $sent . ', and this server accepts at most '
             . $limit . ' in one submission. Because of that, nothing you sent reached the portal — '
             . 'not your receipts, and not what you typed — so the form below is empty. '
             . 'Please fill it in again and attach fewer or smaller receipts, so that together they come to less than '
