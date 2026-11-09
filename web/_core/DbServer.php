@@ -366,9 +366,9 @@ final class DbServer
         //        no deadline: still waiting after 150 seconds. Section K4
         //        drives the 3-second deadline ending it; it does not measure
         //        the default, because its stand-in server gives up after 120.
-        //    On a PHP built with libmysqlclient instead of mysqlnd, the
-        //    `mysqlnd.*` setting does not exist and the READ half does not
-        //    apply; only the connect half does. (The request's own connection
+        //    mysqli uses mysqlnd only since PHP 8.2, so both halves apply on
+        //    every PHP this portal runs on (MIN_PHP is 8.4.0, set in
+        //    PhpRuntime). (The request's own connection
         //    has no read deadline either; that is #872, not this method.)
         //
         //    Done with settings rather than `mysqli_init()` and

@@ -48,6 +48,9 @@
  *      (approvers not e-mailed, do not submit again); otherwise "not known".
  *      Every kept file is logged by its path — including the orphan left when
  *      the commit really did fail, which is the cost of never deleting.
+ *   L  the CONNECT half of the new connection's 3-second deadline: asked to
+ *      reach an address that never answers a connection attempt, it gives
+ *      up in seconds, not PHP's default 60. K4 drives the READ half.
  *   Z  across the WHOLE run, no column of either log holds a claimant's own
  *      file name (#714)
  *
@@ -68,15 +71,25 @@
  *   - Stopped with Ctrl-C or a polite kill, it puts back what it changed
  *     (when PHP has the pcntl extension). Killed outright (`kill -9`) it
  *     cannot: see the note beside the signal handler for what to remove.
+ *   - Whether the e-mail step is ever called on section K's path is held by
+ *     the handler's STRUCTURE, not by a check: with the connection lost the
+ *     step records nothing, so a version that called it anyway stays green
+ *     (planted, P31). K06b proves only that no attempt is recorded.
+ *   - Section L needs an address that never answers. On a machine whose
+ *     network answers "no route" at once for every address it tries, check
+ *     L00 FAILS (exit 1) — DELIBERATELY: a check that passed there would be
+ *     claiming the connect half works without having tested it (#645).
  *
  * Usage:  SELFTEST_DB_NAME=selftest_expreceipts SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/expense-receipts-selftest.php
  *
  *         The database must already hold `web/_sql/full_schema.sql`. Needs
  *         PHP's curl and fileinfo extensions, `proc_open()`, python3 (for
- *         section K's proxy), and permission to CREATE TRIGGER. It REFUSES
- *         rather than skipping when anything is missing, because a skipped
- *         test reads exactly like a passing one.
+ *         section K's proxy), permission to CREATE TRIGGER, and, for section
+ *         L, an address that never answers a connection attempt (one of the
+ *         documentation-only addresses it tries, such as 192.0.2.1). It
+ *         REFUSES rather than skipping when anything else is missing, because
+ *         a skipped test reads exactly like a passing one.
  *
  * Exit:   0 only when every check ran and passed, and the count is the one
  *         expected; 1 when a check failed; 2 when it refused to run.
