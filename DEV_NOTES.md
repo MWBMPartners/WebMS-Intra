@@ -21180,6 +21180,54 @@ Round 4 of the check found the copied-in half leaking past the rule in two ways,
 - **No existing test relied on public-by-default** (the whole suite stayed green before section N was
   written), so the new checks are the only guard; that is why each writer has its own plant.
 
+### An event's web address, and rows already in the calendar (#877, D-100)
+
+- `Portal\Core\Events::slugStem()` (name + start date, the date SLICED from the
+  stored reading, never resolved — #777) and `Events::freeSlug()` (the first
+  free address asked of the database) are the ONE place the calendar file
+  import decides an event's address. The Manage Events form, the series
+  pattern page and the public suggestion form still have their own copies:
+  #883, together with the events API, which still makes the address from the
+  name alone.
+- **The "is it free" question must count deleted events and events copied in
+  from an outside calendar**, because `uq_event_site_slug` does. Plant (b) in
+  section P adds `isDeleted = 0` and the row whose address a deleted event
+  holds is refused.
+- **"Is it free" must be asked again before EVERY try, not once before the
+  tries.** The trigger stand-in in section R cannot see the difference (it
+  refuses whatever the address); the independent check found section R green
+  with the question hoisted. **"No test can race a real second writer" was
+  wrong — the #735 mistake.** The question is which two events must be
+  ordered: another row arriving between the page asking and the page saving.
+  R12-R14 make that happen with ONE page request: the test inserts the address
+  in an OPEN transaction, sends Confirm in the background (curl_multi), checks
+  `information_schema.INNODB_TRX` for the page's INSERT in `LOCK WAIT` (the
+  premise, asked rather than slept for), then commits; the page's INSERT is
+  refused (1062) and must ask again and save at `-2`. Plant (e) hoists the
+  question and R13's outcome goes red.
+- **D-100: `Events::alreadyInCalendar()`** — same organisation, same name
+  compared as BYTES (capitals matter: a re-upload carries the same bytes, and a
+  wrongly skipped row is the harder mistake to notice), same stored start
+  compared as the reading (no moment, #777), a DELETED event does NOT count
+  (the manager deleted it), an event COPIED IN from an outside calendar of the
+  same organisation DOES count (it is in that calendar). Asked at CONFIRM, row
+  by row; the preview's mark is for the person only and is never read on
+  Confirm (plant (h) makes Confirm trust it and V16 goes red). A row the FILE
+  repeats (same name byte for byte, same STORED start) is a separate rule, in
+  the round-2 section below: it is left out unless ticked whether or not its
+  first copy was saved, and labelled "Repeats an earlier row", never "already
+  in the calendar". It is a question, not a lock: an event added in the
+  milliseconds between the question and the INSERT is not seen. Another
+  organisation's events are excluded by `siteID`; that is not driven by the
+  test (one organisation in the test world).
+- Both questions sit on `check_event_visibility.py`'s `LINE_ALLOWLIST`, keyed
+  by line number at the END of `Events.php` so they do not move the earlier
+  entries — a change above them in Events.php will move them.
+- The old refusal sentence ("another event already has the web address made
+  from this name … Give the event a different name") is gone: neither half is
+  true any more. Section S's old checks S6-S8 (two refused duplicates make ONE
+  error record) are carried by section R's two given-up rows (R9-R11).
+
 ### One row, one outcome: the calendar file import (#790)
 
 - **Wrap the work for each row, not the loop.** `execute()` throws under

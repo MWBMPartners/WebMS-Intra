@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A calendar file with the same event on several dates imports every row; a row already in the calendar is skipped (#877, D-100)
+
+- **A calendar file holding the same event on several dates now imports every
+  row (#877).** An imported event's web address was made from its name alone,
+  and the database allows one address per organisation, so a file of weekly
+  services imported only the first and listed the rest as refused (before #790
+  it stopped with an error page). The address is now the name plus the date, as
+  the Manage Events form makes it, with `-2`, `-3` … where two events share a
+  name and a day or a deleted event still holds the address. An address taken
+  by another writer between the import asking and saving is asked for again, up
+  to three times.
+- **A row already in the calendar is left out unless the manager ticks to
+  import it (D-100).** The name-only address had, by accident, refused a second
+  import of the same file; #877 removed that, so a re-upload would have doubled
+  every event. Now a row with the same name (letter for letter) and the same
+  start as an event already in the organisation's calendar is marked in the
+  preview, left out on Confirm, and listed as "Already in the calendar"; one
+  tick, "Import these anyway", imports such rows too. Asked again at Confirm.
+  The activity record counts these rows on their own.
+- A row the file itself repeats (same name, capitals included, same start) is marked in the preview and left out in the same way, with one wording that points at the row it repeats.
+- **Tests:** `tools/calendar-import-selftest.php`, 132 checks on MySQL 8.0.36 and MariaDB 11.4, including a real two-writer race against the page. Six check rounds by fresh Claude agents (protected arm); the repeat message was simplified after needing rewording three rounds running. Raised: #883.
+
 ### Calendar file import: one refused row no longer stops the import (#790, D-099)
 
 - **Calendar file import: one refused row no longer stops the import (#790,

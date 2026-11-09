@@ -449,6 +449,10 @@ Events, series, RSVP, exports, and seven view modes.
   on its own — the results list shows every row as imported (with its event number), not imported (with the
   reason), or, if the database connection was lost, not known; the activity log records the counts (#790,
   D-099).
+  Imported events get a web address made from the name and the date, unique in the organisation, so the
+  same event on many dates imports in one file; uploading a file again adds only what is missing — rows
+  matching an event already in the calendar, or repeated within the file, are skipped unless "Import these
+  anyway" is ticked (#877, D-100).
 - **Show on the public website (#493, package P1; D-057, D-077, D-078).** The countdown that other
   websites can show and the sitemap list an organisation's own event only while somebody has ticked
   "Show on the public website", the event is marked Public, and today is inside its optional from/until
