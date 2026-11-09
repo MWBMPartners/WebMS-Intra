@@ -1053,7 +1053,7 @@ final class PublicWebsiteSetup
     /** What the check says about the main website whenever it did not get a normal page. */
     public const NOT_A_NORMAL_PAGE = 'This check did not get a normal page from your main website. That can happen, for '
         . 'example, when a website is down, its name does not exist or points at a private or internal address, it sends '
-        . 'visitors on to another address this check will not follow, it uses an unusual port, it has a security-certificate '
+        . 'visitors on to another address this check will not follow, it has a security-certificate '
         . 'problem, it turns away automated visitors, or this server is not allowed to make outside connections. Open it in '
         . 'your own browser to see what your visitors get.';
 
@@ -1067,9 +1067,14 @@ final class PublicWebsiteSetup
      *   - anything else: ONE sentence that is always true
      *     (`NOT_A_NORMAL_PAGE`, worded "for example" — never a complete list),
      *     plus — only where SafeFetch reports one — the last HTTP status
-     *     received, as a fact and not as a cause. A status of 400 or more means
-     *     the website DID answer, so that row is "For information" ('note');
-     *     anything else is "Needs attention" ('problem').
+     *     received, as a fact and not as a cause. A status from 400 to 499
+     *     means the website DID answer and turned this check away (for example
+     *     a website that refuses automated visitors), so that row is "For
+     *     information" ('note'). A status from 500 to 599 is the website's own
+     *     server saying it is failing — the website IS down — so that row, like
+     *     nothing received at all, is "Needs attention" ('problem'). (Round 4
+     *     first drew the line at "400 or more", which labelled two kinds of
+     *     "down" opposite ways; round 5 corrected it.)
      *
      * ⚠️ NO TEST-ONLY PARAMETER (round 4). It used to take `$curlAvailable`
      *    so a test could say "no curl"; every test then passed it, and the
@@ -1097,13 +1102,13 @@ final class PublicWebsiteSetup
         $status = (int) ($got['status'] ?? 0);
         if (function_exists('curl_init') === false) {
             return ['state' => 'untested', 'words' => 'it could not be checked on this server, because this server cannot '
-                . 'fetch outside addresses (PHP\'s curl extension is not installed). Open it in your own browser to see what your visitors get.'];
+                . 'fetch outside addresses (PHP\'s curl extension is not installed or is switched off on this server). Open it in your own browser to see what your visitors get.'];
         }
         if ($status === 200 && (($got['ok'] ?? false) === true || ($got['capped'] ?? false) === true)) {
             return ['state' => 'ok', 'words' => 'it answered.'];
         }
 
-        return ['state' => $status >= 400 ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE
+        return ['state' => ($status >= 400 && $status <= 499) ? 'note' : 'problem', 'words' => self::NOT_A_NORMAL_PAGE
             . ($status > 0 ? ' The last answer this check received was HTTP ' . $status . '.' : '')];
     }
 
