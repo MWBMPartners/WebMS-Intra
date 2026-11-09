@@ -90,9 +90,11 @@ if ($action === 'frame_add_main') {
 }
 
 // ✅ D-101: approving or withdrawing approval of ANY organisation's public
-//    address — the installation's global administrator only, asked here AND
-//    in the class (the installation and an organisation may be different
-//    parties). Every refusal is recorded by the class.
+//    address — the installation's global administrator only (the
+//    installation and an organisation may be different parties). The CLASS is
+//    the one refusal: this handler passes App::isRootAdmin() and asks nothing
+//    itself, so the rule lives in one place; the class records every refusal.
+//    (An earlier comment said it was asked here as well; it was not.)
 if ($action === 'public_host_approve' || $action === 'public_host_withdraw') {
     $target = is_string($_POST['site'] ?? null) === true && preg_match('/^[1-9][0-9]{0,9}$/D', $_POST['site']) === 1 ? (int) $_POST['site'] : 0;
     $host   = is_string($_POST['host'] ?? null) === true ? $_POST['host'] : '';
@@ -122,7 +124,9 @@ if ($action === 'door_on' || $action === 'door_replace' || $action === 'door_off
         // The words must match the card's own tick (round 2 of P4a's check):
         // with a public address set, replacing the name does NOT stop copies
         // that use it.
-        $finish($action === 'door_replace' && PublicWebsiteSetup::publicHostFor($mysqli, $siteId) !== ''
+        // The SAME question the card asks (round 7 of P4a's check): an
+        // unapproved address is not the door, so it changes nothing here.
+        $finish($action === 'door_replace' && PublicWebsiteSetup::publicHostInEffect($mysqli, $siteId) !== ''
             ? 'Nothing was changed: tick the box to say you understand that copies using the old name on the portal\'s own '
                 . 'address will stop working, and copies using your public address will not.'
             : 'Nothing was changed: tick the box to say you understand that every copy pasted into a website will stop working.', 'danger');

@@ -109,7 +109,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 149;
+const PDS_EXPECTED_CHECKS = 164;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1035,6 +1035,108 @@ $d9 = $cardAs('setup', 'public_host', ['value' => 'another.selftest.test']);
 $setInstallation('site.url', $base);
 check('D09 while the portal\'s own address is not set, no public address can be saved (the portal cannot tell which addresses members sign in at)',
     [$hostRow($siteA)['hostName'] ?? null, str_contains($d9['page'], 'own address is not set, so it cannot tell')], [$hostA, true]);
+
+// ── Round 7 of P4a's check: three D-101 guards were pinned by NOTHING ───────
+// (each removable with every check green), so each now has a scenario that
+// the check below AND a plant in section P both run. Each scenario puts back
+// what it changed: A's address approved, B's approved, site.url set.
+/** (a) An organisation's FIRST public address — the INSERT branch — waits too. D01 and P58 only reach the UPDATE. */
+$scnFirstAddress = static function () use ($db, $siteA, $hostA, $cardAs, $approvedAt, $isDoor, $http): array {
+    $db->query("DELETE FROM `tblPublicHosts` WHERE `siteID` = {$siteA}");
+    $cardAs('setup', 'public_host', ['value' => 'first.selftest.test']);
+    $out = [$approvedAt($siteA), $isDoor($http('GET', '/events.json', ['host' => 'first.selftest.test']))];
+    $db->query("DELETE FROM `tblPublicHosts` WHERE `siteID` = {$siteA}");
+    $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`, `approvedAtUtc`) VALUES ({$siteA}, '{$hostA}', UTC_TIMESTAMP(), UTC_TIMESTAMP())");
+    return $out;
+};
+check('D10 an organisation with NO public address yet saves its first one: it is stored WAITING, and it is not the door',
+    $scnFirstAddress(), [null, false]);
+/** (b) Withdrawing is the installation's global administrator's alone — D03 and P59 only tried approving. */
+$scnWithdrawRefused = static function () use ($db, $siteA, $siteB, $cardAs, $approvedAt, $logged, $people): array {
+    $refusals = static fn (): int => $logged('PublicWebsiteSetupRefused', $people['setup']['id']) + $logged('PublicWebsiteSetupRefused', $people['root']['id']);
+    $before = $refusals();
+    $cardAs('setup', 'public_host_withdraw', ['site' => '1']);
+    $cardAs('root', 'public_host_withdraw', ['site' => '1']);
+    $tester = $cardAs('tester', 'public_host_withdraw', ['site' => '1']);
+    // Another organisation's, by changing the posted `site` field.
+    $cross = $cardAs('setup', 'public_host_withdraw', ['site' => (string) $siteB]);
+    $out = [$approvedAt($siteA) !== null, $approvedAt($siteB) !== null, $refusals() - $before, $tester['status'],
+        str_contains($cross['page'], 'Only a global administrator of the whole installation can withdraw')];
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` IN ({$siteA}, {$siteB}) AND `approvedAtUtc` IS NULL");
+    return $out;
+};
+check('D11 nobody but the installation\'s global administrator can WITHDRAW approval: the "Set up the public website" holder and A\'s own global administrator are refused and it is recorded, an ordinary administrator cannot open the page, and A\'s holder cannot withdraw B\'s by changing the posted organisation',
+    $scnWithdrawRefused(), [true, true, 3, 403, true]);
+/** (c) An UNAPPROVED address is shown nowhere as the door's: not in the card's addresses, not as the replace advice, not in the refusal's words, and whyNoAddress() still explains. */
+$scnUnapprovedNotShown = static function () use ($db, $siteA, $hostA, $cardAs, $http, $people, $setInstallation, $base): array {
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+    $page = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+    $addr = preg_match('/data-door-address="events">([^<]*)</', $page, $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '';
+    $refusal = $cardAs('root', 'door_replace');
+    $setInstallation('site.url', null);
+    $noAddr = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+    $setInstallation('site.url', $base);
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+    return [str_contains($addr, $hostA), str_contains($addr, '/w/'), str_contains($page, 'data-door-replace-public="1"'),
+        str_contains($refusal['page'], 'tick the box to say you understand that every copy pasted into a website will stop working'),
+        str_contains($noAddr, 'own address is not set, so the door answers nothing on it yet')];
+};
+check('D12 with A\'s address WAITING, the card gives the /w/ address and not the public one, offers no "public address is not affected" advice, the missing-tick refusal says every copy stops, and with no portal address the card still says why there is none',
+    $scnUnapprovedNotShown(), [false, true, false, true, true]);
+/** An APPROVED address that is also an address members sign in at is not the door (publicHostRow() refuses it), and the card must not claim it is. */
+$scnMembersAddress = static function () use ($db, $siteB, $hostA, $people, $http, $isDoor): array {
+    $db->query("UPDATE `tblSites` SET `hostPattern` = '{$hostA}' WHERE `siteID` = {$siteB}");
+    $page = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+    $door = $isDoor($http('GET', '/events.json', ['host' => $hostA]));
+    $db->query("UPDATE `tblSites` SET `hostPattern` = NULL WHERE `siteID` = {$siteB}");
+    return [str_contains($page, 'data-public-host-approval="approved-members-address"'), str_contains($page, 'https://' . $hostA . '/events.json'), $door];
+};
+check('D13 an approved address that is ALSO an address members sign in at: the card says the door does not answer on it and does not offer it as the door\'s address, and it is not the door',
+    $scnMembersAddress(), [true, false, false]);
+/** The installation's list says when it could not be read, never "no organisation has entered one". */
+$scnListUnreadable = static function () use ($db, $http, $people): array {
+    $db->query('RENAME TABLE `tblPublicHosts` TO `tblPublicHostsPdsAside`');
+    try {
+        $page = $http('GET', '/admin/public-website', ['jar' => $people['instroot']['jar']])['body'];
+    } finally {
+        $db->query('RENAME TABLE `tblPublicHostsPdsAside` TO `tblPublicHosts`');
+    }
+    return [str_contains($page, 'data-public-host-list-unreadable="1"'), str_contains($page, 'No organisation has entered a public address')];
+};
+// A run killed while the table is renamed would leave it aside: put it back.
+register_shutdown_function(static function () use ($db): void {
+    try {
+        $rs = $db->query("SHOW TABLES LIKE 'tblPublicHostsPdsAside'");
+        if ($rs !== false && $rs->num_rows === 1) {
+            $db->query('RENAME TABLE `tblPublicHostsPdsAside` TO `tblPublicHosts`');
+        }
+    } catch (Throwable $e) {
+        echo "  ! tblPublicHosts may still be called tblPublicHostsPdsAside; rename it back by hand.\n";
+    }
+});
+check('D14 when the public addresses cannot be read, the installation\'s list says so, and does not claim no organisation has entered one',
+    $scnListUnreadable(), [true, false]);
+/** Approving is refused while the portal's own address is not set, as saving is. */
+$scnApproveNoSiteUrl = static function () use ($db, $siteA, $hostA, $cardAs, $approvedAt, $setInstallation, $base): array {
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+    $setInstallation('site.url', null);
+    $r = $cardAs('instroot', 'public_host_approve', ['site' => '1', 'host' => $hostA]);
+    $setInstallation('site.url', $base);
+    $out = [$approvedAt($siteA) !== null, str_contains($r['page'], 'cannot tell whether this is an address members sign in at')];
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+    return $out;
+};
+check('D15 while the portal\'s own address is not set, the installation\'s global administrator cannot approve a public address either, and is told why',
+    $scnApproveNoSiteUrl(), [false, true]);
+$db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+$d16 = $cardAs('instroot', 'public_host_approve', ['site' => '1', 'host' => strtoupper($hostA) . ' ']);
+$d16Waiting = $approvedAt($siteA);
+$cardAs('instroot', 'public_host_approve', ['site' => '1', 'host' => $hostA]);
+$d16Said = (string) ($db->query("SELECT `activityDescription` FROM `tblActivityLogs` WHERE `activityType` = 'PublicWebsitePublicAddressApproved' "
+    . "AND `userID` = {$people['instroot']['id']} ORDER BY `logID` DESC LIMIT 1")->fetch_assoc()['activityDescription'] ?? '');
+check('D16 an approval must name the address exactly as stored (MySQL would match other capitals and trailing spaces): a different spelling changes nothing, and the approval recorded names the STORED address',
+    [$d16Waiting, str_contains($d16['page'], 'no longer the one waiting'), $approvedAt($siteA) !== null, str_contains($d16Said, ' ' . $hostA . ' ')],
+    [null, true, true, true]);
 
 $setOwn($siteA, 'calendar.enabled', 'false');
 $refusals['Calendar switched off'] = $feedA();
@@ -1992,6 +2094,27 @@ $p = $plant('_core/PublicWebsiteSetup.php', "                if (PortalAddress::
         return $saved;
     });
 check('P60 with "the portal\'s own address must be set" taken out, a public address is saved while the portal cannot tell members\' addresses', [$p['applied'], $p['result']], [true, 'another.selftest.test']);
+// Round 7 of P4a's check: each guard above that was pinned by nothing.
+$p = $plant('_core/PublicWebsiteSetup.php', "'VALUES (?, ?, UTC_TIMESTAMP(), NULL, NULL)'", "'VALUES (?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), NULL)'", $scnFirstAddress);
+check('P61 with an organisation\'s FIRST address stored approved, it is the door the moment it is saved', [$p['applied'], is_string($p['result'][0] ?? null) && $p['result'][0] !== 'no row', $p['result'][1] ?? null], [true, true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$isRootAdmin === false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can withdraw",
+    "        if (false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can withdraw",
+    $scnWithdrawRefused);
+check('P62 with "the installation\'s global administrator only" taken out of withdrawing, A\'s holder withdraws A\'s approval AND B\'s', [$p['applied'], $p['result'][0] ?? null, $p['result'][1] ?? null], [true, false, false]);
+$p = $plant('_core/PublicDoor.php', '$host = PublicWebsiteSetup::publicHostInEffect($db, $siteId);', '$host = PublicWebsiteSetup::publicHostFor($db, $siteId);', $scnUnapprovedNotShown);
+check('P63 with addressFor() back on any stored address, the card publishes an UNAPPROVED address as the door\'s', [$p['applied'], $p['result'][0] ?? null], [true, true]);
+$p = $plant('_apps/admin/public-website/index.php', "<?php if (\$publicHostInEffect !== ''): ?>\n                        <?php // Round 1 of P4a's check",
+    "<?php if (\$publicHost !== ''): ?>\n                        <?php // Round 1 of P4a's check", $scnUnapprovedNotShown);
+check('P64 with the card\'s "Replace" advice back on any stored address, it tells an organisation an UNAPPROVED address is unaffected', [$p['applied'], $p['result'][2] ?? null], [true, true]);
+$p = $plant('_apps/admin/public-website/save.php', "PublicWebsiteSetup::publicHostInEffect(\$mysqli, \$siteId) !== ''", "PublicWebsiteSetup::publicHostFor(\$mysqli, \$siteId) !== ''", $scnUnapprovedNotShown);
+check('P65 with the missing-tick refusal back on any stored address, it disagrees with the card about an UNAPPROVED address', [$p['applied'], $p['result'][3] ?? null], [true, false]);
+$p = $plant('_core/PublicDoor.php', "|| PublicWebsiteSetup::publicHostInEffect(\$db, \$siteId) !== '') {", "|| PublicWebsiteSetup::publicHostFor(\$db, \$siteId) !== '') {", $scnUnapprovedNotShown);
+check('P66 with whyNoAddress() back on any stored address, the card cannot say why the door has no address', [$p['applied'], $p['result'][4] ?? null], [true, false]);
+$p = $plant('_core/PublicWebsiteSetup.php', "could not be listed: ' . \$e->getMessage());\n\n            return null;", "could not be listed: ' . \$e->getMessage());\n\n            return [];", $scnListUnreadable);
+check('P67 with an unreadable list answered as an empty one, the installation\'s administrator is told no organisation has entered an address', [$p['applied'], $p['result']], [true, [false, true]]);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (PortalAddress::visitorCanChooseHost() === true) {\n            return self::refusedAndRecorded('public address approval'",
+    "        if (false) {\n            return self::refusedAndRecorded('public address approval'", $scnApproveNoSiteUrl);
+check('P68 with "the portal\'s own address must be set" taken out of approving, an address is approved while nobody can tell members\' addresses', [$p['applied'], $p['result'][0] ?? null], [true, true]);
 // P58 and P60 put A's own address back, which (rightly) leaves it waiting:
 // approve it again directly so the tidy-up starts from the state it expects.
 $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");

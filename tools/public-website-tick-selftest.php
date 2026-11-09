@@ -2280,7 +2280,23 @@ check('W7 organisation 2\'s main website, framing list and public address never 
 // W8: the public address (D-095). Stored lower case; bad values refused; one
 //     held by ANOTHER organisation refused by the unique key without naming
 //     it; the portal's own address refused; empty deletes.
-$scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $recorded, $people, $signIn, $http, $pwClean): array {
+/**
+ * #493 P4a (D-101): put the installation's `site.url` back exactly as it was —
+ * DELETED when there was no row, never left as a new empty-string row (round
+ * 7 of P4a's check: an empty row is not the same state as no row).
+ */
+$pwPutSiteUrlBack = static function (?array $was) use ($db): void {
+    if ($was === null) {
+        $db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
+        return;
+    }
+    $restore = (string) $was['settingValue'];
+    $st = $db->prepare("UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
+    $st->bind_param('s', $restore);
+    $st->execute();
+    $st->close();
+};
+$scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $recorded, $people, $signIn, $http, $pwClean, $pwPutSiteUrlBack): array {
     $pwClean();
     $out = [];
     // #493 P4a (D-101): a public address cannot be saved while the portal's
@@ -2308,11 +2324,7 @@ $scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, 
     $pwPost('setup', 'public_host', '');
     $out['empty deletes'] = $pwHost($siteOne);
     $out['organisation 2 untouched'] = $pwHost($siteTwo);
-    $restore = $siteUrl === null ? '' : (string) $siteUrl['settingValue'];
-    $st = $db->prepare("UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
-    $st->bind_param('s', $restore);
-    $st->execute();
-    $st->close();
+    $pwPutSiteUrlBack($siteUrl);
     return $out;
 };
 $wHostWant = ['stored' => 'events.pwt-one.example.org'];
@@ -2852,7 +2864,7 @@ check('W18 with a hand-edited framing list holding "*", a ";" line and an http l
 //      is refused, the other's row is untouched, and nothing is stored for
 //      this one. And a row a hand edit SPOILED (unreadable, so the page shows
 //      none) is replaced by an UPDATE, not refused as a clash.
-$scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $signIn, $http, $pwClean): array {
+$scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $signIn, $http, $pwClean, $pwPutSiteUrlBack): array {
     $pwClean();
     // #493 P4a (D-101): set the portal's own address for the scenario (a public
     // address cannot be saved without it), and put it back at the end.
@@ -2876,11 +2888,7 @@ $scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pw
     $out['a spoiled row is shown as none'] = str_contains($http('GET', '/admin/public-website')['body'], 'NOT A HOST') === false;
     $pwPost('setup', 'public_host', 'events.fresh.pwt.example.org');
     $out['a spoiled row is replaced'] = $pwHost($siteOne);
-    $restore = $siteUrl === null ? '' : (string) $siteUrl['settingValue'];
-    $st = $db->prepare("UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = 'site.url' AND `siteID` IS NULL");
-    $st->bind_param('s', $restore);
-    $st->execute();
-    $st->close();
+    $pwPutSiteUrlBack($siteUrl);
     $pwClean();
     return $out;
 };

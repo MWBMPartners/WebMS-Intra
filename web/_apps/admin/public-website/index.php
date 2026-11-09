@@ -71,8 +71,11 @@ $csrf = Auth::csrfToken();
 $website     = PublicWebsiteSetup::websiteAddressFor($mysqli, $siteId);
 $publicHost  = PublicWebsiteSetup::publicHostFor($mysqli, $siteId);
 // D-101: an organisation's public address does nothing until the
-// installation's global administrator approves it.
+// installation's global administrator approves it, and an approved one that
+// is also an address members sign in at is not the door either. The card asks
+// the ONE helper the handler and PublicDoor ask (round 7 of P4a's check).
 $publicHostApproved = PublicWebsiteSetup::publicHostApproved($mysqli, $siteId);
+$publicHostInEffect = PublicWebsiteSetup::publicHostInEffect($mysqli, $siteId);
 $origins     = PublicWebsiteSetup::frameOriginsStored($mysqli, $siteId);
 $permitted   = PublicWebsiteSetup::framingPermitted($mysqli);
 $isRootAdmin = App::isRootAdmin();
@@ -153,9 +156,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-2" data-door-form="replace">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                     <input type="hidden" name="action" value="door_replace">
-                    <?php if ($publicHost !== '' && $publicHostApproved === true): ?>
+                    <?php if ($publicHostInEffect !== ''): ?>
                         <?php // Round 1 of P4a's check: the public address carries no name, so replacing the name does NOT stop it. Said plainly, and the replace advice is not offered as the remedy. ?>
-                        <p class="small mb-1" data-door-replace-public="1"><strong>Replace the name</strong> stops only copies that use the portal's own address, with <code>/w/</code> and the name in it. Your public address, <?php echo $esc($publicHost); ?>, carries no name, so copies that use it are <strong>not</strong> affected. To stop those, switch the door off below, or change or remove the public address.</p>
+                        <p class="small mb-1" data-door-replace-public="1"><strong>Replace the name</strong> stops only copies that use the portal's own address, with <code>/w/</code> and the name in it. Your public address, <?php echo $esc($publicHostInEffect); ?>, carries no name, so copies that use it are <strong>not</strong> affected. To stop those, switch the door off below, or change or remove the public address.</p>
                         <div class="form-check"><input class="form-check-input" type="checkbox" name="understood" value="1" id="pw-door-replace-ok" required><label class="form-check-label" for="pw-door-replace-ok">I understand copies using the old name on the portal's own address will stop working, and copies using the public address will not</label></div>
                     <?php else: ?>
                         <p class="small mb-1"><strong>Replace the name</strong> if the addresses have gone somewhere they should not. Every copy pasted into a website with the old name stops working at once, and you will need to paste the new addresses in again.</p>
@@ -243,9 +246,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </form>
             <?php if ($publicHost !== ''): ?>
                 <?php // D-101: an address does NOTHING until the installation's global administrator approves it. Said here, on the organisation's own card. ?>
-                <p class="mt-2 mb-0" data-public-host-approval="<?php echo $publicHostApproved === true ? 'approved' : 'waiting'; ?>">
-                    <?php if ($publicHostApproved === true): ?>
+                <p class="mt-2 mb-0" data-public-host-approval="<?php echo $publicHostInEffect !== '' ? 'approved' : ($publicHostApproved === true ? 'approved-members-address' : 'waiting'); ?>">
+                    <?php if ($publicHostInEffect !== ''): ?>
                         <span class="badge text-bg-success me-1">Approved</span> The installation's administrator has approved this address, so the public door answers on it while the door is on.
+                    <?php elseif ($publicHostApproved === true): ?>
+                        <span class="badge text-bg-warning me-1">Approved, not in use</span> The installation's administrator approved this address, but it is also an address members sign in at, so the public door does <strong>not</strong> answer on it. Change it to a name members do not use.
                     <?php else: ?>
                         <span class="badge text-bg-warning me-1">Waiting</span> Waiting for the installation's administrator to approve it. Until then it does nothing: it is not the public door.
                     <?php endif; ?>
@@ -288,7 +293,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <h2 class="h5">Public addresses (every organisation)</h2>
                 <p class="text-muted">An organisation's public address does nothing until you approve it here. Before approving, make sure the address is NOT one members sign in at — an alias of the portal's own address, say — because once approved, every page there answers only the public door. Withdrawing approval takes effect at once.</p>
-                <?php if ($allPublicHosts === []): ?>
+                <?php if ($allPublicHosts === null): ?>
+                    <div class="alert alert-warning mb-0" data-public-host-list-unreadable="1">The list of public addresses could not be read just now, so nothing can be approved or withdrawn here. Try again later; nothing was changed.</div>
+                <?php elseif ($allPublicHosts === []): ?>
                     <p class="mb-0">No organisation has entered a public address.</p>
                 <?php else: ?>
                     <ul class="list-unstyled mb-0">

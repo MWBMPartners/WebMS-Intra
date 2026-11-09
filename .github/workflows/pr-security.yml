@@ -1383,7 +1383,11 @@ jobs:
       - name: '.htaccess refuses every direct PHP address (hard gate, #493)'
         id: htaccess_php_denied
         if: always()
-        run: python3 tools/audit-checks/check_htaccess_php_denied.py
+        # The second line plants each known way of making the rule do
+        # nothing (round 7 of P4a's check) and requires each to be reported.
+        run: |
+          python3 tools/audit-checks/check_htaccess_php_denied.py
+          python3 tools/audit-checks/check_htaccess_php_denied.py --self-test
 
       # Every page that writes its own <head> must also write the description,
       # canonical address and preview card (#569). Those pages are the ones a

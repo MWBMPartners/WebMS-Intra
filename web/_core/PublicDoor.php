@@ -618,9 +618,10 @@ final class PublicDoor
         if ($door['state'] !== 'on') {
             return '';
         }
-        // D-101: only an APPROVED public address is the door, so only an
-        // approved one is written into the door's own addresses.
-        $host = PublicWebsiteSetup::publicHostApproved($db, $siteId) === true ? PublicWebsiteSetup::publicHostFor($db, $siteId) : '';
+        // D-101: only the public address IN EFFECT (approved, and not an
+        // address members sign in at) is the door, so only that one is
+        // written into the door's own addresses.
+        $host = PublicWebsiteSetup::publicHostInEffect($db, $siteId);
         if ($host !== '') {
             return 'https://' . $host . '/' . $what;
         }
@@ -646,7 +647,7 @@ final class PublicDoor
     public static function whyNoAddress(\mysqli $db, int $siteId): string
     {
         if (PublicWebsiteSetup::doorStateFor($db, $siteId)['state'] !== 'on'
-            || PublicWebsiteSetup::publicHostApproved($db, $siteId) === true) {
+            || PublicWebsiteSetup::publicHostInEffect($db, $siteId) !== '') {
             return '';
         }
         if (PortalAddress::state() === PortalAddress::STATE_UNREADABLE) {
