@@ -24,6 +24,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\DbServer;
+use Portal\Core\Events;
 use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -1090,9 +1091,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $unknown = false;
                         $slug    = '';
                         try {
-                            $slug = strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/', '-', (string) $r['eventName']), '-'));
-                            $slug = substr($slug !== '' ? $slug : 'event-' . bin2hex(random_bytes(4)), 0, 100);
-
                             // 🕐 STORE THE READING, DO NOT ROUND-TRIP IT (#777).
                             //    `tblEvents.startDateTime` holds a WALL-CLOCK
                             //    reading. This was
@@ -1154,21 +1152,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $catId   = $r['categoryID'] !== null ? (int) $r['categoryID'] : null;
                             $typeId  = $r['typeID']     !== null ? (int) $r['typeID']     : null;
 
-                            $stmt->bind_param(
-                                'issssssisssiiii',
-                                $siteId, $name, $slug, $desc, $startSql, $endSql, $importZone,
-                                $allDay, $loc, $status, $isPub, $isFeat,
-                                $catId, $typeId, $userId
-                            );
-                            // 🧷 `execute()` answering false is turned into the
-                            //    SAME refusal as a throw. Under today's strict
-                            //    reporting it never answers false; the line is
-                            //    here so that changing the reporting mode one
-                            //    day cannot bring back a second, untested path
-                            //    — the old `'DB error: '` branch was exactly
-                            //    that, dead beside the line that mattered.
-                            if ($stmt->execute() !== true) {
-                                throw new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
+                            // 🔤 THE WEB ADDRESS: NAME, DATE, AND A FREE ONE
+                            //    ASKED OF THE DATABASE (#877).
+                            //
+                            //    WHAT WAS WRONG. The address was made from the
+                            //    NAME ALONE, and the database allows one address
+                            //    per organisation (`uq_event_site_slug`). So a
+                            //    file holding the same service every week — the
+                            //    commonest file anybody imports — asked for one
+                            //    address on every row, and every row after the
+                            //    first was refused. Before #790 that refusal
+                            //    stopped the import with an error page; after
+                            //    #790 the rows were listed as not imported, with
+                            //    advice to rename every week's service. A name an
+                            //    existing event already had was refused too,
+                            //    INCLUDING a deleted event's, because the key
+                            //    covers deleted rows.
+                            //
+                            //    NOW the address is the name plus the date, as
+                            //    the Manage Events form makes it, and
+                            //    `Events::freeSlug()` asks the database for the
+                            //    first one free — `-2`, `-3` … when two events
+                            //    share a name AND a day, or a deleted event
+                            //    still holds it. The ONE place both are decided
+                            //    is `Portal\Core\Events`.
+                            //
+                            // 🏁 AND IF SOMEBODY TAKES IT FIRST. Between asking
+                            //    and saving, another import or the Manage Events
+                            //    form can take the same address. The key still
+                            //    refuses the second writer — nothing is stored
+                            //    twice — and that refusal is caught HERE and
+                            //    the address asked for again, `$slugTries`
+                            //    times at most, so the row is saved under the
+                            //    next free address rather than refused. Every
+                            //    other refusal goes straight to the `catch`
+                            //    below, unchanged. Bounded, because a loop that
+                            //    could run for ever against a unique key is
+                            //    worse than a refusal.
+                            $slugStem  = Events::slugStem($name, $startSql);
+                            $slugTries = 3;
+                            for ($slugTry = 1; ; $slugTry++) {
+                                $slug = Events::freeSlug($mysqli, $siteId, $slugStem);
+                                $stmt->bind_param(
+                                    'issssssisssiiii',
+                                    $siteId, $name, $slug, $desc, $startSql, $endSql, $importZone,
+                                    $allDay, $loc, $status, $isPub, $isFeat,
+                                    $catId, $typeId, $userId
+                                );
+                                try {
+                                    // 🧷 `execute()` answering false is turned
+                                    //    into the SAME refusal as a throw. Under
+                                    //    today's strict reporting it never
+                                    //    answers false; the line is here so that
+                                    //    changing the reporting mode one day
+                                    //    cannot bring back a second, untested
+                                    //    path — the old `'DB error: '` branch
+                                    //    was exactly that, dead beside the line
+                                    //    that mattered.
+                                    if ($stmt->execute() !== true) {
+                                        throw new \mysqli_sql_exception((string) $stmt->error, (int) $stmt->errno);
+                                    }
+                                    break;
+                                } catch (\mysqli_sql_exception $taken) {
+                                    if ($slugTry < $slugTries
+                                        && (int) $taken->getCode() === 1062
+                                        && str_contains($taken->getMessage(), 'uq_event_site_slug') === true
+                                    ) {
+                                        continue;
+                                    }
+                                    throw $taken;
+                                }
                             }
                             $savedAs = (int) $stmt->insert_id;
                         } catch (\mysqli_sql_exception $refused) {
@@ -1186,16 +1239,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     . 'saved (error ' . $code . '), so this page cannot tell whether it was saved. Check '
                                     . 'Manage Events before importing this row again.';
                             } elseif ($code === 1062 && str_contains($refused->getMessage(), 'uq_event_site_slug') === true) {
-                                // 🔤 The commonest cause, in words a person can
-                                //    act on. The web address of an imported
-                                //    event is made from its NAME alone, so two
-                                //    rows with the same name — or a name an
-                                //    existing event already has — ask for the
-                                //    same address, and the second is refused.
-                                $refusal = 'Not imported: the database refused this row because another event already has '
-                                    . 'the web address made from this name ("' . $slug . '") — possibly an event that has since been '
-                                    . 'deleted. Nothing from this row was saved. Give the event a different name and import '
-                                    . 'it again.';
+                                // 🔤 Reached only when the address was taken
+                                //    EVERY time it was asked for (`$slugTries`
+                                //    above): the database said it was free, and
+                                //    then another event took it before this row
+                                //    could be saved, again and again. That means
+                                //    something else is adding events with the
+                                //    same name on the same day at the same
+                                //    moment — another import, most likely.
+                                //
+                                // ⚠️ THE OLD SENTENCE IS GONE ON PURPOSE (#877).
+                                //    It said another event "already has the web
+                                //    address made from this name" and told the
+                                //    administrator to rename the event. The
+                                //    address is no longer made from the name
+                                //    alone and a taken one is no longer
+                                //    refused, so neither half is true any more;
+                                //    renaming would not even be needed — the
+                                //    same row imported again gets the next free
+                                //    address.
+                                $refusal = 'Not imported: every web address this page tried for this event ("' . $slug
+                                    . '" was the last) was taken by another event at the moment the row was being saved '
+                                    . '— most likely another import of the same events running at the same time. '
+                                    . 'Nothing from this row was saved. Check Manage Events, then import this row '
+                                    . 'again if it is not there.';
                             } elseif ($describesTheRow($code) === true) {
                                 $refusal = 'Not imported: the database refused this row (error ' . $code . ': '
                                     . $refused->getMessage() . '). Nothing from this row was saved.';

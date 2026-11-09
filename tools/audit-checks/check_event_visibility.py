@@ -375,6 +375,17 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
         "SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents` WHERE `siteID` = ?",
         "reads only one organisation's zone texts, to work out each event's clock (#804); no event is returned",
     ),
+    # Not an event read at all (#877): Events::freeSlug() asks only whether a
+    # web address is already taken in the organisation, for the calendar file
+    # import. It must count EVERY row the unique key `uq_event_site_slug`
+    # counts — deleted ones and ones copied in from an outside calendar
+    # included — or it would call an address free that the database is about
+    # to refuse. It returns no event and no detail of one. It sits at the END
+    # of Events.php, so it does not move the two entries above.
+    ("_core/Events.php", 1076): (
+        "SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1",
+        "asks only whether an event web address is taken, across every row the unique key covers (#877); no event is returned",
+    ),
 }
 
 

@@ -976,4 +976,122 @@ class Events
 
         return $changed;
     }
+
+    // =========================================================================
+    // 🔤 AN EVENT'S WEB ADDRESS (#877)
+    // =========================================================================
+
+    /**
+     * How many numbered addresses `freeSlug()` asks about before it gives up
+     * on numbers and adds a short random ending instead.
+     */
+    public const SLUG_NUMBERED_TRIES = 50;
+
+    /**
+     * The address an event would like to have: its name made address-safe,
+     * then the DATE it starts on — `sunday-service-2026-06-07`.
+     *
+     * The date is what lets the same name exist on many days. Before #877 the
+     * calendar file import made the address from the NAME ALONE, so a file
+     * holding the same service every week asked for one address over and
+     * over, and the database refused every row after the first
+     * (`uq_event_site_slug` allows one address per organisation). The Manage
+     * Events form already added the date; this is the same shape, so an
+     * imported event and a typed one get addresses that look alike.
+     *
+     * 🕐 THE DATE IS SLICED OUT OF THE TEXT, NEVER RESOLVED (#777). The start
+     *    is a reading on the event's own clock. Passing it through
+     *    `strtotime()` would put the address on the NEXT day for a reading in
+     *    the hour the clocks skip, in the zones that go forward at 23:00
+     *    (`calendar/manage/save.php` records that measurement). Anything that
+     *    is not a digit becomes a single hyphen, so even text nobody checked
+     *    cannot put a `/` or a quote into an address.
+     *
+     * The name part is cut to 100 characters, as the import always cut it,
+     * which leaves room for the date and a numbered ending inside the
+     * column's 200. A name with nothing address-safe in it (all punctuation,
+     * or a script with no Latin letters) becomes `event`.
+     *
+     * @param string $eventName    The event's name as it will be stored.
+     * @param string $startReading The start as stored (`YYYY-MM-DD HH:MM:SS`).
+     *
+     * @return string The address the event would like, before anybody has
+     *                asked whether it is free.
+     */
+    public static function slugStem(string $eventName, string $startReading): string
+    {
+        $name = strtolower(trim((string) preg_replace('/[^a-zA-Z0-9]+/', '-', $eventName), '-'));
+        $name = rtrim(substr($name !== '' ? $name : 'event', 0, 100), '-');
+        $date = trim((string) preg_replace('/[^0-9]+/', '-', substr($startReading, 0, 10)), '-');
+
+        return $date !== '' ? $name . '-' . $date : $name;
+    }
+
+    /**
+     * The first address, starting from `$stem`, that no event in this
+     * organisation holds: `$stem`, then `$stem-2`, `$stem-3` … up to
+     * `SLUG_NUMBERED_TRIES`, then `$stem-` and eight random hex characters.
+     *
+     * 🔑 ASKED OF THE DATABASE, NEVER WORKED OUT FROM A POSITION. The unique
+     *    key `uq_event_site_slug (siteID, eventSlug)` covers DELETED events
+     *    too — a deleted event keeps its address for ever — so a deleted
+     *    "Sunday Service" on the same day still holds its address, and an
+     *    address built from "this is the second row of the file" would
+     *    collide with it (the series pattern page met exactly that, #669).
+     *
+     * 🛡️ NO `isDeleted` AND NO `externalFeedID IS NULL` IN THE QUESTION, and
+     *    adding either would be a bug. The question is only "would the
+     *    database refuse this address", and the key does not care whether the
+     *    row is deleted or was copied in from an outside calendar. Narrowing
+     *    it would report an address as free that the database is about to
+     *    refuse. It shows no event to anybody and returns no detail of one —
+     *    only whether a row exists — so it needs neither
+     *    `EventVisibility::where()` nor the imported-event refusal.
+     *
+     * ⚠️ WHAT THIS CANNOT PROMISE. Between this answer and the INSERT,
+     *    somebody else (a second import, the Manage Events form) can take the
+     *    same address. The unique key still refuses the second writer, so no
+     *    address is ever stored twice; the CALLER must catch that refusal and
+     *    ask again, a bounded number of times. The calendar file import does.
+     *
+     * Bounded on purpose: a loop that could run for ever against a unique key
+     * is worse than a refusal. Fifty events with the same name on the same
+     * day in one organisation is not a real calendar, so the random ending is
+     * a last resort; it is not asked about, and if it ever collided the
+     * caller's retry would ask again.
+     *
+     * The question THROWS on a database fault (the portal's strict
+     * reporting), exactly as the INSERT after it would; the caller decides
+     * what a throw means for its row.
+     *
+     * @param mysqli $db     The connection the event will be written on.
+     * @param int    $siteId The organisation the event belongs to.
+     * @param string $stem   What `slugStem()` gave.
+     *
+     * @return string An address no event in the organisation held when asked.
+     */
+    public static function freeSlug(mysqli $db, int $siteId, string $stem): string
+    {
+        $probe = $db->prepare(
+            'SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1'
+        );
+        if ($probe === false) {
+            // Only reachable if the reporting mode ever stops throwing.
+            throw new \RuntimeException('the question "is this web address free" could not be prepared');
+        }
+        try {
+            for ($try = 1; $try <= self::SLUG_NUMBERED_TRIES; $try++) {
+                $candidate = $try === 1 ? $stem : $stem . '-' . $try;
+                $probe->bind_param('is', $siteId, $candidate);
+                $probe->execute();
+                if ($probe->get_result()->fetch_row() === null) {
+                    return $candidate;
+                }
+            }
+        } finally {
+            $probe->close();
+        }
+
+        return $stem . '-' . bin2hex(random_bytes(4));
+    }
 }

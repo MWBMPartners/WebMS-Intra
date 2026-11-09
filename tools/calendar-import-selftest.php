@@ -30,8 +30,16 @@
  *   F  the activity record exists and gives both counts
  *   G  the refusal is recorded for whoever looks after the installation
  *   H  pressing Confirm again imports nothing a second time
- *   S  two rows with the SAME NAME, which needs no trigger at all: the
- *      second is refused in plain words and the row after it is imported
+ *   S  the SAME NAME on several dates, which needs no trigger at all (#877):
+ *      EVERY row is imported, each at its own web address — name and date,
+ *      with a numbered ending where two share a day or a DELETED event
+ *      already holds the address (the database's unique key covers deleted
+ *      rows). Until #877 every row after the first was refused.
+ *   R  another writer taking the web address between the import asking
+ *      whether it is free and saving the row (#877), stood in for by the
+ *      trigger: taken once, the row is saved on its second try; taken every
+ *      time, it is refused after three tries and says why, and the rest of
+ *      the file is still saved
  *   T  a refusal carrying a SERVER code above 3000 (3819, a broken CHECK rule)
  *      is a refusal, not a lost connection: the row after it is still saved
  *   U  a refusal about the DATABASE (1114, a full table) is recorded as
@@ -41,7 +49,10 @@
  *      Then the plant is taken out and the scenario is green again. A second
  *      plant puts back "every code from 2000 up is a lost connection", and
  *      section T's file goes red. Two more collapse the row-or-database
- *      split, once each way, and sections U and G go red.
+ *      split, once each way, and sections U and G go red. Four more (#877)
+ *      put back the name-only address, leave deleted events out of the
+ *      "is it free" question, drop the date from the address, and allow only
+ *      one try — and sections S and R go red for each.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It does not drive a LOST CONNECTION part-way through (the "whether it
@@ -50,7 +61,12 @@
  *     rest of the page then cannot draw either, because the page's header
  *     reads the database too. That branch is read, not driven.
  *   - It runs ONE web worker, so two administrators importing at once is
- *     untested, and such a test would pass on broken code.
+ *     untested, and such a test would pass on broken code. Section R stands
+ *     in for the one part of that which matters to the web address — the
+ *     address taken between asking and saving — with a trigger giving the
+ *     unique key's own refusal. It proves the import asks again and stops;
+ *     it cannot prove a REAL second writer's address is then skipped, because
+ *     in the stand-in nobody really holds the address.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_… SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/calendar-import-selftest.php
@@ -157,7 +173,29 @@ const TRIGGER_3819_TEXT = 'p790 test trigger: refused with a server code above 3
 //    "Notification" (section G). The first version recorded both the same.
 const REFUSED_1114_NAME = 'P790 refused 1114';
 const TRIGGER_1114_TEXT = 'p790 test trigger: the table is full, on purpose';
+// 🏁 Two more names stand in for ANOTHER WRITER TAKING THE WEB ADDRESS between
+//    the import asking whether it is free and saving the row (#877). One
+//    process cannot race itself, so the trigger refuses the row with exactly
+//    the refusal the unique key gives (1062, naming `uq_event_site_slug`):
+//    "race once" only on its FIRST try, so the import's retry must save it;
+//    "race always" on every try, so the retry must give up after a bounded
+//    number and say so. Each try is counted in `p877_slug_tries`, a MEMORY
+//    table, because a refused statement takes back what an InnoDB table was
+//    given but NOT what a MEMORY table was given — the count survives the
+//    refusal it is counting.
+const RACE_ONCE_NAME   = 'P790 race once';
+const RACE_ALWAYS_NAME = 'P790 race always';
+const RACE_TEXT        = "Duplicate entry 'p877' for key 'uq_event_site_slug'";
 $db->query('DROP TRIGGER IF EXISTS `p790_refuse_one_row`');
+$db->query('DROP TABLE IF EXISTS `p877_slug_tries`');
+try {
+    $db->query(
+        'CREATE TABLE `p877_slug_tries` (`eventName` VARCHAR(100) NOT NULL PRIMARY KEY, `tries` INT NOT NULL) '
+        . 'ENGINE=MEMORY'
+    );
+} catch (Throwable $e) {
+    refuse('could not create the test table p877_slug_tries (' . $e->getMessage() . ')');
+}
 try {
     $db->query(
         'CREATE TRIGGER `p790_refuse_one_row` BEFORE INSERT ON `tblEvents` FOR EACH ROW '
@@ -167,6 +205,13 @@ try {
         . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_3819_TEXT . "', MYSQL_ERRNO = 3819; "
         . "ELSEIF NEW.`eventName` = '" . REFUSED_1114_NAME . "' THEN "
         . "SIGNAL SQLSTATE 'HY000' SET MESSAGE_TEXT = '" . TRIGGER_1114_TEXT . "', MYSQL_ERRNO = 1114; "
+        . "ELSEIF NEW.`eventName` IN ('" . RACE_ONCE_NAME . "', '" . RACE_ALWAYS_NAME . "') THEN "
+        . "INSERT INTO `p877_slug_tries` (`eventName`, `tries`) VALUES (NEW.`eventName`, 1) "
+        . "ON DUPLICATE KEY UPDATE `tries` = `tries` + 1; "
+        . "IF NEW.`eventName` = '" . RACE_ALWAYS_NAME . "' "
+        . "OR (SELECT `tries` FROM `p877_slug_tries` WHERE `eventName` = NEW.`eventName`) = 1 THEN "
+        . "SIGNAL SQLSTATE '23000' SET MESSAGE_TEXT = '" . str_replace("'", "''", RACE_TEXT) . "', MYSQL_ERRNO = 1062; "
+        . "END IF; "
         . "END IF; END"
     );
 } catch (Throwable $e) {
@@ -188,6 +233,12 @@ register_shutdown_function(static function () use (&$state): void {
             $state['db']->query('DROP TRIGGER IF EXISTS `p790_refuse_one_row`');
         } catch (Throwable $e) {
             echo "  ! could not remove the test trigger p790_refuse_one_row; remove it by hand.\n";
+        }
+        try {
+            $state['db']->query('DROP TABLE IF EXISTS `p877_slug_tries`');
+            $state['db']->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P877 %'");
+        } catch (Throwable $e) {
+            echo "  ! could not remove p877_slug_tries or the P877 holder event; remove them by hand.\n";
         }
     }
     if ($state['child'] !== null && is_dir($state['child']) === true) {
@@ -505,6 +556,7 @@ $reportOf = static function (string $html): array {
 $runImport = static function (?string $file = null) use ($http, $tokenOn, $signIn, $csv, $db, $reportOf, $userId): array {
     $file ??= $csv;
     $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'");
+    $db->query('DELETE FROM `p877_slug_tries`');
     $mark = (int) ($db->query('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')->fetch_assoc()['m'] ?? 0);
     $errMark = (int) ($db->query('SELECT COALESCE(MAX(`errorID`), 0) AS m FROM `tblErrors`')->fetch_assoc()['m'] ?? 0);
 
@@ -515,9 +567,18 @@ $runImport = static function (?string $file = null) use ($http, $tokenOn, $signI
     $confirm = $http('POST', '/calendar/manage/import', ['csrf_token' => $token, 'action' => 'confirm']);
 
     $events = [];
-    $rs = $db->query("SELECT `eventID`, `eventName` FROM `tblEvents` WHERE `eventName` LIKE 'P790 %' ORDER BY `eventID`");
+    $slugs  = [];
+    $rs = $db->query(
+        "SELECT `eventID`, `eventName`, `eventSlug` FROM `tblEvents` WHERE `eventName` LIKE 'P790 %' ORDER BY `eventID`"
+    );
     while ($row = $rs->fetch_assoc()) {
         $events[(int) $row['eventID']] = (string) $row['eventName'];
+        $slugs[(int) $row['eventID']]  = (string) $row['eventSlug'];
+    }
+    $tries = [];
+    $rs = $db->query('SELECT `eventName`, `tries` FROM `p877_slug_tries` ORDER BY `eventName`');
+    while ($row = $rs->fetch_assoc()) {
+        $tries[(string) $row['eventName']] = (int) $row['tries'];
     }
     $activity = [];
     $rs = $db->query(
@@ -540,6 +601,8 @@ $runImport = static function (?string $file = null) use ($http, $tokenOn, $signI
         'whole'         => str_contains($confirm['body'], '</html>'),
         'report'        => $reportOf($confirm['body']),
         'events'        => $events,
+        'slugs'         => $slugs,
+        'tries'         => $tries,
         'activity'      => $activity,
         'errors'        => $errors,
         'body'          => $confirm['body'],
@@ -621,14 +684,37 @@ check('H1 the page says there is nothing to import', str_contains($again['body']
 $count = (int) ($db->query("SELECT COUNT(*) AS n FROM `tblEvents` WHERE `eventName` LIKE 'P790 %'")->fetch_assoc()['n'] ?? -1);
 check('H2 ...and the database still holds exactly the two events', $count, 2);
 
-echo "S. The SAME NAME three times: the ordinary cause, with no trigger at all\n";
-// 🔤 An imported event's web address is made from its NAME alone, and the
-//    database refuses a second event at the same address (#877). So a file
+echo "S. The SAME NAME on several dates imports EVERY row, each at its own web address (#877)\n";
+// 🔤 An imported event's web address used to be made from its NAME alone, and
+//    the database refuses a second event at the same address. So a file
 //    holding the same service more than once — the commonest thing anybody
-//    imports — had its second row refused, and before #790 that refusal
-//    stopped the import exactly as the trigger does above. This section needs
-//    no trigger: it is the cause a real file meets. THREE copies, so two rows
-//    are refused and S5 can tell one record per import from one per row.
+//    imports — had every row after the first refused (before #790 the refusal
+//    stopped the whole import). Now the address is the name plus the date, and
+//    a free one is ASKED OF THE DATABASE.
+//
+//    The file is built to reach every branch of that, with no trigger at all:
+//      - THREE dates of "P790 Sunday Service", so the date alone separates them;
+//      - a FOURTH on the same day as the third, evening, so the date does NOT
+//        separate them and the numbered ending (`-2`) must;
+//      - a DELETED event (named P877, so `$runImport` leaves it alone) already
+//        holding the first date's address, because `uq_event_site_slug` covers
+//        deleted rows: a probe that skipped deleted events would call the
+//        address free and the database would then refuse it.
+$holderSlug = 'p790-sunday-service-2031-03-02';
+$db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P877 %'");
+$holder = $db->prepare(
+    'INSERT INTO `tblEvents` (`siteID`, `eventName`, `eventSlug`, `startDateTime`, `timezone`, `status`, '
+    . "`isDeleted`, `deletedAt`) VALUES (?, 'P877 deleted holder', ?, '2031-03-02 10:00:00', 'Europe/London', "
+    . "'published', 1, NOW())"
+);
+$holder->bind_param('is', $siteId, $holderSlug);
+$holder->execute();
+$holderId = (int) $db->insert_id;
+$holder->close();
+if ($holderId <= 0) {
+    refuse('could not make the deleted event that holds the first date\'s address');
+}
+
 $dup = $child . $sep . 'p790-dup.csv';
 file_put_contents(
     $dup,
@@ -636,22 +722,103 @@ file_put_contents(
     . "\"P790 Sunday Service\",2031-03-02 10:00:00,2031-03-02 11:00:00,published\n"
     . "\"P790 Sunday Service\",2031-03-09 10:00:00,2031-03-09 11:00:00,published\n"
     . "\"P790 Sunday Service\",2031-03-16 10:00:00,2031-03-16 11:00:00,published\n"
-    . "\"P790 after the twins\",2031-03-17 10:00:00,2031-03-17 11:00:00,published\n"
+    . "\"P790 Sunday Service\",2031-03-16 18:00:00,2031-03-16 19:00:00,published\n"
+    . "\"P790 after the services\",2031-03-17 10:00:00,2031-03-17 11:00:00,published\n"
 );
-$s = $runImport($dup);
-check('S1 the page finishes with a list of all four rows', array_keys($s['report']), [2, 3, 4, 5]);
-check('S2 the first service is imported, the two copies are not, the row after is imported',
-    array_map(static fn (array $line): string => $line[0], $s['report']),
-    [2 => 'OK', 3 => 'Skipped', 4 => 'Skipped', 5 => 'OK']);
-check('S3 ...and a copy\'s reason says, in plain words, that the name\'s web address is taken',
-    str_contains($s['report'][3][1] ?? '', 'another event already has the web address made from this name'), true);
-check('S4 the database holds exactly what the list says',
-    array_values($s['events']), ['P790 Sunday Service', 'P790 after the twins']);
-$dupRecords = array_values(array_filter($s['errors'], static fn (string $e): bool => str_contains($e, 'calendar file import')));
-check('S6 TWO refused rows make ONE error record for the import, not one per row', count($dupRecords), 1);
-check('S7 ...which counts both rows', str_contains($dupRecords[0] ?? '', '2 row(s) refused'), true);
-check('S8 ...under a title that speaks of rows, and at "Notification" (a duplicate is the row\'s problem)',
-    str_starts_with($dupRecords[0] ?? '', 'Notification | Rows of a calendar file import were refused by the database |'), true);
+/** Section S's file, reduced to what the checks and the plants compare. */
+$scnSameName = static function () use ($runImport, $dup): array {
+    $s = $runImport($dup);
+    return [
+        'keys'    => array_keys($s['report']),
+        'lines'   => array_map(static fn (array $line): string => $line[0], $s['report']),
+        'events'  => array_values($s['events']),
+        'slugs'   => array_values($s['slugs']),
+        'records' => array_values(array_filter(
+            $s['errors'],
+            static fn (string $e): bool => str_contains($e, 'calendar file import')
+        )),
+    ];
+};
+$s = $scnSameName();
+check('S1 the page finishes with a list of all five rows', $s['keys'], [2, 3, 4, 5, 6]);
+check('S2 THE WHOLE POINT: every row is imported — the same name on four dates, and the row after',
+    $s['lines'], [2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK', 6 => 'OK']);
+check('S3 the database holds exactly what the list says',
+    $s['events'],
+    ['P790 Sunday Service', 'P790 Sunday Service', 'P790 Sunday Service', 'P790 Sunday Service', 'P790 after the services']);
+check('S4 each has its own web address: name and date, "-2" where a DELETED event holds the first date\'s, '
+    . 'and "-2" for the second service on one day',
+    $s['slugs'],
+    [
+        'p790-sunday-service-2031-03-02-2',
+        'p790-sunday-service-2031-03-09',
+        'p790-sunday-service-2031-03-16',
+        'p790-sunday-service-2031-03-16-2',
+        'p790-after-the-services-2031-03-17',
+    ]);
+check('S6 nothing was refused, so nothing about this import is recorded as an error', $s['records'], []);
+$heldBy = $db->query(
+    "SELECT `eventID`, `isDeleted` FROM `tblEvents` WHERE `eventSlug` = '{$holderSlug}' AND `siteID` = {$siteId}"
+)->fetch_all(MYSQLI_ASSOC);
+check('S7 the deleted event still holds its address, untouched, and nothing else was given it',
+    array_map(static fn (array $row): array => [(int) $row['eventID'], (int) $row['isDeleted']], $heldBy),
+    [[$holderId, 1]]);
+
+echo "R. Another writer takes the address between asking and saving (#877)\n";
+// 🏁 Stood in for by the trigger (see RACE_ONCE_NAME at the top): the database
+//    refuses the row exactly as the unique key would if somebody else had just
+//    taken the address. The import must ask again and save it; and where the
+//    address is taken EVERY time it must stop after a bounded number of tries
+//    and say so, while the rest of the file is still saved (D-099). Two rows
+//    are given up on, so R9 can tell one error record per import from one per
+//    row — the property section S used to show with refused duplicates, which
+//    no longer happen.
+$race = $child . $sep . 'p790-race.csv';
+file_put_contents(
+    $race,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 R before\",2031-06-01 10:00:00,2031-06-01 11:00:00,published\n"
+    . '"' . RACE_ONCE_NAME . "\",2031-06-02 10:00:00,2031-06-02 11:00:00,published\n"
+    . '"' . RACE_ALWAYS_NAME . "\",2031-06-03 10:00:00,2031-06-03 11:00:00,published\n"
+    . '"' . RACE_ALWAYS_NAME . "\",2031-06-04 10:00:00,2031-06-04 11:00:00,published\n"
+    . "\"P790 R after\",2031-06-05 10:00:00,2031-06-05 11:00:00,published\n"
+);
+/** Section R's file, reduced to what the checks and the plants compare. */
+$scnRace = static function () use ($runImport, $race): array {
+    $r = $runImport($race);
+    return [
+        'lines'   => array_map(static fn (array $line): string => $line[0], $r['report']),
+        'msg4'    => $r['report'][4][1] ?? '',
+        'events'  => array_values($r['events']),
+        'slugs'   => array_values($r['slugs']),
+        'tries'   => $r['tries'],
+        'whole'   => $r['whole'],
+        'records' => array_values(array_filter(
+            $r['errors'],
+            static fn (string $e): bool => str_contains($e, 'calendar file import')
+        )),
+    ];
+};
+$rr = $scnRace();
+check('R1 the page finishes drawing', $rr['whole'], true);
+check('R2 the row taken ONCE is saved on its second try; the rows taken EVERY time are not; the rest are saved',
+    $rr['lines'], [2 => 'OK', 3 => 'OK', 4 => 'Skipped', 5 => 'Skipped', 6 => 'OK']);
+check('R3 ...the row taken once was tried twice, and each row taken every time three times and no more',
+    $rr['tries'], [RACE_ALWAYS_NAME => 6, RACE_ONCE_NAME => 2]);
+check('R4 ...the database holds exactly the three rows the list calls imported',
+    $rr['events'], ['P790 R before', RACE_ONCE_NAME, 'P790 R after']);
+check('R5 ...and the row saved on its second try has its own name-and-date address',
+    $rr['slugs'][1] ?? null, 'p790-race-once-2031-06-02');
+check('R6 a row given up on says, in plain words, that every address tried was taken at the moment of saving',
+    str_contains($rr['msg4'], 'every web address this page tried for this event'), true);
+check('R7 ...and that nothing from it was saved',
+    str_contains($rr['msg4'], 'Nothing from this row was saved'), true);
+check('R8 ...and it no longer tells anybody to rename the event, which would not help',
+    str_contains($rr['msg4'], 'different name'), false);
+check('R9 TWO refused rows make ONE error record for the import, not one per row', count($rr['records']), 1);
+check('R10 ...which counts both rows', str_contains($rr['records'][0] ?? '', '2 row(s) refused'), true);
+check('R11 ...under a title that speaks of rows, and at "Notification" (a taken address is the row\'s problem)',
+    str_starts_with($rr['records'][0] ?? '', 'Notification | Rows of a calendar file import were refused by the database |'), true);
 
 echo "T. A server code above 3000 is a REFUSAL, not a lost connection\n";
 $csv3819 = $child . $sep . 'p790-3819.csv';
@@ -719,8 +886,10 @@ $phpLog  = (string) @file_get_contents($child . $sep . 'php-errors.log');
 $ownLines = array_values(array_filter(
     explode("\n", $phpLog),
     static fn (string $line): bool => str_contains($line, 'manage' . DIRECTORY_SEPARATOR . 'import.php')
+        || str_contains($line, '_core' . DIRECTORY_SEPARATOR . 'Events.php')
 ));
-check('S5 the import page wrote no PHP error, warning or notice in sections A to U', $ownLines, []);
+check('S5 the import page, and the class that makes its web addresses, wrote no PHP error, warning or notice '
+    . 'in sections A to U', $ownLines, []);
 
 echo "P. The plant: the old loop, with nothing catching, goes RED\n";
 // 🚨 THIS IS WHAT MAKES THE CHECKS ABOVE WORTH HAVING. The plant makes both
@@ -800,10 +969,99 @@ check('P12 with no refusal counted as the row\'s problem, the trigger\'s refusal
     str_starts_with($gRecorded[0] ?? '', 'Error | '), true);
 check('P13 ...so section G\'s G3 would have gone red', str_starts_with($gRecorded[0] ?? '', 'Notification | '), false);
 
-file_put_contents($pagePath, $before);
-clearstatcache(true, $pagePath);
+// 🔤 #877's plants. Each puts ONE part of the web-address fix back the way it
+//    was, or the way somebody might "simplify" it, and the section that guards
+//    that part must go red. All four go into the CHILD copy; each must apply,
+//    or the section refuses rather than passing on a plant that never went in.
+$eventsPath   = $child . $sep . 'web' . $sep . '_core' . $sep . 'Events.php';
+$eventsBefore = (string) file_get_contents($eventsPath);
+/** Put one planted change into a child file, refusing if it does not apply exactly once. */
+$plant = static function (string $path, string $original, string $find, string $replace, string $what) use ($startServer, $waitForServer): void {
+    if (substr_count($original, $find) !== 1) {
+        refuse('section P could not find exactly one copy of ' . $what . ' in the copied file');
+    }
+    file_put_contents($path, str_replace($find, $replace, $original));
+    clearstatcache(true, $path);
+    $startServer();
+    $waitForServer();
+};
+$restoreBoth = static function () use ($pagePath, $before, $eventsPath, $eventsBefore): void {
+    file_put_contents($pagePath, $before);
+    file_put_contents($eventsPath, $eventsBefore);
+    clearstatcache(true, $pagePath);
+    clearstatcache(true, $eventsPath);
+};
+
+// (a) THE OLD ADDRESS: the name alone, with nobody asked whether it is free.
+$plant(
+    $pagePath,
+    $before,
+    '$slug = Events::freeSlug($mysqli, $siteId, $slugStem);',
+    "\$slug = substr(strtolower(trim((string) preg_replace('/[^a-zA-Z0-9]+/', '-', \$name), '-')), 0, 100);",
+    'the free-address call'
+);
+$sp = $scnSameName();
+check('P14 with the name-only address put back, the same name on later dates is refused again (#877 restored)',
+    $sp['lines'], [2 => 'OK', 3 => 'Skipped', 4 => 'Skipped', 5 => 'Skipped', 6 => 'OK']);
+check('P15 ...so section S\'s S2 would have gone red', $sp['lines'] === [2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK', 6 => 'OK'], false);
+$restoreBoth();
+
+// (b) A PROBE THAT SKIPS DELETED EVENTS — the plausible "tidy-up". It calls the
+//     deleted event's address free, and the database then refuses it.
+$plant(
+    $eventsPath,
+    $eventsBefore,
+    'WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1',
+    'WHERE `siteID` = ? AND `eventSlug` = ? AND `isDeleted` = 0 LIMIT 1',
+    'the free-address question'
+);
+$sp = $scnSameName();
+check('P16 with deleted events left out of the question, the row whose address a deleted event holds is refused',
+    $sp['lines'][2] ?? null, 'Skipped');
+check('P17 ...and only that row: the other dates still import', $sp['lines'], [2 => 'Skipped', 3 => 'OK', 4 => 'OK', 5 => 'OK', 6 => 'OK']);
+$restoreBoth();
+
+// (c) NO DATE IN THE ADDRESS: every row still imports (the probe numbers them),
+//     but the addresses are no longer the name and the date, so S4 must see it.
+$plant(
+    $eventsPath,
+    $eventsBefore,
+    "return \$date !== '' ? \$name . '-' . \$date : \$name;",
+    'return $name;',
+    'the name-and-date address'
+);
+$sp = $scnSameName();
+check('P18 with the date left out of the address, the rows are numbered instead and S4 would have gone red',
+    $sp['slugs'],
+    [
+        'p790-sunday-service',
+        'p790-sunday-service-2',
+        'p790-sunday-service-3',
+        'p790-sunday-service-4',
+        'p790-after-the-services',
+    ]);
+$restoreBoth();
+
+// (d) NO SECOND TRY: an address taken between asking and saving refuses the row.
+$plant(
+    $pagePath,
+    $before,
+    '$slugTries = 3;',
+    '$slugTries = 1;',
+    'the number of tries'
+);
+$rp = $scnRace();
+check('P19 with only one try, the row whose address was taken once is refused instead of saved',
+    $rp['lines'][3] ?? null, 'Skipped');
+check('P20 ...having been tried once, so section R\'s R2 and R3 would have gone red',
+    $rp['tries'][RACE_ONCE_NAME] ?? null, 1);
+$restoreBoth();
+
 $startServer();
 $waitForServer();
+$sameAgain = $scnSameName();
+check('P21 with every #877 plant taken out, section S\'s file imports every row again',
+    $sameAgain['lines'], [2 => 'OK', 3 => 'OK', 4 => 'OK', 5 => 'OK', 6 => 'OK']);
 $restored = $runImport();
 check('P5 with the plant taken out, the same file gives the same list as section A again',
     array_map(static fn (array $line): string => $line[0], $restored['report']),
