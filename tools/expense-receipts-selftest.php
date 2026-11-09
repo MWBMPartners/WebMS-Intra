@@ -20,26 +20,37 @@
  *   A  the rule and the words, asked of `ExpenseRules` directly (no copy of
  *      either is kept here — #647: a test holding its own copy tests nothing)
  *   B  #649's own acceptance case: a good file, a file over 10 MB, a file of
- *      the wrong kind and an EMPTY SLOT (as the real form always sends) — the
- *      claim is saved, the good file is attached on disk and in the database,
- *      the two others are named with their reasons, the empty slot is not
- *      mentioned, and the claimant's file names reach no log
+ *      the wrong kind and an EMPTY SLOT — which is what a file box with
+ *      nothing chosen sends, as the unused second box does with JavaScript
+ *      off — the claim is saved, the good file is attached on disk and in the
+ *      database, the two others are named with their reasons, the empty slot
+ *      is not mentioned, and the claimant's file names reach no log
  *   C  a file over the SERVER's own limit (PHP refuses it before the portal
  *      sees it — the commonest real case on shared hosting)
- *   D  an empty file is refused; a HEIC photo is attached
+ *   D  an empty file is refused; a HEIC photo is attached; a name that is not
+ *      valid UTF-8 does not blank the whole message
  *   E  the folder exists but cannot be written: every move fails — the claim
  *      is saved and the file is named as NOT stored, with an error-log line
  *   F  the folder cannot even be MADE: the whole claim is refused (#649's own
  *      wording) and nothing is written; a claim with NO receipt is not refused
  *   G  a failure after a receipt was moved rolls the claim back AND takes the
- *      moved file away, so nothing is left on disk that no row points at
+ *      moved file away, so nothing is left on disk that no row points at; and
+ *      a file that cannot be removed is logged by its path
  *   H  a failure AFTER the commit (the approvers' e-mail) no longer tells the
  *      claimant "Error saving claim" about a claim that WAS saved
+ *   I  more files than `max_file_uploads`: PHP drops the rest before the
+ *      handler runs, and the claimant is told, without names (PHP gives none)
+ *   J  the database connection is LOST part-way, so the rollback throws too:
+ *      the moved file is still removed and the claimant still told
+ *   Z  across the WHOLE run, no column of either log holds a claimant's own
+ *      file name (#714)
  *
  * WHAT IT CANNOT DO, said plainly
  *   - A partly-arrived file (`UPLOAD_ERR_PARTIAL`) and PHP having no temporary
  *     folder cannot be produced over HTTP here; section A covers their WORDS
- *     and their place in the rule, not the handler reaching them.
+ *     and their place in the rule, not the handler reaching them. Their
+ *     error-log line is written by the SAME statement as a failed move's,
+ *     which section E drives.
  *   - It runs ONE worker, so two claims at once racing to make the folder is
  *     untested (the handler asks `is_dir()` again after a failed `mkdir()`
  *     for exactly that, and nothing here proves it).
@@ -69,7 +80,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 81;
+const EXPECTED_CHECKS = 116;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -216,6 +227,37 @@ check('A29 a crafted name cannot carry control characters into the message',
 check('A30 a long name is shortened', mb_strlen(R::shownFileName(str_repeat('x', 300) . '.pdf')) <= 82, true);
 check('A31 the 10 MB limit is unchanged', R::RECEIPT_MAX_BYTES, 10485760);
 
+// Round 1 of the independent check, 9 November 2026.
+check('A32 a name that is not valid UTF-8 is SCRUBBED, so the page can still escape it',
+    htmlspecialchars(R::shownFileName("Caf\xE9 bill.txt"), ENT_QUOTES, 'UTF-8') !== '', true);
+check('A33 ...and keeps the rest of the name', str_contains(R::shownFileName("Caf\xE9 bill.txt"), ' bill.txt'), true);
+foreach ([R::RECEIPT_TOO_BIG => 'smaller copy', R::RECEIPT_TOO_BIG_FOR_SERVER => 'smaller copy',
+          R::RECEIPT_WRONG_TYPE => 'needs saving as', R::RECEIPT_EMPTY => 'check that you chose'] as $r => $fix) {
+    check('A34 a file refused as ' . $r . ' is told WHAT TO CHANGE, not just to send it again',
+        str_contains(R::receiptRefusalWords($r), $fix), true);
+}
+check('A35 no reason holds a semicolon (the list of files is joined with one)',
+    count(array_filter($words, static fn (string $w): bool => str_contains($w, ';'))), 0);
+check('A36 the advice no longer says "submit it again with the file." for a file that would be refused again',
+    str_contains($oneMsg['message'], 'do what is said above'), true);
+$warn = ['type' => 2, 'message' => 'PHP Request Startup: ' . R::UPLOAD_COUNT_WARNING, 'file' => 'Unknown', 'line' => 0];
+check('A37 PHP\'s warning means files WERE dropped', R::uploadsCutShort($warn, 3, 3), R::CUT_SHORT_CERTAIN);
+check('A38 with no warning, as many as allowed means some MAY have been', R::uploadsCutShort(null, 3, 3), R::CUT_SHORT_POSSIBLE);
+check('A39 fewer than allowed, and no warning, means none were', R::uploadsCutShort(null, 2, 3), R::CUT_SHORT_NO);
+check('A40 some other warning is not mistaken for it',
+    R::uploadsCutShort(['type' => 2, 'message' => 'Undefined variable'], 1, 20), R::CUT_SHORT_NO);
+$cutOnly = R::submittedMessage(7, [], '', R::CUT_SHORT_CERTAIN, 3);
+check('A41 files dropped and nothing named: still a WARNING', $cutOnly['type'], 'warning');
+check('A42 ...saying the limit and that the rest never arrived',
+    str_contains($cutOnly['message'], 'This server accepts at most 3 files in one submission, so the files you chose beyond that never reached the portal'), true);
+$maybe = R::submittedMessage(7, [], '', R::CUT_SHORT_POSSIBLE, 3);
+check('A43 when it cannot be told, the words say IF, never that files were lost',
+    str_contains($maybe['message'], 'so if you chose more than 3, the rest never reached the portal'), true);
+$both = R::submittedMessage(7, [['name' => 'a.exe', 'reason' => R::RECEIPT_WRONG_TYPE]], '', R::CUT_SHORT_CERTAIN, 3);
+check('A44 a named file AND dropped files: both said, with the advice for both',
+    str_contains($both['message'], '"a.exe"') && str_contains($both['message'], 'at most 3 files')
+        && str_contains($both['message'], 'no more than 3 files'), true);
+
 // ═════════════════════════════════════════════════════════════════════════════
 // The pages. A COPY of web/, so changing a folder's permissions never touches
 // the repository, and every receipt this run stores goes in a folder this run
@@ -329,44 +371,66 @@ $jar  = $child . $sep . 'cookies.txt';
 
 // 📏 The server's own limit for ONE file is set to 12 MB on purpose: above the
 //    portal's 10 MB (so section B's 10.5 MB file reaches the PORTAL's check)
-//    and below 13 MB (so section C's file is refused by PHP itself).
-$env = getenv();
-unset($env['PHP_CLI_SERVER_WORKERS']);
-$env['PORTAL_ENV'] = 'prod';
-$state['proc'] = proc_open(
-    [
-        PHP_BINARY,
-        '-d', 'session.save_path=' . $child . $sep . 'sessions',
-        '-d', 'error_log=' . $child . $sep . 'php-errors.log',
-        '-d', 'log_errors=1', '-d', 'display_errors=0',
-        '-d', 'max_execution_time=120',
-        '-d', 'upload_max_filesize=12M', '-d', 'post_max_size=64M',
-        '-d', 'upload_tmp_dir=' . $child,
-        '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
-        '-S', '127.0.0.1:' . $port,
-        '-t', $child . $sep . 'web' . $sep . 'public_html',
-        $child . $sep . 'router.php',
-    ],
-    [
-        0 => ['file', '/dev/null', 'r'],
-        1 => ['file', $child . $sep . 'server.log', 'a'],
-        2 => ['file', $child . $sep . 'server.log', 'a'],
-    ],
-    $pipes,
-    $child,
-    $env
-);
-if (is_resource($state['proc']) === false) {
-    refuse('could not start PHP\'s web server');
-}
+//    and below 13 MB (so section C's file is refused by PHP itself). Section I
+//    starts it again with `max_file_uploads=3`; sign-ins survive, because the
+//    sessions are files in this run's own folder.
+$startServer = static function (array $extraIni = []) use (&$state, $child, $sep, $port): void {
+    if (is_resource($state['proc']) === true) {
+        proc_terminate($state['proc']);
+        proc_close($state['proc']);
+        $state['proc'] = null;
+        // A new server started too soon fails to bind and every request answers 0.
+        usleep(500000);
+    }
+    $env = getenv();
+    unset($env['PHP_CLI_SERVER_WORKERS']);
+    $env['PORTAL_ENV'] = 'prod';
+    $ini = [];
+    foreach ($extraIni as $key => $value) {
+        $ini[] = '-d';
+        $ini[] = $key . '=' . $value;
+    }
+    $state['proc'] = proc_open(
+        array_merge(
+            [
+                PHP_BINARY,
+                '-d', 'session.save_path=' . $child . $sep . 'sessions',
+                '-d', 'error_log=' . $child . $sep . 'php-errors.log',
+                '-d', 'log_errors=1', '-d', 'display_errors=0',
+                '-d', 'max_execution_time=120',
+                '-d', 'upload_max_filesize=12M', '-d', 'post_max_size=64M',
+                '-d', 'upload_tmp_dir=' . $child,
+                '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
+            ],
+            $ini,
+            [
+                '-S', '127.0.0.1:' . $port,
+                '-t', $child . $sep . 'web' . $sep . 'public_html',
+                $child . $sep . 'router.php',
+            ]
+        ),
+        [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['file', $child . $sep . 'server.log', 'a'],
+            2 => ['file', $child . $sep . 'server.log', 'a'],
+        ],
+        $pipes,
+        $child,
+        $env
+    );
+    if (is_resource($state['proc']) === false) {
+        refuse('could not start PHP\'s web server');
+    }
+};
 
 /**
- * One request. `$files` is a list of [field name, file name, bytes]; when it
- * holds anything the body is built as multipart BY HAND, because curl cannot
- * send an EMPTY slot (`filename=""`), which is exactly what the real form's
- * second file box sends on every submission.
+ * A request, ready to send. `$files` is a list of [field name, file name,
+ * bytes]; when it holds anything the body is built as multipart BY HAND,
+ * because curl cannot send an EMPTY slot (`filename=""`) — which is what a
+ * file box with nothing chosen sends, so a claim with no receipt carries one,
+ * and so does the second box the form shows when JavaScript is off.
  */
-$http = static function (string $method, string $path, array $post = [], array $files = []) use ($port, $jar): array {
+$makeRequest = static function (string $method, string $path, array $post = [], array $files = []) use ($port, $jar) {
     $handle  = curl_init('http://127.0.0.1:' . $port . $path);
     $headers = [];
     curl_setopt_array($handle, [
@@ -402,8 +466,13 @@ $http = static function (string $method, string $path, array $post = [], array $
         }
     }
     curl_setopt($handle, CURLOPT_HTTPHEADER, $headers);
-    $raw = curl_exec($handle);
-    if ($raw === false) {
+
+    return $handle;
+};
+
+/** What came back for a finished request. */
+$answerOf = static function ($handle, $raw): array {
+    if ($raw === false || $raw === null) {
         return ['status' => 0, 'location' => '', 'body' => 'no answer: ' . curl_error($handle)];
     }
     $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
@@ -416,6 +485,13 @@ $http = static function (string $method, string $path, array $post = [], array $
     ];
 };
 
+/** One request, waited for. */
+$http = static function (string $method, string $path, array $post = [], array $files = []) use ($makeRequest, $answerOf): array {
+    $handle = $makeRequest($method, $path, $post, $files);
+
+    return $answerOf($handle, curl_exec($handle));
+};
+
 $tokenOn = static function (string $html): string {
     if (preg_match('/name="csrf_token"\s+value="([^"]+)"/', $html, $m) === 1) {
         return $m[1];
@@ -426,17 +502,19 @@ $tokenOn = static function (string $html): string {
     return '';
 };
 
-$up = false;
-for ($i = 0; $i < 80; $i++) {
-    if ($http('GET', '/login')['status'] > 0) {
-        $up = true;
-        break;
+/** Wait for the server by asking it for a page, never by sleeping blind. */
+$waitUp = static function () use ($http): void {
+    for ($i = 0; $i < 80; $i++) {
+        if ($http('GET', '/login')['status'] > 0) {
+            return;
+        }
+        usleep(250000);
     }
-    usleep(250000);
-}
-if ($up === false) {
     refuse('the test server never answered');
-}
+};
+
+$startServer();
+$waitUp();
 
 // ── The world: one member, one department ───────────────────────────────────
 $email    = 'expense.receipts@selftest.invalid';
@@ -515,9 +593,9 @@ $png = (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAD
  *
  * @return array{post:array, message:string, alert:string, claim:?array, rows:list<array>, disk:list<string>}
  */
-$submit = static function (string $title, array $files) use ($http, $tokenOn, $db, $deptId, $userId, $receipts): array {
-    $form = $http('GET', '/expenses/submit');
-    $post = $http('POST', '/expenses/submit/save', [
+$submit = static function (string $title, array $files, ?callable $during = null) use ($http, $makeRequest, $answerOf, $tokenOn, $db, $deptId, $userId, $receipts): array {
+    $form    = $http('GET', '/expenses/submit');
+    $request = $makeRequest('POST', '/expenses/submit/save', [
         'csrf_token' => $tokenOn($form['body']),
         'deptID'     => (string) $deptId,
         'claimTitle' => $title,
@@ -525,6 +603,45 @@ $submit = static function (string $title, array $files) use ($http, $tokenOn, $d
         'itemQty[]'  => ['1'],
         'itemUnit[]' => ['12.50'],
     ], $files);
+    if ($during === null) {
+        $post = $answerOf($request, curl_exec($request));
+    } else {
+        // ⏱️ Sent WITHOUT waiting, so this test can act while the handler is
+        //    part-way: a planted trigger holds the receipt's row insert open
+        //    (the file has already been moved by then), and `$during` is given
+        //    the handler's database connection number the moment that pause is
+        //    seen running. It is called once; the test then waits for the
+        //    answer. A request never seen is reported by the caller's checks.
+        //
+        //    ⚠️ MEASURED: while a trigger runs, the process list shows the
+        //       TRIGGER's statement (`SET @p649_pause = SLEEP(4)`), not the
+        //       INSERT that fired it — so matching the INSERT never matched.
+        $multi = curl_multi_init();
+        curl_multi_add_handle($multi, $request);
+        $called  = false;
+        $running = 1;
+        $waited  = 0;
+        do {
+            curl_multi_exec($multi, $running);
+            if ($called === false) {
+                $seen = $db->query(
+                    "SELECT ID FROM information_schema.PROCESSLIST WHERE INFO LIKE 'SET @p649_pause = SLEEP%' AND ID <> CONNECTION_ID()"
+                )->fetch_assoc();
+                if ($seen !== null) {
+                    $during((int) $seen['ID']);
+                    $called = true;
+                }
+            }
+            curl_multi_select($multi, 0.1);
+            $waited++;
+        } while ($running > 0 && $waited < 1200);
+        $post = $answerOf($request, curl_multi_getcontent($request));
+        curl_multi_remove_handle($multi, $request);
+        curl_multi_close($multi);
+        if ($called === false) {
+            echo "  ! the handler's receipt insert was never seen running, so nothing was done part-way\n";
+        }
+    }
     $after   = $http('GET', '/expenses/submit');
     $message = '';
     $alert   = '';
@@ -562,6 +679,28 @@ $errorsSince = static function (int $sinceId, string $code) use ($db): array {
     return $rows;
 };
 $lastErrorId = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(errorID), 0) AS m FROM tblErrors')->fetch_assoc()['m'] ?? 0);
+
+/**
+ * EVERY column of every row both logs gained after the given marks, as one
+ * text. Round 1 of the independent check showed why it must be every column:
+ * the first version searched only `tblErrors.errorDetail` and
+ * `tblActivityLogs.activityDescription`, and a planted error-log line with
+ * the claimant's file name in its TITLE left the whole test green.
+ */
+$logsSince = static function (int $errorId, int $activityId) use ($db): string {
+    $rows = array_merge(
+        $db->query("SELECT * FROM tblErrors WHERE errorID > {$errorId}")->fetch_all(MYSQLI_ASSOC),
+        $db->query("SELECT * FROM tblActivityLogs WHERE logID > {$activityId}")->fetch_all(MYSQLI_ASSOC)
+    );
+
+    return (string) json_encode($rows, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+};
+$lastActivityId = static fn (): int => (int) ($db->query('SELECT COALESCE(MAX(logID), 0) AS m FROM tblActivityLogs')->fetch_assoc()['m'] ?? 0);
+// The marks for section Z, taken before the first claim of the run.
+$runErrorStart    = $lastErrorId();
+$runActivityStart = $lastActivityId();
+// Every claimant file name the run sends, for section Z.
+$sentNames = [];
 
 /** Every file in the receipts folder, so a section can tell what appeared. */
 $folderNow = static function () use ($receipts): array {
@@ -602,23 +741,16 @@ check('B11 ...naming the big one with its reason',
 check('B12 ...naming the wrong kind with its reason',
     str_contains($b['message'], '"' . $wrongName . '", because it is not a kind of file a receipt may be'), true);
 check('B13 ...NOT naming the good file, which was attached', str_contains($b['message'], 'ZZ-GOOD'), false);
-check('B14 ...and NOT reporting the empty slot (the real form sends one every time)',
+check('B14 ...and NOT reporting the empty slot (a file box with nothing chosen sends one)',
     str_contains($b['message'], 'a file with no name'), false);
 check('B15 ...and saying how to add them', str_contains($b['message'], 'withdraw the claim from its own page'), true);
 $act = $db->query("SELECT activityDescription FROM tblActivityLogs WHERE userID = {$userId} AND activityType = 'ExpenseSubmit' ORDER BY logID DESC LIMIT 1")->fetch_assoc();
 check('B16 the activity record counts what was not attached',
     str_contains((string) ($act['activityDescription'] ?? ''), '2 file(s) not attached'), true);
-$leak = 0;
-foreach (['tblActivityLogs' => 'activityDescription', 'tblErrors' => 'errorDetail'] as $t => $c) {
-    foreach ([$bigName, $wrongName, $goodName] as $n) {
-        $s = $db->prepare("SELECT COUNT(*) AS n FROM `{$t}` WHERE `{$c}` LIKE CONCAT('%', ?, '%')");
-        $s->bind_param('s', $n);
-        $s->execute();
-        $leak += (int) $s->get_result()->fetch_assoc()['n'];
-        $s->close();
-    }
-}
-check('B17 the claimant\'s own file names reach NEITHER log (#714)', $leak, 0);
+$sentNames = array_merge($sentNames, [$bigName, $wrongName, $goodName]);
+$bLogs     = $logsSince($runErrorStart, $runActivityStart);
+$leak      = array_values(array_filter([$bigName, $wrongName, $goodName], static fn (string $n): bool => str_contains($bLogs, $n)));
+check('B17 the claimant\'s own file names reach NO column of either log (#714)', $leak, []);
 check('B18 no file name reached the database\'s receipt rows either',
     str_contains(json_encode($b['rows']) ?: '', 'Train ticket'), false);
 check('B19 nothing was put in the error log for files the CLAIMANT got wrong',
@@ -638,9 +770,14 @@ check('C05 ...in the one-file sentence', str_contains($c['message'], 'one file y
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nD. An empty file is refused; an iPhone photo (HEIC) is attached\n";
 // ═════════════════════════════════════════════════════════════════════════════
+$sentNames = array_merge($sentNames, ['Scan of everything.pdf', 'Empty.pdf', 'IMG_4031.HEIC', 'Parking ZZ-MOVE.png',
+    'Taxi ZZ-NOFOLDER.png', 'Lunch ZZ-ROLLBACK.png', 'Hotel ZZ-AFTER.png', 'Dinner ZZ-LEFT.png', 'Fuel ZZ-KILLED.png']);
 $d = $submit('P649 D empty and heic', [
     ['files[]', 'Empty.pdf', ''],
     ['files[]', 'IMG_4031.HEIC', "\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic" . str_repeat("\x00", 64)],
+    // "Café bill.txt" from a computer using an older character set: é is the
+    // single byte E9, which is not valid UTF-8 (round 1 of the check).
+    ['files[]', "Caf\xE9 bill.txt", 'not a receipt'],
 ]);
 check('D01 the claim is saved', $d['claim'] !== null, true);
 check('D02 the HEIC photo IS attached (one row, one file on disk)', [count($d['rows']), count($d['disk'])], [1, 1]);
@@ -652,6 +789,8 @@ check('D05 ...and the HEIC is not named', str_contains($d['message'], 'IMG_4031'
 //    row, one file". So the empty file's absence is checked by itself.
 check('D06 the empty file has NO receipt row (an empty file is no evidence)',
     count(array_filter($d['rows'], static fn (array $r): bool => (int) $r['fileSize'] === 0)), 0);
+check('D07 A NAME THAT IS NOT VALID UTF-8 DOES NOT BLANK THE MESSAGE (it was printed empty)',
+    str_contains($d['message'], ' bill.txt", because it is not a kind of file'), true);
 
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nE. The folder exists but cannot be written, so the move fails\n";
@@ -727,6 +866,38 @@ check('G01 the claim is rolled back', $g['claim'], null);
 check('G02 the claimant is told it was not saved', [$g['alert'], $g['message']], ['danger', 'Error saving claim. Please try again.']);
 check('G03 THE MOVED FILE WENT WITH IT: the folder is exactly as it was', $folderNow(), $before);
 
+// G2: the same failure, but the file CANNOT be removed. The trigger pauses the
+// receipt's row insert (the file is already moved) and then refuses it; while
+// it pauses, the folder loses its write permission, so the clean-up's removal
+// fails. That file must be named in the error log by its PATH — the name the
+// portal made up — and never by the claimant's own name.
+$slowRefusal = static function (string $then) use ($db): void {
+    $db->query('DROP TRIGGER IF EXISTS trg_p649_slow');
+    $db->query(
+        "CREATE TRIGGER trg_p649_slow BEFORE INSERT ON tblExpenseClaimFiles FOR EACH ROW "
+        . "BEGIN IF NEW.stage IS NULL THEN SET @p649_pause = SLEEP(4); {$then} END IF; END"
+    );
+};
+$slowRefusal("SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'p649 planted refusal after a pause';");
+$state['undo'][] = 'DROP TRIGGER IF EXISTS trg_p649_slow';
+$errBefore = $lastErrorId();
+$before    = $folderNow();
+$g2 = $submit('P649 G2 left behind', [['files[]', 'Dinner ZZ-LEFT.png', $png]], static function (int $thread) use ($receipts): void {
+    chmod($receipts, 0500);
+});
+chmod($receipts, 0700);
+$db->query('DROP TRIGGER IF EXISTS trg_p649_slow');
+$leftFiles = array_values(array_diff($folderNow(), $before));
+$leftRows  = $errorsSince($errBefore, 'RECEIPT_LEFT_BEHIND');
+check('G04 the claim is rolled back and the claimant told', [$g2['claim'], $g2['alert']], [null, 'danger']);
+check('G05 the premise: the file really could not be removed (one left behind)', count($leftFiles), 1);
+check('G06 THE ADMINISTRATOR IS TOLD, by the file\'s own path in the folder',
+    count($leftRows) === 1 && str_contains((string) ($leftRows[0]['errorDetail'] ?? ''), (string) ($leftFiles[0] ?? '-')), true);
+check('G07 ...and never by the claimant\'s own file name (#714)', str_contains(json_encode($leftRows) ?: '', 'ZZ-LEFT'), false);
+foreach ($leftFiles as $leftover) {
+    @unlink($receipts . DIRECTORY_SEPARATOR . $leftover);
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 echo "\nH. A failure AFTER the commit never says the saved claim was not saved\n";
 // ═════════════════════════════════════════════════════════════════════════════
@@ -755,6 +926,72 @@ check('H01 the claim is saved', $h['claim'] !== null, true);
 check('H02 ...with its receipt', count($h['rows']), 1);
 check('H03 THE CLAIMANT IS TOLD IT WAS SUBMITTED, not "Error saving claim"',
     [$h['alert'], $h['message']], ['success', 'Your claim #' . (int) ($h['claim']['claimID'] ?? 0) . ' has been submitted.']);
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "\nJ. The database connection is LOST part-way, so the rollback throws as well\n";
+// ═════════════════════════════════════════════════════════════════════════════
+// The realistic way a claim fails after a receipt has moved is a lost
+// connection, and on a lost connection `rollback()` THROWS too ("MySQL server
+// has gone away"). The first version rolled back FIRST, unguarded: the second
+// exception escaped, the moved file was never removed, and the claimant got
+// no message (round 1 of the independent check). Here the trigger holds the
+// receipt's row insert open and this test KILLS the handler's connection.
+$slowRefusal('');
+$before = $folderNow();
+$killed = false;
+$j = $submit('P649 J connection lost', [['files[]', 'Fuel ZZ-KILLED.png', $png]], static function (int $thread) use ($db, &$killed): void {
+    $db->query('KILL ' . $thread);
+    $killed = true;
+});
+$db->query('DROP TRIGGER IF EXISTS trg_p649_slow');
+array_pop($state['undo']);
+check('J00 the premise: the handler\'s connection really was killed part-way', $killed, true);
+check('J01 the claim is not saved (the server threw it away with the connection)', $j['claim'], null);
+check('J02 THE MOVED FILE IS STILL REMOVED: the folder is exactly as it was', $folderNow(), $before);
+check('J03 THE CLAIMANT IS STILL TOLD it was not saved',
+    [$j['post']['status'], $j['alert'], $j['message']], [302, 'danger', 'Error saving claim. Please try again.']);
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "\nI. More files than the server takes in one submission (max_file_uploads)\n";
+// ═════════════════════════════════════════════════════════════════════════════
+// PHP drops every file past `max_file_uploads` (20 by default; hosts set it
+// lower) BEFORE the handler runs: they are not in `$_FILES` at all. Measured
+// by round 1 of the independent check: three of four attached, "Your claim
+// #8 has been submitted.", the fourth named nowhere.
+$startServer(['max_file_uploads' => '3']);
+$waitUp();
+$i1 = $submit('P649 I four files', [
+    ['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png], ['files[]', 'r3.png', $png], ['files[]', 'r4 ZZ-DROPPED.png', $png],
+]);
+check('I01 the premise: PHP really dropped one (three receipts kept)', [$i1['claim'] !== null, count($i1['rows'])], [true, 3]);
+check('I02 THE CLAIMANT IS WARNED, not congratulated', $i1['alert'], 'warning');
+check('I03 ...told PHP\'s own limit and that the rest never arrived (said as certain, because PHP said so)',
+    str_contains($i1['message'], 'This server accepts at most 3 files in one submission, so the files you chose beyond that never reached the portal'), true);
+check('I04 ...and how to add them', str_contains($i1['message'], 'submit it again with no more than 3 files'), true);
+check('I05 ...without inventing a name for the dropped file', str_contains($i1['message'], 'ZZ-DROPPED'), false);
+$i2 = $submit('P649 I two files', [['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png]]);
+check('I06 fewer files than the limit: a plain success, no talk of a limit',
+    [count($i2['rows']), $i2['alert'], str_contains($i2['message'], 'at most')], [2, 'success', false]);
+$i3 = $submit('P649 I exactly three', [['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png], ['files[]', 'r3.png', $png]]);
+check('I07 EXACTLY the limit: all three kept, and PHP gave no warning, so the words say IF',
+    [count($i3['rows']), str_contains($i3['message'], 'so if you chose more than 3, the rest never reached the portal')], [3, true]);
+// MEASURED: PHP does NOT count an empty box towards its limit (an empty box
+// then three files, limit 3: all three kept, no warning). The first version of
+// the fallback counted empty boxes, so two files and an unused box read as
+// "as many as allowed" and told the claimant files might be missing.
+$i4 = $submit('P649 I two and an empty box', [['files[]', 'r1.png', $png], ['files[]', 'r2.png', $png], ['files[]', '', '']]);
+check('I08 two files and an EMPTY box, limit 3: a plain success (an empty box is not a file PHP counts)',
+    [count($i4['rows']), $i4['alert'], str_contains($i4['message'], 'at most')], [2, 'success', false]);
+$startServer();
+$waitUp();
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "\nZ. Across the WHOLE run, no column of either log holds a claimant's file name\n";
+// ═════════════════════════════════════════════════════════════════════════════
+$allLogs = $logsSince($runErrorStart, $runActivityStart);
+check('Z00 the premise: the run did write log rows to search', strlen($allLogs) > 1000, true);
+check('Z01 NONE of the file names the run sent appears in ANY column of tblErrors or tblActivityLogs (#714)',
+    array_values(array_filter(array_unique($sentNames), static fn (string $n): bool => str_contains($allLogs, $n))), []);
 
 // ── Tidy up the rows this test made ─────────────────────────────────────────
 $removeMember($userId);

@@ -733,16 +733,85 @@ final class ExpenseRules
             $limit = $m[1] . ' ' . strtoupper($m[2]) . 'B';
         }
 
+        // ✏️ EACH REASON SAYS WHAT TO CHANGE, not just what went wrong (round 1
+        //    of the independent check, 9 November 2026). The advice after the
+        //    list used to say "submit it again with the file", which for a file
+        //    that is too big, of the wrong kind or empty would only be refused
+        //    again. No reason contains a semicolon: the list of files joins
+        //    its entries with one.
         return match ($reason) {
-            self::RECEIPT_TOO_BIG            => 'it is larger than 10 MB, the most one receipt may be',
+            self::RECEIPT_TOO_BIG            => 'it is larger than 10 MB, the most one receipt may be, so it needs a smaller copy, such as a photo taken at a lower size or a scan saved as a PDF',
             self::RECEIPT_TOO_BIG_FOR_SERVER => $limit !== ''
-                ? 'it is larger than this server accepts for one file (' . $limit . ')'
-                : 'it is larger than this server accepts for one file',
-            self::RECEIPT_PARTIAL            => 'only part of it arrived, so it was not kept',
-            self::RECEIPT_EMPTY              => 'the file is empty',
-            self::RECEIPT_WRONG_TYPE         => 'it is not a kind of file a receipt may be (a photo or picture in JPG, PNG, GIF or HEIC, a PDF, or a Word, Excel or CSV file)',
-            default                          => 'the portal could not store it, which is a fault on the server rather than in your file, and it has been recorded for your administrator',
+                ? 'it is larger than this server accepts for one file (' . $limit . '), so it needs a smaller copy'
+                : 'it is larger than this server accepts for one file, so it needs a smaller copy',
+            self::RECEIPT_PARTIAL            => 'only part of it arrived, so it was not kept, and choosing the same file again usually works',
+            self::RECEIPT_EMPTY              => 'the file is empty, so check that you chose the right file',
+            self::RECEIPT_WRONG_TYPE         => 'it is not a kind of file a receipt may be, so it needs saving as a photo or picture (JPG, PNG, GIF or HEIC), a PDF, or a Word, Excel or CSV file',
+            // "Recorded for your administrator" is TRUE because the handler
+            // writes an error-log line for EVERY file with this reason, in one
+            // place after the claim is saved — PHP's own refusals (codes 6, 7
+            // and 8) as well as a failed move. Round 1 of the check found the
+            // first version wrote one only for a failed move.
+            default                          => 'the portal could not store it, which is a fault on the server rather than in your file and has been recorded for your administrator, so the same file can be tried again once that is put right',
         };
+    }
+
+    /**
+     * The words PHP itself uses, in its start-up warning, when a request
+     * carries more files than `max_file_uploads` allows. PHP then DROPS the
+     * files beyond the limit before any portal code runs — they are simply
+     * absent from `$_FILES`, with no error code and no name.
+     */
+    public const UPLOAD_COUNT_WARNING = 'Maximum number of allowable file uploads has been exceeded';
+
+    /** No file was dropped for being past the server's limit on how many files one request may carry. */
+    public const CUT_SHORT_NO = 'no';
+
+    /** PHP said so: files past the limit were dropped. */
+    public const CUT_SHORT_CERTAIN = 'certain';
+
+    /**
+     * PHP's warning could not be read, but exactly as many files arrived as
+     * the server allows, so more may have been chosen and dropped. The words
+     * for this case say "if", because it cannot be told from a claim that
+     * really had exactly that many.
+     */
+    public const CUT_SHORT_POSSIBLE = 'possible';
+
+    /**
+     * Were files dropped by PHP for being past `max_file_uploads`? (#649,
+     * round 1 of the independent check.)
+     *
+     * MEASURED, not assumed: with `max_file_uploads=3` and four receipts the
+     * fourth simply was not there — three were attached, the claimant was
+     * told "Your claim #8 has been submitted.", and the fourth was named
+     * nowhere. PHP's warning is raised before any script runs, so no error
+     * handler sees it; it is still what `error_get_last()` answers when the
+     * handler asks first thing. That is the certain signal. When it has been
+     * overwritten by something earlier in the request, the fallback is the
+     * count: as many files as the limit allows is the one state in which
+     * some may be missing.
+     *
+     * @param mixed $lastError What `error_get_last()` answered.
+     * @param int   $received  How many FILES arrived — empty boxes NOT counted,
+     *                         because PHP does not count them towards its limit
+     *                         either (measured in section I of the self-test).
+     * @param int   $limit     `max_file_uploads`; 0 or less means not known.
+     *
+     * @return string One of the CUT_SHORT_* constants.
+     */
+    public static function uploadsCutShort(mixed $lastError, int $received, int $limit): string
+    {
+        if (is_array($lastError) === true
+            && is_string($lastError['message'] ?? null) === true
+            && str_contains($lastError['message'], self::UPLOAD_COUNT_WARNING) === true) {
+            return self::CUT_SHORT_CERTAIN;
+        }
+        if ($limit > 0 && $received >= $limit) {
+            return self::CUT_SHORT_POSSIBLE;
+        }
+
+        return self::CUT_SHORT_NO;
     }
 
     /**
@@ -760,13 +829,22 @@ final class ExpenseRules
      * Control characters are removed and a long name is shortened, so a
      * crafted name cannot flood the message. The page escapes the result.
      *
+     * ⚠️ A NAME THAT IS NOT VALID UTF-8 IS SCRUBBED FIRST. A computer set to an
+     *    older character set sends "Café" as the single byte E9, and
+     *    `htmlspecialchars()` answers an EMPTY STRING for text that is not
+     *    valid UTF-8 — so the page printed a warning box with NOTHING in it,
+     *    the whole message gone (measured by round 1 of the independent
+     *    check). `mb_scrub()` puts a replacement mark where each bad byte was,
+     *    so the rest of the name, and the whole message, survive.
+     *
      * @param string $clientName The name the claimant's computer gave the file.
      *
      * @return string The name in double quotes, or a description when it has none.
      */
     public static function shownFileName(string $clientName): string
     {
-        $name = basename(str_replace('\\', '/', $clientName));
+        $name = mb_scrub($clientName, 'UTF-8');
+        $name = basename(str_replace('\\', '/', $name));
         $name = (string) preg_replace('/[\x00-\x1F\x7F]+/', '', $name);
         if ($name === '') {
             return 'a file with no name';
@@ -781,25 +859,41 @@ final class ExpenseRules
     /**
      * What the claimant is told once their claim is saved.
      *
-     * THREE COMPLETE SENTENCES, one per case, written out whole on purpose
-     * (#694: a sentence assembled from branches had wording faults no check
-     * could see): nothing left out; one file not attached; several not
-     * attached. The advice is the only route the portal offers today: a
-     * receipt cannot be added to a claim after it is made (`edit/save.php`
-     * changes the figures only), so the claimant withdraws the claim — which
-     * the claim's own page allows while it is pending — and submits it again.
+     * BUILT FROM WHOLE SENTENCES, each chosen for its case and none assembled
+     * from clauses in the middle (#694: a sentence built from branches had
+     * wording faults no check could see). The cases are how many files were
+     * named as not attached (none, one, several) and whether PHP dropped files
+     * past the server's limit on how many one submission may carry
+     * (`uploadsCutShort()`): five combinations besides plain success, each with
+     * its own opening and advice, plus one of two sentences about the limit.
+     *
+     * The advice is the only route the portal offers today: a receipt cannot
+     * be added to a claim after it is made (`edit/save.php` changes the
+     * figures only), so the claimant withdraws the claim — which the claim's
+     * own page allows while it is pending — and submits it again, having done
+     * what each reason says. Files PHP dropped are NEVER named, because PHP
+     * never passed their names on.
      *
      * @param int                                    $claimId     The new claim's number.
      * @param list<array{name:string,reason:string}> $notAttached Each file not attached:
-     *                                                            its own name and RECEIPT_* reason.
+     *                                                            its own name and RECEIPT_* reason
+     *                                                            (other keys are ignored).
      * @param string                                 $serverLimit `upload_max_filesize`, for the words.
+     * @param string                                 $cutShort    One of the CUT_SHORT_* constants.
+     * @param int                                    $countLimit  `max_file_uploads`, for the words.
      *
      * @return array{type:string,message:string} `type` is the alert's colour.
      */
-    public static function submittedMessage(int $claimId, array $notAttached, string $serverLimit = ''): array
-    {
+    public static function submittedMessage(
+        int $claimId,
+        array $notAttached,
+        string $serverLimit = '',
+        string $cutShort = self::CUT_SHORT_NO,
+        int $countLimit = 0
+    ): array {
         $count = count($notAttached);
-        if ($count === 0) {
+        $cut   = ($cutShort === self::CUT_SHORT_CERTAIN || $cutShort === self::CUT_SHORT_POSSIBLE) && $countLimit > 0;
+        if ($count === 0 && $cut === false) {
             return [
                 'type'    => 'success',
                 'message' => 'Your claim #' . $claimId . ' has been submitted.',
@@ -812,20 +906,45 @@ final class ExpenseRules
                 . ', because ' . self::receiptRefusalWords((string) ($file['reason'] ?? ''), $serverLimit);
         }
 
+        // 1. The opening.
         if ($count === 1) {
-            return [
-                'type'    => 'warning',
-                'message' => 'Your claim #' . $claimId . ' has been submitted, but one file you chose was NOT attached to it: '
-                    . $parts[0] . '. Anybody reviewing the claim will see it without that file. '
-                    . 'To add it, withdraw the claim from its own page while it is still pending, and submit it again with the file.',
-            ];
+            $opening = 'Your claim #' . $claimId . ' has been submitted, but one file you chose was NOT attached to it: '
+                . $parts[0] . '.';
+        } elseif ($count > 1) {
+            $opening = 'Your claim #' . $claimId . ' has been submitted, but ' . $count . ' files you chose were NOT attached to it: '
+                . implode('; ', $parts) . '.';
+        } elseif ($cutShort === self::CUT_SHORT_CERTAIN) {
+            $opening = 'Your claim #' . $claimId . ' has been submitted, but not every file you chose was received.';
+        } else {
+            $opening = 'Your claim #' . $claimId . ' has been submitted, but not every file you chose may have been received.';
+        }
+
+        // 2. The server's limit on how many files, when it was reached.
+        $limitSentence = '';
+        if ($cut === true && $cutShort === self::CUT_SHORT_CERTAIN) {
+            $limitSentence = ' This server accepts at most ' . $countLimit . ' files in one submission, so the files you chose beyond that never reached the portal: they are not attached, and their names cannot be shown here.';
+        } elseif ($cut === true) {
+            $limitSentence = ' This server accepts at most ' . $countLimit . ' files in one submission and ' . $countLimit . ' arrived, so if you chose more than ' . $countLimit . ', the rest never reached the portal: they are not attached, and their names cannot be shown here.';
+        }
+
+        // 3. What a reviewer sees, and 4. what to do.
+        if ($cut === false && $count === 1) {
+            $after = ' Anybody reviewing the claim will see it without that file.'
+                . ' To add it, do what is said above, then withdraw the claim from its own page while it is still pending and submit it again with the file.';
+        } elseif ($cut === false) {
+            $after = ' Anybody reviewing the claim will see it without those files.'
+                . ' To add them, do what is said above, then withdraw the claim from its own page while it is still pending and submit it again with the files.';
+        } elseif ($count === 0) {
+            $after = ' Anybody reviewing the claim will see only the files that arrived.'
+                . ' To add the rest, withdraw the claim from its own page while it is still pending and submit it again with no more than ' . $countLimit . ' files, putting several receipts into one PDF if you have more than that.';
+        } else {
+            $after = ' Anybody reviewing the claim will see it without those files.'
+                . ' To add them, do what is said above, then withdraw the claim from its own page while it is still pending and submit it again with no more than ' . $countLimit . ' files, putting several receipts into one PDF if you have more than that.';
         }
 
         return [
             'type'    => 'warning',
-            'message' => 'Your claim #' . $claimId . ' has been submitted, but ' . $count . ' files you chose were NOT attached to it: '
-                . implode('; ', $parts) . '. Anybody reviewing the claim will see it without those files. '
-                . 'To add them, withdraw the claim from its own page while it is still pending, and submit it again with the files.',
+            'message' => $opening . $limitSentence . $after,
         ];
     }
 }

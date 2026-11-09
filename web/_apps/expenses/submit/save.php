@@ -21,9 +21,12 @@
  *    and why (`ExpenseRules::submittedMessage()`, the ONE place the words are);
  *  - the ONE case that refuses the whole claim is the portal being unable to
  *    make its receipts folder, checked BEFORE anything is written;
- *  - a claim that is rolled back takes the receipt files it had already moved
- *    with it, so no receipt is left on disk with no claim — a file nothing
- *    points at could never be reached by an erasure;
+ *  - files PHP DROPS for being past `max_file_uploads` are reported too
+ *    (unnamed — PHP never passes their names on);
+ *  - a claim that is not saved takes the receipt files it had already moved
+ *    with it, removed BEFORE the rollback is tried, so a lost connection
+ *    cannot stop it — a file nothing points at could never be reached by an
+ *    erasure; one that cannot be removed is logged by its path;
  *  - and once the claim is COMMITTED, nothing after it (the activity record,
  *    the e-mail to approvers) can make this page say "Error saving claim":
  *    that sentence used to be reachable for a claim that WAS saved, inviting
@@ -58,6 +61,15 @@ use Portal\Core\ExpenseMailer;
 use Portal\Core\ExpenseRules;
 use Portal\Core\Router;
 use Portal\Core\Site;
+
+// 📮 READ PHP'S LAST WARNING FIRST, before this page does anything that could
+//    replace it (#649, round 1 of the independent check). When a submission
+//    carries more files than `max_file_uploads` allows, PHP drops the extra
+//    files before any script runs and leaves only a start-up warning, which
+//    `error_get_last()` still answers here. Anything later — even a warning
+//    silenced with `@` — would overwrite it, so it is taken now and judged by
+//    `ExpenseRules::uploadsCutShort()` further down.
+$startupWarning = error_get_last();
 
 // 🛡️ Session and security checks
 Auth::ensureSession();
@@ -141,25 +153,45 @@ if ($deptExists === false) {
 //    `ExpenseRules::whyReceiptRefused()` is the ONE rule. A file it refuses is
 //    REMEMBERED with its reason, never skipped in silence: the claimant is told
 //    by name, once the claim is saved. An empty slot (nothing chosen) is not a
-//    receipt at all and is not reported — the form has two `files[]` inputs,
-//    so an empty one arrives on every ordinary submission.
+//    receipt at all and is not reported. A file box with nothing chosen still
+//    sends an empty entry, so a claim submitted with no receipt carries one;
+//    and with JavaScript switched off the form shows a second box (inside
+//    `<noscript>`), so one left unused arrives empty beside the other's files.
 //
 //    The claimant's own file name is held here ONLY to be shown back to them
 //    in the one-off message (#714: it is never stored). It is not put in the
-//    activity log, the error log or the database.
+//    activity log, the error log or the database. `adminNote` is what the
+//    error log says instead, for a file the server failed to store.
+$uploaded        = ExpenseRules::receiptsFromUpload($_FILES['files'] ?? null);
 $receiptsToStore = [];
 $notAttached     = [];
-foreach (ExpenseRules::receiptsFromUpload($_FILES['files'] ?? null) as $upload) {
+foreach ($uploaded as $upload) {
     $why = ExpenseRules::whyReceiptRefused($upload['error'], $upload['size'], $upload['name']);
     if ($why === ExpenseRules::RECEIPT_NOTHING_CHOSEN) {
         continue;
     }
     if ($why !== ExpenseRules::RECEIPT_OK) {
-        $notAttached[] = ['name' => $upload['name'], 'reason' => $why];
+        $notAttached[] = [
+            'name'      => $upload['name'],
+            'reason'    => $why,
+            'adminNote' => 'PHP refused one file with upload error code ' . $upload['error'] . ' before the portal saw it',
+        ];
         continue;
     }
     $receiptsToStore[] = $upload;
 }
+
+// 🔢 FILES PHP DROPPED FOR BEING PAST `max_file_uploads` (round 1 of the
+//    independent check). They are not in `$_FILES` at all, so the loop above
+//    cannot see them; `uploadsCutShort()` reads PHP's warning, taken at the
+//    top of this page, and falls back to "as many arrived as are allowed".
+//    The claimant is told; the files cannot be named, because PHP never
+//    passed their names on. An EMPTY box is not counted: measured, PHP does
+//    not count one towards its limit either, so counting it made two files
+//    and an unused box read as "as many as allowed".
+$countLimit = (int) ini_get('max_file_uploads');
+$filesSent  = count(array_filter($uploaded, static fn (array $u): bool => $u['error'] !== UPLOAD_ERR_NO_FILE));
+$cutShort   = ExpenseRules::uploadsCutShort($startupWarning, $filesSent, $countLimit);
 
 // 📂 THE RECEIPTS FOLDER, checked before the claim is written (#649).
 //    `mkdir()`'s answer used to be thrown away, so a folder that could not be
@@ -287,18 +319,16 @@ try {
             // 📦 `move_uploaded_file()` answers a plain true or false (#720).
             //    A false used to mean "no row, no word". It is now a receipt
             //    the claimant is told was NOT attached, and a line in the error
-            //    log for the administrator — without the claimant's own file
-            //    name (#714), which is why it names the claim and the receipt
-            //    number instead.
+            //    log for the administrator, written with every other "could not
+            //    store it" after the commit (step 5) — without the claimant's
+            //    own file name (#714), which is why the note names the receipt
+            //    number and the folder instead.
             if (@move_uploaded_file($tmp, $path) !== true) {
-                $notAttached[] = ['name' => $upload['name'], 'reason' => ExpenseRules::RECEIPT_NOT_STORED];
-                Logger::errorPlatform(
-                    'Expenses',
-                    'Error',
-                    'RECEIPT_NOT_STORED',
-                    'A receipt could not be moved into the receipts folder',
-                    'Claim #' . $claimID . ', receipt ' . $nextNo . ' of this submission. Folder: ' . $upDir
-                );
+                $notAttached[] = [
+                    'name'      => $upload['name'],
+                    'reason'    => ExpenseRules::RECEIPT_NOT_STORED,
+                    'adminNote' => 'receipt ' . $nextNo . ' of this submission could not be moved into the receipts folder ' . $upDir,
+                ];
                 continue;
             }
             $movedPaths[] = $path;
@@ -319,18 +349,63 @@ try {
         throw new \RuntimeException('The claim could not be committed');
     }
 } catch (\Throwable $ex) {
-    App::rollback();
-    // 🧹 A ROLLED-BACK CLAIM TAKES ITS RECEIPT FILES WITH IT (#649). Before,
-    //    a failure after a receipt had been moved (its row refused, the PDF
-    //    step throwing) left the file in the folder with no claim and no row
-    //    pointing at it — a copy of somebody's receipt that nothing lists and
-    //    no erasure could ever find. Only files THIS request moved are named.
+    // 🧹 A CLAIM THAT IS NOT SAVED TAKES ITS RECEIPT FILES WITH IT (#649).
+    //    Before, a failure after a receipt had been moved (its row refused,
+    //    the PDF step throwing) left the file in the folder with no claim and
+    //    no row pointing at it — a copy of somebody's receipt that nothing
+    //    lists and no erasure could ever find. Only files THIS request moved
+    //    are named.
+    //
+    //    ⚠️ THE FILES GO FIRST, AND EVERYTHING AFTER THEM IS GUARDED (round 1 of
+    //       the independent check). The first version rolled back first, with
+    //       nothing around it — and the realistic way for a claim to fail here
+    //       is a lost database connection, on which `rollback()` THROWS too
+    //       ("MySQL server has gone away"). The second exception escaped this
+    //       block: the files were never removed, the claimant got no message,
+    //       and the very orphan this block exists to prevent was left behind.
+    //       Removing a file needs no database, so it cannot be stopped by one.
+    $leftBehind = [];
     foreach ($movedPaths as $moved) {
-        if (is_file($moved) === true) {
-            @unlink($moved);
+        if (is_file($moved) === true && @unlink($moved) === false) {
+            $leftBehind[] = $moved;
         }
     }
-    Logger::exception($ex);
+
+    // Undo the claim. When the connection is gone the server has already
+    // thrown the unfinished claim away, which is why a failure here is
+    // recorded and passed over rather than allowed to stop the message below.
+    $rollbackFault = null;
+    try {
+        App::rollback();
+    } catch (\Throwable $second) {
+        $rollbackFault = $second;
+    }
+
+    // Record what happened. A file that could not be removed is named by its
+    // PATH only — a name the portal made up, never the claimant's (#714) —
+    // and goes to PHP's own error log as well, because the database log may
+    // be the very thing that has failed.
+    foreach ($leftBehind as $path) {
+        error_log('[expenses/submit] a receipt file for a claim that was not saved could not be removed: ' . $path);
+    }
+    try {
+        Logger::exception($ex);
+        if ($rollbackFault !== null) {
+            Logger::exception($rollbackFault);
+        }
+        foreach ($leftBehind as $path) {
+            Logger::errorPlatform(
+                'Expenses',
+                'Error',
+                'RECEIPT_LEFT_BEHIND',
+                'A receipt file for a claim that was not saved could not be removed',
+                'File: ' . $path . ' — nothing in the database points at it; remove it by hand.'
+            );
+        }
+    } catch (\Throwable $ignored) {
+        error_log('[expenses/submit] a claim was not saved and the error log could not be written: ' . $ex->getMessage());
+    }
+
     $_SESSION['flash_msg']  = 'Error saving claim. Please try again.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Router::url('expenses/submit'));
@@ -344,7 +419,26 @@ try {
 //    saved — an invitation to submit the same money twice. A failure here is
 //    recorded for the administrator and the claimant is told the truth.
 try {
-    // 5. 📓 Log activity — a COUNT of receipts not attached, never their names.
+    // 5. 🧾 One error-log line for EVERY file the server failed to store —
+    //    PHP's own refusals (upload error codes 6, 7 and 8) and a failed move
+    //    alike — because the claimant is told such a file "has been recorded
+    //    for your administrator", and round 1 of the independent check found
+    //    that true only of a failed move. Written here, ONE place, after the
+    //    commit, so a rollback cannot take the line away with the claim. The
+    //    note never holds the claimant's file name (#714).
+    foreach ($notAttached as $file) {
+        if (($file['reason'] ?? '') === ExpenseRules::RECEIPT_NOT_STORED) {
+            Logger::errorPlatform(
+                'Expenses',
+                'Error',
+                'RECEIPT_NOT_STORED',
+                'A receipt could not be stored, so it was not attached to a claim',
+                'Claim #' . $claimID . ': ' . (string) ($file['adminNote'] ?? 'no further detail was recorded')
+            );
+        }
+    }
+
+    // 6. 📓 Log activity — a COUNT of receipts not attached, never their names.
     Logger::activity(
         'ExpenseSubmit',
         'Claim #' . $claimID . ' created (£' . number_format($totalAmt, 2) . ')'
@@ -352,7 +446,7 @@ try {
         $userId
     );
 
-    // 6. 📧 Send email notification to approvers
+    // 7. 📧 Send email notification to approvers
     ExpenseMailer::notify($claimID, 'submitted', [
         'comments' => '',
     ]);
@@ -360,9 +454,17 @@ try {
     Logger::exception($ex);
 }
 
-// 7. ✅ Tell the claimant what happened — including, by name, every file that
-//    was NOT attached (#649) — and go back to the claims page, which prints it.
-$told = ExpenseRules::submittedMessage($claimID, $notAttached, (string) ini_get('upload_max_filesize'));
+// 8. ✅ Tell the claimant what happened — including, by name, every file that
+//    was NOT attached (#649), and any PHP dropped past the server's limit on
+//    how many files one submission may carry — and go back to the claims
+//    page, which prints it.
+$told = ExpenseRules::submittedMessage(
+    $claimID,
+    $notAttached,
+    (string) ini_get('upload_max_filesize'),
+    $cutShort,
+    $countLimit
+);
 $_SESSION['flash_msg']  = $told['message'];
 $_SESSION['flash_type'] = $told['type'];
 header('Location: ' . Router::url('expenses/submit') . '?success=' . $claimID);
