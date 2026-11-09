@@ -978,8 +978,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     //    for each name and start.
                     $repeatCount  = 0;
                     $firstRowSeen = [];
-                    // The repeat keys of rows that WERE imported in this run.
-                    $savedKeys    = [];
                     // ☑️ "Import these anyway" (D-100). An unticked box is not
                     //    sent at all, and NOT SENT MEANS NO here — the safe
                     //    default the owner chose — so this asks for the exact
@@ -1273,18 +1271,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'ok'     => false,
                                     'repeat' => true,
                                     'row'    => $r['rowNum'],
-                                    // Worded by whether row N itself was
-                                    // imported: if it was not, "to import it
-                                    // as well" would claim a copy that is not
-                                    // there.
-                                    'msg'    => 'Repeats row ' . $repeatOf . ' of this file (the same name and the same '
-                                        . 'start date and time), so it was not imported. Nothing from it was saved. '
-                                        . (isset($savedKeys[$repeatKey]) === true
-                                            ? 'To import it as well, import a file holding only this row and tick '
-                                                . '"Import these anyway".'
-                                            : 'Row ' . $repeatOf . ' was not imported either, so this event is not in '
-                                                . 'the calendar from this file; to import it, put it right and import '
-                                                . 'a file holding only that row.'),
+                                    // ✂️ ONE WORDING, WHATEVER HAPPENED TO ROW N.
+                                    //    It states only what is certain and
+                                    //    points at row N's own line. Three
+                                    //    rounds of the independent check each
+                                    //    found a sentence GUESSING what had
+                                    //    happened to row N wrong for some
+                                    //    reason row N could have (imported;
+                                    //    refused for a fault in the row or in
+                                    //    the database; given up on after three
+                                    //    address tries; already in the
+                                    //    calendar), so the guess is gone rather
+                                    //    than refined a fourth time.
+                                    'msg'    => 'Repeats row ' . $repeatOf . ' of this file (the same name, capitals '
+                                        . 'included, and the same start date and time), so it was left out. Nothing '
+                                        . 'from it was saved. Row ' . $repeatOf . '\'s own line above says what '
+                                        . 'happened to it. To import this row as a separate event anyway, import a '
+                                        . 'file holding only this row and tick "Import these anyway".',
                                 ];
                                 $repeatCount++;
                                 continue;
@@ -1473,9 +1476,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         if ($savedAs > 0) {
-                            // Remembered so a later repeat of this row can say
-                            // truthfully that its first copy WAS imported.
-                            $savedKeys[$repeatKey] = true;
                             $results[] = ['ok' => true, 'row' => $r['rowNum'], 'msg' => 'Imported as event #' . $savedAs];
                             $okCount++;
                         } else {

@@ -45,8 +45,10 @@
  *   X  a row the FILE repeats (same name, same STORED start — so a start
  *      written without seconds counts too) is marked "repeats row N" in the
  *      preview and left out at Confirm unless ticked, so the two pages agree;
- *      a repeat of a row the database refused says that row was not imported
- *      either
+ *      its line has ONE wording whatever happened to the row it repeats
+ *      (imported, refused by the row or by the database, already in the
+ *      calendar — X3, X7, Y1, Y2), because a guess was wrong three rounds
+ *      running
  *   R  another writer taking the web address between the import asking
  *      whether it is free and saving the row (#877). First stood in for by
  *      the trigger: taken once, the row is saved on its second try; taken
@@ -76,7 +78,8 @@
  *      capitals — and section V goes red for each. Three more count any
  *      value as ticked and make each page forget the file's own repeats
  *      (sections V and X go red), and two more key a repeat by the cell's raw
- *      text on one page only (section X goes red).
+ *      text on one page only (section X goes red), and one puts a guess about
+ *      the repeated row's fate back into its wording (Y1 and Y2 go red).
  *   L  a connection lost BEFORE a row's INSERT is sent (during one of the two
  *      questions asked first) is reported as "not imported, nothing saved",
  *      never as "may have been saved". Driven by one line injected into the
@@ -988,9 +991,17 @@ check('X1 the preview marks BOTH repeated rows "Repeats an earlier row" — the 
     [$x['repeatMarks'], $x['saysRow2'], $x['ready']], [2, true, 3]);
 check('X2 Confirm, without the tick, leaves out exactly the rows the preview marked — the two pages agree',
     $x['lines'], [2 => 'OK', 3 => 'Repeats an earlier row', 4 => 'OK', 5 => 'OK', 6 => 'Repeats an earlier row']);
-check('X3 ...says which row it repeats, and how to import it anyway',
-    [str_contains($x['msg3'], 'Repeats row 2 of this file'), str_contains($x['msg3'], 'import a file holding only this row')],
-    [true, true]);
+/**
+ * The ONE wording a repeated row is given, whatever happened to the row it
+ * repeats (round 4 of the independent check: three rounds running, a sentence
+ * guessing row N's fate was wrong for some reason row N could have had).
+ */
+$repeatWords = static fn (int $n): string => 'Repeats row ' . $n . ' of this file (the same name, capitals included, '
+    . 'and the same start date and time), so it was left out. Nothing from it was saved. Row ' . $n . '\'s own '
+    . 'line above says what happened to it. To import this row as a separate event anyway, import a file holding '
+    . 'only this row and tick "Import these anyway".';
+check('X3 ...in the one wording: which row it repeats, that row\'s own line, and how to import it anyway',
+    $x['msg3'], $repeatWords(2));
 check('X4 ...three events are saved: different capitals and a different date are not repeats', $x['count'], 3);
 check('X5 ...and the activity record counts the repeat on its own',
     $x['activity'], ['Bulk import: 3 events created, 0 already in the calendar, 2 repeated in the file, 0 rows not imported']);
@@ -1009,13 +1020,47 @@ file_put_contents(
     . '"' . REFUSED_NAME . "\",2031-10-05 10:00:00,2031-10-05 11:00:00,published\n"
 );
 $xr = $runImport($twiceRefused);
-check('X7 a repeat of a REFUSED row is still left out, and says row 2 was not imported either — never "to import it as well"',
-    [
-        array_map(static fn (array $line): string => $line[0], $xr['report']),
-        str_contains($xr['report'][3][1] ?? '', 'Row 2 was not imported either'),
-        str_contains($xr['report'][3][1] ?? '', 'To import it as well'),
-    ],
-    [[2 => 'Skipped', 3 => 'Repeats an earlier row'], true, false]);
+check('X7 a repeat of a row REFUSED by the trigger is still left out, in the same one wording',
+    [array_map(static fn (array $line): string => $line[0], $xr['report']), $xr['report'][3][1] ?? ''],
+    [[2 => 'Skipped', 3 => 'Repeats an earlier row'], $repeatWords(2)]);
+
+// Y1 and Y2: two more things that can have happened to the row a repeat
+// points at. The wording must be the same for each, because it guesses
+// nothing — the round-4 regression told a repeat of a row ALREADY IN THE
+// CALENDAR to "put it right and import a file holding only that row", which
+// imports nothing, and told a repeat of a row refused for a DATABASE reason
+// (1114) to put the row right, though its own line says it is not the row.
+$yAlready = $child . $sep . 'p790-y-already.csv';
+file_put_contents(
+    $yAlready,
+    "eventName,startDateTime,endDateTime,status\n"
+    . "\"P790 Sunday Service\",2031-03-09 10:00:00,2031-03-09 11:00:00,published\n"
+    . "\"P790 Sunday Service\",2031-03-09 10:00:00,2031-03-09 11:00:00,published\n"
+);
+$yDatabase = $child . $sep . 'p790-y-database.csv';
+file_put_contents(
+    $yDatabase,
+    "eventName,startDateTime,endDateTime,status\n"
+    . '"' . REFUSED_1114_NAME . "\",2031-10-06 10:00:00,2031-10-06 11:00:00,published\n"
+    . '"' . REFUSED_1114_NAME . "\",2031-10-06 10:00:00,2031-10-06 11:00:00,published\n"
+);
+/** Y1 and Y2, reduced to each run's lines and its repeated row's words. */
+$scnRepeatOfOther = static function () use ($runImport, $dup, $yAlready, $yDatabase): array {
+    $runImport($dup);
+    $a = $runImport($yAlready, false);
+    $d = $runImport($yDatabase);
+    return [
+        'alreadyLines' => array_map(static fn (array $line): string => $line[0], $a['report']),
+        'alreadyMsg'   => $a['report'][3][1] ?? '',
+        'dbLines'      => array_map(static fn (array $line): string => $line[0], $d['report']),
+        'dbMsg'        => $d['report'][3][1] ?? '',
+    ];
+};
+$y = $scnRepeatOfOther();
+check('Y1 a repeat of a row ALREADY IN THE CALENDAR is left out, in the same one wording',
+    [$y['alreadyLines'], $y['alreadyMsg']], [[2 => 'Already in the calendar', 3 => 'Repeats an earlier row'], $repeatWords(2)]);
+check('Y2 a repeat of a row the DATABASE refused (1114, not the row\'s fault) is left out, in the same one wording',
+    [$y['dbLines'], $y['dbMsg']], [[2 => 'Skipped', 3 => 'Repeats an earlier row'], $repeatWords(2)]);
 
 echo "R. Another writer takes the address between asking and saving (#877)\n";
 // 🏁 Stood in for by the trigger (see RACE_ONCE_NAME at the top): the database
@@ -1581,6 +1626,24 @@ $plant(
 $x = $scnTwice(false);
 check('P39 with Confirm keying repeats by raw text, the row written without seconds is not called a repeat, so X2 would have gone red',
     $x['lines'][6] ?? null, 'Already in the calendar');
+$restoreBoth();
+
+// (s) A GUESS ABOUT ROW N PUT BACK in place of "its own line above says what
+//     happened to it" — the shape that was wrong three rounds running.
+$plant(
+    $pagePath,
+    $before,
+    "'from it was saved. Row ' . \$repeatOf . '\\'s own line above says what '\n"
+    . "                                        . 'happened to it. ",
+    "'from it was saved. Row ' . \$repeatOf . ' was not imported either; put it right '\n"
+    . "                                        . 'and import it again. ",
+    'the repeat wording'
+);
+$y = $scnRepeatOfOther();
+check('P40 with a guess about row N put back, the repeat of a row already in the calendar is told something untrue, '
+    . 'so Y1 would have gone red', $y['alreadyMsg'] === $repeatWords(2), false);
+check('P41 ...and so is the repeat of a row the database refused, so Y2 would have gone red',
+    $y['dbMsg'] === $repeatWords(2), false);
 $restoreBoth();
 
 // (n) THE PREVIEW FORGETS THE FILE'S OWN REPEATS: it calls the row Ready again.
