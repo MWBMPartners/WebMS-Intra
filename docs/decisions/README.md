@@ -151,7 +151,8 @@ appended with its real date and a note that it was added later.
 | [D-093](093-only-a-global-administrator-hands-out-public-website-setup.md) | 2026-11-09 | Only an organisation's global administrator may hand out "Set up the public website" | in force |
 | [D-094](094-the-installation-can-forbid-framing-for-every-organisation.md) | 2026-11-09 | The installation can forbid every organisation's public pages being framed | in force |
 | [D-095](095-the-public-website-page-stores-both-addresses.md) | 2026-11-09 | The public-website page stores the organisation's main website and, optionally, a public address for the portal's public pages | in force |
+| [D-096](096-iphone-heic-receipts-are-accepted.md) | 2026-11-09 | iPhone photos (HEIC/HEIF) are accepted as expense receipts | in force |
 
-*95 decisions. This index is checked against the folder by
+*96 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
