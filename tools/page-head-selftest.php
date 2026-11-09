@@ -38,17 +38,27 @@
  *      faults: the icon line deleted, commented out, and moved into <body>.
  *   H. /openapi.json names the INSTALLATION's product, never one written into
  *      the description file (#821), with a planted fault.
+ *   I. A page reachable at two addresses carries ONE canonical address (#823):
+ *      /settings and /admin/settings both say …/settings, / and /dashboard
+ *      both say …/; a 404 page (/index.php, and an address nothing answers)
+ *      carries NO canonical address or og:url; an ordinary signed-in page
+ *      still carries its own. Three planted faults, one per fix.
  *
  * WHAT IT CANNOT DO
  *   - It does not judge how a preview card LOOKS, only what the page says.
  *   - It does not check og:image's picture really loads; it checks the tag is
  *     only written when a raster file is on disk.
- *   - It signs ONE person in, an ordinary member, and only for the confidence
- *     monitor (G08, G13/G14), which refuses anybody signed out. Every other
- *     page here is fetched signed out. Ordinary pages behind the sign-in are
- *     covered by part B only through a page that is public and uses the
- *     shared header; nothing here checks a signed-in page that requires
- *     head-meta.php itself.
+ *   - It signs TWO people in, each for one section only: an ordinary member
+ *     for the confidence monitor (G08, G13/G14), which refuses anybody signed
+ *     out, and an ADMINISTRATOR for part I (Settings needs one; the Dashboard
+ *     needs anybody signed in). Every other page here is fetched signed out.
+ *     So the only signed-in pages read through the shared header are the
+ *     Dashboard, Settings and /help (I05); nothing else behind the sign-in is
+ *     covered.
+ *   - Part I proves the error rule on 404 answers only. A 403 or 500 answer
+ *     goes through the same test in head-meta.php (the response code, which
+ *     `Router::renderError()` sets before drawing), but no 403 or 500 page is
+ *     fetched here, so that is read from the code, not measured.
  *   - TWO token-reached screens ARE covered (#821): the projector display
  *     (`worship/display?t=…`) and the asset tag page (`a/{token}`), each drawn
  *     for a record this test makes and removes. The token pages that REQUIRE
@@ -79,7 +89,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/569
  * -----------------------------------------------------------------------------
  */
@@ -1025,6 +1035,218 @@ foreach (['product.name' => $nameWas, 'product.publisher' => $publisherWas] as $
         $setSetting($key, $was);
     }
 }
+
+echo "\n=== I. One page, two addresses, ONE canonical address; an error page has none (#823) ===\n";
+// -----------------------------------------------------------------------------
+// WHY. head-meta.php builds the canonical address and og:url from the REQUEST
+// path unless a page names its own (`$pageCanonicalPath`). Three pages were
+// reachable more than one way and so gave themselves more than one "one true
+// address" (#823, found by #569's round-2 check):
+//   - settings/index.php answers `/settings` AND `/admin/settings`;
+//   - the Dashboard answers `/` AND `/dashboard`;
+//   - `/index.php` (and every other address nothing answers) drew a 404 page
+//     that called ITSELF `…/index.php` — an error page has no true address.
+//
+// WHICH ADDRESS IS "THE ONE" was measured, not chosen by taste: the address the
+// portal itself sends people to. For Settings that is `/settings` (the menu on
+// every page, and every redirect in the page's own save handler); for the
+// Dashboard it is the front page `/` (the menu's Home link, the brand link,
+// and the "Dashboard" breadcrumb on nearly every page). The reasoning, and the
+// commands that count the links, are beside `$pageCanonicalPath` in each page.
+//
+// Both pages refuse anybody signed out (the Dashboard sends them to sign in;
+// Settings also needs an ADMINISTRATOR), so an administrator is made and
+// signed in for this section only, and removed at its end. Each fetch is
+// checked to be the page it meant to be first — a marker only that page draws,
+// and HTTP 200 — so a sign-in that failed reads as "the page did not draw",
+// never as a canonical-address fault.
+//
+// I06-I11 PLANT each fix back out of the copy, one at a time, and require the
+// very same question to go red — then put it back and require it to pass.
+$i8         = ['user' => 982201];
+$i8Password = bin2hex(random_bytes(12)) . 'Aa1!';
+$i8User     = 'selftest-pagehead-admin-' . bin2hex(random_bytes(3));
+$i8Jar      = $child . $sep . 'i8-cookies.txt';
+$canonBase  = 'https://portal.example.test';
+
+/** Remove the administrator this section made. Safe to call twice. */
+$i8Tidy = static function () use ($db, $i8): void {
+    // The same schema-driven sweep as $g8Tidy: every table whose link points
+    // at tblUsers is asked, so the rows the sign-in wrote go too.
+    $links = $db->query(
+        "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+        . "WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'tblUsers'"
+    );
+    foreach ($links->fetch_all(MYSQLI_ASSOC) as $link) {
+        $db->query('DELETE FROM `' . str_replace('`', '', (string) $link['TABLE_NAME']) . '` WHERE `'
+            . str_replace('`', '', (string) $link['COLUMN_NAME']) . '` = ' . $i8['user']);
+    }
+    $db->query('DELETE FROM tblUsers WHERE userID = ' . $i8['user']);
+};
+$i8Tidy();
+$stmt = $db->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, \'Page-head Administrator\', ?, 1, 1, 0)');
+$i8Email = $i8User . '@selftest.invalid';
+$stmt->bind_param('is', $i8['user'], $i8Email);
+$stmt->execute();
+$stmt = $db->prepare('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, 1, 1, 1, 0)');
+$stmt->bind_param('i', $i8['user']);
+$stmt->execute();
+$i8Hash = password_hash($i8Password, PASSWORD_DEFAULT);
+$stmt = $db->prepare('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)');
+$stmt->bind_param('iss', $i8['user'], $i8User, $i8Hash);
+$stmt->execute();
+$stmt->close();
+
+/**
+ * Fetch as the administrator: [HTTP status, body]. The status is the LAST
+ * response's, after any redirect was followed.
+ */
+$fetchAsAdmin = static function (string $path, array $post = []) use ($port, $i8Jar): array {
+    $ch = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_COOKIEJAR      => $i8Jar,
+        CURLOPT_COOKIEFILE     => $i8Jar,
+    ]);
+    if ($post !== []) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+    }
+    $body = curl_exec($ch);
+    return [(int) curl_getinfo($ch, CURLINFO_HTTP_CODE), is_string($body) === true ? $body : ''];
+};
+[, $i8SignIn] = $fetchAsAdmin('/login');
+preg_match('#name="csrf_token"\s+value="([^"]+)"#', $i8SignIn, $i8Csrf);
+$fetchAsAdmin('/login', ['csrf_token' => $i8Csrf[1] ?? '', 'username' => $i8User, 'password' => $i8Password]);
+
+/**
+ * Fetch every address in $paths and require each to be the page ($marker),
+ * answered 200, with canonical AND og:url both exactly $expected. Answers what
+ * is wrong, or '' when nothing is. The checks AND the plants ask this, so a
+ * plant is judged by the very same question the check asks.
+ */
+$oneCanonical = static function (array $paths, string $marker, string $expected) use ($fetchAsAdmin, $tag): string {
+    $wrong = [];
+    foreach ($paths as $path) {
+        [$code, $html] = $fetchAsAdmin($path);
+        if ($code !== 200 || str_contains($html, $marker) === false) {
+            $wrong[] = "{$path} did not draw the page (HTTP {$code}), so its head was not checked";
+            continue;
+        }
+        $can = $tag($html, 'canonical', '');
+        $ogu = $tag($html, 'property', 'og:url');
+        if ($can !== $expected || $ogu !== $expected) {
+            $wrong[] = "{$path} gave canonical " . var_export($can, true) . ' and og:url ' . var_export($ogu, true)
+                . ", expected both to be '{$expected}'";
+        }
+    }
+    return implode("\n", $wrong);
+};
+
+/**
+ * Fetch an address nothing answers and require a REAL 404 page — HTML, with
+ * its description, which needs no address (as C04) — carrying NO canonical
+ * address and NO og:url. Answers what is wrong, or '' when nothing is.
+ */
+$noCanonical = static function (string $path) use ($fetchAsAdmin, $tag): string {
+    [$code, $html] = $fetchAsAdmin($path);
+    if ($code !== 404 || str_contains($html, '<html') === false) {
+        return "{$path} did not answer a 404 page (HTTP {$code}), so its head was not checked";
+    }
+    $wrong = [];
+    $can   = $tag($html, 'canonical', '');
+    $ogu   = $tag($html, 'property', 'og:url');
+    if ($can !== null || $ogu !== null) {
+        $wrong[] = "{$path} (a 404 page) gave canonical " . var_export($can, true) . ' and og:url ' . var_export($ogu, true)
+            . ', expected neither';
+    }
+    $desc = $tag($html, 'name', 'description');
+    if ($desc === null || trim($desc) === '') {
+        $wrong[] = "{$path} (a 404 page) lost its description too, which needs no address";
+    }
+    return implode("\n", $wrong);
+};
+
+$settingsMarker  = 'id="settingsAccordion"';
+$dashboardMarker = 'portal-dashboard-hero-title';
+$missingAddress  = '/no-such-page-' . bin2hex(random_bytes(4));
+$i8Checks = [
+    'I01' => [static fn (): string => $oneCanonical(['/settings', '/admin/settings'], $settingsMarker, $canonBase . '/settings'),
+              '/settings and /admin/settings both carry the one canonical address ' . $canonBase . '/settings'],
+    'I02' => [static fn (): string => $oneCanonical(['/', '/dashboard'], $dashboardMarker, $canonBase . '/'),
+              '/ and /dashboard both carry the one canonical address ' . $canonBase . '/'],
+    'I03' => [static fn (): string => $noCanonical('/index.php'),
+              '/index.php answers a 404 page with a description and NO canonical address or og:url'],
+    'I04' => [static fn (): string => $noCanonical($missingAddress),
+              'an address nothing answers gives a 404 page with NO canonical address either (the class, not one address)'],
+];
+foreach ($i8Checks as $id => [$run, $words]) {
+    $wrong = $run();
+    if ($wrong === '') {
+        ok($id, $words);
+    } else {
+        bad($id, 'not so: ' . $words, $wrong);
+    }
+}
+
+// I05: the error rule must not reach an ORDINARY page. A 200 page, signed in,
+// still carries its own canonical address — otherwise I03 and I04 could pass
+// because the tags had vanished everywhere.
+[$i5Code, $i5Html] = $fetchAsAdmin('/help');
+$i5Can = $tag($i5Html, 'canonical', '');
+if ($i5Code === 200 && $i5Can === $canonBase . '/help') {
+    ok('I05', 'an ordinary page, signed in, still carries its own canonical address (' . $i5Can . ')');
+} else {
+    bad('I05', 'an ordinary page lost or changed its canonical address, so the error rule reaches too far', 'HTTP ' . $i5Code . ', canonical ' . var_export($i5Can, true));
+}
+
+// I06-I11: PLANT each fix back out of the copy, one at a time.
+$i8Plant = static function (
+    string $planted, string $restored, string $file, string $pattern, string $replacement,
+    string $what, callable $check
+): void {
+    $before = (string) file_get_contents($file);
+    $after  = preg_replace($pattern, $replacement, $before, 1);
+    if (is_string($after) === false || $after === $before) {
+        bad($planted, "could not plant the fault: {$what} was not found in the copy");
+        return;
+    }
+    file_put_contents($file, $after);
+    $wrong = $check();
+    if ($wrong !== '') {
+        ok($planted, "with {$what} taken out, the check goes red — it can see that fault:\n           "
+            . str_replace("\n", "\n           ", $wrong));
+    } else {
+        bad($planted, "with {$what} taken out, the check STILL passed, so it proves nothing");
+    }
+    file_put_contents($file, $before);
+    $again = $check();
+    if ($again === '') {
+        ok($restored, 'and it passes again once the fault is taken out');
+    } else {
+        bad($restored, 'it did not recover after the planted fault was removed', $again);
+    }
+};
+$i8Plant(
+    'I06', 'I07', $child . $sep . 'web' . $sep . '_apps' . $sep . 'settings' . $sep . 'index.php',
+    '#^\$pageCanonicalPath = \'settings\';$#m', '// planted: no canonical path named',
+    "Settings' own canonical path",
+    $i8Checks['I01'][0]
+);
+$i8Plant(
+    'I08', 'I09', $child . $sep . 'web' . $sep . '_apps' . $sep . 'dashboard' . $sep . 'index.php',
+    '#^\$pageCanonicalPath = \'\';$#m', '// planted: no canonical path named',
+    "the Dashboard's own canonical path",
+    $i8Checks['I02'][0]
+);
+$i8Plant(
+    'I10', 'I11', $child . $sep . 'web' . $sep . '_core' . $sep . 'templates' . $sep . 'head-meta.php',
+    '#\(\$headMetaIsError === false && #', '(',
+    "head-meta.php's error-answer rule",
+    $i8Checks['I03'][0]
+);
+$i8Tidy();
 
 echo "\n=== Z. Clean-up ===\n";
 $clearSetting('site.url');

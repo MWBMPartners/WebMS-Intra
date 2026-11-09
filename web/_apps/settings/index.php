@@ -38,7 +38,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.5.0
+ * @version   0.6.0
  * -----------------------------------------------------------------------------
  */
 
@@ -58,6 +58,31 @@ use Portal\Core\Site;
 $pageTitle   = 'Settings';
 $pageSection = 'admin';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Settings' => ''];
+
+// 🏠 ONE canonical address for this page, whichever way it was reached (#823).
+//
+//    This file answers TWO addresses: `settings` and `admin/settings` are both
+//    seeded in tblRoutes and both point here. head-meta.php builds the
+//    canonical address and og:url from the request path unless a page names
+//    its own, so until #823 this one page told search engines and preview
+//    cards it had two "one true addresses".
+//
+//    `settings` is the one chosen because it is the one the portal itself
+//    sends people to, measured on 9 November 2026 rather than assumed:
+//      - the menu on every page (`_core/templates/nav.php`) links
+//        `Site::url('settings')`, and nowhere links the other;
+//      - every redirect in this page's own save handler (`settings/save.php`,
+//        43 of them) lands on `Site::url('settings')`, so this is the address
+//        in the address bar after every save.
+//    `admin/settings` IS linked too — from 18 files, mostly the admin area's
+//    own breadcrumbs and help text — so it keeps working and is NOT being
+//    retired; it simply is not the address this page calls its own. Count
+//    with: grep -rnoE "url(ForScript)?\(\s*'(admin/)?settings'" web
+//
+//    A clean route, no `.php`, no leading slash — head-meta.php hands it to
+//    PortalAddress::absolute(), which adds the organisation's part itself
+//    (#536: never join two built addresses).
+$pageCanonicalPath = 'settings';
 
 // 🛡️ Admin access check (Router handles isProtected login enforcement)
 if (App::isAdmin() === false) {

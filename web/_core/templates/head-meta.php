@@ -67,7 +67,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * -----------------------------------------------------------------------------
  */
 
@@ -115,13 +115,37 @@ if ($pageDescription === '') {
 // `/api-docs/index.php` — and building from the request path gave that page a
 // `.php` canonical address, two "one true addresses" for one page, and a `.php`
 // address in a link that leaves the portal (#569 round 1). It is NOT the only
-// page reachable twice: `/settings` and `/admin/settings`, and `/` and
-// `/dashboard`, each still give one page two canonical addresses (#823). A page
-// that leaves this unset keeps the request path.
+// page reachable twice: `settings/index.php` (at `/settings` and
+// `/admin/settings`) names `settings`, and the Dashboard (at `/` and
+// `/dashboard`) names the front page, `''` (#823). A page that leaves this
+// unset keeps the request path.
+//
+// AN ERROR ANSWER CARRIES NO CANONICAL ADDRESS AT ALL (#823). A "not found",
+// "access denied" or "server error" page is not a page anybody should be sent
+// to, so it has no "one true address" — and building one from the request
+// path made it claim the address it failed at as its own: `/index.php`
+// answered a 404 page calling itself `…/index.php`, and so did every other
+// address nothing answers (`/no-such-page` → `…/no-such-page`). The preview
+// card goes with it, because the card's og:url IS that address.
+//
+// It is decided by the RESPONSE CODE, not by a variable each error page sets,
+// on purpose: every error page reaches this file through
+// `Router::renderError()` (which sets the code FIRST, then draws), and so do
+// `error.php`, the "event unavailable" page and any page that refuses with a
+// 4xx of its own. One test here covers all of them, including ones written
+// later; a per-page flag would be one more thing for the next error page to
+// forget. 400 and above only: a 2xx is a real page, and a 3xx draws nothing.
+//
+// WHAT IT CANNOT DO: see a code set AFTER this file has run. Nothing here does
+// that (a status line is sent with the first byte of the page, so it would not
+// take effect anyway). `http_response_code()` answers `false` where there is
+// no web request at all; that is treated as an ordinary page.
+$headMetaStatus = http_response_code();
+$headMetaIsError = is_int($headMetaStatus) === true && $headMetaStatus >= 400;
 $canonicalPathForPage = (isset($pageCanonicalPath) === true && is_string($pageCanonicalPath) === true)
     ? $pageCanonicalPath
     : \Portal\Core\Router::extractPath();
-$canonicalAddress = \Portal\Core\PortalAddress::visitorCanChooseHost() === false
+$canonicalAddress = ($headMetaIsError === false && \Portal\Core\PortalAddress::visitorCanChooseHost() === false)
     ? \Portal\Core\PortalAddress::absolute($canonicalPathForPage)
     : '';
 
@@ -177,8 +201,9 @@ $headMetaImage     = (
     <meta name="description" content="<?php echo htmlspecialchars($pageDescription, ENT_QUOTES, 'UTF-8'); ?>">
 <?php if ($canonicalAddress !== ''): ?>
     <!-- 🏠 The one address this page should be known by (#569). Left out
-         altogether while a visitor could choose the host name — see the note
-         beside $canonicalAddress in this file. -->
+         altogether while a visitor could choose the host name, and on an
+         error answer (#823) — see the note beside $canonicalAddress in this
+         file. -->
     <link rel="canonical" href="<?php echo htmlspecialchars($canonicalAddress, ENT_QUOTES, 'UTF-8'); ?>">
 
     <!-- 🔗 The preview card a chat app, e-mail client or collaboration tool

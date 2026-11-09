@@ -23,7 +23,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   0.10.0
+ * @version   0.11.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/85
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/410
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/514
@@ -44,6 +44,28 @@ use Portal\Core\Site;
 // 📌 Page metadata for the template system
 $pageTitle   = 'Dashboard';
 $pageSection = 'dashboard';
+
+// 🏠 ONE canonical address for this page, whichever way it was reached (#823).
+//
+//    The Dashboard answers both `/` (the router rewrites an empty path to the
+//    `dashboard` route) and `/dashboard`. head-meta.php builds the canonical
+//    address and og:url from the REQUEST path unless a page names its own, so
+//    until #823 the same page called itself `…/` on one and `…/dashboard` on
+//    the other.
+//
+//    The front page (`''`) is the one chosen because it is the one the portal
+//    itself sends people to, measured on 9 November 2026 rather than assumed:
+//    the menu's Home link and the brand link in `_core/templates/nav.php` are
+//    both `Site::url('')`, and so is the "Dashboard" breadcrumb that nearly
+//    every page carries. `dashboard` by name is linked from 14 files (mostly
+//    admin reports) against 295 for the front page, and keeps working; it is
+//    simply not the address this page calls its own. Count with:
+//    grep -rlE "url\(\s*'dashboard'\s*\)" web   and   grep -rlE "url\(\s*''\s*\)" web
+//
+//    The EMPTY string is deliberate and is not "unset": head-meta.php accepts
+//    any string here, and PortalAddress::absolute('') gives the organisation's
+//    own front page, with its first part where one is in use (#536).
+$pageCanonicalPath = '';
 
 $userId  = (int) ($_SESSION['user_id'] ?? 0);
 $siteId  = Site::id();
