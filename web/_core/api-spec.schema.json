@@ -30,7 +30,8 @@
       ],
       "properties": {
         "title": {
-          "description": "The API's name, as a developer sees it.",
+          "description": "The API's name, as a developer sees it. What a developer sees is NOT this file's value: web/public_html/openapi.php, the only thing that serves this file (at /openapi.json), replaces it with the installation's own product name followed by ' REST API', read from Site::productName() (#307). The product name is chosen at install (#296), so this file must not carry one — it used to say 'WebMS Intra REST API', which read as a name built into the product (#821). Section H of tools/page-head-selftest.php checks both halves: that no product name from web/_core/brand-defaults.php is written here, and that the served title follows the installation's setting.",
+          "$comment": "Keep this a plain placeholder such as 'REST API'. A product or company name here is wrong on any installation that chose another at install, and it would be what a reader of this file believes the API is called.",
           "type": "string",
           "minLength": 1
         },
@@ -64,11 +65,11 @@
           "type": "object",
           "properties": {
             "name": {
-              "description": "The responsible party's name.",
+              "description": "The responsible party's name. Deliberately NOT written in this file (#821): web/public_html/openapi.php fills it in when it serves the description, from the installation's `product.publisher` setting (Site::productPublisher()), so a company name typed here would only ever be a second, possibly different, answer.",
               "type": "string"
             },
             "url": {
-              "description": "A web address for them.",
+              "description": "A web address for them. This one IS written here, and is the product's own public source repository rather than any customer's address: openapi.php keeps it as the codebase's identity whatever brand is installed (#307). It is not a customer's domain, which is what the no-built-in-addresses rule (#500) forbids. NOTE: an installation whose `product.publisher` setting names a different company still shows this link beside that company's name — a known mismatch, found while building #821 and deliberately not decided there.",
               "type": "string"
             },
             "email": {

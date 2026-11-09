@@ -56,6 +56,32 @@ $nonce     = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Confidence Monitor — <?php echo htmlspecialchars($title, ENT_QUOTES, 'UTF-8'); ?></title>
+    <!-- 📝 What this screen is, in one line (#569, #821). Written here by
+         hand rather than through head-meta.php, on purpose: this file is on
+         the EXEMPT list in tools/audit-checks/check_page_head_tags.py (a
+         presenter's confidence monitor; nobody shares its address), so a
+         canonical address and a preview card would describe nothing. A
+         description is different: the owner's checklist of 4 October 2026
+         covers every page, and it costs nothing. It names no organisation and
+         nothing about the service. -->
+    <meta name="description" content="A speaker's confidence monitor: how long the service has been running, and messages from the operator.">
+    <!-- 🔖 "THIS SCREEN HAS NO ICON", SAID OUT LOUD (#821). With no icon link
+         at all a browser falls back to /favicon.ico by convention; nothing
+         answers that address, so every load cost a 404 that the browser
+         reports as a console error. Measured, not assumed: on 9 November 2026
+         the browser audit (tools/layout-audit.mjs, which since #821 prints the
+         address of a failed request) reported "Failed to load resource ... 404
+         — at /favicon.ico" for this screen before this line was added.
+
+         Why an EMPTY icon and not the portal's own: the portal's icon is
+         worked out by head-meta.php, which this file deliberately does not use
+         (see above), and copying those lines here would make a third place
+         that works the icon out, where head-meta.php's own note says there are
+         two and must be no third. A tablet in the speaker's eyeline shows this
+         full-screen, so no tab is ever seen. `data:,` is a picture with
+         nothing in it: the browser asks nobody and shows its own plain tab
+         icon. The same choice as the kiosk screen (assets/kiosk.php). -->
+    <link rel="icon" href="data:,">
     <style nonce="<?php echo $nonce; ?>">
         html, body { height: 100%; margin: 0; background: #000; color: #fff;
                      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }

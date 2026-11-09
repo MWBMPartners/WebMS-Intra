@@ -185,6 +185,33 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?php echo $assetNameSafe; ?> &middot; <?php echo $siteNameSafe; ?></title>
+    <!-- 📝 What this page is, in one line (#569, #821). Written here by hand
+         rather than through head-meta.php, on purpose: this file is on the
+         EXEMPT list in tools/audit-checks/check_page_head_tags.py (reached by
+         scanning the tag on an item, not by a shared link), so a canonical
+         address and a preview card would describe nothing. A description is
+         different: the owner's checklist of 4 October 2026 covers every page,
+         and it costs nothing. It names neither the item nor the organisation:
+         those are already on the page, and a description is what a search or
+         a preview would repeat elsewhere. -->
+    <meta name="description" content="A found-property page: how to let the owner of this item know where it is.">
+    <!-- 🔖 "THIS PAGE HAS NO ICON", SAID OUT LOUD (#821). With no icon link
+         at all a browser falls back to /favicon.ico by convention; nothing
+         answers that address, so every load cost a 404 that the browser
+         reports as a console error. Measured, not assumed: on 9 November 2026
+         the browser audit (tools/layout-audit.mjs, which since #821 prints the
+         address of a failed request) reported "Failed to load resource ... 404
+         — at /favicon.ico" for this page before this line was added.
+
+         Why an EMPTY icon and not the portal's own: the portal's icon is
+         worked out by head-meta.php, which this file deliberately does not use
+         (see above), and copying those lines here would make a third place
+         that works the icon out, where head-meta.php's own note says there are
+         two and must be no third. Somebody who has scanned the tag on a found
+         item needs the page, not a tab icon. `data:,` is a picture with
+         nothing in it: the browser asks nobody and shows its own plain tab
+         icon. The same choice as the kiosk screen (assets/kiosk.php). -->
+    <link rel="icon" href="data:,">
     <!-- 🤖 Never index a lost-and-found token page — it identifies a
          specific physical item and its owning organisation. -->
     <meta name="robots" content="noindex, nofollow, noai, noimageai">

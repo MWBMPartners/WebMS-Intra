@@ -13,7 +13,7 @@
  * Package:     Portal\Tools
  * Author:      MWBM Partners Ltd (t/a MWservices)
  * Copyright:   2026-present MWBM Partners Ltd (t/a MWservices) - All Rights Reserved
- * Version:     1.5.0
+ * Version:     1.6.0
  * Link:        https://github.com/MWBMPartners/WebMS-Intra/issues/569
  * -----------------------------------------------------------------------------
  *
@@ -367,8 +367,19 @@ async function main() {
         return (sent && sent.params && sent.params.request && sent.params.request.url) || '';
       };
       const isOutside = url => url !== '' && !url.startsWith(BASE);
+      // 📍 NAME THE ADDRESS, NOT JUST THE FAULT (#821). This portal's own
+      //    addresses are shown from their first `/` (the base is the same for
+      //    every line and only makes them harder to read); anything else is
+      //    shown whole. An empty answer means the browser never said which
+      //    address it was, and the line says so rather than leaving a gap.
+      const where = url => {
+        if (typeof url !== 'string' || url === '') { return '(the browser did not say which address)'; }
+        const shown = url.startsWith(BASE) ? (url.slice(BASE.length) || '/') : url;
+        return shown.length > 200 ? shown.slice(0, 200) + '…' : shown;
+      };
       const outsideHosts = new Set();
       let failedReqs = 0;
+      const failedWhere = [];
       for (const e of failedAll) {
         const url = requestUrl(e.params && e.params.requestId);
         if (isOutside(url)) {
@@ -376,20 +387,38 @@ async function main() {
           continue;
         }
         failedReqs += 1;
+        const why = (e.params && e.params.errorText) ? ' (' + e.params.errorText + ')' : '';
+        failedWhere.push(where(url) + why);
       }
       // Keep the TEXT, not just a count: "1 JavaScript error" tells nobody
       // what to fix, and the point of this check is that the page looks
       // finished while something on it does nothing.
+      //
+      // 📍 AND KEEP THE ADDRESS (#821). A request that comes back 404 is NOT a
+      //    "failed request" to the browser — the network part worked, so no
+      //    `Network.loadingFailed` arrives — it is reported ONLY as a console
+      //    line, "Failed to load resource: the server responded with a status
+      //    of 404". That sentence names no address. The browser does say which
+      //    one, in the entry's own `url` field, and until #821 this file threw
+      //    it away. That is how a missing `/favicon.ico` on /api-docs was
+      //    reported as "a JavaScript error at 320px" and cost a probe to
+      //    identify, when printing the address would have named it at once.
+      //    An exception carries the script's address and line the same way.
       const errorTexts = events.flatMap(e => {
         if (e.method === 'Log.entryAdded' && e.params && e.params.entry
             && e.params.entry.level === 'error') {
-          return [(e.params.entry.text || '').slice(0, 160)];
+          const entry = e.params.entry;
+          const text = (entry.text || '').slice(0, 160);
+          return [entry.url ? text + ' — at ' + where(entry.url) : text];
         }
         if (e.method === 'Runtime.exceptionThrown' && e.params
             && e.params.exceptionDetails) {
           const d = e.params.exceptionDetails;
-          const msg = (d.exception && d.exception.description) || d.text || 'an exception';
-          return [String(msg).split('\n')[0].slice(0, 160)];
+          const msg = String((d.exception && d.exception.description) || d.text || 'an exception')
+            .split('\n')[0].slice(0, 160);
+          // lineNumber is counted from 0 by the protocol; people count from 1.
+          const line = typeof d.lineNumber === 'number' ? ':' + (d.lineNumber + 1) : '';
+          return [d.url ? msg + ' — at ' + where(d.url) + line : msg];
         }
         return [];
       });
@@ -421,7 +450,8 @@ async function main() {
           + `\n      ${[...new Set(errorTexts)].slice(0, 3).join('\n      ')}`);
       }
       if (failedReqs > 0) {
-        problems.push(`${page} @${asked}: ${failedReqs} request(s) to this portal failed to load`);
+        problems.push(`${page} @${asked}: ${failedReqs} request(s) to this portal failed to load`
+          + `\n      ${[...new Set(failedWhere)].slice(0, 3).join('\n      ')}`);
       }
       if (outsideHosts.size > 0) {
         // A WARNING, not a problem: it may simply mean this machine is offline.

@@ -32,7 +32,12 @@
  *   F. The browser-tab icon on a page that draws its own <head> (#680).
  *   G. /api-docs, on both ways in, and the kiosk screen — the pages that draw
  *      their own <head> outside web/_apps' ordinary pattern — with a planted
- *      fault on /api-docs.
+ *      fault on /api-docs. Since #821 also the three other exempt SCREENS
+ *      (the projector display, the asset tag page, the confidence monitor),
+ *      each of which must say out loud that it has no icon, with a planted
+ *      fault on one of them.
+ *   H. /openapi.json names the INSTALLATION's product, never one written into
+ *      the description file (#821), with a planted fault.
  *
  * WHAT IT CANNOT DO
  *   - It does not judge how a preview card LOOKS, only what the page says.
@@ -648,6 +653,281 @@ if ($html !== '' && $desc !== null && trim($desc) !== '' && preg_match('#<link[^
     ok('G05', 'the kiosk screen carries a description and an explicitly empty icon, so no /favicon.ico request is made');
 } else {
     bad('G05', 'the kiosk screen is missing its description or its empty icon link', substr($html, 0, 400));
+}
+
+// -----------------------------------------------------------------------------
+// G06-G10: THE OTHER THREE EXEMPT SCREENS (#821).
+//
+// WHY. The projector display (`worship/display`), the asset tag page
+// (`a/{token}`, drawn by assets/tag.php) and the confidence monitor
+// (`service-plans/confidence`) are on the static check's EXEMPT list, like the
+// kiosk, and drew their own <head> with no icon link — so a browser asked for
+// /favicon.ico on every load and got a 404 (F03 pins that the address is
+// unanswered). That was MEASURED in a real browser before the fix, not
+// inferred: on 9 November 2026 tools/layout-audit.mjs reported "Failed to load
+// resource ... 404 — at /favicon.ico" for each of the three, one run per
+// screen. Each now carries the kiosk's explicit empty icon and a one-line
+// description. These checks prove that is what comes OUT, over HTTP.
+//
+// Each screen draws only for a real record, so the test makes one of each and
+// removes them again at the end. The confidence monitor needs a signed-in
+// person and the Service Plans app switched on, which ships switched OFF
+// (`service_plans.enabled` is seeded '0'), so both are arranged here and the
+// switch is put back to whatever it was.
+$g8 = ['displayPlan' => 982101, 'plan' => 982102, 'asset' => 982103, 'user' => 982104];
+$displayToken = bin2hex(random_bytes(32));
+$tagToken     = bin2hex(random_bytes(16));
+$g8Password   = bin2hex(random_bytes(12)) . 'Aa1!';
+$g8User       = 'selftest-pagehead-' . bin2hex(random_bytes(3));
+
+$readSetting = static function (string $key) use ($db): ?string {
+    $stmt = $db->prepare('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL');
+    $stmt->bind_param('s', $key);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return is_array($row) === true ? (string) $row['settingValue'] : null;
+};
+
+/** Remove every record G06-G10 made. Safe to call twice. */
+$g8Tidy = static function () use ($db, $g8): void {
+    $db->query('DELETE FROM tblAssetAudit WHERE assetID = ' . $g8['asset']);
+    $db->query('DELETE FROM tblAssets WHERE assetID = ' . $g8['asset']);
+    $db->query('DELETE FROM tblServicePlans WHERE planID = ' . $g8['displayPlan']);
+    $db->query('DELETE FROM tblServicePlan WHERE planID = ' . $g8['plan']);
+    // Signing in writes rows in other tables that point at the account (the
+    // activity log among them), and not every one of those links removes its
+    // rows with the account. So every table whose link points at tblUsers is
+    // asked, by the schema itself rather than by a list typed here, and the
+    // test person's rows are removed from it first. Names come from
+    // information_schema, never from a request, so building them into the
+    // statement is safe.
+    $links = $db->query(
+        "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE "
+        . "WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'tblUsers'"
+    );
+    foreach ($links->fetch_all(MYSQLI_ASSOC) as $link) {
+        $db->query('DELETE FROM `' . str_replace('`', '', (string) $link['TABLE_NAME']) . '` WHERE `'
+            . str_replace('`', '', (string) $link['COLUMN_NAME']) . '` = ' . $g8['user']);
+    }
+    $db->query('DELETE FROM tblUsers WHERE userID = ' . $g8['user']);
+};
+
+$servicePlansWas = $readSetting('service_plans.enabled');
+$g8Tidy();
+$stmt = $db->prepare('INSERT INTO tblServicePlans (planID, name, siteID, displayToken, isActive) VALUES (?, \'Page-head display plan\', 1, ?, 1)');
+$stmt->bind_param('is', $g8['displayPlan'], $displayToken);
+$stmt->execute();
+$stmt = $db->prepare('INSERT INTO tblServicePlan (planID, siteID, title, serviceDate) VALUES (?, 1, \'Page-head confidence plan\', CURDATE())');
+$stmt->bind_param('i', $g8['plan']);
+$stmt->execute();
+$stmt = $db->prepare('INSERT INTO tblAssets (assetID, siteID, name, publicToken, publicPageEnabled, isConfidential, isDeleted) VALUES (?, 1, \'Page-head projector\', ?, 1, 0, 0)');
+$stmt->bind_param('is', $g8['asset'], $tagToken);
+$stmt->execute();
+$stmt = $db->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, \'Page-head Member\', ?, 1, 0, 0)');
+$g8Email = $g8User . '@selftest.invalid';
+$stmt->bind_param('is', $g8['user'], $g8Email);
+$stmt->execute();
+$stmt = $db->prepare('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, 1, 1, 0, 0)');
+$stmt->bind_param('i', $g8['user']);
+$stmt->execute();
+$g8Hash = password_hash($g8Password, PASSWORD_DEFAULT);
+$stmt = $db->prepare('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)');
+$stmt->bind_param('iss', $g8['user'], $g8User, $g8Hash);
+$stmt->execute();
+$stmt->close();
+$setSetting('service_plans.enabled', 'true');
+
+/** Fetch with a cookie jar, so a sign-in carries over. */
+$g8Jar   = $child . $sep . 'g8-cookies.txt';
+$getAsMe = static function (string $path, array $post = []) use ($port, $g8Jar): string {
+    $ch = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_COOKIEJAR      => $g8Jar,
+        CURLOPT_COOKIEFILE     => $g8Jar,
+    ]);
+    if ($post !== []) {
+        curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($post));
+    }
+    $body = curl_exec($ch);
+    return is_string($body) === true ? $body : '';
+};
+
+/** The screen carries a description AND exactly the empty icon, and no other icon link. */
+$emptyIconOnly = static function (string $html) use ($tag): string {
+    $miss = [];
+    $desc = $tag($html, 'name', 'description');
+    if ($desc === null || trim($desc) === '') {
+        $miss[] = 'a description';
+    }
+    $icons = preg_match_all('#<link[^>]*\brel\s*=\s*"icon"[^>]*>#i', $html, $all);
+    if ($icons !== 1 || preg_match('#\bhref\s*=\s*"data:,"#i', $all[0][0] ?? '') !== 1) {
+        $miss[] = 'exactly one icon link, the empty `data:,` one (found ' . (int) $icons . ')';
+    }
+    return implode('; ', $miss);
+};
+
+$screens = [
+    'G06' => ['/worship/display?t=' . $displayToken, 'the projector display', 'Page-head display plan', false],
+    'G07' => ['/a/' . $tagToken, 'the asset tag page', 'Page-head projector', false],
+    'G08' => ['/service-plans/confidence?id=' . $g8['plan'], 'the confidence monitor', 'Page-head confidence plan', true],
+];
+// Sign in once, for G08. The form token comes from the sign-in page itself.
+$signInPage = $getAsMe('/login');
+preg_match('#name="csrf_token"\s+value="([^"]+)"#', $signInPage, $csrfMatch);
+$getAsMe('/login', ['csrf_token' => $csrfMatch[1] ?? '', 'username' => $g8User, 'password' => $g8Password]);
+
+foreach ($screens as $id => [$path, $words, $marker, $signedIn]) {
+    // The two token pages are fetched SIGNED OUT on purpose: a signed-in
+    // administrator is redirected from the tag page to the internal item page,
+    // which uses the ordinary header and so would prove nothing here.
+    $html = $signedIn === true ? $getAsMe($path) : $get($path);
+    if ($html === '' || str_contains($html, $marker) === false) {
+        // Not the screen at all — a refusal, a sign-in page, an app switched
+        // off. Said plainly, so a fixture fault never reads as a page fault.
+        bad($id, "{$words} ({$path}) did not draw the screen, so nothing about its head was checked", substr($html, 0, 300));
+        continue;
+    }
+    $missing = $emptyIconOnly($html);
+    if ($missing === '') {
+        ok($id, "{$words} carries a description and an explicitly empty icon, so no /favicon.ico request is made");
+    } else {
+        bad($id, "{$words} is missing: {$missing}");
+    }
+}
+
+// G09/G10: PLANT the fault on one screen. With the icon line taken out of the
+// copied projector display, G06's question must come back with an answer — or
+// G06-G08 prove nothing. Only the icon line is removed, so the page still
+// draws (a plant that broke the page would be "caught" for the wrong reason).
+$plantShow   = $child . $sep . 'web' . $sep . '_apps' . $sep . 'worship' . $sep . 'display.php';
+$showBefore  = (string) file_get_contents($plantShow);
+$showAfter   = preg_replace('#^\s*<link rel="icon" href="data:,">\s*$\n#m', '', $showBefore);
+if ($showAfter === null || $showAfter === $showBefore) {
+    bad('G09', 'could not plant the fault: no empty icon line found in the copied projector display');
+} else {
+    file_put_contents($plantShow, $showAfter);
+    $html = $get('/worship/display?t=' . $displayToken);
+    if (str_contains($html, 'Page-head display plan') === false) {
+        bad('G09', 'the planted projector display did not draw at all, so the plant broke more than the icon', substr($html, 0, 300));
+    } elseif ($emptyIconOnly($html) !== '') {
+        ok('G09', 'with the icon line taken out of the projector display, the check sees it — G06 can see the fault');
+    } else {
+        bad('G09', 'with the icon line taken out, the projector display STILL passed, so G06 proves nothing');
+    }
+    file_put_contents($plantShow, $showBefore);
+    $html = $get('/worship/display?t=' . $displayToken);
+    if ($emptyIconOnly($html) === '') {
+        ok('G10', 'and the projector display is whole again once the fault is taken out');
+    } else {
+        bad('G10', 'the projector display did not recover after the planted fault was removed');
+    }
+}
+$g8Tidy();
+if ($servicePlansWas === null) {
+    $clearSetting('service_plans.enabled');
+} else {
+    $setSetting('service_plans.enabled', $servicePlansWas);
+}
+
+echo "\n=== H. /openapi.json names the installation's product, never a built-in one (#821) ===\n";
+// -----------------------------------------------------------------------------
+// WHY. The product name is chosen at install (#296) and read through
+// Site::productName(). `web/_core/api-spec.json` is served ONLY by
+// `web/public_html/openapi.php`, which replaces the title and the contact's
+// name with the installation's product and publisher (#307). Until #821 the
+// file itself still said "WebMS Intra REST API" and named the publishing
+// company — never served, but what anybody reading the file took the API to
+// be called, and what a second reader of the file would have shown.
+//
+// H01 reads the FILE: no product name from brand-defaults.php in the title or
+// the contact. The names come from that file, never from a list typed here, so
+// a new brand added there is covered without touching this test.
+// H02/H03 read the SERVED description with a made-up product and publisher,
+// so a title that merely happened to match the default could not pass.
+// H04/H05 plant the fault: an openapi.php that stops replacing the title.
+$presets   = (array) (require $repo . $sep . 'web' . $sep . '_core' . $sep . 'brand-defaults.php');
+$brandBits = [];
+foreach ($presets as $preset) {
+    foreach (['name', 'publisher'] as $field) {
+        $value = trim((string) ($preset[$field] ?? ''));
+        if ($value !== '') {
+            $brandBits[$value] = true;
+        }
+    }
+}
+$specRaw = (string) file_get_contents($repo . $sep . 'web' . $sep . '_core' . $sep . 'api-spec.json');
+$specArr = json_decode($specRaw, true);
+$infoText = is_array($specArr) === true
+    ? (string) ($specArr['info']['title'] ?? '') . ' | ' . (string) ($specArr['info']['contact']['name'] ?? '')
+    : '';
+$foundBits = array_values(array_filter(
+    array_keys($brandBits),
+    static fn (string $bit): bool => stripos($infoText, $bit) !== false
+));
+if ($brandBits === [] || $infoText === '') {
+    bad('H01', 'could not read the brand names or the description file, so nothing was checked');
+} elseif ($foundBits === []) {
+    ok('H01', 'api-spec.json names none of the ' . count($brandBits) . ' product or publisher names in brand-defaults.php in its title or contact');
+} else {
+    bad('H01', 'api-spec.json writes a product or company name into its title or contact, which openapi.php is meant to supply', 'found: ' . implode(', ', $foundBits));
+}
+
+$nameWas      = $readSetting('product.name');
+$publisherWas = $readSetting('product.publisher');
+$plantedName  = 'Planted Product ' . bin2hex(random_bytes(3));
+$plantedPub   = 'Planted Publisher ' . bin2hex(random_bytes(3));
+$setSetting('product.name', $plantedName);
+$setSetting('product.publisher', $plantedPub);
+
+$served = json_decode($get('/openapi.json'), true);
+$title  = is_array($served) === true ? (string) ($served['info']['title'] ?? '') : '';
+$who    = is_array($served) === true ? (string) ($served['info']['contact']['name'] ?? '') : '';
+if ($title === $plantedName . ' REST API') {
+    ok('H02', 'the served title follows the installation\'s product name: "' . $title . '"');
+} else {
+    bad('H02', 'the served title does not follow the installation\'s product name', 'expected "' . $plantedName . ' REST API", got "' . $title . '"');
+}
+if ($who === $plantedPub) {
+    ok('H03', 'the served contact names the installation\'s publisher: "' . $who . '"');
+} else {
+    bad('H03', 'the served contact does not name the installation\'s publisher', 'expected "' . $plantedPub . '", got "' . $who . '"');
+}
+
+$plantSpec  = $child . $sep . 'web' . $sep . 'public_html' . $sep . 'openapi.php';
+$specBefore = (string) file_get_contents($plantSpec);
+$specAfter  = preg_replace('#^\$spec\[\'info\'\]\[\'title\'\] = [^\n]*$#m', '// planted: title left as the file says', $specBefore);
+if ($specAfter === null || $specAfter === $specBefore) {
+    bad('H04', 'could not plant the fault: no title replacement found in the copied openapi.php');
+} else {
+    file_put_contents($plantSpec, $specAfter);
+    $planted = json_decode($get('/openapi.json'), true);
+    $pTitle  = is_array($planted) === true ? (string) ($planted['info']['title'] ?? '') : '';
+    if ($pTitle !== '' && $pTitle !== $plantedName . ' REST API') {
+        ok('H04', 'with the replacement taken out of openapi.php, the served title is "' . $pTitle . '" — H02 can see the fault');
+    } else {
+        bad('H04', 'with the replacement taken out, the title was still right (or nothing was served), so H02 proves nothing', 'got "' . $pTitle . '"');
+    }
+    file_put_contents($plantSpec, $specBefore);
+    $again = json_decode($get('/openapi.json'), true);
+    if (is_array($again) === true && (string) ($again['info']['title'] ?? '') === $plantedName . ' REST API') {
+        ok('H05', 'and /openapi.json is whole again once the fault is taken out');
+    } else {
+        bad('H05', '/openapi.json did not recover after the planted fault was removed');
+    }
+}
+
+// Put the two installation settings back exactly as they were: they are
+// seeded rows, so deleting them would change the database for the next test.
+foreach (['product.name' => $nameWas, 'product.publisher' => $publisherWas] as $key => $was) {
+    if ($was === null) {
+        $clearSetting($key);
+    } else {
+        $setSetting($key, $was);
+    }
 }
 
 echo "\n=== Z. Clean-up ===\n";

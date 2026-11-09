@@ -56,6 +56,32 @@ $siteName     = (string) (Site::branding('name')  ?? 'Portal');
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Display — <?php echo htmlspecialchars((string) $plan['name'], ENT_QUOTES, 'UTF-8'); ?></title>
+    <!-- 📝 What this screen is, in one line (#569, #821). Written here by
+         hand rather than through head-meta.php, on purpose: this file is on
+         the EXEMPT list in tools/audit-checks/check_page_head_tags.py (a wall
+         display for a service; nobody shares its address), so a canonical
+         address and a preview card would describe nothing. A description is
+         different: the owner's checklist of 4 October 2026 covers every page,
+         and it costs nothing. It names no organisation and nothing about what
+         is on the screen. -->
+    <meta name="description" content="A projector screen that shows the words of a service as the operator moves through them.">
+    <!-- 🔖 "THIS SCREEN HAS NO ICON", SAID OUT LOUD (#821). With no icon link
+         at all a browser falls back to /favicon.ico by convention; nothing
+         answers that address, so every load cost a 404 that the browser
+         reports as a console error. Measured, not assumed: on 9 November 2026
+         the browser audit (tools/layout-audit.mjs, which since #821 prints the
+         address of a failed request) reported "Failed to load resource ... 404
+         — at /favicon.ico" for this screen before this line was added.
+
+         Why an EMPTY icon and not the portal's own: the portal's icon is
+         worked out by head-meta.php, which this file deliberately does not use
+         (see above), and copying those lines here would make a third place
+         that works the icon out, where head-meta.php's own note says there are
+         two and must be no third. A projector shows this full-screen, so no
+         tab is ever seen. `data:,` is a picture with nothing in it: the
+         browser asks nobody and shows its own plain tab icon. The same choice
+         as the kiosk screen (assets/kiosk.php). -->
+    <link rel="icon" href="data:,">
     <style>
         :root { --brand: <?php echo htmlspecialchars($brandPrimary, ENT_QUOTES, 'UTF-8'); ?>; }
         * { box-sizing: border-box; }
