@@ -80,7 +80,7 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 //    bare "Forbidden", which said the number was a real pending claim).
 //
 //    The refusal is the same redirect it always was. Its WORDS changed with
-//    #648: they used to be "Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.",
+//    #648: they used to be "Access denied — Approver or Admin role required.",
 //    which became untrue the moment the role stopped being a way in — a
 //    role-holder with no department would have been told they needed the
 //    role they already held.
