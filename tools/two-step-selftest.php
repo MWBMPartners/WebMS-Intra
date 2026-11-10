@@ -83,7 +83,18 @@
  *      and five planted faults are each caught. The Microsoft and Google
  *      sign-ins are driven through the real callbacks with the provider
  *      stubbed in the SCRATCH copy only (part K's own header says exactly how
- *      and what that cannot prove); the passkey sign-in is not driven.
+ *      and what that cannot prove). Since #902 the PASSKEY sign-in is driven
+ *      too, with nothing stubbed: the test makes a real P-256 key, registers
+ *      it as the portal stores one, and signs the portal's own challenge, so
+ *      `WebAuthn::verifyAuthentication()` checks a genuine signature (a
+ *      tampered one is refused, which is what proves that). Also since #902:
+ *      a kiosk browser (`kiosk_user_id`, the Asset Tracker hand-over) counts
+ *      as NOBODY, so a real sign-in on it starts clean — with the kiosk
+ *      member and the person signing in deliberately the SAME person, the
+ *      one fixture in which "counts as nobody" and "counts as that member"
+ *      give different answers; and an invitation whose sign-in fails AFTER
+ *      the account is made says so, rather than "that username is taken".
+ *      Four more plants, each caught.
  *
  * SAFETY
  * ------
@@ -157,7 +168,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/613
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/623
  * -----------------------------------------------------------------------------
@@ -166,7 +177,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 117;
+const EXPECTED_CHECKS = 127;
 
 function refuse(string $why): never
 {
@@ -295,6 +306,11 @@ const PEOPLE = [
 /** Part K's invitation: the account it makes is a NEW person, numbered by the database, so it is found by these. */
 const INVITEE_EMAIL = 'invitee.twostep@selftest.invalid';
 const INVITEE_LOGIN = 'tss-invitee';
+/** #902: two more invitations, whose sign-in is made to fail after the account is made. */
+const INVITEES_902 = [
+    ['invitee.p902a.twostep@selftest.invalid', 'tss-invitee-p902a'],
+    ['invitee.p902b.twostep@selftest.invalid', 'tss-invitee-p902b'],
+];
 /** How this test names itself to the portal, so the records it causes can be found and removed. */
 const AGENT = 'two-step-selftest';
 /** The trigger part I makes, and drops. */
@@ -326,14 +342,18 @@ function removeWorld(): void
     q('DELETE FROM tblTotpBackupCodes WHERE userID BETWEEN 922000 AND 922999');
     // Part K: the Microsoft and Google links its sign-ins make, and the invitation and the account it made.
     q('DELETE FROM tblLinkedAccounts WHERE userID BETWEEN 922000 AND 922999');
-    q('DELETE FROM tblInvitation WHERE email = ?', 's', [INVITEE_EMAIL]);
-    foreach (q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [INVITEE_EMAIL]) as $invitee) {
-        $inviteeId = (int) $invitee['userID'];
-        foreach (['tblActivityLogs', 'tblErrors', 'tblLinkedAccounts', 'tblLocalAccounts', 'tblUserSites', 'tblUsers'] as $table) {
-            q('DELETE FROM ' . $table . ' WHERE userID = ?', 'i', [$inviteeId]);
+    foreach (array_merge([[INVITEE_EMAIL, INVITEE_LOGIN]], INVITEES_902) as [$inviteeEmail, $inviteeLogin]) {
+        q('DELETE FROM tblInvitation WHERE email = ?', 's', [$inviteeEmail]);
+        foreach (q('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [$inviteeEmail]) as $invitee) {
+            $inviteeId = (int) $invitee['userID'];
+            foreach (['tblActivityLogs', 'tblErrors', 'tblLinkedAccounts', 'tblLocalAccounts', 'tblUserSites', 'tblUsers'] as $table) {
+                q('DELETE FROM ' . $table . ' WHERE userID = ?', 'i', [$inviteeId]);
+            }
         }
+        q('DELETE FROM tblLocalAccounts WHERE username = ?', 's', [$inviteeLogin]);
     }
-    q('DELETE FROM tblLocalAccounts WHERE username = ?', 's', [INVITEE_LOGIN]);
+    // #902: the test passkeys (they would go with their accounts anyway, by the cascade).
+    q('DELETE FROM tblWebAuthnCredentials WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUserSites WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUsers WHERE userID BETWEEN 922000 AND 922999');
@@ -434,18 +454,23 @@ function setting(string $key, string $value): void
  * followed. An answer without this run's header came from somewhere else
  * and is returned as status -1, which no check expects.
  *
- * @param array<string,mixed>|null $post
+ * @param array<string,mixed>|string|null $post A form's fields, or (a string) a
+ *                                          JSON body sent as the passkey
+ *                                          script on the sign-in page sends it.
  * @param string                   $ip   The visitor's address, sent as a proxy would send it.
  *
  * @return array{status:int, location:string, body:string, head:string}
  */
-function req(string $jar, string $method, string $path, ?array $post = null, string $ip = ''): array
+function req(string $jar, string $method, string $path, array|string|null $post = null, string $ip = ''): array
 {
     global $port, $state;
     $handle  = curl_init('http://127.0.0.1:' . $port . $path);
     $headers = ['Expect:', 'User-Agent: ' . AGENT];
     if ($ip !== '') {
         $headers[] = 'X-Forwarded-For: ' . $ip;
+    }
+    if (is_string($post) === true) {
+        $headers[] = 'Content-Type: application/json';
     }
     curl_setopt_array($handle, [
         CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 120,
@@ -457,7 +482,7 @@ function req(string $jar, string $method, string $path, ?array $post = null, str
     }
     if ($method === 'POST') {
         curl_setopt($handle, CURLOPT_POST, true);
-        curl_setopt($handle, CURLOPT_POSTFIELDS, http_build_query($post ?? []));
+        curl_setopt($handle, CURLOPT_POSTFIELDS, is_string($post) === true ? $post : http_build_query($post ?? []));
     }
     $raw = curl_exec($handle);
     if ($raw === false) {
@@ -1712,9 +1737,16 @@ head('K. A sign-in keeps nothing of somebody else\'s session, and all of the sam
 // grant, the proof, the two-factor gate and the redirect. What this does NOT
 // prove is anything about a real provider's answer or a real signature check.
 //
-// The passkey sign-in is the one path not driven: no test here can make a real
-// authenticator's signature. It calls the same Auth::beginSessionFor() as every
-// other path; the plants below prove what that method does.
+// THE PASSKEY SIGN-IN IS DRIVEN FOR REAL (#902), and needs no stub. A passkey
+// is a key pair: the portal stores the public half and checks a signature over
+// its own challenge. PHP's openssl makes a P-256 key pair as an authenticator
+// does, so this test registers the public half exactly as the portal stores one
+// (a COSE key, base64url) and signs what an authenticator signs. What that does
+// NOT prove: anything about a real authenticator, a browser's own checks, or
+// attestation at registration — only that the portal's sign-in takes a genuine
+// assertion and what it then does with the session. Until #902 nothing drove
+// it, and the independent check on #900 put webauthn.php back to a bare
+// session_regenerate_id() with this file still at 117 of 117.
 
 const STUB = 'p900stub:';
 
@@ -2094,6 +2126,214 @@ ok('K24 PLANT, the Microsoft callback put back as it was before #900 (a bare ses
     in_array('flash_msg', stillThere($p5['now'], $p5['waiting']), true) === true && (int) ($p5['now']['user_id'] ?? 0) === PEOPLE['tia'],
     'still there under the plant: ' . implode(', ', stillThere($p5['now'], $p5['waiting'])));
 
+// =============================================================================
+// K8-K10 (#902): a passkey, a kiosk browser, and an invitation whose sign-in fails.
+// =============================================================================
+
+/** Bytes as base64url, as WebAuthn writes them. */
+function b64u(string $raw): string
+{
+    return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
+}
+
+/**
+ * A passkey for `$who`: a real P-256 key pair, the public half stored in
+ * tblWebAuthnCredentials as the portal stores one (a COSE key in CBOR, then
+ * base64url). The private half stays in this process and signs.
+ *
+ * @return array{key:\OpenSSLAsymmetricKey, id:string, count:int}
+ */
+function passkeyFor(string $who): array
+{
+    $key = openssl_pkey_new(['private_key_type' => OPENSSL_KEYTYPE_EC, 'curve_name' => 'prime256v1']);
+    if ($key === false) {
+        refuse('this PHP\'s openssl could not make a P-256 key, so no passkey can be made');
+    }
+    $ec = (array) (openssl_pkey_get_details($key)['ec'] ?? []);
+    $x  = str_pad((string) ($ec['x'] ?? ''), 32, "\0", STR_PAD_LEFT);
+    $y  = str_pad((string) ($ec['y'] ?? ''), 32, "\0", STR_PAD_LEFT);
+    // A CBOR map of five: kty 1 => 2 (EC2), alg 3 => -7 (ES256), crv -1 => 1
+    // (P-256), x -2 => 32 bytes, y -3 => 32 bytes.
+    $cose = "\xA5" . "\x01\x02" . "\x03\x26" . "\x20\x01" . "\x21\x58\x20" . $x . "\x22\x58\x20" . $y;
+    $id   = b64u(random_bytes(16));
+    q('INSERT INTO tblWebAuthnCredentials (userID, credentialID, publicKey, signCount, friendlyName) VALUES (?, ?, ?, 0, ?)', 'isss', [PEOPLE[$who], $id, b64u($cose), 'p902 test passkey']);
+
+    return ['key' => $key, 'id' => $id, 'count' => 0];
+}
+
+/**
+ * A passkey sign-in, as the sign-in page's script makes it: ask for the
+ * options (which stores a challenge in the session), sign the challenge, send
+ * the assertion. With `$tamper` the signature is over different bytes, so a
+ * portal that really checks it must refuse.
+ *
+ * @param array{key:\OpenSSLAsymmetricKey, id:string, count:int} $pk
+ *
+ * @return array{rpId:string, verify:array, answer:array}
+ */
+function passkeyIn(string $jar, array &$pk, string $ip, string $redirect, bool $tamper = false): array
+{
+    global $port;
+    $options   = req($jar, 'POST', '/login/webauthn', (string) json_encode(['action' => 'auth_options']), $ip);
+    $decoded   = json_decode($options['body'], true);
+    $challenge = (string) ($decoded['options']['challenge'] ?? '');
+    $rpId      = (string) ($decoded['options']['rpId'] ?? '');
+    $pk['count']++;
+    // rpIdHash, flags (user present + user verified), signature counter.
+    $authData   = hash('sha256', $rpId, true) . "\x05" . pack('N', $pk['count']);
+    $clientData = (string) json_encode(['type' => 'webauthn.get', 'challenge' => $challenge, 'origin' => 'http://127.0.0.1:' . $port, 'crossOrigin' => false]);
+    $signed     = $authData . hash('sha256', $clientData . ($tamper === true ? 'tampered' : ''), true);
+    $signature  = '';
+    if (openssl_sign($signed, $signature, $pk['key'], OPENSSL_ALGO_SHA256) === false) {
+        refuse('openssl could not sign the passkey assertion');
+    }
+    $verify = req($jar, 'POST', '/login/webauthn', (string) json_encode([
+        'action'     => 'auth_verify',
+        'redirect'   => $redirect,
+        'credential' => ['id' => $pk['id'], 'rawId' => $pk['id'], 'type' => 'public-key', 'response' => [
+            'clientDataJSON' => b64u($clientData), 'authenticatorData' => b64u($authData), 'signature' => b64u($signature), 'userHandle' => null,
+        ]],
+    ]), $ip);
+
+    return ['rpId' => $rpId, 'verify' => $verify, 'answer' => (array) (json_decode($verify['body'], true) ?? [])];
+}
+
+/** Plant into any SCRATCH file, proved applied; returns what to put back. */
+$plantFile = static function (string $rel, string $from, string $to) use ($child, $sep): string {
+    $file   = $child . $sep . 'web' . $sep . str_replace('/', $sep, $rel);
+    $before = (string) file_get_contents($file);
+    $count  = 0;
+    $after  = str_replace($from, $to, $before, $count);
+    if ($count !== 1) {
+        refuse("the plant '" . mb_substr($from, 0, 60) . "' matched {$count} place(s) in the scratch {$rel}, not exactly one");
+    }
+    file_put_contents($file, $after);
+    clearstatcache(true, $file);
+    if ((string) file_get_contents($file) !== $after) {
+        refuse("a plant did not apply to the scratch {$rel}");
+    }
+
+    return $before;
+};
+$unplantFile = static function (string $rel, string $before) use ($child, $sep): void {
+    $file = $child . $sep . 'web' . $sep . str_replace('/', $sep, $rel);
+    file_put_contents($file, $before);
+    clearstatcache(true, $file);
+    if ((string) file_get_contents($file) !== $before) {
+        refuse("a plant could not be taken out of the scratch {$rel}");
+    }
+};
+
+// The address the passkey is for. Read what a stock installation would send
+// first — a NOTE, not a check — then set it as an administrator would.
+$rpProbe = newJar();
+$rpSeen  = (array) (json_decode(req($rpProbe, 'POST', '/login/webauthn', (string) json_encode(['action' => 'auth_options']), ip(118))['body'], true) ?? []);
+note('with auth.webauthn.rpID as this database holds it, the passkey options name rpId ' . var_export($rpSeen['options']['rpId'] ?? null, true)
+    . ' (an empty value is not one any browser accepts; see #902\'s notes)');
+setting('auth.webauthn.rpID', '127.0.0.1');
+$passkeys = ['sam' => passkeyFor('sam'), 'tia' => passkeyFor('tia')];
+
+// --- K8. A is signed in; B signs in with a PASSKEY on that browser.
+/** Run the passkey journey (also used by the plant). */
+$pkJourney = static function (string $as, string $ip, string $comeBack, bool $tamper = false) use (&$passkeys): array {
+    [$jar]   = passwordStep('sam', $ip);
+    $waiting = theirs() + ['login_redirect' => '/p902-sams-page', 'user_locale' => 'cy'];
+    putInSession($jar, $waiting + ['portal_locale' => 'cy']);
+    $idBefore = sessionIdOf($jar);
+    $pk       = passkeyIn($jar, $passkeys[$as], $ip, $comeBack, $tamper);
+
+    return ['jar' => $jar, 'pk' => $pk, 'now' => sessionEntries($jar), 'idBefore' => $idBefore, 'waiting' => $waiting];
+};
+$k8t = $pkJourney('tia', ip(119), '/', true);
+ok('K25 a passkey assertion with a TAMPERED signature is refused and changes nothing: the passkey journeys below are genuine signatures the portal really checks',
+    ($k8t['pk']['answer']['success'] ?? null) === false && (int) ($k8t['now']['user_id'] ?? 0) === PEOPLE['sam'] && count(stillThere($k8t['now'], $k8t['waiting'])) === count($k8t['waiting']),
+    'rpId ' . var_export($k8t['pk']['rpId'], true) . '; answer ' . $k8t['pk']['verify']['body']);
+$k8 = $pkJourney('tia', ip(120), '/');
+ok('K26 B signing in with a PASSKEY on a browser A is signed in on gets none of A\'s entries (message, typing, come-back address, A\'s saved language), keeps the browser\'s language, and the proof is B\'s, by passkey',
+    ($k8['pk']['answer']['success'] ?? null) === true && ($k8['pk']['answer']['redirect'] ?? '') === '/' && (int) ($k8['now']['user_id'] ?? 0) === PEOPLE['tia']
+        && stillThere($k8['now'], $k8['waiting']) === [] && ($k8['now']['portal_locale'] ?? null) === 'cy' && proofIn($k8['now']) === PEOPLE['tia'] . ':passkey',
+    'answer ' . $k8['pk']['verify']['body'] . '; still there: ' . implode(', ', stillThere($k8['now'], $k8['waiting'])) . '; proof: ' . proofIn($k8['now']));
+$k8Page = req($k8['jar'], 'GET', '/account/add-password', null, ip(120));
+ok('K27 ...B\'s own page does not show A\'s waiting message, and the session identifier was replaced',
+    $k8Page['status'] === 200 && str_contains($k8Page['body'], (string) $k8['waiting']['flash_msg']) === false && $k8['idBefore'] !== '' && sessionIdOf($k8['jar']) !== $k8['idBefore'],
+    describe($k8Page) . '; identifier ' . (sessionIdOf($k8['jar']) === $k8['idBefore'] ? 'NOT replaced' : 'replaced'));
+$k8s = $pkJourney('sam', ip(121), '/account/add-password');
+ok('K28 A proving herself again with her own PASSKEY (as the "Add a password" page asks, #731) keeps every entry of hers, comes back to the page that asked, and her proof is renewed as passkey with a new identifier',
+    ($k8s['pk']['answer']['success'] ?? null) === true && ($k8s['pk']['answer']['redirect'] ?? '') === '/account/add-password' && (int) ($k8s['now']['user_id'] ?? 0) === PEOPLE['sam']
+        && count(stillThere($k8s['now'], $k8s['waiting'])) === count($k8s['waiting']) && proofIn($k8s['now']) === PEOPLE['sam'] . ':passkey'
+        && $k8s['idBefore'] !== '' && sessionIdOf($k8s['jar']) !== $k8s['idBefore'],
+    'answer ' . $k8s['pk']['verify']['body'] . '; still there: ' . implode(', ', stillThere($k8s['now'], $k8s['waiting'])) . '; proof: ' . proofIn($k8s['now']));
+$webauthnRel = '_apps/auth/login/webauthn.php';
+$wasWebauthn = $plantFile($webauthnRel, "            Auth::beginSessionFor(\$webauthnUserId);\n", "            session_regenerate_id(true);\n");
+$p6 = $pkJourney('tia', ip(122), '/');
+$unplantFile($webauthnRel, $wasWebauthn);
+ok('K29 PLANT, the passkey sign-in put back as it was before #900 (a bare session_regenerate_id): A\'s message reaches B, so K26 and K27 can fail',
+    ($p6['pk']['answer']['success'] ?? null) === true && (int) ($p6['now']['user_id'] ?? 0) === PEOPLE['tia'] && in_array('flash_msg', stillThere($p6['now'], $p6['waiting']), true) === true,
+    'answer ' . $p6['pk']['verify']['body'] . '; still there under the plant: ' . implode(', ', stillThere($p6['now'], $p6['waiting'])));
+
+// --- K9. A KIOSK browser: the Asset Tracker hand-over put a member in the
+//     session (`kiosk_user_id`), which is NOT a sign-in. Then somebody really
+//     signs in on it. The kiosk member and the person signing in are
+//     deliberately the SAME person (B): only in that fixture do "a kiosk
+//     counts as nobody" (start clean) and "a kiosk counts as its member" (the
+//     same person, keep everything) give different answers. With two
+//     different people both rules start clean and the check could not fail.
+$kioskJourney = static function (string $ip): array {
+    $jar = newJar();
+    req($jar, 'GET', '/login', null, $ip);
+    $kiosk   = ['kiosk_user_id' => PEOPLE['tia'], 'kiosk_user_name' => 'Selftest two-step tia', 'kiosk_expires' => time() + 600];
+    $waiting = theirs();
+    putInSession($jar, $kiosk + $waiting);
+    $in = passwordIn($jar, 'tia', $ip);
+
+    return ['in' => $in, 'now' => sessionEntries($jar), 'all' => $kiosk + $waiting];
+};
+$k9 = $kioskJourney(ip(123));
+ok('K30 a real sign-in on a KIOSK browser starts clean: nothing of the kiosk hand-over (not even the member it named, who is the person signing in) and none of the waiting entries are kept',
+    $k9['in']['status'] === 302 && $k9['in']['location'] === '/' && (int) ($k9['now']['user_id'] ?? 0) === PEOPLE['tia'] && stillThere($k9['now'], $k9['all']) === [],
+    describe($k9['in']) . '; still there: ' . implode(', ', stillThere($k9['now'], $k9['all'])));
+$plantAuth(["    private const SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON = [\n        'portal_locale',\n    ];" => "    private const SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON = [\n        'portal_locale',\n        'kiosk_user_id',\n    ];"]);
+$p7 = $kioskJourney(ip(124));
+$unplant();
+ok('K31 PLANT, kiosk_user_id added to what a different person keeps: the kiosk hand-over survives a real sign-in, so K30 can fail',
+    in_array('kiosk_user_id', stillThere($p7['now'], $p7['all']), true) === true, 'still there under the plant: ' . implode(', ', stillThere($p7['now'], $p7['all'])));
+$plantAuth(["foreach (['user_id', '2fa_user_id'] as \$key) {" => "foreach (['user_id', '2fa_user_id', 'kiosk_user_id'] as \$key) {"]);
+$p8 = $kioskJourney(ip(125));
+$unplant();
+ok('K32 PLANT, a kiosk session counted as its member\'s: the waiting entries survive B\'s sign-in, so K30 can fail (and would not, had the kiosk named somebody else)',
+    in_array('flash_msg', stillThere($p8['now'], $p8['all']), true) === true, 'still there under the plant: ' . implode(', ', stillThere($p8['now'], $p8['all'])));
+
+// --- K10. An invitation whose sign-in fails AFTER the account is made.
+//     Nothing in the real code can make that happen today (accept.php's own
+//     comment says why), so the scratch Auth::beginSessionFor() is made to
+//     throw: that is the only way to reach the branch that reports it.
+$inviteJourney = static function (array $invitee, string $ip) use ($password): array {
+    [$email, $login] = $invitee;
+    $token = bin2hex(random_bytes(32));
+    q("INSERT INTO tblInvitation (siteID, email, tokenHash, intendedRole, expiresAt, createdByID) VALUES (1, ?, ?, 'user', DATE_ADD(NOW(), INTERVAL 1 DAY), NULL)", 'ss', [$email, hash('sha256', $token)]);
+    $jar  = newJar();
+    $form = req($jar, 'GET', '/auth/invite?token=' . $token, null, $ip);
+    $in   = req($jar, 'POST', '/auth/invite', ['token' => $token, 'csrf_token' => token($form['body']), 'fullName' => 'Selftest two-step invitee p902', 'username' => $login, 'password' => $password, 'passwordConfirm' => $password], $ip);
+
+    return ['form' => $form, 'in' => $in, 'id' => (int) (one('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [$email])['userID'] ?? 0), 'now' => sessionEntries($jar)];
+};
+$throwAtGrant = ["    public static function beginSessionFor(int \$userId): void\n    {\n" => "    public static function beginSessionFor(int \$userId): void\n    {\n        throw new \\LogicException('p902: a sign-in made to fail on purpose');\n"];
+$plantAuth($throwAtGrant);
+$k10 = $inviteJourney(INVITEES_902[0], ip(126));
+$unplant();
+ok('K33 an invitation whose sign-in fails after the account is made says the account WAS created and to sign in, never "already in use", and leaves nobody signed in',
+    $k10['form']['status'] === 200 && $k10['in']['status'] === 200 && $k10['id'] > 0 && str_contains($k10['in']['body'], 'Your account has been created') === true
+        && str_contains($k10['in']['body'], 'already in use') === false && array_key_exists('user_id', (array) $k10['now']) === false,
+    describe($k10['form']) . ' then ' . describe($k10['in']) . '; new account ' . $k10['id'] . '; body: ' . mb_substr(trim(strip_tags($k10['in']['body'])), 0, 160));
+$plantAuth($throwAtGrant);
+$wasAccept = $plantFile('_apps/invites/accept.php', 'if ($committed === true) {', 'if (false) {');
+$p9 = $inviteJourney(INVITEES_902[1], ip(127));
+$unplantFile('_apps/invites/accept.php', $wasAccept);
+$unplant();
+ok('K34 PLANT, accept.php\'s #902 branch switched off: the same failure tells a person whose account WAS made that their username is taken, so K33 can fail',
+    $p9['id'] > 0 && str_contains($p9['in']['body'], 'already in use') === true,
+    describe($p9['in']) . '; new account ' . $p9['id']);
+
 // The scratch copy goes back to exactly what was copied, stubs and all removed.
 file_put_contents($scratchAuth, $authAsCopied);
 clearstatcache(true, $scratchAuth);
@@ -2131,7 +2371,10 @@ $left = (int) one(
     . "+ (SELECT COUNT(*) FROM tblTotpBackupCodes WHERE userID BETWEEN 922000 AND 922999) + (SELECT COUNT(*) FROM tblActivityLogs WHERE userID BETWEEN 922000 AND 922999 OR visitorIP LIKE '198.51.100.%' OR userAgent = '" . AGENT . "') "
     . "+ (SELECT COUNT(*) FROM tblApiRateLimits WHERE bucket LIKE 'totp\\_%:9220__%') + (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = '" . TRIGGER . "') "
     . "+ (SELECT COUNT(*) FROM tblLinkedAccounts WHERE userID BETWEEN 922000 AND 922999) + (SELECT COUNT(*) FROM tblInvitation WHERE email = '" . INVITEE_EMAIL . "') "
-    . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress = '" . INVITEE_EMAIL . "') AS n"
+    . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress = '" . INVITEE_EMAIL . "') "
+    . "+ (SELECT COUNT(*) FROM tblInvitation WHERE email IN ('" . INVITEES_902[0][0] . "', '" . INVITEES_902[1][0] . "')) "
+    . "+ (SELECT COUNT(*) FROM tblUsers WHERE emailAddress IN ('" . INVITEES_902[0][0] . "', '" . INVITEES_902[1][0] . "')) "
+    . "+ (SELECT COUNT(*) FROM tblWebAuthnCredentials WHERE userID BETWEEN 922000 AND 922999) AS n"
 )['n'];
 $settingsBack = true;
 foreach ($before as $settingKey => $row) {

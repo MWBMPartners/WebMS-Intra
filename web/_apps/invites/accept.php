@@ -111,6 +111,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flashType = 'danger';
         } else {
             $db = App::db();
+            // 🧾 Whether the account has been CREATED (#902). The catch below
+            //    used to answer every failure with "That username or email is
+            //    already in use." and a rollback — right before the commit, and
+            //    untrue after it: a failure in signing the new person in (the
+            //    three calls after the commit) would have told them their name
+            //    was taken for an account that had just been made, and left the
+            //    form on screen to fill in again for an invitation that was now
+            //    spent. None of the three can throw today, worked out on
+            //    10 November 2026: Auth::beginSessionFor() throws only when no
+            //    session is active, and Auth::ensureSession() at the top of this
+            //    page starts one; session_regenerate_id() warns rather than
+            //    throws; and Auth::initSessionSite() catches its own failures.
+            //    So this is not a live fault — it is a catch that would have
+            //    reported the wrong thing the day one of those changed, and
+            //    part K of tools/two-step-selftest.php makes the sign-in throw
+            //    to prove what is said instead.
+            $committed = false;
             try {
                 $db->begin_transaction();
 
@@ -181,6 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $db->commit();
+                $committed = true;
 
                 // 🔑 Replace the session ID before granting identity on this
                 // public, pre-auth page (#B6b) — session fixation defence,
@@ -208,6 +226,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 header('Location: ' . Site::url(''));
                 exit();
             } catch (\Throwable $e) {
+                if ($committed === true) {
+                    // ✅ The account EXISTS and the invitation is spent; only
+                    //    signing in failed. Take back anything of a sign-in
+                    //    that got part-way (a session naming the person with no
+                    //    organisation chosen is not a state any page expects),
+                    //    record why, and say what is true: the account is
+                    //    there, sign in with what you just chose. Not the form
+                    //    again — it would be refused as "already accepted".
+                    unset($_SESSION['user_id']);
+                    Logger::errorPlatform('Invites', 'Error', 'INVITE_SIGNIN_FAIL', $e->getMessage(), '');
+                    echo '<!doctype html><html><head><meta charset="utf-8"><meta name="robots" content="noindex,nofollow"><title>Invitation</title></head>'
+                       . '<body style="font-family:system-ui;text-align:center;padding:4rem 1rem;">'
+                       . '<h1>Your account has been created</h1>'
+                       . '<p>You could not be signed in automatically. Please sign in with the username and password you have just chosen.</p>'
+                       . '<p><a href="' . htmlspecialchars(Site::url('login'), ENT_QUOTES, 'UTF-8') . '">Sign in</a></p></body></html>';
+                    exit();
+                }
                 $db->rollback();
                 // 🔐 Public pre-auth page — never reflect the raw exception
                 // message (table/column names on a duplicate-key, etc.) back
