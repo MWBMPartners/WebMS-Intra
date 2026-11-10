@@ -2304,9 +2304,16 @@ ok('K32 PLANT, a kiosk session counted as its member\'s: the waiting entries sur
     in_array('flash_msg', stillThere($p8['now'], $p8['all']), true) === true, 'still there under the plant: ' . implode(', ', stillThere($p8['now'], $p8['all'])));
 
 // --- K10. An invitation whose sign-in fails AFTER the account is made.
-//     Nothing in the real code can make that happen today (accept.php's own
-//     comment says why), so the scratch Auth::beginSessionFor() is made to
-//     throw: that is the only way to reach the branch that reports it.
+//     REACHABLE in the real code: outside multi-site session mode,
+//     Auth::initSessionSite() runs queries that throw under strict reporting,
+//     so a database failure after the commit lands in accept.php's catch with
+//     the person already written into the session (accept.php's comment says
+//     exactly where). This test runs in that mode, and makes the scratch
+//     initSessionSite() throw — AFTER user_id is written, which is the
+//     realistic failure and the only one that exercises the page taking the
+//     half-made sign-in back. (Throwing in beginSessionFor() instead, as the
+//     first version did, fails before user_id is written, so deleting the
+//     page's unset() left this check green: a clause that could not fail.)
 $inviteJourney = static function (array $invitee, string $ip) use ($password): array {
     [$email, $login] = $invitee;
     $token = bin2hex(random_bytes(32));
@@ -2317,11 +2324,11 @@ $inviteJourney = static function (array $invitee, string $ip) use ($password): a
 
     return ['form' => $form, 'in' => $in, 'id' => (int) (one('SELECT userID FROM tblUsers WHERE emailAddress = ?', 's', [$email])['userID'] ?? 0), 'now' => sessionEntries($jar)];
 };
-$throwAtGrant = ["    public static function beginSessionFor(int \$userId): void\n    {\n" => "    public static function beginSessionFor(int \$userId): void\n    {\n        throw new \\LogicException('p902: a sign-in made to fail on purpose');\n"];
+$throwAtGrant = ["    public static function initSessionSite(int \$userId, \\mysqli \$db): void\n    {\n" => "    public static function initSessionSite(int \$userId, \\mysqli \$db): void\n    {\n        throw new \\RuntimeException('p902: the organisation could not be read, on purpose');\n"];
 $plantAuth($throwAtGrant);
 $k10 = $inviteJourney(INVITEES_902[0], ip(126));
 $unplant();
-ok('K33 an invitation whose sign-in fails after the account is made says the account WAS created and to sign in, never "already in use", and leaves nobody signed in',
+ok('K33 an invitation whose sign-in fails after the account is made (the organisation could not be read) says the account WAS created and to sign in, never "already in use", and takes back the half-made sign-in',
     $k10['form']['status'] === 200 && $k10['in']['status'] === 200 && $k10['id'] > 0 && str_contains($k10['in']['body'], 'Your account has been created') === true
         && str_contains($k10['in']['body'], 'already in use') === false && array_key_exists('user_id', (array) $k10['now']) === false,
     describe($k10['form']) . ' then ' . describe($k10['in']) . '; new account ' . $k10['id'] . '; body: ' . mb_substr(trim(strip_tags($k10['in']['body'])), 0, 160));

@@ -115,18 +115,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             //    used to answer every failure with "That username or email is
             //    already in use." and a rollback — right before the commit, and
             //    untrue after it: a failure in signing the new person in (the
-            //    three calls after the commit) would have told them their name
-            //    was taken for an account that had just been made, and left the
-            //    form on screen to fill in again for an invitation that was now
-            //    spent. None of the three can throw today, worked out on
-            //    10 November 2026: Auth::beginSessionFor() throws only when no
-            //    session is active, and Auth::ensureSession() at the top of this
-            //    page starts one; session_regenerate_id() warns rather than
-            //    throws; and Auth::initSessionSite() catches its own failures.
-            //    So this is not a live fault — it is a catch that would have
-            //    reported the wrong thing the day one of those changed, and
-            //    part K of tools/two-step-selftest.php makes the sign-in throw
-            //    to prove what is said instead.
+            //    calls after the commit) told them their name was taken for an
+            //    account that had just been made, and left the form on screen to
+            //    fill in again for an invitation that was now spent.
+            //
+            //    THAT WAS REACHABLE, and an earlier draft of this comment said it
+            //    was not. Auth::initSessionSite() catches its own failures ONLY
+            //    in multi-site session mode. In every other mode it calls
+            //    Site::userBelongsTo() (through getUserSiteRole()) and
+            //    Site::resolveDefaultSiteForUser(), whose prepare() and execute()
+            //    are not caught and, under the portal's strict reporting
+            //    (bootstrap.php sets MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR),
+            //    THROW. So a database failure after the commit — a lost
+            //    connection, a lock-wait timeout — landed here, with the person
+            //    already written into the session. (Auth::beginSessionFor()
+            //    throws only when no session is active, and ensureSession() at
+            //    the top of this page starts one.) Part K of
+            //    tools/two-step-selftest.php makes initSessionSite() throw to
+            //    prove what is said now, and that the half-made sign-in is taken
+            //    back.
             $committed = false;
             try {
                 $db->begin_transaction();
