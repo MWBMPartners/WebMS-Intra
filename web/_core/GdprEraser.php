@@ -519,28 +519,44 @@ class GdprEraser
             // for authorship-attribution-detached, mirroring
             // tblAnnouncements/tblEvents/tblRecording above.
             //
-            // tblCareVisit: a pastoral visit names who MADE it (`visitedByID`)
-            // and who its follow-up was given to (`followUpAssignedToID`).
-            // The visit and its notes describe the person being cared for,
-            // not the visitor, so they stay with the case. Both numbers are
-            // taken off, one instruction per column.
+            // tblCareVisit: a pastoral visit names who MADE it (`visitedByID`,
+            // and since migration 272 `visitedByName`) and who its follow-up
+            // was given to (`followUpAssignedToID`). The visit and its notes
+            // describe the person being cared for, not the visitor, so they
+            // stay with the case.
+            //
+            // 🧾 WHO MADE THE VISIT IS KEPT (#703, the owner's decision D-016,
+            //    3 November 2026; it "rules out unlinking the worker"). A
+            //    pastoral or safeguarding record that cannot say who carried it
+            //    out is worse for the people it protects than one that keeps a
+            //    worker's name. So `visitedByID` gets a "retain" instruction,
+            //    and nothing anywhere empties `visitedByName`.
+            //
+            //    THE NAME IS WHAT IS KEPT, NOT JUST THE NUMBER. The worker's own
+            //    account row is still emptied by the `tblUsers` step at the
+            //    end of this list, so their number on its own would point at
+            //    "[Deleted User]". `visitedByName` is written when the visit is
+            //    made (`_apps/care/visit-save.php`), so the name survives the
+            //    account without depending on any step of the erasure.
+            //
+            //    `followUpAssignedToID` is NOT covered by D-016 and is still
+            //    detached: being GIVEN a follow-up is not making the visit or
+            //    recording a check. (Nothing writes that column today — #708.)
             //
             // 🛑 WHAT THIS USED TO DO, so nobody puts it back.
             //    Until 11 October 2026 `visitedByID` could not be empty, and
-            //    a "retain" instruction left the number in place. That was
-            //    the worst of both: the number stayed, yet it pointed at an
-            //    emptied account, so it told a safeguarding review nothing.
-            //    And a visit somebody ELSE made, with the follow-up given to
-            //    this person, was matched by nothing at all. Migration 208
-            //    made the column emptiable (Salem874's decision).
-            //    Before that again, the table had no instruction, and every
-            //    erasure's sealed audit trail said "no column ties a row of
-            //    this table to an account", which was untrue.
-            //
-            //    NOT DECIDED HERE: whether the NAME of whoever made a visit
-            //    should be kept on safeguarding grounds. That is a question
-            //    for the organisation's safeguarding lead. As built, it is
-            //    not kept.
+            //    a "retain" instruction left the number in place - pointing at
+            //    an emptied account, so it told a safeguarding review nothing.
+            //    Migration 208 then made the column emptiable and this list
+            //    emptied it (11 October to #703), which D-016 rules out. Both
+            //    were wrong in opposite ways, and the cure for the first is
+            //    the NAME column, not emptying the number. Before 11 October,
+            //    the table had no instruction at all, and every erasure's
+            //    sealed audit trail said "no column ties a row of this table to
+            //    an account", which was untrue.
+            //    `tools/gdpr-coverage-selftest.php` (section 23) and section 3b
+            //    of `tools/gdpr-eraser-selftest.php` fail if the worker is
+            //    unlinked again.
             // tblCareAccessLog is different: a "who viewed this case" audit
             // row attributed to a since-erased viewer carries no independent
             // value once that identity is gone (unlike the visit notes,
@@ -573,8 +589,9 @@ class GdprEraser
             //    `tools/gdpr-coverage-selftest.php` pins the position, so
             //    moving this line down turns the step red instead of silent.
             //
-            //    What it does NOT touch: `visitedByID`, `followUpAssignedToID`
-            //    (each has its own instruction above and below), the date, the
+            //    What it does NOT touch: `visitedByID`, `visitedByName`,
+            //    `followUpAssignedToID` (each has its own instruction below, or
+            //    is kept on purpose: #703), the date, the
             //    kind of visit, the follow-up date, or `caseID` itself - the
             //    visit stays attached to its case, because a note-less visit on
             //    a known case is a record and a detached one is rubble.
@@ -644,9 +661,35 @@ class GdprEraser
             //       `approvedByID` to the deriver would silently drop it.
             ['table' => 'tblResourceBooking', 'userCol' => 'bookedByID',   'action' => 'anonymise', 'nullCols' => ['purpose', 'declineReason'], 'reason' => 'the booking is kept so the room\'s history is intact; who booked it is detached, and so is their stated reason for wanting the room. `declineReason` is named here too and CAN NEVER MATCH, because nothing writes it — the decline branch of resources/action.php sets only status, approvedByID and approvedAt, and there is no form field for it: the limit is recorded rather than the column dropped, the #708 precedent, so that a decline reason stored in future is already reached. The booker\'s own `notes` are KEPT by the owner\'s decision of 3 November 2026, recorded in the catalogue (#723)'],
             ['table' => 'tblResourceBooking', 'userCol' => 'approvedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s booking stays; who approved it is detached'],
-            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who made the visit is detached'],
+            // 🧾 #703, D-016: KEPT, number and name. See the long note above
+            //    the #709 instruction. The reason is the sentence a worker
+            //    reads on "Request data erasure", so it says plainly what
+            //    they cannot expect.
+            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral visits you made keep your name as the person who made them, even after your account is erased. This is kept on purpose (decision D-016): a pastoral or safeguarding record must still say who carried it out. Your name and your account number are the only things about you on them'],
             ['table' => 'tblCareVisit',      'userCol' => 'followUpAssignedToID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who its follow-up was given to is detached'],
             ['table' => 'tblCareAccessLog',  'userCol' => 'viewerID',     'action' => 'delete'],
+
+            // 🛡️ DBS (safeguarding) checks, #703 and the owner's decision
+            //    D-016. Until #703 this table was left to the derived route,
+            //    which kept the check (`userID`, the person it is about) and
+            //    DETACHED who recorded it (`recordedByID`), because every
+            //    "acted on it" column on a kept table gets an "empty it"
+            //    instruction there. D-016 keeps the name of whoever recorded a
+            //    safeguarding check, so the table is written out here instead.
+            //
+            //    BOTH INSTRUCTIONS ARE WRITTEN OUT ON PURPOSE: a table named in
+            //    this hand-written list is SKIPPED ENTIRELY by
+            //    `fromPersonalDataCatalogue()`, so leaving the person's own
+            //    checks to the deriver would silently drop their "keep" line
+            //    (the `tblResourceBooking` note above says the same).
+            //
+            //    The recorder's NAME is `recordedByName`, written when the
+            //    check is recorded (`_apps/admin/safeguarding/dbs-save.php`),
+            //    because the recorder's own account is emptied by the
+            //    `tblUsers` step and their number alone would point at
+            //    "[Deleted User]". Nothing in this list empties it.
+            ['table' => 'tblDbsChecks',      'userCol' => 'userID',       'action' => 'retain',    'nullCols' => [], 'reason' => 'Safeguarding record. Kept and flagged, never quietly removed (how long it is kept: as required by safeguarding policy)'],
+            ['table' => 'tblDbsChecks',      'userCol' => 'recordedByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'DBS checks you recorded keep your name as the person who recorded them, even after your account is erased. This is kept on purpose (decision D-016): a safeguarding check must still say who carried it out. Your name and your account number are the only things about you on them'],
 
             // #393 Asset Tracker. tblAssetFoundReports is deliberately
             // NOT catalogued here — it's filled by the public, anonymous

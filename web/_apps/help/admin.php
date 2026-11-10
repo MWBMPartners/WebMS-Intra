@@ -709,6 +709,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             collect a child, because the organisation's duty of care to that child does not end
             because an adult asked to be erased. A Gift Aid declaration, with the network address
             it was made from, because that is part of the evidence it was made.
+            <br>
+            <strong>Who made a pastoral visit, and who recorded a DBS (safeguarding) check.</strong>
+            When a member of staff or a volunteer asks to be erased, the visits they made and the
+            checks they recorded keep their <strong>name</strong> as the person who made them.
+            That was decided deliberately on 3 November 2026: a safeguarding record that cannot say
+            who carried it out is worse for the people it exists to protect. Their account itself is
+            still emptied &mdash; contact details, sign-in, everything else &mdash; and their name
+            and account number are the only things about them left on those records. The name is
+            the one their account had when the visit or check was recorded. Two limits, said
+            plainly: a worker erased before this was decided cannot be given their name back, so
+            those older visits still show &ldquo;Somebody no longer recorded&rdquo;; and what a
+            visit says about the person <em>being cared for</em> is still emptied when
+            <em>they</em> ask to be erased.
         </li>
         <li>
             <strong>Kept because it is the organisation's own record, not the person's.</strong> A

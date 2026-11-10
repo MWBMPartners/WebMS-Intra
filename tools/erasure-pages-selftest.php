@@ -181,7 +181,9 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 80;
+const EXPECTED_CHECKS = 82; // 80 until #703 (D-016) added two: the two writers
+                            // record who made a visit and who recorded a DBS check
+                            // BY NAME, driven through the real pages.
 
 function refuse(string $why): never
 {
@@ -341,6 +343,8 @@ const NOTE_TEXT   = 'ERASURE REVIEW BOOKING NOTE Pip asked for the side room bec
 
 const ROLE_DC_A = 917030; // the Data Controller role, A's own copy of it
 const ROLE_DC_B = 917031; // and B's
+const ROLE_CARE_A = 917032; // the Care Team role, A's own copy: given to Mel in section F, so she can record a visit through the real page (#703)
+const DBS_MEL     = 917213; // a DBS check Mel recorded for Cal (#703): it must keep her name after her erasure
 
 const REQ_PIP_A = 917910; // Pip's request, filed in A (section J)
 const REQ_PIP_B = 917911; // Pip's request, filed in B
@@ -389,6 +393,7 @@ function removeWorld(): void
     q('DELETE FROM tblVisitor WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblCareAccessLog WHERE caseID = ?', 'i', [CASE_ID]);
     q('DELETE FROM tblCareVisit WHERE caseID = ?', 'i', [CASE_ID]);
+    q('DELETE FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999');
     q('DELETE FROM tblCareCase WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblExpenseClaimApprovals WHERE claimID = ?', 'i', [CLAIM]);
     q('DELETE FROM tblExpenseClaims WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
@@ -579,7 +584,11 @@ q("INSERT INTO tblGiftAidDeclaration (declarationID, siteID, donorID, address, p
 q("INSERT INTO tblVisitor (visitorID, siteID, fullName, assignedToID, createdByID, notes) VALUES (?, ?, 'Vera Visitor', ?, ?, 'Came with her sister.')", 'iiii', [VISITOR, ORG_A, MEL, ADM]);
 q("INSERT INTO tblVisitorContact (contactID, visitorID, contactedByID, method, summary) VALUES (?, ?, ?, 'call', 'Rang Vera; she will come on Sunday.')", 'iii', [NOTE, VISITOR, MEL]);
 q("INSERT INTO tblCareCase (caseID, siteID, personUserID, summary, openedByID) VALUES (?, ?, ?, 'Cal is recovering from an operation.', ?)", 'iiii', [CASE_ID, ORG_A, CAL, ADM]);
-q("INSERT INTO tblCareVisit (visitID, caseID, visitedByID, kind, notes) VALUES (?, ?, ?, 'visit', 'Visited Cal at home; in good spirits.')", 'iii', [VISIT, CASE_ID, MEL]);
+// #703 (D-016): a visit carries its visitor's NAME as well as number, as
+// `care/visit-save.php` writes it - which section F drives for real. So does a
+// DBS check Mel recorded, as `admin/safeguarding/dbs-save.php` writes it.
+q("INSERT INTO tblCareVisit (visitID, caseID, visitedByID, visitedByName, kind, notes) VALUES (?, ?, ?, 'Mel Member', 'visit', 'Visited Cal at home; in good spirits.')", 'iii', [VISIT, CASE_ID, MEL]);
+q("INSERT INTO tblDbsChecks (dbsCheckID, userID, dbsType, issuedDate, expiresAt, status, recordedByID, recordedByName) VALUES (?, ?, 'enhanced', '2025-01-10', '2028-01-10', 'valid', ?, 'Mel Member')", 'iii', [DBS_MEL, CAL, MEL]);
 q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'Selftest erasure dept', 'SED', 1)", 'ii', [DEPT, ORG_A]);
 q("INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES (?, ?, ?, ?, 'ERASURE Cal claim', CURDATE(), 12.50, 'Approved')", 'iiii', [CLAIM, ORG_A, CAL, DEPT]);
 q("INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, comments) VALUES (?, ?, 'Approved', 'Receipts all present.')", 'ii', [CLAIM, MEL]);
@@ -906,6 +915,30 @@ $pages = static fn (): array => [
     'room'     => text(req($GLOBALS['jar']['adm'], 'GET', '/resources/resource?id=' . ROOM)['body']),
     'bookings' => text(req($GLOBALS['jar']['adm'], 'GET', '/resources/approvals')['body']),
 ];
+// 🧾 #703 (D-016): the two writers, DRIVEN. Mel is given the Care Team role
+//    in A and records a visit through the real page; A's administrator records
+//    a DBS check through the real page. Each row must carry the maker's NAME
+//    read from their own account, because the erasure keeps that name and
+//    empties the account. A check that only read the source could not see a
+//    writer that stopped running; this one can.
+q("INSERT INTO `tblRoles` (`roleID`, `siteID`, `roleKey`, `roleName`, `description`, `isStandard`) VALUES (?, ?, 'care_team', 'Care Team', 'Opens the confidential pastoral care register', 1)", 'ii', [ROLE_CARE_A, ORG_A]);
+q('INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES (?, ?, ?)', 'iii', [MEL, ROLE_CARE_A, ORG_A]);
+$caseForm = req($jar['mel'], 'GET', '/care/case?id=' . CASE_ID);
+$visitSaved = req($jar['mel'], 'POST', '/care/visit-save', ['csrf_token' => token($caseForm['body']), 'caseID' => (string) CASE_ID, 'kind' => 'call', 'notes' => 'Mel rang Cal after the operation.']);
+$melVisit = one('SELECT visitedByID, visitedByName FROM tblCareVisit WHERE caseID = ? AND notes = ?', 'is', [CASE_ID, 'Mel rang Cal after the operation.']);
+ok('the pastoral visit page records who made a visit by NAME as well as number, read from their own account (#703)',
+    $caseForm['status'] === 200 && $visitSaved['status'] === 302
+    && $melVisit !== null && (int) $melVisit['visitedByID'] === MEL && $melVisit['visitedByName'] === 'Mel Member',
+    'form HTTP ' . $caseForm['status'] . ', save HTTP ' . $visitSaved['status'] . ' ' . $visitSaved['location'] . '; row: ' . json_encode($melVisit));
+$dbsForm  = req($jar['adm'], 'GET', '/admin/safeguarding/dbs');
+$dbsSaved = req($jar['adm'], 'POST', '/admin/safeguarding/dbs/save', ['csrf_token' => token($dbsForm['body']), 'userID' => (string) CAL,
+    'dbsType' => 'basic', 'referenceNumber' => 'P703-DRIVEN', 'issuedDate' => '2026-01-05', 'expiresAt' => '2029-01-05', 'status' => 'valid']);
+$admDbs = one('SELECT recordedByID, recordedByName FROM tblDbsChecks WHERE userID = ? AND referenceNumber = ?', 'is', [CAL, 'P703-DRIVEN']);
+ok('the DBS page records who recorded a check by NAME as well as number, read from their own account (#703)',
+    $dbsForm['status'] === 200 && $dbsSaved['status'] === 302
+    && $admDbs !== null && (int) $admDbs['recordedByID'] === ADM && $admDbs['recordedByName'] === 'Ada Admin',
+    'form HTTP ' . $dbsForm['status'] . ', save HTTP ' . $dbsSaved['status'] . ' ' . $dbsSaved['location'] . '; row: ' . json_encode($admDbs));
+
 $was = $pages();
 ok('before the run, five pages show records Mel worked on, each with Mel\'s name: a follow-up note, a pastoral visit, an approval on Cal\'s expense claim, a room booking, and that booking in the approvals queue',
     str_contains($was['note'], 'Rang Vera; she will come on Sunday.') && str_contains($was['note'], 'Mel Member')
@@ -933,16 +966,23 @@ ok('...and THAT is what empties the account: name, address, biography, photo lin
 $kept = [
     'visitor'  => one('SELECT fullName, assignedToID FROM tblVisitor WHERE visitorID = ?', 'i', [VISITOR]),
     'note'     => one('SELECT summary, contactedByID FROM tblVisitorContact WHERE contactID = ?', 'i', [NOTE]),
-    'visit'    => one('SELECT notes, visitedByID FROM tblCareVisit WHERE visitID = ?', 'i', [VISIT]),
+    'visit'    => one('SELECT notes, visitedByID, visitedByName FROM tblCareVisit WHERE visitID = ?', 'i', [VISIT]),
+    'driven'   => one('SELECT visitedByID, visitedByName FROM tblCareVisit WHERE caseID = ? AND notes = ?', 'is', [CASE_ID, 'Mel rang Cal after the operation.']),
+    'dbs'      => one('SELECT userID, recordedByID, recordedByName FROM tblDbsChecks WHERE dbsCheckID = ?', 'i', [DBS_MEL]),
     'approval' => one('SELECT decision, comments, userID FROM tblExpenseClaimApprovals WHERE claimID = ?', 'i', [CLAIM]),
     'booking'  => one('SELECT purpose, status, bookedByID FROM tblResourceBooking WHERE bookingID = ?', 'i', [BOOKING]),
     'giftAid'  => one('SELECT donorID, address FROM tblGiftAidDeclaration WHERE declarationID = ?', 'i', [GIFTAID]),
 ];
-ok('other people\'s records are all still in the database, each with only Mel\'s number taken off: the visitor, the note, the visit, the approval, the booking; and Cal\'s Gift Aid declaration is untouched',
+ok('other people\'s records are all still in the database, each with only Mel\'s number taken off: the visitor, the note, the approval, the booking; Cal\'s Gift Aid declaration is untouched; and the two pastoral visits and the DBS check Mel made KEEP her number and her name (#703, D-016)',
     $kept === [
         'visitor'  => ['fullName' => 'Vera Visitor', 'assignedToID' => null],
         'note'     => ['summary' => 'Rang Vera; she will come on Sunday.', 'contactedByID' => null],
-        'visit'    => ['notes' => 'Visited Cal at home; in good spirits.', 'visitedByID' => null],
+        // 🔁 CHANGED BY #703 (the owner's decision D-016, 3 November 2026):
+        //    who made a pastoral visit, or recorded a safeguarding check, is
+        //    KEPT. It used to expect `visitedByID` => null.
+        'visit'    => ['notes' => 'Visited Cal at home; in good spirits.', 'visitedByID' => MEL, 'visitedByName' => 'Mel Member'],
+        'driven'   => ['visitedByID' => MEL, 'visitedByName' => 'Mel Member'],
+        'dbs'      => ['userID' => CAL, 'recordedByID' => MEL, 'recordedByName' => 'Mel Member'],
         'approval' => ['decision' => 'Approved', 'comments' => 'Receipts all present.', 'userID' => null],
         // 🔁 CHANGED BY #723 (3 November 2026): the booker's stated reason is
         //    emptied now. It used to expect 'Welcome team supper' to survive —
@@ -955,8 +995,14 @@ ok('other people\'s records are all still in the database, each with only Mel\'s
 $now = $pages();
 ok('the VISITOR page still shows the follow-up note, with "Somebody no longer recorded" where Mel\'s name was',
     str_contains($now['note'], 'Rang Vera; she will come on Sunday.') && str_contains($now['note'], 'Somebody no longer recorded') && str_contains($now['note'], 'Mel Member') === false, mb_substr($now['note'], 0, 500));
-ok('the PASTORAL page still shows the visit and its notes, the same way',
-    str_contains($now['visit'], 'Visited Cal at home; in good spirits.') && str_contains($now['visit'], 'Somebody no longer recorded') && str_contains($now['visit'], 'Mel Member') === false, mb_substr($now['visit'], 0, 500));
+// 🔁 CHANGED BY #703 (D-016). It used to require "Somebody no longer
+//    recorded" and NO "Mel Member". Who made a visit is kept now, so the page
+//    must still NAME Mel - from the name kept on the visit, because her own
+//    account now reads "[Deleted User]" - and must never show that stand-in.
+ok('the PASTORAL page still shows the visit and its notes, and still names Mel as who made it although her account is emptied (#703, D-016)',
+    str_contains($now['visit'], 'Visited Cal at home; in good spirits.') && str_contains($now['visit'], 'Mel rang Cal after the operation.')
+    && substr_count($now['visit'], 'Mel Member') >= 2 && str_contains($now['visit'], '[Deleted User]') === false
+    && str_contains($now['visit'], 'Somebody no longer recorded') === false, mb_substr($now['visit'], 0, 500));
 ok('the EXPENSE CLAIM\'s page still shows the approval line, with "Approver\'s details removed" where Mel\'s name was',
     str_contains($now['claim'], 'Receipts all present.') && str_contains($now['claim'], 'Approver\'s details removed') && str_contains($now['claim'], 'Mel Member') === false, mb_substr($now['claim'], 0, 500));
 // 🔁 CHANGED BY #723, AND THE POINT OF THE CHECK IS NOW CLEARER. It used to
@@ -1915,6 +1961,7 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblErasureRequest WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblSettings WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblGivingEntry WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblGivingCategory WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblGivingKeptDonors WHERE siteID IN (?, ?)) '
+    . '+ (SELECT COUNT(*) FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999) '
     // 🧑‍⚖️ Section J's own rows (#732). Counted here as well, because the links
     //    are switched off while the world is removed, so nothing is taken away
     //    by a parent going: each has to be deleted by name or it is left

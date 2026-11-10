@@ -12,6 +12,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
+use Portal\Core\GdprEraser;
 use Portal\Core\Markdown;
 use Portal\Core\Site;
 
@@ -68,8 +69,23 @@ $stmt = $db->prepare(
     // a visit asks to be forgotten (migration 208). With a plain JOIN that
     // visit, and its notes, dropped off this page altogether: kept in the
     // database as safeguarding requires, and invisible to the team.
+    //
+    // 🧾 WHOSE NAME IS SHOWN (#703, the owner's decision D-016). An erasure now
+    //    KEEPS who made a visit: the number stays and the name written when
+    //    the visit was recorded (`visitedByName`) stays. But the visitor's own
+    //    account is emptied, so its `fullName` reads "[Deleted User]". So:
+    //      - while the account is live, its CURRENT name, so somebody who has
+    //        changed their name is not shown under the old one;
+    //      - once the account has been emptied by an erasure, or is missing,
+    //        the name kept on the visit;
+    //      - neither (a visit whose visitor was erased before #703, when the
+    //        number was emptied too): the page's own "Somebody no longer
+    //        recorded" below.
+    //    `GdprEraser::emptiedAccountSql()` is the ONE test of "emptied by an
+    //    erasure"; it is asked rather than copied.
     'SELECT v.visitID, v.visitedAt, v.kind, v.notes, v.followUpAt, '
-    . '       u.fullName AS visitorName '
+    . '       CASE WHEN u.userID IS NULL OR ' . GdprEraser::emptiedAccountSql('u') . ' '
+    . '            THEN v.visitedByName ELSE u.fullName END AS visitorName '
     . 'FROM tblCareVisit v LEFT JOIN tblUsers u ON u.userID = v.visitedByID '
     . 'WHERE v.caseID = ? ORDER BY v.visitedAt DESC'
 );

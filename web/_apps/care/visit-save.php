@@ -51,12 +51,28 @@ if ($stmt !== false) {
     }
 }
 
+// 🧾 WHO MADE THE VISIT IS WRITTEN BY NAME as well as by number (#703, the
+//    owner's decision D-016, migration 272). An erasure KEEPS the name of
+//    whoever made a pastoral visit, and it empties that person's own account
+//    row, so a kept NUMBER alone would point at "[Deleted User]" and say
+//    nothing. The name is taken from the account itself, in the same
+//    statement, never from the session: a session can carry a name that was
+//    changed since sign-in, and this is a safeguarding record. A sub-query
+//    rather than a join, so the statement writes exactly one row whatever it
+//    finds, and fails exactly as it did before this change if it must.
+//
+//    Written here, when the visit is made, rather than copied in by the
+//    erasure: copied at erasure, the name would depend on one step running
+//    before another, and a run that failed at that step would lose it for
+//    good. `tools/gdpr-coverage-selftest.php` pins this statement's shape and
+//    `tools/erasure-pages-selftest.php` drives it.
 try {
     $stmt = $db->prepare(
-        'INSERT INTO tblCareVisit (caseID, visitedByID, kind, notes, followUpAt) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO `tblCareVisit` (`caseID`, `visitedByID`, `visitedByName`, `kind`, `notes`, `followUpAt`) '
+        . 'SELECT ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?), ?, ?, ?'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('iisss', $caseId, $userId, $kind, $notes, $followUpDate);
+        $stmt->bind_param('iiisss', $caseId, $userId, $userId, $kind, $notes, $followUpDate);
         $stmt->execute();
         $stmt->close();
     }

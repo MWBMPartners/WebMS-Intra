@@ -2124,49 +2124,72 @@ return [
     ],
     'tblCareVisit' => [
         'decision' => 'unlink',
-        // This said 'retain' until 11 October 2026 (roll-out package A2a),
-        // because `visitedByID` could not be empty: the number of whoever
-        // made the visit was left in place, pointing at an emptied account.
-        // Migration 208 made the column emptiable and GdprEraser::catalogue()
-        // now empties it, and `followUpAssignedToID`, with an instruction
-        // each.
+        // 🧾 WHO MADE THE VISIT IS KEPT (#703, the owner's decision D-016,
+        //    3 November 2026, which "rules out unlinking the worker"). When a
+        //    member of staff or a volunteer is erased, the visits they made keep
+        //    their number AND their name. A pastoral or safeguarding record that
+        //    cannot say who carried it out is worse for the people it protects.
+        //
+        //    The NAME is `visitedByName` (migration 272), written when the visit
+        //    is recorded. It has to be: the worker's own account row is emptied
+        //    by the erasure, so `visitedByID` alone would point at "[Deleted
+        //    User]" and say nothing. That number-only shape is what this entry
+        //    had until 11 October 2026 (decision 'retain', `visitedByID` left in
+        //    place), and migration 208 then made the column emptiable and the
+        //    erasure emptied it - which D-016 rules out. Neither is put back.
+        //
+        //    The decision stays 'unlink' because the row still loses something
+        //    on an erasure: the note, when the person CARED FOR is erased (#709),
+        //    and the follow-up worker's number. 'retain' would forbid both.
         //
         // 🧾 #708, and the owner's decision of 2 November 2026: RECORD THE
         //    LIMIT, change nothing. `followUpAssignedToID`'s instruction is
         //    correct and can NEVER MATCH A ROW on the code as it stands,
         //    because nothing writes the column — `_apps/care/visit-save.php`
-        //    inserts only `caseID`, `visitedByID`, `kind`, `notes` and
-        //    `followUpAt`. So the coverage here looks wider than it is, and
-        //    that is the whole reason this note exists. It was NOT deleted,
-        //    and the page was NOT changed to fill it: whether a pastoral visit
-        //    should have an assignable follow-up owner is a question about how
-        //    pastoral care is run, which is the owner's and not a tidy-up.
-        //    If the page ever sets it, this note comes out and nothing else
-        //    needs to change. The CASE HISTORY stays for as long as safeguarding policy keeps
-        // the case - but the note on a visit is the subject's own record and is
-        // to be emptied, which needs matching through the parent table (#709).
-        // An earlier version of this comment and of `reason` said the notes
-        // were kept on safeguarding grounds, which contradicted the line in
-        // `notEmptiedHere` below.
+        //    inserts only `caseID`, `visitedByID`, `visitedByName`, `kind`,
+        //    `notes` and `followUpAt`. So the coverage here looks wider than it
+        //    is, and that is the whole reason this note exists. It was NOT
+        //    deleted, and the page was NOT changed to fill it: whether a
+        //    pastoral visit should have an assignable follow-up owner is a
+        //    question about how pastoral care is run, which is the owner's and
+        //    not a tidy-up. D-016 does not reach it either: being GIVEN a
+        //    follow-up is not making the visit. If the page ever sets it, this
+        //    note comes out and nothing else needs to change.
         //
-        // NOT DECIDED: whether the NAME of whoever made a visit should be
-        // kept on safeguarding grounds. That is for the organisation's
-        // safeguarding lead. As built, it is not kept.
+        // The CASE HISTORY stays for as long as safeguarding policy keeps the
+        // case - but the note on a visit is the subject's own record and is
+        // emptied, matched through the parent table (#709). An earlier version
+        // of this comment and of `reason` said the notes were kept on
+        // safeguarding grounds, which contradicted the line in `notEmptiedHere`
+        // below.
         'reason'   => 'A pastoral visit. The case history is kept for as long as safeguarding policy keeps the '
-                    . 'case, and who made the visit and who its follow-up was given to are detached. The note on '
-                    . 'a visit is the subject\'s own record and IS emptied, matched through the case (#709)',
-        'columns'  => ['visitedByID', 'followUpAssignedToID', 'notes'],
+                    . 'case. Who made the visit is KEPT, by name, when that person is erased (the owner\'s decision '
+                    . 'D-016, #703): a pastoral record must still say who carried it out. Who its follow-up was given '
+                    . 'to is detached. The note on a visit is the subject\'s own record and IS emptied when the person '
+                    . 'cared for is erased, matched through the case (#709)',
+        'columns'  => ['visitedByID', 'visitedByName', 'followUpAssignedToID', 'notes'],
+        'notEmptiedHere' => [
+            'visitedByName' => 'KEPT ON PURPOSE, by the owner\'s decision D-016 (3 November 2026, #703): when the '
+                . 'person who made a pastoral visit is erased, their name stays on the visit as the person who made '
+                . 'it, because a pastoral or safeguarding record that cannot say who carried it out is worse for the '
+                . 'people it protects. Their number (`visitedByID`) is kept too, by a "retain" instruction; their own '
+                . 'account is still emptied, which is why the name is written onto the visit when it is recorded.',
+        ],
     ],
     'tblDbsChecks' => [
         'decision' => 'retain',
-        // `recordedByID` (who typed the check in) IS cleared, since 11 October
-        // 2026: the check itself, and whose it is, stay exactly as they are.
-        // Whether the name of whoever recorded a check should be kept on
-        // safeguarding grounds has NOT been decided; it is the same question
-        // as for pastoral visits, for the organisation's safeguarding lead.
-        'reason'   => 'Safeguarding record. Kept and flagged, never quietly removed',
+        // 🧾 WHO RECORDED THE CHECK IS KEPT (#703, the owner's decision D-016,
+        //    3 November 2026). From 11 October 2026 until #703 `recordedByID`
+        //    was cleared by the derived "who handled it" instruction; D-016
+        //    rules that out. GdprEraser now writes this table's instructions by
+        //    hand, both of them "retain", and the recorder's NAME is
+        //    `recordedByName` (migration 272), written when the check is
+        //    recorded, because the recorder's own account is emptied by an
+        //    erasure and the number alone would point at "[Deleted User]".
+        'reason'   => 'Safeguarding record. Kept and flagged, never quietly removed. Who recorded the check is kept '
+                    . 'too, by name, when that person is erased (the owner\'s decision D-016, #703)',
         'period'   => 'as required by safeguarding policy',
-        'columns'  => ['userID', 'notes', 'recordedByID'],
+        'columns'  => ['userID', 'notes', 'recordedByID', 'recordedByName'],
     ],
     // 🧾 THE CLAIMANT IS KEPT WITH THE CLAIM, AS A DECISION (#492 part 4, the
     //    owner, 3 November 2026). The reason here used to end "...and the

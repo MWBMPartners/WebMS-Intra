@@ -75,11 +75,19 @@ $stmt->close();
 if ($ok === false) { http_response_code(404); exit('User not found'); }
 
 $refArg = $ref !== '' ? $ref : null;
+// 🧾 WHO RECORDED THE CHECK IS WRITTEN BY NAME as well as by number (#703, the
+//    owner's decision D-016, migration 272). An erasure KEEPS the name of
+//    whoever recorded a safeguarding check, and it empties that person's own
+//    account row, so a kept NUMBER alone would point at "[Deleted User]". The
+//    name is read from the recorder's account in the same statement, never
+//    from the session. A sub-query rather than a join, so the statement still
+//    writes exactly one row whatever it finds: the check itself matters more
+//    than the label on it, and nothing about recording one changed but this.
 $stmt = $mysqli->prepare(
-    'INSERT INTO tblDbsChecks (userID, dbsType, referenceNumber, issuedDate, expiresAt, status, recordedByID) '
-    . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO `tblDbsChecks` (`userID`, `dbsType`, `referenceNumber`, `issuedDate`, `expiresAt`, `status`, `recordedByID`, `recordedByName`) '
+    . 'SELECT ?, ?, ?, ?, ?, ?, ?, (SELECT `r`.`fullName` FROM `tblUsers` `r` WHERE `r`.`userID` = ?)'
 );
-$stmt->bind_param('isssssi', $userId, $dbsType, $refArg, $issued, $expires, $status, $recorder);
+$stmt->bind_param('isssssii', $userId, $dbsType, $refArg, $issued, $expires, $status, $recorder, $recorder);
 $stmt->execute();
 $stmt->close();
 

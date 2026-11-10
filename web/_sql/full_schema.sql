@@ -3331,7 +3331,8 @@ CREATE TABLE IF NOT EXISTS `tblCareCase` (
 CREATE TABLE IF NOT EXISTS `tblCareVisit` (
     `visitID`       INT      NOT NULL AUTO_INCREMENT,
     `caseID`        INT      NOT NULL,
-    `visitedByID`   INT      DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
+    `visitedByID`   INT      DEFAULT NULL COMMENT 'Who made the visit. KEPT when that person is erased (D-016, #703, migration 272); their name is on visitedByName, because their own account is emptied. Empty only on a visit whose visitor was erased before that change.',
+    `visitedByName` VARCHAR(255) DEFAULT NULL COMMENT 'The name of whoever made the visit, written when the visit is recorded. KEPT when that person is erased, by decision D-016 of the owner (#703, migration 272): a pastoral record must still say who made the visit',
     `visitedAt`     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `kind`          ENUM('visit','call','message','prayer','other') NOT NULL DEFAULT 'visit',
     `notes`         TEXT     DEFAULT NULL,
@@ -6714,6 +6715,7 @@ CREATE TABLE IF NOT EXISTS `tblDbsChecks` (
     `expiresAt`      DATE         NOT NULL COMMENT 'Most orgs renew every 3 years',
     `status`         ENUM('valid','expired','revoked') NOT NULL DEFAULT 'valid',
     `recordedByID`   INT          DEFAULT NULL,
+    `recordedByName` VARCHAR(255) DEFAULT NULL COMMENT 'The name of whoever recorded the check, written when it is recorded. KEPT when that person is erased, by decision D-016 of the owner (#703, migration 272)',
     `recordedAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `notes`          VARCHAR(500) DEFAULT NULL,
     PRIMARY KEY (`dbsCheckID`),
@@ -11584,6 +11586,19 @@ UPDATE `tblRoles` r
 DELETE FROM `tblSettings` WHERE `settingKey` = 'attend.reports.visibleTo';
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('271_attendance_reports_permission.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 272_worker_name_kept_on_care_records.sql (#703; D-016) ─────────────
+-- Two columns, both declared in their own tables above: `tblCareVisit`'s
+-- `visitedByName` and `tblDbsChecks`' `recordedByName`, and a true comment on
+-- `tblCareVisit.visitedByID`. They hold the NAME of whoever made a pastoral
+-- visit or recorded a DBS check, written when the record is made, and an
+-- erasure KEEPS them (the owner's decision D-016). The migration also copies
+-- names into records that already existed; a database built from this script
+-- has no such records, so there is nothing to copy here, and the migration's
+-- copy touches only empty names when the installer replays it.
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('272_worker_name_kept_on_care_records.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 273_no_built_in_time_zone.sql (#782) ───────────────────────────────
