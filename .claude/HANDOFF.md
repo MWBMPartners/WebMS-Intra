@@ -14,7 +14,7 @@ Last whole suite (with #598): 102/103, the one red being the eraser test's exact
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, e1f4afed (rebased on 6a5bfd20) | Round 4 CLEAN; integrating now (#598 has landed). Raised #925 |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, e1f4afed (rebased on 6a5bfd20) | Round 4 CLEAN; cherry-picked onto the working branch with docs (schema conflict with 270 resolved: both blocks, in order); whole suite running, then push. Raised #925, #930 |
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab | Round 4 (c4542370) NOT CLEAN: the number also survives in the activity log and other records' change history; rate-limit wording untrue; list items checked by words, so a reversed meaning passes. Redesign sent: stop presenting the list as complete, add a plain statement about logs with their real clearing rule, pin whole text in all four places |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.

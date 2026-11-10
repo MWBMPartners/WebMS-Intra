@@ -3190,6 +3190,10 @@ tell whether a page RENDERS in the chosen language** — that needs HTTP
 and a seeded installation, and both say so in their own output. The
 technical record is DEV_NOTES.md, "A question asked too early (#763)".
 
+- **Attendance figures (#529; D-106, D-109, D-114, D-115).** `AttendanceAccess::mayViewTotals()` is the ONE
+  question for the totals AND each session's headcount (permission `attendance.reports`); `mayDeleteSession()`
+  is the ONE delete rule, asked by both delete addresses. A refusal is the same 404 as an address that does
+  not exist. The record is DEV_NOTES.md, "Who sees the attendance figures (#529)".
 - **Outside services (#778; D-058, D-072, D-073).** `Portal\Core\OutsideServices` is the ONE place
   that decides whether a member's details may go to an outside company (Gravatar, a sign-in
   provider's photo, an OpenStreetMap map of a member's home), and the ONLY file under `web/` that may

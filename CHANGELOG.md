@@ -4,6 +4,38 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Attendance: who sees the totals, who sees a session's figures, and who may delete a session (#529, #917, #921, D-106, D-109, D-114, D-115, migration 271)
+
+- **The attendance totals are seen by administrators and by a role the organisation chooses (D-106).**
+  The reports page, the attendance spreadsheet (`/attendance/export`) and the "Total Headcount This Month"
+  card on `/attendance` now need the new permission **"See the attendance totals"**
+  (`attendance.reports`), which an organisation points at a role on Admin, Roles. It ships pointing at a
+  new standard role, **Attendance Coordinator**, held by nobody, so out of the box only administrators see
+  the totals. A member, or an account from another organisation, gets the same "page not found" as an
+  address that does not exist (a refused member used to get 403).
+- **The three-way setting `attend.reports.visibleTo` is deleted** (migration 271) and gone from
+  `/admin/settings/attendance`. An organisation that had chosen something wider, such as "any member",
+  loses that choice (D-106 rules out "any member"). No customer installation exists yet.
+- **The attendance spreadsheet follows the same rule.** It used to be for administrators only. Its
+  `notes` column is free text, and the Roles page now says so. The ANONYMOUS check-in spreadsheet is
+  unchanged: administrators only.
+- **Members no longer see any session's headcount (D-109, #917).** On `/attendance` the Headcount column
+  and each row's Edit button are drawn only for administrators and permission holders. The form for an
+  existing session (`/attendance/record?edit=N`) answers "page not found" to anybody else, and its update
+  is answered exactly as for a session that does not exist, writing nothing. Any member still records a
+  NEW session and sees the counts they type.
+- **Who may delete a session (D-114, D-115).** Administrators, permission holders, and the member who
+  recorded that session, on the list (the control is drawn only for them), in the delete handler and in
+  `api/attendance/delete`. An API key with `attendance:write` may still delete any session; one without
+  it cannot. Anybody else, and a session already deleted, gets "Attendance session not found." and
+  nothing is written. (A session that did not exist used to be answered "Attendance record deleted.")
+- **`api/attendance/list`** no longer gives a signed-in caller who is not an administrator or permission
+  holder deleted sessions, session notes or `updatedByID`.
+- **#921 fixed:** `/attendance` prints the message the attendance handlers leave, so "Attendance recorded
+  successfully" and "deleted" appear where the person lands.
+- The download refuses a non-string form token cleanly instead of answering 500.
+- Open: #925, #930.
+
 ### Sign-in and password reset: ten fixes (#598, D-104, D-105, D-108, migration 270)
 
 - **A password reset, a password change while signed in, and an administrator setting the password now sign

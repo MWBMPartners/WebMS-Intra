@@ -22287,6 +22287,41 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
 
+### Who sees the attendance figures, and who may delete a session (#529, D-106, D-109, D-114, D-115)
+
+- **`AttendanceAccess::mayViewTotals($db, $userId, $siteId, App::isAdmin(), App::isRootAdmin())` is the ONE
+  question**, for the totals AND each session's headcount. `decide()` is the rule with no database: not a
+  member → no; administrator → yes; otherwise the permission. Asked by `attendance/report.php`,
+  `attendance/export.php` and `attendance/index.php`. `viewerIsMember()` stays for the recording pages.
+  `coordinatesAnyEvent()`, `choice()`, `readChoice()`, `mayView()` and the `VISIBLE_*` constants went with
+  the setting.
+- **Deleting:** `decideDelete()` (no database, used per row by the list) and `mayDeleteSession()` (the same
+  rule with the session read, used by both delete addresses). The recorder test is a condition of the ONE
+  look-up that finds the session, so "not yours" and "not there" cannot answer differently. The look-up AND
+  the page's UPDATE both ask for `isDeleted = 0`. Plant M2 (the UPDATE without it) is caught only by the
+  text pin, because the rule refuses an already-deleted session first, so no request can reach the UPDATE.
+- **Refusal is `Router::renderError(404)`, asked BEFORE the form token on the download**, so a refused
+  member is never redirected with a message that reveals the download exists.
+- **Part Q of `tools/access-pages-selftest.php` compares the WHOLE answer** (status line, every header and
+  the body, minus `Date:`, the nonce and the address) with the same account's answer for
+  `/attendance/zz-no-such-page`. A body-only comparison passed with `header('X-Report: …')` above a gate. It
+  searches for every figure raw AND with a thousands comma, after removing runs of 32+ hex (tokens and
+  nonces) so a token cannot contain the number by chance.
+- **Only one fixture makes the membership half of `mayViewTotals()` decide anything:** LADM, a member of B
+  with the portal-wide `isAdmin` flag, because `App::isAdmin()` is true for that flag on any organisation's
+  address. Without LADM, `$isMember = $userId > 0` left every check green.
+- **The template pin in `attendance-access-selftest.php` walks the enclosing `if`/`endif` blocks for EVERY
+  occurrence of a figure.** Its first version took the nearest `if` above the FIRST occurrence, so a figure
+  inside the delete button's confirmation passed.
+- **Fixture traps.** Part G records sessions through the real page and they take the next auto numbers, so a
+  fixture numbered in that range collided. "Copy from last" copies the highest-numbered session of the day,
+  so part Q's fixtures are numbered for that. `refusedAtTheDoor()` looks for organisation A's name in a
+  refusal that names the signed-in account, so a person NAMED like the role made a correct refusal read as a
+  leak. An update through `record/save.php` writes every field, so a test that posts no `notes` empties them.
+- **Left as they are:** admin-only readers of the same figures (`admin/reports/*`, the report builder's
+  attendance source) stay administrators-only, because they hold other data too, so widening them is not
+  D-106. `updatedAt` still reaches members through `api/attendance/list` (#930).
+
 ### Signing the other browsers out (#598, D-104, D-108)
 
 - **Sessions are PHP files and nothing lists whose are whose.** `Auth::endOtherSessionsOf()` is

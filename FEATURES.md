@@ -763,8 +763,13 @@ seeded `'0'` stub for a future auto-purge cron — see DEV_NOTES).
 
 ### 📋 Attendance — `/attendance/` ✅
 
-**Who may record (12 October 2026).** Recording, changing and deleting a head count: any active member of the
-organisation, or an administrator. Nobody from another organisation. Viewing the counts is not yet limited the same way (#511).
+**Who may record, see and delete (10 November 2026; D-106, D-109, D-114).** Any active member of the
+organisation, or an administrator, may record a NEW session; nobody from another organisation may. The
+totals (reports page, the attendance spreadsheet, the month's headcount card) and each past session's
+figures are seen only by administrators and holders of **"See the attendance totals"**
+(`attendance.reports`, Admin → Roles; ships as the standard role Attendance Coordinator, held by nobody),
+who alone may correct a recorded session. A session may be deleted by an administrator, a permission holder,
+or the member who recorded it. Anybody else gets the same "page not found" as an address that does not exist.
 
 Service-type-aware headcount tracker.
 
@@ -805,7 +810,7 @@ Service-type-aware headcount tracker.
   dropped by migration 201 (#530).
 
 **Tables:** `tblAttendanceSessions`, `tblAttendanceCounts`, `tblAttendanceServiceTypes`, `tblAnonymousCheckins`, `tblAnonymousCheckinDays`
-**Settings:** `attend.anonCounts.visibleTo`, `attend.detailRetentionDays`
+**Settings:** `attend.anonCounts.visibleTo`, `attend.detailRetentionDays` (`attend.reports.visibleTo` was deleted by migration 271)
 
 ---
 
