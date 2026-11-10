@@ -1623,6 +1623,15 @@ jobs:
         if: always()
         run: node tools/csrf-carriers-selftest.mjs
 
+      # 🚪 #493 P4b: the script an organisation pastes into its own website
+      #    draws TEXT ONLY, in a shadow root, under a strict content policy —
+      #    behaviour, so it is driven in a real browser (D-065). It refuses
+      #    rather than skipping when no Chromium-family browser is found.
+      - name: 'The public door''s script draws text only, in a real browser (#493 P4b)'
+        id: public_door_script_browser
+        if: always()
+        run: node tools/public-door-script-selftest.mjs
+
       # 🎨 D-091: the colours worked out from an organisation's own colour are
       #    really the ones a browser applies — the style block outweighs
       #    portal.css — and every pair a person reads is at least 4.5:1, in

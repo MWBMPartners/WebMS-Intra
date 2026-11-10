@@ -4,6 +4,35 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The public door, part two: the script a website pastes in, and the old countdown widget removed (#493 P4b, migration 264)
+
+- **Added: a one-line script an organisation pastes into its own website** (D-056). Once its door is on,
+  Admin → Public website shows three: its events, its noticeboard posters, or a countdown to its next event
+  (the countdown is the script's "next" mode, D-084). The script is served only through the door's one gate,
+  at `/w/{name}/door.js` or `/door.js` on an approved public address, from a file kept outside the web root,
+  and needs Calendar or the Noticeboard switched on; every refusal is the door's identical "not found". It
+  reads the feed beside it without cookies and with no referrer, and draws only plain text (and `https:`
+  pictures and links) inside a shadow root of its own: nothing it is given is ever turned into page markup,
+  its styles and the website's cannot reach each other, it adds no global variable, and it works under a
+  strict content security policy. Each event's time is shown on that event's own clock — including on the
+  morning the clocks go forward, when the feed now also carries each time exactly as stored
+  (`startsOnClock`, `endsOnClock`) beside its true moment. When the door is off it draws nothing.
+- **Removed: the old countdown widget.** `web/public_html/widget/` (`countdown.js`), its two public addresses
+  `widget/countdown.json` and `widget/countdown` (migration 264 and the install script), their handlers, and
+  the old embeddable `/widget` page with its loader. That page had no sign-in check of its own and was
+  unreachable only because its route had been removed (migration 189); deleting the folder alone would have
+  left the missing route as its only guard, so the page went in the same change. `/widget` and every old
+  widget address now answer the portal's own "not found". robots.txt now asks crawlers to keep off `/w/`.
+- **Changed:** every sentence saying what "Show on the public website" governs now names the public door in
+  place of the countdown widget — the event form, the calendar and imports help, the outside-calendar pages
+  and `api-spec.json`. The card's advice about a website's content policy now says pictures come from the
+  portal and from any outside picture a poster uses.
+- **Tests:** `tools/public-door-selftest.php`, `tools/public-door-script-selftest.mjs` (a real headless
+  browser against a strict policy, with hostile text in every field it draws) and
+  `tools/htaccess-apache-selftest.php` (each total pinned in its file), with planted faults for every gate,
+  every drawn field and every countdown box. Two check rounds by fresh Claude agents (protected arm: outside
+  websites, stored data); round 2 was clean. Raised from it: #898, #899. Codex has not reviewed it.
+
 ### A sign-in keeps nothing of the previous person's session (#900)
 
 - **Fixed (security): signing in on a shared browser no longer hands the previous person's waiting session

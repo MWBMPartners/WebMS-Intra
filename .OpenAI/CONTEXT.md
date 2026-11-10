@@ -3218,7 +3218,12 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   only once the installation's global administrator approves it (D-101); `PublicWebsiteSetup::publicHostStatus()`
   is the ONE answer to where it stands. `.htaccess`'s deny rule is driven on a real Apache by
   `tools/htaccess-apache-selftest.php` (D-065). Test: `tools/public-door-selftest.php`; the record is
-  DEV_NOTES.md, "The public door (#493, package P4a)".
+  DEV_NOTES.md, "The public door (#493, package P4a)". The script a website pastes in
+  (`web/_core/data/public-door.js`, #493 P4b) is outside the web root and served only by `PublicDoor`; it is
+  TEXT ONLY — never `innerHTML` or any other HTML sink — and its behaviour is driven in a real browser by
+  `tools/public-door-script-selftest.mjs`, so change the script and run it. The old `/widget…` addresses are
+  deleted (D-084, migration 264): do not bring one back. Record: DEV_NOTES.md, "The public door's script
+  (#493, package P4b)".
   The technical record is DEV_NOTES.md, "Show on the public website, for events (#493, package P1)".
 
 ## A time on a clock is not a moment, and the test for it cannot work (#777 part one)

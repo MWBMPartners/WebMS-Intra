@@ -236,7 +236,16 @@ screens and didn't say what it meant.
   `/w/{name}/…` on the portal's address or at `/…` on the organisation's approved public address, which
   answers nothing else. Replacing the name does not affect the public address. Every refusal is one
   identical "not found"; no cookie, no session. On a test copy the door answers signed-in testers only
-  (D-087; its card is P4d). Still to come: the pasted-in script (P4b) and the frameable page (P4c).
+  (D-087; its card is P4d). **The script (#493 P4b; D-084):** once the door is on, the card shows three
+  one-line scripts to paste into the organisation's website — its events, its posters, or a countdown to
+  its next event (`data-show="events|posters|next"`, with optional `data-limit`, `data-target`,
+  `data-lang`, `data-refresh`). Served only through the door, at `/w/{name}/door.js` or `/door.js` on the
+  approved public address. It draws plain text only, in a box of its own that the website's styles cannot
+  reach, works under a strict content security policy, shows each event's time on that event's own clock,
+  and draws nothing while the door is off. Its own few words are English (#899); dates follow `data-lang`.
+  **The old countdown widget is removed** (`/widget/countdown.js`, `/widget/countdown.json`,
+  `/widget/countdown` and the old `/widget` page); the script's countdown mode replaces it. Still to come:
+  the frameable page (P4c).
 - **Admin → Server Information** (`/admin/system-info`, any
   administrator): PHP version, the database verdict, connection facts
   asked of the live connection itself rather than read from the
@@ -619,7 +628,7 @@ administrators' guide is `/help/calendar-imports`. The technical record is DEV_N
 - Four levels: Everyone (including signed-out visitors), Members of this organisation, Selected groups and people, and Only administrators
   (choices and rules only). A calendar has the first three. A choice or rule says how much people outside the calendar's own audience see: "Title, date and time only" (where its form starts) or
   "Full details", which shows everything the calendar gave. API keys get exactly what a signed-out visitor gets, and each calendar,
-  choice or rule has a "Don't show via API" box. "Also show on the public website" (off by default, for Everyone only) controls the countdown widget, the sitemap and, where a signed-out visitor sees the event in full, the search-engine markup on the event's page — but a calendar's or a rule's box does so only while the organisation is held to "one box per subscribed calendar"; under "one tick per event" (the default) only a choice about that event counts (#493, D-080, D-081).
+  choice or rule has a "Don't show via API" box. "Also show on the public website" (off by default, for Everyone only) controls the public door (the feeds and the script an organisation pastes into its own website, #493), the sitemap and, where a signed-out visitor sees the event in full, the search-engine markup on the event's page — but a calendar's or a rule's box does so only while the organisation is held to "one box per subscribed calendar"; under "one tick per event" (the default) only a choice about that event counts (#493, D-080, D-081).
 - **Six kinds of list.** "Selected groups and people" can name small groups, leadership roles, roles, user groups, departments and named people
   (up to 50). The form shows each kind as its own group of tick boxes, with a line under Roles, User groups and Departments saying what the thing
   is and where it is managed. A role, group or department of another organisation lets nobody in. A retired user group or switched-off

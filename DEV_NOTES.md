@@ -21918,3 +21918,47 @@ recorded on #902 along with a static guard against a seventh sign-in path skippi
 `check_session_id_not_stored.py` allows three whole-session uses in `Auth.php` (was one) — the one-line
 rewrite is two of them, and there is no slack: a fourth fails.
 
+### The public door's script (#493, package P4b)
+
+**The script lives outside the web root** (`web/_core/data/public-door.js`) and is served by `PublicDoor`
+(`SURFACE_SCRIPT`, `script()`), so the door's gate decides whether it answers. A copy under `public_html/`
+would answer on every address with the door switched off. It has the feeds' headers plus Content-Length, a
+query string is ignored (websites add `?v=2`), and it finds its feed from its own address
+(`new URL('events.json', currentScript.src)`), so nothing about an organisation is written into it.
+
+**"Text only" is behaviour, so it is driven in a real browser (D-065).** `tools/public-door-script-selftest.mjs`
+serves the real file to headless Edge or Chrome, from a made-up portal on `localhost` to a made-up website on
+`127.0.0.1` sent with a strict content security policy, with the browser's clock set to UTC+14 so a converted
+time would show. Round 1 found the lesson worth keeping: **a test proving "nothing becomes markup" must put
+markup in EVERY field it draws.** The fixtures carried hostile text only in some fields, and the only plant
+was in the shared drawing helper, so swapping `textContent` for `innerHTML` on the poster's kicker alone, or
+its place alone, left every check green. Each field now carries markup and has its own plant. The same
+round found the countdown's minutes checked by nothing (the one event was two hours away and only days and
+hours were compared) — an event 2 days 3 hours 25 minutes away now makes every box non-trivial.
+
+**A switched-off door on an approved PUBLIC ADDRESS was tested by nothing.** On `/w/{name}/` it is covered
+by accident, because switching the door off deletes the name row; on a public address the "is the door on?"
+question is the only guard. Asking for a refusal on BOTH forms of address, for every surface, is the rule.
+
+**Clock readings in the feed.** The events feed carries `startsOnClock` / `endsOnClock` — the stored reading
+exactly as written, with no offset — beside `startsAt` / `endsAt`, the true moment. The script SHOWS the
+reading and COUNTS DOWN from the moment, so an event stored at 01:30 on the morning the clocks go forward
+shows 01:30 (as the portal's own pages do) while its moment is 02:30 (#777: a clock reading is not a moment).
+Each reading is null exactly when its moment is, and equals the moment's first 19 characters everywhere
+except the missing hour; test J11 checks that on every event in three real feeds.
+
+**The widget deletion, and the shadowing check.** Before deleting `web/public_html/widget/`, the addresses it
+hid were listed (CLAUDE.md, "Web-root shadowing trap"): `/widget`, whose route migration 189 had removed and
+whose page had NO sign-in check — so the page went in the same change — and the static `countdown.js`. The
+two countdown routes were never hidden and were live public addresses until migration 264. Migration 264 is
+three DELETEs, each matched on address AND target, because `check_schema_seed_parity.py` reads only
+`DELETE … WHERE routeKey = '…'` as "removed on purpose" (an OR-joined version made it report both rows missing).
+
+**Tests that read the countdown now read the door's feed** (`public-website-tick-selftest.php` sections C, D
+and R, and `time-zones-selftest.php` X14). The tick test gained Z1, requiring every such read to have
+answered 200: a feed that answers nothing reads as "not shown" and would pass every "not shown" check.
+
+**Not driven:** browsers other than Chromium; a real outside website on a different scheme. The feed is
+ordered by clock reading rather than real moment (#898), which the countdown works round by asking for 50
+and choosing by moment; the script's own words are English only (#899).
+
