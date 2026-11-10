@@ -13,9 +13,9 @@ Last whole suite (with #932): 104/104 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 1409d679 | Check round 11: code correct (no erasure step changed); three tests pass on broken code, each 'one state over' the last round's fix. Round 12 = table-driven pin of the whole hold matrix, narrowed escaping check, which-organisation lose-row check, plus four untrue sentences. Then #940 |
-| #785 — a guard for write paths that store a wall-clock reading as a moment | worktree agent (p785-build) | Building (tooling only) |
-| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | worktree agent (p935-build) | Building |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 5eec9289 | Round 12 built (table-driven K13 over all 16 hold states; K11e narrowed; K11r which-organisation; four untrue sentences fixed). Check round 12 running. Then #940 |
+| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, 4fe9b574 | Built; the gate found a SIXTH live fault (CSV import, loose cells in the skipped hour stored an hour out), fixed to store the written reading. Check round 1 running |
+| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 7f4e784f | Built (empty place = organisation's map position, sunset falls back to fixed times; country from the organisation or refused; page reads the installation layer, writes only arrived fields). Check round 1 running. Raised #942, #943 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782, landed), 274 (#935). Next free: 275.
@@ -23,7 +23,7 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 ## Next, in this order
 
 1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
-2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#941. #931 closed by D-116.
+2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#943. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
