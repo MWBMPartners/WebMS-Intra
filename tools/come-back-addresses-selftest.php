@@ -37,14 +37,19 @@
  * part of the address, from inside one and from the default one.
  *
  * The newsletter: a real "Send" through the real page, with click counting on,
- * records the newsletter's two links (their "&amp;" decoded); a counted link
+ * records the newsletter's two recordable links (their "&amp;" decoded) and
+ * NOT a third that holds a space; the recipient's copy (read through a
+ * test-only extra in the router, which calls the real
+ * Newsletter::personalise() on the real rendered newsletter) carries the two
+ * as counted links with their tokens and the third EXACTLY as written; a counted link
  * for one of them forwards to it and marks the recipient as having clicked;
  * and everything else gets the "this link cannot be used" page with 404 and
  * NO redirect, and counts nothing: an old-style link carrying the address
  * ("u="), each address in the issue's list in that form, a made-up token, a
  * token sent as a list, a token in capitals, a token from ANOTHER newsletter,
- * and a stored address that is not a web address (a row put in by hand, as a
- * restore could) — so the address is judged again whenever it is read.
+ * a stored address that is not a web address (a row put in by hand, as a
+ * restore could), and a stored ftp:// address, which fails ONLY the
+ * http-or-https rule — so the address is judged again whenever it is read.
  *
  * SAFETY
  * ------
@@ -89,7 +94,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A run that makes fewer has skipped some, and fails. */
-const EXPECTED = 71;
+const EXPECTED = 74;
 
 function refuse(string $why): never
 {
@@ -195,6 +200,10 @@ const A       = '/' . KEY_A;
 const OTHER_TOKEN = '0123456789abcdef0123456789abcdef';
 /** A row put in by hand whose address is not a web address. */
 const BAD_ROW_TOKEN = 'fedcba9876543210fedcba9876543210';
+/** A row put in by hand that fails ONLY the http-or-https rule: a well-formed ftp address with a host. */
+const FTP_ROW_TOKEN = 'abcdefabcdefabcdefabcdefabcdef01';
+/** A link in the newsletter that cannot be recorded (a space), so it must be sent exactly as written, uncounted. */
+const UNRECORDABLE = 'https://example.org/has space';
 
 /** Remove everything this test made. @return int rows of its own left afterwards (0 is right). */
 function removeWorld(): int
@@ -409,10 +418,16 @@ foreach ([[ASSET_B, ORG_B], [ASSET_1, 1]] as [$asset, $site]) {
 q("INSERT INTO tblNewsletter (newsletterID, siteID, title, subject, status, createdByID) VALUES (?, 1, 'Selftest come-back newsletter', 'Selftest come-back newsletter', 'draft', ?)", 'ii', [NEWS_1, U1ADMIN]);
 q("INSERT INTO tblNewsletterContent (newsletterID, blockType, position, payload) VALUES (?, 'cta', 1, ?)", 'is', [NEWS_1, json_encode(['label' => 'Read it', 'url' => 'https://example.org/read?x=1&y=2'])]);
 q("INSERT INTO tblNewsletterContent (newsletterID, blockType, position, payload) VALUES (?, 'text', 2, ?)", 'is', [NEWS_1, json_encode(['text' => 'See [more here](https://example.net/more) please.'])]);
+// A link isForwardable() refuses (it holds a space) but the counting pattern
+// still matches: it must go out exactly as written, with no counted link.
+q("INSERT INTO tblNewsletterContent (newsletterID, blockType, position, payload) VALUES (?, 'cta', 3, ?)", 'is', [NEWS_1, json_encode(['label' => 'Odd link', 'url' => UNRECORDABLE])]);
 q("INSERT INTO tblNewsletter (newsletterID, siteID, title, subject, status, createdByID) VALUES (?, ?, 'Selftest other newsletter', 'Selftest other newsletter', 'sent', ?)", 'iii', [NEWS_B, ORG_B, BADMIN]);
 q('INSERT INTO tblNewsletterLink (newsletterID, linkToken, targetUrl, targetHash) VALUES (?, ?, ?, ?)', 'isss', [NEWS_B, OTHER_TOKEN, 'https://example.com/other', hash('sha256', 'https://example.com/other')]);
 // A row nobody's send could write: its address is not a web address.
 q('INSERT INTO tblNewsletterLink (newsletterID, linkToken, targetUrl, targetHash) VALUES (?, ?, ?, ?)', 'isss', [NEWS_1, BAD_ROW_TOKEN, 'javascript:alert(1)', hash('sha256', 'javascript:alert(1)')]);
+// …and one that fails ONLY the http-or-https rule ("javascript:" above fails three rules at once,
+// so it could not show that this one rule is in force on its own).
+q('INSERT INTO tblNewsletterLink (newsletterID, linkToken, targetUrl, targetHash) VALUES (?, ?, ?, ?)', 'isss', [NEWS_1, FTP_ROW_TOKEN, 'ftp://example.org/file', hash('sha256', 'ftp://example.org/file')]);
 
 setting('payments.enabled', '1');
 setting('newsletter.enabled', '1');
@@ -464,6 +479,19 @@ $router = <<<'ROUTER'
 declare(strict_types=1);
 header('X-Come-Back-Selftest: __TOKEN__');
 $root = (string) realpath(__DIR__ . '/web/public_html');
+// TEST-ONLY EXTRA: what Newsletter::personalise() makes of a newsletter's real
+// rendered HTML — the exact text a recipient's copy carries. dispatch() calls
+// the same two methods; the e-mail itself is never delivered here, so this is
+// how the links IN it are read. Answers only a request carrying this run's
+// token; nothing in the portal knows about this header.
+if (($_SERVER['HTTP_X_COME_BACK_PERSONALISE'] ?? '') === '__TOKEN__') {
+    define('PORTAL_WEBROOT', $root);
+    require_once __DIR__ . '/web/_core/bootstrap.php';
+    $n = (int) ($_GET['n'] ?? 0); $r = (int) ($_GET['r'] ?? 0); $site = (int) ($_GET['site'] ?? 1);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo \Portal\Core\Newsletter::personalise(\Portal\Core\Newsletter::renderHtml($n, $site), $n, $r, 'selftest', $site);
+    return true;
+}
 $uri  = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
 if (preg_match('#(^|/)\.(?!well-known)#', $uri) === 1) { http_response_code(403); exit('403'); }
 if (preg_match('#\.(php\d?|phtml|phar)$#i', $uri) === 1 && in_array($uri, ['/index.php', '/api-docs/index.php', '/error.php'], true) === false) { http_response_code(404); exit('404'); }
@@ -648,15 +676,37 @@ foreach (hostile('', null) as $label => $address) {
 head('D. The newsletter click counter (one organisation)');
 $edit = req($jarS, 'GET', '/newsletter/edit?id=' . NEWS_1);
 $send = req($jarS, 'POST', '/newsletter/send', ['csrf_token' => token($edit['body']), 'newsletterID' => (string) NEWS_1]);
-$rows = q('SELECT linkToken, targetUrl FROM tblNewsletterLink WHERE newsletterID = ? AND linkToken <> ? ORDER BY targetUrl', 'is', [NEWS_1, BAD_ROW_TOKEN]);
+$rows = q('SELECT linkToken, targetUrl FROM tblNewsletterLink WHERE newsletterID = ? AND linkToken NOT IN (?, ?) ORDER BY targetUrl', 'iss', [NEWS_1, BAD_ROW_TOKEN, FTP_ROW_TOKEN]);
 $recipient = one('SELECT recipientID, clickedAt FROM tblNewsletterRecipient WHERE newsletterID = ? AND userID = ?', 'ii', [NEWS_1, MEMBER1]);
 ok(
-    'D01 a real Send, with click counting on, recorded the newsletter\'s two links, with "&amp;" decoded to "&"',
+    'D01 a real Send, with click counting on, recorded the newsletter\'s two recordable links (and NOT the one holding a space), with "&amp;" decoded to "&"',
     array_column($rows, 'targetUrl') === ['https://example.net/more', 'https://example.org/read?x=1&y=2']
         && count(array_filter(array_column($rows, 'linkToken'), static fn (string $t): bool => preg_match('/^[0-9a-f]{32}$/', $t) === 1)) === 2,
     'send answered ' . said($send) . '; rows: ' . json_encode($rows)
 );
 ok('D02 the member was locked in as a recipient, and has not clicked', $recipient !== null && $recipient['clickedAt'] === null, json_encode($recipient));
+// What the recipient's copy really carries (see the router's test-only extra).
+$copy = '';
+$handle = curl_init('http://127.0.0.1:' . $port . '/?n=' . NEWS_1 . '&r=' . (int) ($recipient['recipientID'] ?? 0) . '&site=1');
+curl_setopt_array($handle, [CURLOPT_RETURNTRANSFER => true, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_TIMEOUT => 60,
+    CURLOPT_HTTPHEADER => ['X-Come-Back-Personalise: ' . $state['token']]]);
+$copy = (string) curl_exec($handle);
+$hrefs = preg_match_all('/href="([^"]*)"/', $copy, $mm) > 0 ? array_map(static fn (string $h): string => html_entity_decode($h, ENT_QUOTES | ENT_HTML5, 'UTF-8'), $mm[1]) : [];
+$counted = array_values(array_filter($hrefs, static fn (string $h): bool => str_contains($h, '/newsletter/track/click') === true));
+$wantL   = array_map(static fn (array $row): string => (string) $row['linkToken'], $rows);
+$gotL    = array_map(static fn (string $h): string => (string) (preg_match('/[?&]l=([^&]*)/', $h, $lm) === 1 ? $lm[1] : '(none)'), $counted);
+sort($wantL);
+sort($gotL);
+ok(
+    'D02b the copy\'s two recordable links are counted links carrying their recorded tokens, and none carries the address ("u=")',
+    count($counted) === 2 && $gotL === $wantL && array_filter($counted, static fn (string $h): bool => str_contains($h, 'u=') === true) === [],
+    'hrefs: ' . json_encode($hrefs)
+);
+ok(
+    'D02c the link that cannot be recorded goes out EXACTLY as written, not counted and not turned into an empty counted link',
+    in_array(UNRECORDABLE, $hrefs, true) === true && count($hrefs) === 4,
+    'hrefs: ' . json_encode($hrefs)
+);
 $rid   = (int) ($recipient['recipientID'] ?? 0);
 $token = (string) ($rows[1]['linkToken'] ?? '');
 $click = static fn (string $query): array => req($jarS, 'GET', '/newsletter/track/click?' . $query);
@@ -675,6 +725,7 @@ foreach ([
     'a token from ANOTHER newsletter'         => 'n=' . NEWS_1 . '&r=' . $rid . '&l=' . OTHER_TOKEN,
     'its own token under another newsletter'  => 'n=' . NEWS_B . '&r=' . $rid . '&l=' . $token,
     'a stored address that is not a web address (a row put in by hand)' => 'n=' . NEWS_1 . '&r=' . $rid . '&l=' . BAD_ROW_TOKEN,
+    'a stored address failing ONLY the http-or-https rule (ftp://, by hand)' => 'n=' . NEWS_1 . '&r=' . $rid . '&l=' . FTP_ROW_TOKEN,
     'no token at all'                         => 'n=' . NEWS_1 . '&r=' . $rid,
 ] as $label => $query) {
     $got = $click($query);
