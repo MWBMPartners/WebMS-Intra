@@ -37,9 +37,10 @@ WHY IT IS NARROW, ON PURPOSE (#483: a check that cries wolf gets switched off).
     so a file path or a sentence never does. A name WITH a "/" counts in any
     capitalisation and with spaces round it, because PHP opens
     'europe/london' and ' Europe/London' as London (measured on 8.5). A name
-    WITHOUT a "/" ("GB", "Turkey", "EST") counts ONLY when passed straight to
-    `new DateTimeZone(`, `timezone_open(` or `date_default_timezone_set(`,
-    and never when PHP shows it IS UTC ("UTC", "Universal", "Zulu", "GMT"):
+    WITHOUT a "/" ("GB", "Turkey", "EST", "WET") counts ONLY when written
+    immediately after the opening bracket of `new DateTimeZone(`,
+    `timezone_open(` or `date_default_timezone_set(`, and never when PHP shows
+    it IS UTC (nine names, measured: "UTC", "Universal", "Zulu", "GMT" ...):
     UTC is the portal's deliberate "nothing is known" answer. Why only there:
     every such name is also a country, a country code or an abbreviation, and
     measured on 10 November 2026 the literal "GB" appears 13 times under web/
@@ -52,8 +53,10 @@ WHY IT IS NARROW, ON PURPOSE (#483: a check that cries wolf gets switched off).
   - Third-party JavaScript under web/public_html/assets/vendor/ is not read:
     it is not this portal's code.
 
-WHAT IT CANNOT SEE: a zone name without a "/" anywhere but directly inside
-those three calls (so `?? 'GB'`, or `$z = 'GB'; new DateTimeZone($z)`, passes),
+WHAT IT CANNOT SEE: a zone name without a "/" anywhere but immediately after
+the opening bracket of those three calls (so `?? 'GB'`, `$z = 'GB'; new
+DateTimeZone($z)`, `new DateTimeZone(timezone: 'GB')` and
+`new DateTimeZone(('GB'))` all pass),
 a zone built from pieces ('Europe/' . 'London'), one that is not in quotes, one
 passed through a constant or variable, and one in a SQL file. In JavaScript only
 names WITH a "/" are looked for (rule 2 is a PHP-call rule). And it cannot tell

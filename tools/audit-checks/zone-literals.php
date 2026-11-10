@@ -23,13 +23,13 @@
  *      (`value="Europe/London"`, `DEFAULT ''Europe/London''`). PHP opens
  *      'europe/london' and ' Europe/London' as London (measured on 8.5), so a
  *      check matching only the proper spelling would let both through.
- *   2. A zone name WITHOUT a "/" ("GB", "Turkey", "EST", "Japan") passed
- *      DIRECTLY as the first argument to `new DateTimeZone(`,
- *      `timezone_open(` or `date_default_timezone_set(`, in any capitalisation
- *      and with spaces — UNLESS PHP itself shows that zone IS UTC (no offset
- *      and no clock change, ever: "UTC", "Universal", "Zulu", "GMT" and the
- *      like). UTC is the portal's deliberate "nothing is known" answer
- *      (Site::ZONE_WHEN_NONE), not one customer's place.
+ *   2. A zone name WITHOUT a "/" ("GB", "Turkey", "EST", "WET", "Japan")
+ *      written as a quoted literal IMMEDIATELY after the opening bracket of
+ *      `new DateTimeZone(`, `timezone_open(` or `date_default_timezone_set(`,
+ *      in any capitalisation and with spaces — UNLESS PHP itself shows that
+ *      zone IS UTC (see the measured test below: exactly nine names, "UTC",
+ *      "Universal", "Zulu", "GMT" among them). UTC is the portal's deliberate
+ *      "nothing is known" answer (Site::ZONE_WHEN_NONE), not a place.
  *
  * WHY RULE 2 IS NARROWER THAN RULE 1, and the measurement behind it. Every
  * one of the 45 names without a "/" is ALSO something else: a country name
@@ -51,9 +51,12 @@
  * parser").
  *
  * WHAT IT CANNOT SEE, said plainly:
- *   - a zone name without a "/" anywhere EXCEPT directly inside one of those
- *     three calls: `$zone = 'GB'; new DateTimeZone($zone);` passes, and so
- *     does `?? 'GB'` as a fallback (rule 2's measurement is why);
+ *   - a zone name without a "/" anywhere EXCEPT immediately after the
+ *     opening bracket of one of those three calls: `$zone = 'GB'; new
+ *     DateTimeZone($zone);` passes, and so does `?? 'GB'` as a fallback
+ *     (rule 2's measurement is why). So do `new DateTimeZone(timezone: 'GB')`
+ *     (a NAMED argument) and `new DateTimeZone(('GB'))` (extra brackets),
+ *     because the token before the literal is then not the call's bracket;
  *   - a zone name BUILT from pieces ('Europe/' . 'London');
  *   - a zone name read from a file or the database at run time;
  *   - a zone name that is not in quotes (inside prose in a string);
@@ -70,7 +73,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/782
  * -----------------------------------------------------------------------------
  */
@@ -93,10 +96,35 @@ foreach (DateTimeZone::listIdentifiers(DateTimeZone::ALL_WITH_BC) as $name) {
         $withSlash[strtolower($name)] = $name;
         continue;
     }
-    $zone      = new DateTimeZone($name);
-    $isUtcItself = $zone->getOffset(new DateTimeImmutable('2026-01-15 12:00:00', new DateTimeZone('UTC'))) === 0
-        && $zone->getOffset(new DateTimeImmutable('2026-07-15 12:00:00', new DateTimeZone('UTC'))) === 0
-        && count((array) $zone->getTransitions(-2147483648, 4102444800)) <= 1;
+    // "IS UTC ITSELF", measured with PHP on 10 November 2026 rather than
+    // guessed: offset 0 in January AND July, shown as UTC, UCT or GMT (or a
+    // plain +00:00 offset), and NO past or future offset other than 0. That
+    // passes exactly nine names — UTC, UCT, Universal, Zulu, GMT, GMT0, GMT+0,
+    // GMT-0, Greenwich — in any capitalisation. The first version asked only
+    // "offset 0 twice and at most one transition", and that let through:
+    //   - "WET": PHP reads it as a FIXED abbreviation at +00, so a developer
+    //     meaning Western Europe silently gets UTC all year; and
+    //     getTransitions() answers false, which `count((array) false)` counts
+    //     as 1;
+    //   - "Factory": offset 0 but shown "-00", which means "place unknown".
+    // "Iceland" fails the last part (it once had an offset of -968 seconds):
+    // it is a place that happens to be on GMT today, not UTC.
+    $zone  = new DateTimeZone($name);
+    $steps = $zone->getTransitions(-2147483648, 4102444800);
+    $isUtcItself = true;
+    foreach (['2026-01-15 12:00:00', '2026-07-15 12:00:00'] as $moment) {
+        $at = (new DateTimeImmutable($moment, new DateTimeZone('UTC')))->setTimezone($zone);
+        if ($at->getOffset() !== 0 || in_array($at->format('T'), ['UTC', 'UCT', 'GMT', 'GMT+0000'], true) === false) {
+            $isUtcItself = false;
+        }
+    }
+    if (is_array($steps) === true) {
+        foreach ($steps as $step) {
+            if ((int) $step['offset'] !== 0) {
+                $isUtcItself = false;
+            }
+        }
+    }
     if ($isUtcItself === false) {
         $withoutSlash[strtolower($name)] = $name;
     }

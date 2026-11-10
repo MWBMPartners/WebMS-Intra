@@ -48,9 +48,13 @@
  * is why each change night is found, and why Santiago is here as well.
  *
  * THE MADE-UP WORLD
- *   One organisation (and a second, for the limit), whose quiet hours are
- *   Friday 18:00 to Saturday 18:00 on a clock in Europe/London, and people
- *   who each have a confirmed number for texts:
+ *   One organisation (and a second, for the limit). In parts A to M the
+ *   quiet-hours zone setting NAMES Europe/London, so quiet hours are Friday
+ *   18:00 to Saturday 18:00 on London's clock for both. Part N empties that
+ *   setting ("each organisation's own time zone", #782) and puts the first
+ *   organisation on Australia/Sydney and the second on Europe/London, so each
+ *   text has quiet hours on its own organisation's clock. And people who each
+ *   have a confirmed number for texts:
  *     follow    follows the portal's quiet hours
  *     on        has chosen "always"
  *     off       has switched quiet hours off for themselves
@@ -114,6 +118,17 @@
  *      recent texts (the moment a text was handed over), Account, SMS and
  *      the broadcast page's first paragraph; and every sentence the class
  *      records, against its copy written out in this file
+ *   M  a text sent AT ONCE is asked the same "may this person be sent this
+ *      organisation's text?" question as a held one (the owner's decision
+ *      of 26 October 2026): an account switched off or deleted, the kinds
+ *      that are never held, a text naming nobody, membership on an
+ *      installation with several organisations, that a text is HELD before
+ *      that question is asked (and sent later if the account is back on),
+ *      and the day's limit
+ *   N  each organisation's own clock (#782): with the zone setting empty, a
+ *      text sent at once and a held text are each judged on the quiet hours
+ *      of the organisation they belong to, in one run that handles two
+ *      organisations, for one person who has a number in both
  *
  * WHAT THIS CANNOT PROVE
  *   - A real text-message provider. No text leaves the machine. What Twilio,

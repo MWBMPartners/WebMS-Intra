@@ -62,8 +62,11 @@
  *   database. "Is this person in their quiet hours?" is asked of Sabbath for
  *   a moment read from that same clock (nowOnDatabaseClock()), both when a
  *   text is held and when it is sent. Sabbath works its window out on a
- *   clock in the zone the Sabbath settings name, so the answer stays right
- *   on the two nights a year the clocks change.
+ *   clock: the zone the Sabbath settings name when they name one, and,
+ *   when that setting is EMPTY (the default on a new installation since
+ *   #782), the zone of the TEXT'S OWN organisation, which send() and
+ *   sendDue() pass. Either way the answer stays right on the two nights a
+ *   year the clocks change.
  *   `createdAt` and `sentAt` are older than all this and are written by the
  *   database server's OWN clock (not UTC), as they always were: every row
  *   from before migration 219 holds them that way. The daily limit counts a
@@ -96,9 +99,12 @@
  *     KIND (see HELD_USE_WITHIN), or from a use-by moment its caller gives.
  *     A text typed by an administrator and sent as a kind that "keeps" is
  *     sent late even if its own words were about that morning.
- *   - Give each organisation its own quiet hours. Sabbath reads one window
- *     from the settings of the request in hand, and those settings are
- *     saved for the whole installation.
+ *   - Give each organisation its own quiet-hours RULES. Whether quiet hours
+ *     are on, the method, the offsets and the place for sunset are read from
+ *     the settings of the request in hand, and those are saved for the whole
+ *     installation, so they are the same for every organisation. The CLOCK
+ *     is not: whenever the zone setting is empty, each text's window is
+ *     worked out on its own organisation's zone (#782).
  *   - Stop the day's limit being passed by one text when two things send
  *     at the same moment: two ordinary requests, or a run of the job and an
  *     ordinary request. Only two RUNS OF THE JOB cannot do it, because they
