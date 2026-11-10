@@ -11,10 +11,13 @@
  *      `$_SESSION['user_id']` and `$_SESSION['2fa_user_id']` (whose session
  *      this is while somebody waits for their code — `Auth::sessionPerson()`
  *      counts it), the same through `$GLOBALS['_SESSION']`, by `=` or any
- *      compound assignment, as the target of a `foreach (… as …)`, or as a
- *      key in a whole-session assignment `$_SESSION = [... 'user_id' => ...]`.
- *      A write of the literal `null` is a sign-out, not a grant, and is not
- *      listed.
+ *      compound assignment, as a `foreach` target (`as X`, `as &X`,
+ *      `as $k => X`, `as $k => &X`), or as a top-level key of a LITERAL array
+ *      that is the whole right-hand side of `$_SESSION = […];` / `+= […];`
+ *      with a value other than null, true or false. A function's arguments
+ *      (`array_merge(…)`, `array_diff_key(…)`) are NOT read. A write of
+ *      `null`, directly or at the end of a chain of `=`, is a sign-out, not a
+ *      grant, and is not listed.
  *   2. For each one: is there a call to `Auth::beginSessionFor(` — or, for
  *      the one delegated grant, `Auth::loginLocal(` — EARLIER IN THE SAME
  *      FUNCTION (or the same file, outside any function)? Presence and order,
@@ -169,14 +172,33 @@ function readFileStructure(string $file): array
             $pendClass = ($i + 1 < $n && $tok[$i + 1][0] === T_STRING) ? $tok[$i + 1][1] : 'class@' . $tok[$i][2];
         } elseif ($id === T_USE && count($stack) === 1 && $depth === 0 && $i + 1 < $n
             && in_array($tok[$i + 1][0], [T_NAME_QUALIFIED, T_NAME_FULLY_QUALIFIED, T_STRING], true) === true) {
-            // Only the plain one-name forms; a grouped `use A\{B, C}` is left
-            // alone, and the name in a call is then read as written.
-            $full  = ltrim($tok[$i + 1][1], '\\');
-            $short = substr((string) strrchr('\\' . $full, '\\'), 1);
-            if (($tok[$i + 2][0] ?? null) === T_AS && ($tok[$i + 3][0] ?? null) === T_STRING) {
-                $short = $tok[$i + 3][1];
+            // `use A\B;`, `use A\B as C;`, and the grouped `use A\{B, C as D};`.
+            // (`use function …` and `use const …` start with another word and
+            // are not class imports, so they are passed over.)
+            $prefix  = ltrim($tok[$i + 1][1], '\\');
+            $entries = [];
+            if (($tok[$i + 2][0] ?? null) === T_NS_SEPARATOR && ($tok[$i + 3][0] ?? null) === '{') {
+                $k = $i + 4;
+                while ($k < $n && $tok[$k][0] !== '}') {
+                    if (in_array($tok[$k][0], [T_STRING, T_NAME_QUALIFIED], true) === true) {
+                        $alias = null;
+                        if (($tok[$k + 1][0] ?? null) === T_AS && ($tok[$k + 2][0] ?? null) === T_STRING) {
+                            $alias = $tok[$k + 2][1];
+                        }
+                        $entries[] = [$prefix . '\\' . $tok[$k][1], $alias];
+                        $k += $alias === null ? 1 : 3;
+                        continue;
+                    }
+                    $k++;
+                }
+            } else {
+                $alias = (($tok[$i + 2][0] ?? null) === T_AS && ($tok[$i + 3][0] ?? null) === T_STRING) ? $tok[$i + 3][1] : null;
+                $entries[] = [$prefix, $alias];
             }
-            $aliases[strtolower($short)] = strtolower($full);
+            foreach ($entries as [$full, $alias]) {
+                $short = $alias ?? substr((string) strrchr('\\' . $full, '\\'), 1);
+                $aliases[strtolower($short)] = strtolower($full);
+            }
         } elseif ($id === '{' || $id === T_CURLY_OPEN || $id === T_DOLLAR_OPEN_CURLY_BRACES) {
             $scope = $top['scope'];
             $cls   = '';
@@ -195,10 +217,6 @@ function readFileStructure(string $file): array
         } elseif ($id === ';' && $pendScope !== null && $depth === $pendAt) {
             $pendScope = null; // an abstract or interface method: no body
         }
-
-        if ($id === T_DOUBLE_COLON && $i > 0 && ($tok[$i + 1][0] ?? null) === T_STRING && ($tok[$i + 2][0] ?? null) === '(') {
-            $calls[$scopeOf[$i]][] = ltrim($tok[$i - 1][1], '\\') . '::' . $tok[$i + 1][1];
-        }
     }
 
     /** Does the class name at $i mean Portal\Core\Auth here? */
@@ -213,6 +231,19 @@ function readFileStructure(string $file): array
 
         return in_array($name, ['auth', 'portal\\core\\auth'], true) === true;
     };
+
+    // --- Every static call, per function. A call on Auth however it is
+    //     written (`Auth::`, `self::`/`static::` inside Auth, the full name,
+    //     an alias) is recorded as `Auth::` and the method name in small
+    //     letters, because PHP ignores the case of a method name. Anything
+    //     else is recorded as written.
+    for ($i = 1; $i + 2 < $n; $i++) {
+        if ($tok[$i][0] === T_DOUBLE_COLON && $tok[$i + 1][0] === T_STRING && $tok[$i + 2][0] === '(') {
+            $calls[$scopeOf[$i]][] = $isAuthClass($i - 1) === true
+                ? 'Auth::' . strtolower($tok[$i + 1][1])
+                : ltrim($tok[$i - 1][1], '\\') . '::' . $tok[$i + 1][1];
+        }
+    }
 
     // --- The calls that begin a session (and the delegated one). -----------
     $marks = [];   // [index, scope, kind 'begin'|'loginLocal']
@@ -243,19 +274,33 @@ function readFileStructure(string $file): array
             continue;
         }
 
-        // The whole session at once: `$_SESSION = …` or `$_SESSION += …`.
+        // The whole session at once: `$_SESSION = […];` or `$_SESSION += […];`.
+        // ONLY when the right-hand side is ITSELF one literal array, and only
+        // its own top-level keys are read, with a value other than null, true
+        // or false. Anything else — `array_diff_key($_SESSION, ['user_id' =>
+        // true])` (a sign-out), `array_merge($_SESSION, [...])`, a variable —
+        // is not judged: a function's arguments say nothing on their own about
+        // what ends up in the session, and reading them cried wolf on a
+        // sign-out. That hole is declared in the Python's header.
         if ($at < $n && ($tok[$at][0] === '=' || $tok[$at][0] === T_PLUS_EQUAL)) {
-            $d = 0;
-            for ($end = $at + 1; $end < $n && !($d === 0 && in_array($tok[$end][0], [';', T_CLOSE_TAG], true) === true); $end++) {
-                if (in_array($tok[$end][0], ['(', '[', '{', T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true) === true) {
-                    $d++;
-                } elseif (in_array($tok[$end][0], [')', ']', '}'], true) === true) {
-                    $d--;
-                }
-                if ($tok[$end][0] === T_CONSTANT_ENCAPSED_STRING && in_array(trim($tok[$end][1], '\'"'), IDENTITY_KEYS, true) === true
-                    && ($tok[$end + 1][0] ?? null) === T_DOUBLE_ARROW
-                    && strtolower($tok[$end + 2][1] ?? '') !== 'null') {
-                    $writes[] = ['at' => $i, 'key' => trim($tok[$end][1], '\'"'), 'form' => 'whole session'];
+            $open = $at + 1;
+            if (($tok[$open][0] ?? null) === T_ARRAY && ($tok[$open + 1][0] ?? null) === '(') {
+                $open++;
+            }
+            $close = (in_array($tok[$open][0] ?? null, ['[', '('], true) === true) ? $match($open) : -1;
+            if ($close > 0 && in_array($tok[$close + 1][0] ?? null, [';', T_CLOSE_TAG], true) === true) {
+                $d = 0;
+                for ($k = $open + 1; $k < $close; $k++) {
+                    if (in_array($tok[$k][0], ['(', '[', '{', T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true) === true) {
+                        $d++;
+                    } elseif (in_array($tok[$k][0], [')', ']', '}'], true) === true) {
+                        $d--;
+                    }
+                    if ($d === 0 && $tok[$k][0] === T_CONSTANT_ENCAPSED_STRING && in_array(trim($tok[$k][1], '\'"'), IDENTITY_KEYS, true) === true
+                        && ($tok[$k + 1][0] ?? null) === T_DOUBLE_ARROW
+                        && in_array(strtolower($tok[$k + 2][1] ?? ''), ['null', 'true', 'false'], true) === false) {
+                        $writes[] = ['at' => $i, 'key' => trim($tok[$k][1], '\'"'), 'form' => 'whole session'];
+                    }
                 }
             }
             continue;
@@ -277,7 +322,36 @@ function readFileStructure(string $file): array
             }
             $after = $m + 1;
         }
-        $isForeach = $i > 0 && $tok[$i - 1][0] === T_AS;
+        // A `foreach` target, in the four forms PHP allows for one value:
+        // `as X`, `as &X`, `as $k => X`, `as $k => &X`. (A destructured target,
+        // `as [X]` or `as list(X)`, is not read; declared in the header.)
+        $isForeach = false;
+        $j         = $i - 1;
+        if ($j >= 0 && in_array($tok[$j][0], ['&', T_AMPERSAND_FOLLOWED_BY_VAR_OR_VARARG], true) === true) {
+            $j--;
+        }
+        if ($j >= 0 && $tok[$j][0] === T_AS) {
+            $isForeach = true;
+        } elseif ($j >= 0 && $tok[$j][0] === T_DOUBLE_ARROW) {
+            // Walk back over the key expression to see whether `as` is before it.
+            $d = 0;
+            for ($k = $j - 1; $k >= 0; $k--) {
+                $kid = $tok[$k][0];
+                if ($kid === ')' || $kid === ']') {
+                    $d++;
+                } elseif ($kid === '(' || $kid === '[') {
+                    if ($d === 0) {
+                        break;
+                    }
+                    $d--;
+                } elseif ($d === 0 && $kid === T_AS) {
+                    $isForeach = true;
+                    break;
+                } elseif ($d === 0 && in_array($kid, [',', ';', '{', '}', T_DOUBLE_ARROW], true) === true) {
+                    break;
+                }
+            }
+        }
         $isAssign  = $after < $n && ($tok[$after][0] === '=' || in_array($tok[$after][0], ASSIGN_IDS, true) === true);
         if ($isForeach === false && $isAssign === false) {
             continue;
@@ -294,10 +368,28 @@ function readFileStructure(string $file): array
         if (in_array($key, IDENTITY_KEYS, true) === false) {
             continue;
         }
-        // `= null;` is a sign-out, not a grant.
-        if ($isAssign === true && $tok[$after][0] === '=' && strtolower($tok[$after + 1][1] ?? '') === 'null'
-            && in_array($tok[$after + 2][0] ?? null, [';', T_CLOSE_TAG], true) === true) {
-            continue;
+        // `= null;` is a sign-out, not a grant — also through a chain of plain
+        // assignments, `$_SESSION['user_id'] = $_SESSION['2fa_user_id'] = null;`,
+        // whose value is the value at the END of the chain.
+        if ($isAssign === true && $tok[$after][0] === '=') {
+            $v = $after + 1;
+            while (($tok[$v][0] ?? null) === T_VARIABLE) {
+                $w = $v + 1;
+                while (($tok[$w][0] ?? null) === '[') {
+                    $m = $match($w);
+                    if ($m < 0) {
+                        break;
+                    }
+                    $w = $m + 1;
+                }
+                if (($tok[$w][0] ?? null) !== '=') {
+                    break;
+                }
+                $v = $w + 1;
+            }
+            if (strtolower($tok[$v][1] ?? '') === 'null' && in_array($tok[$v + 1][0] ?? null, [';', T_CLOSE_TAG], true) === true) {
+                continue;
+            }
         }
         $writes[] = ['at' => $i, 'key' => $key, 'form' => $isForeach === true ? 'foreach target' : ($tok[$i][1] === '$GLOBALS' ? "\$GLOBALS['_SESSION']" : 'entry')];
     }
