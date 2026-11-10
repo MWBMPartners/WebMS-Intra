@@ -1526,7 +1526,7 @@ setting seeds.
 | New write endpoints: Attendance + Documents (create/update/delete), Expenses (create/delete), Users (create/update, admin-gated + default-off flags) | #323 Phase 2 (#157 remnant) | #372 | ✅ (Expenses status-transition update deferred to Phase 3) |
 | Canonical `ApiKey::SCOPES` vocabulary + rotation grace windows; admin API-keys UI scope checkbox multi-select (server-validated) + grace selector + "rotated" badge; audit viewer source (session/apikey) badge + key-prefix | #323 Phase 2 | #372 | ✅ |
 | OpenAPI spec (`api-spec.json`) documents every `/api/v1/*` path + `bearerAuth` scheme alongside the existing legacy aliases | #323 Phase 2 | #372 | ✅ |
-| Outbound webhooks admin CRUD UI | #324 | #372 | ✅ |
+| Outbound webhooks admin CRUD UI — targets are checked when saved and again at every delivery (`SafeFetch`, #615): ordinary public http/https addresses only, on ports 443/80 unless the installation's global administrator allows other ports (D-102, `WebhookPorts`); a failed delivery shows its reason in words and the receiver's reply is not kept | #324 | #372 | ✅ |
 
 ---
 

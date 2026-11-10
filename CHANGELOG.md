@@ -4,6 +4,27 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Outbound webhooks can no longer be pointed inside the host's network (#615, D-102)
+
+- **Fixed (security):** saving a webhook now refuses an address on this machine, on a private or internal
+  network, at the cloud metadata address, a name that resolves to any of those, or an unusual spelling of a
+  number, with one plain message. Every delivery goes through the new `SafeFetch::post()`, which checks the
+  address again at the moment of sending, pins the connection to the checked address (so a re-pointed name is
+  refused), ignores proxies, follows no redirect and caps the time and the reply. The target address is never
+  written to a log.
+- **Changed: the receiver's reply is no longer stored.** A failed delivery records one word saying why, and the
+  deliveries list shows it in plain words ("refused" for where an address leads, "not-allowed" for how it is
+  written). Older rows keep their reply until the nightly payload clear-out (#713) empties it.
+- **Changed, and existing webhooks may stop:** only ports 443 and 80 are allowed unless the installation's global
+  administrator allows other ports on public addresses, on the Webhooks page (D-102; the general settings editor
+  refuses that setting). A webhook already saved on another port is refused at every delivery until then, and
+  dead-letters. A user name and password inside the address, formerly sent as a basic sign-in, are refused. The
+  request timeout is now kept between 1 and 30 seconds. Pausing a webhook is never refused.
+- **Tests:** new `tools/webhook-delivery-selftest.php` (its total pinned in the file), real MySQL, a local
+  receiver and the Webhooks page over real HTTP; parts A and B went red on the code before the fix. Wired into
+  `portal-selftests.yml`. Two check rounds by fresh Claude agents (protected arm: security, stored data); round 2
+  was clean. Raised from it: #908. Codex has not reviewed it.
+
 ### Passkeys work on a fresh installation (#903)
 - The name a passkey is tied to (WebAuthn's "relying party ID") was read with
   `??` from a setting the install script seeds as an EMPTY string, so every

@@ -613,7 +613,7 @@ jobs:
           for container in "$MYSQL_CID" "$SECOND_CID" "$LOOSE_CID"; do
             ask "$container" -e 'SELECT VERSION(), @@collation_server, @@GLOBAL.sql_mode'
           done
-          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs; do
+          for db in selftest_appswitch selftest_expenserules selftest_expensewithdraw selftest_expensepayrace selftest_expenseedit selftest_expreceipts selftest_pagescripts selftest_myvolunteering selftest_gdpreraser selftest_erasurereview selftest_capabilities selftest_sitemodes selftest_channel selftest_portaladdress selftest_siteaddresses selftest_erasurepages selftest_adminpwd selftest_accesspages selftest_settingssecrets selftest_signinlimits selftest_timezones selftest_upgradepages selftest_twostep selftest_livechat selftest_golive selftest_heldtexts selftest_activitylog selftest_pagehead selftest_evrep selftest_transcription selftest_limit selftest_retcaps selftest_ratelimit selftest_webhookret selftest_webhookdelivery selftest_reservedwords selftest_offsite selftest_helppages selftest_pwwriter selftest_sspwd selftest_cttrans selftest_portalcheck selftest_i18nlang selftest_scheduledjobs selftest_outside selftest_topbar selftest_regret selftest_pwtick selftest_locks selftest_notifyprefs; do
             ask "$MYSQL_CID" -e "CREATE DATABASE ${db}"
             ask "$MYSQL_CID" "${db}" < web/_sql/full_schema.sql > /dev/null
             echo "built ${db}"
@@ -1376,6 +1376,21 @@ jobs:
         env:
           SELFTEST_DB_NAME: selftest_webhookret
         run: php tools/webhook-retention-selftest.php
+
+      # 🪝 Where an outbound webhook may go, and what is kept of it (#615,
+      #    D-102). Saving refuses private, internal and oddly-spelled
+      #    addresses; every delivery goes through SafeFetch::post() (checked
+      #    at send time, pinned, no proxy, no redirect, capped); no row or log
+      #    holds the address or the receiver's reply. Needs curl and
+      #    proc_open; two checks use the public nip.io service (they still run
+      #    without it, and say which happened). Ports 10930/10931.
+      - name: 'Webhook delivery self-test (#615)'
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          SELFTEST_DB_NAME: selftest_webhookdelivery
+          SELFTEST_WEB_PORT: '10930'
+          WEBHOOK_SELFTEST_RECEIVER_PORT: '10931'
+        run: php tools/webhook-delivery-selftest.php
 
       # 🗝️ The hard-coded reserved-word list is checked against the REAL server
       #    (#719). `check_reserved_words_quoted.py` has to carry that list in

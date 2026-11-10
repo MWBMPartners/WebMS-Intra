@@ -22086,3 +22086,27 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   self-test (`check_sign_in_begins_session.py`) pinned a LINE NUMBER
   ("webauthn.php:13") for one plant; any edit above the line turned it red on
   correct code. It now names the finding by what is written.
+
+### Webhooks go through SafeFetch (#615, D-102)
+
+- `SafeFetch::post()` is the ONE way an address a person typed is SENT to; `get()` the one way it is
+  fetched. Both share `check()` and `buildHandle()`, so a guard added to one is in both.
+- The check runs at SEND time, not only at save: a name can be re-pointed after it is saved.
+- A send never hands back the reply — structurally, so no caller can store or show it.
+- A send's refusal names no host in the error log (a webhook address typed by a possibly-probing
+  administrator); a calendar fetch still names the host (its secret is in the path).
+- `responseSnippet` holds a `SafeFetch::POST_REASONS` word or NULL. The admin page prints only words
+  from its own fixed map, never the column.
+- Pausing is never refused, by design: a pre-#615 webhook may point somewhere it now may not, and
+  switching it off must always work. Asking whether `targetUrl` ARRIVED (#677), not what it holds.
+- Test: `tools/webhook-delivery-selftest.php`. Its worker (parts A, B) runs in a child process so
+  plants can swap classes; `--old-core=<dir>` and `--old-save=<file>` re-run against the pre-#615
+  code. Plant P1 embeds the original pre-#615 send code, so "red on the old code" is re-proved every
+  run without that commit being in the checkout.
+- D-102: which port numbers is an INSTALLATION setting (`WebhookPorts`), standard ports by default,
+  read from the installation's row only, set by a global administrator on the Webhooks page and
+  recorded; the general settings editor refuses the key. `refused` = where an address leads;
+  `not-allowed` = how it is written.
+- Not covered: `emit()` itself (same private `attemptDelivery()`); https to a real receiver; a real
+  name server changing its answer mid-request (part A3 fakes it exactly as safefetch part E does).
+- Web Push still does not use SafeFetch (it posts to the push service a browser named; unchanged).
