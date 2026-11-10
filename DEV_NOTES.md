@@ -22255,3 +22255,34 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   any website" passes, measured in round 5); U27 compares each page with the method, so it cannot see a wrong
   method — U26's independent rules carry that.
 
+### Whose expense claims a person may see (#648, D-103)
+
+- `ExpenseRules` holds ONE reach rule, asked two ways: `mayViewClaim()` (one claim, PHP, the
+  claim page) and `reachSql()` (a list, a WHERE condition, the spreadsheet and the approvals
+  list). `reachToSee()` = admin or treasurer → everything, else `Departments::approverDepts()`;
+  `reachToDecide()` = admin → everything, else the same departments. The role contributes no
+  department. Do not put a role or department test back into a page.
+- The claim page works out the reach BEFORE reading the claim and answers "out of reach" and
+  "no such claim" with one statement and one 404, so the two cost the same database work too.
+- `reachSql()` fails CLOSED: no department is `1 = 0`, a malformed reach reaches nothing, the
+  column name is refused unless it is a plain `alias.column`, department numbers are bound.
+- Section 5b of `tools/expense-rules-selftest.php` runs `reachSql()` against real rows and
+  requires it to pick exactly the claims `reachCovers()` opens, so the PHP and SQL forms
+  cannot drift. Section L3 of `tools/access-pages-selftest.php` drives it over HTTP.
+- **The existence-leak CLASS (round 1 of the check):** fixing the claim page alone left the edit page, its save, the delete API and the decision handler each telling a real claim number from a made-up one (403 vs 404, or different words). Enumerate every handler that takes a claim number and make each answer out-of-reach exactly as missing — status, body, headers, redirect, flash and database work.
+- Enumerated with `git grep -n "403\|Forbidden\|http_response_code" web/_apps/expenses/` and by
+  reading every handler that looks a claim up by number: view, edit (page and save), api/delete,
+  approve/save, withdraw/save, treasury/save, api/export, api/list, api/create.
+  - Fixed: view (round 0), edit page, edit save, api/delete, approve/save.
+  - Already right: withdraw/save ("Claim not found." for both — access-pages M4); treasury/save and
+    the treasury list (a non-treasurer is refused BEFORE any claim is looked up, and a treasurer may
+    pay any claim but their own); api/export, api/list, api/create (take no claim number).
+- Ownership is asked BEFORE the approval count in the edit page and its save, so somebody else's
+  claim and a made-up number cost the same database work. On the claim page that is MEASURED:
+  section L3-3b of access-pages compares the statements in the server's query log, numbers blanked.
+  The other endpoints' database work is NOT measured, only reasoned from the code order.
+- The Expense Approver role no longer appears in `approve/save.php` at all; `expenses.approve` is
+  asked only by `ExpenseRules::mayExportClaims()`.
+- Migration 269 rewrites the approver role's description where it is still migration 202's
+  sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
+  already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.

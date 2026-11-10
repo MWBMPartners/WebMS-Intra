@@ -4,6 +4,45 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Expense claims: the Approver role sees only its own departments, and no claim number can be confirmed by guessing (#648, #915, D-103, D-040, migration 269)
+
+- **Expenses: nobody can find out which claim numbers are real (#648 round 1, #915, #541 item 5).**
+  Every expense address now answers somebody else's claim that a person may not touch exactly as
+  a claim that does not exist: the edit form (was 403, now 404), the edit form's save (was "You can
+  only change your own expense claim", now "That claim could not be found."), the delete API (was
+  403 "Access denied", now 404 "Expense claim not found"), and the decision handler (was a bare
+  "Forbidden" for another department's pending claim, now the "Claim not found or not in Pending
+  status." a made-up number gets). The Expense Approver role is no longer a way past the decision
+  handler's first check, so a role-holder with no department is refused before any claim is looked
+  up; that refusal now reads "Access denied — only an administrator, or a lead or approver of a
+  department, can decide expense claims." (it used to say "Approver or Admin role required", which a
+  role-holder would have been told while holding the role).
+- **Roles:** the Expense Approver role's description now says what it gives (migration 269 rewrites
+  it only where it is still the old sentence "Approves or rejects expense claims").
+- **Expenses: the organisation-wide Approver role no longer sees every claim (#648, D-103).**
+  The claim page opened ANY claim of the organisation to a holder of the role (line items,
+  suppliers, receipts), and the Export spreadsheet gave them every claim, while the approvals
+  list and the decision page kept them to the departments they approve for. Now a role holder
+  opens and downloads only the claims of departments they are a lead, approver or required
+  approver of. Administrators and treasurers still see every claim; a claimant always sees
+  their own. A claim somebody may not open is now answered exactly as a claim that does not
+  exist (404, the same page) — it used to be a 403, which told any signed-in member that the
+  number was a real claim.
+- **A treasurer may download the claims spreadsheet (D-040, #541 item 2).** The Export button on
+  `/expenses/approve` is now offered to treasurers, and their file holds every claim.
+
+- The approvals list (`/expenses/approve`) is one query whose department condition comes from
+  `ExpenseRules::reachToDecide()`; who is listed what is unchanged.
+- "Go to Approvals" on a claim page, and the claimant's "you cannot decide your own claim"
+  note, are now shown only to somebody who may actually decide the claim (an administrator, or
+  a lead / approver / required approver of its department) — no longer to a holder of the
+  Approver role for a department they cannot decide.
+- Roles page: the `expenses.approve` capability is now labelled "Expense approver: download the
+  claims spreadsheet", and its description says what it really opens. Its old description
+  ("approving or rejecting claims across the whole organisation, opening any claim") was never
+  true of deciding and stopped being true of reading.
+- **Tests:** section L3 of `tools/access-pages-selftest.php` over real HTTP (headers and the server's query log compared, not only bodies) and section 5 of `tools/expense-rules-selftest.php` (the SQL form run against real rows and matched with the PHP form); each total pinned in its file. Two check rounds by fresh Claude agents (protected arm: money, personal details); round 2's only finding was an untrue comment, corrected. The migration harness passed on MySQL 8.4.11 and MariaDB 11.4.13. Raised from it: #916. Codex has not reviewed it.
+
 ### The public door, part four: test copies, and a set-up check that the public address reaches the door (#493 P4d)
 
 - **Added: who a test copy's public door answers is a tiered setting** (D-087). On a test copy only (alpha, beta
