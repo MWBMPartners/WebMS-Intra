@@ -6,14 +6,13 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932.
-Last whole suite (with #932): 104/104 green. Decisions taken this stretch: D-102 to D-119 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
+#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703.
+Last whole suite (with #703): 104/104 green; e2e harness all phases. Decisions taken this stretch: D-102 to D-119 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 5eec9289 | CLEAN at round 12; cherry-picked with docs (1667aa34). e2e harness passed all phases; whole suite running, then push. Raised #944. Then #940 |
 | #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, 4fe9b574 | Check round 1 NOT CLEAN: rebuilding the reading from date_parse() fields mis-stores 3 classes (weekday relatives, first/last day of, ordinal + relative month; 1,912 of 155,040 cells); PASS_THROUGH defence unguarded. Round 2: read the cell in UTC instead |
 | #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 7f4e784f | Check round 1 NOT CLEAN: Sabbath::place() fast path reads the wrong organisation's position after Site::forceContext() (API keys); near-zero coordinate in exponent form refused; other-org path and preview pinned by nothing; audit check cries wolf on a display-only read. Round 2 building. Raised #942, #943 |
 
@@ -22,7 +21,7 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 
 ## Next, in this order
 
-1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
+1. #940 next (the activity-log 'never delete' wording on the privacy and help pages, now that #703 has landed). #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
 2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#943. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
