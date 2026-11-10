@@ -1,8 +1,8 @@
 /**
  * Path: tools/public-door-script-selftest.mjs
  * -----------------------------------------------------------------------------
- * The public door's SCRIPT, driven in a REAL browser 🚪🌐🧪 (#493 package P4b;
- * D-056, D-057, D-084)
+ * The public door's SCRIPT, and its FRAMED PAGE, driven in a REAL browser 🚪🌐🧪
+ * (#493 packages P4b and P4c; D-056, D-057, D-082, D-084, D-094)
  * -----------------------------------------------------------------------------
  * `web/_core/data/public-door.js` is what an organisation pastes into its own
  * website. Whether it draws TEXT ONLY, stays inside its shadow root and obeys
@@ -49,6 +49,17 @@
  *      uncaught error or console error.
  *   R  what the portal received: the feed was asked for with NO Referer, and
  *      the limit asked for. (No cookie half: see the note above R01.)
+ *   F  (#493 P4c) the page a website shows in a FRAME, drawn by the REAL
+ *      renderer and sent with the REAL headers (PHP makes both from
+ *      web/_core for the run), over https: opened on its own every hostile
+ *      value is text and its one stylesheet is allowed by its hash (F01); a
+ *      website the organisation LISTS frames it (F02); a website NOT listed,
+ *      framing the same page with the same headers, is REFUSED by the
+ *      browser (F03); with nothing listed even that website is refused (F04);
+ *      no Referer is sent (F05). FX1-FX5 break what is served — frame-
+ *      ancestors widened to "*", the stylesheet's hash, the title unescaped
+ *      (and then with every wall down, so "nothing ran" is shown to be able
+ *      to fail) — with one control that must stay green.
  *   X  the plants: each rule broken in a copy of the script served in its
  *      place, and the check that must notice required to go red — innerHTML
  *      on each drawn field ON ITS OWN (X14-X19), the zone label on every
@@ -58,14 +69,21 @@
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It serves made-up feeds, not the portal's: the gate, the headers and
- *     what the feeds contain are tools/public-door-selftest.php's.
+ *     what the feeds contain are tools/public-door-selftest.php's. The framed
+ *     page is the REAL renderer's output for a made-up fixture, sent with the
+ *     real header lines; that the door really sends those lines, with
+ *     frameAncestorsFor()'s answer in each state, is that test's section V.
+ *   - Old browsers that ignore frame-ancestors and honour only
+ *     X-Frame-Options are not run.
  *   - One browser engine (Chromium-family). Firefox and Safari are not run.
  *   - It cannot see a website builder that rewrites pasted scripts.
  *
  * Usage:  node tools/public-door-script-selftest.mjs
- *         Needs a Chromium-family browser (CHROME_PATH, or the usual places)
- *         and a node with a global WebSocket. REFUSES (exit 2) rather than
- *         skipping when either is missing.
+ *         Needs a Chromium-family browser (CHROME_PATH, or the usual places),
+ *         a node with a global WebSocket, and — since #493 P4c — PHP with its
+ *         openssl extension (PHP_BINARY, or `php` on the path), which draws
+ *         the framed page from web/_core and makes section F's certificate.
+ *         REFUSES (exit 2) rather than skipping when any is missing.
  *
  * Exit:   0 only when every check passed AND the number of checks is the
  *         number expected; 1 otherwise; 2 when it refused to run.
@@ -79,9 +97,10 @@
  * -----------------------------------------------------------------------------
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { createServer as createHttpsServer } from 'node:https';
+import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -89,7 +108,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 /** How many checks a full run makes; a different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 54; // 39 in the first build; round 1 of P4b's check added E07-E09 and X14-X25
+const EXPECTED_CHECKS = 64; // 39 in the first build; round 1 of P4b's check added E07-E09 and X14-X25; #493 P4c added F01-F05 and FX1-FX5
 
 /* Any Chromium-family browser (see tools/csrf-carriers-selftest.mjs for why). */
 const BROWSERS = [
@@ -252,6 +271,79 @@ ${body.replace(/PORTAL/g, portal)}
 }
 const SITE_CSS = 'p { color: rgb(255, 0, 0); font-family: monospace; }\n';
 
+/* ── #493 P4c: the page a website shows in a FRAME ───────────────────────────
+   The page is drawn by the REAL renderer (PublicDoor::renderPage()) and sent
+   with the REAL headers (PublicDoor::pageHeaderLines(), with frame-ancestors
+   from PublicWebsiteSetup::frameAncestorsValue() — the function
+   frameAncestorsFor() hands the organisation's list to), each produced by PHP
+   from web/_core for this run. Over https, because frameAncestorsValue()
+   accepts only https websites and an https website may not frame an http
+   page; three made-up names share one address and one certificate the test
+   makes itself. Each is its OWN site (three different second-level names, not
+   three names under one): two names under one ".test" name are ONE site to the
+   browser, so a frame between them runs in the same process and is not
+   announced as a target of its own — measured, FX4 saw no frame at all:
+     https://portal-selftest.test:{port}    "the portal", serving the page;
+     https://listed-selftest.test:{port}    a website the organisation LISTS;
+     https://unlisted-selftest.test:{port}  a website it does not.
+   The page draws its words as TEXT and runs no script, so the hostile values
+   are the same kind as above. */
+const FRAME_NAME = 'FRAMEPAGEAAAAAAAAAAAAAAAA';
+const FRAME_TITLE = '<img src=x onerror="window.__pwned=11">Framed & "quoted"';
+const FRAME_ABOUT = '<script>window.__pwned=12</script>about';
+const FRAME_POSTER = '<svg onload="window.__pwned=13"></svg>poster';
+const FRAME_MUST_APPEAR = [FRAME_TITLE, FRAME_ABOUT, FRAME_POSTER];
+const FRAME_FIXTURE = {
+    events: { organisation: { name: 'Made-up organisation </title><i>', timezone: 'Europe/London' }, events: [{
+        id: 'framed', title: FRAME_TITLE, startsAt: '2030-06-01T10:30:00+01:00', endsAt: null, startsOnClock: '2030-06-01T10:30:00',
+        endsOnClock: null, allDay: false, timezone: 'Europe/London', detailsLimited: false, description: FRAME_ABOUT,
+        location: { name: 'Hall', address: null, url: 'https://venue.example.invalid/' },
+    }] },
+    posters: { organisation: { name: 'Made-up organisation </title><i>', timezone: 'Europe/London' }, posters: [{
+        title: FRAME_POSTER, kicker: null, category: null, when: null, time: null, location: null, link: 'https://more.example.invalid/',
+        media: null, thumbUrl: null, canvaUrl: null,
+    }] },
+};
+/* The PHP that answers for the portal's half. `cert` makes a certificate;
+   otherwise it prints the page and the two header sets as JSON. */
+const FRAME_PHP = String.raw`<?php
+declare(strict_types=1);
+$core = $argv[1];
+spl_autoload_register(static function (string $c) use ($core): void {
+    if (str_starts_with($c, 'Portal\\Core\\') === true) {
+        $f = $core . '/' . substr($c, 12) . '.php';
+        if (is_file($f) === true) {
+            require $f;
+        }
+    }
+});
+if (($argv[2] ?? '') === 'cert') {
+    if (function_exists('openssl_pkey_new') === false) {
+        fwrite(STDERR, "this PHP has no openssl extension\n");
+        exit(3);
+    }
+    $key = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+    $csr = openssl_csr_new(['commonName' => 'portal-selftest.test'], $key, ['digest_alg' => 'sha256']);
+    $crt = openssl_csr_sign($csr, null, $key, 1, ['digest_alg' => 'sha256']);
+    openssl_x509_export($crt, $certText);
+    openssl_pkey_export($key, $keyText);
+    echo json_encode(['cert' => $certText, 'key' => $keyText]);
+    exit(0);
+}
+$fx = json_decode($argv[4], true);
+echo json_encode([
+    'page'   => \Portal\Core\PublicDoor::renderPage($fx['events'], $fx['posters']),
+    'listed' => \Portal\Core\PublicDoor::pageHeaderLines(\Portal\Core\PublicWebsiteSetup::frameAncestorsValue([$argv[3]]), false, false),
+    'none'   => \Portal\Core\PublicDoor::pageHeaderLines(\Portal\Core\PublicWebsiteSetup::frameAncestorsValue([]), false, false),
+]);
+`;
+/** What a framed (or directly opened) page shows, read INSIDE it. */
+const FRAME_PROBE = `var t = document.querySelector('.door__title');
+    return { url: document.URL, ready: document.readyState, text: document.body ? document.body.textContent : '',
+        pwned: window.__pwned === undefined ? null : window.__pwned, scripts: document.scripts.length,
+        weight: t ? getComputedStyle(t).fontWeight : null,
+        links: Array.prototype.map.call(document.querySelectorAll('a'), function (a) { return { href: a.getAttribute('href'), target: a.target, rel: a.rel }; }) };`;
+
 /* ── A very small DevTools client (the csrf-carriers test's, trimmed) ─────── */
 class Browser {
     constructor(ws) {
@@ -261,11 +353,19 @@ class Browser {
         this.session = null;
         this.errors = [];
         this.warnings = [];
+        this.frames = [];
         ws.addEventListener('message', (event) => {
             const msg = JSON.parse(event.data);
             if (msg.method === 'Runtime.exceptionThrown') {
                 const d = msg.params?.exceptionDetails ?? {};
                 this.errors.push(`uncaught: ${d.exception?.description ?? d.text ?? 'unknown'}`);
+                return;
+            }
+            // #493 P4c: a frame from another website is a separate target
+            // (an "out-of-process" frame); auto-attach announces each one, and
+            // section F evaluates inside it through its own session.
+            if (msg.method === 'Target.attachedToTarget') {
+                this.frames.push({ session: msg.params.sessionId, type: msg.params.targetInfo?.type ?? '', url: msg.params.targetInfo?.url ?? '' });
                 return;
             }
             if (msg.method === 'Runtime.consoleAPICalled') {
@@ -286,7 +386,7 @@ class Browser {
         const id = this.next;
         this.next += 1;
         const frame = { id, method, params };
-        if (useSession === true && this.session !== null) { frame.sessionId = this.session; }
+        if (typeof useSession === 'string') { frame.sessionId = useSession; } else if (useSession === true && this.session !== null) { frame.sessionId = this.session; }
         return new Promise((resolve, reject) => {
             this.waiting.set(id, (msg) => (msg.error !== undefined ? reject(new Error(`${method}: ${msg.error.message}`)) : resolve(msg.result)));
             this.ws.send(JSON.stringify(frame));
@@ -299,10 +399,10 @@ class Browser {
         });
     }
 
-    async evaluate(expression) {
+    async evaluate(expression, session = true) {
         const result = await this.send('Runtime.evaluate', {
             expression: `JSON.stringify((function(){${expression}})())`, returnByValue: true,
-        });
+        }, session);
         if (result.exceptionDetails !== undefined) {
             throw new Error(`page threw: ${result.exceptionDetails.text} ${result.exceptionDetails.exception?.description ?? ''}`);
         }
@@ -365,6 +465,67 @@ async function main() {
     console.log(`Browser: ${browserPath}`);
 
     const work = await mkdtemp(path.join(tmpdir(), 'door-script-'));
+
+    /* ── #493 P4c: the framed page's half, made by PHP from the real code ── */
+    const php = process.env.PHP_BINARY || 'php';
+    const framePhp = path.join(work, 'frame-fixture.php');
+    await writeFile(framePhp, FRAME_PHP);
+    const certRun = spawnSync(php, [framePhp, path.join(ROOT, 'web', '_core'), 'cert'], { encoding: 'utf8' });
+    if (certRun.status !== 0) {
+        console.error(`REFUSED: PHP (${php}) could not make the certificate section F needs: ${(certRun.stderr || certRun.error?.message || '').trim()}`);
+        await rm(work, { recursive: true, force: true });
+        process.exit(2);
+    }
+    const tls = JSON.parse(certRun.stdout);
+    const frameServed = { page: '', headers: { listed: [], none: [] } };
+    let framePort = 0;
+    const frameRequests = [];
+    const httpsServer = createHttpsServer({ cert: tls.cert, key: tls.key }, (request, answer) => {
+        const url = new URL(request.url, 'https://x');
+        const host = String(request.headers.host ?? '').split(':')[0];
+        if (host === 'portal-selftest.test' && url.pathname === `/w/${FRAME_NAME}/page.html`) {
+            const lines = frameServed.headers[url.searchParams.get('state') ?? ''];
+            if (lines === undefined) { answer.writeHead(404).end('not found'); return; }
+            frameRequests.push({ referer: request.headers.referer ?? null });
+            const headers = {};
+            for (const line of lines) {
+                const at = line.indexOf(':');
+                headers[line.slice(0, at)] = line.slice(at + 1).trim();
+            }
+            answer.writeHead(200, headers).end(frameServed.page);
+            return;
+        }
+        if ((host === 'listed-selftest.test' || host === 'unlisted-selftest.test') && url.pathname === '/site/frame.html') {
+            const state = url.searchParams.get('state') ?? 'listed';
+            // The frame exactly as the card prints it, sandbox included — but
+            // FX4 asks for it WITHOUT the sandbox attribute, to show that the
+            // "nothing ran" check can fail once every wall is down.
+            const sandbox = url.searchParams.get('bare') === '1' ? '' : ' sandbox="allow-popups allow-popups-to-escape-sandbox"';
+            answer.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>a website</title></head>
+<body><p>A website framing the portal's page.</p>
+<iframe id="door" src="https://portal-selftest.test:${framePort}/w/${FRAME_NAME}/page.html?state=${state}" title="Our events" width="100%" height="600" style="border:0" loading="lazy" referrerpolicy="no-referrer"${sandbox}></iframe>
+</body></html>`);
+            return;
+        }
+        answer.writeHead(404).end('not found');
+    });
+    await new Promise((resolve) => httpsServer.listen(0, '127.0.0.1', resolve));
+    framePort = httpsServer.address().port;
+    const frameRun = spawnSync(php, [framePhp, path.join(ROOT, 'web', '_core'), 'render', `https://listed-selftest.test:${framePort}`,
+        JSON.stringify(FRAME_FIXTURE)], { encoding: 'utf8' });
+    let frameReal = null;
+    try { frameReal = JSON.parse(frameRun.stdout); } catch { frameReal = null; }
+    if (frameRun.status !== 0 || frameReal === null || typeof frameReal.page !== 'string' || frameReal.page.length < 500) {
+        console.error(`REFUSED: PHP could not draw the page from web/_core: ${(frameRun.stderr || frameRun.stdout || '').trim().slice(0, 400)}`);
+        httpsServer.close();
+        await rm(work, { recursive: true, force: true });
+        process.exit(2);
+    }
+    const frameServeReal = () => {
+        frameServed.page = frameReal.page;
+        frameServed.headers = { listed: frameReal.listed.slice(), none: frameReal.none.slice() };
+    };
+    frameServeReal();
     const profile = path.join(work, 'profile');
     let served = realScript;          // what /w/*/door.js answers (a plant swaps it)
     const seen = [];                  // every feed request the "portal" received
@@ -417,13 +578,17 @@ async function main() {
 
     const edge = spawn(browserPath, [
         '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
-        '--no-default-browser-check', '--disable-gpu', '--host-resolver-rules=MAP localhost 127.0.0.1',
+        '--no-default-browser-check', '--disable-gpu', '--host-resolver-rules=MAP localhost 127.0.0.1,MAP portal-selftest.test 127.0.0.1,MAP listed-selftest.test 127.0.0.1,MAP unlisted-selftest.test 127.0.0.1',
+        // #493 P4c: section F's three made-up https names share one
+        // certificate the test makes for itself, which no browser trusts.
+        '--ignore-certificate-errors',
     ], { stdio: 'ignore', env: { ...process.env, TZ: 'Pacific/Kiritimati' } });
     const stop = async () => {
         const ended = new Promise((resolve) => { edge.once('exit', resolve); setTimeout(resolve, 5000); });
         try { edge.kill('SIGTERM'); } catch { /* gone */ }
         await ended;
         try { server.close(); } catch { /* closed */ }
+        try { httpsServer.close(); } catch { /* closed */ }
         for (let i = 0; i < 20; i += 1) {
             try { await rm(work, { recursive: true, force: true }); return; } catch { await new Promise((r) => setTimeout(r, 250)); }
         }
@@ -678,6 +843,81 @@ async function main() {
         const sc = steady(control);
         const differs = Object.keys(sb).filter((k) => JSON.stringify(sc[k]) !== JSON.stringify(sb[k]));
         check('X13 the CONTROL: a comment changed, and every fact above is exactly as before (the list of facts that differ is empty)', differs, []);
+
+        /* ── F. #493 P4c: the page a website shows in a frame ─────────────
+           Whether a browser REFUSES a frame is behaviour (D-065), so it is
+           asked of the browser: a refused frame becomes Chromium's own error
+           page (chrome-error://chromewebdata/) — a POSITIVE sign of refusal,
+           waited for rather than assumed from an empty frame. */
+        console.log('F. The page a website frames (#493 P4c; D-082, D-094)');
+        await browser.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+        const portalPage = (state) => `https://portal-selftest.test:${framePort}/w/${FRAME_NAME}/page.html?state=${state}`;
+        /** Open a website framing the page; read what the frame holds, from INSIDE it. */
+        const framed = async (site, state, bare = false) => {
+            browser.frames = [];
+            await browser.send('Page.navigate', { url: `https://${site}-selftest.test:${framePort}/site/frame.html?state=${state}${bare === true ? '&bare=1' : ''}` });
+            for (let i = 0; i < 100; i += 1) {
+                for (const f of browser.frames.filter((one) => one.type === 'iframe')) {
+                    let r = null;
+                    try { r = await browser.evaluate(FRAME_PROBE, f.session); } catch { r = null; }
+                    if (r === null) { continue; }
+                    if (r.url.startsWith('chrome-error:') === true) {
+                        return { refused: true };
+                    }
+                    if (r.url === portalPage(state) && r.ready === 'complete' && r.text.trim() !== '') {
+                        // An error event may follow load by a moment: look again.
+                        await new Promise((done) => setTimeout(done, 400));
+                        const again = await browser.evaluate(FRAME_PROBE, f.session).catch(() => r);
+                        return { refused: false, ...again, missing: FRAME_MUST_APPEAR.filter((one) => again.text.includes(one) === false) };
+                    }
+                }
+                await new Promise((done) => setTimeout(done, 100));
+            }
+            return { refused: null };
+        };
+        const facts = (r) => ({ refused: r.refused, missing: r.missing, pwned: r.pwned, scripts: r.scripts, weight: r.weight, links: r.links });
+        const wantShown = {
+            refused: false, missing: [], pwned: null, scripts: 0, weight: '700',
+            links: [{ href: 'https://venue.example.invalid/', target: '_blank', rel: 'noopener noreferrer nofollow' },
+                { href: 'https://more.example.invalid/', target: '_blank', rel: 'noopener noreferrer nofollow' }],
+        };
+        const directOk = await browser.open(portalPage('listed'), "document.querySelector('.door__title') !== null");
+        const direct = await browser.evaluate(FRAME_PROBE);
+        check('F01 the page opened on its own: every hostile value appears as those very characters, no element made of them, nothing ran, and the title is bold — its ONE stylesheet allowed by the hash in its content rule',
+            [directOk, facts({ ...direct, refused: false, missing: FRAME_MUST_APPEAR.filter((one) => direct.text.includes(one) === false) })],
+            [true, wantShown]);
+        const fListed = await framed('listed', 'listed');
+        check('F02 a website the organisation LISTS shows it in a frame — the same page, the same facts — under the real header (frame-ancestors from frameAncestorsValue())',
+            [frameReal.listed.some((l) => l.includes(`frame-ancestors https://listed-selftest.test:${framePort};`)), facts(fListed)], [true, wantShown]);
+        const fUnlisted = await framed('unlisted', 'listed');
+        check('F03 a website NOT listed, framing the very same page with the very same headers, is refused by the browser (D-082)', fUnlisted.refused, true);
+        const fNone = await framed('listed', 'none');
+        check('F04 with nothing listed (or framing forbidden for the installation, which gives the same header: frame-ancestors \'none\' and X-Frame-Options DENY), even that website is refused',
+            [frameReal.none.includes('X-Frame-Options: DENY'), fNone.refused], [true, true]);
+        check('F05 the page was asked for with NO Referer from the website framing it (the snippet\'s referrerpolicy), every time', frameRequests.every((q) => q.referer === null) && frameRequests.length >= 3, true);
+
+        // The plants, each in what is SERVED, the real page and headers put back after.
+        const framePlant = async (label, change, run, notices) => {
+            change();
+            let r;
+            try { r = await run(); } finally { frameServeReal(); }
+            check(label, notices(r), true);
+        };
+        await framePlant('FX1 frame-ancestors widened to "*": F03 sees the website not listed show the page',
+            () => { frameServed.headers.listed = frameServed.headers.listed.map((l) => l.replace(/frame-ancestors [^;]+;/, 'frame-ancestors *;')); },
+            () => framed('unlisted', 'listed'), (r) => r.refused === false);
+        await framePlant('FX2 the stylesheet\'s hash altered: F02 sees the browser refuse the stylesheet (the title no longer bold)',
+            () => { frameServed.headers.listed = frameServed.headers.listed.map((l) => l.replace(/'sha256-[^']+'/, "'sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='")); },
+            () => framed('listed', 'listed'), (r) => r.refused === false && r.weight !== '700');
+        const rawTitle = () => { frameServed.page = frameServed.page.replace(/<p class="door__title">[^<]*<\/p>/, `<p class="door__title">${FRAME_TITLE}</p>`); };
+        await framePlant('FX3 the title written UNESCAPED: F02 sees the markup (the value no longer appears as characters) — and the content rule and the sandbox still let nothing run',
+            rawTitle, () => framed('listed', 'listed'), (r) => r.refused === false && r.missing.includes(FRAME_TITLE) && r.pwned === null);
+        await framePlant('FX4 unescaped, with the content rule AND the frame\'s sandbox taken away: the planted handler runs (so F02\'s "nothing ran" can fail)',
+            () => { rawTitle(); frameServed.headers.listed = frameServed.headers.listed.filter((l) => l.startsWith('Content-Security-Policy:') === false); },
+            () => framed('listed', 'listed', true), (r) => r.refused === false && r.pwned === 11);
+        await framePlant('FX5 the CONTROL: a comment added to the page, and every fact of F02 is exactly as before',
+            () => { frameServed.page = frameServed.page.replace('</main>', '</main>\n<!-- a harmless comment -->'); },
+            () => framed('listed', 'listed'), (r) => JSON.stringify(facts(r)) === JSON.stringify(wantShown));
     } finally {
         await stop();
     }

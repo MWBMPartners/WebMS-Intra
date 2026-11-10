@@ -21,6 +21,24 @@
  *                     (`web/_core/data/public-door.js`, whose header says how).
  *                     The countdown of the old `widget/countdown.js` (#319)
  *                     lives on as its "next event" mode (D-084).
+ *   page.html         (#493 P4c) a plain page an organisation's website can
+ *                     show in a FRAME, for a website that cannot paste in a
+ *                     script (D-056's fallback). Drawn here, on the server,
+ *                     with NO JavaScript; `?show=events` (the default),
+ *                     `posters` or `both`, and `limit` as the feeds take it
+ *                     (default PAGE_DEFAULT_LIMIT). Only the websites the
+ *                     organisation lists may frame it, and none while the
+ *                     installation forbids framing (D-082, D-094):
+ *                     `frame-ancestors` comes from
+ *                     `PublicWebsiteSetup::frameAncestorsFor()` and nowhere
+ *                     else. See pageHeaderLines() and renderPage().
+ *
+ * WHY "page.html", AND NOT THE BARE /w/{name}/ (#493 P4c): one name that is
+ * the SAME on both forms of address, so `addressFor()` builds it exactly as it
+ * builds the others; and the empty address stays what it was in P4a — the
+ * door's identical 404, on /w/{name}/ and on a public address's own "/" — so
+ * no refusal P4a pinned changes meaning. ".html" says what comes back, as
+ * ".json" and ".js" do beside it.
  *
  * They are reached at /w/{name}/… on the portal's own address, where {name}
  * is the organisation's random public name (`tblPublicDoorNames`), or at /…
@@ -28,15 +46,15 @@
  * organisation a request is for is decided by `Site::preDetect()` — the ONE
  * place that decides it — before any session is looked at; this class reads
  * ONLY `Site::doorSiteId()`, never `Site::id()`, so a refused request can
- * never fall back to organisation 1. Package P4c (the page you can frame)
- * adds to this class; until then nothing else answers here.
+ * never fall back to organisation 1. Nothing else answers here.
  *
  * THE QUESTIONS, IN THIS ORDER (answer())
  * -----------------------------------------------------------------------------
  *   1. Is the request well formed? GET or HEAD only, one of the addresses
- *      above, and `limit` (feeds only) a whole number from 1 to 50. The
- *      script takes no parameters, and ignores a query string (websites add
- *      `?v=2` to make browsers fetch a fresh copy).
+ *      above, and `limit` (feeds and the page) a whole number from 1 to 50.
+ *      The page's `show` must be exactly one of PAGE_SHOWS. The script takes
+ *      no parameters, and ignores a query string (websites add `?v=2` to make
+ *      browsers fetch a fresh copy).
  *   2. Is the portal closed for maintenance or an upgrade
  *      (`Maintenance::isActive()`)? Then 503 with Retry-After, the same for
  *      every organisation. The one answer that is not a refusal.
@@ -50,6 +68,9 @@
  *      (`AppRegistry::isEnabledForSite()`): events need Calendar and Events,
  *      posters and their media need the Noticeboard, and the script needs at
  *      least one of the two (with both off there is nothing it could draw).
+ *      The page needs the app of EVERY part it is asked for: `show=both`
+ *      with either app off is refused, rather than quietly drawing half, so
+ *      a switched-off app is never shown and never silently dropped.
  *   5. D-087, on a test copy only (`Gatekeeper::shouldEnforce()`): unless the
  *      organisation's door is open to anybody there
  *      (`PublicWebsiteSetup::testCopyDoorOpenToAnybody()`), only somebody the
@@ -63,7 +84,10 @@
  *      media() ask `PublicWebsite::posterWhere()`, on the ORGANISATION's own
  *      calendar date. The renderers are given arrays, never the connection
  *      (`tools/audit-checks/check_public_door_reads.py` holds both rules).
- *   7. Send the headers for that kind of answer, then the answer.
+ *   7. Send the headers for that kind of answer, then the answer. The page's
+ *      headers (pageHeaderLines()) are the only ones whose `frame-ancestors`
+ *      is not 'none': it is `PublicWebsiteSetup::frameAncestorsFor()`, asked
+ *      on every request, never built here.
  *
  * EVERY REFUSAL IS ONE IDENTICAL 404 (notFound()), whatever the cause — an
  * unknown, replaced or removed name, an inactive organisation, the door off,
@@ -127,6 +151,59 @@ final class PublicDoor
      * on every address, door switched off or not).
      */
     public const SCRIPT_FILE = 'data' . DIRECTORY_SEPARATOR . 'public-door.js';
+
+    /** The page a website shows in a frame (#493 P4c). See the file header for why this name. */
+    public const SURFACE_PAGE = 'page.html';
+
+    /**
+     * What the page may be asked to show (`?show=`), the first being the
+     * default when none is sent. "events" first because the script's own
+     * default is events (P4b), so the two ways of pasting agree. Anything
+     * else — another word, capitals, a list — is the door's 404.
+     */
+    public const PAGE_SHOWS = ['events', 'posters', 'both'];
+
+    /**
+     * How many items of EACH kind the page draws when `limit` is not sent: the
+     * script's default (P4b), not the feeds' 20, because both draw a list a
+     * visitor reads inside somebody else's page.
+     */
+    public const PAGE_DEFAULT_LIMIT = 10;
+
+    /**
+     * The page's whole stylesheet. It is written into the page in ONE <style>
+     * element and allowed by its HASH in the page's content rule
+     * (pageCsp()), so no other style can run there — not one injected into a
+     * field, not a style attribute. Change it freely: the hash is worked out
+     * from this text on every request, so the two cannot disagree.
+     *
+     * Light and dark follow the visitor's own setting (`prefers-color-scheme`)
+     * and `color-scheme` lets the browser draw scrollbars to match. The
+     * background is transparent, so the frame takes the website's own
+     * background where the colour schemes agree.
+     */
+    public const PAGE_CSS = ':root{color-scheme:light dark;--door-accent:#3b45b5;--door-text:#1b1f24;--door-muted:#57606a;'
+        . '--door-line:#d0d7de;}'
+        . '@media (prefers-color-scheme:dark){:root{--door-accent:#9aa3ff;--door-text:#e6edf3;--door-muted:#9da7b3;--door-line:#30363d;}}'
+        . '*{box-sizing:border-box;}'
+        . 'html,body{margin:0;padding:0;background:transparent;}'
+        . 'body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--door-text);line-height:1.4;'
+        . 'padding:.5rem 1rem;overflow-wrap:anywhere;}'
+        . '.door__heading{font-size:1.1rem;margin:.75rem 0 .25rem;}'
+        . '.door__list{list-style:none;margin:0;padding:0;}'
+        . '.door__item{padding:.75rem 0;border-bottom:1px solid var(--door-line);}'
+        . '.door__item:last-child{border-bottom:0;}'
+        . 'p{margin:0 0 .25rem;}'
+        . '.door__title{font-weight:700;font-size:1.05rem;}'
+        . '.door__kicker{color:var(--door-accent);font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;}'
+        . '.door__when,.door__where{color:var(--door-muted);font-size:.9rem;}'
+        . '.door__about{font-size:.95rem;white-space:pre-line;}'
+        . '.door__link a{color:var(--door-accent);}'
+        . '.door__picture{display:block;max-width:100%;height:auto;border-radius:.4rem;margin-bottom:.5rem;}'
+        . '.door__empty{color:var(--door-muted);}';
+
+    /** English weekday names for a weekly poster, Sunday first (the feed's 0 = Sunday). */
+    private const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     /** How many items a feed gives when `limit` is not sent. */
     public const DEFAULT_LIMIT = 20;
@@ -206,9 +283,16 @@ final class PublicDoor
         }
         $surface = Site::doorSurface();
         $media   = '';
+        $show    = '';
         if ($surface === self::SURFACE_EVENTS || $surface === self::SURFACE_POSTERS) {
             $limit = self::limitFrom($_GET['limit'] ?? null);
             if ($limit === null) {
+                self::notFound();
+            }
+        } elseif ($surface === self::SURFACE_PAGE) {
+            $limit = self::limitFrom($_GET['limit'] ?? null, self::PAGE_DEFAULT_LIMIT);
+            $show  = self::pageShowFrom($_GET['show'] ?? null);
+            if ($limit === null || $show === null) {
                 self::notFound();
             }
         } elseif ($surface === self::SURFACE_SCRIPT) {
@@ -248,6 +332,14 @@ final class PublicDoor
                 && AppRegistry::isEnabledForSite('noticeboard', $siteId) === false) {
                 self::notFound();
             }
+        } elseif ($surface === self::SURFACE_PAGE) {
+            // Every part asked for needs its own app: "both" needs both.
+            if ($show !== 'posters' && AppRegistry::isEnabledForSite('calendar', $siteId) === false) {
+                self::notFound();
+            }
+            if ($show !== 'events' && AppRegistry::isEnabledForSite('noticeboard', $siteId) === false) {
+                self::notFound();
+            }
         } else {
             $app = $surface === self::SURFACE_EVENTS ? 'calendar' : 'noticeboard';
             if (AppRegistry::isEnabledForSite($app, $siteId) === false) {
@@ -270,6 +362,19 @@ final class PublicDoor
         }
 
         // 6️⃣ Read, then 7️⃣ answer.
+        if ($surface === self::SURFACE_PAGE) {
+            // Read only the parts asked for, through the same readers as the
+            // feeds, so the page can never show what a feed would not.
+            $events  = $show === 'posters' ? null : self::events($db, $siteId, $limit);
+            $posters = $show === 'events' ? null : self::posters($db, $siteId, $limit);
+            $page    = self::renderPage($events, $posters);
+            // frame-ancestors: the ONE place that decides it (D-082, D-094),
+            // asked fresh for every answer. Never built here.
+            self::sendPageHeaders(PublicWebsiteSetup::frameAncestorsFor($db, $siteId), $testCopy, $testersOnly);
+            header('Content-Length: ' . (string) strlen($page));
+            echo $page;
+            exit();
+        }
         if ($surface === self::SURFACE_SCRIPT) {
             $script = self::script();
             // `text/javascript` with nosniff: a browser runs it as a script
@@ -304,10 +409,10 @@ final class PublicDoor
      * whole number from 1 to MAX_LIMIT, or null — refused — for anything else
      * (a list, a sign, a leading zero, a decimal point, too large).
      */
-    public static function limitFrom(mixed $raw): ?int
+    public static function limitFrom(mixed $raw, int $default = self::DEFAULT_LIMIT): ?int
     {
         if ($raw === null) {
-            return self::DEFAULT_LIMIT;
+            return $default;
         }
         if (is_string($raw) === false || preg_match('/^[1-9][0-9]{0,2}$/D', $raw) !== 1) {
             return null;
@@ -315,6 +420,25 @@ final class PublicDoor
         $n = (int) $raw;
 
         return $n <= self::MAX_LIMIT ? $n : null;
+    }
+
+    /**
+     * What the page was asked to show: the first of PAGE_SHOWS when `show` is
+     * not sent, exactly one of them, or null — refused — for anything else
+     * (another word, capitals, an empty value, a list). Exact on purpose: a
+     * tidied value would make two addresses mean one page, and a cache in
+     * between would keep both.
+     */
+    public static function pageShowFrom(mixed $raw): ?string
+    {
+        if ($raw === null) {
+            return self::PAGE_SHOWS[0];
+        }
+        if (is_string($raw) === false || in_array($raw, self::PAGE_SHOWS, true) === false) {
+            return null;
+        }
+
+        return $raw;
     }
 
     /** Is this a stored upload's name as the noticeboard makes them: 32 hex characters and a known ending? */
@@ -657,6 +781,192 @@ final class PublicDoor
         ]);
     }
 
+    /**
+     * 🖼️ The page a website frames (#493 P4c), as HTML. Pure: given what the
+     * readers answered (null for a part not asked for), it writes the page.
+     *
+     * WHAT IT PROMISES, and how:
+     *   - NO JAVASCRIPT. It writes no <script>, no event handler and no
+     *     `javascript:` address, and its content rule (pageCsp()) allows no
+     *     script at all, so even a field that somehow carried one could not
+     *     run it.
+     *   - EVERY VALUE ESCAPED, through text() and nothing else — titles,
+     *     descriptions, places, addresses, kickers, times, zone labels and
+     *     the organisation's name in the <title> alike. A title such as
+     *     `<img onerror=…>` shows as those characters.
+     *   - LINKS AND PICTURES ONLY TO https:// (httpsOrNull(), asked again
+     *     here even though the readers asked it, because the door's own media
+     *     address is only as https as the portal's address). A link opens in
+     *     a new tab with no referrer, so the frame never navigates and the
+     *     other website is told nothing.
+     *   - EACH EVENT'S TIME ON ITS OWN CLOCK: the reading as stored
+     *     (`startsOnClock`), written by `I18n::formatClockDateTime()` — the
+     *     ONE place a wall-clock reading becomes words, which builds no
+     *     moment (#777) — so a visitor anywhere sees the time where the event
+     *     happens, and an event stored at 01:30 on the morning the clocks go
+     *     forward shows 01:30. Where the event's clock is not the
+     *     organisation's, its place is named ("New York time"), as the
+     *     script does.
+     *
+     * Its words are English, as the script's are (#899).
+     *
+     * @param array{organisation:array{name:string, timezone:string}, events:list<array<string,mixed>>}|null  $events
+     * @param array{organisation:array{name:string, timezone:string}, posters:list<array<string,mixed>>}|null $posters
+     */
+    public static function renderPage(?array $events, ?array $posters): string
+    {
+        $org      = ($events ?? $posters ?? ['organisation' => ['name' => '', 'timezone' => '']])['organisation'];
+        $both     = $events !== null && $posters !== null;
+        $what     = $both === true ? 'events and noticeboard' : ($events !== null ? 'events' : 'noticeboard');
+        $orgName  = trim((string) ($org['name'] ?? ''));
+        $title    = ($orgName === '' ? '' : $orgName . ' — ') . $what;
+        $orgClock = (string) ($org['timezone'] ?? '');
+
+        $out = "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n"
+            . "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+            . "<meta name=\"referrer\" content=\"no-referrer\">\n"
+            . '<title>' . self::text($title) . "</title>\n"
+            . '<style>' . self::PAGE_CSS . "</style>\n</head>\n<body>\n<main class=\"door\">\n";
+        if ($events !== null) {
+            $out .= self::pageEvents($events['events'], $orgClock, $both);
+        }
+        if ($posters !== null) {
+            $out .= self::pagePosters($posters['posters'], $both);
+        }
+
+        return $out . "</main>\n</body>\n</html>\n";
+    }
+
+    /** The events part of the page. */
+    private static function pageEvents(array $events, string $orgClock, bool $heading): string
+    {
+        $out = "<section class=\"door__part\" data-door-part=\"events\">\n"
+            . ($heading === true ? "<h2 class=\"door__heading\">Events</h2>\n" : '');
+        if ($events === []) {
+            return $out . "<p class=\"door__empty\">No upcoming events.</p>\n</section>\n";
+        }
+        $out .= "<ul class=\"door__list\">\n";
+        foreach ($events as $ev) {
+            $out .= "<li class=\"door__item\">\n<p class=\"door__title\">" . self::text($ev['title'] ?? '') . "</p>\n";
+            $when = self::eventWhen($ev, $orgClock);
+            if ($when !== '') {
+                $out .= '<p class="door__when">' . self::text($when) . "</p>\n";
+            }
+            $place = is_array($ev['location'] ?? null) === true ? $ev['location'] : null;
+            if ($place !== null) {
+                $where = implode(', ', array_values(array_filter([trim((string) ($place['name'] ?? '')), trim((string) ($place['address'] ?? ''))],
+                    static fn (string $one): bool => $one !== '')));
+                if ($where !== '') {
+                    $out .= '<p class="door__where">' . self::text($where) . "</p>\n";
+                }
+                $out .= self::pageLink($place['url'] ?? null, 'Venue details');
+            }
+            $about = trim((string) ($ev['description'] ?? ''));
+            if ($about !== '') {
+                $out .= '<p class="door__about">' . self::text($about) . "</p>\n";
+            }
+            $out .= "</li>\n";
+        }
+
+        return $out . "</ul>\n</section>\n";
+    }
+
+    /** The posters part of the page. */
+    private static function pagePosters(array $posters, bool $heading): string
+    {
+        $out = "<section class=\"door__part\" data-door-part=\"posters\">\n"
+            . ($heading === true ? "<h2 class=\"door__heading\">Noticeboard</h2>\n" : '');
+        if ($posters === []) {
+            return $out . "<p class=\"door__empty\">Nothing on the noticeboard just now.</p>\n</section>\n";
+        }
+        $out .= "<ul class=\"door__list\">\n";
+        foreach ($posters as $p) {
+            $out .= "<li class=\"door__item\">\n";
+            $media   = is_array($p['media'] ?? null) === true ? $p['media'] : null;
+            $picture = $p['thumbUrl'] ?? (($media !== null && ($media['type'] ?? '') === 'image') ? ($media['url'] ?? null) : null);
+            $src     = is_string($picture) === true ? self::httpsOrNull($picture) : null;
+            if ($src !== null) {
+                $out .= '<img class="door__picture" src="' . self::text($src) . '" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">' . "\n";
+            }
+            $kicker = trim((string) ($p['kicker'] ?? ''));
+            if ($kicker !== '') {
+                $out .= '<p class="door__kicker">' . self::text($kicker) . "</p>\n";
+            }
+            $out .= '<p class="door__title">' . self::text($p['title'] ?? '') . "</p>\n";
+            $posterWhen = self::posterWhenWords($p);
+            if ($posterWhen !== '') {
+                $out .= '<p class="door__when">' . self::text($posterWhen) . "</p>\n";
+            }
+            $place = trim((string) ($p['location'] ?? ''));
+            if ($place !== '') {
+                $out .= '<p class="door__where">' . self::text($place) . "</p>\n";
+            }
+            $out .= self::pageLink($p['link'] ?? null, 'Find out more') . "</li>\n";
+        }
+
+        return $out . "</ul>\n</section>\n";
+    }
+
+    /**
+     * An event's day and time as words, on ITS OWN clock: the stored reading
+     * (`startsOnClock`), never the instant. An all-day event gives its day
+     * only. Its place is named when its clock is not the organisation's.
+     */
+    private static function eventWhen(array $ev, string $orgClock): string
+    {
+        $reading = $ev['startsOnClock'] ?? null;
+        if (is_string($reading) === false || I18n::wallClockReading($reading) === null) {
+            return '';
+        }
+        $words = I18n::formatClockDateTime($reading, ($ev['allDay'] ?? false) === true ? 'D j M Y' : 'D j M Y, H:i');
+        $zone  = trim((string) ($ev['timezone'] ?? ''));
+        if ($zone !== '' && $orgClock !== '' && $zone !== $orgClock) {
+            // "America/New_York" becomes "New York time": the place, as a person says it.
+            $parts  = explode('/', $zone);
+            $words .= ' (' . str_replace('_', ' ', (string) end($parts)) . ' time)';
+        }
+
+        return $words;
+    }
+
+    /** A poster's day ("Every Tuesday", or a date) and time, as words. */
+    private static function posterWhenWords(array $p): string
+    {
+        $when  = is_array($p['when'] ?? null) === true ? $p['when'] : null;
+        $words = '';
+        if ($when !== null && ($when['type'] ?? '') === 'weekly' && is_int($when['weekday'] ?? null) === true
+            && isset(self::WEEKDAYS[$when['weekday']]) === true) {
+            $words = 'Every ' . self::WEEKDAYS[$when['weekday']];
+        } elseif ($when !== null && ($when['type'] ?? '') === 'once' && is_string($when['date'] ?? null) === true
+            && I18n::wallClockReading($when['date'] . ' 00:00') !== null) {
+            $words = I18n::formatClockDateTime($when['date'] . ' 00:00', 'D j M Y');
+        }
+        $time = trim((string) ($p['time'] ?? ''));
+        if ($time !== '') {
+            $words = $words === '' ? $time : $words . ', ' . $time;
+        }
+
+        return $words;
+    }
+
+    /** A link, only to an https:// address, opened in a new tab and telling the other side nothing — or ''. */
+    private static function pageLink(mixed $address, string $words): string
+    {
+        $safe = is_string($address) === true ? self::httpsOrNull($address) : null;
+        if ($safe === null) {
+            return '';
+        }
+
+        return '<p class="door__link"><a href="' . self::text($safe) . '" target="_blank" rel="noopener noreferrer nofollow" '
+            . 'referrerpolicy="no-referrer">' . self::text($words) . "</a></p>\n";
+    }
+
+    /** Text for the page: every value the page writes goes through here. */
+    private static function text(mixed $value): string
+    {
+        return htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE | ENT_HTML5, 'UTF-8');
+    }
+
     // =========================================================================
     // 🔗 Addresses
     // =========================================================================
@@ -674,7 +984,7 @@ final class PublicDoor
      * '' when the door is off, or no address can be built without trusting a
      * host the visitor chose — and then the door answers nothing on /w/.
      *
-     * @param string $what 'events.json', 'posters.json', 'door.js' or 'media/{file}'.
+     * @param string $what 'events.json', 'posters.json', 'door.js', 'page.html' or 'media/{file}'.
      */
     public static function addressFor(\mysqli $db, int $siteId, string $what): string
     {
@@ -834,6 +1144,89 @@ final class PublicDoor
             header('Cache-Control: public, max-age=60');
         }
         header('X-Robots-Tag: ' . ($testCopy === true ? 'noindex, nofollow, noarchive' : 'noindex'));
+    }
+
+    /**
+     * The page's content rule (#493 P4c), with `$frameAncestors` — which
+     * comes from `PublicWebsiteSetup::frameAncestorsFor()` and nowhere else —
+     * put in as it is. Nothing is allowed by default; the page's ONE
+     * stylesheet by its hash; pictures only over https; no script of any
+     * kind (there is no `script-src`, so `default-src 'none'` refuses every
+     * one); no `<base>` and no form. `sandbox` adds a second wall: even a
+     * script that somehow got in would not run, and the page cannot steer
+     * the website around it. `allow-popups` with
+     * `allow-popups-to-escape-sandbox` is what lets a "Find out more" link
+     * open an ordinary new tab.
+     */
+    public static function pageCsp(string $frameAncestors): string
+    {
+        return "default-src 'none'; img-src https:; style-src 'sha256-" . base64_encode(hash('sha256', self::PAGE_CSS, true)) . "'; "
+            . "base-uri 'none'; form-action 'none'; frame-ancestors " . $frameAncestors . '; '
+            . 'sandbox allow-popups allow-popups-to-escape-sandbox';
+    }
+
+    /**
+     * Every header on the page's answer, as lines, in the order they are
+     * sent. Pure, so the browser test serves exactly these (D-065: whether a
+     * browser REFUSES a frame is driven in a real one, by
+     * tools/public-door-script-selftest.mjs, not read here).
+     *
+     *   - Content-Security-Policy: pageCsp(), whose `frame-ancestors` is the
+     *     organisation's listed websites, or 'none' when it lists none or the
+     *     installation forbids framing (D-082, D-094).
+     *   - X-Frame-Options: DENY, but ONLY when `frame-ancestors` is 'none'.
+     *     It is the older header for the same question, and it can name no
+     *     website: `ALLOW-FROM` is obsolete and today's browsers ignore it.
+     *     A browser that understands `frame-ancestors` ignores X-Frame-Options
+     *     altogether (the HTML standard says so), so sending it changes
+     *     nothing there; it matters only to a browser too old for
+     *     `frame-ancestors`, which is then told no. When websites ARE listed
+     *     it is LEFT OUT, because the only values it has — DENY and
+     *     SAMEORIGIN — would refuse the very websites the organisation listed
+     *     in any browser that honoured it.
+     *   - Cross-Origin-Resource-Policy: cross-origin, so a website that
+     *     requires it of everything it embeds (COEP) can still frame the page.
+     *   - No Access-Control-Allow-Origin: a page is opened in a frame, never
+     *     read by another website's script.
+     *   - Caching, Referrer-Policy, nosniff and X-Robots-Tag exactly as the
+     *     feeds have them: one minute; `private, no-store` with `Vary: Cookie`
+     *     on a testers-only test copy (D-087); `noindex` — the page is meant
+     *     to be seen inside the organisation's own website, not found on its
+     *     own — and on a test copy `noindex, nofollow, noarchive`.
+     *
+     * @return list<string>
+     */
+    public static function pageHeaderLines(string $frameAncestors, bool $testCopy, bool $testersOnly): array
+    {
+        $lines = [
+            'Content-Type: text/html; charset=utf-8',
+            'Content-Security-Policy: ' . self::pageCsp($frameAncestors),
+        ];
+        if ($frameAncestors === "'none'") {
+            $lines[] = 'X-Frame-Options: DENY';
+        }
+        $lines[] = 'Cross-Origin-Resource-Policy: cross-origin';
+        $lines[] = 'Referrer-Policy: no-referrer';
+        $lines[] = 'X-Content-Type-Options: nosniff';
+        if ($testersOnly === true) {
+            $lines[] = 'Cache-Control: private, no-store';
+            $lines[] = 'Vary: Cookie';
+        } else {
+            $lines[] = 'Cache-Control: public, max-age=60';
+        }
+        $lines[] = 'X-Robots-Tag: ' . ($testCopy === true ? 'noindex, nofollow, noarchive' : 'noindex');
+
+        return $lines;
+    }
+
+    /** Send the page's headers (pageHeaderLines()), after clearing whatever start-up queued. */
+    private static function sendPageHeaders(string $frameAncestors, bool $testCopy, bool $testersOnly): void
+    {
+        self::clearHeaders();
+        http_response_code(200);
+        foreach (self::pageHeaderLines($frameAncestors, $testCopy, $testersOnly) as $line) {
+            header($line);
+        }
     }
 
     /** Take away every header the door replaces or must never send (REMOVED_HEADERS). */

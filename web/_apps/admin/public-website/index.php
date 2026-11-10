@@ -27,6 +27,10 @@
  *    Until the door is on, nothing from the portal is shown on any outside
  *    website, and the card says so: a page of settings that seem to do
  *    something they do not is #671's "a lie with a Save button".
+ *    With the door on it prints, as text, the feed addresses, the script lines
+ *    (P4b) and the frame lines (P4c) — and says when a frame cannot work: on
+ *    no website while the installation forbids framing (D-094), and only on
+ *    the listed websites otherwise (D-082).
  *
  * Every value is checked, refused with its reason, and recorded, by
  * `Portal\Core\PublicWebsiteSetup` — the ONE place. This page only draws.
@@ -92,6 +96,23 @@ if ($doorScript !== '') {
         $doorPastes[$show] = ['words' => $words, 'code' => '<script src="' . $doorScript . '" data-show="' . $show . '" defer></script>'];
     }
 }
+// #493 P4c: the page a website shows in a FRAME, for websites that cannot take
+// a script (D-056's fallback). Its address comes from the same ONE helper; the
+// lines to paste are printed as TEXT. Whether a frame will work at all is
+// said from the SAME two answers the door's header is built from — the
+// installation's switch (D-094) and this organisation's list (D-082) — so the
+// card can never promise a frame the header refuses.
+$doorPage    = $door['state'] === 'on' ? PublicDoor::addressFor($mysqli, $siteId, PublicDoor::SURFACE_PAGE) : '';
+$framePastes = [];
+if ($doorPage !== '') {
+    foreach (['events' => ['Your events, soonest first', 'Our events'], 'posters' => ['Your noticeboard posters', 'Our noticeboard'],
+        'both' => ['Both, events first', 'Our events and noticeboard']] as $show => [$words, $frameTitle]) {
+        $framePastes[$show] = ['words' => $words, 'code' => '<iframe src="' . $doorPage . '?show=' . $show . '" title="' . $frameTitle
+            . '" width="100%" height="600" style="border:0" loading="lazy" referrerpolicy="no-referrer" '
+            . 'sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>'];
+    }
+}
+$framingInForce = PublicWebsiteSetup::frameOriginsInForce($mysqli, $siteId);
 // D-087 on a test copy: the door answers signed-in testers only in this
 // version (nothing can choose "anybody" until package P4d), and the card says
 // what that means for trying it from a real website.
@@ -169,9 +190,26 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endforeach; ?>
                         <p class="small text-muted">Add <code>data-limit="5"</code> to show fewer (up to <?php echo (int) PublicDoor::MAX_LIMIT; ?>), or <code>data-target="#my-box"</code> to draw inside a part of your page you name. If your website has a content security policy, it must allow this portal's address for scripts (script-src) and for reading data (connect-src), and for images (img-src) both this portal's address and the address of any outside picture a poster uses — allowing <code>https:</code> for images covers both. Some website builders do not allow scripts at all; the feed addresses above still work for whoever builds your website.</p>
                     <?php endif; ?>
+                    <?php if ($framePastes !== []): ?>
+                        <?php // #493 P4c: the frame, for websites that cannot take a script. Printed as TEXT (escaped), never as a live frame on this page. ?>
+                        <h3 class="h6 mt-3">Or show it in a frame</h3>
+                        <p class="small">If your website cannot take a script but lets you add a frame (an "embed" or "iframe" box), paste one of these. It shows a plain page with no script in it.</p>
+                        <?php if ($permitted === false): ?>
+                            <div class="alert alert-warning small" data-frame-works="installation-off">This installation does not allow any outside website to show its organisations' pages in a frame, so a frame pasted into your website shows nothing at all. The script above still works.</div>
+                        <?php elseif ($framingInForce === []): ?>
+                            <div class="alert alert-warning small" data-frame-works="none-listed">A frame works only on the websites listed under "Websites allowed to show your public pages in a frame" below, and none is listed yet, so a frame pasted into any website shows nothing. Add your website there first.</div>
+                        <?php else: ?>
+                            <p class="small" data-frame-works="listed">A frame works <strong>only</strong> on the websites listed under "Websites allowed to show your public pages in a frame" below: <?php echo $esc(implode(', ', $framingInForce)); ?>. On any other website it shows nothing.</p>
+                        <?php endif; ?>
+                        <?php foreach ($framePastes as $show => $paste): ?>
+                            <p class="small mb-1"><?php echo $esc($paste['words']); ?>:</p>
+                            <pre class="small bg-body-tertiary border rounded p-2 mb-2" data-door-frame="<?php echo $esc($show); ?>"><code><?php echo $esc($paste['code']); ?></code></pre>
+                        <?php endforeach; ?>
+                        <p class="small text-muted">Add <code>&amp;limit=5</code> to the address to show fewer (up to <?php echo (int) PublicDoor::MAX_LIMIT; ?> of each; <?php echo (int) PublicDoor::PAGE_DEFAULT_LIMIT; ?> without it). Change <code>height</code> to fit your page.</p>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($doorTestersOnly === true): ?>
-                    <div class="alert alert-warning" data-door-testers-only="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. Browsers do not send your sign-in to another website, so a copy pasted into a real website shows nothing from this test copy; open the addresses above in this browser instead.</div>
+                    <div class="alert alert-warning" data-door-testers-only="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. Browsers do not send your sign-in to another website, so a copy pasted into a real website — a script or a frame — shows nothing from this test copy; open the addresses above in this browser instead.</div>
                 <?php endif; ?>
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-2" data-door-form="replace">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">

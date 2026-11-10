@@ -2,7 +2,7 @@
 // Path: tools/public-door-selftest.php
 /**
  * -----------------------------------------------------------------------------
- * The public door, over real HTTP 🚪🧪 (#493 P4a and P4b; D-056, D-057, D-084,
+ * The public door, over real HTTP 🚪🧪 (#493 P4a, P4b and P4c; D-056, D-057, D-082, D-084,
  * D-087, D-094, D-095, D-097, D-098)
  * -----------------------------------------------------------------------------
  * Drives the REAL door — `web/public_html/index.php` → `Site::preDetect()` →
@@ -50,6 +50,27 @@
  *      PJ10). What
  *      the script DRAWS is driven in a real browser by
  *      tools/public-door-script-selftest.mjs, not here.
+ *   V  (#493 P4c; D-056, D-082, D-094) the page a website shows in a FRAME,
+ *      /w/{name}/page.html and /page.html on a public address, read with
+ *      PHP's own HTML5 parser: what it shows (events by default, posters,
+ *      both; limit), the organisations never crossing, pictures and links
+ *      only over https, each event's time as STORED on its own clock (the
+ *      missing hour), hostile text in every field the database can carry
+ *      appearing as text with nothing becoming markup, no <script> or
+ *      javascript: anywhere; its headers pinned in each state —
+ *      frame-ancestors exactly what frameAncestorsFor() gives (nothing
+ *      listed, two listed, a hand-edited list, the installation's switch off
+ *      or unreadable, another organisation), X-Frame-Options DENY only with
+ *      'none', the one stylesheet allowed by the hash of what was SENT,
+ *      sandboxed, no cookie; the card's frame lines as text and its three
+ *      "where it works" sentences; every refusal (bad show or limit, an app
+ *      off, replaced, switched off on BOTH forms, inactive) the door's 404.
+ *      VP01-VP16 drive the RENDERER from the copy in its own process with
+ *      every field hostile — the zone's name and a poster's time included,
+ *      which the database cannot carry — and take each escape and each
+ *      https check out on its own. Whether a browser REFUSES the frame from a
+ *      website not listed is driven in a real browser by
+ *      tools/public-door-script-selftest.mjs (section F there).
  *   W  (#493 P4b, D-084) the old widget folder is gone: /widget, its old
  *      script, feed and embed page each the portal's own 404 on the members'
  *      address and the door's 404 on a public address; no route row; the
@@ -90,9 +111,9 @@
  *      must find its text exactly once or it fails loudly.
  *
  * WHAT IT CANNOT DO, said plainly
- *   - frame-ancestors from `PublicWebsiteSetup::frameAncestorsFor()` belongs
- *     to the framed PAGE, which is package P4c. Here it pins only that data
- *     answers say `frame-ancestors 'none'` whatever the organisation lists.
+ *   - Data answers say `frame-ancestors 'none'` whatever the organisation
+ *     lists; only the framed PAGE (section V) carries frameAncestorsFor().
+ *     What a browser DOES with that header is not seen here (see V above).
  *   - No real outside website, real browser, DNS name or TLS certificate is
  *     involved: a public address is imitated by sending its name in the Host
  *     header to the test server. What browsers do with CORS, CORP and the
@@ -126,7 +147,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 197; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11
+const PDS_EXPECTED_CHECKS = 247; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11 and PV01-PV14
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1636,6 +1657,394 @@ check('J11 in a fresh read of three feeds (A by name, A by public address, B), e
     [$jClock['premise'], $jClock['problems']], [true, []]);
 
 // =============================================================================
+echo "V. The page a website shows in a frame (#493 P4c; D-056, D-082, D-094)\n";
+// =============================================================================
+// The page is read here as a browser reads it — PHP's own HTML5 parser
+// (Dom\HTMLDocument), never a search of the markup — so "this shows as text"
+// means the parsed text node holds the very characters sent, and "nothing
+// runs" means no <script> element and no on… attribute exists in the parsed
+// document. Whether a browser REFUSES the frame from a website not listed is
+// behaviour in a browser: tools/public-door-script-selftest.mjs drives it.
+/**
+ * The facts of one page, from the PARSED document.
+ *
+ * @return array<string, mixed>
+ */
+$pageFacts = static function (string $html): array {
+    if (str_contains($html, '<html') === false) {
+        return ['parsed' => false];
+    }
+    $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $texts = static function (string $selector) use ($doc): array {
+        $out = [];
+        foreach ($doc->querySelectorAll($selector) as $node) {
+            $out[] = $node->textContent;
+        }
+        return $out;
+    };
+    $tags = [];
+    $handlers = [];
+    foreach ($doc->querySelectorAll('*') as $el) {
+        $tags[strtolower($el->tagName)] = true;
+        foreach ($el->attributes as $attr) {
+            if (str_starts_with(strtolower($attr->name), 'on') === true) {
+                $handlers[] = strtolower($el->tagName) . '[' . $attr->name . ']';
+            }
+        }
+    }
+    ksort($tags);
+    $links = [];
+    foreach ($doc->querySelectorAll('a') as $a) {
+        $links[] = ['href' => $a->getAttribute('href'), 'target' => $a->getAttribute('target'), 'rel' => $a->getAttribute('rel'),
+            'ref' => $a->getAttribute('referrerpolicy'), 'text' => $a->textContent];
+    }
+    $pics = [];
+    foreach ($doc->querySelectorAll('img') as $img) {
+        $pics[] = ['src' => $img->getAttribute('src'), 'ref' => $img->getAttribute('referrerpolicy'), 'alt' => $img->getAttribute('alt')];
+    }
+    $style = $doc->querySelector('head > style');
+    return [
+        'parsed' => true, 'title' => $doc->title, 'parts' => array_map(static fn ($n) => $n->getAttribute('data-door-part'),
+            iterator_to_array($doc->querySelectorAll('[data-door-part]'))),
+        'headings' => $texts('h2'), 'titles' => $texts('.door__title'), 'whens' => $texts('.door__when'), 'wheres' => $texts('.door__where'),
+        'abouts' => $texts('.door__about'), 'kickers' => $texts('.door__kicker'), 'empties' => $texts('.door__empty'),
+        'links' => $links, 'pics' => $pics, 'tags' => array_keys($tags), 'handlers' => $handlers,
+        'scripts' => count($doc->querySelectorAll('script')), 'styles' => count($doc->querySelectorAll('style')),
+        'styleText' => $style === null ? null : $style->textContent,
+    ];
+};
+/** The content rule a page must carry: its ONE stylesheet allowed by the hash of what was really SENT, and `$fa` for frame-ancestors. */
+$pageCspFor = static function (array $facts, string $fa): string {
+    return "default-src 'none'; img-src https:; style-src 'sha256-" . base64_encode(hash('sha256', (string) ($facts['styleText'] ?? ''), true)) . "'; "
+        . "base-uri 'none'; form-action 'none'; frame-ancestors " . $fa . '; sandbox allow-popups allow-popups-to-escape-sandbox';
+};
+/** The headers a page answer is pinned on, and the ones it must NOT carry. */
+$pageHeaders = static function (array $r): array {
+    $out = [];
+    foreach (['content-type', 'content-security-policy', 'x-frame-options', 'cross-origin-resource-policy', 'referrer-policy',
+        'x-content-type-options', 'cache-control', 'vary', 'x-robots-tag', 'set-cookie', 'access-control-allow-origin',
+        'access-control-allow-credentials', 'cross-origin-opener-policy'] as $k) {
+        $out[$k] = $r['headers'][$k] ?? '';
+    }
+    return $out;
+};
+$pageHeadersWant = static function (string $csp, string $xfo, string $cache = 'public, max-age=60', string $vary = '', string $robots = 'noindex'): array {
+    return ['content-type' => 'text/html; charset=utf-8', 'content-security-policy' => $csp, 'x-frame-options' => $xfo,
+        'cross-origin-resource-policy' => 'cross-origin', 'referrer-policy' => 'no-referrer', 'x-content-type-options' => 'nosniff',
+        'cache-control' => $cache, 'vary' => $vary, 'x-robots-tag' => $robots, 'set-cookie' => '', 'access-control-allow-origin' => '',
+        'access-control-allow-credentials' => '', 'cross-origin-opener-policy' => ''];
+};
+// The name is asked of the database at every call (as $feedA does): V19 replaces it.
+$pageA = static fn (string $query = '', array $opt = []) => $http('GET', '/w/' . (string) $doorName($siteA) . '/page.html' . $query, $opt);
+$pagePublicA = static fn (string $query = '', array $opt = []) => $http('GET', '/page.html' . $query, ['host' => $hostA] + $opt);
+
+$v1 = $pageA();
+$v1f = $pageFacts($v1['body']);
+check('V01 /w/{name}/page.html answers 200 HTML: by default A\'s events only, soonest first — the same events the feed gives — with no posters part',
+    [$v1['status'], $v1f['parts'] ?? null, $v1f['titles'] ?? null, $v1f['headings'] ?? null],
+    [200, ['events'], ['PDS A running now', 'PDS A shown'], []]);
+$v2a = $pageFacts($pagePublicA()['body']);
+$v2b = $pageFacts($http('GET', '/w/' . $nameB . '/page.html')['body']);
+$v2c = $pageFacts($http('GET', '/page.html', ['host' => $hostB])['body']);
+check('V02 the same page on A\'s approved public address (/page.html); and B\'s name and B\'s public address give B\'s events only — the organisations never cross',
+    [$v2a['titles'] ?? null, $v2b['titles'] ?? null, $v2c['titles'] ?? null], [['PDS A running now', 'PDS A shown'], ['PDS B shown'], ['PDS B shown']]);
+$v3w = $pageFacts($pageA('?show=posters')['body']);
+$v3p = $pageFacts($pagePublicA('?show=posters')['body']);
+// A has an APPROVED public address, so addressFor() points the door's media at
+// it whichever form the page is asked on (C11): both forms draw the same
+// pictures. A plain-http picture or link is dropped (VP01 drives that).
+check('V03 show=posters gives A\'s posters in the board\'s order; a picture only over https — the door\'s own media address, and an outside https picture — the same on both forms of address; a link only to https (the plain-http one dropped)',
+    [$v3w['parts'] ?? null, $v3w['titles'] ?? null, $v3p['pics'] ?? null, $v3w['pics'] ?? null, $v3p['links'] ?? null],
+    [['posters'], ['PDS poster shown', 'PDS poster outside picture', 'PDS poster naming B upload'],
+        [['src' => 'https://' . $hostA . '/media/' . $upA, 'ref' => 'no-referrer', 'alt' => ''], ['src' => 'https://images.selftest.invalid/a.png', 'ref' => 'no-referrer', 'alt' => '']],
+        [['src' => 'https://' . $hostA . '/media/' . $upA, 'ref' => 'no-referrer', 'alt' => ''], ['src' => 'https://images.selftest.invalid/a.png', 'ref' => 'no-referrer', 'alt' => '']],
+        [['href' => 'https://events.selftest.invalid/toddlers', 'target' => '_blank', 'rel' => 'noopener noreferrer nofollow', 'ref' => 'no-referrer', 'text' => 'Find out more']]]);
+$v4 = $pageFacts($pageA('?show=both')['body']);
+$v5 = $pageFacts($pageA('?show=both&limit=1')['body']);
+check('V04 show=both gives events then posters, each headed; limit=1 gives one of EACH',
+    [$v4['parts'] ?? null, $v4['headings'] ?? null, count($v4['titles'] ?? []), $v5['titles'] ?? null],
+    [['events', 'posters'], ['Events', 'Noticeboard'], 5, ['PDS A running now', 'PDS poster shown']]);
+// Times: on the event's own clock, from the STORED reading (#777). The next
+// morning London's clocks go forward was worked out in J10 ($jGapDay).
+$vGap = $makeEvent('PDS A in the missing hour', $siteA, 'Europe/London', $jGapDay . ' 01:30:00', $jGapDay . ' 03:00:00');
+$vClock = $pageFacts($pageA('?limit=50')['body']);
+$db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$vGap}");
+$vWhen = static function (array $f, string $title): ?string {
+    foreach ($f['titles'] ?? [] as $i => $t) {
+        if ($t === $title) {
+            return $f['whens'][$i] ?? null;
+        }
+    }
+    return null;
+};
+$vLondon = $zoneA === 'Europe/London' ? '' : ' (London time)';
+check('V05 each event\'s time is on its own clock, as STORED: the running event at its stored reading; on the morning London\'s clocks go forward (' . $jGapDay . ') an event stored at 01:30 SHOWS 01:30, not the 02:30 its instant moved to — the premise first: PHP really moves that reading — and an event on another clock than the organisation\'s names it',
+    [(new DateTimeImmutable($jGapDay . ' 01:30:00', new DateTimeZone('Europe/London')))->format('H:i'),
+        $vWhen($vClock, 'PDS A running now'), $vWhen($vClock, 'PDS A in the missing hour')],
+    ['02:30', $nowA->modify('-1 hour')->format('D j M Y, H:i'),
+        (new DateTimeImmutable($jGapDay . ' 00:00:00', new DateTimeZone('UTC')))->format('D j M Y') . ', 01:30' . $vLondon]);
+// Hostile text in EVERY field the database can carry (P4b round 1's lesson:
+// one field with markup proves nothing about the others). The fields the
+// database cannot carry hostile text in (a zone name, a TIME column) are
+// driven through the renderer itself in VP01, with every field hostile.
+$vEvil = [
+    'title' => 'PDS V <img src=x onerror="window.pwned=1">title & "q"',
+    'about' => "PDS V <script>window.pwned=2</script>about\nline two",
+    'place' => 'PDS V <b onclick="x()">place</b>',
+    'street' => 'PDS V <svg onload="x()"></svg>street',
+    'poster' => 'PDS V <iframe src="//evil"></iframe>poster',
+    'kicker' => 'PDS V <u onmouseover="x()">kicker</u>',
+    'where' => 'PDS V <style>*{display:none}</style>where',
+    // `</title>` because inside <title> a parser reads tags as TEXT: only a
+    // closing tag can break out of it, so only a value carrying one can tell
+    // an escaped <title> from an unescaped one (VP02 was green without it).
+    'org' => 'PDS V </title><img src=x onerror=alert(1)> org & \'q\'',
+];
+$vEvent = $makeEvent($vEvil['title'], $siteA, $zoneA, $at($later->modify('+1 day')), null,
+    ['description' => $vEvil['about'], 'locationName' => $vEvil['place'], 'locationAddress' => $vEvil['street']]);
+$vPoster = $makePoster($vEvil['poster'], $siteA, ['kicker' => $vEvil['kicker'], 'location' => $vEvil['where']]);
+$db->query("UPDATE `tblSites` SET `siteName` = '" . $db->real_escape_string($vEvil['org']) . "' WHERE `siteID` = 1");
+$vHostileBodies = [$pageA('?show=both&limit=50')['body'], $pagePublicA('?show=both&limit=50')['body']];
+$db->query("UPDATE `tblSites` SET `siteName` = '" . $db->real_escape_string($nameTest) . "' WHERE `siteID` = 1");
+$db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$vEvent}");
+$db->query("DELETE FROM `tblNoticeboardPosters` WHERE `posterID` = {$vPoster}");
+$vHostile = array_map($pageFacts, $vHostileBodies);
+$vMissing = [];
+foreach ($vHostile as $i => $f) {
+    $all = array_merge([$f['title'] ?? ''], $f['titles'] ?? [], $f['abouts'] ?? [], $f['wheres'] ?? [], $f['kickers'] ?? []);
+    foreach (['title', 'poster'] as $k) {
+        if (in_array($vEvil[$k], $all, true) === false) {
+            $vMissing[] = "{$i}:{$k}";
+        }
+    }
+    foreach (['about' => 'abouts', 'kicker' => 'kickers', 'where' => 'wheres'] as $k => $list) {
+        if (in_array($vEvil[$k], $f[$list] ?? [], true) === false) {
+            $vMissing[] = "{$i}:{$k}";
+        }
+    }
+    if (in_array($vEvil['place'] . ', ' . $vEvil['street'], $f['wheres'] ?? [], true) === false) {
+        $vMissing[] = "{$i}:place+street";
+    }
+    if (($f['title'] ?? '') !== $vEvil['org'] . ' — events and noticeboard') {
+        $vMissing[] = "{$i}:organisation name";
+    }
+    if (in_array('<b>"Tom & Jerry\'s"</b></script>', $f['abouts'] ?? [], true) === false) {
+        $vMissing[] = "{$i}:running event's description";
+    }
+}
+check('V06 hostile text in EVERY field the database can carry — an event\'s title, description, place and address, a poster\'s title, kicker and place, and the organisation\'s name — appears character for character as TEXT in the parsed page, on both forms of address',
+    $vMissing, []);
+$vElements = ['a', 'body', 'h2', 'head', 'html', 'img', 'li', 'main', 'meta', 'p', 'section', 'style', 'title', 'ul'];
+check('V07 and nothing in those values became markup: no <script>, no on… attribute, exactly ONE <style> (the page\'s own), and no element the page does not draw itself',
+    array_map(static fn (array $f): array => [$f['scripts'] ?? null, $f['handlers'] ?? null, $f['styles'] ?? null, $f['tags'] ?? null], $vHostile),
+    [[0, [], 1, $vElements], [0, [], 1, $vElements]]);
+$vAllBodies = array_merge([$v1['body'], $pageA('?show=posters')['body'], $pageA('?show=both')['body'], $pagePublicA('?show=both')['body']], $vHostileBodies);
+check('V08 no page answer contains a <script> tag or "javascript:" anywhere in its bytes (the page is the no-script fallback)',
+    array_values(array_filter($vAllBodies, static fn (string $b): bool => stripos($b, '<script') !== false || stripos($b, 'javascript:') !== false)), []);
+
+// Headers, in each state of D-082 and D-094.
+$setOwn($siteA, 'public.frame.origins', null);
+$vNone = $pageA();
+check('V09 with nothing listed: frame-ancestors \'none\' (no website may frame it) and X-Frame-Options DENY; the ONE stylesheet allowed by the hash of what was really sent; no script source at all; sandboxed; one minute\'s caching; noindex; no cookie, no CORS header, no COOP',
+    $pageHeaders($vNone), $pageHeadersWant($pageCspFor($pageFacts($vNone['body']), "'none'"), 'DENY'));
+$setOwn($siteA, 'public.frame.origins', "https://www.selftest.invalid\nhttps://second.selftest.invalid:8443");
+$vListed  = $pageA();
+$vListedP = $pagePublicA();
+$vListedB = $http('GET', '/w/' . $nameB . '/page.html');
+check('V10 with two websites listed: frame-ancestors names exactly those two (as frameAncestorsFor() gives them), with NO X-Frame-Options (it cannot name a website, and DENY would refuse the listed ones) — on both forms of address; and B, which lists nothing, still says \'none\'',
+    [$pageHeaders($vListed), $pageHeaders($vListedP), $vListedB['headers']['content-security-policy'] ?? '', $vListedB['headers']['x-frame-options'] ?? ''],
+    [$pageHeadersWant($pageCspFor($pageFacts($vListed['body']), 'https://www.selftest.invalid https://second.selftest.invalid:8443'), ''),
+        $pageHeadersWant($pageCspFor($pageFacts($vListedP['body']), 'https://www.selftest.invalid https://second.selftest.invalid:8443'), ''),
+        $pageCspFor($pageFacts($vListedB['body']), "'none'"), 'DENY']);
+// A HAND-EDITED list (lines the page would refuse) is filtered by the ONE
+// reader: the header carries only what frameAncestorsFor() accepts.
+$setOwn($siteA, 'public.frame.origins', "https://www.selftest.invalid\nhttp://plain.selftest.invalid\nhttps://*.selftest.invalid\n*\nhttps://x.selftest.invalid; script-src *");
+$vEdited = $pageA();
+check('V11 a hand-edited list holding lines the page would refuse (plain http, a wildcard, "*", an injected directive) gives frame-ancestors the one good website only',
+    $vEdited['headers']['content-security-policy'] ?? '', $pageCspFor($pageFacts($vEdited['body']), 'https://www.selftest.invalid'));
+$setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
+$setInstallation('public.frame.permitted', 'no');
+$vOff = $pageA();
+$setInstallation('public.frame.permitted', 'maybe');
+$vOdd = $pageA();
+$setInstallation('public.frame.permitted', 'yes');
+check('V12 with the installation\'s switch saying no (D-094), and with a value that is neither yes nor no, a listed website counts for nothing: \'none\' and DENY',
+    [$pageHeaders($vOff), $pageHeaders($vOdd)],
+    [$pageHeadersWant($pageCspFor($pageFacts($vOff['body']), "'none'"), 'DENY'), $pageHeadersWant($pageCspFor($pageFacts($vOdd['body']), "'none'"), 'DENY')]);
+$vBefore = $sessionFiles();
+$vHead = $http('HEAD', '/w/' . $nameA . '/page.html');
+$pageA('', ['cookie' => 'PHPSESSID=' . str_repeat('p', 32)]);
+$pagePublicA('?show=both', ['cookie' => 'PHPSESSID=' . str_repeat('o', 32)]);
+check('V13 HEAD is answered like GET, with no body; and no page request makes a session file — a made-up cookie included',
+    [$vHead['status'], $vHead['body'], $sessionFiles() - $vBefore], [200, '', 0]);
+
+// The card.
+$vCard = static function () use ($http, $people): string {
+    return $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+};
+$vFrameLine = static function (string $show, string $title) use ($hostA): string {
+    return htmlspecialchars('<iframe src="https://' . $hostA . '/page.html?show=' . $show . '" title="' . $title . '" width="100%" height="600" style="border:0" '
+        . 'loading="lazy" referrerpolicy="no-referrer" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>', ENT_QUOTES, 'UTF-8');
+};
+$vCardListed = $vCard();
+$setOwn($siteA, 'public.frame.origins', null);
+$vCardNone = $vCard();
+$setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
+$setInstallation('public.frame.permitted', 'no');
+$vCardOff = $vCard();
+$setInstallation('public.frame.permitted', 'yes');
+$setOwn($siteA, 'public.frame.origins', null);
+check('V14 the card prints the frame to paste for events, posters and both, on the address the ONE helper builds (A\'s public address here), as TEXT — never a live frame on the card',
+    [str_contains($vCardListed, $vFrameLine('events', 'Our events')), str_contains($vCardListed, $vFrameLine('posters', 'Our noticeboard')),
+        str_contains($vCardListed, $vFrameLine('both', 'Our events and noticeboard')), stripos($vCardListed, '<iframe') !== false],
+    [true, true, true, false]);
+check('V15 and says when a frame works: only on the website listed (named); on NO website while none is listed; and not at all while the installation forbids framing — each in its own words',
+    [str_contains($vCardListed, 'data-frame-works="listed"') && str_contains($vCardListed, 'below: https://www.selftest.invalid.'),
+        str_contains($vCardNone, 'data-frame-works="none-listed"'), str_contains($vCardOff, 'data-frame-works="installation-off"'),
+        str_contains($vCardOff, 'data-frame-works="listed"'), str_contains($vCardNone, 'data-frame-works="listed"')],
+    [true, true, true, false, false]);
+
+// Refusals: every one joins $refusals, which R01 compares byte for byte.
+foreach (['Events', 'all', '', ' events', 'next'] as $bad) {
+    $refusals['the page, show=' . $bad] = $pageA('?show=' . rawurlencode($bad));
+}
+$refusals['the page, show as a list'] = $pageA('?show[]=events');
+$refusals['the page, limit=0'] = $pageA('?limit=0');
+$refusals['the page, limit=51'] = $pageA('?limit=51');
+$refusals['the page, a POST'] = $http('POST', '/w/' . $nameA . '/page.html', ['post' => ['x' => '1']]);
+$refusals['the page, in capitals'] = $http('GET', '/w/' . $nameA . '/PAGE.HTML');
+$refusals['the page, a trailing slash'] = $http('GET', '/w/' . $nameA . '/page.html/');
+$refusals['the page, unknown name'] = $http('GET', '/w/' . str_repeat('cd', 12) . '/page.html');
+$refusals['the page, an inactive organisation by name'] = $http('GET', '/w/' . $nameC . '/page.html');
+$refusals['the page, an inactive organisation\'s public address'] = $http('GET', '/page.html', ['host' => $hostC]);
+$setOwn($siteA, 'calendar.enabled', 'false');
+$refusals['the page, events with Calendar off'] = $pageA('?show=events');
+$refusals['the page, both with Calendar off'] = $pagePublicA('?show=both');
+$vCalOffPosters = $pageA('?show=posters')['status'];
+$setOwn($siteA, 'calendar.enabled', null);
+$setOwn($siteA, 'noticeboard.enabled', 'false');
+$refusals['the page, posters with the Noticeboard off'] = $pagePublicA('?show=posters');
+$refusals['the page, both with the Noticeboard off'] = $pageA('?show=both');
+$vNbOffEvents = $pageA('?show=events')['status'];
+$setOwn($siteA, 'noticeboard.enabled', null);
+check('V16 every part asked for needs its own app: Calendar off refuses events and both but serves posters; the Noticeboard off refuses posters and both but serves events',
+    [$refusals['the page, events with Calendar off']['status'], $refusals['the page, both with Calendar off']['status'], $vCalOffPosters,
+        $refusals['the page, posters with the Noticeboard off']['status'], $refusals['the page, both with the Noticeboard off']['status'], $vNbOffEvents],
+    [404, 404, 200, 404, 404, 200]);
+check('V17 a show that is not exactly events, posters or both (capitals, "all", empty, a space, the script\'s "next", a list), a bad limit, a POST, capitals, a trailing slash, an unknown name and an inactive organisation (by name and public address) are all the door\'s 404',
+    array_values(array_unique(array_map(static fn (string $k): int => $refusals[$k]['status'], array_values(array_filter(array_keys($refusals),
+        static fn (string $k): bool => str_starts_with($k, 'the page, ') === true))))), [404]);
+$setInstallation('portal.maintenance.active', '1');
+$vClosed        = $pageA();
+$vClosedUnknown = $http('GET', '/w/' . str_repeat('cd', 12) . '/page.html');
+$setInstallation('portal.maintenance.active', '0');
+check('V18 while closed for maintenance the page is the same 503 as every other door answer, a real name and an unknown one alike',
+    [$vClosed['status'], $signature($vClosed) === $signature($vClosedUnknown)], [503, true]);
+// Replaced, and switched off — on BOTH forms of address (P4b round 1's
+// lesson: on a public address "is the door on?" is the only guard).
+$vOldName = $nameA;
+$card('root', 'door_replace', ['understood' => '1']);
+$refusals['the page on a replaced name'] = $http('GET', '/w/' . $vOldName . '/page.html');
+$vLastName = (string) $doorName($siteA);
+$card('root', 'door_off', ['understood' => '1']);
+$refusals['the page on a switched-off door\'s public address'] = $http('GET', '/page.html', ['host' => $hostA]);
+$refusals['the page on a switched-off door\'s last name'] = $http('GET', '/w/' . $vLastName . '/page.html');
+$card('root', 'door_on');
+$nameA = (string) $doorName($siteA);
+check('V19 the page after a replaced name, and with the door switched off (on A\'s approved public address AND on the last name), is the door\'s 404 — and served again once the door is back on',
+    [$refusals['the page on a replaced name']['status'], $refusals['the page on a switched-off door\'s public address']['status'],
+        $refusals['the page on a switched-off door\'s last name']['status'], $pageA()['status'], $pagePublicA()['status']],
+    [404, 404, 404, 200, 200]);
+
+// The renderer itself, with EVERY field hostile — including the two the
+// database cannot carry hostile text in (a zone's name, a poster's time) — run
+// from the COPY in its own PHP process, so a plant made in the copy is what
+// answers (VP plants below).
+$vpFixture = [
+    'events' => ['organisation' => ['name' => 'VP </title><img src=x onerror=1> org', 'timezone' => 'Europe/London'], 'events' => [
+        ['id' => 'a', 'title' => 'VP <script>window.pwned=1</script>title', 'startsAt' => '2030-06-01T10:30:00+01:00', 'endsAt' => null,
+            'startsOnClock' => '2030-06-01T10:30:00', 'endsOnClock' => null, 'allDay' => false, 'timezone' => 'Atlantic/<i onclick=x>Nowhere',
+            'detailsLimited' => false, 'description' => 'VP <iframe src=//evil></iframe>about',
+            'location' => ['name' => 'VP <u>place</u>', 'address' => 'VP <svg onload=x></svg>street', 'url' => 'javascript:window.pwned=2']],
+        ['id' => 'b', 'title' => 'VP plain', 'startsAt' => '2030-06-02T09:00:00+01:00', 'endsAt' => null, 'startsOnClock' => '2030-06-02T09:00:00',
+            'endsOnClock' => null, 'allDay' => false, 'timezone' => 'Europe/London', 'detailsLimited' => false, 'description' => null,
+            'location' => ['name' => 'Venue', 'address' => null, 'url' => 'https://venue.example.invalid/?a=1&lt;b']],
+        ['id' => 'c', 'title' => 'VP all day', 'startsAt' => '2030-07-04T00:00:00+01:00', 'endsAt' => null, 'startsOnClock' => '2030-07-04T00:00:00',
+            'endsOnClock' => null, 'allDay' => true, 'timezone' => 'Europe/London', 'detailsLimited' => true, 'description' => null, 'location' => null],
+    ]],
+    'posters' => ['organisation' => ['name' => 'VP </title><img src=x onerror=1> org', 'timezone' => 'Europe/London'], 'posters' => [
+        ['title' => 'VP <img src=x onerror=3>poster', 'kicker' => 'VP <i>kicker</i>', 'category' => null, 'when' => ['type' => 'weekly', 'weekday' => 2],
+            'time' => 'VP <b>10:30</b>', 'location' => 'VP <s>where</s>', 'link' => 'http://plain.example.invalid/',
+            'media' => ['type' => 'image', 'url' => 'http://pictures.example.invalid/a.png'], 'thumbUrl' => null, 'canvaUrl' => null],
+        ['title' => 'VP poster two', 'kicker' => null, 'category' => null, 'when' => ['type' => 'once', 'date' => '2030-07-04'], 'time' => null,
+            'location' => null, 'link' => 'https://more.example.invalid/x?a=1&lt;b', 'media' => null,
+            'thumbUrl' => 'https://pictures.example.invalid/t.png?a=1&lt;b', 'canvaUrl' => null],
+    ]],
+];
+file_put_contents($child . $sep . 'vp-fixture.json', json_encode($vpFixture));
+file_put_contents($child . $sep . 'vp-render.php', '<?php' . "\n" . 'declare(strict_types=1);' . "\n"
+    . '$core = $argv[1];' . "\n"
+    . 'spl_autoload_register(static function (string $c) use ($core): void { if (str_starts_with($c, "Portal\\\\Core\\\\") === true) { $f = $core . "/" . substr($c, 12) . ".php"; if (is_file($f) === true) { require $f; } } });' . "\n"
+    . '$fx = json_decode((string) file_get_contents($argv[2]), true);' . "\n"
+    . 'echo \Portal\Core\PublicDoor::renderPage($fx["events"], $fx["posters"]);' . "\n");
+$pureRender = static function () use ($child, $sep): string {
+    return (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($child . $sep . 'vp-render.php') . ' '
+        . escapeshellarg($child . $sep . 'web' . $sep . '_core') . ' ' . escapeshellarg($child . $sep . 'vp-fixture.json') . ' 2>&1');
+};
+$vpWant = [
+    'parsed' => true, 'title' => 'VP </title><img src=x onerror=1> org — events and noticeboard', 'parts' => ['events', 'posters'],
+    'headings' => ['Events', 'Noticeboard'],
+    'titles' => ['VP <script>window.pwned=1</script>title', 'VP plain', 'VP all day', 'VP <img src=x onerror=3>poster', 'VP poster two'],
+    'whens' => ['Sat 1 Jun 2030, 10:30 (<i onclick=x>Nowhere time)', 'Sun 2 Jun 2030, 09:00', 'Thu 4 Jul 2030', 'Every Tuesday, VP <b>10:30</b>', 'Thu 4 Jul 2030'],
+    'wheres' => ['VP <u>place</u>, VP <svg onload=x></svg>street', 'Venue', 'VP <s>where</s>'],
+    'abouts' => ['VP <iframe src=//evil></iframe>about'], 'kickers' => ['VP <i>kicker</i>'], 'empties' => [],
+    'links' => [['href' => 'https://venue.example.invalid/?a=1&lt;b', 'target' => '_blank', 'rel' => 'noopener noreferrer nofollow', 'ref' => 'no-referrer', 'text' => 'Venue details'],
+        ['href' => 'https://more.example.invalid/x?a=1&lt;b', 'target' => '_blank', 'rel' => 'noopener noreferrer nofollow', 'ref' => 'no-referrer', 'text' => 'Find out more']],
+    'pics' => [['src' => 'https://pictures.example.invalid/t.png?a=1&lt;b', 'ref' => 'no-referrer', 'alt' => '']],
+    'tags' => $vElements, 'handlers' => [], 'scripts' => 0, 'styles' => 1,
+];
+$vpFacts = static function (string $html) use ($pageFacts): array {
+    $f = $pageFacts($html);
+    unset($f['styleText']);
+    return $f;
+};
+check('VP01 the renderer, with every field hostile (the zone\'s name and the poster\'s time included): each value is TEXT, character for character; a link and a picture only to https, written so "&lt;" in an address stays those four characters; the zone named only where it is not the organisation\'s; an all-day event by its day alone; nothing that runs',
+    $vpFacts($pureRender()), $vpWant);
+/** A plant in the COPY's renderer only — no web server is involved, so none is restarted. */
+$plantPure = static function (string $from, string $to, callable $read) use ($child, $sep, $pureRender, $vpFacts): array {
+    $path   = $child . $sep . 'web' . $sep . '_core' . $sep . 'PublicDoor.php';
+    $before = (string) file_get_contents($path);
+    if (substr_count($before, $from) !== 1) {
+        echo '      ! PLANT NOT APPLIED: the text was found ' . substr_count($before, $from) . " times, not once: " . substr($from, 0, 90) . "\n";
+        return ['applied' => false, 'result' => null];
+    }
+    file_put_contents($path, str_replace($from, $to, $before));
+    $facts = $vpFacts($pureRender());
+    file_put_contents($path, $before);
+    return ['applied' => true, 'result' => $read($facts)];
+};
+foreach ([
+    ['VP02', "'<title>' . self::text(\$title)", "'<title>' . \$title", 'the organisation\'s name in the <title>', static fn (array $f): bool => ($f['title'] ?? null) !== $vpWant['title']],
+    ['VP03', "<p class=\\\"door__title\\\">\" . self::text(\$ev['title'] ?? '')", "<p class=\\\"door__title\\\">\" . (\$ev['title'] ?? '')", 'an event\'s title', static fn (array $f): bool => ($f['titles'][0] ?? null) !== $vpWant['titles'][0]],
+    ['VP04', "'<p class=\"door__when\">' . self::text(\$when)", "'<p class=\"door__when\">' . \$when", 'an event\'s time and its zone label', static fn (array $f): bool => ($f['whens'][0] ?? null) !== $vpWant['whens'][0]],
+    ['VP05', "'<p class=\"door__where\">' . self::text(\$where)", "'<p class=\"door__where\">' . \$where", 'an event\'s place and address', static fn (array $f): bool => ($f['wheres'][0] ?? null) !== $vpWant['wheres'][0]],
+    ['VP06', "'<p class=\"door__about\">' . self::text(\$about)", "'<p class=\"door__about\">' . \$about", 'an event\'s description', static fn (array $f): bool => ($f['abouts'] ?? null) !== $vpWant['abouts']],
+    ['VP07', "'<p class=\"door__kicker\">' . self::text(\$kicker)", "'<p class=\"door__kicker\">' . \$kicker", 'a poster\'s kicker', static fn (array $f): bool => ($f['kickers'] ?? null) !== $vpWant['kickers']],
+    ['VP08', "'<p class=\"door__title\">' . self::text(\$p['title'] ?? '')", "'<p class=\"door__title\">' . (\$p['title'] ?? '')", 'a poster\'s title', static fn (array $f): bool => ($f['titles'][3] ?? null) !== $vpWant['titles'][3]],
+    ['VP09', "'<p class=\"door__when\">' . self::text(\$posterWhen)", "'<p class=\"door__when\">' . \$posterWhen", 'a poster\'s day and time', static fn (array $f): bool => ($f['whens'][3] ?? null) !== $vpWant['whens'][3]],
+    ['VP10', "'<p class=\"door__where\">' . self::text(\$place)", "'<p class=\"door__where\">' . \$place", 'a poster\'s place', static fn (array $f): bool => ($f['wheres'][2] ?? null) !== $vpWant['wheres'][2]],
+    ['VP11', "'<p class=\"door__link\"><a href=\"' . self::text(\$safe)", "'<p class=\"door__link\"><a href=\"' . \$safe", 'a link\'s address', static fn (array $f): bool => ($f['links'] ?? null) !== $vpWant['links']],
+    ['VP12', "'<img class=\"door__picture\" src=\"' . self::text(\$src)", "'<img class=\"door__picture\" src=\"' . \$src", 'a picture\'s address', static fn (array $f): bool => ($f['pics'] ?? null) !== $vpWant['pics']],
+    ['VP13', "\$safe = is_string(\$address) === true ? self::httpsOrNull(\$address) : null;", "\$safe = is_string(\$address) === true ? \$address : null;", 'https only, for links', static fn (array $f): bool => ($f['links'] ?? null) !== $vpWant['links']],
+    ['VP14', "\$src     = is_string(\$picture) === true ? self::httpsOrNull(\$picture) : null;", "\$src     = is_string(\$picture) === true ? \$picture : null;", 'https only, for pictures', static fn (array $f): bool => ($f['pics'] ?? null) !== $vpWant['pics']],
+    ['VP15', "if (\$zone !== '' && \$orgClock !== '' && \$zone !== \$orgClock) {", "if (\$zone !== '') {", 'the zone label only where the clock differs', static fn (array $f): bool => ($f['whens'][1] ?? null) !== $vpWant['whens'][1]],
+    ['VP16', "\$words = I18n::formatClockDateTime(\$reading, (\$ev['allDay'] ?? false) === true ? 'D j M Y' : 'D j M Y, H:i');", "\$words = I18n::formatClockDateTime(\$reading, 'D j M Y, H:i');", 'an all-day event by its day alone', static fn (array $f): bool => ($f['whens'][2] ?? null) !== $vpWant['whens'][2]],
+] as [$label, $from, $to, $what, $caught]) {
+    $p = $plantPure($from, $to, $caught);
+    check("{$label} with {$what} taken out of the renderer, VP01's facts change", [$p['applied'], $p['result']], [true, true]);
+}
+
+// =============================================================================
 echo "W. The old widget folder is gone, and its addresses answer nothing (D-084)\n";
 // =============================================================================
 // D-084: web/public_html/widget/ (countdown.js) is deleted with its two
@@ -1986,6 +2395,16 @@ check('T10 on a test copy the script follows D-087 exactly as the feeds do: with
     [$tScriptNone['status'], $signature($tScriptNone) === $signature($alphaRefusal), $tScriptTester['status'], $tScriptTester['headers']['cache-control'] ?? '',
         $tScriptTester['headers']['vary'] ?? '', $tScriptTester['headers']['x-robots-tag'] ?? '', $tScriptTester['headers']['set-cookie'] ?? ''],
     [404, true, 200, 'private, no-store', 'Cookie', 'noindex, nofollow, noarchive', '']);
+// #493 P4c: the page follows D-087 exactly as the feeds do — and its
+// frame-ancestors is still the organisation's list on a test copy.
+$setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
+$tPageNone   = $pageA();
+$tPageTester = $pageA('', ['cookie' => $cookieOf($people['tester']['jar'])]);
+$setOwn($siteA, 'public.frame.origins', null);
+check('T11 on a test copy the page follows D-087 as the feeds do: with no sign-in the door\'s 404; for a tester served with private, no-store, Vary: Cookie, noindex, nofollow, noarchive and no Set-Cookie — and frame-ancestors still the organisation\'s listed website, with no X-Frame-Options',
+    [$tPageNone['status'], $signature($tPageNone) === $signature($alphaRefusal), $tPageTester['status'], $pageHeaders($tPageTester)],
+    [404, true, 200, $pageHeadersWant($pageCspFor($pageFacts($tPageTester['body']), 'https://www.selftest.invalid'), '', 'private, no-store', 'Cookie',
+        'noindex, nofollow, noarchive')]);
 $channel = 'prod';
 $startServer();
 $waitForServer();
@@ -2584,6 +3003,115 @@ $p = $plant('_core/PublicDoor.php', "        return \$m[1] . 'T' . \$m[2];", "  
     static fn (): array => $scnClockFields());
 check('PJ11 with startsOnClock withheld for any reading at 00:00, J11 sees it null beside a real instant (and its premise still holds, so it bit on a real 00:00 event)',
     [$p['applied'], $p['result']['premise'] ?? null, ($p['result']['problems'] ?? []) !== []], [true, true, true]);
+
+// ── #493 P4c: the framed page's own guards ──────────────────────────────────
+// Each taken out of the copy and the check that must notice re-run; the
+// expected value is the value UNDER the fault. The renderer's own plants
+// (VP02-VP16) need no web server and are in section V.
+$p = $plant('_core/PublicDoor.php', "if (\$show !== 'posters' && AppRegistry::isEnabledForSite('calendar', \$siteId) === false) {", 'if (false) {',
+    static function () use ($setOwn, $siteA, $pageA): int {
+        $setOwn($siteA, 'calendar.enabled', 'false');
+        $s = $pageA('?show=events')['status'];
+        $setOwn($siteA, 'calendar.enabled', null);
+        return $s;
+    });
+check('PV01 with the page\'s Calendar question taken out, its events are drawn with Calendar switched off (V16 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', "if (\$show !== 'events' && AppRegistry::isEnabledForSite('noticeboard', \$siteId) === false) {", 'if (false) {',
+    static function () use ($setOwn, $siteA, $pageA): int {
+        $setOwn($siteA, 'noticeboard.enabled', 'false');
+        $s = $pageA('?show=posters')['status'];
+        $setOwn($siteA, 'noticeboard.enabled', null);
+        return $s;
+    });
+check('PV02 with the page\'s Noticeboard question taken out, its posters are drawn with the Noticeboard switched off (V16 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$pageSend = 'self::sendPageHeaders(PublicWebsiteSetup::frameAncestorsFor($db, $siteId), $testCopy, $testersOnly);';
+$p = $plant('_core/PublicDoor.php', $pageSend,
+    'self::sendPageHeaders(PublicWebsiteSetup::frameAncestorsValue(PublicWebsiteSetup::frameOriginsStored($db, $siteId)), $testCopy, $testersOnly);',
+    static function () use ($setOwn, $setInstallation, $siteA, $pageA): bool {
+        $setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
+        $setInstallation('public.frame.permitted', 'no');
+        $csp = $pageA()['headers']['content-security-policy'] ?? '';
+        $setInstallation('public.frame.permitted', 'yes');
+        $setOwn($siteA, 'public.frame.origins', null);
+        return str_contains($csp, 'frame-ancestors https://www.selftest.invalid;');
+    });
+check('PV03 with frame-ancestors built from the stored list rather than frameAncestorsFor(), the installation\'s "no" is ignored and the listed website may frame the page (V12 catches it)',
+    [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_core/PublicDoor.php', $pageSend, "self::sendPageHeaders(\"'none'\", \$testCopy, \$testersOnly);",
+    static function () use ($setOwn, $siteA, $pageA): bool {
+        $setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
+        $csp = $pageA()['headers']['content-security-policy'] ?? '';
+        $setOwn($siteA, 'public.frame.origins', null);
+        return str_contains($csp, "frame-ancestors 'none';");
+    });
+check('PV04 with frame-ancestors fixed at \'none\' rather than asked of frameAncestorsFor(), a listed website is refused too (V10 catches it)', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_core/PublicDoor.php', "if (\$frameAncestors === \"'none'\") {", 'if (true) {',
+    static function () use ($setOwn, $siteA, $pageA): string {
+        $setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
+        $x = $pageA()['headers']['x-frame-options'] ?? '';
+        $setOwn($siteA, 'public.frame.origins', null);
+        return $x;
+    });
+check('PV05 with X-Frame-Options DENY sent whatever is listed, a browser honouring it would refuse the listed website (V10 catches it)', [$p['applied'], $p['result']], [true, 'DENY']);
+$p = $plant('_core/PublicDoor.php', "if (\$frameAncestors === \"'none'\") {", 'if (false) {',
+    static fn (): string => $pageA()['headers']['x-frame-options'] ?? '');
+check('PV06 with X-Frame-Options never sent, a browser too old for frame-ancestors would let ANY website frame a page that lists none (V09 catches it)', [$p['applied'], $p['result']], [true, '']);
+$p = $plant('_core/PublicDoor.php', "base64_encode(hash('sha256', self::PAGE_CSS, true))", "base64_encode(hash('sha256', '', true))",
+    static function () use ($pageA, $pageCspFor, $pageFacts): bool {
+        $r = $pageA();
+        return ($r['headers']['content-security-policy'] ?? '') === $pageCspFor($pageFacts($r['body']), "'none'");
+    });
+check('PV07 with the stylesheet\'s hash worked out from anything but the stylesheet sent, V09 sees the content rule no longer allow it', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/PublicDoor.php', "'sandbox allow-popups allow-popups-to-escape-sandbox'", "'upgrade-insecure-requests'",
+    static function () use ($pageA, $pageCspFor, $pageFacts): bool {
+        $r = $pageA();
+        return ($r['headers']['content-security-policy'] ?? '') === $pageCspFor($pageFacts($r['body']), "'none'");
+    });
+check('PV08 with the sandbox taken out of the content rule, V09 notices', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/PublicDoor.php', 'if (is_string($raw) === false || in_array($raw, self::PAGE_SHOWS, true) === false) {', 'if (is_string($raw) === false) {',
+    static fn (): int => $pageA('?show=Events')['status']);
+check('PV09 with the exact list of shows taken out, show=Events is answered (V17 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', "if (PublicWebsiteSetup::doorStateFor(\$db, \$siteId)['state'] !== 'on') {",
+    "if (\$surface !== self::SURFACE_PAGE && PublicWebsiteSetup::doorStateFor(\$db, \$siteId)['state'] !== 'on') {",
+    static function () use ($db, $siteA, $http, $hostA): int {
+        $was = $db->query("SELECT `publicName` FROM `tblPublicDoorNames` WHERE `siteID` = {$siteA}")->fetch_assoc();
+        $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` = {$siteA}");
+        $s = $http('GET', '/page.html', ['host' => $hostA])['status'];
+        if ($was !== null) {
+            $db->query("INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES ({$siteA}, '{$was['publicName']}', UTC_TIMESTAMP())");
+        }
+        return $s;
+    });
+check('PV10 with the page let past the "door on?" question, a switched-off door serves it on its approved public address (V19 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', "\$reading = \$ev['startsOnClock'] ?? null;",
+    "\$reading = isset(\$ev['startsAt']) === true ? substr((string) \$ev['startsAt'], 0, 19) : null;",
+    static function () use ($makeEvent, $siteA, $jGapDay, $pageA, $pageFacts, $vWhen, $db): ?string {
+        $id = $makeEvent('PDS A in the missing hour', $siteA, 'Europe/London', $jGapDay . ' 01:30:00', $jGapDay . ' 03:00:00');
+        $w  = $vWhen($pageFacts($pageA('?limit=50')['body']), 'PDS A in the missing hour');
+        $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+        return $w;
+    });
+check('PV11 with the time shown taken from the instant rather than the stored reading, the missing-hour event shows 02:30 (V05 catches it)',
+    [$p['applied'], $p['result']], [true, (new DateTimeImmutable($jGapDay . ' 00:00:00', new DateTimeZone('UTC')))->format('D j M Y') . ', 02:30' . $vLondon]);
+$p = $plant('_core/PublicDoor.php', $pageSend, "self::sendDataHeaders('text/html; charset=utf-8', \$testCopy, \$testersOnly);",
+    static function () use ($pageA, $pageHeaders, $pageHeadersWant, $pageCspFor, $pageFacts): bool {
+        $r = $pageA();
+        return $pageHeaders($r) === $pageHeadersWant($pageCspFor($pageFacts($r['body']), "'none'"), 'DENY');
+    });
+check('PV12 with the page sent under the FEEDS\' headers (never framable, readable by any script), V09 notices', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/PublicDoor.php', "        self::clearHeaders();\n        http_response_code(200);\n        foreach (self::pageHeaderLines(",
+    "        http_response_code(200);\n        foreach (self::pageHeaderLines(",
+    static function () use ($setOwn, $siteA, $pageA, $pageHeaders): array {
+        $setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
+        $h = $pageHeaders($pageA());
+        $setOwn($siteA, 'public.frame.origins', null);
+        return [$h['x-frame-options'], $h['cross-origin-opener-policy']];
+    });
+check('PV13 with start-up\'s headers no longer cleared first, its X-Frame-Options SAMEORIGIN and COOP reach a page that lists a website, and the listed website is refused (V10 catches it)',
+    [$p['applied'], $p['result']], [true, ['SAMEORIGIN', 'same-origin']]);
+$p = $plant('_core/PublicDoor.php', 'if (Gatekeeper::mayUseTestCopy($db, self::peekSignedInAccount(), PORTAL_ENV) === false) {', 'if (false) {',
+    static fn (): int => $pageA()['status'], 'alpha');
+check('PV14 with D-087\'s tester question taken out, a test copy serves the page to anybody (T11 catches it)', [$p['applied'], $p['result']], [true, 200]);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

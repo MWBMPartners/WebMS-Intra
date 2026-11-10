@@ -37,7 +37,7 @@
  *   B  every address that must work does, exactly as measured: / and the
  *      clean addresses the router answers (/robots.txt, /sitemap.xml,
  *      /manifest.json, /openapi.json, /assets/, /expenses/submit,
- *      /w/…/events.json, /w/…/door.js, and — since #493 P4b deleted the
+ *      /w/…/events.json, /w/…/door.js, /w/…/page.html (#493 P4c), and — since #493 P4b deleted the
  *      folder — /widget and /widget/countdown.js) reach index.php; /api-docs/ and /error.php run their
  *      own files; /offline/ runs the static offline page; /index.php, /assets,
  *      /offline and /api-docs redirect where the server sends them (see the
@@ -75,7 +75,7 @@ declare(strict_types=1);
 
 const HAS_IMAGE = 'php:8.4-apache';
 /** Every check, counted: a probe list that shrinks must fail, not pass quietly. */
-const EXPECTED_CHECKS = 56; // 53, then three B probes for #493 P4b (door.js, /widget, /widget/countdown.js)
+const EXPECTED_CHECKS = 57; // 53, then three B probes for #493 P4b (door.js, /widget, /widget/countdown.js), and one for P4c (page.html)
 
 $repo   = dirname(__DIR__);
 $webDir = $repo . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . 'public_html';
@@ -248,6 +248,9 @@ $mustWork = [
     // front controller, where the router has no address for them (the real
     // portal's 404; tools/public-door-selftest.php section W drives that).
     ['/w/0123456789abcdef01234567/door.js', 'index.php'], ['/widget', 'index.php'], ['/widget/countdown.js', 'index.php'],
+    // #493 P4c: the page a website frames is never a file on disk either; an
+    // address ending in .html must reach the front controller like any other.
+    ['/w/0123456789abcdef01234567/page.html', 'index.php'],
     ['/assets/js/portal.js', 'static:assets/js/portal.js'], ['/sw.js', 'static:sw.js'], ['/sitemap.xsd', 'static:sitemap.xsd'],
 ];
 
