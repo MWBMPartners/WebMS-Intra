@@ -91,13 +91,17 @@
  *   reason; rule 2 passes the request's own name through untouched, because
  *   the browser then gives its own refusal and nothing the portal sent could
  *   change it.
- * - A WIDER rpId set by hand (say "example.org" for portal.example.org) lets
- *   every site under that domain ask a member's authenticator for an answer.
- *   The origin check is what stops such an answer being accepted, and it can
- *   only do that while the origin is FIXED, i.e. while `site.url` is set.
+ * - ANY rpId set by hand while `site.url` is empty — not only a wider one.
+ *   A wider name (say "example.org" for portal.example.org) lets every site
+ *   under that domain ask a member's authenticator for an answer; but even
+ *   the portal's own exact name lets every site BELOW it (x.portal.example.org)
+ *   ask. The origin check is what stops such an answer being accepted, and it
+ *   can only do that while the origin is FIXED, i.e. while `site.url` is set.
  *   With `site.url` empty the origin follows the request, and an answer
- *   collected by another site under the wider domain could be replayed with
- *   that site's name as the Host. So set `site.url` before widening the rpId.
+ *   collected by such a site could be replayed with that site's name as the
+ *   Host. So set `site.url` before setting the rpId by hand at all. (The
+ *   independent check on #903 found the first version of this sentence said
+ *   "wider" only, which understated it; the code before #903 behaved the same.)
  * - Whether the address really reaches this portal. That is the hosting
  *   panel's business, as it is for PortalAddress.
  *
