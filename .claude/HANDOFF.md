@@ -13,7 +13,7 @@ Last whole suite (with #932): 104/104 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 0381b94c | Check round 10: one real problem, a test gap ('both holds' wording unpinned); plus organisation-name escaping unguarded (security), the no-period statement rule untested one way, and three untrue doc sentences. Round 11 building. Then #940 |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 1409d679 | Check round 11: code correct (no erasure step changed); three tests pass on broken code, each 'one state over' the last round's fix. Round 12 = table-driven pin of the whole hold matrix, narrowed escaping check, which-organisation lose-row check, plus four untrue sentences. Then #940 |
 | #785 — a guard for write paths that store a wall-clock reading as a moment | worktree agent (p785-build) | Building (tooling only) |
 | #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | worktree agent (p935-build) | Building |
 
