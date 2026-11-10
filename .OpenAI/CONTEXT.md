@@ -548,7 +548,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     address anywhere it reads: the list of places still to sweep,
     `site_aware_addresses_pending.txt`, has been EMPTY since 13 October 2026
     and nothing may be added to it (`--strict` fails if a line appears).
-    `tools/site-addresses-selftest.php` reads the real pages.
+    `tools/site-addresses-selftest.php` reads the real pages. **A "come back to" address taken from a request goes through `Auth::safeRedirectUrl()` and nothing else (#620)** — no page judges one itself; `tools/audit-checks/check_redirect_targets_judged.py` is the hard gate (presence only, D-065), and the newsletter click counter forwards only to the address `Newsletter::linkTarget()` stored for that newsletter.
     `tools/audit-checks/check_registered_addresses.py` fails on an address
     written out whole in `Site::url()`, `Router::url()`,
     `Router::urlForScript()` or `Portal.url()` that nothing answers (an

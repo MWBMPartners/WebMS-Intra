@@ -1130,6 +1130,17 @@ jobs:
           python3 tools/audit-checks/check_sign_in_begins_session.py
           python3 tools/audit-checks/check_sign_in_begins_session.py --self-test
 
+      # #620. A "come back to" address taken from the request goes through
+      # Auth::safeRedirectUrl(), the ONE judge. Presence only (D-065): it
+      # follows no value; the HTTP test (come-back-addresses-selftest.php)
+      # proves the pages. Reads PHP with PHP's own tokeniser; REFUSES without php.
+      - name: 'A come-back address from the request is judged by Auth::safeRedirectUrl() (hard gate, #620)'
+        id: redirect_targets_judged
+        if: always()
+        run: |
+          python3 tools/audit-checks/check_redirect_targets_judged.py
+          python3 tools/audit-checks/check_redirect_targets_judged.py --self-test
+
       # A page that writes more than once must hand back the replacement
       # anti-forgery token, because accepting one replaces it (#634).
       - name: 'A page that writes twice hands back the replacement form token (hard gate, #646)'

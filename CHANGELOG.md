@@ -4,6 +4,35 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A "come back to" address is always judged, and the newsletter click counter is no longer an open redirect (#620, migration 268)
+
+- **Three older pages no longer send people to addresses they were handed
+  (#620).** The payments checkout and the asset assignment page each had a
+  "come back to" judge of their own, and both let something through: the
+  checkout accepted "/<tab>/outside.example", which a browser reads as another
+  site, and any other organisation's address; the asset page accepted a ".."
+  part that left the organisation. Both now ask `Auth::safeRedirectUrl()`, the
+  judge every sign-in page uses, which now also refuses a "." or ".." part in
+  every set-up (it used to only where organisations are told apart by the
+  first part of the address). A refused address on the asset page returns to
+  that asset's page, where the result message is shown. The newsletter's click
+  counter forwarded to ANY web address in its link — an open redirect wearing
+  the portal's address. Its links now carry a random token for an address
+  recorded with that newsletter when it is sent (migration 268,
+  `tblNewsletterLink`), and anything else gets "this link cannot be used / is
+  no longer valid" (404). **Links in newsletters sent before this change stop
+  working** — chosen knowingly; no installation exists yet and click counting
+  ships switched off. A counted link whose address had two query parts used to
+  reach the wrong page (it carried `&amp;`); fixed. A new hard gate,
+  `check_redirect_targets_judged.py`, reports a request value written
+  straight into a `Location` header outside the one judge;
+  it does not follow values (see DEV_NOTES).
+- **Tests:** new `tools/come-back-addresses-selftest.php` over real HTTP (its total pinned in the file), and the
+  check's own self-test; both wired into the workflows. Three check rounds by fresh Claude agents (protected arm:
+  security); every finding after round 1 was in the static check, so review closed at the three-round cap (D-064),
+  with what round 3 found on #913. The migration harness passed on MySQL 8.4.11 and MariaDB 11.4.13. Raised from
+  it: #909, #910, #911, #913. Codex has not reviewed it.
+
 ### Outbound webhooks can no longer be pointed inside the host's network (#615, D-102)
 
 - **Fixed (security):** saving a webhook now refuses an address on this machine, on a private or internal

@@ -22110,3 +22110,67 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
 - Not covered: `emit()` itself (same private `attemptDelivery()`); https to a real receiver; a real
   name server changing its answer mid-request (part A3 fakes it exactly as safefetch part E does).
 - Web Push still does not use SafeFetch (it posts to the push service a browser named; unchanged).
+
+### Come-back addresses and the one judge (#620)
+
+- `Auth::safeRedirectUrl()` is the ONE judge of an address taken from a
+  request. Rule 3 (#620): no "." or ".." path part, as sent or once decoded, in
+  EVERY set-up. It was refused only inside `staysInThisOrganisation()`, i.e.
+  only in path mode, so a single-organisation install accepted
+  "/assets/../../outside". The test there stays as a second line.
+- The newsletter click counter: `Newsletter::linkToken()` is the ONE writer of
+  `tblNewsletterLink`, `Newsletter::linkTarget()` the ONE reader, and
+  `Newsletter::isForwardable()` the ONE test of a forwardable address, asked
+  at write AND read. A stored list was chosen over a signature: no key to keep
+  or lose, the link reveals nothing, and the list is the record of what the
+  newsletter linked to. Tokens are random (not the row number) so one
+  newsletter's links cannot be listed by counting. `ON DUPLICATE KEY`, never
+  `INSERT IGNORE` (IGNORE turns "too long" into a silent cut). A link that
+  cannot be recorded (table missing before "Run migrations", database refused)
+  is sent UNCOUNTED rather than stopping the newsletter. The hash-clash guard
+  compares the stored address with the one asked about.
+- Nothing new is recorded about a person: who clicked is still only
+  `tblNewsletterRecipient.clickedAt`. A refused link counts nothing (D05).
+- The refusal uses the existing ONE page for an unusable e-mailed link,
+  `_core/templates/link-unusable.php` (#569), with 404 (not 410: the page
+  cannot tell an old link from a made-up one).
+- The check (`check_redirect_targets_judged.py` + `redirect-targets-structure.php`),
+  REWRITTEN in round 1 under D-065 and closed in round 2. It does NOT follow
+  values. Rule: in each `header()` whose header text (the argument named
+  `header:`, else the first) holds a fixed text beginning "Location:" (any
+  capitals), a request value (`$_GET`, `$_POST`, `$_REQUEST`, `$_COOKIE`,
+  `$_FILES`, also as `${_GET[...]}`; `$_SERVER` with no key, a key that is not
+  exactly one fixed text, or a key set from the request — `HTTP_*`,
+  `REDIRECT_*`, `REQUEST_URI`, `QUERY_STRING`, `PATH_INFO`, `ORIG_PATH_INFO`,
+  `PATH_TRANSLATED`, `PHP_SELF`, `SCRIPT_URL`, `SCRIPT_URI`, `SERVER_NAME`,
+  `UNENCODED_URL`, `argv`) may appear only in the FIRST argument of
+  `Auth::safeRedirectUrl(` (class RESOLVED to `Portal\Core\Auth` through
+  `namespace`/`use`; `self::`/`static::` only inside that class) or of a
+  harmless wrapper: `(int)`/`(float)`/`(bool)`, the built-in `intval()`,
+  `urlencode()`, `rawurlencode()`, `http_build_query()`, `isset()`, `empty()`.
+  Only the first argument, because the judge returns its fallback unchanged
+  and `http_build_query()` emits its prefix and separator raw. A wrapper
+  written as a method, after `new`, or named by this file's own `use function`
+  or declaration is not the built-in. Exemption list EMPTY (fails both ways).
+  Today: 1,272 Location headers, none with a request value written in.
+- Stated cost: ANY request value written into the header outside those
+  wrappers is reported, harmless or not (a test, `count()`, `strlen()`,
+  `sprintf('%d')`). None exists today.
+- What it cannot see, MEASURED (must-stay-green self-test cases): a request
+  value in a variable first (including `'/' . $_GET`), a helper's answer, a
+  parameter, an array element, the whole header in a variable, a split header
+  name, a heredoc holding a variable, a Refresh header, `header()` through
+  `call_user_func()` or a variable, and a namespaced `urlencode()`/`intval()`
+  that may be that namespace's own function declared in another file.
+  DECLARED: `$GLOBALS['_GET']`, `$_ENV`, `extract()`, variable variables,
+  properties, `filter_input()`, `getenv()`, `php://input`, `$_SESSION`, a
+  request-set `$_SERVER` key not on the list (a host's own `SetEnvIf`), meta
+  refresh, JavaScript. Against e1b4cc96 it reports the checkout's 5 and not
+  the other two pages (both used variables). The HTTP test guards behaviour.
+- Self-test: 50 must-report, 31 must-stay-green, 12 measured blind spots, 3
+  about the list and parsing; counts pinned.
+
+- The issues found by version 1 stand on their own: #909 (Zoom), #910 (?lang=
+  and the judge's colon rule). Version 2 does not see either (both use
+  variables), so they are no longer exemptions.
+- What round 3 (the last) found the check still cannot see — named arguments and spreads inside the judge or a wrapper, two own-function spellings, a bare constant `$_SERVER` key — is on #913.
