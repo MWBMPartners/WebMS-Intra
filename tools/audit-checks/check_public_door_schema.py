@@ -250,6 +250,12 @@ MUST_FAIL = [
     ("events", "the posters format name on the events feed", with_change(events_doc([]), format="webms-public-posters")),
     ("events", "a version given as text", with_change(events_doc([]), version="1")),
     ("events", "a missing field", events_doc([{k: v for k, v in GOOD_EVENT.items() if k != "detailsLimited"}])),
+    # Round 2 of P4b's check: taking either #493 P4b field out of the schema's
+    # `required` list was caught by nothing — the only missing-field case named
+    # detailsLimited. One case per field, each measured red with that field
+    # taken out of `required`.
+    ("events", "startsOnClock missing", events_doc([{k: v for k, v in GOOD_EVENT.items() if k != "startsOnClock"}])),
+    ("events", "endsOnClock missing", events_doc([{k: v for k, v in GOOD_EVENT.items() if k != "endsOnClock"}])),
     ("events", "fifty-one events", events_doc([GOOD_EVENT] * 51)),
     ("posters", "a sort order leaking out", posters_doc([with_change(GOOD_POSTER, sortOrder=3)])),
     ("posters", "a plain-http link", posters_doc([with_change(GOOD_POSTER, link="http://example.org")])),

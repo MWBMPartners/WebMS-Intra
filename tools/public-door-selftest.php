@@ -126,7 +126,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 195; // 170 in P4a; #493 P4b adds J01-J10, W01-W04, T10 and PJ1-PJ10
+const PDS_EXPECTED_CHECKS = 197; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1564,6 +1564,77 @@ check('J10 on the morning London\'s clocks go forward (' . $jGapDay . '), an eve
         $jGapRow['endsOnClock'] ?? null],
     ['02:30', $jGapDay . 'T01:30:00', $jGapDay . 'T02:30:00+01:00', $jGapDay . 'T03:00:00']);
 
+// Round 2 of P4b's check: "startsOnClock is null exactly when startsAt is" was
+// held by construction only — clockText() made to answer null for any reading
+// at hour 00 left every check green. So every event in a FRESH read of the
+// feeds is checked against the rule: each *OnClock is null exactly when its
+// instant is, and otherwise equals the instant's first 19 characters — except
+// the one event in the missing hour, whose reading is the STORED one. The read
+// includes an event starting at 00:00 and the missing-hour event, each made
+// for the read and removed after it, and the premise says they were really
+// there. ⚠️ The first version borrowed C18's all-day event "today" for its
+// 00:00 reading — and a run that crossed midnight lost it: by the time PJ11
+// ran, "today" was yesterday, the event had finished and left the feed, the
+// plant had nothing to bite on and stayed green (measured). Its own event,
+// three days ahead, cannot expire mid-run; and PJ11 asks the premise too.
+$scnClockFields = static function () use ($feedA, $http, $hostA, $nameB, $makeEvent, $siteA, $zoneA, $nowA, $jGapDay, $db): array {
+    $midnightDay = $nowA->modify('+3 days')->format('Y-m-d');
+    $midnight = $makeEvent('PDS A at midnight', $siteA, $zoneA, $midnightDay . ' 00:00:00', $midnightDay . ' 01:00:00');
+    $gap      = $makeEvent('PDS A in the missing hour', $siteA, 'Europe/London', $jGapDay . ' 01:30:00', $jGapDay . ' 03:00:00');
+    $reads = [$feedA('events.json?limit=50'), $http('GET', '/events.json?limit=50', ['host' => $hostA]), $http('GET', '/w/' . $nameB . '/events.json?limit=50')];
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` IN ({$midnight}, {$gap})");
+    $problems = [];
+    $seen     = ['events' => 0, 'midnight' => 0, 'withEnd' => 0, 'gap' => 0];
+    foreach ($reads as $i => $r) {
+        $events = json_decode($r['body'], true)['events'] ?? null;
+        if ($r['status'] !== 200 || is_array($events) === false) {
+            $problems[] = "read {$i} answered {$r['status']}";
+            continue;
+        }
+        foreach ($events as $one) {
+            $seen['events']++;
+            $isGap = $one['title'] === 'PDS A in the missing hour';
+            foreach (['startsAt' => 'startsOnClock', 'endsAt' => 'endsOnClock'] as $instantKey => $clockKey) {
+                if (array_key_exists($clockKey, $one) === false) {
+                    $problems[] = "{$one['title']}: no {$clockKey}";
+                    continue;
+                }
+                $instant = $one[$instantKey];
+                $clock   = $one[$clockKey];
+                // What was READ is counted from the instant, before any rule is
+                // judged, so a fault in the reading to show cannot also empty
+                // the premise (it did, in the first version of PJ11).
+                if ($instantKey === 'startsAt' && $instant !== null && substr((string) $instant, 11, 2) === '00') {
+                    $seen['midnight']++;
+                }
+                if ($instantKey === 'endsAt' && $instant !== null) {
+                    $seen['withEnd']++;
+                }
+                if (($instant === null) !== ($clock === null)) {
+                    $problems[] = "{$one['title']}: {$clockKey} " . var_export($clock, true) . " beside {$instantKey} " . var_export($instant, true);
+                    continue;
+                }
+                if ($instant === null) {
+                    continue;
+                }
+                $want = $isGap === true
+                    ? ($instantKey === 'startsAt' ? $jGapDay . 'T01:30:00' : $jGapDay . 'T03:00:00')
+                    : substr((string) $instant, 0, 19);
+                if ($clock !== $want) {
+                    $problems[] = "{$one['title']}: {$clockKey} {$clock}, wanted {$want}";
+                }
+            }
+            if ($isGap === true) {
+                $seen['gap']++;
+            }
+        }
+    }
+    return ['problems' => $problems, 'premise' => $seen['events'] >= 5 && $seen['midnight'] >= 1 && $seen['withEnd'] >= 1 && $seen['gap'] >= 1, 'seen' => $seen];
+};
+$jClock = $scnClockFields();
+check('J11 in a fresh read of three feeds (A by name, A by public address, B), every event\'s startsOnClock and endsOnClock are null exactly when its instant is, and otherwise the instant\'s own reading — the missing-hour event excepted, which keeps the STORED reading; the premise: an event at 00:00, one with an end and the missing-hour one were really read',
+    [$jClock['premise'], $jClock['problems']], [true, []]);
+
 // =============================================================================
 echo "W. The old widget folder is gone, and its addresses answer nothing (D-084)\n";
 // =============================================================================
@@ -2507,6 +2578,12 @@ $p = $plant('_core/PublicDoor.php', "        return \$m[1] . 'T' . \$m[2];", "  
         return $got;
     });
 check('PJ10 with the reading to show taken from the instant, the missing-hour event reaches websites as 02:30 (J10 catches it)', [$p['applied'], $p['result']], [true, $jGapDay . 'T02:30:00']);
+// Round 2 of P4b's check: the reading to show withheld for any time at 00:00
+// (the checker's own plant) — J11's rule, not construction, must catch it.
+$p = $plant('_core/PublicDoor.php', "        return \$m[1] . 'T' . \$m[2];", "        return str_starts_with(\$m[2], '00:') ? null : \$m[1] . 'T' . \$m[2];",
+    static fn (): array => $scnClockFields());
+check('PJ11 with startsOnClock withheld for any reading at 00:00, J11 sees it null beside a real instant (and its premise still holds, so it bit on a real 00:00 event)',
+    [$p['applied'], $p['result']['premise'] ?? null, ($p['result']['problems'] ?? []) !== []], [true, true, true]);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");
