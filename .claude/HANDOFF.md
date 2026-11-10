@@ -13,9 +13,9 @@ Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, b662a5d1 | Round 6 built (rendered-page pins over HTTP; the whole untraceable-sentence class fixed); check round 6 running |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, b662a5d1 | Round 6 NOT CLEAN (account/delete.php and a new privacy/index.php sentence untrue; pins found by first match; confirmed giving branch never drawn; hidden-text claim too broad; pin schema unrun). Round 7 = fix the sentences + SIMPLIFY: delete the phrase scan, pin the ancestor chain instead of a hiding blocklist |
 | #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 747c0194 | Built; check round 1 running on 747c0194. Owner reversed both build calls: an organisation's admin sets its own figure (D-118); lowering the installation below an organisation is refused, naming them (D-119) — builder reworking. Member wording after #703 |
-| #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | worktree agent (p782-build) | Building |
+| #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | `agent-aacc4726f08c2aabc` / `p782-build`, 637a398d | Built (e2e harness passed); check round 1 running. Raised #935-#937 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782). #932 needs none. Next free: 274.
@@ -23,7 +23,7 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 ## Next, in this order
 
 1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
-2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933, #934. #931 closed by D-116.
+2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#937. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
