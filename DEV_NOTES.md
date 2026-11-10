@@ -16535,11 +16535,19 @@ things are worth keeping:
    machinery as a number of days would clear **every** row on the next run.
    So `log_retention_installation_days()` refuses a 0 before any comparison,
    and says why.
+   **Since #932 (10 November 2026, D-117) this is true of the ERROR log only.**
+   For `audit.retentionDays` a stored 0 means "never delete", decided in
+   `Portal\Core\ActivityLogRetention`, and `log_sweep()` deletes nothing under
+   it. The error log's 0 still means a year, pinned on its own in section F of
+   `retention-caps-selftest.php` so the shared helpers cannot drift.
 3. **No page can create a per-organisation row for either key.**
    `_apps/settings/save.php` counts the installation's own row as a clash, so
    such a row can only arrive by hand-written SQL or a whole-database restore
    — which is exactly why the cap lives in the reader the clear-out uses and
    not on a form.
+   **Since #932 this is true of the error log only:** an organisation's own
+   administrator sets the activity log's figure on Admin, Maintenance, Retention
+   (D-118), and the general settings editor now refuses `audit.retentionDays`.
 
 ### A help page is the one document nothing here reads (#583)
 
@@ -22286,6 +22294,46 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
 - Migration 269 rewrites the approver role's description where it is still migration 202's
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
+
+### The activity log kept for ever, by choice (#932; D-117, D-118, D-119)
+
+- **`Portal\Core\ActivityLogRetention` is the ONE place** that decides the activity log's period and the
+  only writer of `audit.retentionDays`. 0 means "never delete" and is the LARGEST value (#668's zero rule):
+  an organisation may choose never only where the installation has, and an installation with a number of
+  days holds every organisation to it. Never is not clamped to the 3650-day maximum.
+- **One helper serves two settings whose 0 means different things.** The dispatch is BY KEY at the top of
+  each helper, and the error log's 0 → 365 is pinned on its own, so the helpers cannot drift. Planted:
+  reading the error log's 0 as never turns three checks red.
+- **`SettingLimit::installationAllows()` with the zero flag answers 3650 for a stored 0.** That is the right
+  number to COMPARE with, and exactly the clamp D-117 forbids if taken as the answer, so
+  `installationAllowsForEver()` is asked first.
+- **D-119's read of the organisations' figures happens inside the saving transaction**, after the
+  installation's row is locked. If it cannot read them, it REFUSES rather than answering "nobody blocks";
+  that is proved by renaming `tblSites` for one save. A save that changes nothing is never judged.
+- **A race has two directions, and each lock is proved only by the race that needs it.** The organisation's
+  "never" in flight while the installation is lowered is caught by the lowering's own locked read. Removing
+  `FOR UPDATE` from `storedValue()` ALONE left every check green; only the opposite race (the installation
+  lowered while an organisation saves never, `--hold-installation`) needs that lock. With both locks removed
+  the save STILL waited (~1.8 s, blocked by the holder's insert), so "it waited" proves nothing; the stored
+  value is the decisive half.
+- **An enumeration cannot see a method that has stopped answering.** `settings-locks-selftest.php` asks each
+  lock method for its keys, so a method answering false dropped its key and the run stayed green with fewer
+  checks (194 → 189). Check B0b names the key and the method.
+- **Submit a form exactly as drawn.** The #674 fault (a box prefilled from merged settings) looks right and
+  saves wrong. Only posting the page's own drawn fields and reading the row back shows it (`asDrawn()`).
+- **A fixture holding a stronger permission than its name cannot test the weaker role.** The first
+  "orgadmin" had `tblUsers.isAdmin = 1`, an administrator everywhere, and with one organisation `Site::id()`
+  is always 1. So D-118's "only their own organisation" was driven by nothing until section M used a TRUE
+  organisation administrator with several organisations switched on.
+- **A test that switches a setting must put it back on EVERY exit**, and must capture the original once.
+  Otherwise a crashed run leaves the setting changed, and the next run takes the leftover as the original.
+  Section M records the original rows in a file and restores them from a shutdown function; this was measured
+  with a `kill -9` mid-section.
+- **Two things recorded rather than changed.** An organisation figure above 3650 (only possible through SQL)
+  blocks lowering never to 3650, although the reader already holds it to 3650. And D-119's read moved before
+  the lock cannot be caught without a hook inside the method.
+- Tests: `tools/activity-log-retention-selftest.php` (over HTTP) and section F of
+  `tools/retention-caps-selftest.php`. The member-facing wording is #940, after #703.
 
 ### No time zone is built in (#782)
 

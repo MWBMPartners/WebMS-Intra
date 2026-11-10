@@ -4,6 +4,25 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The activity log can be kept for ever, by choice (#932, D-117, D-118, D-119)
+
+- **"Never delete" is now a choice for the activity log** (`audit.retentionDays`, stored as 0), on Admin →
+  Maintenance → Retention. Before this, a stored 0 silently fell back to a year; that was never an owner's
+  decision.
+- **The installation's figure caps every organisation's** (#668, D-013). An organisation may choose "never"
+  only where the installation has. "Never" is not clamped to the ten-year maximum.
+- **An organisation's own administrator sets its figure** (D-118); the installation's figure is a global
+  administrator's.
+- **Lowering the installation's figure below one an organisation has chosen is refused, naming the
+  organisations** (D-119). Nothing of theirs is deleted until they lower their own.
+- The page says what "never" costs: the log grows without limit, and some records describe a person (by
+  account number, and sometimes by name or e-mail address) for ever, even after that person asks to be
+  erased (#933).
+- The general settings editor now refuses `audit.retentionDays`. The nightly clear-out deletes nothing under
+  "never". The error log is unchanged: its stored 0 still means a year.
+- A post to the page carrying an action it does not recognise now runs nothing; before, any post ran the clear-out.
+- Open: #940 (the wording on the privacy and help pages, after #703), #933.
+
 ### No time zone is built in any more (#782, migration 273)
 
 - **The livestream schedule, venues, the venue availability check and the Sabbath quiet window now use

@@ -3190,6 +3190,11 @@ tell whether a page RENDERS in the chosen language** — that needs HTTP
 and a seeded installation, and both say so in their own output. The
 technical record is DEV_NOTES.md, "A question asked too early (#763)".
 
+- **The activity log's period: `Portal\Core\ActivityLogRetention` is the ONE place (#932; D-117, D-118,
+  D-119).** 0 = never delete, the largest value; set on Admin → Maintenance → Retention only (an organisation's
+  figure by its own administrator, the installation's by a global administrator); an installation figure below
+  an organisation's is refused, naming it; the error log's 0 still means a year. Tests:
+  `tools/activity-log-retention-selftest.php`, section F of `tools/retention-caps-selftest.php`.
 - **No time zone is built in (#782, migration 273).** `Livestream::zoneOf()`, `Venues::zoneToStore()` /
   `venueTimezone()` and `Sabbath::zone()` are the one answers for a livestream slot's, a venue's and the
   quiet window's clock; each falls back to `Site::timezone()`. The quiet window is per ORGANISATION: pass

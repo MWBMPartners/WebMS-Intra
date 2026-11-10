@@ -14,7 +14,7 @@ Last whole suite (with #782): 103/103 green. Decisions taken this stretch: D-102
 | Package | Worktree / branch | State |
 |---|---|---|
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 87d01592 | Check round 8 NOT CLEAN (narrowing): keep-step refactor measured behaviour-neutral (old vs new byte-identical on 75 givers); outlook wrong for the 'due' case (past keep-until) and 'none of your gifts' ignores envelopes; tblUsers reason still groups statements with number-only records. Round 9 building |
-| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, de3c05c8 | Clean (round 3 a comment fix, reviewed by me). Integrating next: cherry-pick 747c0194, 8d7e03a4, 6cad0316, 154be792, de3c05c8; docs from notes; whole suite; push. Member wording is #940, after #703 |
+| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, de3c05c8 | Cherry-picked (4fda0046..4f42bdb9) with docs; whole suite running, then push and close. Member wording is #940, after #703 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782). #932 needs none. Next free: 274.
