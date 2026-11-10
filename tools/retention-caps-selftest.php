@@ -128,7 +128,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const RC_EXPECTED_CHECKS = 141; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six; 116 until #932 replaced section F's three 0-means-a-year pins with twenty-two; 135 until D-118/D-119 (#932 round 2) added six, including the race and the unreadable case.
+const RC_EXPECTED_CHECKS = 142; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six; 116 until #932 replaced section F's three 0-means-a-year pins with twenty-two; 135 until D-118/D-119 (#932 round 2) added six, including the race and the unreadable case; 141 until check round 1 added the race the other way.
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -177,6 +177,26 @@ if (($argv[1] ?? '') === '--hold-ceiling') {
     $up->bind_param('ss', $holdTo, $key);
     $up->execute();
     $up->close();
+    usleep($holdForMs * 1000);
+    $holder->commit();
+    $holder->close();
+    exit(0);
+}
+
+// 🔒 FOURTH ROLE (#932 check round 1, finding M1): the INSTALLATION's figure
+//    being lowered from never to 30, in flight. It locks the installation's
+//    row, as saveInstallation() does, changes it, and waits before committing.
+//    An organisation's "never" saved in that window must WAIT and then see 30.
+//    Without the lock in storedValue() it reads the old never from a snapshot
+//    and stores the organisation's never under an installation of 30 days —
+//    exactly #687's fault — and the THIRD role below cannot see that, because
+//    there the lowering's own locked read of the organisations catches it.
+if (($argv[1] ?? '') === '--hold-installation') {
+    $holdForMs = (int) ($argv[2] ?? 2500);
+    $holder    = new mysqli($rcHost, $rcUser, $rcPass, $dbName, $rcPort);
+    $holder->begin_transaction();
+    $holder->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'audit.retentionDays' AND `siteID` IS NULL FOR UPDATE");
+    $holder->query("UPDATE `tblSettings` SET `settingValue` = '30' WHERE `settingKey` = 'audit.retentionDays' AND `siteID` IS NULL");
     usleep($holdForMs * 1000);
     $holder->commit();
     $holder->close();
@@ -926,7 +946,7 @@ rc_world($mysqli, $AL, '30', null);
 $rcSave = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 0, true);
 rc_check('#932: under an installation of 30 days an organisation\'s never is REFUSED with the reason, and nothing is stored',
     $rcSave['outcome'] === 'refused' && $rcSave['refusal'] === 'above-installation' && $rcAlSetting(1) === null
-    && str_contains($rcSave['message'], 'keep for ever') === true && str_contains($rcSave['message'], 'between 1 and 30') === true,
+    && str_contains($rcSave['message'], 'does not allow "Never delete"') === true && str_contains($rcSave['message'], 'between 1 and 30') === true,
     json_encode($rcSave) . ' stored: ' . var_export($rcAlSetting(1), true));
 $rcSave = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 31, true);
 rc_check('…and so are 31 days, never clamped to 30',
@@ -1024,6 +1044,32 @@ if (is_resource($rcHolder) === true) {
 rc_check('D-119 RACE: a lowering made while an organisation\'s "never" is being saved WAITS for it, then refuses — the installation stays never',
     $rcRaceWait > 1.0 && $rcRaced['outcome'] === 'refused' && $rcAlSetting(null) === '0' && $rcAlSetting(1) === '0',
     sprintf('waited %.2fs; ', $rcRaceWait) . json_encode($rcRaced) . ' stored: ' . var_export([$rcAlSetting(null), $rcAlSetting(1)], true));
+
+// 🔒 AND THE RACE THE OTHER WAY (check round 1, finding M1). The installation is
+//    being lowered from never to 30 in another, uncommitted transaction; an
+//    organisation's "never" saved meanwhile must WAIT, then judge against 30 and
+//    REFUSE, storing nothing. "It waited" is context only: the decisive half is
+//    that NO organisation row was written. Measured: with ` FOR UPDATE` taken
+//    out of storedValue() alone, every other check in this file stayed green.
+rc_world($mysqli, $AL, '0', null);
+$rcHoldCmd2 = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' --hold-installation 2500';
+$rcHoldPipes2 = [];
+$rcHolder2 = proc_open($rcHoldCmd2, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $rcHoldPipes2, dirname(__DIR__), [
+    'SELFTEST_DB_NAME' => $dbName, 'SELFTEST_DB_HOST' => $rcHost, 'SELFTEST_DB_USER' => $rcUser,
+    'SELFTEST_DB_PASS' => $rcPass, 'SELFTEST_DB_PORT' => (string) $rcPort,
+] + $_ENV);
+usleep(800_000);
+$rcRace2Start = microtime(true);
+$rcRaced2     = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 0, true);
+$rcRace2Wait  = microtime(true) - $rcRace2Start;
+if (is_resource($rcHolder2) === true) {
+    fclose($rcHoldPipes2[1]);
+    fclose($rcHoldPipes2[2]);
+    proc_close($rcHolder2);
+}
+rc_check('RACE, the other way: an organisation\'s "never" saved while the installation is being lowered to 30 days WAITS, then is refused, and NO organisation row is written',
+    $rcRace2Wait > 1.0 && $rcRaced2['outcome'] === 'refused' && $rcAlSetting(null) === '30' && $rcAlSetting(1) === null,
+    sprintf('waited %.2fs; ', $rcRace2Wait) . json_encode($rcRaced2) . ' stored: ' . var_export([$rcAlSetting(null), $rcAlSetting(1)], true));
 $mysqli->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'audit.retentionDays' AND `siteID` IS NOT NULL");
 
 // 🚨 THE ERROR LOG DID NOT CHANGE, and these pins are what stop a shared

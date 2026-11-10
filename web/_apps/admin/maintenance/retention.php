@@ -330,8 +330,13 @@ $alrOwn       = ActivityLogRetention::ownDays($mysqli, Site::id());
 $alrInstNever = $activityInstallationDays === ActivityLogRetention::NEVER;
 $alrOwnMax    = max(ActivityLogRetention::HARD_MAX_DAYS, $alrOwn ?? 0);
 $alrSiteName  = (string) (Site::current()['siteName'] ?? '');
-$alrNeverCost = 'The log then grows without limit, and the account number of somebody who has asked to be '
-    . 'erased stays in the descriptions of past records for ever.';
+// What "never" costs, in words no stronger than is true: an erasure unlinks a
+// person's records but does not rewrite descriptions, which usually name
+// somebody by account number and, for some kinds of record, by full name or a
+// sign-in provider's e-mail address (#933). Not every description names anybody.
+$alrNeverCost = 'The log then grows without limit. Some records describe a person — usually by account number, '
+    . 'and for some kinds of record by name or e-mail address — and those descriptions stay for ever, even after '
+    . 'that person has asked to be erased.';
 
 /**
  * The organisation's own form, drawn in ONE place for both views of this page:
@@ -823,7 +828,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <button type="submit" class="btn btn-warning" <?php echo ($preview['activity'] + $preview['errors'] + $preview['registrations'] + $preview['checkinDetail'] + $preview['givingIdentityDue']) === 0 ? 'disabled' : ''; ?>>
         <i class="fa-solid fa-broom me-1"></i> Run Sweep Now
     </button>
-    <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Adjust retention settings</a>
+    <?php /* #932: the activity log's period is no longer changed in the general
+             settings editor (it refuses the key); it is set in the card above.
+             The error log's period still is, so that link stays, named for it. */ ?>
+    <a href="#activity-log-retention" class="btn btn-outline-secondary">Activity-log period</a>
+    <a href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">Error-log period and other settings</a>
 </form>
 
 <div class="card mt-4 border-0 bg-body-tertiary">

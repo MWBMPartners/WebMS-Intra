@@ -36,9 +36,12 @@
  * The log grows without limit. And an erasure UNLINKS a person's activity
  * records (the catalogue's decision for `tblActivityLogs`): it empties the
  * columns that point at them and keeps the record of what happened, so a
- * DESCRIPTION that names somebody by account number is not rewritten. Until
- * #932 the clear-out was what eventually removed such a line; under "never"
- * it stays for ever.
+ * DESCRIPTION that names somebody is not rewritten — usually by account
+ * number, and for some kinds of record by full name or by an e-mail address a
+ * sign-in provider gave (#933 lists them: an event registration received, an
+ * account linked or unlinked). Until #932 the clear-out was what eventually
+ * removed such a line; under "never" it stays for ever. The page says so in
+ * words no stronger than that, because not every description names anybody.
  *
  * WHO WRITES IT, MEASURED (10 November 2026)
  * -----------------------------------------------------------------------------
@@ -196,7 +199,9 @@ final class ActivityLogRetention
      * A usable one goes through `SettingLimit::cappedForSite()` with the zero
      * flag, which is where "never survives only where BOTH levels mean it"
      * lives: own 0 under an installation of 30 is 30; own 0 under an
-     * installation of never is never; own 1000 under never is 3650.
+     * installation of never is never; own 1000 under never is 1000 (any number
+     * of days is allowed under never); own 99999 under never is 3650 (a NUMBER
+     * is still held to the hard maximum — measured, not reasoned).
      */
     public static function daysForSite(int $siteId): int
     {
@@ -259,10 +264,12 @@ final class ActivityLogRetention
     }
 
     /**
-     * 💬 That refusal in words. `SettingLimit::refusalWords()` is the one
-     *    wording for a limit and never says WHO set it (the two levels may be
-     *    different parties); its "keep for ever" form is used for a refused
-     *    never, so the advice can never name the 0 just refused.
+     * 💬 That refusal in words. A number of days goes through
+     *    `SettingLimit::refusalWords()`, the one wording for a limit, which never
+     *    says WHO set it (the two levels may be different parties). A refused
+     *    never is worded HERE, in the page's own name for the choice ("Never
+     *    delete"), in the same shape, so the advice can never name the 0 just
+     *    refused.
      */
     public static function refusalWordsForSite(string $reason, mixed $installationStored, int $days): string
     {
@@ -272,12 +279,20 @@ final class ActivityLogRetention
             return 'A number of days can be at most ' . self::HARD_MAX_DAYS . ' (ten years). Nothing was saved.';
         }
 
-        return SettingLimit::refusalWords(
-            $reason,
-            SettingLimit::ceilingFrom($installationStored, self::DEFAULT_DAYS, self::HARD_MAX_DAYS, true),
-            'days',
-            $days === self::NEVER
-        );
+        $allowed = SettingLimit::ceilingFrom($installationStored, self::DEFAULT_DAYS, self::HARD_MAX_DAYS, true);
+        if ($reason === 'above-installation' && $days === self::NEVER) {
+            // 🏷️ The page calls this choice "Never delete", so the refusal does
+            //    too: SettingLimit's own words say "keep for ever", and two names
+            //    for one choice on one page is how somebody comes to think they
+            //    are two choices. Same shape as SettingLimit's: it names the
+            //    smallest and largest numbers allowed, never a range holding 0,
+            //    and never who set the limit.
+            return 'This installation does not allow "Never delete" for the activity log, so nothing was saved. '
+                . 'Choose a number of days between 1 and ' . $allowed . '. '
+                . 'Ask whoever runs this installation if your organisation needs to keep it longer.';
+        }
+
+        return SettingLimit::refusalWords($reason, $allowed, 'days', false);
     }
 
     // #########################################################################

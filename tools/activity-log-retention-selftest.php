@@ -44,6 +44,10 @@
  *      a post with no action is still the sweep, as it always was
  *   K  the ERROR log is untouched: its stored 0 still reads as a year on the
  *      page and the real clear-out still deletes a 400-day-old error row
+ *   L  the form token: both activity-log forms posted with no token and with a
+ *      wrong one are refused and store nothing; and each form SUBMITTED
+ *      EXACTLY AS DRAWN changes nothing — above all an organisation with no row
+ *      of its own still has none (#674)
  *   P  the plants: each guard taken out of a COPY of the portal, the scenario
  *      that should catch it run again, and it must go red. Count them from the
  *      `$plant(` calls, never from a comment.
@@ -83,7 +87,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const AL_EXPECTED_CHECKS = 58;
+const AL_EXPECTED_CHECKS = 64;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -445,6 +449,50 @@ $save = static function (array $fields) use ($http, $tokenOn, $page, $flashOf): 
     return ['status' => $answer['status'], 'location' => $answer['location'], 'flash' => $flashOf($after['body']), 'page' => $after['body']];
 };
 $install = static fn (array $f): array => $save(['action' => 'activity-retention-installation'] + $f);
+
+/**
+ * The fields of ONE of the page's forms exactly as the browser would send them
+ * untouched: its hidden inputs, the radio that is drawn `checked`, and the
+ * number box's drawn value. Reading what the page DREW is the point (#674):
+ * a form prefilled from the wrong layer looks right and saves wrong.
+ */
+$asDrawn = static function (string $html, string $action): array {
+    $at = strpos($html, 'value="' . $action . '"');
+    if ($at === false) {
+        return [];
+    }
+    $start = (int) strrpos(substr($html, 0, $at), '<form');
+    $end   = strpos($html, '</form>', $at);
+    $form  = substr($html, $start, ($end === false ? strlen($html) : $end) - $start);
+    $fields = [];
+    preg_match_all('#<input\b[^>]*>#s', $form, $inputs);
+    foreach ($inputs[0] as $tag) {
+        $name  = preg_match('#name="([^"]*)"#', $tag, $m) === 1 ? $m[1] : '';
+        $value = preg_match('#value="([^"]*)"#', $tag, $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '';
+        $type  = preg_match('#type="([^"]*)"#', $tag, $m) === 1 ? $m[1] : 'text';
+        if ($name === '') {
+            continue;
+        }
+        if ($type === 'radio') {
+            if (preg_match('#\schecked\b#', $tag) === 1) {
+                $fields[$name] = $value;
+            }
+            continue;
+        }
+        $fields[$name] = $value;
+    }
+    return $fields;
+};
+/** Submit one form exactly as drawn, with nothing touched. */
+$submitAsDrawn = static function (string $action) use ($http, $page, $asDrawn): array {
+    $fields = $asDrawn($page()['body'], $action);
+    return ['fields' => $fields, 'answer' => $fields === [] ? null : $http('POST', AL_PAGE, $fields)];
+};
+/** Post one form with no token, or a wrong one: both must be refused and change nothing. */
+$postWithToken = static function (array $fields, ?string $token) use ($http, $page, $flashOf): array {
+    $answer = $http('POST', AL_PAGE, ($token === null ? [] : ['csrf_token' => $token]) + $fields);
+    return ['status' => $answer['status'], 'flash' => $flashOf($page()['body'])];
+};
 $forOrg  = static fn (array $f): array => $save(['action' => 'activity-retention-organisation'] + $f);
 
 // ── The real clear-out ──────────────────────────────────────────────────────
@@ -537,6 +585,35 @@ $scnOrgAdminNoSweep = static function () use ($db, $world, $signIn, $http, $toke
     return $ans['status'] === 403
         && (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `logID` = {$old}")->fetch_assoc()['n'] ?? 0) === 1;
 };
+/**
+ * #674 (check round 1, M6): an organisation with NO row of its own, its form
+ * submitted exactly as drawn, must still have no row. Drawn from the merged
+ * settings it would show the installation's 30 ticked as its own, and one
+ * untouched Save would pin it.
+ */
+$scnPrefillUntouched = static function () use ($world, $signIn, $submitAsDrawn, $setting, $siteOne): bool {
+    $world('30', null, null);
+    $signIn('orgadmin');
+    $sent = $submitAsDrawn('activity-retention-organisation');
+    return ($sent['fields']['choice'] ?? null) === 'follow' && $sent['answer'] !== null
+        && $setting(AL_KEY, $siteOne) === null;
+};
+/** The form token (M7): both forms refused with no token and with a wrong one, nothing stored. */
+$scnTokenRefused = static function () use ($world, $signIn, $postWithToken, $setting, $siteOne): bool {
+    $world('30', null, null);
+    $out = [];
+    foreach ([null, 'not-the-token'] as $token) {
+        $signIn('globaladmin');
+        $out[] = $postWithToken(['action' => 'activity-retention-installation', 'choice' => 'days', 'days' => '20'], $token);
+        $out[] = $postWithToken(['action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '20'], $token);
+    }
+    foreach ($out as $one) {
+        if ($one['flash']['type'] !== 'danger' || str_contains($one['flash']['text'], 'form token') === false) {
+            return false;
+        }
+    }
+    return $setting(AL_KEY, null) === '30' && $setting(AL_KEY, $siteOne) === null;
+};
 /** The real job keeps every row under never. */
 $scnJobKeeps = static function () use ($scnNeverKeeps): bool {
     return $scnNeverKeeps() === ['one' => true, 'two' => true, 'nobody' => true];
@@ -594,8 +671,8 @@ check('A3 the activity-log card is there, with both forms', [
 check('A4 under 365 days the ORGANISATION\'s form does not offer "never" (a choice whose Save always refuses)',
     str_contains($p['body'], 'id="alrOwnNever"'), false);
 check('A5 ...and says plainly why', str_contains($p['body'], 'is not available</strong>, because this installation'), true);
-check('A6 "never" is explained where it is offered: the log grows without limit, and an erased person\'s number stays',
-    str_contains($p['body'], 'grows without limit') && str_contains($p['body'], 'stays in the descriptions of past records for ever'), true);
+check('A6 "never" is explained where it is offered: the log grows without limit, and what records say about an erased person stays',
+    str_contains($p['body'], 'grows without limit') && str_contains($p['body'], 'those descriptions stay for ever, even after'), true);
 check('A7 the installation\'s box is prefilled with its own 365, inside its own max of 3650',
     preg_match('#name="days" aria-label="Number of days, for every organisation"\s+value="365"#', $p['body']) === 1
     && str_contains($p['body'], 'min="1" max="3650"'), true);
@@ -655,8 +732,8 @@ echo "F. The refusal, met by the organisation's own administrator\n";
 $beforeRefused = $activityCount('ActivityLogRetentionRefused');
 check('F1 (scenario) under 30 days an organisation\'s never is refused and nothing is stored', $scnRefuseNever(), true);
 $r = $forOrg(['choice' => 'never']);
-check('F2 ...the reason is given: "keep for ever" is not allowed, choose 1 to 30, and it never names who set the limit',
-    [str_contains($r['flash']['text'], 'does not allow "keep for ever"'), str_contains($r['flash']['text'], 'between 1 and 30'),
+check('F2 ...the reason is given in the page\'s own words: "Never delete" is not allowed, choose 1 to 30, and it never names who set the limit',
+    [str_contains($r['flash']['text'], 'does not allow "Never delete"'), str_contains($r['flash']['text'], 'between 1 and 30'),
      str_contains($r['flash']['text'], 'global administrator')], [true, true, false]);
 check('F3 ...and each refusal is recorded', $activityCount('ActivityLogRetentionRefused'), $beforeRefused + 2);
 $r = $forOrg(['choice' => 'days', 'days' => '0']);
@@ -686,6 +763,22 @@ $r = $forOrg(['choice' => 'never']);
 check('H1 it changes nothing and says so, rather than refusing a figure nobody typed', [$setting(AL_KEY, $siteOne), $r['flash']['type']], ['0', 'info']);
 check('H2 ...and the page warns that the stored never is not being obeyed, and says what is in force: the READER caps it',
     [str_contains($r['page'], 'data-activity-log-never-held="1"'), str_contains($r['page'], 'data-activity-log-in-force="30"')], [true, true]);
+
+echo "L. The form token, and a form submitted exactly as drawn (check round 1)\n";
+check('L1 (scenario) both forms, posted with NO form token and with a WRONG one, are refused with the token message and store nothing',
+    $scnTokenRefused(), true);
+check('L2 (scenario) an organisation with no figure of its own: its form, submitted untouched, still leaves it with NO row (#674)',
+    $scnPrefillUntouched(), true);
+$world('0', null, null);
+$signIn('globaladmin');
+$sentInst = $submitAsDrawn('activity-retention-installation');
+check('L3 the installation\'s form at never, submitted untouched, is drawn with "never" ticked and changes nothing',
+    [$sentInst['fields']['choice'] ?? null, $setting(AL_KEY, null)], ['never', '0']);
+$world('30', '20', null);
+$signIn('orgadmin');
+$sentOwn = $submitAsDrawn('activity-retention-organisation');
+check('L4 an organisation\'s own 20 days, submitted untouched, is drawn as its own and stays 20',
+    [$sentOwn['fields']['choice'] ?? null, $sentOwn['fields']['days'] ?? null, $setting(AL_KEY, $siteOne)], ['days', '20', '20']);
 
 echo "I. Who may use it (D-118)\n";
 $world('30', null, null);
@@ -774,6 +867,12 @@ $p11 = $plant('_apps/admin/maintenance/retention.php', 'ActivityLogRetention::sa
 check('P11 with D-118 undone (global administrators only), the organisation\'s administrator cannot save their own figure', [$p11['applied'], $p11['result']], [true, false]);
 $p12 = $plant('_apps/admin/maintenance/retention.php', 'if ($isGlobalAdmin === false) {', 'if (false) {', $scnOrgAdminNoSweep);
 check('P12 with the global-administrator gate taken out, an organisation\'s administrator runs the sweep', [$p12['applied'], $p12['result']], [true, false]);
+$p13 = $plant('_apps/admin/maintenance/retention.php', "        \$alrFinish('Invalid or expired form token. Nothing was changed. Please try again.', 'danger');\n",
+    "        // planted: the form-token refusal taken out\n", $scnTokenRefused);
+check('P13 with the activity-log forms\' form-token refusal taken out, a post with no token or a wrong one is SAVED', [$p13['applied'], $p13['result']], [true, false]);
+$p14 = $plant('_apps/admin/maintenance/retention.php', '$alrOwn       = ActivityLogRetention::ownDays($mysqli, Site::id());',
+    '$alrOwn       = App::settings(\'audit.retentionDays\') === null ? null : (int) App::settings(\'audit.retentionDays\');', $scnPrefillUntouched);
+check('P14 with the organisation\'s form prefilled from the merged settings (#674), one untouched Save pins the installation\'s figure as its own', [$p14['applied'], $p14['result']], [true, false]);
 check('P8 with every plant removed again, the refusal is green once more', $scnRefuseNever(), true);
 
 // 🧾 The server's own error log. A page that throws part-way can still answer

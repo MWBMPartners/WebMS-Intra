@@ -26,6 +26,9 @@
  * THE ONE LIST is the set of those methods, read out of `web/_core/` by PHP's
  * tokeniser — never typed into this file, and WHICH keys are pressed in
  * section B is decided by that list alone. What IS typed by hand, and why:
+ *   - `audit.retentionDays` (#932), for the premise check B0b — a lock method
+ *     answering `false` for everything drops its key from the enumeration
+ *     and leaves the run green, so the key is named here on purpose;
  *   - `transcription.retentionDays`, the issue's own key: the premise check B0
  *     (the enumeration must reach it) and the scenarios of plants P1 and P6;
  *   - the exact source text each plant removes — the delete handler's
@@ -936,6 +939,16 @@ head('Section B — every locked key is refused on DELETE, CHANGE and ADD, as a 
 // =============================================================================
 check('B0 PREMISE: the issue\'s own key is among those the methods lock (so the enumeration reaches it)',
     isset($locked['transcription.retentionDays']) === true, 'locked: ' . implode(', ', array_keys($locked)));
+// 📜 #932: the same premise for how long the ACTIVITY LOG is kept, BY NAME and
+//    by its own method. The enumeration only tests what a method says it locks,
+//    so a method answering `false` for everything simply drops its key and the
+//    run stays green with five fewer checks (measured: 194 -> 189). The harm is
+//    concrete: a global administrator deletes the installation's row here,
+//    every organisation that chose "never delete" falls back to a year, and the
+//    next clear-out deletes their records.
+check('B0b PREMISE (#932): audit.retentionDays is locked, by ActivityLogRetention::lockedInGeneralEditor()',
+    in_array('ActivityLogRetention::lockedInGeneralEditor', $locked['audit.retentionDays'] ?? [], true) === true,
+    'locked by: ' . json_encode($locked['audit.retentionDays'] ?? null));
 
 // The controls: the very same request shapes DO delete, change and add an ordinary setting.
 foreach ([null, $site] as $level) {
@@ -1130,9 +1143,9 @@ check('P5 every row a press or a plant took away or changed is back, with its ow
 // ── Tidy up: only what this run made (the shutdown function would do it too) ─
 $cleanUp();
 
-// S1 three times, S2, B0, B1a/b twice, B1c, B2 and B3 once per row, B4 once per
-// key, P1 to P3, P6a/b, P7, P4, P4b, P5.
-$expected = 3 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 3 + 2 + 1 + 2 + 1;
+// S1 three times, S2, B0, B0b, B1a/b twice, B1c, B2 and B3 once per row, B4 once
+// per key, P1 to P3, P6a/b, P7, P4, P4b, P5.
+$expected = 3 + 1 + 1 + 1 + 4 + 1 + count($snapshot) * 2 + count($locked) + 3 + 2 + 1 + 2 + 1;
 printf("\n%d passed, %d failed, %d ran of %d expected (%d lock methods, %d locked keys, %d rows)\n",
     $passed, $failed, $passed + $failed, $expected, count($methods), count($locked), count($snapshot));
 if ($passed + $failed !== $expected) {
