@@ -14,9 +14,9 @@ Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102
 | Package | Worktree / branch | State |
 |---|---|---|
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, a77d046c | Round 5 NOT CLEAN: other reasons members read still say the activity log / change history / expense items are untraceable; page pins strip PHP blocks and tag attributes, so an echoed or hidden sentence passes. Round 6: fix the contradicting class, pin the RENDERED pages over HTTP |
-
 | #932 — activity log may be kept for ever (D-117) | worktree agent (p932-build) | Building: code part only (sweep, retention page, retention-caps test); member wording after #703 |
 | #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | worktree agent (p782-build) | Building |
+
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782). #932 needs none. Next free: 274.
 
