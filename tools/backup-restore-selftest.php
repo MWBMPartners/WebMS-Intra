@@ -1250,8 +1250,10 @@ function brs_waitFor(callable $condition, float $seconds): bool
  * let the database stamp such a column instead of writing the value it was
  * given, the result would differ from the original ONLY when the two moments
  * fall in different seconds — so a comparison made without this passes or
- * fails on the timing of the run, not on the code (#912; the re-stamped
- * `updatedAt` of #694 was this shape). Calling this after taking the "before"
+ * fails on the timing of the run, not on the code (#912). The re-stamped
+ * `updatedAt` of #694 was caught every run only because that test row carried
+ * a fixed date from long ago; a row stamped by the database when the test
+ * wrote it has no such margin. Calling this after taking the "before"
  * picture makes every later stamp land in a later second, so such a fault
  * fails EVERY run. The database's clock is asked rather than PHP's, because it
  * is the database that does the stamping.
@@ -3672,10 +3674,13 @@ function brs_proof27(): void
     $heldBackWas = brs_savedHeldBack();
 
     // ⏱️ EVERYTHING BELOW HAPPENS IN A LATER SECOND THAN THE ROWS ABOVE WERE
-    //    WRITTEN, on purpose (#912). Three tables here carry a column the
-    //    database stamps for itself (`tblUsers.createdAt`,
-    //    `tblTotpBackupCodes.createdAt`, `tblSettings.updatedAt`), and a
-    //    restore or put-back that let one be stamped again would only differ
+    //    WRITTEN, on purpose (#912). Every table the INSERTs above write to carries
+    //    a column the database stamps for itself — `tblSites.createdAt` and
+    //    `tblSites.updatedAt` (the second stamped again on every UPDATE),
+    //    `tblSettings.updatedAt`, `tblUsers.createdAt` and
+    //    `tblTotpBackupCodes.createdAt`, read from information_schema rather
+    //    than remembered — and a restore or put-back that let one be stamped
+    //    again would only differ
     //    from the original when the run crossed a second — which made the
     //    decisive comparison in section D pass or fail on timing. With this it
     //    is decided by the code, every run.
