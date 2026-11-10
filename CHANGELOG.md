@@ -4,6 +4,25 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A sign-in keeps nothing of the previous person's session (#900)
+
+- **Fixed (security): signing in on a shared browser no longer hands the previous person's waiting session
+  data to the next person.** Every sign-in replaced the session's identifier but kept everything in it, and
+  the Microsoft and Google sign-in addresses, the passkey sign-in and an invitation link do not refuse a
+  browser somebody is already signed in on. So a waiting message, kept form typing or a come-back address
+  passed to whoever signed in next. Measured on the code before the fix: after a Microsoft or Google
+  sign-in, the second person was shown the first person's waiting message AND was sent to the page the first
+  person had been waiting to come back to. `Auth::beginSessionFor()` is now the one place each of the six
+  ways of signing in decides what survives: a DIFFERENT person (including the first sign-in on a browser)
+  starts with only the browser's chosen language; the SAME person signing in again (finishing a two-step
+  code, or proving themselves again to add a password, #731) keeps everything. The session identifier is
+  replaced either way, now including at the two-step code step.
+- **Tests:** part K of `tools/two-step-selftest.php` (its total pinned in the file), driving the password,
+  Microsoft, Google, invitation and two-step paths over HTTP — Microsoft and Google with the provider stubbed
+  in the test's own copy; ten of its behaviour checks went red on the old code. The passkey path calls the same
+  method and is not driven by any test (#902). Independent check (protected arm: sign-in) clean at round 1.
+  Codex has not reviewed it.
+
 ### Expense claims: a refused claim comes back filled in, and a failed save leaves no PDF behind (#869, #870, #871)
 
 - **A claim that is not saved no longer leaves its PDF behind (#869).** The claim's PDF holds the claimant's

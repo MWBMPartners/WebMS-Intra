@@ -751,7 +751,11 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     FIX FOR THE CLASSIC SIGN-IN FIXATION ATTACK -- my first version did
     and the independent check killed it.** All six grants of
     `$_SESSION['user_id']` are ALREADY preceded by
-    `session_regenerate_id(true)`, so the id somebody is signed in UNDER
+    `session_regenerate_id(true)` (since #900 every one goes through
+    `Auth::beginSessionFor()`, which calls it and also decides what of
+    the session survives -- a DIFFERENT person starts with only the
+    browser's chosen language; the two-step code step now rotates too),
+    so the id somebody is signed in UNDER
     was always one PHP minted. **THEREFORE THIS SETTING DOES NOT MAKE
     THOSE ROTATIONS REDUNDANT:** strict mode refuses an unknown id, it
     does not rotate one at a privilege boundary. What it DOES close is

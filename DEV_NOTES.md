@@ -21886,3 +21886,35 @@ no limit exactly as PHP treats them). `sizeShown()` rounds the LIMIT DOWN always
 nearest, rounding the sent figure up only when it would not otherwise read larger, comparing amounts in bytes.
 Round 1's version rounded both to the nearest and could promise more than the server takes (1500K read "1.5
 MB") — **the figure a person acts on must be rounded in the direction that keeps the advice true.**
+
+### What a sign-in keeps of the session (#900)
+
+**`session_regenerate_id(true)` gives a session a new identifier and KEEPS ITS DATA.** Every sign-in path
+rotated the identifier (#705's point, and still right), and that was read as "the session starts fresh". It
+did not: whatever the previous person on that browser had waiting — a one-off message, kept form typing
+(#870), a come-back address — was handed to the next person. Rotation protects the identifier; it says
+nothing about the contents.
+
+`Auth::beginSessionFor($userId)` is called at all SIX grants, immediately before `$_SESSION['user_id']` is
+written: `Auth::loginLocal()`, `Auth::callbackMS365()`, `Auth::callbackGoogle()`,
+`_apps/auth/login/webauthn.php`, `_apps/invites/accept.php` and `_apps/auth/2fa/verify.php`. Whose session it
+is: `user_id`, else `2fa_user_id`, else nobody; a kiosk's `kiosk_user_id` is not a sign-in and counts as
+nobody. A different person keeps only `Auth::SESSION_KEYS_KEPT_FOR_A_DIFFERENT_PERSON` (`portal_locale`); the
+same person keeps everything; the identifier is replaced either way.
+
+**`login_redirect` is deliberately NOT kept for a different person.** Every writer sets it for the session's
+CURRENT person — `git grep -n "login_redirect'\] *=" 76709e3e -- web` answers five lines: the four
+two-factor branches and `auth/account/add-password.php`, which is behind `requireLogin()` — so a value waiting
+at a grant is always the previous person's. `/login/ms365` and `/login/google` still accept a signed-in
+browser on purpose: the "Add a password" page sends a member there to prove themselves (#731), which is why
+the rule is decided by WHO signs in rather than by refusing.
+
+**One narrow window remains, unchanged from before:** anything written between a person's password step and
+their two-step code is kept when they finish the code, because both steps are the same person. It needs a
+second person to use the browser in that window.
+
+Tests: part K of `tools/two-step-selftest.php`; the passkey path and a kiosk browser are driven by nothing,
+recorded on #902 along with a static guard against a seventh sign-in path skipping the method.
+`check_session_id_not_stored.py` allows three whole-session uses in `Auth.php` (was one) — the one-line
+rewrite is two of them, and there is no slack: a fourth fails.
+
