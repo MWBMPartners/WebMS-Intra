@@ -1724,7 +1724,10 @@ final class PublicWebsiteSetup
      *   savedChoice,
      *   savedChoiceType  what saving the organisation's choice says (given
      *                    `choice`) — the choice, then `card` — and its colour:
-     *                    amber unless the door answers somebody here;
+     *                    amber unless the choice is in force AND the door
+     *                    answers somebody here (so the gate-off state, where
+     *                    the door answers everybody but the choice has no
+     *                    effect, is amber too);
      *   savedLimit,
      *   savedLimitType   what saving the installation's limit says (given
      *                    `limit` and `chose`), and its colour.

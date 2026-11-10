@@ -3164,7 +3164,10 @@ foreach ($uTable as $i => $f) {
     if (($w['reachRow'] !== null) !== $skip) {
         $why[] = 'the reach row skipped or fetched wrongly';
     }
-    // NO FRAME CLAIM, of any kind (round 4 of P4d's check): the sentence about
+    // NO WORD CONTAINING "fram" (round 4 of P4d's check) — which is all this
+    // guard can see: a frame claim spelt without it ("embedded in any
+    // website", "shown inside any website you list") passes, as round 5 of
+    // the check measured. The sentence about
     // frames was untrue two rounds running — a "never" the browser does not
     // keep, then a promise the framing rule refuses by default. Whether a frame
     // shows anything is the framing card's business; these sentences say who
@@ -3255,7 +3258,7 @@ foreach ($uWords($uLimitTable) as $i => $w) {
     }
 }
 check('U26 doorReachWords() is TRUE, and each state DISTINGUISHABLE, in every one of ' . count($uTable) . ' combinations of its facts (rule × door on, off, spoiled or unreadable × public address × /w/ address × the two apps × choice) and ' . count($uLimitTable)
-    . ' for the limit\'s save — judged by rules written in this test: each state shows its own words and no other state\'s, a testers-only public address always "answers nobody", a same-domain frame said rather than a "never", each address under its own label and no app\'s address while it is off, no "below", every "until" naming who decides, the save\'s colour following its words',
+    . ' for the limit\'s save — judged by rules written in this test: each state shows its own words and no other state\'s, a testers-only public address always "answers nobody", no word containing "fram" (the frame claims round 4 removed; a claim spelt without it is not seen), each address under its own label and no app\'s address while it is off, no "below", every "until" naming who decides, the save\'s colour following its words',
     [count($uTable), count($uLimitTable), $uWrong], [512, 24, []]);
 
 /** Render one state of A over real HTTP: the door card's warning, the test-copy card's sentence, the set-up check's two rows and the flash colour. */
@@ -3445,7 +3448,7 @@ $setInstallation('public.door.testCopies.permitted', 'testers');
 $channel = 'prod';
 $startServer();
 $waitForServer();
-check('U28 each change of choice, POSTED in ' . count($uSlots) . ' states, stores the new choice; its message is doorReachWords()\'s for the state AFTER the save; and the colour the HANDLER returned is green where the door answers somebody and AMBER where it does not (the door off, a public address only, the test copy\'s gate off)',
+check('U28 each change of choice, POSTED in ' . count($uSlots) . ' states, stores the new choice; its message is doorReachWords()\'s for the state AFTER the save; and the colour the HANDLER returned is green where the choice is in force and the door answers somebody, and AMBER otherwise (the door off, a public address only, and the test copy\'s gate off — where the door answers everybody but the choice has no effect)',
     $uTransitions, [
         'testers → anybody, with a public address' => [true, 'success', 'success', 'anybody'],
         'anybody → testers, with a public address' => [true, 'success', 'success', 'testers'],
