@@ -658,73 +658,66 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        `tools/audit-checks/check_wall_clock_writes_not_moments.py`, the
     //        first run it ever had.
     //
-    //        ⚠️ IT STORES THE WRITTEN READING, AND THE FIRST VERSION REFUSED IT.
-    //           Refusing was a refusal by SPELLING -- `Sun, 29 Mar 2026 01:30`
-    //           turned away while `2026-03-29 01:30`, the same reading, was
-    //           stored -- and round 14 of #777 already settled that nothing
-    //           here may refuse a value for the shape it is written in. Its
-    //           stated reason, that no written value was safe to assemble
-    //           because the DATE had moved in Nuuk, was also wrong: it is
-    //           `strtotime()` that moves the date. `date_parse()` keeps the
-    //           written year, month, day, hour and minute (measured: hour 1 for
-    //           `01:30`, day 28 for the Nuuk cell).
+    //        HOW THE WRITTEN READING IS FOUND: PHP reads the same cell again,
+    //        in UTC. UTC has no clock changes, so nothing can move, and every
+    //        other rule PHP applies -- `+1 day`, `+1 weekday`, `last day of`,
+    //        an ISO ordinal or week date, a named weekday that disagrees with
+    //        the date -- is applied exactly as `strtotime()` applied it above.
+    //        So on every reading that exists the two agree, and they differ
+    //        ONLY where the zone skipped the hour. `EventRecurrence::
+    //        readingIsReal()`, the one test of whether a reading exists in a
+    //        zone, decides that, in the zone `strtotime()` itself used.
     //
-    //        So the reading is built from `date_parse()`'s own fields, through
-    //        the rules every other path uses and no copy of them:
-    //          * the date's relative days, months and years (an ISO ordinal or
-    //            week date arrives as day 1 plus N days) are added in UTC, which
-    //            has no transitions, so nothing can move;
-    //          * `I18n::wallClockFromInput()` judges the result's shape and
-    //            range and asks `checkdate()` -- the one place that is done;
-    //          * `EventRecurrence::readingIsReal()` -- the one test of whether
-    //            a reading exists in a zone (#777 round 12) -- decides that the
-    //            written reading is in the skipped hour, in the zone
-    //            `strtotime()` itself used, so this changes nothing on any
-    //            other hour of the year;
-    //          * the `$fmtStore` wrapper still applies the year floor and the
-    //            DATETIME ceiling, and the #797 two-reference rule above has
-    //            already refused a cell with no date or no year.
+    //        ⚠️ THAT LAST TEST CHANGES NOTHING, AND IS KEPT ANYWAY. Because the
+    //           UTC reading equals the zone's on every reading that exists,
+    //           removing it was measured to give the identical result over
+    //           89,376 generated cells (16 spellings, 22 zones, every 15
+    //           minutes for six hours either side of every clock change in
+    //           2025-2027). It is kept because it says what this step is FOR
+    //           and limits it to that if PHP's two readings ever disagree for
+    //           another reason. **No behavioural check can guard it, because
+    //           its removal is not a fault** -- so do not write one that
+    //           claims to.
     //
-    //        A cell naming a ZONE (`... GMT`) or an offset is an INSTANT,
-    //        converted on purpose, and is not asked; nor is a relative TIME
-    //        (`... +1 hour`), whose difference is arithmetic, not a move. A
-    //        named weekday (`Sun,`, Excel's long date) is fine when it is the
-    //        date's own; one that DISAGREES (`Mon, 29 Mar 2026`, a Sunday) is
-    //        left to the line below, where PHP moves to the next such weekday
-    //        exactly as it does on every other day of the year -- measured,
-    //        without this the gap night alone would have kept the 29th. This
-    //        step only stores a reading the cell wrote unambiguously.
-    //        Driven by K07 in section K of tools/clock-change-selftest.php.
+    //        ⚠️ TWO EARLIER VERSIONS OF THIS STEP WERE WRONG, AND BOTH ARE
+    //           WORTH KNOWING.
+    //           * The first REFUSED such a cell. That refused by SPELLING --
+    //             `Sun, 29 Mar 2026 01:30` turned away while `2026-03-29
+    //             01:30`, the same reading, was stored -- which round 14 of
+    //             #777 rules out. It also refused `2026-03-29 24:00`.
+    //           * The second rebuilt the reading from `date_parse()`'s FIELDS,
+    //             and stored the wrong DATE, with no refusal, for three kinds
+    //             of cell: `+1 weekday` (`2026-03-29 01:30 +1 weekday` was
+    //             03-30 and became 03-29), `first/last day of`, and an ISO
+    //             ordinal date with a relative month (`2026-057 01:30 +1
+    //             month` was 03-26 and became 03-29) -- `date_parse()` reports
+    //             an ordinal as month 1, day N, so the month was added before
+    //             the days folded over. An independent sweep found 1,912 such
+    //             cells. **Re-implementing PHP's date arithmetic from its parts
+    //             is a second copy of a rule nobody wrote down; asking PHP
+    //             again, in a zone where nothing moves, is the same rule.**
+    //
+    //        What is NOT asked here, and why:
+    //          * a cell naming a ZONE (`... GMT`) or an offset is an INSTANT,
+    //            converted on purpose (`is_localtime`);
+    //          * a relative TIME (`... +1 hour`) is arithmetic on a moment,
+    //            and across the change an hour is an exact hour -- so it keeps
+    //            the old line's answer.
+    //        The `$fmtStore` wrapper's year floor and DATETIME ceiling still
+    //        apply to what this returns, and #797's two-reference rule above
+    //        has already refused a cell with no date or no year. Driven by K07
+    //        to K07e in section K of tools/clock-change-selftest.php.
     $relative = $parsed['relative'] ?? [];
     if ($parsed['is_localtime'] === false
-        && is_int($parsed['year']) === true
-        && is_int($parsed['month']) === true
-        && is_int($parsed['day']) === true
-        && is_int($parsed['hour']) === true
-        && is_int($parsed['minute']) === true
         && (int) ($relative['hour'] ?? 0) === 0
         && (int) ($relative['minute'] ?? 0) === 0
         && (int) ($relative['second'] ?? 0) === 0) {
-        $writtenUtc = gmmktime(
-            0,
-            0,
-            0,
-            $parsed['month'] + (int) ($relative['month'] ?? 0),
-            $parsed['day'] + (int) ($relative['day'] ?? 0),
-            $parsed['year'] + (int) ($relative['year'] ?? 0)
-        );
-        $writtenDay = gmdate('Y-m-d', $writtenUtc);
-        $written = I18n::wallClockFromInput(sprintf(
-            '%s %02d:%02d:%02d',
-            $writtenDay,
-            $parsed['hour'],
-            $parsed['minute'],
-            is_int($parsed['second']) === true ? $parsed['second'] : 0
-        ));
-        $weekdayAgrees = isset($relative['weekday']) === false
-            || (int) gmdate('w', $writtenUtc) === (int) $relative['weekday'];
+        try {
+            $written = (new \DateTimeImmutable($trimmed, new \DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+        } catch (\Throwable $notReadable) {
+            $written = null;
+        }
         if ($written !== null
-            && $weekdayAgrees === true
             && \Portal\Core\EventRecurrence::readingIsReal($written, date_default_timezone_get()) === false) {
             $why = '';
             return $written;

@@ -226,6 +226,26 @@ $stmt->bind_param('s', $endSql);
     # ⚠️ ADDED BECAUSE MUTATION FOUND IT UNTESTED: P09 reaches a closure's
     #    values through the ARRAY path, so following a SCALAR through a `use`
     #    list was switched off with every case green.
+    # ⚠️ ADDED BECAUSE THE INDEPENDENT CHECK FOUND IT UNTESTED: emptying
+    #    PASS_THROUGH left every case green, while a moment passed through
+    #    sprintf() or trim() into a clock column went unseen. One plant for
+    #    each of the probe's two readers of the list (the formatted-text one
+    #    and the moment one).
+    ("P15 a formatted moment passed through sprintf()",
+     HEAD + """
+$s = sprintf('%s', date('Y-m-d H:i:s', strtotime((string) $_POST['s'])));
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P16 a moment passed through max(), then formatted and trim()med",
+     HEAD + """
+$ts = max(strtotime((string) $_POST['s']), 0);
+$text = trim(date('Y-m-d H:i:s', $ts));
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (endDateTime) VALUES (?)');
+$stmt->bind_param('s', $text);
+""", {("$text", "tblEvents.endDateTime")}),
+
     ("P14 a single value carried into a closure through its use list",
      HEAD + """
 $start = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
@@ -502,8 +522,8 @@ print(f"\n{len(results)} checks: {len(results) - len(failed)} passed, {len(faile
       f"({plants} plants, {greens} must-stay-green, {len(results) - plants - greens} refusals).")
 # ⚠️ THE COUNTS ARE PINNED, so a case deleted from a list cannot leave this
 #    printing "all passed" over less than it used to test (#697, #485).
-if plants != 14 or greens != 11:
+if plants != 16 or greens != 11:
     print(f"FAIL: the plant or green list has changed size ({plants} / {greens}, "
-          f"pinned 14 / 11). Change the pin in the same edit, deliberately.")
+          f"pinned 16 / 11). Change the pin in the same edit, deliberately.")
     sys.exit(1)
 sys.exit(1 if len(failed) > 0 else 0)

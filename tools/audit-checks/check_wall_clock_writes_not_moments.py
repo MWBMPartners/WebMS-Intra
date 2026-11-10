@@ -101,8 +101,10 @@ nobody has driven yet. It does not see:
   * SQL handed in as a PARAMETER (a helper such as `FeedAdmin::one($db,
     $sql, ...)`) -- the bind calls whose statement it could not read are
     COUNTED and listed by `--verbose` on every run, so that limit is a number
-    rather than a hope (twelve today, none of them a writer of a clock column,
-    read one by one when this was written);
+    rather than a hope (twelve today, read one by one when this was written:
+    none of them stores a clock column through a moment. That is NOT "none
+    writes a clock column" -- `DbBackup.php`'s restore writes every table,
+    clock columns included, but copies stored values and builds no moment);
   * which column a value lands in, where that cannot be matched -- a spread
     whose pushes carry no `'<column> = ?'` literal, `execute($array)`,
     INSERT ... SELECT, or a value written into the text of `query()`. There it
@@ -209,34 +211,38 @@ CLASSIFIED: dict[str, object] = {
 #    one-edit bypass this repository has recorded five times.
 #
 #    An entry may need MORE THAN ONE pin, so the guard is a tuple of whole
-#    conditions, each required exactly once. The import's step (d) has two that
-#    matter: the outer one decides a cell is a plain reading (no zone, no
-#    relative time), and the inner one decides it is in the skipped hour and
-#    returns what the cell WROTE.
+#    statements, each required exactly once. The import's step (d) has three:
+#    the outer condition decides a cell is a plain reading (no zone, no offset,
+#    no relative time); the UTC read gives the reading the cell wrote; and the
+#    inner condition returns it when it is in the skipped hour.
 #
-#    What the pins cannot see: whether the guarded code is REACHED, or what the
-#    lines BETWEEN them do (the date built in UTC). That is behavioural, and
-#    K07, K07b, K07c and K07d drive it (D-065).
+#    What the pins cannot see: whether the guarded code is REACHED. That is
+#    behavioural, and K07 to K07e drive it (D-065). One of the three pins
+#    guards something no behaviour can: removing the `readingIsReal()` test
+#    was measured to change NOTHING over 89,376 generated cells (the UTC read
+#    agrees with the zone on every reading that exists), so it is pinned as a
+#    statement of what the step is for, not as a fault guard.
 #
-# ⚠️ THE FIRST VERSION OF STEP (d) REFUSED such a cell, and this pin pinned
-#    the refusal. The coordinator overturned it: refusing `Sun, 29 Mar 2026
-#    01:30` while storing `2026-03-29 01:30`, the same reading, was a refusal by
-#    SPELLING, which round 14 of #777 had already ruled out, and the stated
-#    reason for it (no safe written value) was untrue because `date_parse()`
-#    keeps the written fields. The refusing version, planted back, fails K07b
-#    -- and K07c too, because it also refused `2026-03-29 24:00`.
+# ⚠️ TWO EARLIER VERSIONS OF STEP (d) WERE PINNED HERE, AND BOTH WERE WRONG.
+#    * The first REFUSED such a cell -- a refusal by SPELLING, which round 14
+#      of #777 rules out (`2026-03-29 01:30`, the same reading, was stored).
+#      Planted back it fails K07b, and K07c: it also refused `2026-03-29
+#      24:00`.
+#    * The second rebuilt the reading from `date_parse()`'s fields, and the
+#      independent check found it storing the wrong DATE, with no refusal,
+#      for `+1 weekday`, `first/last day of` and an ordinal date with `+1
+#      month` -- 1,912 cells in its sweep. Planted back it fails K07b and
+#      K07e. **A pin pins whatever is there; it is never evidence that what
+#      is there is right.**
 IMPORT_STEP3_GUARD = (
     "if ($parsed['is_localtime'] === false "
-    "&& is_int($parsed['year']) === true "
-    "&& is_int($parsed['month']) === true "
-    "&& is_int($parsed['day']) === true "
-    "&& is_int($parsed['hour']) === true "
-    "&& is_int($parsed['minute']) === true "
     "&& (int) ($relative['hour'] ?? 0) === 0 "
     "&& (int) ($relative['minute'] ?? 0) === 0 "
     "&& (int) ($relative['second'] ?? 0) === 0) {",
+    "try { "
+    "$written = (new \\DateTimeImmutable($trimmed, new \\DateTimeZone('UTC')))->format('Y-m-d H:i:s'); "
+    "}",
     "if ($written !== null "
-    "&& $weekdayAgrees === true "
     "&& \\Portal\\Core\\EventRecurrence::readingIsReal($written, date_default_timezone_get()) === false) { "
     "$why = ''; "
     "return $written; "
@@ -246,11 +252,13 @@ _IMPORT_REASON = (
     "The CSV import's loose-spreadsheet step (`$fmtClockRaw` step 3) builds a "
     "moment with strtotime() ON PURPOSE: it is the only reader of Excel's long "
     "date, US slash dates and the rest, and the strict steps before it store "
-    "the text without one. Since #785, when that moment moved a plain reading "
-    "out of the hour that does not exist, step (d) returns the reading the cell "
-    "WROTE instead, built from date_parse()'s fields and judged by "
-    "I18n::wallClockFromInput(), so what reaches this column is the time the "
-    "cell wrote. Driven by K07-K07d of tools/clock-change-selftest.php."
+    "the text without one. Since #785, for a plain reading (no zone, offset or "
+    "relative time), step (d) also reads the cell in UTC, where nothing moves, "
+    "and returns THAT whenever the reading is in the hour the zone skipped -- "
+    "so what reaches this column is the reading the cell wrote. Measured over "
+    "89,376 generated cells: the only change from the original reader is "
+    "skipped-hour readings now stored as written. Driven by K07-K07e of "
+    "tools/clock-change-selftest.php."
 )
 ALLOWED: dict[str, tuple[str, str | tuple[str, ...]]] = {
     "web/_apps/calendar/manage/import.php::$startSql::tblEvents.startDateTime::$fmtclockraw":

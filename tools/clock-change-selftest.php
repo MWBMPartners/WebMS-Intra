@@ -592,9 +592,10 @@ if ($foundBoth === false) {
     //    readingIsReal()` -- the one test of whether a reading exists in a
     //    zone (#785) -- and it is reached by ordinary matrix cells, not only
     //    by K07's, so the class is loaded BEFORE the closure runs at all. The
-    //    portal itself autoloads it; an eval here does not. Loaded first in an
-    //    earlier draft of this, the whole test stopped with "class not found"
-    //    at the first ordinary cell.
+    //    portal itself autoloads it; an eval here does not. An earlier draft
+    //    loaded it only inside K07, AFTER the matrix above had already run
+    //    the closure, and the whole test stopped with "class not found" at the
+    //    first ordinary cell -- so it is loaded here, before anything runs.
     require_once PORTAL_CORE . $sep . 'EventRecurrence.php';
     // The reader is defined FIRST: the wrapper binds it with `use (&...)`.
     eval($grabRaw[0]);
@@ -1005,10 +1006,16 @@ if ($foundBoth === false) {
     // `check_wall_clock_writes_not_moments.py` on its first run; nothing in
     // section K had a cell in the skipped hour, so nothing here could see it.
     //
-    // Step (d) now stores the reading the cell WROTE, built from
-    // `date_parse()`'s fields. Its first version REFUSED such a cell, which
-    // was a refusal by spelling (round 14's rule) -- so K07b asserts the
-    // STORED VALUE, and a refusal fails it exactly as a moved hour does.
+    // Step (d) now stores the reading the cell WROTE, which it gets by asking
+    // PHP to read the same cell again in UTC, where nothing moves. Two earlier
+    // versions were wrong and each is planted against these checks:
+    //   * the first REFUSED such a cell -- a refusal by spelling (round 14's
+    //     rule) -- so K07b asserts the STORED VALUE, and a refusal fails it
+    //     exactly as a moved hour does;
+    //   * the second rebuilt the reading from `date_parse()`'s FIELDS and
+    //     stored the wrong DATE for `+1 weekday`, `first/last day of` and an
+    //     ordinal date with `+1 month` -- K07e holds those classes OUTSIDE the
+    //     gap to the original reader's answers, and K07b has them INSIDE it.
     //
     // PREMISE FIRST, as section I does: each cell must really name a time PHP
     // moves in that zone, or the checks below prove nothing.
@@ -1019,6 +1026,17 @@ if ($foundBoth === false) {
         ['Europe/London',    '2026-W13-7 01:30',       '2026-03-29 02:30', '2026-03-29 01:30:00'],
         ['America/New_York', 'Sun, 8 Mar 2026 2:30am', '2026-03-08 03:30', '2026-03-08 02:30:00'],
         ['America/Nuuk',     '28 March 2026 11:30pm',  '2026-03-29 00:30', '2026-03-28 23:30:00'],
+        // Relative DATE rules whose result lands in the skipped hour. The
+        // second was still stored moved by round 1's field rebuild.
+        ['Europe/London',    '2026-03-28 01:30 +1 day',     '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Europe/London',    'sat 2026-03-28 01:30 +1 day', '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Europe/London',    '2027-059 01:30 +1 month',     '2027-03-28 02:30', '2027-03-28 01:30:00'],
+        // Cairo's clocks go forward at midnight on Friday 30 April 2027, the
+        // last day of the month.
+        ['Africa/Cairo',     '2027-04-01 00:30 last day of', '2027-04-30 01:30', '2027-04-30 00:30:00'],
+        // Beirut's go forward at midnight too: `tomorrow` with a DATE is
+        // allowed (a bare `tomorrow` is refused by #797's rule).
+        ['Asia/Beirut',      '2026-03-28 tomorrow 00:30',   '2026-03-29 01:30', '2026-03-29 00:30:00'],
     ];
     $premiseWrong = [];
     $gapWrong     = [];
@@ -1045,6 +1063,15 @@ if ($foundBoth === false) {
     // named weekday DISAGREES with its date (PHP moves it to the next Monday on
     // every day of the year, and step (d) must not make the gap night the one
     // exception), and `24:00` -- each stores exactly what it did before #785.
+    //
+    // ⚠️ AND A RELATIVE TIME ACROSS THE CHANGE, which is the over-reach that
+    //    can actually happen now. Because step (d) reads the cell in UTC, and
+    //    UTC agrees with the zone on every reading that exists, widening it to
+    //    every hour changes nothing (measured -- so this cannot be caught
+    //    there). What CAN go wrong is losing the "no relative time" gate:
+    //    `2026-03-29 00:30 +1 hour` is an exact hour after 00:30, which is
+    //    02:30 that morning, while PHP's UTC reading of it is 01:30, in the
+    //    gap -- so without the gate it would be stored an hour EARLY.
     $keepWrong = [];
     foreach ([
         ['Sun, 29 Mar 2026 02:30',        '2026-03-29 02:30:00'],
@@ -1053,6 +1080,9 @@ if ($foundBoth === false) {
         ['Mon, 29 Mar 2026 01:30',        '2026-03-30 01:30:00'],
         ['2026-03-29 24:00',              '2026-03-30 00:00:00'],
         ['Mon, 01 Jun 2026 10:00:00 GMT', '2026-06-01 11:00:00'],
+        ['2026-03-29 00:30 +1 hour',      '2026-03-29 02:30:00'],
+        ['2026-03-29 00:45 +45 minutes',  '2026-03-29 02:30:00'],
+        ['2026-03-28 01:30 +24 hours',    '2026-03-29 02:30:00'],
     ] as [$keepCell, $keepWant]) {
         $keepGot = $fmtStore($keepCell);
         if ($keepGot !== $keepWant) {
@@ -1077,6 +1107,28 @@ if ($foundBoth === false) {
     }
     check('K07d a cell in the skipped hour WITH a zone or offset is still converted as an instant',
         $instantWrong === [] ? 'all converted' : implode(' | ', $instantWrong), 'all converted');
+    // K07e — THE THREE CLASSES ROUND 1 GOT WRONG, outside the gap, each held
+    //        to the ORIGINAL reader's answer (measured with `git show
+    //        e8a709c1^:web/_apps/calendar/manage/import.php`). Round 1 stored
+    //        the first three as 2026-03-29, each with no refusal; the weird
+    //        `last day of` after a weekday name (it jumps a month) is PHP's
+    //        own rule and is kept, not judged.
+    $classWrong = [];
+    foreach ([
+        ['2026-03-29 01:30 +1 weekday',        '2026-03-30 01:30:00'],
+        ['Sun, 29 Mar 2026 01:30 last day of',  '2026-04-30 01:30:00'],
+        ['Sun, 29 Mar 2026 01:30 first day of', '2026-03-01 01:30:00'],
+        ['2026-057 01:30 +1 month',             '2026-03-26 01:30:00'],
+        ['2026-02-26 01:30 +1 weekday',         '2026-02-27 01:30:00'],
+        ['Thu, 26 Feb 2026 01:30 last day of',  '2026-03-31 01:30:00'],
+    ] as [$classCell, $classWant]) {
+        $classGot = $fmtStore($classCell);
+        if ($classGot !== $classWant) {
+            $classWrong[] = $classCell . ' gave ' . ($classGot ?? 'REFUSED') . ', wanted ' . $classWant;
+        }
+    }
+    check('K07e +1 weekday, first/last day of and ordinal +1 month match the original reader',
+        $classWrong === [] ? 'all as before' : implode(' | ', $classWrong), 'all as before');
 
     // K03 — THE PREMISE, so K02 cannot pass by refusing everything. If the
     //       closure simply returned null the checks above would both be
