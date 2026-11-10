@@ -147,7 +147,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 247; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11 and PV01-PV14
+const PDS_EXPECTED_CHECKS = 252; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, and (round 1) T12 and PV15-PV18
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1844,9 +1844,11 @@ check('V08 no page answer contains a <script> tag or "javascript:" anywhere in i
 
 // Headers, in each state of D-082 and D-094.
 $setOwn($siteA, 'public.frame.origins', null);
-$vNone = $pageA();
-check('V09 with nothing listed: frame-ancestors \'none\' (no website may frame it) and X-Frame-Options DENY; the ONE stylesheet allowed by the hash of what was really sent; no script source at all; sandboxed; one minute\'s caching; noindex; no cookie, no CORS header, no COOP',
-    $pageHeaders($vNone), $pageHeadersWant($pageCspFor($pageFacts($vNone['body']), "'none'"), 'DENY'));
+$vNone  = $pageA();
+$vNoneP = $pagePublicA();
+check('V09 with nothing listed: frame-ancestors \'none\' (no website may frame it) and X-Frame-Options DENY; the ONE stylesheet allowed by the hash of what was really sent; no script source at all; sandboxed; one minute\'s caching; noindex; no cookie, no CORS header, no COOP — on both forms of address',
+    [$pageHeaders($vNone), $pageHeaders($vNoneP)],
+    [$pageHeadersWant($pageCspFor($pageFacts($vNone['body']), "'none'"), 'DENY'), $pageHeadersWant($pageCspFor($pageFacts($vNoneP['body']), "'none'"), 'DENY')]);
 $setOwn($siteA, 'public.frame.origins', "https://www.selftest.invalid\nhttps://second.selftest.invalid:8443");
 $vListed  = $pageA();
 $vListedP = $pagePublicA();
@@ -1864,19 +1866,22 @@ check('V11 a hand-edited list holding lines the page would refuse (plain http, a
     $vEdited['headers']['content-security-policy'] ?? '', $pageCspFor($pageFacts($vEdited['body']), 'https://www.selftest.invalid'));
 $setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
 $setInstallation('public.frame.permitted', 'no');
-$vOff = $pageA();
+$vOff  = $pageA();
+$vOffP = $pagePublicA();
 $setInstallation('public.frame.permitted', 'maybe');
-$vOdd = $pageA();
+$vOdd  = $pageA();
+$vOddP = $pagePublicA();
 $setInstallation('public.frame.permitted', 'yes');
-check('V12 with the installation\'s switch saying no (D-094), and with a value that is neither yes nor no, a listed website counts for nothing: \'none\' and DENY',
-    [$pageHeaders($vOff), $pageHeaders($vOdd)],
-    [$pageHeadersWant($pageCspFor($pageFacts($vOff['body']), "'none'"), 'DENY'), $pageHeadersWant($pageCspFor($pageFacts($vOdd['body']), "'none'"), 'DENY')]);
+check('V12 with the installation\'s switch saying no (D-094), and with a value that is neither yes nor no, a listed website counts for nothing: \'none\' and DENY — on both forms of address',
+    array_map($pageHeaders, [$vOff, $vOffP, $vOdd, $vOddP]),
+    array_map(static fn (array $r): array => $pageHeadersWant($pageCspFor($pageFacts($r['body']), "'none'"), 'DENY'), [$vOff, $vOffP, $vOdd, $vOddP]));
 $vBefore = $sessionFiles();
-$vHead = $http('HEAD', '/w/' . $nameA . '/page.html');
+$vHead  = $http('HEAD', '/w/' . $nameA . '/page.html');
+$vHeadP = $http('HEAD', '/page.html', ['host' => $hostA]);
 $pageA('', ['cookie' => 'PHPSESSID=' . str_repeat('p', 32)]);
 $pagePublicA('?show=both', ['cookie' => 'PHPSESSID=' . str_repeat('o', 32)]);
-check('V13 HEAD is answered like GET, with no body; and no page request makes a session file — a made-up cookie included',
-    [$vHead['status'], $vHead['body'], $sessionFiles() - $vBefore], [200, '', 0]);
+check('V13 HEAD is answered like GET, with no body, on both forms of address; and no page request makes a session file — a made-up cookie included',
+    [$vHead['status'], $vHead['body'], $vHeadP['status'], $vHeadP['body'], $sessionFiles() - $vBefore], [200, '', 200, '', 0]);
 
 // The card.
 $vCard = static function () use ($http, $people): string {
@@ -1898,48 +1903,64 @@ check('V14 the card prints the frame to paste for events, posters and both, on t
     [str_contains($vCardListed, $vFrameLine('events', 'Our events')), str_contains($vCardListed, $vFrameLine('posters', 'Our noticeboard')),
         str_contains($vCardListed, $vFrameLine('both', 'Our events and noticeboard')), stripos($vCardListed, '<iframe') !== false],
     [true, true, true, false]);
-check('V15 and says when a frame works: only on the website listed (named); on NO website while none is listed; and not at all while the installation forbids framing — each in its own words',
+check('V15 and says when a frame works: only on the website listed (named, with the cost in a very old browser said); on NO website while none is listed; not at all while the installation forbids framing — each in its own words; and (round 1 of P4c\'s check) that the frames and the script lines show nothing while their app is switched off',
     [str_contains($vCardListed, 'data-frame-works="listed"') && str_contains($vCardListed, 'below: https://www.selftest.invalid.'),
+        str_contains($vCardListed, 'such as Internet Explorer 11, would show it on any website'),
         str_contains($vCardNone, 'data-frame-works="none-listed"'), str_contains($vCardOff, 'data-frame-works="installation-off"'),
-        str_contains($vCardOff, 'data-frame-works="listed"'), str_contains($vCardNone, 'data-frame-works="listed"')],
-    [true, true, true, false, false]);
+        str_contains($vCardOff, 'data-frame-works="listed"'), str_contains($vCardNone, 'data-frame-works="listed"'),
+        str_contains($vCardListed, 'data-frame-apps="1">The events frame, and the one with both, show nothing while Calendar and Events is switched off'),
+        str_contains($vCardListed, 'data-script-apps="1">The events and countdown lines show nothing while Calendar and Events is switched off')],
+    [true, true, true, true, false, false, true, true]);
 
 // Refusals: every one joins $refusals, which R01 compares byte for byte.
-foreach (['Events', 'all', '', ' events', 'next'] as $bad) {
-    $refusals['the page, show=' . $bad] = $pageA('?show=' . rawurlencode($bad));
+// Round 1 of P4c's check: every one of these was asked on /w/ ONLY, so a
+// public address could answer them differently (a bare 404 without the door's
+// headers, measured) with everything green. BOTH forms, every one.
+foreach (['by name' => $pageA, 'public address' => $pagePublicA] as $form => $ask) {
+    foreach (['Events', 'all', '', ' events', 'next'] as $bad) {
+        $refusals["the page, {$form}, show={$bad}"] = $ask('?show=' . rawurlencode($bad));
+    }
+    $refusals["the page, {$form}, show as a list"] = $ask('?show[]=events');
+    $refusals["the page, {$form}, limit=0"] = $ask('?limit=0');
+    $refusals["the page, {$form}, limit=51"] = $ask('?limit=51');
 }
-$refusals['the page, show as a list'] = $pageA('?show[]=events');
-$refusals['the page, limit=0'] = $pageA('?limit=0');
-$refusals['the page, limit=51'] = $pageA('?limit=51');
-$refusals['the page, a POST'] = $http('POST', '/w/' . $nameA . '/page.html', ['post' => ['x' => '1']]);
-$refusals['the page, in capitals'] = $http('GET', '/w/' . $nameA . '/PAGE.HTML');
-$refusals['the page, a trailing slash'] = $http('GET', '/w/' . $nameA . '/page.html/');
+$refusals['the page, by name, a POST'] = $http('POST', '/w/' . $nameA . '/page.html', ['post' => ['x' => '1']]);
+$refusals['the page, public address, a POST'] = $http('POST', '/page.html', ['host' => $hostA, 'post' => ['x' => '1']]);
+$refusals['the page, by name, in capitals'] = $http('GET', '/w/' . $nameA . '/PAGE.HTML');
+$refusals['the page, public address, in capitals'] = $http('GET', '/PAGE.HTML', ['host' => $hostA]);
+$refusals['the page, by name, a trailing slash'] = $http('GET', '/w/' . $nameA . '/page.html/');
+$refusals['the page, public address, a trailing slash'] = $http('GET', '/page.html/', ['host' => $hostA]);
 $refusals['the page, unknown name'] = $http('GET', '/w/' . str_repeat('cd', 12) . '/page.html');
 $refusals['the page, an inactive organisation by name'] = $http('GET', '/w/' . $nameC . '/page.html');
 $refusals['the page, an inactive organisation\'s public address'] = $http('GET', '/page.html', ['host' => $hostC]);
-$setOwn($siteA, 'calendar.enabled', 'false');
-$refusals['the page, events with Calendar off'] = $pageA('?show=events');
-$refusals['the page, both with Calendar off'] = $pagePublicA('?show=both');
-$vCalOffPosters = $pageA('?show=posters')['status'];
-$setOwn($siteA, 'calendar.enabled', null);
-$setOwn($siteA, 'noticeboard.enabled', 'false');
-$refusals['the page, posters with the Noticeboard off'] = $pagePublicA('?show=posters');
-$refusals['the page, both with the Noticeboard off'] = $pageA('?show=both');
-$vNbOffEvents = $pageA('?show=events')['status'];
-$setOwn($siteA, 'noticeboard.enabled', null);
-check('V16 every part asked for needs its own app: Calendar off refuses events and both but serves posters; the Noticeboard off refuses posters and both but serves events',
-    [$refusals['the page, events with Calendar off']['status'], $refusals['the page, both with Calendar off']['status'], $vCalOffPosters,
-        $refusals['the page, posters with the Noticeboard off']['status'], $refusals['the page, both with the Noticeboard off']['status'], $vNbOffEvents],
-    [404, 404, 200, 404, 404, 200]);
-check('V17 a show that is not exactly events, posters or both (capitals, "all", empty, a space, the script\'s "next", a list), a bad limit, a POST, capitals, a trailing slash, an unknown name and an inactive organisation (by name and public address) are all the door\'s 404',
+$vApps = [];
+foreach (['by name' => $pageA, 'public address' => $pagePublicA] as $form => $ask) {
+    $setOwn($siteA, 'calendar.enabled', 'false');
+    $refusals["the page, {$form}, events with Calendar off"] = $ask('?show=events');
+    $refusals["the page, {$form}, both with Calendar off"] = $ask('?show=both');
+    $vApps[] = [$refusals["the page, {$form}, events with Calendar off"]['status'], $refusals["the page, {$form}, both with Calendar off"]['status'],
+        $ask('?show=posters')['status']];
+    $setOwn($siteA, 'calendar.enabled', null);
+    $setOwn($siteA, 'noticeboard.enabled', 'false');
+    $refusals["the page, {$form}, posters with the Noticeboard off"] = $ask('?show=posters');
+    $refusals["the page, {$form}, both with the Noticeboard off"] = $ask('?show=both');
+    $vApps[] = [$refusals["the page, {$form}, posters with the Noticeboard off"]['status'], $refusals["the page, {$form}, both with the Noticeboard off"]['status'],
+        $ask('?show=events')['status']];
+    $setOwn($siteA, 'noticeboard.enabled', null);
+}
+check('V16 every part asked for needs its own app, on both forms of address: Calendar off refuses events and both but serves posters; the Noticeboard off refuses posters and both but serves events',
+    $vApps, [[404, 404, 200], [404, 404, 200], [404, 404, 200], [404, 404, 200]]);
+check('V17 on BOTH forms of address, a show that is not exactly events, posters or both (capitals, "all", empty, a space, the script\'s "next", a list), a bad limit, a POST, capitals and a trailing slash — and an unknown name and an inactive organisation (by name and by public address) — are all the door\'s 404 (R01 compares every one byte for byte)',
     array_values(array_unique(array_map(static fn (string $k): int => $refusals[$k]['status'], array_values(array_filter(array_keys($refusals),
         static fn (string $k): bool => str_starts_with($k, 'the page, ') === true))))), [404]);
 $setInstallation('portal.maintenance.active', '1');
 $vClosed        = $pageA();
+$vClosedPublic  = $pagePublicA();
 $vClosedUnknown = $http('GET', '/w/' . str_repeat('cd', 12) . '/page.html');
 $setInstallation('portal.maintenance.active', '0');
-check('V18 while closed for maintenance the page is the same 503 as every other door answer, a real name and an unknown one alike',
-    [$vClosed['status'], $signature($vClosed) === $signature($vClosedUnknown)], [503, true]);
+check('V18 while closed for maintenance the page is the same 503 as every other door answer — by name, on A\'s public address, and for an unknown name alike',
+    [$vClosed['status'], $vClosedPublic['status'], $signature($vClosed) === $signature($vClosedUnknown), $signature($vClosedPublic) === $signature($vClosedUnknown)],
+    [503, 503, true, true]);
 // Replaced, and switched off — on BOTH forms of address (P4b round 1's
 // lesson: on a public address "is the door on?" is the only guard).
 $vOldName = $nameA;
@@ -2401,10 +2422,27 @@ $setOwn($siteA, 'public.frame.origins', 'https://www.selftest.invalid');
 $tPageNone   = $pageA();
 $tPageTester = $pageA('', ['cookie' => $cookieOf($people['tester']['jar'])]);
 $setOwn($siteA, 'public.frame.origins', null);
-check('T11 on a test copy the page follows D-087 as the feeds do: with no sign-in the door\'s 404; for a tester served with private, no-store, Vary: Cookie, noindex, nofollow, noarchive and no Set-Cookie — and frame-ancestors still the organisation\'s listed website, with no X-Frame-Options',
-    [$tPageNone['status'], $signature($tPageNone) === $signature($alphaRefusal), $tPageTester['status'], $pageHeaders($tPageTester)],
+// Round 1 of P4c's check: DENY on the testers-only 'none' answer was asserted
+// nowhere, and dropping it there passed.
+$tPageTesterNone = $pageA('', ['cookie' => $cookieOf($people['tester']['jar'])]);
+check('T11 on a test copy the page follows D-087 as the feeds do: with no sign-in the door\'s 404; for a tester served with private, no-store, Vary: Cookie, noindex, nofollow, noarchive and no Set-Cookie — frame-ancestors still the organisation\'s listed website with no X-Frame-Options, and with nothing listed \'none\' WITH DENY',
+    [$tPageNone['status'], $signature($tPageNone) === $signature($alphaRefusal), $tPageTester['status'], $pageHeaders($tPageTester), $pageHeaders($tPageTesterNone)],
     [404, true, 200, $pageHeadersWant($pageCspFor($pageFacts($tPageTester['body']), 'https://www.selftest.invalid'), '', 'private, no-store', 'Cookie',
+        'noindex, nofollow, noarchive'), $pageHeadersWant($pageCspFor($pageFacts($tPageTesterNone['body']), "'none'"), 'DENY', 'private, no-store', 'Cookie',
         'noindex, nofollow, noarchive')]);
+// Round 1 of P4c's check: no test-copy check had ever asked on the APPROVED
+// PUBLIC ADDRESS, for any surface — so skipping D-087's question there passed.
+$tTester = $cookieOf($people['tester']['jar']);
+$tPub = [];
+foreach (['/page.html', '/events.json', '/posters.json', '/door.js'] as $what) {
+    $none   = $http('GET', $what, ['host' => $hostA]);
+    $tester = $http('GET', $what, ['host' => $hostA, 'cookie' => $tTester]);
+    $tPub[$what] = [$none['status'], $signature($none) === $signature($alphaRefusal), $tester['status'], $tester['headers']['cache-control'] ?? '',
+        $tester['headers']['vary'] ?? '', $tester['headers']['x-robots-tag'] ?? '', $tester['headers']['set-cookie'] ?? ''];
+}
+$tPubWant = [404, true, 200, 'private, no-store', 'Cookie', 'noindex, nofollow, noarchive', ''];
+check('T12 on A\'s approved PUBLIC ADDRESS a test copy\'s door follows D-087 for every surface — the page, both feeds and the script: with no sign-in the door\'s 404, identical to an unknown name\'s; for a tester served, private, no-store, Vary: Cookie, noindex, nofollow, noarchive, no Set-Cookie',
+    $tPub, ['/page.html' => $tPubWant, '/events.json' => $tPubWant, '/posters.json' => $tPubWant, '/door.js' => $tPubWant]);
 $channel = 'prod';
 $startServer();
 $waitForServer();
@@ -3112,6 +3150,30 @@ check('PV13 with start-up\'s headers no longer cleared first, its X-Frame-Option
 $p = $plant('_core/PublicDoor.php', 'if (Gatekeeper::mayUseTestCopy($db, self::peekSignedInAccount(), PORTAL_ENV) === false) {', 'if (false) {',
     static fn (): int => $pageA()['status'], 'alpha');
 check('PV14 with D-087\'s tester question taken out, a test copy serves the page to anybody (T11 catches it)', [$p['applied'], $p['result']], [true, 200]);
+// Round 1 of P4c's check: three faults confined to the APPROVED PUBLIC
+// ADDRESS passed every check, because those checks asked on /w/ only. Each
+// plant below ADDS a condition beside the existing line, so every other
+// plant's anchor text is left intact in the file.
+$p = $plant('_core/PublicDoor.php', "            if (\$limit === null || \$show === null) {\n",
+    "            if (\$limit === null || \$show === null) {\n                if (Site::doorOnPublicHost() === true) {\n                    http_response_code(404);\n                    exit();\n                }\n",
+    static fn (): bool => $signature($pagePublicA('?show=Events')) === $signature($refusals['unknown name']));
+check('PV15 with a bad show or limit answered by a bare 404 on a PUBLIC ADDRESS only, R01 tells it apart (it holds those refusals on both forms)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/PublicDoor.php', 'if (Gatekeeper::mayUseTestCopy($db, self::peekSignedInAccount(), PORTAL_ENV) === false) {',
+    'if (Gatekeeper::mayUseTestCopy($db, self::peekSignedInAccount(), PORTAL_ENV) === false && ($surface !== self::SURFACE_PAGE || Site::doorOnPublicHost() === false)) {',
+    static fn (): int => $pagePublicA()['status'], 'alpha');
+check('PV16 with D-087\'s tester question skipped for the page on a PUBLIC ADDRESS only, a test copy serves it to anybody there (T12 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', 'if (Maintenance::isActive() === true) {',
+    'if (Maintenance::isActive() === true && ($surface !== self::SURFACE_PAGE || Site::doorOnPublicHost() === false)) {',
+    static function () use ($setInstallation, $pagePublicA): int {
+        $setInstallation('portal.maintenance.active', '1');
+        $s = $pagePublicA()['status'];
+        $setInstallation('portal.maintenance.active', '0');
+        return $s;
+    });
+check('PV17 with the maintenance question skipped for the page on a PUBLIC ADDRESS only, it is served while the portal is closed (V18 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', "if (\$frameAncestors === \"'none'\") {", "if (\$frameAncestors === \"'none'\" && \$testersOnly === false) {",
+    static fn (): string => $pageA('', ['cookie' => $cookieOf($people['tester']['jar'])])['headers']['x-frame-options'] ?? '', 'alpha');
+check('PV18 with X-Frame-Options dropped from a testers-only test copy\'s \'none\' answer, it carries none (T11 catches it)', [$p['applied'], $p['result']], [true, '']);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

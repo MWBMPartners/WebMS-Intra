@@ -1184,6 +1184,17 @@ final class PublicDoor
      *     it is LEFT OUT, because the only values it has — DENY and
      *     SAMEORIGIN — would refuse the very websites the organisation listed
      *     in any browser that honoured it.
+     *     ⚠️ THE COST OF LEAVING IT OUT, said plainly: once websites are
+     *     listed, a browser too old to understand `frame-ancestors` (Internet
+     *     Explorer 11 is the one still met) sees no framing rule at all, so
+     *     ANY website could show the page in a frame there. The page holds
+     *     only what the organisation already put on the public website, so
+     *     what such a website could show is public anyway; what it gains is
+     *     the organisation's look inside somebody else's page. Every browser
+     *     that understands `frame-ancestors` — all current ones — refuses an
+     *     unlisted website. Chosen over DENY or SAMEORIGIN because those
+     *     would break the listed websites in that same old browser, which is
+     *     the opposite of what the organisation asked for (D-082).
      *   - Cross-Origin-Resource-Policy: cross-origin, so a website that
      *     requires it of everything it embeds (COEP) can still frame the page.
      *   - No Access-Control-Allow-Origin: a page is opened in a frame, never

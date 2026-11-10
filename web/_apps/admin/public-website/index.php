@@ -184,6 +184,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php // #493 P4b: the pasted-in script. The code is printed as TEXT (escaped), never as markup on this page. ?>
                         <h3 class="h6 mt-3">Or paste one line into your website</h3>
                         <p class="small">If your website lets you add a script, paste one of these lines where the list should appear. It draws the items as plain text in a box of its own, so your website's styles are not changed.</p>
+                        <p class="small" data-script-apps="1">The events and countdown lines show nothing while Calendar and Events is switched off for your organisation, and the posters line shows nothing while the Noticeboard is switched off.</p>
                         <?php foreach ($doorPastes as $show => $paste): ?>
                             <p class="small mb-1"><?php echo $esc($paste['words']); ?>:</p>
                             <pre class="small bg-body-tertiary border rounded p-2 mb-2" data-door-script="<?php echo $esc($show); ?>"><code><?php echo $esc($paste['code']); ?></code></pre>
@@ -194,12 +195,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php // #493 P4c: the frame, for websites that cannot take a script. Printed as TEXT (escaped), never as a live frame on this page. ?>
                         <h3 class="h6 mt-3">Or show it in a frame</h3>
                         <p class="small">If your website cannot take a script but lets you add a frame (an "embed" or "iframe" box), paste one of these. It shows a plain page with no script in it.</p>
+                        <p class="small" data-frame-apps="1">The events frame, and the one with both, show nothing while Calendar and Events is switched off for your organisation; the posters frame, and the one with both, show nothing while the Noticeboard is switched off.</p>
                         <?php if ($permitted === false): ?>
                             <div class="alert alert-warning small" data-frame-works="installation-off">This installation does not allow any outside website to show its organisations' pages in a frame, so a frame pasted into your website shows nothing at all. The script above still works.</div>
                         <?php elseif ($framingInForce === []): ?>
                             <div class="alert alert-warning small" data-frame-works="none-listed">A frame works only on the websites listed under "Websites allowed to show your public pages in a frame" below, and none is listed yet, so a frame pasted into any website shows nothing. Add your website there first.</div>
                         <?php else: ?>
-                            <p class="small" data-frame-works="listed">A frame works <strong>only</strong> on the websites listed under "Websites allowed to show your public pages in a frame" below: <?php echo $esc(implode(', ', $framingInForce)); ?>. On any other website it shows nothing.</p>
+                            <p class="small" data-frame-works="listed">A frame works <strong>only</strong> on the websites listed under "Websites allowed to show your public pages in a frame" below: <?php echo $esc(implode(', ', $framingInForce)); ?>. On any other website every current browser shows nothing. (A very old browser that does not understand that rule, such as Internet Explorer 11, would show it on any website; it only ever shows what you have already put on the public website.)</p>
                         <?php endif; ?>
                         <?php foreach ($framePastes as $show => $paste): ?>
                             <p class="small mb-1"><?php echo $esc($paste['words']); ?>:</p>
