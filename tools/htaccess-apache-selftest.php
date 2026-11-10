@@ -37,7 +37,7 @@
  *   B  every address that must work does, exactly as measured: / and the
  *      clean addresses the router answers (/robots.txt, /sitemap.xml,
  *      /manifest.json, /openapi.json, /assets/, /expenses/submit,
- *      /w/…/events.json, /w/…/door.js, /w/…/page.html and /page.html (#493 P4c), and — since #493 P4b deleted the
+ *      /w/…/events.json, /w/…/door.js, /w/…/page.html and /page.html (#493 P4c), /door-check.txt (#493 P4d), and — since #493 P4b deleted the
  *      folder — /widget and /widget/countdown.js) reach index.php; /api-docs/ and /error.php run their
  *      own files; /offline/ runs the static offline page; /index.php, /assets,
  *      /offline and /api-docs redirect where the server sends them (see the
@@ -75,7 +75,7 @@ declare(strict_types=1);
 
 const HAS_IMAGE = 'php:8.4-apache';
 /** Every check, counted: a probe list that shrinks must fail, not pass quietly. */
-const EXPECTED_CHECKS = 58; // 53, then three B probes for #493 P4b (door.js, /widget, /widget/countdown.js), and two for P4c (/w/…/page.html, /page.html)
+const EXPECTED_CHECKS = 59; // 53, then three B probes for #493 P4b (door.js, /widget, /widget/countdown.js), two for P4c (/w/…/page.html, /page.html), and one for P4d (/door-check.txt)
 
 $repo   = dirname(__DIR__);
 $webDir = $repo . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . 'public_html';
@@ -253,6 +253,9 @@ $mustWork = [
     ['/w/0123456789abcdef01234567/page.html', 'index.php'],
     // ... and its form on a public address, which is the bare /page.html.
     ['/page.html', 'index.php'],
+    // #493 P4d: the set-up check's address on a public address, never a file
+    // on disk either; with a query string, as the check always sends one.
+    ['/door-check.txt?n=' . str_repeat('ab', 32), 'index.php'],
     ['/assets/js/portal.js', 'static:assets/js/portal.js'], ['/sw.js', 'static:sw.js'], ['/sitemap.xsd', 'static:sitemap.xsd'],
 ];
 

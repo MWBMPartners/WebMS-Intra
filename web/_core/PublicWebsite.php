@@ -96,8 +96,9 @@ final class PublicWebsite
      * the others, for the same reason: round 1 of P4a's check found that a
      * global administrator could otherwise add or change them on Admin,
      * Settings and open a test copy's door to anybody with no card, no check
-     * and no record of the decision. `PublicWebsiteSetup` reads them; the
-     * card that writes them is package P4d.
+     * and no record of the decision. `PublicWebsiteSetup` reads them, and
+     * writes them only from the card on Admin → Public website (#493 P4d),
+     * which is drawn only on a test copy.
      */
     public const DOOR_TEST_PERMITTED_KEY = 'public.door.testCopies.permitted';
     public const DOOR_TEST_OPEN_KEY      = 'public.door.testCopies.open';
@@ -482,8 +483,9 @@ final class PublicWebsite
         }
         if (strcasecmp($key, self::DOOR_TEST_OPEN_KEY) === 0) {
             // D-087 names the organisation's GLOBAL administrator, not
-            // somebody given "Set up the public website". The card itself is
-            // P4d; until it exists nothing changes this setting anywhere.
+            // somebody given "Set up the public website": the card (#493
+            // P4d) lets the latter see the choice and not make it, and
+            // PublicWebsiteSetup::saveTestCopyChoice() refuses them.
             return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',
                 'who' => 'a global administrator of this organisation', 'installationOnly' => false];
         }

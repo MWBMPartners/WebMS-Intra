@@ -32,6 +32,16 @@
  *    no website while the installation forbids framing (D-094), and only on
  *    the listed websites otherwise (D-082).
  *
+ * 🧪 THE TEST-COPY CARD (#493 P4d, D-087) is drawn ONLY on a test copy —
+ *    `PublicWebsiteSetup::testCopyDoorRule()`, which asks `Channel`'s one
+ *    list of test channels, is the one place that decides. It says who the
+ *    door answers there now, sets the installation's ceiling (its global
+ *    administrator only) and the organisation's choice within it (the
+ *    organisation's global administrator only), and says plainly that
+ *    "signed-in testers only" works only when the door's address is opened
+ *    directly: a browser does not send the portal's sign-in to a script, a
+ *    feed or a frame on another website.
+ *
  * Every value is checked, refused with its reason, and recorded, by
  * `Portal\Core\PublicWebsiteSetup` — the ONE place. This page only draws.
  *
@@ -48,8 +58,6 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
-use Portal\Core\Channel;
-use Portal\Core\Gatekeeper;
 use Portal\Core\PortalAddress;
 use Portal\Core\PublicDoor;
 use Portal\Core\PublicWebsiteSetup;
@@ -113,16 +121,14 @@ if ($doorPage !== '') {
     }
 }
 $framingInForce = PublicWebsiteSetup::frameOriginsInForce($mysqli, $siteId);
-// D-087 on a test copy: the door answers signed-in testers only in this
-// version (nothing can choose "anybody" until package P4d), and the card says
-// what that means for trying it from a real website.
-$portalChannelSource = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : '';
-// The channel is asked FIRST: on a live portal shouldEnforce() writes a line to
-// the error log when the channel was only assumed, and index.php has already
-// written it for this request.
-$doorTestersOnly     = in_array(PORTAL_ENV, Channel::PRE_RELEASE, true) === true
-    && Gatekeeper::shouldEnforce(PORTAL_ENV, $portalChannelSource) === true
-    && PublicWebsiteSetup::testCopyDoorOpenToAnybody($mysqli, $siteId) === false;
+// D-087 on a test copy (#493 P4d): the ONE answer the door itself asks, so the
+// card can never say something the door does not do. It asks the channel
+// first, so on the live portal nothing else is asked.
+$doorTestRule    = PublicWebsiteSetup::testCopyDoorRule($mysqli, $siteId);
+$doorTestersOnly = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_TESTERS;
+$isOrgGlobal     = PublicWebsiteSetup::isGlobalAdministratorOf($mysqli, $userId, $siteId);
+$doorTestLimit   = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_LIVE ? null : PublicWebsiteSetup::testCopyLimit($mysqli);
+$doorTestChoice  = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_LIVE ? null : PublicWebsiteSetup::testCopyChoice($mysqli, $siteId);
 
 // The one-click suggestion: the main website as an https framing website, when
 // it would be accepted and is not on the list yet.
@@ -256,11 +262,58 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
+    <?php if ($doorTestRule !== PublicWebsiteSetup::DOOR_TEST_LIVE): ?>
+        <!-- 🧪 The public door on THIS TEST COPY (#493 P4d, D-087). Drawn only on a test copy. -->
+        <div class="card mb-3" data-door-test-card="<?php echo $esc($doorTestRule); ?>">
+            <div class="card-body">
+                <h2 class="h5">The public door on this test copy</h2>
+                <p class="text-muted">This is a test copy of the portal (<?php echo $esc((string) PORTAL_ENV); ?>), not the live one. Here you choose who its public door answers.</p>
+                <?php if ($doorTestRule === PublicWebsiteSetup::DOOR_TEST_UNGATED): ?>
+                    <div class="alert alert-warning" data-door-test-now="ungated">This test copy's staff sign-in gate is switched off, so every page of it — the public door included — is open to anybody, whatever is chosen below. Search engines are still told not to list anything the door sends.</div>
+                <?php elseif ($doorTestRule === PublicWebsiteSetup::DOOR_TEST_ANYBODY): ?>
+                    <p data-door-test-now="anybody"><span class="badge text-bg-warning me-1">Open to anybody</span> Your public door here answers anybody on the internet, so a copy pasted into a real website works. Every answer tells search engines not to list it.</p>
+                <?php else: ?>
+                    <p data-door-test-now="testers"><span class="badge text-bg-secondary me-1">Signed-in testers only</span> Your public door here answers only people signed in to this test copy who are allowed to use it.</p>
+                <?php endif; ?>
+                <p class="small" data-door-test-cookie="1"><strong>"Signed-in testers only" works only when the door's address is opened directly</strong>, in a browser signed in here. Browsers do not send this portal's sign-in to a script, a feed or a frame on another website, so a copy pasted into a real website shows nothing from this test copy. To try one on a real website, choose "open to anybody".</p>
+                <?php if ($doorTestLimit === null || $doorTestChoice === null): ?>
+                    <div class="alert alert-warning" data-door-test-unreadable="1">What is chosen here could not be read just now, so nothing can be changed here.<?php echo $doorTestRule === PublicWebsiteSetup::DOOR_TEST_UNGATED ? '' : ' While it cannot be read, the door answers signed-in testers only.'; ?> Try again later.</div>
+                <?php else: ?>
+                    <p class="mb-2" data-door-test-limit="<?php echo $esc($doorTestLimit); ?>"><strong>What this installation allows:</strong> <?php echo $doorTestLimit === 'either'
+                        ? 'each organisation may choose, for its own door, between signed-in testers only and open to anybody.'
+                        : 'signed-in testers only, for every organisation. "Open to anybody" cannot be chosen until the installation\'s global administrator allows it.'; ?></p>
+                    <?php if ($isOrgGlobal === true): ?>
+                        <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" data-door-test-form="choice">
+                            <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                            <input type="hidden" name="action" value="door_test_choice">
+                            <p class="mb-1"><strong>Who your public door answers on this test copy</strong></p>
+                            <div class="form-check"><input class="form-check-input" type="radio" name="value" value="testers" id="pw-test-testers"<?php echo $doorTestChoice !== 'anybody' ? ' checked' : ''; ?>><label class="form-check-label" for="pw-test-testers">Signed-in testers only</label></div>
+                            <div class="form-check"><input class="form-check-input" type="radio" name="value" value="anybody" id="pw-test-anybody"<?php echo $doorTestChoice === 'anybody' ? ' checked' : ''; ?>><label class="form-check-label" for="pw-test-anybody">Open to anybody (search engines told not to list it)<?php echo $doorTestLimit !== 'either' ? ' — not allowed by this installation at the moment' : ''; ?></label></div>
+                            <button type="submit" class="btn btn-primary btn-sm mt-2">Save</button>
+                        </form>
+                    <?php else: ?>
+                        <p class="small text-muted" data-door-test-who="1">Only a global administrator of this organisation can change who its door answers here. It is set to <?php echo $doorTestChoice === 'anybody' ? 'open to anybody' : 'signed-in testers only'; ?>.</p>
+                    <?php endif; ?>
+                    <?php if ($isRootAdmin === true): ?>
+                        <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-3" data-door-test-form="limit">
+                            <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                            <input type="hidden" name="action" value="door_test_limit">
+                            <p class="mb-1"><strong>For the whole installation:</strong> what every organisation may choose on this test copy</p>
+                            <div class="form-check"><input class="form-check-input" type="radio" name="value" value="testers" id="pw-limit-testers"<?php echo $doorTestLimit !== 'either' ? ' checked' : ''; ?>><label class="form-check-label" for="pw-limit-testers">Signed-in testers only, for every organisation</label></div>
+                            <div class="form-check"><input class="form-check-input" type="radio" name="value" value="either" id="pw-limit-either"<?php echo $doorTestLimit === 'either' ? ' checked' : ''; ?>><label class="form-check-label" for="pw-limit-either">Each organisation may choose to open its door to anybody</label></div>
+                            <button type="submit" class="btn btn-primary btn-sm mt-2">Save</button>
+                        </form>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <?php if ($checkRows !== null): ?>
         <div class="card mb-3 border-primary" data-setup-check="1">
             <div class="card-body">
                 <h2 class="h5">What the set-up check found</h2>
-                <p class="small text-muted">Shown once. It changed no setting, and nothing here is a promise that your website shows the public door — this check does not fetch it.</p>
+                <p class="small text-muted">Shown once. It changed no setting, and nothing here is a promise that your website shows the public door — this check never fetches your website's own pages.</p>
                 <ul class="list-unstyled mb-0">
                     <?php foreach ($checkRows as $row): ?>
                         <?php [$word, $colour] = $stateWords[(string) ($row['state'] ?? 'note')] ?? $stateWords['note']; ?>
@@ -410,7 +463,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h5">Check my set-up</h2>
-            <p class="text-muted">Checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched), whether your public address's name exists, whether each framing website is valid, what is marked to appear on the public website today, whether the portal's own address is set, and whether the public door is on, with its addresses. It does not fetch the door, so it cannot say whether your website really shows it. It changes no setting.</p>
+            <p class="text-muted">Checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched), whether your public address's name exists and — when it is approved and the door is on — whether it really reaches this organisation's public door on this portal, whether each framing website is valid, what is marked to appear on the public website today, whether the portal's own address is set, and whether the public door is on, with its addresses. It never fetches your website's own pages, so it cannot say whether your website really shows the door. It changes no setting.</p>
             <p class="small text-muted mb-2">The portal's own address is <?php echo PortalAddress::state() === PortalAddress::STATE_SET ? 'set' : 'not set'; ?>.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/check')); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">

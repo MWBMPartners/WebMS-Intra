@@ -32,6 +32,18 @@
  *                     `frame-ancestors` comes from
  *                     `PublicWebsiteSetup::frameAncestorsFor()` and nowhere
  *                     else. See pageHeaderLines() and renderPage().
+ *   door-check.txt    (#493 P4d) ONLY on an organisation's own public
+ *                     address, never on /w/{name}/: the answer the set-up
+ *                     check ("Check my set-up") fetches to learn whether
+ *                     that address really reaches THIS organisation's door
+ *                     on THIS portal. Asked with `?n=` and 64 random hex
+ *                     characters the check made for that one run, it
+ *                     answers one line: CHECK_FORMAT and a proof
+ *                     (checkProof()) — a keyed hash of the organisation's
+ *                     number, the public address and that random value,
+ *                     keyed by the door's own random name. See checkProof()
+ *                     for why it cannot be forged into a false "it reaches
+ *                     your door" and gives nothing away.
  *
  * WHY "page.html", AND NOT THE BARE /w/{name}/ (#493 P4c): one name that is
  * the SAME on both forms of address, so `addressFor()` builds it exactly as it
@@ -71,13 +83,18 @@
  *      The page needs the app of EVERY part it is asked for: `show=both`
  *      with either app off is refused, rather than quietly drawing half, so
  *      a switched-off app is never shown and never silently dropped.
- *   5. D-087, on a test copy only (`Gatekeeper::shouldEnforce()`): unless the
- *      organisation's door is open to anybody there
- *      (`PublicWebsiteSetup::testCopyDoorOpenToAnybody()`), only somebody the
- *      test-copy gate itself lets in (`Gatekeeper::mayUseTestCopy()`), found
- *      by a READ-ONLY look at the session (`Auth::peekSession()`). In this
- *      version nothing can choose "anybody", so every test copy's door is for
- *      signed-in testers only — the stricter answer, on purpose.
+ *   5. D-087, on a test copy only: `PublicWebsiteSetup::testCopyDoorRule()`
+ *      is the ONE answer (the channel from `Portal\Core\Channel`, the
+ *      test-copy gate's own switch, the installation's limit and the
+ *      organisation's choice). Unless it says the door is open to anybody
+ *      there, only somebody the test-copy gate itself lets in
+ *      (`Gatekeeper::mayUseTestCopy()`), found by a READ-ONLY look at the
+ *      session (`Auth::peekSession()`). Since #493 P4d the limit and the
+ *      choice are set on Admin → Public website (the installation's global
+ *      administrator, then the organisation's); with neither set, a test
+ *      copy's door is for signed-in testers only — the stricter answer.
+ *      Every answer from a test copy's door says `noindex, nofollow,
+ *      noarchive`, whichever is chosen.
  *   6. Read, only through the three readers here: events() asks
  *      `EventVisibility::where()` and `fullDetailSelect()` in website mode with
  *      `PublicWebsite::copiedRuleFor()`, then `redact()`; posters() and
@@ -169,6 +186,17 @@ final class PublicDoor
      * visitor reads inside somebody else's page.
      */
     public const PAGE_DEFAULT_LIMIT = 10;
+
+    /**
+     * The set-up check's address (#493 P4d), on an organisation's own public
+     * address ONLY. On /w/{name}/ it is the door's 404 like any unknown
+     * address: the check is about whether a public address reaches the door,
+     * and a name already names it.
+     */
+    public const SURFACE_CHECK = 'door-check.txt';
+
+    /** The first words of the check's one-line answer, before the proof. */
+    public const CHECK_FORMAT = 'webms-public-door-check 1';
 
     /**
      * The page's whole stylesheet. It is written into the page in ONE <style>
@@ -303,6 +331,14 @@ final class PublicDoor
                 self::notFound();
             }
             $limit = 0;
+        } elseif ($surface === self::SURFACE_CHECK) {
+            // #493 P4d: the set-up check's address, on an organisation's own
+            // PUBLIC ADDRESS only and with exactly one well-formed random
+            // value. On /w/{name}/ it is an unknown address: the door's 404.
+            if (Site::doorOnPublicHost() === false || self::isCheckNonce($_GET['n'] ?? null) === false) {
+                self::notFound();
+            }
+            $limit = 0;
         } else {
             self::notFound();
         }
@@ -327,7 +363,11 @@ final class PublicDoor
         // 4️⃣ The app, switched on for THIS organisation. The script needs
         //    either: it draws events or posters, and with both off it could
         //    draw neither, so it is refused like anything else.
-        if ($surface === self::SURFACE_SCRIPT) {
+        if ($surface === self::SURFACE_CHECK) {
+            // The set-up check asks whether the ADDRESS reaches the door, not
+            // what it shows, so no app is needed: the check says separately
+            // what is on the public website today.
+        } elseif ($surface === self::SURFACE_SCRIPT) {
             if (AppRegistry::isEnabledForSite('calendar', $siteId) === false
                 && AppRegistry::isEnabledForSite('noticeboard', $siteId) === false) {
                 self::notFound();
@@ -348,20 +388,36 @@ final class PublicDoor
         }
 
         // 5️⃣ D-087: a test copy's door is for signed-in testers only unless
-        //    the organisation opened it to anybody (not possible until P4d).
-        $testCopy    = in_array(PORTAL_ENV, Channel::PRE_RELEASE, true);
-        $testersOnly = false;
-        $source      = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : '';
-        if (Gatekeeper::shouldEnforce(PORTAL_ENV, $source) === true
-            && PublicWebsiteSetup::testCopyDoorOpenToAnybody($db, $siteId) === false
-        ) {
-            $testersOnly = true;
+        //    the installation permits AND the organisation chose "open to
+        //    anybody" (#493 P4d). ONE answer, testCopyDoorRule(), which the
+        //    card and the set-up check ask too, so the three cannot disagree.
+        $rule        = PublicWebsiteSetup::testCopyDoorRule($db, $siteId);
+        $testCopy    = $rule !== PublicWebsiteSetup::DOOR_TEST_LIVE;
+        $testersOnly = $rule === PublicWebsiteSetup::DOOR_TEST_TESTERS;
+        if ($testersOnly === true) {
             if (Gatekeeper::mayUseTestCopy($db, self::peekSignedInAccount(), PORTAL_ENV) === false) {
                 self::notFound();
             }
         }
 
         // 6️⃣ Read, then 7️⃣ answer.
+        if ($surface === self::SURFACE_CHECK) {
+            // The proof is made for THIS organisation, THIS public address and
+            // the value the check sent. The address is the one IN EFFECT —
+            // the same answer Site::preDetect() resolved this request by —
+            // and the name is read again here, so a name replaced a moment
+            // ago gives the new name's proof.
+            $checkHost = PublicWebsiteSetup::publicHostInEffect($db, $siteId);
+            $checkName = PublicWebsiteSetup::doorStateFor($db, $siteId);
+            if ($checkHost === '' || $checkName['state'] !== 'on') {
+                self::notFound();
+            }
+            $line = self::CHECK_FORMAT . ' ' . self::checkProof($checkName['name'], $siteId, $checkHost, (string) $_GET['n']) . "\n";
+            self::sendCheckHeaders();
+            header('Content-Length: ' . (string) strlen($line));
+            echo $line;
+            exit();
+        }
         if ($surface === self::SURFACE_PAGE) {
             // Read only the parts asked for, through the same readers as the
             // feeds, so the page can never show what a feed would not.
@@ -439,6 +495,53 @@ final class PublicDoor
         }
 
         return $raw;
+    }
+
+    /**
+     * Is this the random value the set-up check sends (`?n=`): exactly 64
+     * lower-case hex characters, as `bin2hex(random_bytes(32))` makes? A
+     * list, capitals, or any other length is refused before anything else
+     * is asked.
+     */
+    public static function isCheckNonce(mixed $raw): bool
+    {
+        return is_string($raw) === true && preg_match('/^[0-9a-f]{64}$/D', $raw) === 1;
+    }
+
+    /**
+     * 🔏 The set-up check's PROOF (#493 P4d): an HMAC-SHA256 of the
+     * organisation's number, its public address and the check's random
+     * value, keyed by the door's random NAME (`tblPublicDoorNames`, 96 random
+     * bits). Pure, so the check works out the same value to compare.
+     *
+     * WHY IT CANNOT BE SPOOFED INTO A FALSE "IT REACHES YOUR DOOR":
+     *   - the random value is new for every run of the check, so a copy of an
+     *     earlier answer (a cache, a mirror, a parked domain replaying what it
+     *     once saw) never matches;
+     *   - nobody can make the proof without the door's name, and another
+     *     portal, or another organisation's door on this one, has a different
+     *     name and number, so its answer is in the same FORM and never
+     *     matches — which is how the check can say "a door answered, but not
+     *     this one";
+     *   - the only thing that CAN produce it is a server that passes the
+     *     request on to this door. That is what "the address reaches this
+     *     door" means, and the check says so plainly: it cannot tell whether
+     *     something sits in between.
+     * The name is not a secret the way a password is — a copy pasted with
+     * /w/{name}/ shows it — but knowing it adds nothing to an attacker who
+     * would also need to control the address being checked: such a party can
+     * already pass the request on to the real door.
+     *
+     * WHY IT GIVES NOTHING AWAY: the answer is a keyed hash, so it reveals
+     * neither the name nor the number, and the address is part of what is
+     * hashed, so two addresses cannot be matched up as one organisation's by
+     * comparing answers. It is only ever sent on a public address that
+     * already answers the door's feeds, after every question the feeds are
+     * asked (the door on, D-087 on a test copy).
+     */
+    public static function checkProof(string $doorName, int $siteId, string $host, string $nonce): string
+    {
+        return hash_hmac('sha256', "webms-public-door-check-v1\n" . $siteId . "\n" . $host . "\n" . $nonce, $doorName);
     }
 
     /** Is this a stored upload's name as the noticeboard makes them: 32 hex characters and a known ending? */
@@ -1144,6 +1247,27 @@ final class PublicDoor
             header('Cache-Control: public, max-age=60');
         }
         header('X-Robots-Tag: ' . ($testCopy === true ? 'noindex, nofollow, noarchive' : 'noindex'));
+    }
+
+    /**
+     * The headers on the set-up check's answer (#493 P4d): plain text, never
+     * kept by a browser or a cache (`no-store` — each answer is for one run
+     * of the check alone), data and never a page, never framed, nothing
+     * sniffed, and `noindex, nofollow, noarchive` on EVERY portal, because
+     * nobody should ever find it in a search. No
+     * Access-Control-Allow-Origin: only the portal's own server reads it,
+     * never another website's script.
+     */
+    private static function sendCheckHeaders(): void
+    {
+        self::clearHeaders();
+        http_response_code(200);
+        header('Content-Type: text/plain; charset=utf-8');
+        header('Cache-Control: no-store');
+        header('Content-Security-Policy: ' . self::DATA_CSP);
+        header('Referrer-Policy: no-referrer');
+        header('X-Content-Type-Options: nosniff');
+        header('X-Robots-Tag: noindex, nofollow, noarchive');
     }
 
     /**

@@ -101,9 +101,26 @@
  *      served with `private, no-store` and `Vary: Cookie`; every answer
  *      `noindex, nofollow, noarchive`; "open to anybody" only when BOTH the
  *      installation's limit and the organisation's choice say so (written
- *      straight into the database: the general settings editor refuses both,
- *      PublicWebsite::LOCKED_KEYS, and the card is P4d); no
+ *      straight into the database here: the general settings editor refuses
+ *      both, PublicWebsite::LOCKED_KEYS; section U drives the card); no
  *      session file made, even for a made-up cookie.
+ *   U  (#493 P4d; D-087, D-101) the test-copy card and the reach check. The
+ *      card is drawn only on a test copy; the installation's ceiling is set
+ *      by its global administrator alone and the organisation's choice by its
+ *      own global administrator alone (the "Set up" holder sees, cannot
+ *      choose), each posted DIRECTLY to the handler: "open to anybody" under
+ *      a ceiling of testers refused with the reason, every refusal recorded,
+ *      nothing written, both writers refusing on the live portal. Open to
+ *      anybody, every surface on BOTH forms answers with no sign-in and
+ *      noindex, nofollow, noarchive; the ceiling lowered, every surface on
+ *      both forms is the identical 404 again. The test copy's own gate
+ *      switched off. The door's check address (/door-check.txt, public
+ *      address only): its proof, whole header set and every refusal. And
+ *      "Check my set-up"'s reach row in each state — waiting, a members'
+ *      address, the door off, testers only, not reachable — over HTTP, then
+ *      the REAL check in-process through a real TLS server in front of this
+ *      portal: reached ("ok"), another organisation's door, another
+ *      installation's, a 404, a plain 200, a redirect, and no curl.
  *   P  the plants: each gate and each header taken out of a COPY of the
  *      portal, and the scenario that should catch it re-run. The expected
  *      value of a plant check is the value UNDER the fault, as
@@ -147,7 +164,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 254; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20
+const PDS_EXPECTED_CHECKS = 297; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -261,7 +278,7 @@ $setOwn = static function (int $site, string $key, ?string $value) use ($db): vo
         $i->close();
     }
 };
-$touched = ['multisite.enabled', 'multisite.detectionMode', 'site.url', 'public.door.testCopies.permitted',
+$touched = ['multisite.enabled', 'multisite.detectionMode', 'site.url', 'public.door.testCopies.permitted', 'portal.gatekeeper.enabled',
     'public.events.copiedRule', 'portal.maintenance.active', 'public.frame.permitted', 'calendar.enabled', 'noticeboard.enabled'];
 foreach ($touched as $key) {
     $state['restore'][$key] = $installationRow($key);
@@ -2484,6 +2501,462 @@ check('L01 the general settings editor refuses both of D-087\'s settings and sen
         'public.door.testCopies.open' => [true, 'admin/public-website', false]]);
 
 // =============================================================================
+echo "U. D-087's card, and \"Check my set-up\" reaching the door (#493 P4d)\n";
+// =============================================================================
+// The setting D-087 describes is set on a CARD now, by two different people
+// (the installation's global administrator sets the ceiling; the
+// organisation's global administrator chooses within it), and the set-up check
+// FETCHES an approved public address to learn whether it reaches THIS door.
+// Every value here is read back from the database or from the answer itself.
+
+/** A door answer's whole header set, as sorted lines, without what PHP's test server adds of its own. */
+$uHeaderSet = static function (array $r): array {
+    $keep = array_values(array_filter($r['lines'], static fn (string $l): bool
+        => preg_match('/^(date|host|connection|x-powered-by):/i', $l) !== 1));
+    sort($keep);
+    return $keep;
+};
+/** A fresh random value, as the set-up check makes one. */
+$uNonce = static fn (): string => bin2hex(random_bytes(32));
+/**
+ * The proof, worked out HERE from what D-087's check is defined to hash, so a
+ * change to what the door hashes fails U01 rather than being agreed with.
+ */
+$uProof = static function (int $site, string $host, string $nonce) use ($doorName): string {
+    return hash_hmac('sha256', "webms-public-door-check-v1\n" . $site . "\n" . $host . "\n" . $nonce, (string) $doorName($site));
+};
+/** A's door switched off and back on with the SAME name (later sections and plants hold it). */
+$uDoorOff = static function (bool $off) use ($db, $siteA, $doorName): void {
+    static $kept = null;
+    if ($off === true) {
+        $kept = (string) $doorName($siteA);
+        $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` = {$siteA}");
+        return;
+    }
+    $db->query("INSERT INTO `tblPublicDoorNames` (`siteID`, `publicName`, `changedAtUtc`) VALUES ({$siteA}, '{$kept}', UTC_TIMESTAMP())");
+};
+/** The organisation's own row of a setting, exactly as stored, or null. */
+$uOwnRow = static function (int $site, string $key) use ($db): ?string {
+    $s = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?');
+    $s->bind_param('si', $key, $site);
+    $s->execute();
+    $r = $s->get_result()->fetch_assoc();
+    $s->close();
+    return $r === null ? null : (string) $r['settingValue'];
+};
+/** The flash message the page shows after a press (the first alert in the page). */
+$uFlash = static function (string $page): string {
+    if (preg_match('#<div class="alert alert-[a-z]+" role="alert">(.*?)</div>#s', $page, $m) !== 1) {
+        return '';
+    }
+    return trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8'));
+};
+/** Run "Check my set-up" as $role over HTTP and give the set-up check's "Public address" rows, [state, words], in order. */
+$uCheckRows = static function (string $role) use ($http, $tokenOn, $people, $db): array {
+    // The check allows six runs in ten minutes per person (RateLimiter); this
+    // section runs it more often than that, so each run starts with none.
+    $db->query("DELETE FROM `tblApiRateLimits` WHERE `bucket` LIKE 'pwsetup:check:%'");
+    $jar  = $people[$role]['jar'];
+    $page = $http('GET', '/admin/public-website', ['jar' => $jar]);
+    $http('POST', '/admin/public-website/check', ['jar' => $jar, 'post' => ['csrf_token' => $tokenOn($page['body'])]]);
+    $body  = $http('GET', '/admin/public-website', ['jar' => $jar])['body'];
+    $start = strpos($body, 'data-setup-check="1"');
+    $end   = $start === false ? false : strpos($body, '</ul>', $start);
+    if ($start === false || $end === false) {
+        return [];
+    }
+    preg_match_all('#<li class="mb-2" data-check-state="([^"]*)">(.*?)</li>#s', substr($body, $start, $end - $start), $m, PREG_SET_ORDER);
+    $rows = [];
+    foreach ($m as $one) {
+        $text = trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($one[2]), ENT_QUOTES, 'UTF-8')));
+        $at   = strpos($text, 'Public address:');
+        if ($at !== false) {
+            $rows[] = [$one[1], trim(substr($text, $at + strlen('Public address:')))];
+        }
+    }
+    return $rows;
+};
+/** What the ONE reach row says, exactly as PublicWebsiteSetup words it. */
+$uReachWords = [
+    'waiting' => 'Whether it reaches this portal\'s public door was not checked: until the installation\'s administrator approves it, the door does not answer there.',
+    'not in effect' => 'Whether it reaches this portal\'s public door was not checked: as said above, the door does not answer on it.',
+    'door off' => 'Whether it reaches this portal\'s public door was not checked: the door is not switched on, so nothing answers there for your organisation.',
+    'testers' => 'Whether it reaches this portal\'s public door was not checked: on this test copy the door answers only people signed in here who may use the test copy, and this check is not signed in when it fetches. Open https://' . $hostA . '/events.json in this browser to see it.',
+    'not reached' => 'This check did not get an answer from this organisation\'s public door at https://' . $hostA . '/. That can happen, for example, when the address points at a different server, something in front of it answers instead or sends visitors on to another address, its security certificate does not cover the name, the portal is closed for maintenance, or this server cannot reach outside addresses or its own public address. Open https://' . $hostA . '/events.json in your own browser: it should show your events.',
+    'another door' => 'A public door answered at https://' . $hostA . '/, but not this organisation\'s door on this portal. That can happen, for example, when the address leads to another installation of the portal, or to another organisation\'s door. Make sure the address points at this portal.',
+    'reached' => 'It reaches this organisation\'s public door on this portal: the answer from https://' . $hostA . '/ carried a proof only this door could make, for this check alone.',
+    'no curl' => 'Whether it reaches this portal\'s public door could not be checked on this server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed or is switched off on this server). Open https://' . $hostA . '/events.json in your own browser: it should show your events.',
+];
+$uCheckHeaders = ['Cache-Control: no-store', 'Content-Length: 91', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; sandbox",
+    'Content-Type: text/plain; charset=utf-8', 'Referrer-Policy: no-referrer', 'X-Content-Type-Options: nosniff', 'X-Robots-Tag: noindex, nofollow, noarchive'];
+
+// ── The door's check address, on the live portal ─────────────────────────────
+$uRefusal = $http('GET', '/w/' . str_repeat('ab', 12) . '/events.json');
+$n1 = $uNonce();
+$u01 = $http('GET', '/door-check.txt?n=' . $n1, ['host' => $hostA]);
+// Start-up's Permissions-Policy is left on every door answer (it is not in
+// PublicDoor::REMOVED_HEADERS, and asks nothing of a reader); the check's
+// answer carries exactly what the feeds on the same address carry.
+$uPerm = $http('GET', '/events.json', ['host' => $hostA])['headers']['permissions-policy'] ?? null;
+if ($uPerm !== null) {
+    $uCheckHeaders[] = 'Permissions-Policy: ' . $uPerm;
+    sort($uCheckHeaders);
+}
+check('U01 on A\'s approved public address, /door-check.txt with a fresh value answers ONE line — the check\'s format and the proof made from A\'s door name, number, address and that value — with its WHOLE header set: plain text, no-store, data only, never framed, no Referer, nosniff, noindex nofollow noarchive, no cookie and no CORS header',
+    [$u01['status'], $u01['body'], $uHeaderSet($u01)], [200, 'webms-public-door-check 1 ' . $uProof($siteA, $hostA, $n1) . "\n", $uCheckHeaders]);
+$n2 = $uNonce();
+$u02a = $http('GET', '/door-check.txt?n=' . $n2, ['host' => $hostA]);
+$u02b = $http('GET', '/door-check.txt?n=' . $n2, ['host' => $hostB]);
+check('U02 a new value gives a new proof (so an old answer can never be replayed), and B\'s public address answers with B\'s OWN proof for the same value — never A\'s',
+    [$u02a['body'] === 'webms-public-door-check 1 ' . $uProof($siteA, $hostA, $n2) . "\n", $u02a['body'] !== $u01['body'],
+        $u02b['body'] === 'webms-public-door-check 1 ' . $uProof($siteB, $hostB, $n2) . "\n", $u02a['body'] !== $u02b['body']],
+    [true, true, true, true]);
+$uBad = [];
+$uBad['/w/ form'] = $feedA('door-check.txt?n=' . $uNonce());
+$uBad['/w/ form, B'] = $http('GET', '/w/' . $nameB . '/door-check.txt?n=' . $uNonce());
+$uBad['no value'] = $http('GET', '/door-check.txt', ['host' => $hostA]);
+$uBad['capitals'] = $http('GET', '/door-check.txt?n=' . strtoupper($uNonce()), ['host' => $hostA]);
+$uBad['63 characters'] = $http('GET', '/door-check.txt?n=' . substr($uNonce(), 1), ['host' => $hostA]);
+$uBad['65 characters'] = $http('GET', '/door-check.txt?n=' . $uNonce() . 'a', ['host' => $hostA]);
+$uBad['a list'] = $http('GET', '/door-check.txt?n[]=' . $uNonce(), ['host' => $hostA]);
+$uBad['POST'] = $http('POST', '/door-check.txt?n=' . $uNonce(), ['host' => $hostA, 'post' => ['x' => '1']]);
+$uBad['inactive C'] = $http('GET', '/door-check.txt?n=' . $uNonce(), ['host' => $hostC]);
+$uDoorOff(true);
+$uBad['A\'s door off'] = $http('GET', '/door-check.txt?n=' . $uNonce(), ['host' => $hostA]);
+$uDoorOff(false);
+$uSame = [];
+foreach ($uBad as $kind => $r) {
+    $uSame[$kind] = $signature($r) === $signature($uRefusal);
+}
+check('U03 the check address is the door\'s identical 404 on the /w/ form (A\'s name and B\'s), with no value, capitals, 63 or 65 characters, a list, a POST, on the inactive C\'s address and with A\'s door off',
+    $uSame, array_fill_keys(array_keys($uBad), true));
+$u04 = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+check('U04 on the LIVE portal the test-copy card is not drawn at all', [str_contains($u04, 'data-door-test-card'), str_contains($u04, 'door_test_choice')], [false, false]);
+$uRootRefusedBefore = $logged('PublicWebsiteSetupRefused', $people['root']['id']);
+$u05 = $card('root', 'door_test_choice', ['value' => 'anybody']);
+$instJar = $instroot();
+$uInstRefusedBefore = $logged('PublicWebsiteSetupRefused', $people['instroot']['id']);
+$u05b = $card('instroot', 'door_test_limit', ['value' => 'either']);
+check('U05 on the LIVE portal both writers refuse — the organisation\'s choice and the installation\'s limit — saying why, each refusal recorded, and nothing written',
+    [$uFlash($u05['page']), $uFlash($u05b['page']), $logged('PublicWebsiteSetupRefused', $people['root']['id']) - $uRootRefusedBefore,
+        $logged('PublicWebsiteSetupRefused', $people['instroot']['id']) - $uInstRefusedBefore, $uOwnRow($siteA, 'public.door.testCopies.open'),
+        $installationRow('public.door.testCopies.permitted')],
+    ['This is the live portal. This setting changes only how the public door answers on a test copy (the alpha, beta or dev copy), so it is set on that copy, where it is shown. Nothing was saved.',
+        'This is the live portal. This setting changes only how the public door answers on a test copy (the alpha, beta or dev copy), so it is set on that copy, where it is shown. Nothing was saved.',
+        1, 1, null, 'testers']);
+
+// ── "Check my set-up": the reach row, in every state the live portal can show ─
+// The rows are [this organisation's alone, its name exists, approval, REACH].
+$uStates = [];
+$db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+$uStates['waiting'] = ($uCheckRows('root'))[3] ?? null;
+$db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+$asMembersAddress(true);
+$uStates['a members\' address'] = ($uCheckRows('root'))[3] ?? null;
+$asMembersAddress(false);
+$uDoorOff(true);
+$uStates['door off'] = ($uCheckRows('root'))[3] ?? null;
+$uDoorOff(false);
+// In effect, on the live portal: the check FETCHES. This test's portal has no
+// way to reach door-a.selftest.test (no such name exists), so it is not reached.
+$uStates['in effect, not reachable from here'] = ($uCheckRows('root'))[3] ?? null;
+check('U06 "Check my set-up" over HTTP, its reach row read from its results block alone: waiting and a members\' address are "not tested" with the reason, the door off is "not tested", and an approved address this server cannot reach is a problem — never a tick',
+    $uStates, ['waiting' => ['untested', $uReachWords['waiting']], 'a members\' address' => ['untested', $uReachWords['not in effect']],
+        'door off' => ['untested', $uReachWords['door off']], 'in effect, not reachable from here' => ['problem', $uReachWords['not reached']]]);
+
+// ── The real check, in-process, against a real TLS server in front of the door ─
+// SafeFetch reaches only public https addresses, so — exactly as the framing
+// test does — a scratch copy of the REAL SafeFetch trusts this test's
+// certificate and records its options, its test-only resolver names
+// door-a.selftest.test as a TLS server on this machine, and that server
+// passes every request on to THIS test's portal (Host header unchanged), or,
+// by a mode file, answers as something else would. Nothing in the portal's
+// own files is changed for this.
+$uTls = $child . $sep . 'u-tls';
+@mkdir($uTls . $sep . 'core', 0700, true);
+$uCnf = $uTls . $sep . 'tls.cnf';
+file_put_contents($uCnf, "[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN={$hostA}\n[v3]\nsubjectAltName=DNS:{$hostA}\nbasicConstraints=critical,CA:TRUE\n");
+$uCfg = ['config' => $uCnf, 'digest_alg' => 'sha256', 'private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA, 'x509_extensions' => 'v3'];
+$uKey = openssl_pkey_new($uCfg);
+$uCsr = $uKey === false ? false : openssl_csr_new(['commonName' => $hostA], $uKey, $uCfg);
+$uCrt = $uCsr === false ? false : openssl_csr_sign($uCsr, null, $uKey, 2, $uCfg, random_int(1, 2000000000));
+if ($uCrt === false || openssl_x509_export_to_file($uCrt, $uTls . $sep . 'cert.pem') === false
+    || openssl_pkey_export_to_file($uKey, $uTls . $sep . 'key.pem', null, $uCfg) === false) {
+    refuse('could not make the test certificate for section U (PHP\'s openssl extension)');
+}
+file_put_contents($uTls . $sep . 'mode.txt', 'forward');
+file_put_contents($uTls . $sep . 'server.php', <<<'TLS'
+<?php
+// Written by tools/public-door-selftest.php for ONE run. Test only.
+// A TLS server that passes each request on to the test portal, or — by the
+// mode file — answers as something else would.
+declare(strict_types=1);
+[, $tlsPort, $cert, $key, $webPort, $modeFile, $otherHost] = $argv;
+$ctx = stream_context_create(['ssl' => ['local_cert' => $cert, 'local_pk' => $key, 'verify_peer' => false]]);
+$server = stream_socket_server('tls://127.0.0.1:' . $tlsPort, $errno, $errstr, STREAM_SERVER_BIND | STREAM_SERVER_LISTEN, $ctx);
+if ($server === false) {
+    fwrite(STDERR, "could not listen: {$errstr}\n");
+    exit(1);
+}
+$plain = static fn (int $code, string $words, string $body, string $extra = ''): string
+    => "HTTP/1.1 {$code} {$words}\r\nContent-Type: text/plain\r\n{$extra}Content-Length: " . strlen($body) . "\r\nConnection: close\r\n\r\n" . $body;
+while (true) {
+    $c = @stream_socket_accept($server, 60);
+    if ($c === false) {
+        continue;
+    }
+    $head = '';
+    while (($line = fgets($c)) !== false) {
+        $head .= $line;
+        if (rtrim($line, "\r\n") === '') {
+            break;
+        }
+    }
+    $mode = trim((string) @file_get_contents($modeFile));
+    if ($mode === 'p404') {
+        $out = $plain(404, 'Not Found', "no site here\n");
+    } elseif ($mode === 'p200') {
+        $out = $plain(200, 'OK', "ok\n");
+    } elseif ($mode === 'fake') {
+        $out = $plain(200, 'OK', 'webms-public-door-check 1 ' . str_repeat('0', 64) . "\n");
+    } elseif ($mode === 'redirect') {
+        $out = $plain(301, 'Moved', '', 'Location: /events.json' . "\r\n");
+    } else {
+        // Pass it on, as a proxy in front of the portal would. 'forward-b'
+        // rewrites the Host to another organisation's public address.
+        $lines = preg_split('/\r\n/', rtrim($head, "\r\n")) ?: [];
+        $out   = [];
+        foreach ($lines as $i => $l) {
+            if ($i > 0 && preg_match('/^(host|connection):/i', $l) === 1) {
+                if (stripos($l, 'host:') === 0) {
+                    $out[] = $mode === 'forward-b' ? 'Host: ' . $otherHost : $l;
+                }
+                continue;
+            }
+            $out[] = $l;
+        }
+        $out[] = 'Connection: close';
+        $u = @stream_socket_client('tcp://127.0.0.1:' . $webPort, $eno, $estr, 10);
+        if ($u === false) {
+            $out = $plain(502, 'Bad Gateway', "test portal not reachable\n");
+        } else {
+            fwrite($u, implode("\r\n", $out) . "\r\n\r\n");
+            stream_set_timeout($u, 30);
+            $out = (string) stream_get_contents($u);
+            fclose($u);
+        }
+    }
+    @fwrite($c, $out);
+    @fclose($c);
+}
+TLS);
+$uTlsPort = $port + 41;
+$uTlsProc = proc_open([PHP_BINARY, $uTls . $sep . 'server.php', (string) $uTlsPort, $uTls . $sep . 'cert.pem', $uTls . $sep . 'key.pem',
+    (string) $port, $uTls . $sep . 'mode.txt', $hostB],
+    [0 => ['file', '/dev/null', 'r'], 1 => ['file', $uTls . $sep . 'server.log', 'a'], 2 => ['file', $uTls . $sep . 'server.log', 'a']], $uTlsPipes);
+register_shutdown_function(static function () use (&$uTlsProc): void {
+    if (is_resource($uTlsProc) === true) {
+        proc_terminate($uTlsProc);
+        proc_close($uTlsProc);
+    }
+});
+for ($i = 0; $i < 40; $i++) {
+    $probeSocket = @fsockopen('127.0.0.1', $uTlsPort, $eno, $estr, 0.25);
+    if ($probeSocket !== false) {
+        fclose($probeSocket);
+        break;
+    }
+    usleep(150000);
+}
+$uRealSafeFetch = (string) file_get_contents($child . $sep . 'web' . $sep . '_core' . $sep . 'SafeFetch.php');
+$uTrust  = 'CURLOPT_SSL_VERIFYPEER    => true,';
+$uRecord = '$o = self::options($opts);';
+if (substr_count($uRealSafeFetch, $uTrust) !== 1 || substr_count($uRealSafeFetch, $uRecord) !== 1) {
+    refuse('section U could not find SafeFetch\'s certificate line or the first line of get() to record its options');
+}
+file_put_contents($uTls . $sep . 'core' . $sep . 'SafeFetch.php', str_replace([$uTrust, $uRecord], [
+    $uTrust . ' CURLOPT_CAINFO => ' . var_export($uTls . $sep . 'cert.pem', true) . ',',
+    '$GLOBALS[\'pdsSafeFetchCalls\'][] = [\'url\' => $url, \'opts\' => $opts]; ' . $uRecord,
+], $uRealSafeFetch));
+file_put_contents($child . $sep . 'u-ask-check.php', <<<'ASK'
+<?php
+// Written by tools/public-door-selftest.php for ONE run. Test only. Runs the
+// REAL PublicWebsiteSetup::checkSetUp() — no hook — with SafeFetch taken from
+// the scratch copy (it trusts the test certificate and records its options)
+// and every other class from the copy of web/.
+declare(strict_types=1);
+spl_autoload_register(static function (string $class): void {
+    $short = str_replace('Portal\\Core\\', '', $class);
+    $file  = $short === 'SafeFetch' ? __DIR__ . '/u-tls/core/SafeFetch.php' : __DIR__ . '/web/_core/' . $short . '.php';
+    if (is_file($file) === true) {
+        require_once $file;
+    }
+});
+define('PORTAL_CORE', __DIR__ . '/web/_core');
+define('PORTAL_ENV', 'prod');
+define('PORTAL_ENV_SOURCE', 'environment');
+$c = require __DIR__ . '/web/_auth_keys/auth_creds.php';
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$mysqli = new mysqli($c['db_host'], $c['db_user'], $c['db_pass'], $c['db_name'], (int) $c['db_port']);
+$mysqli->set_charset('utf8mb4');
+$site = (int) $argv[1];
+\Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => '']], $site);
+\Portal\Core\SafeFetch::$testResolverOverride = [$argv[3] => ['ips' => ['127.0.0.1'], 'port' => (int) $argv[2]]];
+$GLOBALS['pdsSafeFetchCalls'] = [];
+$before = microtime(true);
+try {
+    $rows = \Portal\Core\PublicWebsiteSetup::checkSetUp($mysqli, $site);
+} catch (\Throwable $e) {
+    echo json_encode(['error' => get_class($e) . ': ' . $e->getMessage()]);
+    exit;
+}
+$door  = array_values(array_filter($GLOBALS['pdsSafeFetchCalls'], static fn (array $one): bool => str_contains($one['url'], '/door-check.txt')));
+$first = $door[0]['opts'] ?? [];
+$public = array_values(array_filter($rows, static fn (array $r): bool => $r['label'] === 'Public address'));
+echo json_encode([
+    'reach'   => isset($public[3]) === true ? [$public[3]['state'], $public[3]['words']] : null,
+    'fetches' => count($door),
+    'url'     => isset($door[0]) === true ? preg_replace('/n=[0-9a-f]{64}$/', 'n=<64 hex>', $door[0]['url']) : null,
+    'opts'    => $first === [] ? null : ['deadline ahead' => (int) round((float) $first['deadline'] - $before), 'step' => $first['timeoutSeconds'],
+        'connect' => $first['connectTimeoutSeconds'], 'redirects' => $first['maxRedirects'], 'https only' => $first['httpsOnly'],
+        'bytes' => $first['maxBytes'], 'accept' => $first['accept']],
+]);
+ASK);
+/** The real check, in-process, with the TLS server in `$mode`; `$php` adds PHP options (for "no curl"). */
+$uAsk = static function (string $mode, string $php = '') use ($child, $sep, $uTls, $uTlsPort, $siteA, $hostA): array {
+    file_put_contents($uTls . $sep . 'mode.txt', $mode);
+    $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . $php . ' -d ' . escapeshellarg('error_log=' . $child . $sep . 'u-ask.log') . ' '
+        . escapeshellarg($child . $sep . 'u-ask-check.php') . ' ' . $siteA . ' ' . $uTlsPort . ' ' . escapeshellarg($hostA) . ' 2>&1');
+    file_put_contents($uTls . $sep . 'mode.txt', 'forward');
+    $got = json_decode($raw, true);
+    return is_array($got) === true ? $got : ['could not ask' => $raw];
+};
+$u07 = $uAsk('forward');
+check('U07 the REAL check, through a real TLS server passing the request on to this portal: ONE fetch of https://' . $hostA . '/door-check.txt with a fresh 64-character value, https only, NO redirects followed, at most 1,024 bytes, 5 seconds a step and 15 in all — and it says the address reaches this organisation\'s door ("ok")',
+    $u07, ['reach' => ['ok', $uReachWords['reached']], 'fetches' => 1, 'url' => 'https://' . $hostA . '/door-check.txt?n=<64 hex>',
+        'opts' => ['deadline ahead' => 15, 'step' => 5, 'connect' => 5, 'redirects' => 0, 'https only' => true, 'bytes' => 1024, 'accept' => 'text/plain']]);
+$u08 = [];
+foreach (['forward-b' => 'another organisation\'s door here', 'fake' => 'another installation\'s door', 'p404' => 'a server answering 404',
+    'p200' => 'a server answering 200 with something else', 'redirect' => 'a server sending it elsewhere'] as $mode => $what) {
+    $u08[$what] = $uAsk($mode)['reach'] ?? null;
+}
+check('U08 a door of the same kind that is not A\'s — another organisation\'s door on this portal (the request passed on with B\'s address) or another installation\'s — is "a public door answered, but not this one"; a 404, a plain 200 or a redirect is "did not get an answer from this door", with the last status as a fact; none is ever "ok"',
+    $u08, ['another organisation\'s door here' => ['problem', $uReachWords['another door']], 'another installation\'s door' => ['problem', $uReachWords['another door']],
+        'a server answering 404' => ['problem', $uReachWords['not reached'] . ' The last answer this check received was HTTP 404.'],
+        'a server answering 200 with something else' => ['problem', $uReachWords['not reached'] . ' The last answer this check received was HTTP 200.'],
+        'a server sending it elsewhere' => ['problem', $uReachWords['not reached'] . ' The last answer this check received was HTTP 301.']]);
+check('U09 on a server without curl (curl_init switched off), the real check says the public address could not be checked on this server',
+    $uAsk('forward', '-d disable_functions=curl_init')['reach'] ?? null, ['untested', $uReachWords['no curl']]);
+
+// ── The card on a TEST COPY ─────────────────────────────────────────────────
+$channel = 'alpha';
+$startServer();
+$waitForServer();
+$uAlphaRefusal = $http('GET', '/w/' . str_repeat('ab', 12) . '/events.json');
+// The "Set up the public website" holder must get past the test-copy gate to
+// see the card at all: the portal-wide Admin flag does that and nothing else.
+$db->query("UPDATE `tblUsers` SET `isAdmin` = 1 WHERE `userID` = {$people['setup']['id']}");
+$u10 = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+check('U10 on a test copy the card is drawn for A\'s global administrator: signed-in testers only now, what the installation allows (testers only), the choice form, NO installation form (they are not the installation\'s), and the plain statement that "signed-in testers only" works only when the address is opened directly',
+    [str_contains($u10, 'data-door-test-card="testers"'), str_contains($u10, 'data-door-test-now="testers"'), str_contains($u10, 'data-door-test-limit="testers"'),
+        str_contains($u10, 'data-door-test-form="choice"'), str_contains($u10, 'data-door-test-form="limit"'),
+        str_contains($u10, 'Browsers do not send this portal\'s sign-in to a script, a feed or a frame on another website')],
+    [true, true, true, true, false, true]);
+$uRootRefusedBefore = $logged('PublicWebsiteSetupRefused', $people['root']['id']);
+$u11 = $card('root', 'door_test_choice', ['value' => 'anybody']);
+check('U11 "open to anybody" posted while the installation allows testers only is REFUSED in the handler with the reason, recorded, and nothing written',
+    [$uFlash($u11['page']), $logged('PublicWebsiteSetupRefused', $people['root']['id']) - $uRootRefusedBefore, $uOwnRow($siteA, 'public.door.testCopies.open')],
+    ['This installation lets test copies\' public doors answer signed-in testers only, so "open to anybody" cannot be chosen. The installation\'s global administrator can change that. Nothing was saved.', 1, null]);
+$u12 = $card('root', 'door_test_limit', ['value' => 'either']);
+check('U12 A\'s global administrator — not the installation\'s — cannot raise the installation\'s limit: refused, recorded, unchanged',
+    [$uFlash($u12['page']), $logged('PublicWebsiteSetupRefused', $people['root']['id']) - $uRootRefusedBefore, $installationRow('public.door.testCopies.permitted')],
+    ['Only a global administrator of the whole installation can change what test copies\' public doors may do. Nothing was saved.', 2, 'testers']);
+$u13page = $http('GET', '/admin/public-website', ['jar' => $instJar])['body'];
+$u13 = $card('instroot', 'door_test_limit', ['value' => 'either']);
+check('U13 the installation\'s global administrator sees the installation form and raises the limit to "either": stored, recorded as PublicDoorTestCopyLimitSaved, and the card says each organisation may choose',
+    [str_contains($u13page, 'data-door-test-form="limit"'), $installationRow('public.door.testCopies.permitted'), $logged('PublicDoorTestCopyLimitSaved', $people['instroot']['id']),
+        str_contains($u13['page'], 'data-door-test-limit="either"'), $uFlash($u13['page'])],
+    [true, 'either', 1, true, 'Saved: on this test copy, each organisation\'s global administrator may now choose to open its public door to anybody (search engines are always told not to list it).']);
+$uSetupRefusedBefore = $logged('PublicWebsiteSetupRefused', $people['setup']['id']);
+$u14page = $http('GET', '/admin/public-website', ['jar' => $people['setup']['jar']])['body'];
+$u14 = $card('setup', 'door_test_choice', ['value' => 'anybody']);
+check('U14 somebody given "Set up the public website" sees the card and the state but NO choice form (D-087 names the global administrator); posted directly, the choice is refused, recorded, and nothing written',
+    [str_contains($u14page, 'data-door-test-card='), str_contains($u14page, 'data-door-test-who="1"'), str_contains($u14page, 'data-door-test-form="choice"'),
+        $uFlash($u14['page']), $logged('PublicWebsiteSetupRefused', $people['setup']['id']) - $uSetupRefusedBefore, $uOwnRow($siteA, 'public.door.testCopies.open')],
+    [true, true, false, 'Only a global administrator of this organisation can choose who its public door answers on a test copy. Nothing was saved.', 1, null]);
+$u15 = $card('root', 'door_test_choice', ['value' => 'anybody']);
+check('U15 with the installation allowing it, A\'s global administrator chooses "open to anybody": stored on A\'s own row, recorded as PublicDoorTestCopyChoiceSaved, and the card says the door here answers anybody',
+    [$uOwnRow($siteA, 'public.door.testCopies.open'), $logged('PublicDoorTestCopyChoiceSaved', $people['root']['id']), str_contains($u15['page'], 'data-door-test-now="anybody"')],
+    ['anybody', 1, true]);
+// Every surface, on BOTH forms of address, with no sign-in at all.
+$uSurfaces = static function () use ($http, $doorName, $siteA, $hostA, $uNonce): array {
+    $out = [];
+    foreach (['events.json', 'posters.json', 'door.js', 'page.html'] as $what) {
+        $out['/w/ ' . $what]    = $http('GET', '/w/' . (string) $doorName($siteA) . '/' . $what);
+        $out['public ' . $what] = $http('GET', '/' . $what, ['host' => $hostA]);
+    }
+    $out['public door-check.txt'] = $http('GET', '/door-check.txt?n=' . $uNonce(), ['host' => $hostA]);
+    return $out;
+};
+$uOpenBefore = $sessionFiles();
+$uOpen = [];
+foreach ($uSurfaces() as $what => $r) {
+    $uOpen[$what] = [$r['status'], $r['headers']['cache-control'] ?? '', $r['headers']['x-robots-tag'] ?? '', $r['headers']['set-cookie'] ?? ''];
+}
+$uOpenWant = [];
+foreach (array_keys($uOpen) as $what) {
+    $uOpenWant[$what] = [200, $what === 'public door-check.txt' ? 'no-store' : 'public, max-age=60', 'noindex, nofollow, noarchive', ''];
+}
+check('U16 open to anybody: EVERY surface — both feeds, the script and the page on /w/ AND on the public address, and the check address — answers with no sign-in, kept for a minute (the check never), every answer telling search engines not to list it, no cookie, no session file',
+    [$uOpen, $sessionFiles() - $uOpenBefore], [$uOpenWant, 0]);
+$uRowsOpen = $uCheckRows('root');
+check('U17 open to anybody, "Check my set-up" on the test copy FETCHES the public address (this server cannot reach it, so a problem — never "not tested" for the testers reason)',
+    $uRowsOpen[3] ?? null, ['problem', $uReachWords['not reached']]);
+$uBNone = [$http('GET', '/w/' . $nameB . '/events.json')['status'], $http('GET', '/events.json', ['host' => $hostB])['status']];
+check('U18 A\'s choice is A\'s alone: B, which chose nothing, is still refused with no sign-in, on both forms', $uBNone, [404, 404]);
+$u19 = $card('instroot', 'door_test_limit', ['value' => 'testers']);
+$uClosed = [];
+foreach ($uSurfaces() as $what => $r) {
+    $uClosed[$what] = [$r['status'], $signature($r) === $signature($uAlphaRefusal)];
+}
+check('U19 the installation lowers the limit to testers only: saved, its message counting the one organisation whose choice now does nothing; A\'s "anybody" is kept, and EVERY surface on both forms is again the door\'s identical 404 with no sign-in — the stricter wins when the door READS',
+    [$uFlash($u19['page']), $uOwnRow($siteA, 'public.door.testCopies.open'), $uClosed, $logged('PublicDoorTestCopyLimitSaved', $people['instroot']['id'])],
+    ['Saved: on this test copy every organisation\'s public door answers signed-in testers only. 1 organisation had chosen "open to anybody"; that choice is kept but does nothing while this limit stands.',
+        'anybody', array_fill_keys(array_keys($uOpen), [404, true]), 2]);
+$uTesterBack = $http('GET', '/events.json', ['host' => $hostA, 'cookie' => $cookieOf($people['tester']['jar'])]);
+check('U20 …and a signed-in tester is still served on the public address, answered privately (private, no-store, Vary: Cookie)',
+    [$uTesterBack['status'], $uTesterBack['headers']['cache-control'] ?? '', $uTesterBack['headers']['vary'] ?? ''], [200, 'private, no-store', 'Cookie']);
+check('U21 with the door for testers only on a test copy, "Check my set-up" does NOT fetch and says why — the check is not signed in when it fetches',
+    ($uCheckRows('root'))[3] ?? null, ['untested', $uReachWords['testers']]);
+$u22a = $card('root', 'door_test_choice', ['value' => 'open']);
+$u22b = $card('root', 'door_test_choice');
+$u22c = $card('instroot', 'door_test_limit', ['value' => 'anybody']);
+check('U22 a choice nobody offers ("open", or "anybody" as the installation\'s limit) is refused; a post with no value at all is refused, never read as a choice; nothing changes',
+    [$uFlash($u22a['page']), $uFlash($u22b['page']), $uFlash($u22c['page']), $uOwnRow($siteA, 'public.door.testCopies.open'), $installationRow('public.door.testCopies.permitted')],
+    ['That choice was not recognised. Nothing was saved.', 'That form did not arrive whole. Nothing was changed.', 'That choice was not recognised. Nothing was saved.', 'anybody', 'testers']);
+$u23 = $card('root', 'door_test_choice', ['value' => 'testers']);
+check('U23 choosing "signed-in testers only" is always allowed: stored, recorded, and the card says so', [$uOwnRow($siteA, 'public.door.testCopies.open'),
+    $logged('PublicDoorTestCopyChoiceSaved', $people['root']['id']), str_contains($u23['page'], 'data-door-test-now="testers"')], ['testers', 2, true]);
+// The test copy's own staff gate switched off: the whole copy is open, so is the door.
+$uGateWas = $installationRow('portal.gatekeeper.enabled');
+$setInstallation('portal.gatekeeper.enabled', 'false');
+$u24card = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+$u24w = $feedA();
+$u24p = $http('GET', '/events.json', ['host' => $hostA]);
+$setInstallation('portal.gatekeeper.enabled', $uGateWas);
+check('U24 with the test copy\'s own staff sign-in gate switched off, the card says the door is open to anybody whatever is chosen, and it is — on both forms, still telling search engines not to list it',
+    [str_contains($u24card, 'data-door-test-card="ungated"'), [$u24w['status'], $u24w['headers']['x-robots-tag'] ?? ''], [$u24p['status'], $u24p['headers']['x-robots-tag'] ?? '']],
+    [true, [200, 'noindex, nofollow, noarchive'], [200, 'noindex, nofollow, noarchive']]);
+$db->query("UPDATE `tblUsers` SET `isAdmin` = 0 WHERE `userID` = {$people['setup']['id']}");
+$setOwn($siteA, 'public.door.testCopies.open', null);
+$setInstallation('public.door.testCopies.permitted', 'testers');
+$channel = 'prod';
+$startServer();
+$waitForServer();
+$u25 = $http('GET', '/events.json', ['host' => $hostA]);
+check('U25 back on the live portal, the door\'s feed says only noindex — the test-copy rule asks the channel first, so it does nothing here', [$u25['status'], $u25['headers']['x-robots-tag'] ?? ''], [200, 'noindex']);
+
+// =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario re-run\n";
 // =============================================================================
 $plant = static function (string $relPath, string|array $from, string|array $to, callable $scenario, string $env = 'prod') use ($child, $sep, $startServer, $waitForServer, &$channel): array {
@@ -3203,6 +3676,128 @@ $p = $plant('_core/PublicDoor.php', "if (\$frameAncestors === \"'none'\") {",
     $tPubPageHeaders, 'alpha');
 check('PV20 with X-Frame-Options DENY dropped on a test copy\'s PUBLIC ADDRESS only, the tester\'s page carries none there and T12 no longer matches',
     [$p['applied'], $p['result']['same'] ?? null, $p['result']['xfo'] ?? null], [true, false, '']);
+
+// ── #493 P4d: D-087's card and the reach check, each guard planted out ───────
+// The expected value is the value UNDER the fault. Each scenario puts back what
+// it changed (the rows and the "Set up" holder's Admin flag).
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$value === 'anybody' && \$limit !== 'either') {", 'if (false) {',
+    static function () use ($card, $uOwnRow, $setOwn, $siteA): ?string {
+        $card('root', 'door_test_choice', ['value' => 'anybody']);
+        $got = $uOwnRow($siteA, 'public.door.testCopies.open');
+        $setOwn($siteA, 'public.door.testCopies.open', null);
+        return $got;
+    }, 'alpha');
+check('PU01 with the installation\'s ceiling taken out of the organisation\'s save, "open to anybody" is stored under a ceiling of testers only (U11 catches it)', [$p['applied'], $p['result']], [true, 'anybody']);
+$p = $plant('_core/PublicWebsiteSetup.php', "\$what = 'limit for test copies\\' public doors';\n        if (\$isRootAdmin === false) {",
+    "\$what = 'limit for test copies\\' public doors';\n        if (false) {",
+    static function () use ($card, $installationRow, $setInstallation): ?string {
+        $card('root', 'door_test_limit', ['value' => 'either']);
+        $got = $installationRow('public.door.testCopies.permitted');
+        $setInstallation('public.door.testCopies.permitted', 'testers');
+        return $got;
+    }, 'alpha');
+check('PU02 with "the installation\'s global administrator only" taken out of the ceiling\'s save, an organisation\'s global administrator raises the installation\'s ceiling (U12 catches it)', [$p['applied'], $p['result']], [true, 'either']);
+$p = $plant('_core/PublicWebsiteSetup.php', 'if (self::isGlobalAdministratorOf($db, (int) $actorId, $siteId) === false) {', 'if (false) {',
+    static function () use ($db, $people, $card, $uOwnRow, $setOwn, $setInstallation, $siteA): ?string {
+        $setInstallation('public.door.testCopies.permitted', 'either');
+        $db->query("UPDATE `tblUsers` SET `isAdmin` = 1 WHERE `userID` = {$people['setup']['id']}");
+        $card('setup', 'door_test_choice', ['value' => 'anybody']);
+        $got = $uOwnRow($siteA, 'public.door.testCopies.open');
+        $db->query("UPDATE `tblUsers` SET `isAdmin` = 0 WHERE `userID` = {$people['setup']['id']}");
+        $setOwn($siteA, 'public.door.testCopies.open', null);
+        $setInstallation('public.door.testCopies.permitted', 'testers');
+        return $got;
+    }, 'alpha');
+check('PU03 with "the organisation\'s global administrator only" taken out of the choice\'s save, somebody given "Set up the public website" opens the door to anybody (U14 catches it)', [$p['applied'], $p['result']], [true, 'anybody']);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (self::testCopyDoorRule(\$db, \$siteId) === self::DOOR_TEST_LIVE) {\n            return self::refusedAndRecorded(\$what, \$siteId, self::LIVE_REFUSAL, \$actorId);",
+    "if (false) {\n            return self::refusedAndRecorded(\$what, \$siteId, self::LIVE_REFUSAL, \$actorId);",
+    static function () use ($card, $uOwnRow, $setOwn, $siteA): ?string {
+        $card('root', 'door_test_choice', ['value' => 'testers']);
+        $got = $uOwnRow($siteA, 'public.door.testCopies.open');
+        $setOwn($siteA, 'public.door.testCopies.open', null);
+        return $got;
+    });
+check('PU04 with "only on a test copy" taken out of the choice\'s save, the LIVE portal stores a choice that does nothing there (U05 catches it)', [$p['applied'], $p['result']], [true, 'testers']);
+$p = $plant('_apps/admin/public-website/index.php', '<?php if ($doorTestRule !== PublicWebsiteSetup::DOOR_TEST_LIVE): ?>', '<?php if (true): ?>',
+    static fn (): bool => str_contains($http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'], 'data-door-test-card='));
+check('PU05 with "only on a test copy" taken out of the card, the live portal draws it (U04 catches it)', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_apps/admin/public-website/index.php', '<?php if ($isOrgGlobal === true): ?>', '<?php if (true): ?>',
+    static function () use ($db, $people, $http): bool {
+        $db->query("UPDATE `tblUsers` SET `isAdmin` = 1 WHERE `userID` = {$people['setup']['id']}");
+        $page = $http('GET', '/admin/public-website', ['jar' => $people['setup']['jar']])['body'];
+        $db->query("UPDATE `tblUsers` SET `isAdmin` = 0 WHERE `userID` = {$people['setup']['id']}");
+        return str_contains($page, 'data-door-test-form="choice"');
+    }, 'alpha');
+check('PU06 with the card\'s "global administrator only" taken out, the "Set up" holder is offered the choice form (U14 catches it)', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_core/PublicDoor.php', "if (Site::doorOnPublicHost() === false || self::isCheckNonce(\$_GET['n'] ?? null) === false) {",
+    "if (self::isCheckNonce(\$_GET['n'] ?? null) === false) {",
+    static fn (): int => $feedA('door-check.txt?n=' . $uNonce())['status']);
+check('PU07 with "on a public address only" taken out, the check address answers on the /w/ form (U03 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', "if (Site::doorOnPublicHost() === false || self::isCheckNonce(\$_GET['n'] ?? null) === false) {",
+    'if (Site::doorOnPublicHost() === false) {',
+    static fn (): int => $http('GET', '/door-check.txt?n=x', ['host' => $hostA])['status']);
+check('PU08 with the value\'s shape taken out, the check address answers a value nobody\'s check made (U03 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (hash_equals(PublicDoor::CHECK_FORMAT . ' ' . \$expectedProof . \"\\n\", \$body) === true) {",
+    "if (str_starts_with(\$body, PublicDoor::CHECK_FORMAT . ' ') === true) {",
+    static fn (): mixed => $uAsk('forward-b')['reach'][0] ?? null);
+check('PU09 with the proof compared by its FORM only, another organisation\'s door reads as "it reaches your door" (U08 catches it)', [$p['applied'], $p['result']], [true, 'ok']);
+$p = $plant('_core/PublicDoor.php', "return hash_hmac('sha256', \"webms-public-door-check-v1\\n\" . \$siteId . \"\\n\" . \$host . \"\\n\" . \$nonce, \$doorName);",
+    'return hash(\'sha256\', $nonce);',
+    static fn (): mixed => $uAsk('forward-b')['reach'][0] ?? null);
+check('PU10 with the proof made from the value alone (no name, number or address), every door gives the same proof and another organisation\'s door reads as yours (U01, U02 and U08 catch it)', [$p['applied'], $p['result']], [true, 'ok']);
+$p = $plant('_core/PublicWebsiteSetup.php', 'if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_TESTERS) {', 'if (false) {',
+    static fn (): mixed => ($uCheckRows('root'))[3][0] ?? null, 'alpha');
+check('PU11 with "testers only: not checked" taken out, the check fetches a door that must refuse it and calls the address a problem (U21 catches it)', [$p['applied'], $p['result']], [true, 'problem']);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$door['state'] !== 'on') {\n            return ['label' => \$label,", "if (false) {\n            return ['label' => \$label,",
+    static function () use ($uDoorOff, $uCheckRows): mixed {
+        $uDoorOff(true);
+        $got = ($uCheckRows('root'))[3][0] ?? null;
+        $uDoorOff(false);
+        return $got;
+    });
+check('PU12 with "the door is off: not checked" taken out, the check fetches a switched-off door and calls the address a problem (U06 catches it)', [$p['applied'], $p['result']], [true, 'problem']);
+$p = $plant('_core/PublicWebsiteSetup.php', 'return self::testCopyDoorOpenToAnybody($db, $siteId) === true ? self::DOOR_TEST_ANYBODY : self::DOOR_TEST_TESTERS;',
+    'return self::DOOR_TEST_ANYBODY;', static fn (): int => $feedA()['status'], 'alpha');
+check('PU13 with the rule answering "anybody" whatever the two settings say, a test copy\'s door answers anybody (T01 and U19 catch it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (in_array(\$channel, Channel::PRE_RELEASE, true) === false) {\n            return self::DOOR_TEST_LIVE;",
+    "if (false) {\n            return self::DOOR_TEST_LIVE;",
+    static fn (): string => $http('GET', '/events.json', ['host' => $hostA])['headers']['x-robots-tag'] ?? '');
+check('PU14 with the channel no longer asked first, the LIVE portal\'s door is treated as a test copy\'s and tells search engines nofollow and noarchive too (U25 catches it)', [$p['applied'], $p['result']], [true, 'noindex, nofollow, noarchive']);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (Gatekeeper::shouldEnforce(\$channel, \$source) === false) {\n            return self::DOOR_TEST_UNGATED;",
+    "if (false) {\n            return self::DOOR_TEST_UNGATED;",
+    static function () use ($installationRow, $setInstallation, $feedA): int {
+        $was = $installationRow('portal.gatekeeper.enabled');
+        $setInstallation('portal.gatekeeper.enabled', 'false');
+        $s = $feedA()['status'];
+        $setInstallation('portal.gatekeeper.enabled', $was);
+        return $s;
+    }, 'alpha');
+check('PU15 with "the test copy\'s gate is switched off" taken out of the rule, a door on an ungated test copy refuses what every other page there serves (U24 catches it)', [$p['applied'], $p['result']], [true, 404]);
+
+$p = $plant('_core/PublicWebsiteSetup.php', 'if (self::testCopyDoorRule($db, 0) === self::DOOR_TEST_LIVE) {', 'if (false) {',
+    static function () use ($card, $installationRow, $setInstallation): ?string {
+        $card('instroot', 'door_test_limit', ['value' => 'either']);
+        $got = $installationRow('public.door.testCopies.permitted');
+        $setInstallation('public.door.testCopies.permitted', 'testers');
+        return $got;
+    });
+check('PU16 with "only on a test copy" taken out of the ceiling\'s save, the LIVE portal stores a ceiling that does nothing there (U05 catches it)', [$p['applied'], $p['result']], [true, 'either']);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$value !== 'testers' && \$value !== 'anybody') {", 'if (false) {',
+    static function () use ($card, $uOwnRow, $setOwn, $siteA): ?string {
+        $card('root', 'door_test_choice', ['value' => 'open']);
+        $got = $uOwnRow($siteA, 'public.door.testCopies.open');
+        $setOwn($siteA, 'public.door.testCopies.open', null);
+        return $got;
+    }, 'alpha');
+check('PU17 with the choice\'s list of answers taken out, a word nobody offers is stored as the organisation\'s choice (U22 catches it)', [$p['applied'], $p['result']], [true, 'open']);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$value !== 'testers' && \$value !== 'either') {", 'if (false) {',
+    static function () use ($card, $installationRow, $setInstallation): ?string {
+        $card('instroot', 'door_test_limit', ['value' => 'anybody']);
+        $got = $installationRow('public.door.testCopies.permitted');
+        $setInstallation('public.door.testCopies.permitted', 'testers');
+        return $got;
+    }, 'alpha');
+check('PU18 with the ceiling\'s list of answers taken out, a word nobody offers is stored as the installation\'s ceiling (U22 catches it)', [$p['applied'], $p['result']], [true, 'anybody']);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

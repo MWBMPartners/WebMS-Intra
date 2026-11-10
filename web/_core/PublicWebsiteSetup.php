@@ -39,18 +39,25 @@
  *                                and no two organisations may share one — the
  *                                database's unique key is the real guard.
  *   4. THE SET-UP CHECK (`checkSetUp()`): what can be known today, and
- *      nothing more. Since #493 P4a it says whether the public door is on
- *      and gives its addresses, but it does NOT fetch the door, so whether a
- *      website really shows it is ALWAYS "not tested" — never a tick. (P4d
- *      adds the fetch that confirms a public address reaches this door.)
+ *      nothing more. It says whether the public door is on and gives its
+ *      addresses. Since #493 P4d it also FETCHES the organisation's public
+ *      address, when one is in effect and the door would answer there, and
+ *      says whether the answer came from THIS organisation's door on THIS
+ *      portal (`PublicDoor::checkProof()`, `publicAddressVerdict()`).
+ *      Whether a WEBSITE really shows the door is still always "not
+ *      tested": the check never fetches the organisation's own pages.
  *   5. THE PUBLIC DOOR'S NAME (#493 P4a, D-097): whether the door is on, its
  *      random public name, and the three writers that turn it on, replace
  *      its name and switch it off (`turnDoorOn()`, `replaceDoorName()`,
  *      `turnDoorOff()`), each recorded. The two look-ups start-up makes
  *      before any session is looked at (`siteForDoorName()`,
- *      `publicHostRow()`), and D-087's reader for test copies
- *      (`testCopyDoorOpenToAnybody()`). The door itself — what it answers —
- *      is `Portal\Core\PublicDoor`.
+ *      `publicHostRow()`), and D-087 for test copies: `testCopyDoorRule()`,
+ *      the ONE answer the door, the card and the set-up check ask, and the
+ *      two writers of its tiered setting (#493 P4d) — `saveTestCopyLimit()`
+ *      (the installation's global administrator sets the ceiling) and
+ *      `saveTestCopyChoice()` (an organisation's global administrator
+ *      chooses within it). The door itself — what it answers — is
+ *      `Portal\Core\PublicDoor`.
  *
  * EVERY BAD VALUE IS REFUSED WITH ITS REASON, never quietly corrected (#668).
  * Tidying that cannot change what an address means (capitals, one closing
@@ -63,9 +70,11 @@
  *   - Nothing here SENDS a header or answers on the public address:
  *     `Portal\Core\PublicDoor` does both (#493 P4a), asking this class for
  *     the framing rule (`frameAncestorsFor()`) and the public address.
- *   - It cannot yet tell whether a public address really points at THIS
- *     portal: the set-up check does not fetch the door in this version (P4d
- *     adds that). It reports only whether the name exists.
+ *   - The set-up check can tell that a public address reaches THIS
+ *     organisation's door on THIS portal, but not whether something sits in
+ *     between and passes the request on (a proxy or a content network): an
+ *     answer that came that way carries the same proof, and it really did
+ *     reach the door. See `PublicDoor::checkProof()`.
  *   - It cannot stop a row being changed straight in the database. That is
  *     why every reader checks the stored value again and drops (and logs)
  *     anything it would have refused.
@@ -109,10 +118,12 @@ final class PublicWebsiteSetup
      * D-087's two settings. The installation's limit ('testers' or 'either',
      * installation row only, seeded 'testers' by migration 263) and the
      * organisation's own choice ('testers' or 'anybody', its own row only, not
-     * seeded). Read by `testCopyDoorOpenToAnybody()`. No page writes either in
-     * this version: the general settings editor refuses both
-     * (`PublicWebsite::LOCKED_KEYS`), and the card that writes them is package
-     * P4d. Declared on `PublicWebsite`, which locks them.
+     * seeded). Read by `testCopyDoorOpenToAnybody()`, through
+     * `testCopyDoorRule()`. Written ONLY by `saveTestCopyLimit()` and
+     * `saveTestCopyChoice()`, from the card on Admin → Public website (#493
+     * P4d); the general settings editor refuses both
+     * (`PublicWebsite::LOCKED_KEYS`). Declared on `PublicWebsite`, which locks
+     * them.
      */
     public const KEY_DOOR_TEST_PERMITTED = PublicWebsite::DOOR_TEST_PERMITTED_KEY;
     public const KEY_DOOR_TEST_OPEN      = PublicWebsite::DOOR_TEST_OPEN_KEY;
@@ -1204,14 +1215,12 @@ final class PublicWebsiteSetup
      * saved, and a database that cannot be asked, is 'testers' — the stricter.
      * Never throws.
      *
-     * ⚠️ NO PAGE WRITES EITHER SETTING YET. The card that does is package P4d.
-     *    The general settings editor refuses to add, change or delete either
-     *    (`PublicWebsite::LOCKED_KEYS`, since round 1 of P4a's check: before
-     *    that, a global administrator COULD add or change them there, which
-     *    an earlier version of this note denied). So in this version every
-     *    test copy's door is for signed-in testers only, unless somebody
-     *    writes the rows straight into the database. On the live portal
-     *    nothing asks this at all.
+     * The two settings are written ONLY by `saveTestCopyLimit()` and
+     * `saveTestCopyChoice()`, from the card on Admin → Public website (#493
+     * P4d). The general settings editor refuses to add, change or delete
+     * either (`PublicWebsite::LOCKED_KEYS`, since round 1 of P4a's check).
+     * Nothing asks this on the live portal: `testCopyDoorRule()` answers
+     * DOOR_TEST_LIVE there before it is reached.
      */
     public static function testCopyDoorOpenToAnybody(\mysqli $db, int $siteId): bool
     {
@@ -1234,6 +1243,98 @@ final class PublicWebsiteSetup
         }
 
         return $own === 'anybody';
+    }
+
+    /** `testCopyDoorRule()`'s answers. */
+    public const DOOR_TEST_LIVE    = 'live';
+    public const DOOR_TEST_UNGATED = 'ungated';
+    public const DOOR_TEST_TESTERS = 'testers';
+    public const DOOR_TEST_ANYBODY = 'anybody';
+
+    /**
+     * 🧪 D-087 IN ONE PLACE (#493 P4d): what a test copy does to this
+     * organisation's public door RIGHT NOW. The door, the card on Admin →
+     * Public website and the set-up check all ask this, so the three can
+     * never disagree.
+     *
+     *   DOOR_TEST_LIVE     not a test copy: `PORTAL_ENV` is not one of
+     *                      `Channel::PRE_RELEASE` — the ONE list of test
+     *                      channels. D-087 does not apply at all.
+     *   DOOR_TEST_UNGATED  a test copy whose staff sign-in gate is switched
+     *                      off (`Gatekeeper::shouldEnforce()` says no —
+     *                      `portal.gatekeeper.enabled` is false). Then every
+     *                      page of the test copy is open to anybody, and so is
+     *                      the door, whatever is chosen here.
+     *   DOOR_TEST_TESTERS  the door answers only somebody the test-copy gate
+     *                      lets in (`Gatekeeper::mayUseTestCopy()`).
+     *   DOOR_TEST_ANYBODY  the installation permits it AND the organisation
+     *                      chose it (`testCopyDoorOpenToAnybody()`).
+     * On every answer but LIVE, the door tells search engines not to list
+     * anything (`noindex, nofollow, noarchive`).
+     *
+     * The channel is asked FIRST, so `Gatekeeper::shouldEnforce()` is never
+     * asked on the live portal: there it writes a line to the error log
+     * whenever the channel was only assumed, and on a door request (which
+     * anybody can send) that is a line per anonymous request. Before #493 P4d
+     * the door asked it first and wrote that line; the members' pages still
+     * do, from index.php. Never throws.
+     */
+    public static function testCopyDoorRule(\mysqli $db, int $siteId): string
+    {
+        // PORTAL_ENV is defined by start-up on every request; only a test
+        // that loads this class on its own can lack it, and is then live.
+        $channel = defined('PORTAL_ENV') === true ? (string) PORTAL_ENV : '';
+        if (in_array($channel, Channel::PRE_RELEASE, true) === false) {
+            return self::DOOR_TEST_LIVE;
+        }
+        $source = defined('PORTAL_ENV_SOURCE') === true ? (string) PORTAL_ENV_SOURCE : '';
+        if (Gatekeeper::shouldEnforce($channel, $source) === false) {
+            return self::DOOR_TEST_UNGATED;
+        }
+
+        return self::testCopyDoorOpenToAnybody($db, $siteId) === true ? self::DOOR_TEST_ANYBODY : self::DOOR_TEST_TESTERS;
+    }
+
+    /**
+     * The installation's limit as the card shows it: 'either' (an organisation
+     * may choose "open to anybody"), 'testers', or null when it could not be
+     * read. A missing row, or any value nobody saved, is 'testers' — what the
+     * door does with it. Never throws.
+     */
+    public static function testCopyLimit(\mysqli $db): ?string
+    {
+        try {
+            $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL LIMIT 1');
+            $key  = self::KEY_DOOR_TEST_PERMITTED;
+            $stmt->bind_param('s', $key);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+        } catch (\Throwable $e) {
+            return null;
+        }
+
+        return $row !== null && (string) ($row['settingValue'] ?? '') === 'either' ? 'either' : 'testers';
+    }
+
+    /**
+     * The organisation's OWN choice as the card shows it: 'anybody',
+     * 'testers', '' when it has never chosen (which the door reads as
+     * 'testers'), or null when it could not be read. Any value nobody saved
+     * reads as 'testers'. Never throws.
+     */
+    public static function testCopyChoice(\mysqli $db, int $siteId): ?string
+    {
+        try {
+            $own = self::organisationRow($db, $siteId, self::KEY_DOOR_TEST_OPEN, false);
+        } catch (\Throwable $e) {
+            return null;
+        }
+        if ($own === null) {
+            return '';
+        }
+
+        return $own === 'anybody' ? 'anybody' : 'testers';
     }
 
     // =========================================================================
@@ -1372,6 +1473,149 @@ final class PublicWebsiteSetup
             ? 'Saved: each organisation may list the websites allowed to show its public pages in a frame.'
             : 'Saved: no outside website may show any organisation\'s public pages in a frame, whatever their lists say.'];
     }
+
+    /**
+     * 🧪 Save the INSTALLATION's limit for test copies' public doors (D-087,
+     * #493 P4d): 'testers' — every organisation's door on a test copy answers
+     * signed-in testers only — or 'either' — each organisation's global
+     * administrator may choose "open to anybody". Only the installation's
+     * global administrator (asked here as well as on the page, because the
+     * installation and an organisation may be different parties), and only on
+     * a test copy: on the live portal the setting does nothing, and a Save
+     * that does nothing is a lie (#671).
+     *
+     * Lowering it to 'testers' is ALWAYS allowed, and needs no clearing up:
+     * the stricter wins when the door READS (`testCopyDoorOpenToAnybody()`),
+     * so an organisation's stored "anybody" stops counting at once and is
+     * kept, to count again only if the limit is raised. The message says how
+     * many organisations that touches; the record carries only the count.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function saveTestCopyLimit(\mysqli $db, string $value, bool $isRootAdmin, ?int $actorId): array
+    {
+        $what = 'limit for test copies\' public doors';
+        if ($isRootAdmin === false) {
+            return self::refusedAndRecorded($what, 0, 'Only a global administrator of the whole installation can change what '
+                . 'test copies\' public doors may do. Nothing was saved.', $actorId);
+        }
+        if (self::testCopyDoorRule($db, 0) === self::DOOR_TEST_LIVE) {
+            return self::refusedAndRecorded($what, 0, self::LIVE_REFUSAL, $actorId);
+        }
+        if ($value !== 'testers' && $value !== 'either') {
+            return self::refusedAndRecorded($what, 0, 'That choice was not recognised. Nothing was saved.', $actorId);
+        }
+        try {
+            $db->begin_transaction();
+            $was  = self::installationRowLocked($db, self::KEY_DOOR_TEST_PERMITTED);
+            $stmt = $db->prepare(
+                'INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) '
+                . "VALUES (NULL, ?, ?, 'testers', 0) ON DUPLICATE KEY UPDATE `settingValue` = VALUES(`settingValue`)"
+            );
+            $key = self::KEY_DOOR_TEST_PERMITTED;
+            $stmt->bind_param('ss', $key, $value);
+            $stmt->execute();
+            $stmt->close();
+            $count = $db->prepare(
+                'SELECT COUNT(*) AS `n` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NOT NULL AND `settingValue` = \'anybody\''
+            );
+            $open  = self::KEY_DOOR_TEST_OPEN;
+            $count->bind_param('s', $open);
+            $count->execute();
+            $chose = (int) ($count->get_result()->fetch_assoc()['n'] ?? 0);
+            $count->close();
+            $db->commit();
+        } catch (\Throwable $e) {
+            self::rollbackQuietly($db);
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the limit for test copies\' public doors could not be saved: ' . $e->getMessage());
+
+            return self::refusedAndRecorded($what, 0, 'The database refused the change. Nothing was saved.', $actorId);
+        }
+        $wasWord = $was === 'either' ? 'either' : 'testers';
+        $several = $chose === 1 ? '' : 's';
+        Logger::activity(
+            'PublicDoorTestCopyLimitSaved',
+            'Test copies\' public doors: the installation\'s limit ' . $wasWord . ' → ' . $value . ' (' . ($value === 'either'
+                ? 'each organisation may choose "open to anybody"' : 'signed-in testers only, for every organisation') . '); '
+                . $chose . ' organisation' . $several . ' had chosen "open to anybody".',
+            $actorId
+        );
+        if ($value === 'either') {
+            return ['saved' => true, 'type' => 'success', 'message' => 'Saved: on this test copy, each organisation\'s global '
+                . 'administrator may now choose to open its public door to anybody (search engines are always told not to list it).'
+                . ($chose > 0 ? ' ' . $chose . ' organisation' . $several . ' had already chosen that, so '
+                    . ($chose === 1 ? 'its door is' : 'their doors are') . ' open to anybody now.' : '')];
+        }
+
+        return ['saved' => true, 'type' => 'success', 'message' => 'Saved: on this test copy every organisation\'s public door '
+            . 'answers signed-in testers only.' . ($chose > 0 ? ' ' . $chose . ' organisation' . $several
+                . ' had chosen "open to anybody"; that choice is kept but does nothing while this limit stands.' : '')];
+    }
+
+    /**
+     * 🧪 Save ONE organisation's choice for its door on a test copy (D-087,
+     * #493 P4d): 'testers' or 'anybody'. Only a global administrator of that
+     * organisation or of the installation (`isGlobalAdministratorOf()`, read
+     * from the database) — D-087 names the organisation's GLOBAL
+     * administrator, so somebody given "Set up the public website" may see
+     * the choice and may not make it. Only on a test copy.
+     *
+     * 'anybody' is REFUSED, with the reason and recorded, while the
+     * installation's limit is not 'either' — never quietly saved as
+     * 'testers' (#668). The limit is read and LOCKED inside the transaction
+     * that writes (#647), so a limit lowered at the same moment cannot be
+     * missed: one waits for the other.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function saveTestCopyChoice(\mysqli $db, int $siteId, string $value, ?int $actorId): array
+    {
+        $what = 'choice for its public door on test copies';
+        if (self::isGlobalAdministratorOf($db, (int) $actorId, $siteId) === false) {
+            return self::refusedAndRecorded($what, $siteId, 'Only a global administrator of this organisation can choose who its '
+                . 'public door answers on a test copy. Nothing was saved.', $actorId);
+        }
+        if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_LIVE) {
+            return self::refusedAndRecorded($what, $siteId, self::LIVE_REFUSAL, $actorId);
+        }
+        if ($value !== 'testers' && $value !== 'anybody') {
+            return self::refusedAndRecorded($what, $siteId, 'That choice was not recognised. Nothing was saved.', $actorId);
+        }
+        try {
+            $db->begin_transaction();
+            $limit = self::installationRowLocked($db, self::KEY_DOOR_TEST_PERMITTED);
+            if ($value === 'anybody' && $limit !== 'either') {
+                $db->rollback();
+
+                return self::refusedAndRecorded($what, $siteId, 'This installation lets test copies\' public doors answer signed-in '
+                    . 'testers only, so "open to anybody" cannot be chosen. The installation\'s global administrator can change '
+                    . 'that. Nothing was saved.', $actorId);
+            }
+            $was = self::organisationRow($db, $siteId, self::KEY_DOOR_TEST_OPEN, true);
+            self::upsertOrganisationRow($db, $siteId, self::KEY_DOOR_TEST_OPEN, $value);
+            $db->commit();
+        } catch (\Throwable $e) {
+            self::rollbackQuietly($db);
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the choice for a test copy\'s public door could not be saved: ' . $e->getMessage());
+
+            return self::refusedAndRecorded($what, $siteId, 'The database refused the change. Nothing was saved.', $actorId);
+        }
+        Logger::activity(
+            'PublicDoorTestCopyChoiceSaved',
+            'Organisation #' . $siteId . '\'s public door on test copies: ' . ($was === null || $was === '' ? '(not chosen)'
+                : ($was === 'anybody' ? 'anybody' : 'testers')) . ' → ' . $value . '.',
+            $actorId
+        );
+
+        return ['saved' => true, 'type' => 'success', 'message' => $value === 'anybody'
+            ? 'Saved: on this test copy your public door answers anybody, so a copy pasted into a real website works. Search '
+                . 'engines are told not to list anything it sends.'
+            : 'Saved: on this test copy your public door answers only people signed in here who may use the test copy.'];
+    }
+
+    /** What both test-copy writers say on the live portal, where the setting does nothing. */
+    public const LIVE_REFUSAL = 'This is the live portal. This setting changes only how the public door answers on a test copy '
+        . '(the alpha, beta or dev copy), so it is set on that copy, where it is shown. Nothing was saved.';
 
     /**
      * Save the organisation's optional public address (D-095). Empty DELETES
@@ -1535,8 +1779,12 @@ final class PublicWebsiteSetup
      * Run the set-up check for one organisation. Read-only: it changes no
      * setting. Each row is `[label, state, words]` where state is 'ok',
      * 'problem', 'note' or 'untested'. The door is reported as on or off
-     * ('note'), and whether a website really shows it is ALWAYS 'untested':
-     * this check does not fetch the door (P4d adds that).
+     * ('note'). Since #493 P4d a public address IN EFFECT is fetched at
+     * `PublicDoor::SURFACE_CHECK` and the answer judged by
+     * `publicAddressVerdict()` — whenever the door would answer there; when
+     * it would not, the row says why it was not checked (`publicAddressRow()`).
+     * Whether a WEBSITE really shows the door is ALWAYS 'untested': the
+     * check never fetches the organisation's own pages.
      *
      * ⚠️ IT TAKES NO "FETCH" ARGUMENT ANY MORE (round 3 of P3's check). A test
      *    hook that replaced the fetch let the real path pass different options
@@ -1606,9 +1854,7 @@ final class PublicWebsiteSetup
                 default              => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Waiting for the '
                     . 'installation\'s administrator to approve it. Until then it does nothing.'],
             };
-            $rows[] = ['label' => 'Public address', 'state' => 'untested',
-                'words' => 'Whether it reaches THIS portal is not checked in this version. With the public door on and the address '
-                    . 'approved, open https://' . $public . '/events.json in your own browser: it should show your events.'];
+            $rows[] = self::publicAddressRow($db, $siteId, $public);
         }
 
         // 🖼️ Framing.
@@ -1661,9 +1907,144 @@ final class PublicWebsiteSetup
                 : 'Switched off, so nothing the portal holds reaches any outside website.'];
         }
         $rows[] = ['label' => 'The public door', 'state' => 'untested', 'words' => 'Whether your website really shows it is not '
-            . 'tested by this check, which does not fetch the door. Open its addresses in your own browser to see what a website gets.'];
+            . 'tested by this check, which never fetches your website\'s own pages. Open its addresses in your own browser to see what a website gets.'];
 
         return $rows;
+    }
+
+    /**
+     * 🚪 Does the organisation's public address reach THIS organisation's
+     * public door on THIS portal (#493 P4d)? ONE row, whose words are true in
+     * every state:
+     *
+     *   - not approved yet (D-101), or approved but not in effect (an address
+     *     members sign in at, or one that could not be checked): 'untested',
+     *     because the door does not answer there, so there is nothing to
+     *     fetch — the row above it says why;
+     *   - the door off, spoiled or unreadable: 'untested', the same reason;
+     *   - a test copy whose door answers signed-in testers only
+     *     (`testCopyDoorRule()`): 'untested' — this check is not signed in
+     *     when it fetches, so the door would refuse it, which proves nothing;
+     *   - otherwise it FETCHES `https://{address}/door-check.txt?n={a random
+     *     value made for this run}` through `SafeFetch` (the ONE way to fetch
+     *     an address somebody typed; it never sets `CURLOPT_ENCODING`, #716)
+     *     with `publicAddressFetchOptions()`, and `publicAddressVerdict()`
+     *     says what the answer means.
+     *
+     * The random value is made here, sent once, and kept nowhere: the proof
+     * it asks for (`PublicDoor::checkProof()`) is worked out from the door's
+     * name as it stands NOW, so a name replaced between the two reads gives a
+     * "not this door" answer that a second press puts right.
+     *
+     * @return array{label:string, state:string, words:string}
+     */
+    public static function publicAddressRow(\mysqli $db, int $siteId, string $public): array
+    {
+        $label  = 'Public address';
+        $status = self::publicHostStatus($db, $siteId);
+        if ($status === self::HOST_WAITING) {
+            return ['label' => $label, 'state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door was not '
+                . 'checked: until the installation\'s administrator approves it, the door does not answer there.'];
+        }
+        if ($status !== self::HOST_APPROVED) {
+            return ['label' => $label, 'state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door was not '
+                . 'checked: as said above, the door does not answer on it.'];
+        }
+        $door = self::doorStateFor($db, $siteId);
+        if ($door['state'] !== 'on') {
+            return ['label' => $label, 'state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door was not '
+                . 'checked: ' . ($door['state'] === 'unreadable' ? 'whether the door is on could not be read, so' : 'the door is '
+                . 'not switched on, so') . ' nothing answers there for your organisation.'];
+        }
+        if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_TESTERS) {
+            return ['label' => $label, 'state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door was not '
+                . 'checked: on this test copy the door answers only people signed in here who may use the test copy, and this '
+                . 'check is not signed in when it fetches. Open https://' . $public . '/events.json in this browser to see it.'];
+        }
+        $nonce = bin2hex(random_bytes(32));
+        $proof = PublicDoor::checkProof($door['name'], $siteId, $public, $nonce);
+        try {
+            $got = SafeFetch::get('https://' . $public . '/' . PublicDoor::SURFACE_CHECK . '?n=' . $nonce, self::publicAddressFetchOptions());
+        } catch (\Throwable $e) {
+            $got = ['ok' => false, 'status' => 0, 'body' => '', 'capped' => false];
+        }
+        $verdict = self::publicAddressVerdict($got, $proof, $public);
+
+        return ['label' => $label, 'state' => $verdict['state'], 'words' => $verdict['words']];
+    }
+
+    /**
+     * The options the public-address fetch hands `SafeFetch::get()`: the
+     * same time limits as the main website's, https only, a small answer
+     * (the door's is one line), and NO redirects — the door never sends one,
+     * so an answer that does is not the door's, whatever it leads to.
+     *
+     * @return array{timeoutSeconds:int, connectTimeoutSeconds:int, maxBytes:int, maxRedirects:int, httpsOnly:bool, accept:string, deadline:float}
+     */
+    public static function publicAddressFetchOptions(): array
+    {
+        return [
+            'timeoutSeconds'        => self::CHECK_TIMEOUT_SECONDS,
+            'connectTimeoutSeconds' => self::CHECK_TIMEOUT_SECONDS,
+            'maxBytes'              => 1024,
+            'maxRedirects'          => 0,
+            'httpsOnly'             => true,
+            'accept'                => 'text/plain',
+            'deadline'              => self::CHECK_DEADLINE_SECONDS + microtime(true),
+        ];
+    }
+
+    /**
+     * 🔎 What the public-address fetch's answer means — ONLY what is
+     * certainly known. Pure, and public so the self-test asks it directly.
+     *
+     *   - this server has no curl: 'untested', it could not be checked here;
+     *   - a complete HTTP 200 whose whole body is exactly
+     *     `PublicDoor::CHECK_FORMAT`, a space, `$expectedProof` and a line
+     *     break (compared with `hash_equals()`): 'ok' — the answer came from
+     *     this organisation's door on this portal, made for this run alone;
+     *   - a complete HTTP 200 in that same form with ANY OTHER proof:
+     *     'problem' — a public door of this kind answered, but not this one.
+     *     It does not say whose: another installation of the portal and
+     *     another organisation's door here look the same from outside, so
+     *     the sentence gives both as examples;
+     *   - anything else, including no answer at all: 'problem', one sentence
+     *     that is always true, worded "for example" as the main website's is
+     *     (`mainWebsiteVerdict()`'s rule — three rounds of P3's check showed
+     *     SafeFetch's answer cannot tell causes apart), plus the last HTTP
+     *     status where SafeFetch reports one, as a fact and not a cause.
+     *
+     * @param array<string,mixed> $got A `SafeFetch::get()` result.
+     *
+     * @return array{state:string, words:string}
+     */
+    public static function publicAddressVerdict(array $got, string $expectedProof, string $public): array
+    {
+        if (function_exists('curl_init') !== true) {
+            return ['state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door could not be checked on this '
+                . 'server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed or is switched '
+                . 'off on this server). Open https://' . $public . '/events.json in your own browser: it should show your events.'];
+        }
+        $status = (int) ($got['status'] ?? 0);
+        $body   = is_string($got['body'] ?? null) === true ? $got['body'] : '';
+        if ($status === 200 && ($got['ok'] ?? false) === true) {
+            if (hash_equals(PublicDoor::CHECK_FORMAT . ' ' . $expectedProof . "\n", $body) === true) {
+                return ['state' => 'ok', 'words' => 'It reaches this organisation\'s public door on this portal: the answer from '
+                    . 'https://' . $public . '/ carried a proof only this door could make, for this check alone.'];
+            }
+            if (preg_match('/^' . preg_quote(PublicDoor::CHECK_FORMAT, '/') . ' [0-9a-f]{64}\n$/D', $body) === 1) {
+                return ['state' => 'problem', 'words' => 'A public door answered at https://' . $public . '/, but not this '
+                    . 'organisation\'s door on this portal. That can happen, for example, when the address leads to another '
+                    . 'installation of the portal, or to another organisation\'s door. Make sure the address points at this portal.'];
+            }
+        }
+
+        return ['state' => 'problem', 'words' => 'This check did not get an answer from this organisation\'s public door at https://'
+            . $public . '/. That can happen, for example, when the address points at a different server, something in front of '
+            . 'it answers instead or sends visitors on to another address, its security certificate does not cover the name, the '
+            . 'portal is closed for maintenance, or this server cannot reach outside addresses or its own public address. Open '
+            . 'https://' . $public . '/events.json in your own browser: it should show your events.'
+            . ($status === 0 ? '' : ' The last answer this check received was HTTP ' . $status . '.')];
     }
 
     /**

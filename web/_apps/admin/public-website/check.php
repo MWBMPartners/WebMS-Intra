@@ -25,10 +25,16 @@
  * `PublicWebsiteSetup::CHECK_LIMIT` times in `CHECK_WINDOW_SECONDS`
  * (`RateLimiter`, the portal's generic limiter).
  *
- * THE DOOR IS NEVER TICKED. Since #493 P4a the check says whether the public
- * door is on and gives its addresses, but it does not fetch the door, so
- * whether a website really shows it is always "not tested": a tick here would
- * be a claim nobody can stand behind. (P4d adds the fetch.)
+ * A WEBSITE IS NEVER TICKED. The check says whether the public door is on
+ * and gives its addresses, and since #493 P4d it also fetches the
+ * organisation's public address — once, at the door's check address, when
+ * that address is approved and the door would answer there — and says
+ * whether the answer came from THIS organisation's door on THIS portal
+ * (`PublicWebsiteSetup::publicAddressRow()`). That is one more outside
+ * fetch, inside the same limit below. Whether a WEBSITE really shows the
+ * door is still always "not tested": the check never fetches the
+ * organisation's own pages, so a tick there would be a claim nobody can
+ * stand behind.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)

@@ -21,6 +21,15 @@
  * hand over to `PublicWebsiteSetup`'s three writers. The last two stop every
  * copy pasted into a website, so they need the `understood` tick, asked here.
  *
+ * THE PUBLIC DOOR ON A TEST COPY (#493 P4d, D-087): `door_test_limit` (the
+ * installation's ceiling, its global administrator only — `App::isRootAdmin()`
+ * is passed and the CLASS refuses) and `door_test_choice` (the organisation's
+ * choice within it — the class asks, from the database, whether this person
+ * is the organisation's global administrator, and refuses "open to anybody"
+ * while the ceiling forbids it). Both are refused on the live portal. Every
+ * refusal and every save is recorded by the class. Like every other `value`
+ * here, a post with no `value` at all is refused, never read as a choice.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -152,6 +161,10 @@ if ($action === 'website') {
     $out = PublicWebsiteSetup::saveFrameOrigins($mysqli, $siteId, $value, $actorId);
 } elseif ($action === 'frame_permitted') {
     $out = PublicWebsiteSetup::saveFramingPermitted($mysqli, $value, App::isRootAdmin(), $actorId);
+} elseif ($action === 'door_test_limit') {
+    $out = PublicWebsiteSetup::saveTestCopyLimit($mysqli, $value, App::isRootAdmin(), $actorId);
+} elseif ($action === 'door_test_choice') {
+    $out = PublicWebsiteSetup::saveTestCopyChoice($mysqli, $siteId, $value, $actorId);
 } else {
     $finish('That form was not recognised. Nothing was changed.', 'danger');
 }
