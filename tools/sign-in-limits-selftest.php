@@ -182,7 +182,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 177; // seven added by #887 (sections 0 and 0b); 53 by #598 (one in H, parts T to Z2, and Q4)
+const EXPECTED_CHECKS = 178; // seven added by #887 (sections 0 and 0b); 54 by #598 (one in H, parts T to Z2, and Q4)
 
 function refuse(string $why): never
 {
@@ -2151,7 +2151,7 @@ function disableTwoStep(string $jar, string $ip, string $current): array
 /** How many sessions of one person were ended because their password changed. */
 function endedForPassword(string $who): int
 {
-    return (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'SessionEndedPasswordChanged'", 'i', [PEOPLE[$who]])['n'];
+    return (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'SessionEndedSignInNotCurrent'", 'i', [PEOPLE[$who]])['n'];
 }
 
 // =============================================================================
@@ -2301,8 +2301,12 @@ q('UPDATE tblUsers SET signInVersion = 1 WHERE userID = ?', 'i', [PEOPLE['zulu']
 $zuluA  = signedInJar('zulu', $at, $password);
 $zuluA2 = signedInJar('zulu', $at, $password);
 q('UPDATE tblUsers SET signInVersion = 0 WHERE userID = ?', 'i', [PEOPLE['zulu']]);   // the restore
-ok('T3a0 straight after the restore, a session carrying a number HIGHER than the account\'s is ended on its next request (any difference ends it; round 2 ended only a lower one)',
-    sentToSignIn($zuluA, $at) === true);
+$endedLine = (string) (one("SELECT activityDescription AS d FROM tblActivityLogs WHERE userID = ? AND activityType = 'SessionEndedSignInNotCurrent' ORDER BY logID DESC LIMIT 1", 'i', [PEOPLE['zulu']])['d'] ?? '');
+ok('T3a0 straight after the restore, a session carrying a number HIGHER than the account\'s is ended on its next request (any difference ends it; round 2 ended only a lower one), and the record says why in words true of a restore too',
+    sentToSignIn($zuluA, $at) === true
+        && ($endedLine = (string) (one("SELECT activityDescription AS d FROM tblActivityLogs WHERE userID = ? AND activityType = 'SessionEndedSignInNotCurrent' ORDER BY logID DESC LIMIT 1", 'i', [PEOPLE['zulu']])['d'] ?? '')) !== ''
+        && str_contains($endedLine, 'its sign-in is no longer current') === true && str_contains($endedLine, 'or the database was restored') === true,
+    $endedLine);
 $zuluPassword = bin2hex(random_bytes(12)) . 'Pp7!';
 useLink($at, storedLink('zulu'), $zuluPassword);                                     // the member resets
 ok('T3a and one that made no request in between does NOT come back to life when the member\'s next reset raises the account again — the number goes up by a random amount, so it never comes back (red on round 2: up by one, back to 1, still signed in)',
@@ -2342,10 +2346,42 @@ ok('T3b set-up: the change failed and rolled back — the page says so, the pass
     $failed['location'] === '/account?error=db' && passwordIs('zulu', $zuluPassword) === true
         && (int) one('SELECT signInVersion AS v FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zulu']])['v'] === $zuluNumber && stillSignedIn($zuluB, $at) === true,
     describe($failed));
-useLink($at, storedLink('zulu'), bin2hex(random_bytes(12)) . 'Rr9!');
+$zuluPassword2 = bin2hex(random_bytes(12)) . 'Rr9!';
+useLink($at, storedLink('zulu'), $zuluPassword2);
 ok('T3c and the member\'s next reset signs that browser out like any other (red on round 2: the rolled-back change had already given it the new number)',
     sentToSignIn($zuluB, $at) === true);
 ok('T3d the scratch change-password page is back byte for byte', (string) file_get_contents($pageFile) === $pageAsWas);
+
+// (c) The same on the RESET page (check round 3: calling passwordChangeCommitted()
+//     before the reset's commit left every check green). A browser signed in as
+//     the person posts a reset that fails after the sign-out was recorded: it
+//     must still be signed in, under the account's unchanged number.
+$resetFile  = $child . $sep . 'web' . $sep . '_apps' . $sep . 'auth' . $sep . 'reset-password' . $sep . 'save.php';
+$resetAsWas = (string) file_get_contents($resetFile);
+// The failure is put IMMEDIATELY BEFORE THE COMMIT, after everything the page
+// does before committing — so a re-stamp moved anywhere ahead of the commit
+// (the check's plant B) has already happened when it fails, and is caught.
+$resetMark = '    $mysqli->commit();' . "\n\n" . '    // 🖥️ Committed: only now may this browser take the new number';
+if (substr_count($resetAsWas, $resetMark) !== 1) {
+    refuse('part T3: the place to make the reset fail is not in reset-password/save.php exactly once');
+}
+file_put_contents($resetFile, str_replace(
+    $resetMark,
+    '    if (is_file(' . var_export($failFlag, true) . ") === true) { throw new \\RuntimeException('selftest: made to fail at the commit'); }\n" . $resetMark,
+    $resetAsWas
+));
+sleep(3);   // opcache: see the wait above
+$zuluC       = signedInJar('zulu', $at, $zuluPassword2);
+$zuluNumber2 = (int) one('SELECT signInVersion AS v FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zulu']])['v'];
+touch($failFlag);
+$failedReset = resetFromSignedIn($zuluC, $at, storedLink('zulu'), 'Never-Stored-598Ss1!');
+unlink($failFlag);
+file_put_contents($resetFile, $resetAsWas);
+ok('T3e a reset that fails AT ITS COMMIT rolls back, and the browser that sent it, signed in as that person, is STILL signed in under the unchanged number (planted: re-stamped before the commit, it was signed out)',
+    str_starts_with($failedReset['location'], '/reset-password?token=') === true && passwordIs('zulu', $zuluPassword2) === true
+        && (int) one('SELECT signInVersion AS v FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zulu']])['v'] === $zuluNumber2 && stillSignedIn($zuluC, $at) === true
+        && (string) file_get_contents($resetFile) === $resetAsWas,
+    describe($failedReset));
 
 // =============================================================================
 head('U. Changing the password while signed in signs out the others; this browser stays (D-104)');
@@ -2597,9 +2633,11 @@ head('Q4. Only a MISSING column falls back; any other database error is NOT quie
 // with a database user that may read and write every column of tblUsers EXCEPT
 // signInVersion — so the very same statements fail with 1143 ("column command
 // denied"), a real error that is not 1054.
-$limUser = 'p598lim';
-$limPass = bin2hex(random_bytes(12));
+// The user is named after THIS run's database (check round 3: one fixed name
+// made two runs on one server drop each other's user part-way).
 $dbNow   = (string) one('SELECT DATABASE() AS d')['d'];
+$limUser = 'p598_' . substr(hash('sha256', $dbNow), 0, 16);
+$limPass = bin2hex(random_bytes(12));
 q("DROP USER IF EXISTS '" . $limUser . "'@'%'");
 q("CREATE USER '" . $limUser . "'@'%' IDENTIFIED BY '" . $limPass . "'");
 q('GRANT SELECT (`userID`, `isActive`), UPDATE (`isActive`) ON `' . $dbNow . "`.`tblUsers` TO '" . $limUser . "'@'%'");

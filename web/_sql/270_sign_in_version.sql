@@ -29,8 +29,8 @@
 -- keeps no list of which files belong to which person, so there is nothing to
 -- find and delete. Instead each session remembers the number it signed in
 -- under, and `Auth::endSessionOfInactiveAccount()`, which already reads this
--- account's row once for every signed-in request, ends a session carrying an
--- older one. No extra query per request. The browser that MADE the change is
+-- account's row once for every signed-in request, ends a session carrying a
+-- different one. No extra query per request. The browser that MADE the change is
 -- given the new number once the change commits, so it is the one that
 -- stays signed in. Any other number ends a session, a HIGHER one included
 -- (a whole-database restore puts the account's number back; session files

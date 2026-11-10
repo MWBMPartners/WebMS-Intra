@@ -716,35 +716,50 @@ if ($action === 'update') {
     //    named because the person can type either that or their e-mail
     //    address. Neither the message nor the record ever carries the
     //    password or any part of its hash.
+    // 📣 What the record and the message say, written out WHOLE for each case
+    //    (#598 check round 3). Setting your OWN password here is a different
+    //    sentence from setting somebody else's: this browser stays signed in,
+    //    and "the person" would be you. Each sentence is spelt out rather than
+    //    assembled from pieces, because a piece written for one case read
+    //    untrue in the other.
+    $recordNote = '';
+    $flashNote  = '';
+    if ($setOwn === true) {
+        if ($signInWasCreated === true) {
+            $recordNote .= ' (a password sign-in was created for the administrator\'s own account)';
+            $flashNote  .= ' A password sign-in was created for your account, under the sign-in name "' . $signInName . '"; '
+                . 'you can sign in with that or with your e-mail address.';
+        }
+        if ($othersSignedOut === true) {
+            $recordNote .= ' (the administrator set their own password; their other browsers were signed out)';
+            $flashNote  .= ' Your new password is set. You are still signed in here, and you have been signed out of every other browser.';
+        } elseif ($othersSignedOut === false) {
+            $recordNote .= ' (the administrator set their own password, but their other browsers could NOT be signed out: database upgrade waiting)';
+            $flashNote  .= ' Your new password is set, but your other browsers could NOT be signed out: a database upgrade is waiting (Admin, Upgrade).';
+        }
+    } else {
+        if ($signInWasCreated === true) {
+            $recordNote .= ' (a password sign-in was created for this account)';
+            $flashNote  .= ' A password sign-in was created for this account, under the sign-in name "' . $signInName . '"; '
+                . 'the person can sign in with that or with their e-mail address.';
+        }
+        if ($othersSignedOut === true) {
+            $recordNote .= ' (the password was set, and the person was signed out of every browser)';
+            $flashNote  .= ' The new password is set, and the person has been signed out of every browser where they were signed in.';
+        } elseif ($othersSignedOut === false) {
+            $recordNote .= ' (the password was set, but the person could NOT be signed out: database upgrade waiting)';
+            $flashNote  .= ' The new password is set, but the person could NOT be signed out of the browsers where they are signed in: '
+                . 'a database upgrade is waiting (Admin, Upgrade).';
+        }
+    }
+
     Logger::activity(
         'UserUpdated',
-        'Updated user #' . $userID . ': ' . $fullName
-            . ($signInWasCreated === true ? ' (a password sign-in was created for this account)' : '')
-            . ($othersSignedOut === true && $setOwn === false ? ' (the password was set, and the person was signed out of every browser)' : '')
-            . ($othersSignedOut === true && $setOwn === true ? ' (the administrator set their own password; their other browsers were signed out)' : '')
-            . ($othersSignedOut === false ? ' (the password was set, but the person could NOT be signed out: database upgrade waiting)' : ''),
+        'Updated user #' . $userID . ': ' . $fullName . $recordNote,
         $_SESSION['user_id'] ?? null
     );
 
-    $_SESSION['flash_msg']  = 'User "' . $fullName . '" updated successfully.'
-        . ($signInWasCreated === true
-            ? ' A password sign-in was created for this account, under the sign-in name "' . $signInName . '"; '
-              . 'the person can sign in with that or with their e-mail address.'
-            : '')
-        // D-108: say what really happened, never more. Two different
-        //    sentences, because setting your OWN password here keeps THIS
-        //    browser signed in (#598 check round 2: one sentence claimed
-        //    "every browser" in both cases, untrue in the second).
-        . ($othersSignedOut === true && $setOwn === false
-            ? ' The new password is set, and the person has been signed out of every browser where they were signed in.'
-            : '')
-        . ($othersSignedOut === true && $setOwn === true
-            ? ' Your new password is set. You are still signed in here, and you have been signed out of every other browser.'
-            : '')
-        . ($othersSignedOut === false
-            ? ' The new password is set, but the person could NOT be signed out of the browsers where they are signed in: '
-              . 'a database upgrade is waiting (Admin, Upgrade).'
-            : '');
+    $_SESSION['flash_msg']  = 'User "' . $fullName . '" updated successfully.' . $flashNote;
     $_SESSION['flash_type'] = 'success';
     header('Location: ' . Site::url('admin/users'));
     exit();

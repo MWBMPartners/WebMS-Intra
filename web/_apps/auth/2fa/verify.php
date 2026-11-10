@@ -273,7 +273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             Auth::issueTrustedDevice($pendingUserId);
             Logger::activity('TotpDeviceTrusted', 'Device marked trusted (2FA bypass for the trust window)', $pendingUserId);
         } else {
-            Logger::activity('TotpDeviceTrustRefused', 'Not marked trusted: the password was reset or changed after this sign-in began', $pendingUserId);
+            Logger::activity('TotpDeviceTrustRefused', 'Not marked trusted: this sign-in is no longer current (the password was reset, changed or set by an administrator, or the database was restored, after it began)', $pendingUserId);
         }
     }
 

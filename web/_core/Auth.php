@@ -795,7 +795,7 @@ class Auth
      * was signed in under; one carrying ANY OTHER number (higher included:
      * a restore, see below) is ended the same way, and the browser that
      * made the change (given the new number after its commit by
-     * endOtherSessionsOf()) is not. Read in the same query, so it costs
+     * passwordChangeCommitted()) is not. Read in the same query, so it costs
      * nothing extra. See SIGN_IN_VERSION_KEY for why a number and not a time.
      *
      * TRIED AND REJECTED
@@ -941,8 +941,13 @@ class Auth
 
             self::endThisSession();
             Logger::activity(
-                'SessionEndedPasswordChanged',
-                'A signed-in session was ended because the password was reset or changed since it signed in.',
+                // Worded for BOTH causes (check round 3): a password reset,
+                // change or administrator's new password, AND a whole-database
+                // restore, which puts the account's number back with no
+                // password change at all. This line cannot tell which.
+                'SessionEndedSignInNotCurrent',
+                'A signed-in session was ended because its sign-in is no longer current: the password was reset, '
+                    . 'changed or set by an administrator, or the database was restored, since it signed in.',
                 $userId
             );
 

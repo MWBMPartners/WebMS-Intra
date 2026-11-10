@@ -102,7 +102,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED = 52; // seven added by #598 (part G, D-108)
+const EXPECTED = 53; // eight added by #598 (part G, D-108)
 
 // 👥 The made-up people. Every one of these numbers is this test's own.
 const ADMIN    = 927001; // a global administrator, who does the editing
@@ -990,12 +990,50 @@ $ownSave        = pressSave(ADMIN, $adminNew);
 ok('G07 an administrator setting their OWN password here stays signed in, the page says so in those words, and their other browser is signed out',
     $ownSave['type'] === 'success' && str_contains($ownSave['flash'], 'You are still signed in here') === true
         && str_contains($ownSave['flash'], 'signed out of every browser where they were signed in') === false
+        && str_contains($ownSave['flash'], 'the person') === false
         && req($adminJar, 'GET', '/admin/users')['status'] === 200 && $adminElsewhere !== '' && $accountStatus($adminElsewhere) === 302
         && $sessionNumber($adminJar) === (int) (one('SELECT signInVersion FROM tblUsers WHERE userID = ?', 'i', [ADMIN])['signInVersion'] ?? -1),
     $ownSave['type'] . ': ' . $ownSave['flash']);
 $memberC = $browserOf($address(WITHPWD), $d108Password);
 ok('G05 the member signs in with the new password, and that browser stays signed in',
     $memberC !== '' && $accountStatus($memberC) === 200 && $accountStatus($memberC) === 200);
+
+// G08 (#598 check round 3): the administrator sets their OWN password again,
+// and the save is made to FAIL after the sign-out was recorded (a file arms a
+// throw in the SCRATCH copy of the page). Everything rolls back, so their
+// browser must still be signed in under the account's unchanged number —
+// calling passwordChangeCommitted() before App::commit() left every check
+// green until this was written.
+$savePage  = $child . $sep . 'web' . $sep . '_apps' . $sep . 'admin' . $sep . 'users' . $sep . 'save.php';
+$saveAsWas = (string) file_get_contents($savePage);
+// The failure goes IMMEDIATELY BEFORE App::commit(), after everything the page
+// does first — so a re-stamp moved ahead of the commit (the check's plant H)
+// has already happened when it fails, and is caught.
+$saveMark  = '        App::commit();' . "\n\n" . '        // 🖥️ D-108, after the commit';
+$failFlag  = $child . $sep . 'p598-fail-admin-save';
+if (substr_count($saveAsWas, $saveMark) !== 1) {
+    refuse('G08: the place to make the save fail is not in admin/users/save.php exactly once');
+}
+file_put_contents($savePage, str_replace(
+    $saveMark,
+    '        if (is_file(' . var_export($failFlag, true) . ") === true) { throw new \\RuntimeException('selftest: made to fail at the commit'); }\n" . $saveMark,
+    $saveAsWas
+));
+// The built-in server keeps compiled pages and looks at a file's time at most
+// every 2 seconds (opcache.revalidate_freq), so the edit is seen after that.
+sleep(3);
+$adminNumberBefore = (int) (one('SELECT signInVersion FROM tblUsers WHERE userID = ?', 'i', [ADMIN])['signInVersion'] ?? -1);
+touch($failFlag);
+$failedSave = pressSave(ADMIN, $adminNew . 'Xx1!');
+unlink($failFlag);
+file_put_contents($savePage, $saveAsWas);
+ok('G08 a save of the administrator\'s OWN password that fails AT ITS COMMIT rolls back, says so, and leaves the administrator signed in under their unchanged number',
+    $failedSave['type'] === 'danger' && str_contains($failedSave['flash'], 'could not be saved') === true
+        && storedPasswordIs(ADMIN, $adminNew) === true
+        && (int) (one('SELECT signInVersion FROM tblUsers WHERE userID = ?', 'i', [ADMIN])['signInVersion'] ?? -2) === $adminNumberBefore
+        && req($adminJar, 'GET', '/admin/users')['status'] === 200 && $sessionNumber($adminJar) === $adminNumberBefore
+        && (string) file_get_contents($savePage) === $saveAsWas,
+    $failedSave['type'] . ': ' . $failedSave['flash'] . '; session ' . var_export($sessionNumber($adminJar), true) . ', account ' . $adminNumberBefore);
 
 // =============================================================================
 // 🧾 The count, the clean-up, and the verdict
