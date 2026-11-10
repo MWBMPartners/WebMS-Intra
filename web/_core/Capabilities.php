@@ -1029,7 +1029,9 @@ final class Capabilities
                 . 'group); each recorded session\'s headcount on the attendance page, this month\'s total '
                 . 'there, and correcting or deleting any session already recorded (D-109, D-114; the member who '
                 . 'recorded a session may also delete that one); and the attendance spreadsheet '
-                . 'download, which also carries the notes typed when each session was recorded. The figures '
+                . 'download, which also carries the notes typed when each session was recorded; and, through '
+                . 'the attendance data address (api/attendance/list), those notes, who last changed each session, '
+                . 'and deleted sessions. The figures '
                 . 'name nobody, but those notes are free text and can. Recording a new session is not '
                 . 'affected: any member may still do that.',
             'standard' => ['attendance_coordinator'],

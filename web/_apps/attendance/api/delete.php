@@ -4,9 +4,19 @@
  * -----------------------------------------------------------------------------
  * Attendance API — Delete (soft) Session 📋
  * -----------------------------------------------------------------------------
- * Dual-mode (bearer API key OR admin session) endpoint that soft-deletes an
- * attendance session (sets isDeleted = 1). Headcount rows are left in place
- * (they cascade-delete only if the parent row is ever hard-deleted).
+ * Soft-deletes an attendance session (sets isDeleted = 1). Headcount rows are
+ * left in place (they cascade-delete only if the parent row is ever
+ * hard-deleted). Two ways in:
+ *
+ *   - a SIGNED-IN person: an administrator, a holder of "See the attendance
+ *     totals", or the member who recorded THAT session (D-114, asked of
+ *     `AttendanceAccess::mayDeleteSession()`). Anybody else gets the same 404
+ *     as a session that does not exist. Until #529 this said "admin session"
+ *     and required an administrator.
+ *   - an API KEY holding the `attendance:write` scope may delete ANY session
+ *     (the owner, 10 November 2026 — D-115). A key is an administrator's own
+ *     tool for an integration and acts with that authority; D-114's "nobody
+ *     else" is about people. A key without the scope is refused (403).
  *
  *   DELETE /api/v1/attendance/{id}
  *   (or POST /api/attendance/delete?id=N — legacy alias, {"sessionID": N} in body)

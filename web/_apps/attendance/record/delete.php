@@ -89,8 +89,10 @@ if (AttendanceAccess::mayDeleteSession($mysqli, (int) ($userId ?? 0), $siteId, $
     exit();
 }
 
-// 🗑️ Soft delete
-$stmt = $mysqli->prepare('UPDATE tblAttendanceSessions SET isDeleted = 1, updatedByID = ? WHERE sessionID = ? AND siteID = ?');
+// 🗑️ Soft delete. `isDeleted` = 0 is in the statement as well as in the
+//    look-up above (#529 round 3): without it, a second delete of the same
+//    session would overwrite `updatedByID`, the record of who deleted it.
+$stmt = $mysqli->prepare('UPDATE `tblAttendanceSessions` SET `isDeleted` = 1, `updatedByID` = ? WHERE `sessionID` = ? AND `siteID` = ? AND `isDeleted` = 0');
 if ($stmt !== false) {
     $stmt->bind_param('iii', $userId, $sessionID, $siteId);
     $stmt->execute();

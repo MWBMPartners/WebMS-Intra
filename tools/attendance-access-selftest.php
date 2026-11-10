@@ -249,8 +249,20 @@ $gate          = "if (AttendanceAccess::mayDeleteSession(\$mysqli, (int) (\$user
 check('the delete handler holds the WHOLE D-114 gate, exactly', str_contains($deleteHandler, $gate) === true);
 check(
     'the delete handler asks it BEFORE it writes anything',
-    strpos($deleteHandler, $gate) !== false && strpos($deleteHandler, 'UPDATE tblAttendanceSessions SET isDeleted = 1') !== false
-        && strpos($deleteHandler, $gate) < strpos($deleteHandler, 'UPDATE tblAttendanceSessions SET isDeleted = 1')
+    strpos($deleteHandler, $gate) !== false && strpos($deleteHandler, 'UPDATE `tblAttendanceSessions` SET `isDeleted` = 1') !== false
+        && strpos($deleteHandler, $gate) < strpos($deleteHandler, 'UPDATE `tblAttendanceSessions` SET `isDeleted` = 1')
+);
+// #529 round 3: a session ALREADY deleted must not be deleted again — the
+// second delete would say "deleted" and overwrite `updatedByID`, the record of
+// who deleted it. Both the rule's look-up and the page's UPDATE say so.
+check(
+    'the delete handler\'s UPDATE touches only a session not yet deleted',
+    str_contains($deleteHandler, "WHERE `sessionID` = ? AND `siteID` = ? AND `isDeleted` = 0'") === true
+);
+$accessCode = codeOnly($web . '/../web/_core/AttendanceAccess.php');
+check(
+    'mayDeleteSession()\'s look-up finds only a session not yet deleted',
+    str_contains($accessCode, "'WHERE `sessionID` = ? AND `siteID` = ? AND `isDeleted` = 0 '") === true
 );
 $apiDelete = codeOnly($web . '/_apps/attendance/api/delete.php');
 $apiGate   = "if (ApiAuth::source() === 'session'\n    && AttendanceAccess::mayDeleteSession(\$db, (int) (\$actorId ?? 0), \$siteId, \$sessionId, App::isAdmin(), App::isRootAdmin()) === false) {\n    ApiResponse::error('Attendance session not found', 404);\n}";

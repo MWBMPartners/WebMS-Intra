@@ -276,7 +276,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 427; // 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 433; // 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -3669,7 +3669,11 @@ q('INSERT INTO tblAttendanceCounts (sessionID, groupLabel, headcount, sortOrder)
 // "Copy from last" copies ITS group label. Every figure here is distinctive, so
 // the raw number can be searched for (#529 round 2: a check that looked only
 // for "4,321" passed on a page printing 4321).
-foreach ([[916691, MEM, 4319, ' own'], [916692, LEAD, 4317, ' lead one'], [916693, LEAD, 4316, ' lead two'], [916694, LEAD, 4318, ' copied']] as [$sid, $by, $n, $label]) {
+// 916685 is deleted by A's administrator through the PAGE, and 916686 by an
+// API key (#529 round 3). Both are numbered BELOW 916694 on purpose: "Copy
+// from last" copies the highest-numbered session of the day, and Q25 needs
+// that to be 916694's label (916695 was tried first and took its place).
+foreach ([[916691, MEM, 4319, ' own'], [916692, LEAD, 4317, ' lead one'], [916693, LEAD, 4316, ' lead two'], [916694, LEAD, 4318, ' copied'], [916685, LEAD, 4315, ' lead three'], [916686, LEAD, 4314, ' lead four']] as [$sid, $by, $n, $label]) {
     q('INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, sessionDate, notes, createdByID) VALUES (?, ?, 916601, ?, ?, ?)', 'iissi', [$sid, ORG_A, $today, ATT_Q_MARK . $label . ' note', $by]);
     q('INSERT INTO tblAttendanceCounts (sessionID, groupLabel, headcount, sortOrder) VALUES (?, ?, ?, 0)', 'isi', [$sid, ATT_Q_MARK . $label, $n]);
 }
@@ -3819,6 +3823,14 @@ ok(
 );
 $answer = $listAs('aco');
 $ids    = array_map(static fn (array $r): int => (int) ($r['sessionID'] ?? 0), data($answer)['sessions'] ?? []);
+$liveCount = (int) one('SELECT COUNT(*) AS n FROM tblAttendanceSessions WHERE siteID = ? AND isDeleted = 0', 'i', [ORG_A])['n'];
+$allCount  = (int) one('SELECT COUNT(*) AS n FROM tblAttendanceSessions WHERE siteID = ?', 'i', [ORG_A])['n'];
+$counted   = (int) (data($listAs('mem'))['pagination']['totalItems'] ?? -1);
+ok(
+    'Q26c. …and its count of sessions leaves the deleted ones out too, so it cannot say how many exist',
+    $allCount > $liveCount && $counted === $liveCount,
+    'counted ' . $counted . '; not deleted ' . $liveCount . '; all ' . $allCount
+);
 ok(
     'Q26b. …while the holder of the permission still gets every session with its notes, deleted ones included (unchanged)',
     $answer['status'] === 200 && in_array(916612, $ids, true) === true && str_contains($answer['body'], ATT_Q_MARK . ' own note') === true,
@@ -3854,6 +3866,21 @@ ok(
     $answer['status'] === 302 && $deleted(916691) === 1 && str_contains($msg, 'Attendance record deleted.') === true && $qShowsFigure($msg, [4319]) === false,
     'HTTP ' . $answer['status'] . '; isDeleted ' . $deleted(916691)
 );
+$updatedBy = static fn (int $sid): int => (int) (one('SELECT updatedByID FROM tblAttendanceSessions WHERE sessionID = ?', 'i', [$sid])['updatedByID'] ?? 0);
+$answer    = $qDelete('mem', 916691);
+$msg       = req($jar['mem'], 'GET', ADDR_A . '/attendance')['body'];
+ok(
+    'Q29b. #529 round 3: the member deleting their own session a SECOND time is told it cannot be found',
+    $answer['status'] === 302 && str_contains($msg, 'Attendance session not found.') === true && $updatedBy(916691) === MEM,
+    'who deleted it, as recorded: ' . $updatedBy(916691)
+);
+$answer = $qDelete('adm', 916691);
+$msg    = req($jar['adm'], 'GET', ADDR_A . '/attendance')['body'];
+ok(
+    'Q29c. …and an administrator deleting it again is told the same, and the record of who deleted it is NOT overwritten',
+    $answer['status'] === 302 && str_contains($msg, 'Attendance session not found.') === true && $updatedBy(916691) === MEM,
+    'who deleted it, as recorded: ' . $updatedBy(916691) . ' (expected ' . MEM . ')'
+);
 $answer = $qDelete('aco', 916693);
 ok('Q30. D-114: the holder of the permission deletes a session somebody else recorded', $answer['status'] === 302 && $deleted(916693) === 1, 'HTTP ' . $answer['status']);
 /** The same delete through the API, signed in, with the page's form token in the header a script sends. */
@@ -3869,6 +3896,20 @@ $answer = $apiDelete('lead', 916692);
 ok('Q32. D-114: through the API, the member who recorded it deletes it', $answer['status'] === 200 && $deleted(916692) === 1, said($answer));
 $answer = $apiDelete('adm', 916694);
 ok('Q33. D-114: through the API, an administrator deletes one too (unchanged)', $answer['status'] === 200 && $deleted(916694) === 1, said($answer));
+$answer = $qDelete('adm', 916685);
+ok('Q34. D-114: A\'s administrator deletes a session somebody else recorded, through the PAGE', $answer['status'] === 302 && $deleted(916685) === 1 && $updatedBy(916685) === ADM, 'HTTP ' . $answer['status']);
+// D-115: an API key holding attendance:write may delete ANY session; one
+// without that scope may not. The key is made here, for A, and goes with the
+// world (removeWorld deletes A's keys).
+$keyAW = 'wbms_' . bin2hex(random_bytes(16));
+q(
+    "INSERT INTO tblApiKeys (siteID, name, keyHash, keyPrefix, scopes, isActive, createdByID) VALUES (?, 'Selftest attendance write key', ?, ?, 'attendance:write', 1, NULL)",
+    'iss', [ORG_A, hash('sha256', $keyAW), substr($keyAW, 0, 12)]
+);
+$answer = req('', 'POST', ADDR_A . '/api/attendance/delete', null, $keyA, (string) json_encode(['sessionID' => 916686]));
+ok('Q35. D-115: an API key WITHOUT attendance:write is refused, and the session is not deleted', $answer['status'] === 403 && $deleted(916686) === 0, said($answer));
+$answer = req('', 'POST', ADDR_A . '/api/attendance/delete', null, $keyAW, (string) json_encode(['sessionID' => 916686]));
+ok('Q36. D-115: an API key WITH attendance:write deletes a session nobody gave it, as before', $answer['status'] === 200 && $deleted(916686) === 1, said($answer));
 
 // --- another organisation's accounts ------------------------------------------
 // At the door: SiteGate refuses a non-member on EVERY address, so the report is

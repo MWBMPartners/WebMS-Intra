@@ -44,13 +44,15 @@ $siteId = Site::id();
 //    may rely on seeing deletions.
 $limited = ApiAuth::source() === 'session'
     && AttendanceAccess::mayViewTotals($db, (int) (ApiAuth::actorUserId() ?? 0), $siteId, App::isAdmin(), App::isRootAdmin()) === false;
-$notDeleted = $limited === true ? ' AND s.isDeleted = 0' : '';
+$notDeleted = $limited === true ? ' AND s.`isDeleted` = 0' : '';
 $page   = max(1, (int) ($_GET['page'] ?? 1));
 $limit  = min(100, max(1, (int) ($_GET['limit'] ?? 20)));
 $offset = ($page - 1) * $limit;
 
 // 📊 Count
-$cntStmt = $db->prepare('SELECT COUNT(*) AS total FROM tblAttendanceSessions s WHERE s.siteID = ?' . $notDeleted);
+// The count leaves deleted sessions out for the same callers, or `totalItems`
+// and `totalPages` would say how many deleted sessions exist.
+$cntStmt = $db->prepare('SELECT COUNT(*) AS `total` FROM `tblAttendanceSessions` s WHERE s.`siteID` = ?' . $notDeleted);
 if ($cntStmt === false) {
     ApiResponse::error('Database error', 500);
 }
@@ -63,9 +65,9 @@ $totalPages = max(1, (int) ceil($totalItems / $limit));
 // 📋 Fetch
 $sessions = [];
 $stmt = $db->prepare(
-    'SELECT s.*, t.typeName FROM tblAttendanceSessions s '
-    . 'LEFT JOIN tblAttendanceServiceTypes t ON t.serviceTypeID = s.serviceTypeID '
-    . 'WHERE s.siteID = ?' . $notDeleted . ' ORDER BY s.sessionDate DESC LIMIT ? OFFSET ?'
+    'SELECT s.*, t.`typeName` FROM `tblAttendanceSessions` s '
+    . 'LEFT JOIN `tblAttendanceServiceTypes` t ON t.`serviceTypeID` = s.`serviceTypeID` '
+    . 'WHERE s.`siteID` = ?' . $notDeleted . ' ORDER BY s.`sessionDate` DESC LIMIT ? OFFSET ?'
 );
 if ($stmt !== false) {
     $stmt->bind_param('iii', $siteId, $limit, $offset);

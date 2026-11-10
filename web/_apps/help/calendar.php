@@ -455,9 +455,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p>
         <strong>Who can delete a recorded session.</strong> Your administrators, anybody holding
         &ldquo;See the attendance totals&rdquo;, and the member who recorded that particular session
-        &mdash; so somebody who made a mistake can delete their own session and record it again. Nobody
-        else sees a delete button, and to anybody else the session behaves as though it were not there.
+        &mdash; so somebody who made a mistake can delete their own session and record it again. Every
+        member still sees every session on the list, but only those people are offered the delete
+        button; anybody else who tries to delete a session is told it cannot be found, and nothing is
+        deleted.
     </p>
+    <p>
+        An <strong>API key</strong> (a password an administrator gives another program so it can use the
+        portal directly) that is allowed to write attendance can also delete any session, as it always
+        could: it is the administrator's own tool and acts with their authority. A key without that
+        permission cannot.
+    </p>
+    <!-- D-115 (the owner, 10 November 2026). -->
     <!-- D-114 (the owner, 10 November 2026). Until then any member could delete any session. -->
     <!-- #917 / D-109 (the owner, 10 November 2026). Until then this paragraph said the list "still
          shows each session's own headcount to the people who record them", which was untrue in the
