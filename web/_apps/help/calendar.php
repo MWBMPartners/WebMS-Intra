@@ -447,12 +447,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </p>
     <p>
         <strong>What a member who records attendance sees.</strong> Any member of your organisation can
-        still record a new session, and sees the counts they are typing (and the total of what they just
-        saved). They see the list of recorded sessions &mdash; date, service, event and who recorded it
-        &mdash; but not any session's headcount, and they cannot open a session already recorded to
-        correct it, because that would show its figures. A member who made a mistake can delete the
-        session and record it again, or ask an administrator to correct it.
+        still record a new session, and sees the counts they are typing (and, straight afterwards, the
+        total of what they just saved). They see the list of recorded sessions &mdash; date, service,
+        event and who recorded it &mdash; but not any session's headcount, and they cannot open a session
+        already recorded to correct it, because that would show its figures.
     </p>
+    <p>
+        <strong>Who can delete a recorded session.</strong> Your administrators, anybody holding
+        &ldquo;See the attendance totals&rdquo;, and the member who recorded that particular session
+        &mdash; so somebody who made a mistake can delete their own session and record it again. Nobody
+        else sees a delete button, and to anybody else the session behaves as though it were not there.
+    </p>
+    <!-- D-114 (the owner, 10 November 2026). Until then any member could delete any session. -->
     <!-- #917 / D-109 (the owner, 10 November 2026). Until then this paragraph said the list "still
          shows each session's own headcount to the people who record them", which was untrue in the
          reassuring direction: it showed every session's figure to EVERY member, recording or not. -->

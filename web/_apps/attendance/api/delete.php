@@ -25,11 +25,18 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\AttendanceAccess;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
 ApiAuth::requireMethod('POST');
-$body = ApiAuth::requireWrite('attendance:write', sessionNeedsAdmin: true);
+// 🔒 D-114: a SIGNED-IN caller is no longer required to be an administrator
+//    here; who may delete a session is decided below by the same rule as the
+//    page (`AttendanceAccess::mayDeleteSession()`). An API KEY holding
+//    `attendance:write` is unchanged: a key is made and scoped by an
+//    administrator for an integration, it is not a member, and D-114 is about
+//    which members may delete.
+$body = ApiAuth::requireWrite('attendance:write', sessionNeedsAdmin: false);
 
 $sessionId = (int) ($_GET['id'] ?? $body['sessionID'] ?? 0);
 if ($sessionId <= 0) {
@@ -39,6 +46,13 @@ if ($sessionId <= 0) {
 $db     = App::db();
 $siteId = Site::id();
 $actorId = ApiAuth::actorUserId();
+
+// 🔒 D-114 for a signed-in caller: refused exactly as a session that does not
+//    exist (the same 404 and words as the look-up below), before the row is read.
+if (ApiAuth::source() === 'session'
+    && AttendanceAccess::mayDeleteSession($db, (int) ($actorId ?? 0), $siteId, $sessionId, App::isAdmin(), App::isRootAdmin()) === false) {
+    ApiResponse::error('Attendance session not found', 404);
+}
 
 // 🔍 Fetch the row first so the audit trail retains full oldData
 $fetch = $db->prepare(

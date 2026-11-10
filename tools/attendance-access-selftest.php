@@ -168,16 +168,98 @@ check(
         && strpos($export, $asked) < strpos($export, 'Auth::verifyCsrf(')
 );
 $index = codeOnly($web . '/_apps/attendance/index.php');
-// D-109 (#917): each row's headcount and each row's Edit button too.
+/**
+ * The `<?php if (...): ?>` blocks that ENCLOSE an offset in a template, nearest
+ * first. Walks backwards over every alternative-syntax `if` and `endif`, so a
+ * block that has already CLOSED above the offset is not counted as enclosing
+ * it.
+ *
+ * ⚠️ WHY A WALK AND NOT "THE NEAREST if ABOVE" (#529 round 2): the first
+ *    version took the nearest `<?php if (` above the text and looked no
+ *    further. With a figure planted in the delete button's confirmation, the
+ *    nearest `if` above it was the Edit button's — a block that had already
+ *    closed — so the check passed on a member being shown the count.
+ *
+ * @return list<string> The opening tag of each enclosing block.
+ */
+function enclosingBlocks(string $template, int $at): array
+{
+    preg_match_all('/<\?php if \(.*?\): \?>|<\?php endif; \?>/', substr($template, 0, $at), $m, PREG_OFFSET_CAPTURE);
+    $depth  = 0;
+    $opened = [];
+    foreach (array_reverse($m[0]) as [$tag]) {
+        if (str_starts_with($tag, '<?php endif') === true) {
+            $depth++;
+        } elseif ($depth > 0) {
+            $depth--;
+        } else {
+            $opened[] = $tag;
+        }
+    }
+
+    return $opened;
+}
+
+// D-109 (#917): each row's headcount and each row's Edit button too. EVERY
+// occurrence is checked, not the first: round 2 planted a second
+// `$sess['totalCount']` (in the delete button's confirmation) and a check that
+// looked only at the first one passed.
 foreach (['Total Headcount This Month', "Site::url('attendance/export')", "Site::url('attendance/report')", "\$sess['totalCount']", "?edit=<?php echo (int) \$sess['sessionID']"] as $shown) {
-    $at    = strpos($index, $shown);
-    $guard = $at === false ? false : strrpos(substr($index, 0, $at), '<?php if (');
+    $offsets = [];
+    for ($at = strpos($index, $shown); $at !== false; $at = strpos($index, $shown, $at + 1)) {
+        $offsets[] = $at;
+    }
+    $outside = array_filter($offsets, static fn (int $at): bool => in_array('<?php if ($mayViewReports === true): ?>', enclosingBlocks($index, $at), true) === false);
     check(
-        'on the attendance page, "' . $shown . '" sits inside a block opened by "if ($mayViewReports === true)"',
-        $guard !== false && str_starts_with(substr($index, $guard), '<?php if ($mayViewReports === true): ?>'),
-        $at === false ? 'not found at all' : 'the nearest block above it opens differently'
+        'on the attendance page, EVERY "' . $shown . '" (' . count($offsets) . ') sits inside a block opened by "if ($mayViewReports === true)"',
+        $offsets !== [] && $outside === [],
+        $offsets === [] ? 'not found at all' : count($outside) . ' outside such a block'
     );
 }
+// D-114: the list's delete control is drawn by the ONE rule, per row.
+$deleteForm = "action=\"<?php echo htmlspecialchars(Site::url('attendance/record/delete')";
+$at         = strpos($index, $deleteForm);
+check(
+    'on the attendance page, the delete control sits inside a block opened by AttendanceAccess::decideDelete() for that row',
+    $at !== false && in_array("<?php if (AttendanceAccess::decideDelete(\$mayViewReports, (int) (\$sess['createdByID'] ?? 0), \$viewerId) === true): ?>", enclosingBlocks($index, $at), true) === true
+        && substr_count($index, $deleteForm) === 1
+);
+
+// -----------------------------------------------------------------------------
+echo "\n2b. D-114: who may delete a session\n";
+// -----------------------------------------------------------------------------
+// [may see the figures, recorded by, viewer, expected] — by hand.
+foreach ([
+    [true,  0,  0,  true],   // an administrator or holder: any session, even one with no recorder
+    [true,  7,  9,  true],   // …and one somebody else recorded
+    [false, 9,  9,  true],   // the member who recorded it
+    [false, 7,  9,  false],  // somebody else's session
+    [false, 0,  9,  false],  // a session with no recorder on record
+    [false, 0,  0,  false],  // nobody signed in, no recorder: never "the same person"
+] as [$sees, $by, $viewer, $expected]) {
+    $actual = AttendanceAccess::decideDelete($sees, $by, $viewer);
+    check(
+        sprintf('decideDelete(may see figures %s, recorded by %d, viewer %d) → %s', $sees ? 'yes' : 'no', $by, $viewer, $expected ? 'may delete' : 'refused'),
+        $actual === $expected,
+        'got ' . var_export($actual, true)
+    );
+}
+$deleteHandler = codeOnly($web . '/_apps/attendance/record/delete.php');
+$gate          = "if (AttendanceAccess::mayDeleteSession(\$mysqli, (int) (\$userId ?? 0), \$siteId, \$sessionID, App::isAdmin(), App::isRootAdmin()) === false) {\n    \$_SESSION['flash_msg']  = 'Attendance session not found.';\n    \$_SESSION['flash_type'] = 'danger';\n    header('Location: ' . Site::url('attendance'));\n    exit();\n}";
+check('the delete handler holds the WHOLE D-114 gate, exactly', str_contains($deleteHandler, $gate) === true);
+check(
+    'the delete handler asks it BEFORE it writes anything',
+    strpos($deleteHandler, $gate) !== false && strpos($deleteHandler, 'UPDATE tblAttendanceSessions SET isDeleted = 1') !== false
+        && strpos($deleteHandler, $gate) < strpos($deleteHandler, 'UPDATE tblAttendanceSessions SET isDeleted = 1')
+);
+$apiDelete = codeOnly($web . '/_apps/attendance/api/delete.php');
+$apiGate   = "if (ApiAuth::source() === 'session'\n    && AttendanceAccess::mayDeleteSession(\$db, (int) (\$actorId ?? 0), \$siteId, \$sessionId, App::isAdmin(), App::isRootAdmin()) === false) {\n    ApiResponse::error('Attendance session not found', 404);\n}";
+check('api/attendance/delete holds the WHOLE D-114 gate, exactly', str_contains($apiDelete, $apiGate) === true);
+check(
+    'api/attendance/delete asks it BEFORE it reads the session',
+    strpos($apiDelete, $apiGate) !== false && strpos($apiDelete, 'FROM tblAttendanceSessions WHERE sessionID = ?') !== false
+        && strpos($apiDelete, $apiGate) < strpos($apiDelete, 'FROM tblAttendanceSessions WHERE sessionID = ?')
+);
 
 // -----------------------------------------------------------------------------
 echo "\n3. The old setting is read by nothing\n";

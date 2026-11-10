@@ -77,14 +77,25 @@
  * because a role held in organisation B must never open organisation A's
  * totals: `Capabilities::allows()` is asked about THIS organisation only.
  *
+ * WHO MAY DELETE A SESSION (the owner, 10 November 2026 — D-114)
+ * -------------------------------------------------------------------------
+ * Administrators, holders of the permission, and THE MEMBER WHO RECORDED THAT
+ * SESSION (so they can put right their own mistake, which D-109 stopped them
+ * correcting in place). Nobody else. `decideDelete()` is the rule with no
+ * database, asked by the list for each row's delete control;
+ * `mayDeleteSession()` is the same rule with the session read, asked by the
+ * delete handler and by `api/attendance/delete` for a signed-in caller.
+ * Somebody refused is answered exactly as for a session that does not exist:
+ * the recorder test is a condition of the SAME look-up that finds the
+ * session, so "not yours" and "not there" cannot be told apart.
+ *
+ * Deleting shows no figure, and the message afterwards names none.
+ *
  * WHAT THIS CLASS DELIBERATELY DOES NOT DO
  * -------------------------------------------------------------------------
- * It does not decide who may RECORD a new head count or delete a session —
- * any active member may, and an administrator (the owner's decision). Those
- * pages (`attendance/record.php`, `record/save.php`, `record/delete.php`)
- * call `viewerIsMember()` below to shut outsiders out, and ask
- * `mayViewTotals()` only where an existing session's figures are shown or
- * overwritten.
+ * It does not decide who may RECORD a new head count — any active member
+ * may, and an administrator (the owner's decision). The recording pages call
+ * `viewerIsMember()` below to shut outsiders out.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -167,6 +178,80 @@ final class AttendanceAccess
             : false;
 
         return self::decide($isMember, $isAdmin, $holds);
+    }
+
+    /**
+     * D-114, with no database: may somebody delete one session?
+     *
+     * Yes for anybody who may see the attendance figures (an administrator or
+     * a holder of the permission — pass `mayViewTotals()`'s answer), and for
+     * the person who recorded that session. A session with no recorder on
+     * record (0) belongs to nobody, so only the first group may delete it.
+     *
+     * @param bool $mayViewFigures mayViewTotals() for this viewer.
+     * @param int  $recordedBy     The session's `createdByID`, 0 when none.
+     * @param int  $viewerId       The signed-in account, 0 for nobody.
+     *
+     * @return bool
+     */
+    public static function decideDelete(bool $mayViewFigures, int $recordedBy, int $viewerId): bool
+    {
+        if ($mayViewFigures === true) {
+            return true;
+        }
+
+        return $viewerId > 0 && $recordedBy === $viewerId;
+    }
+
+    /**
+     * D-114 with the session read: does this session exist in this
+     * organisation, not yet deleted, AND may this person delete it? ONE answer
+     * for both questions, on purpose: a caller refusing on `false` says
+     * exactly what it would say for a session that is not there.
+     *
+     * The look-up itself carries the rule — for somebody who may not see the
+     * figures it asks for `createdByID = <them>` — so no session row is ever
+     * read for a person who may not delete it.
+     *
+     * @param mysqli $db            An open connection.
+     * @param int    $userId        The viewer; 0 is always false.
+     * @param int    $siteId        The organisation.
+     * @param int    $sessionId     The session.
+     * @param bool   $isAdmin       App::isAdmin().
+     * @param bool   $isGlobalAdmin App::isRootAdmin().
+     *
+     * @return bool
+     */
+    public static function mayDeleteSession(mysqli $db, int $userId, int $siteId, int $sessionId, bool $isAdmin, bool $isGlobalAdmin): bool
+    {
+        if ($userId <= 0 || $siteId <= 0 || $sessionId <= 0) {
+            return false;
+        }
+        if (self::viewerIsMember($db, $userId, $siteId) === false) {
+            return false;
+        }
+        $mayViewFigures = self::mayViewTotals($db, $userId, $siteId, $isAdmin, $isGlobalAdmin);
+
+        $stmt = $db->prepare(
+            'SELECT `createdByID` FROM `tblAttendanceSessions` '
+            . 'WHERE `sessionID` = ? AND `siteID` = ? AND `isDeleted` = 0 '
+            . '  AND (? = 1 OR `createdByID` = ?) LIMIT 1'
+        );
+        if ($stmt === false) {
+            return false;
+        }
+        $privileged = $mayViewFigures === true ? 1 : 0;
+        $stmt->bind_param('iiii', $sessionId, $siteId, $privileged, $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        if ($row === null) {
+            return false;
+        }
+
+        // Asked of the rule as well as written into the look-up, so the two
+        // cannot drift: the query narrows, the rule decides.
+        return self::decideDelete($mayViewFigures, (int) ($row['createdByID'] ?? 0), $userId);
     }
 
     /**

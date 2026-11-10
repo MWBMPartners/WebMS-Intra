@@ -276,7 +276,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 416; // 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 427; // 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -1400,8 +1400,13 @@ $answer = req($jar['mem'], 'GET', $record);
 ok('control: a member of A opens the form (200)', $answer['status'] === 200, 'HTTP ' . $answer['status']);
 $answer = post($jar['mem'], $record, $record . '/save', $newSession('ACCESS-ATT member'));
 ok('control: …records a head count (any active member may)', $answer['status'] === 302 && $sessionsNoted('ACCESS-ATT member') === 1, 'HTTP ' . $answer['status'] . '; sessions written: ' . $sessionsNoted('ACCESS-ATT member'));
-$answer = post($jar['mem'], $record, $record . '/delete', ['sessionID' => 916611]);
-ok('control: …and deletes a session', $answer['status'] === 302 && $deleted(916611) === 1, 'HTTP ' . $answer['status'] . '; isDeleted: ' . $deleted(916611));
+// D-114 (#529 round 2): a member deletes only a session THEY recorded, so the
+// control deletes the one just recorded. Until then this deleted 916611, a
+// seeded session with no recorder, which only an administrator or a holder of
+// the attendance permission may now delete (part Q).
+$ownSession = (int) (one('SELECT sessionID FROM tblAttendanceSessions WHERE siteID = ? AND notes = ?', 'is', [ORG_A, 'ACCESS-ATT member'])['sessionID'] ?? 0);
+$answer     = post($jar['mem'], $record, $record . '/delete', ['sessionID' => $ownSession]);
+ok('control: …and deletes the session they recorded', $answer['status'] === 302 && $ownSession > 0 && $deleted($ownSession) === 1, 'HTTP ' . $answer['status'] . '; isDeleted: ' . ($ownSession > 0 ? $deleted($ownSession) : 'no such session'));
 $answer = post($jar['gadm'], $record, $record . '/save', $newSession('ACCESS-ATT global'));
 ok('control: a global administrator, a member of no organisation, records one too', $answer['status'] === 302 && $sessionsNoted('ACCESS-ATT global') === 1, 'HTTP ' . $answer['status'] . '; sessions written: ' . $sessionsNoted('ACCESS-ATT global'));
 $answer = post($jar['gadm'], $record, $record . '/delete', ['sessionID' => 916612]);
@@ -3658,6 +3663,29 @@ $jar['ladm'] = signIn('ladm', ADDR_B);
 // and collided.
 q("INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, sessionDate, notes) VALUES (916690, ?, 916601, ?, ?)", 'iss', [ORG_A, $today, ATT_Q_MARK . ' note']);
 q('INSERT INTO tblAttendanceCounts (sessionID, groupLabel, headcount, sortOrder) VALUES (916690, ?, 4321, 0)', 's', [ATT_Q_MARK . ' group']);
+// D-114 (#529 round 2): sessions with a RECORDER. 916691 is the ordinary
+// member's own, so "a member never sees a figure" is tested on a session they
+// recorded themselves as well as on somebody else's. 916694 is the newest, so
+// "Copy from last" copies ITS group label. Every figure here is distinctive, so
+// the raw number can be searched for (#529 round 2: a check that looked only
+// for "4,321" passed on a page printing 4321).
+foreach ([[916691, MEM, 4319, ' own'], [916692, LEAD, 4317, ' lead one'], [916693, LEAD, 4316, ' lead two'], [916694, LEAD, 4318, ' copied']] as [$sid, $by, $n, $label]) {
+    q('INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, sessionDate, notes, createdByID) VALUES (?, ?, 916601, ?, ?, ?)', 'iissi', [$sid, ORG_A, $today, ATT_Q_MARK . $label . ' note', $by]);
+    q('INSERT INTO tblAttendanceCounts (sessionID, groupLabel, headcount, sortOrder) VALUES (?, ?, ?, 0)', 'isi', [$sid, ATT_Q_MARK . $label, $n]);
+}
+/** A page's text with every run of 32 or more hex characters (form tokens, nonces) taken out, so a number can be searched for without a token happening to contain it. */
+$qNoTokens = static fn (string $body): string => ap_replace('/[0-9a-f]{32,}/i', '', $body);
+/** Does a page show any of these figures, raw or with a thousands comma? */
+$qShowsFigure = static function (string $body, array $figures) use ($qNoTokens): bool {
+    $plain = $qNoTokens($body);
+    foreach ($figures as $n) {
+        if (str_contains($plain, (string) $n) === true || str_contains($plain, number_format($n)) === true) {
+            return true;
+        }
+    }
+
+    return false;
+};
 
 $qReport = ADDR_A . '/attendance/report';
 $qExport = ADDR_A . '/attendance/export';
@@ -3729,8 +3757,8 @@ ok('Q5b. …while still showing the member the page itself (recording is not aff
 
 // --- D-109 (#917): no session's own headcount for an ordinary member ----------
 ok(
-    'Q20. D-109: the session list shows a member no headcount column, no session\'s figure and no Edit button',
-    str_contains($page['body'], '4,321') === false && str_contains($page['body'], '>Headcount</div>') === false
+    'Q20. D-109: the session list shows a member no headcount column, no session\'s figure (raw or with a comma, their own session\'s included) and no Edit button',
+    $qShowsFigure($page['body'], [4321, 4319, 4317, 4316, 4318]) === false && str_contains($page['body'], '>Headcount</div>') === false
         && str_contains($page['body'], '?edit=') === false && str_contains($page['body'], 'ACCESS service') === true,
     'HTTP ' . $page['status']
 );
@@ -3746,14 +3774,13 @@ $qUpdate = static fn (string $who, int $session, int $count): array => post($jar
     'action' => 'update', 'sessionID' => $session, 'serviceTypeID' => 916601, 'sessionDate' => $today,
     'groups' => [ATT_Q_MARK . ' group'], 'counts' => [$count], 'notes' => ATT_Q_MARK . ' note', // the note too: an update writes every field, and an absent note is stored as none
 ]);
-// The message is read on the RECORD page, not /attendance where the handler
-// sends the person: /attendance prints no waiting message at all (a fault older
-// than this work), so the message waits until the record page is next opened.
-// Read it before the next post(), whose own visit to that page would take it.
+// The message is read on /attendance, where the handler sends the person: that
+// page prints it since #921 was fixed in #529 round 2 (until then it printed
+// none, and this read it on the record page).
 $real    = $qUpdate('mem', 916690, 1);
-$realMsg = req($jar['mem'], 'GET', $qRecord)['body'];
+$realMsg = req($jar['mem'], 'GET', ADDR_A . '/attendance')['body'];
 $fake    = $qUpdate('mem', 916699, 1);
-$fakeMsg = req($jar['mem'], 'GET', $qRecord)['body'];
+$fakeMsg = req($jar['mem'], 'GET', ADDR_A . '/attendance')['body'];
 ok(
     'Q22. D-109: a member posting new counts over an EXISTING session is answered as for a session that does not exist, and nothing is written',
     $real['status'] === 302 && $real['location'] === $fake['location'] && str_contains($realMsg, 'Attendance session not found.') === true
@@ -3770,6 +3797,78 @@ ok(
 );
 $answer = $qUpdate('aco', 916690, 4322);
 ok('Q24. D-109: …and can correct it', $answer['status'] === 302 && $qStored() === 4322, 'HTTP ' . $answer['status'] . '; stored ' . $qStored());
+
+// --- coverage pins (#529 round 2): three more places a figure could reach a member
+$page = req($jar['mem'], 'GET', $qRecord . '?copyFrom=last&serviceTypeID=916601');
+ok(
+    'Q25. "Copy from last" as a member copies the last session\'s group labels and none of its figures',
+    $page['status'] === 200 && str_contains($page['body'], 'value="' . ATT_Q_MARK . ' copied"') === true && $qShowsFigure($page['body'], [4318, 4321, 4319, 4317, 4316]) === false,
+    'HTTP ' . $page['status']
+);
+$listAs = static fn (string $who): array => req($jar[$who], 'GET', ADDR_A . '/api/attendance/list?limit=100');
+$answer = $listAs('mem');
+$rows   = data($answer)['sessions'] ?? [];
+$ids    = array_map(static fn (array $r): int => (int) ($r['sessionID'] ?? 0), $rows);
+$keys   = array_unique(array_merge([], ...array_map('array_keys', $rows)));
+ok(
+    'Q26. api/attendance/list as a member: no deleted session, no notes, no "who last changed it", and no figure',
+    $answer['status'] === 200 && in_array(916691, $ids, true) === true && in_array(916612, $ids, true) === false
+        && in_array('notes', $keys, true) === false && in_array('updatedByID', $keys, true) === false
+        && str_contains($answer['body'], ATT_Q_MARK) === false && $qShowsFigure($answer['body'], [4322, 4319, 4317, 4316, 4318]) === false,
+    'HTTP ' . $answer['status'] . '; keys: ' . implode(',', $keys) . '; has 916612: ' . var_export(in_array(916612, $ids, true), true)
+);
+$answer = $listAs('aco');
+$ids    = array_map(static fn (array $r): int => (int) ($r['sessionID'] ?? 0), data($answer)['sessions'] ?? []);
+ok(
+    'Q26b. …while the holder of the permission still gets every session with its notes, deleted ones included (unchanged)',
+    $answer['status'] === 200 && in_array(916612, $ids, true) === true && str_contains($answer['body'], ATT_Q_MARK . ' own note') === true,
+    'HTTP ' . $answer['status']
+);
+
+// --- D-114: who may delete a recorded session ---------------------------------
+// The control for one session is its hidden field; a member is offered it only
+// on the session they recorded.
+$control = static fn (string $body, int $sid): bool => str_contains($body, 'name="sessionID" value="' . $sid . '"');
+$memList = req($jar['mem'], 'GET', ADDR_A . '/attendance')['body'];
+ok(
+    'Q27. D-114: a member is offered the delete control on the session they recorded, and not on another member\'s or on one with no recorder',
+    $control($memList, 916691) === true && $control($memList, 916692) === false && $control($memList, 916690) === false
+);
+$acoList = req($jar['aco'], 'GET', ADDR_A . '/attendance')['body'];
+ok('Q27b. D-114: the holder of the permission is offered it on every session', $control($acoList, 916691) === true && $control($acoList, 916692) === true && $control($acoList, 916690) === true);
+$qDelete = static fn (string $who, int $sid): array => post($jar[$who], ADDR_A . '/attendance', ADDR_A . '/attendance/record/delete', ['sessionID' => $sid]);
+$real    = $qDelete('mem', 916692);
+$realMsg = req($jar['mem'], 'GET', ADDR_A . '/attendance')['body'];
+$fake    = $qDelete('mem', 916699);
+$fakeMsg = req($jar['mem'], 'GET', ADDR_A . '/attendance')['body'];
+ok(
+    'Q28. D-114: a member deleting another member\'s session is answered exactly as for a session that does not exist, and it is not deleted',
+    $real['status'] === 302 && $real['location'] === $fake['location'] && str_contains($realMsg, 'Attendance session not found.') === true
+        && str_contains($fakeMsg, 'Attendance session not found.') === true && $deleted(916692) === 0,
+    'HTTP ' . $real['status'] . ' ' . $real['location'] . ' against ' . $fake['location'] . '; isDeleted ' . $deleted(916692)
+);
+$answer = $qDelete('mem', 916691);
+$msg    = req($jar['mem'], 'GET', ADDR_A . '/attendance')['body'];
+ok(
+    'Q29. D-114: the member deletes the session they recorded, and the message names no figure',
+    $answer['status'] === 302 && $deleted(916691) === 1 && str_contains($msg, 'Attendance record deleted.') === true && $qShowsFigure($msg, [4319]) === false,
+    'HTTP ' . $answer['status'] . '; isDeleted ' . $deleted(916691)
+);
+$answer = $qDelete('aco', 916693);
+ok('Q30. D-114: the holder of the permission deletes a session somebody else recorded', $answer['status'] === 302 && $deleted(916693) === 1, 'HTTP ' . $answer['status']);
+/** The same delete through the API, signed in, with the page's form token in the header a script sends. */
+$apiDelete = static fn (string $who, int $sid): array => postJson($jar[$who], ADDR_A . '/api/attendance/delete', ['sessionID' => $sid], ['X-CSRF-TOKEN: ' . token(req($jar[$who], 'GET', ADDR_A . '/attendance')['body'])]);
+$real = $apiDelete('mem', 916692);
+$fake = $apiDelete('mem', 916699);
+ok(
+    'Q31. D-114: through api/attendance/delete, a member deleting another member\'s session gets the same answer as a session that does not exist, and nothing is written',
+    $real['status'] === 404 && stable($real) === stable($fake) && $deleted(916692) === 0,
+    said($real) . ' against ' . said($fake)
+);
+$answer = $apiDelete('lead', 916692);
+ok('Q32. D-114: through the API, the member who recorded it deletes it', $answer['status'] === 200 && $deleted(916692) === 1, said($answer));
+$answer = $apiDelete('adm', 916694);
+ok('Q33. D-114: through the API, an administrator deletes one too (unchanged)', $answer['status'] === 200 && $deleted(916694) === 1, said($answer));
 
 // --- another organisation's accounts ------------------------------------------
 // At the door: SiteGate refuses a non-member on EVERY address, so the report is

@@ -37,11 +37,10 @@ if (Auth::check() === false) {
 //    address, could add, change and delete its head counts.
 //
 //    Now: an administrator, or an active member of this organisation.
-//    AttendanceAccess::viewerIsMember() is the same membership test the
-//    attendance report page uses; do not write a second copy of it here.
-//    WHICH members may record is not narrowed: any active member still may
-//    (the owner's decision). The same test is in record.php, record/save.php
-//    and record/delete.php; change all three together.
+//    AttendanceAccess::viewerIsMember() is the ONE membership test; do not
+//    write a second copy of it here. The same test is in record.php,
+//    record/save.php and record/delete.php; change all three together. WHICH
+//    of them may delete a given session is D-114's, asked further down.
 if (App::isAdmin() === false
     && AttendanceAccess::viewerIsMember($mysqli, (int) ($_SESSION['user_id'] ?? 0), Site::id()) === false) {
     Router::renderError(403);
@@ -69,6 +68,22 @@ $siteId = Site::id();
 
 if ($sessionID <= 0) {
     $_SESSION['flash_msg']  = 'Invalid session ID.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . Site::url('attendance'));
+    exit();
+}
+
+// 🔒 D-114 (the owner, 10 November 2026): administrators, holders of "See the
+//    attendance totals", and the member who recorded THIS session. Anybody
+//    else is told exactly what a session that does not exist gets, nothing is
+//    written, and it is asked before anything about the session is read.
+//
+//    ⚠️ A session that does not exist used to be answered "Attendance record
+//    deleted." — the UPDATE matched nothing and the page said it had worked.
+//    It now says "Attendance session not found.", which is true, and is the
+//    same answer a refusal gets.
+if (AttendanceAccess::mayDeleteSession($mysqli, (int) ($userId ?? 0), $siteId, $sessionID, App::isAdmin(), App::isRootAdmin()) === false) {
+    $_SESSION['flash_msg']  = 'Attendance session not found.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('attendance'));
     exit();

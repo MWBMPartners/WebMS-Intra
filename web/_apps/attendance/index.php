@@ -109,7 +109,7 @@ if (count($params) > 0) {
 $totalPages = max(1, (int) ceil($totalRows / $perPage));
 
 // 📋 Fetch sessions with total headcount
-$sql = 'SELECT s.sessionID, s.sessionDate, s.sessionTime, s.notes, '
+$sql = 'SELECT s.sessionID, s.sessionDate, s.sessionTime, s.notes, s.createdByID, '
      . 'st.typeName AS serviceTypeName, st.typeSlug, '
      . 'e.eventName, '
      . 'COALESCE(SUM(c.headcount), 0) AS totalCount, '
@@ -182,8 +182,22 @@ if ($stmt !== false) {
 }
 
 // 📄 Include shared header template
+// 📋 The waiting message (#921). The record, save and delete handlers all send
+//    the person here with a message, and until #529 round 2 this page never
+//    printed one, so it appeared later on the record page instead.
+$flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? 'info');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
+
+<?php if ($flashMsg !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?> alert-dismissible fade show">
+        <?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    </div>
+<?php endif; ?>
 
 <!-- 📋 Attendance Header -->
 <?php
@@ -386,6 +400,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <i class="fa-solid fa-pen"></i>
                     </a>
                     <?php endif; ?>
+                    <?php // 🔒 D-114: the delete control only for those the handler lets delete THIS session. ?>
+                    <?php if (AttendanceAccess::decideDelete($mayViewReports, (int) ($sess['createdByID'] ?? 0), $viewerId) === true): ?>
                     <form method="post" action="<?php echo htmlspecialchars(Site::url('attendance/record/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="sessionID" value="<?php echo (int) $sess['sessionID']; ?>">
@@ -394,6 +410,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <i class="fa-solid fa-trash"></i>
                         </button>
                     </form>
+                    <?php endif; ?>
                 </div>
             </div>
         <?php endforeach; ?>

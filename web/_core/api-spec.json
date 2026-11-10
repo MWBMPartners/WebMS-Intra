@@ -5854,7 +5854,7 @@
           "Attendance"
         ],
         "summary": "List attendance sessions for the current site (v1)",
-        "description": "Requires scope `attendance:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/attendance/list`.",
+        "description": "Requires scope `attendance:read` (bearer) or an authenticated session. A signed-in caller who is not an administrator and does not hold the permission \"See the attendance totals\" is given only sessions that are not deleted, without `notes` and without `updatedByID` (#529, D-109). No headcount is returned to anybody here. **Legacy alias:** `GET /api/attendance/list`.",
         "security": [
           {
             "bearerAuth": []
@@ -6198,7 +6198,7 @@
           "Attendance"
         ],
         "summary": "Soft-delete an attendance session (v1; isDeleted = 1)",
-        "description": "Requires scope `attendance:write` (bearer) or an admin session. **Legacy alias:** `POST /api/attendance/delete?id={id}`.",
+        "description": "Requires scope `attendance:write` (bearer), or a signed-in session of an administrator, a holder of the permission \"See the attendance totals\", or the member who recorded that session (D-114). Any other signed-in caller gets the same 404 as a session that does not exist. **Legacy alias:** `POST /api/attendance/delete?id={id}`.",
         "security": [
           {
             "bearerAuth": []
