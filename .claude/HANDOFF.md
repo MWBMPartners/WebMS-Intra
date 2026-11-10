@@ -14,7 +14,7 @@ pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900,
 | Package | Worktree / branch | State |
 |---|---|---|
 | #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | 00d94451: round 3's wording and test gaps fixed; round 4 check running (no e2e — #923) |
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 314e9bf0 | Round 3: no wrong behaviour; fixing three small things (double delete; a help sentence; a file header) + D-115 (API keys may delete) |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, e1f4afed (rebased on 6a5bfd20) | Round 3 fixes and D-115 in; round 4 check running |
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab | Round 2: code correct; D-113's wording missed the sentences members actually read (GdprEraser's own reasons, the erasure report) — fixing |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
