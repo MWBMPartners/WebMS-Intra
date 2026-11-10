@@ -75,9 +75,13 @@
  *   address of each organisation's own): there the path says nothing about the
  *   organisation, and the judge's organisation rule does not run. They are
  *   covered for the sign-in pages by tools/site-addresses-selftest.php part N.
- * - That a link in a delivered e-mail carries the token: the e-mail is never
- *   delivered here. It checks the rows the real send wrote, which is where
- *   the token comes from.
+ * - That the DELIVERED e-mail carries exactly what D02b and D02c read. No
+ *   e-mail is delivered here (the mail route has no server, so the send
+ *   fails at once). D02b/D02c read the recipient's copy by calling the real
+ *   Newsletter::personalise() on the real Newsletter::renderHtml() through a
+ *   test-only extra in the router — the same two calls dispatch() makes — and
+ *   D01 reads the rows the real Send wrote. That dispatch() hands that copy
+ *   to the mail service unchanged is read from the code, not driven here.
  *
  * Run:  SELFTEST_DB_NAME=selftest_comeback SELFTEST_DB_PORT=… SELFTEST_DB_PASS=…
  *       SELFTEST_WEB_PORT=11320 php tools/come-back-addresses-selftest.php

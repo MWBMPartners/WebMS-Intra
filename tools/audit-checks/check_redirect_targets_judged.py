@@ -5,26 +5,39 @@ has it (#620).
 
 WHAT IT CHECKS, exactly
 -----------------------
-In every `header(...)` call under `web/` whose first argument holds a fixed
-text beginning "Location:", a request value -- `$_GET`, `$_POST`,
-`$_REQUEST`, `$_COOKIE`, `$_FILES`, or a `$_SERVER` value the visitor chooses
--- may appear only inside the brackets of `Auth::safeRedirectUrl( ... )`
-(the class resolved to `Portal\\Core\\Auth` through the file's `namespace` and
-`use` lines), or inside a wrapper that cannot produce another site's address
-(`(int)`, `(float)`, `(bool)`, `intval()`, `urlencode()`, `rawurlencode()`,
-`http_build_query()`, `isset()`, `empty()`). Anything else is reported,
-unless the call is named in NOT_A_COME_BACK_ADDRESS below with a reason.
+In every `header(...)` call under `web/` whose header text -- the argument
+named `header:`, else the first -- holds a fixed text beginning "Location:",
+a request value -- `$_GET`, `$_POST`, `$_REQUEST`, `$_COOKIE`, `$_FILES`
+(also written `${_GET[...]}` in a string), or `$_SERVER` with a key set from
+the request (the list is `RT_SERVER_KEYS` in the probe) or a key that is not
+one fixed text -- may appear only in the FIRST argument of
+`Auth::safeRedirectUrl( ... )` (the class resolved to `Portal\\Core\\Auth`
+through the file's `namespace` and `use` lines), or in the FIRST argument of a
+wrapper that cannot produce another site's address: `(int)`, `(float)`,
+`(bool)`, the built-in `intval()`, `urlencode()`, `rawurlencode()`,
+`http_build_query()`, and `isset()`, `empty()`. Only the first argument,
+because the judge hands back its second (the fallback) unchanged, and
+`http_build_query()` puts its second and third into the answer as they are.
+A wrapper written as a method (`Other::urlencode(`, `$o->urlencode(`), after
+`new`, or whose name this file imports with `use function` or declares
+itself, is not the built-in and does not count. Everything else is
+reported, unless the call is named in NOT_A_COME_BACK_ADDRESS below.
 
 WHAT IT DOES NOT CHECK -- and this is most of the problem, so read it before
 trusting a green run. It does NOT follow a value. A request value put into a
 VARIABLE first and the variable written into the header passes, and so do a
 helper's answer, a function's parameter, an array element, the whole header
-held in a variable, a header name split in two, and a Refresh header. All
-three pages #620 fixed had one of those shapes, so this check would NOT have
-caught any of them as they were before #620 except the checkout's (whose
-`sanitizeReturnTo($_POST[...])` sat in the header itself). Each of those is a
-self-test case that must stay green, so the day the check starts seeing one
-it says so. The full list is in `redirect-targets-structure.php`.
+held in a variable, a header name split in two, a heredoc holding a variable,
+a Refresh header, header() called through call_user_func() or a variable, and
+urlencode()/intval() in a namespaced file where they may be that namespace's
+own function declared in another file. Each of those is a self-test case that
+must stay green (BLIND_SPOTS), so the day the check starts seeing one it says
+so; what is declared without being measured is listed in
+`redirect-targets-structure.php`. Measured against e1b4cc96, before #620:
+this check reports the checkout's five headers (its
+`sanitizeReturnTo($_POST[...])` sat in the header itself) and NOT the asset
+page or the click counter, whose request values reached the header through a
+variable.
 
 WHY SO NARROW (D-065, and #902's check before it). Version 1 of this check
 followed values through assignments and expressions. It cried wolf on correct
@@ -36,11 +49,12 @@ see without judging anything about where a value goes: a request value
 WRITTEN INTO the header. Whether the pages REFUSE what they should is
 behaviour, and is DRIVEN over HTTP by `tools/come-back-addresses-selftest.php`.
 
-ONE COST, said plainly: a request value written into the header only as a
-TEST (`($_GET['x'] === 'a' ? ... : ...)`) is reported, because seeing that it
-is only a test means reading the expression. No header in `web/` has that
-shape today (measured 10 November 2026: 1,272 Location headers, none holding
-a request value). Write the test above the header, or name the call below.
+ONE COST, said plainly: ANY request value written into the header outside
+those wrappers is reported, harmless or not -- a test (`$_GET['x'] === 'a'`),
+`count()`, `strlen()`, `sprintf('%d', ...)` alike -- because telling them
+apart means reading the expression. No header in `web/` has any such shape
+today (measured 10 November 2026: 1,272 Location headers, none holding a
+request value). Work the value out above the header, or name the call below.
 
 FAILS BOTH WAYS. A finding not on the list fails; a list entry that no longer
 matches a finding fails too (#668: a stale exemption excuses whatever is
@@ -56,7 +70,7 @@ DELIBERATELY no fallback to reading the PHP in Python (the
 @author    MWBM Partners Ltd (t/a MWservices)
 @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
 @license   All Rights Reserved
-@version   2.0.0
+@version   2.1.0
 @link      https://github.com/MWBMPartners/WebMS-Intra/issues/620
 """
 
@@ -138,7 +152,8 @@ def analyse(root: str, exemptions: dict) -> tuple[list[str], int]:
                 continue
             problems.append(
                 f"{relative}:{finding['line']}: `{finding['statement']}` writes the request value "
-                f"{', '.join(finding['values'])} into a Location header outside Auth::safeRedirectUrl(). Give the "
+                f"{', '.join(finding['values'])} into a Location header outside the FIRST argument of "
+                "Auth::safeRedirectUrl() or of a harmless wrapper. Give the "
                 "request's value to Auth::safeRedirectUrl() and delete any judge of the page's own. If it is only a "
                 "test, or this is not a 'come back to' address at all, work it out above the header, or add the call "
                 "to NOT_A_COME_BACK_ADDRESS with the reason -- that is a decision, not a tidy-up.")
@@ -183,6 +198,27 @@ MUST_REPORT = {
     "the Host header": "<?php header('Location: https://' . $_SERVER['HTTP_HOST'] . '/x');",
     "a $_SERVER key that is not fixed text": "<?php header('Location: ' . $_SERVER[$k]);",
     "an only-a-test shape written into the header (the stated cost)": "<?php header('Location: ' . (($_GET['t'] ?? '') === 'a' ? '/a' : '/b'));",
+    "a count() written into the header (the stated cost)": "<?php header('Location: /x?n=' . count($_POST['ids']));",
+    # #620 round 2: only the FIRST argument of the judge or a wrapper is covered.
+    "the judge's FALLBACK from the request": "<?php use Portal\\Core\\Auth;\nheader('Location: ' . Auth::safeRedirectUrl($_GET['r'] ?? null, $_GET['back']));",
+    "the judge given nothing, the fallback from the request": "<?php use Portal\\Core\\Auth;\nheader('Location: ' . Auth::safeRedirectUrl(null, $_GET['u']));",
+    "http_build_query's prefix from the request": "<?php header('Location: ' . http_build_query([0 => 'x'], $_GET['p']));",
+    "http_build_query's separator from the request": "<?php header('Location: ' . http_build_query(['a' => 1, 'b' => 2], '', $_GET['s']));",
+    "${_GET} in a string": "<?php header(\"Location: ${_GET['u']}\");",
+    "a $_SERVER key built from two texts": "<?php header('Location: ' . $_SERVER['REQUEST' . '_URI']);",
+    "a $_SERVER key built from a text and a variable": "<?php header('Location: ' . $_SERVER['X' . $k]);",
+    "a static method named urlencode": "<?php header('Location: ' . Other::urlencode($_GET['u']));",
+    "an object's method named urlencode": "<?php header('Location: ' . $o->urlencode($_GET['u']));",
+    "new urlencode(...)": "<?php header('Location: ' . new urlencode($_GET['u']));",
+    "this file's own urlencode": "<?php namespace App;\nfunction urlencode($v) { return $v; }\nheader('Location: ' . urlencode($_GET['u']));",
+    "this file's own intval": "<?php namespace App;\nfunction intval($v) { return $v; }\nheader('Location: ' . intval($_GET['u']));",
+    "use function ... as urlencode": "<?php use function Evil\\pass as urlencode;\nheader('Location: ' . urlencode($_GET['u']));",
+    "named arguments, header text second": "<?php header(replace: true, header: 'Location: ' . $_GET['u']);",
+    "REDIRECT_URL": "<?php header('Location: ' . $_SERVER['REDIRECT_URL']);",
+    "REDIRECT_QUERY_STRING": "<?php header('Location: /x?' . $_SERVER['REDIRECT_QUERY_STRING']);",
+    "SCRIPT_URI": "<?php header('Location: ' . $_SERVER['SCRIPT_URI']);",
+    "SERVER_NAME": "<?php header('Location: https://' . $_SERVER['SERVER_NAME'] . '/x');",
+    "argv": "<?php header('Location: ' . $_SERVER['argv'][0]);",
 }
 MUST_STAY_GREEN = {
     "judged": "<?php use Portal\\Core\\Auth;\nheader('Location: ' . Auth::safeRedirectUrl($_GET['redirect'] ?? null));",
@@ -206,6 +242,11 @@ MUST_STAY_GREEN = {
     "quoted in a comment": "<?php // header('Location: ' . $_GET['u']);\n/* header('Location: ' . $_POST['u']); */",
     "quoted in a string": "<?php $help = \"header('Location: ' . \\$_GET['u'])\";",
     "a server-set $_SERVER key": "<?php header('Location: ' . $_SERVER['SCRIPT_NAME']);",
+    # urlencode() leaves no "/", "\\" or ":", so the answer is a path on this site.
+    "urlencode around the whole address": "<?php header('Location: ' . urlencode($_GET['u']));",
+    "the fully qualified built-in in a file with its own urlencode": "<?php namespace App;\nfunction urlencode($v) { return $v; }\nheader('Location: ' . \\urlencode($_GET['u']));",
+    "named arguments, judged": "<?php use Portal\\Core\\Auth;\nheader(header: 'Location: ' . Auth::safeRedirectUrl($_GET['r']), replace: true);",
+    "named arguments, another argument first and a fixed address": "<?php header(replace: true, header: 'Location: /x');",
     # The version-1 checker's cry-wolf shapes (#620 round 1): correct code, must stay green.
     "cry-wolf h1: in_array allow-list": "<?php $tab = (string) ($_GET['tab'] ?? '');\n$r = in_array($tab, ['a', 'b'], true) === true ? Site::url('x') : Site::url('y');\nheader('Location: ' . $r);",
     "cry-wolf h2: str_starts_with": "<?php $r = str_starts_with((string) ($_GET['u'] ?? ''), '/a') === true ? Site::url('a') : Site::url('b');\nheader('Location: ' . $r);",
@@ -227,8 +268,11 @@ BLIND_SPOTS = {
     "the header name split in two": "<?php header('Loc' . 'ation: ' . $_GET['u']);",
     "a heredoc holding a variable": "<?php $u = $_GET['u'];\nheader(<<<H\nLocation: $u\nH);",
     "a Refresh header": "<?php header('Refresh: 0; url=' . $_GET['u']);",
+    "header() called through call_user_func": "<?php call_user_func('header', 'Location: ' . $_GET['u']);",
+    "header() called through a variable": "<?php $f = 'header';\n$f('Location: ' . $_GET['u']);",
+    "urlencode in a namespace, which may be that namespace's own function declared in ANOTHER file": "<?php namespace App;\nheader('Location: ' . urlencode($_GET['u']));",
 }
-EXPECTED = {"report": 30, "green": 27, "blind": 9, "other": 3}
+EXPECTED = {"report": 50, "green": 31, "blind": 12, "other": 3}
 
 
 def self_test() -> int:
@@ -297,12 +341,12 @@ def main() -> int:
     problems, locations = analyse(root, NOT_A_COME_BACK_ADDRESS)
     if problems:
         print("check_redirect_targets_judged: a request value is written into a Location header outside "
-              "Auth::safeRedirectUrl() (#620)\n")
+              "the first argument of Auth::safeRedirectUrl() (#620)\n")
         for problem in problems:
             print("  • " + problem)
         return 1
     print(f"check_redirect_targets_judged: OK — {locations} Location headers read; none has a request value written "
-          f"into it outside Auth::safeRedirectUrl(), and {len(NOT_A_COME_BACK_ADDRESS)} are named exemptions. It does "
+          f"into it outside the first argument of Auth::safeRedirectUrl() or a harmless wrapper, and {len(NOT_A_COME_BACK_ADDRESS)} are named exemptions. It does "
           "NOT follow values through variables or helpers: see redirect-targets-structure.php for what it cannot see.")
     return 0
 
