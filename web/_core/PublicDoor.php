@@ -1176,7 +1176,11 @@ final class PublicDoor
      *     installation forbids framing (D-082, D-094).
      *   - X-Frame-Options: DENY, but ONLY when `frame-ancestors` is 'none'.
      *     It is the older header for the same question, and it can name no
-     *     website: `ALLOW-FROM` is obsolete and today's browsers ignore it.
+     *     website. `X-Frame-Options: ALLOW-FROM <website>` was considered and
+     *     is NOT sent: the only browser that obeys it is Internet Explorer 11,
+     *     out of support since June 2022; it can name only ONE website, so it
+     *     would cover a one-website list and nothing longer; and every current
+     *     browser ignores it (frame-ancestors is what they obey).
      *     A browser that understands `frame-ancestors` ignores X-Frame-Options
      *     altogether (the HTML standard says so), so sending it changes
      *     nothing there; it matters only to a browser too old for

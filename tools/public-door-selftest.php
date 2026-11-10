@@ -147,7 +147,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 252; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, and (round 1) T12 and PV15-PV18
+const PDS_EXPECTED_CHECKS = 254; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1908,8 +1908,12 @@ check('V15 and says when a frame works: only on the website listed (named, with 
         str_contains($vCardListed, 'such as Internet Explorer 11, would show it on any website'),
         str_contains($vCardNone, 'data-frame-works="none-listed"'), str_contains($vCardOff, 'data-frame-works="installation-off"'),
         str_contains($vCardOff, 'data-frame-works="listed"'), str_contains($vCardNone, 'data-frame-works="listed"'),
-        str_contains($vCardListed, 'data-frame-apps="1">The events frame, and the one with both, show nothing while Calendar and Events is switched off'),
-        str_contains($vCardListed, 'data-script-apps="1">The events and countdown lines show nothing while Calendar and Events is switched off')],
+        // WHOLE sentences (round 2 of P4c's check: pinning only their openings
+        // let the posters halves go untrue unnoticed).
+        str_contains($vCardListed, 'data-frame-apps="1">The events frame, and the one with both, show nothing while Calendar and Events is switched off '
+            . 'for your organisation; the posters frame, and the one with both, show nothing while the Noticeboard is switched off.</p>'),
+        str_contains($vCardListed, 'data-script-apps="1">The events and countdown lines show nothing while Calendar and Events is switched off for your '
+            . 'organisation, and the posters line shows nothing while the Noticeboard is switched off.</p>')],
     [true, true, true, true, false, false, true, true]);
 
 // Refusals: every one joins $refusals, which R01 compares byte for byte.
@@ -2441,8 +2445,15 @@ foreach (['/page.html', '/events.json', '/posters.json', '/door.js'] as $what) {
         $tester['headers']['vary'] ?? '', $tester['headers']['x-robots-tag'] ?? '', $tester['headers']['set-cookie'] ?? ''];
 }
 $tPubWant = [404, true, 200, 'private, no-store', 'Cookie', 'noindex, nofollow, noarchive', ''];
-check('T12 on A\'s approved PUBLIC ADDRESS a test copy\'s door follows D-087 for every surface — the page, both feeds and the script: with no sign-in the door\'s 404, identical to an unknown name\'s; for a tester served, private, no-store, Vary: Cookie, noindex, nofollow, noarchive, no Set-Cookie',
-    $tPub, ['/page.html' => $tPubWant, '/events.json' => $tPubWant, '/posters.json' => $tPubWant, '/door.js' => $tPubWant]);
+// Round 2 of P4c's check: on this combination (a test copy's PUBLIC ADDRESS,
+// a tester) only four headers were compared, so the page sent with
+// `frame-ancestors *` passed. The page's WHOLE header set is compared here,
+// exactly as T11 does on /w/ (A lists nothing at this point: 'none' and DENY).
+$tPubPage = $http('GET', '/page.html', ['host' => $hostA, 'cookie' => $tTester]);
+check('T12 on A\'s approved PUBLIC ADDRESS a test copy\'s door follows D-087 for every surface — the page, both feeds and the script: with no sign-in the door\'s 404, identical to an unknown name\'s; for a tester served, private, no-store, Vary: Cookie, noindex, nofollow, noarchive, no Set-Cookie — and the tester\'s page carries its WHOLE header set, frame-ancestors \'none\' and DENY included',
+    [$tPub, $pageHeaders($tPubPage)],
+    [['/page.html' => $tPubWant, '/events.json' => $tPubWant, '/posters.json' => $tPubWant, '/door.js' => $tPubWant],
+        $pageHeadersWant($pageCspFor($pageFacts($tPubPage['body']), "'none'"), 'DENY', 'private, no-store', 'Cookie', 'noindex, nofollow, noarchive')]);
 $channel = 'prod';
 $startServer();
 $waitForServer();
@@ -3174,6 +3185,24 @@ check('PV17 with the maintenance question skipped for the page on a PUBLIC ADDRE
 $p = $plant('_core/PublicDoor.php', "if (\$frameAncestors === \"'none'\") {", "if (\$frameAncestors === \"'none'\" && \$testersOnly === false) {",
     static fn (): string => $pageA('', ['cookie' => $cookieOf($people['tester']['jar'])])['headers']['x-frame-options'] ?? '', 'alpha');
 check('PV18 with X-Frame-Options dropped from a testers-only test copy\'s \'none\' answer, it carries none (T11 catches it)', [$p['applied'], $p['result']], [true, '']);
+// Round 2 of P4c's check (N4): the same two headers on a test copy's PUBLIC
+// ADDRESS only, for a tester — the one combination T12 had compared only four
+// headers on. Each ADDS a condition, leaving every other plant's anchor intact.
+$tPubPageHeaders = static function () use ($http, $hostA, $cookieOf, $people, $pageHeaders, $pageHeadersWant, $pageCspFor, $pageFacts): array {
+    $r = $http('GET', '/page.html', ['host' => $hostA, 'cookie' => $cookieOf($people['tester']['jar'])]);
+    return ['same' => $pageHeaders($r) === $pageHeadersWant($pageCspFor($pageFacts($r['body']), "'none'"), 'DENY', 'private, no-store', 'Cookie',
+        'noindex, nofollow, noarchive'), 'csp' => $r['headers']['content-security-policy'] ?? '', 'xfo' => $r['headers']['x-frame-options'] ?? ''];
+};
+$p = $plant('_core/PublicDoor.php', 'self::sendPageHeaders(PublicWebsiteSetup::frameAncestorsFor($db, $siteId), $testCopy, $testersOnly);',
+    'self::sendPageHeaders(($testCopy === true && Site::doorOnPublicHost() === true) ? \'*\' : PublicWebsiteSetup::frameAncestorsFor($db, $siteId), $testCopy, $testersOnly);',
+    $tPubPageHeaders, 'alpha');
+check('PV19 (N4) with the frame rule loosened to "*" on a test copy\'s PUBLIC ADDRESS only, the tester\'s page says frame-ancestors * there and T12 no longer matches',
+    [$p['applied'], $p['result']['same'] ?? null, str_contains((string) ($p['result']['csp'] ?? ''), 'frame-ancestors *;')], [true, false, true]);
+$p = $plant('_core/PublicDoor.php', "if (\$frameAncestors === \"'none'\") {",
+    "if (\$frameAncestors === \"'none'\" && (\$testersOnly === false || Site::doorOnPublicHost() === false)) {",
+    $tPubPageHeaders, 'alpha');
+check('PV20 with X-Frame-Options DENY dropped on a test copy\'s PUBLIC ADDRESS only, the tester\'s page carries none there and T12 no longer matches',
+    [$p['applied'], $p['result']['same'] ?? null, $p['result']['xfo'] ?? null], [true, false, '']);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");
