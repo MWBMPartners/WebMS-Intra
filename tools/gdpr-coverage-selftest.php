@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 103; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 104; // 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -84,6 +84,8 @@ const EXPECTED_CHECKS = 103; // 81 before the #709 fix round added section 8d; r
                             // member reads say what keeping the number costs. 102.
                             // #703 round 3 added one: the reasons a member is really
                             // SHOWN (GdprEraser's own, not the written list's). 103.
+                            // Round 4 added one: the list of records that keep the
+                            // number, every item, in all four places. 104.
 
 $failures = 0;
 $passes   = 0;
@@ -3108,21 +3110,27 @@ $shown = [];
 foreach ($instructions as $instruction) {
     $shown[(string) $instruction['table'] . '.' . (string) $instruction['userCol']] = (string) ($instruction['reason'] ?? '');
 }
+// 📌 PINNED WHOLE (#703 round 4). Round 3 pinned each reason's opening, its
+//    decision number and its ending, and the independent check put "In
+//    practice nobody can trace them to you once your account is emptied." in
+//    the MIDDLE of one with every suite green: a reassurance added anywhere
+//    the pin did not look. So each sentence a worker reads is compared WHOLE,
+//    with only runs of spaces made one. The cost is stated: rewording one of
+//    these sentences means changing it here too, on purpose - which is the
+//    point, because these are the sentences D-113 is about.
+$wholeKept = static fn (string $s): string => trim((string) gc_replace('/\s+/', ' ', $s));
 $keptLines = [
-    'tblCareVisit.visitedByID'      => ['pastoral visits you made keep your name and your account number as the person who made them', 'D-016'],
-    'tblDbsChecks.recordedByID'     => ['DBS checks you recorded keep your name and your account number as the person who recorded them', 'D-016'],
-    'tblCareCase.openedByID'        => ['pastoral care cases you opened keep your name and your account number as the person who opened them', 'D-110'],
-    'tblKidCheckins.checkedInByID'  => ['children you checked in keep your name and your account number as the helper who checked them in', 'D-111'],
-    'tblKidCheckins.checkedOutByID' => ['children you checked out keep your name and your account number as the helper who checked them out', 'D-111'],
+    'tblCareVisit.visitedByID'      => 'pastoral visits you made keep your name and your account number as the person who made them, even after your account is erased (decision D-016): a pastoral or safeguarding record must still say who carried it out. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
+    'tblDbsChecks.recordedByID'     => 'DBS checks you recorded keep your name and your account number as the person who recorded them, even after your account is erased (decision D-016): a safeguarding check must still say who carried it out. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
+    'tblCareCase.openedByID'        => 'pastoral care cases you opened keep your name and your account number as the person who opened them, even after your account is erased (decision D-110): a pastoral record must still say who opened it. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
+    'tblKidCheckins.checkedInByID'  => 'children you checked in keep your name and your account number as the helper who checked them in, even after your account is erased (decision D-111): who handed a child over must stay answerable. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
+    'tblKidCheckins.checkedOutByID' => 'children you checked out keep your name and your account number as the helper who checked them out, even after your account is erased (decision D-111): who handed a child over, and to whom, must stay answerable. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
 ];
 $shownWrong = [];
-foreach ($keptLines as $key => [$opening, $decision]) {
-    $line = $shown[$key] ?? '';
-    if (str_starts_with($line, $opening) === false
-        || str_contains($line, '(decision ' . $decision . ')') === false
-        || str_ends_with($line, 'Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)') === false
-    ) {
-        $shownWrong[] = $key . ': "' . mb_substr($line, 0, 120) . '…"';
+foreach ($keptLines as $key => $expected) {
+    $line = $wholeKept($shown[$key] ?? '');
+    if ($line !== $wholeKept($expected)) {
+        $shownWrong[] = $key . ': "' . mb_substr($line, 0, 160) . '…"';
     }
 }
 $usersLine = $shown['tblUsers.userID'] ?? '';
@@ -3146,6 +3154,62 @@ if (str_contains($eraserCodeNow, 'points at names nobody') === true
 ) {
     $shownWrong[] = 'the erasure report\'s giving clearing line';
 }
+// 🧾 THE LIST OF RECORDS THAT KEEP THE NUMBER, in every place it is told
+//    (#703 round 4). Round 3's list left out three kinds and nothing pinned it:
+//    deleting "your expense claims, " left every suite green. The list was then
+//    MEASURED - every column of the eraser self-test's loaded schema still
+//    holding the erased person's number after a real erasure, in any column
+//    type - and widened by the shapes that world does not build (an open
+//    count's envelopes, the change history about the account, a rate-limit
+//    record). Each ITEM is pinned in each of the four places, inside that
+//    place's own list, so a harmless rewording around them stays green and a
+//    dropped item goes red.
+$keepsTheNumber = [
+    'expense claims', 'own DBS checks', 'tax declarations', 'giving statements',
+    'gifts kept for tax', 'offering envelopes', 'change history', 'rate-limit records',
+    'approval step', "pastoral visits, care cases, DBS checks or children's check-ins",
+];
+$listIn = static function (string $text, string $start, string $end): string {
+    $from = stripos($text, $start);
+    if ($from === false) {
+        return '';
+    }
+    $to = stripos($text, $end, $from);
+
+    return $to === false ? '' : (string) substr($text, $from, $to - $from);
+};
+$catalogueUsersReason = (string) gc_replace('/\s+/', ' ', $reasonOf('tblUsers'));
+$listPlaces = [
+    'what a member is shown (GdprEraser)' => $listIn((string) gc_replace('/\s+/', ' ', $shown['tblUsers.userID'] ?? ''), 'SOME keep it:', 'Through that number and those names'),
+    'the written list (personal-data-catalogue.php)' => $listIn($catalogueUsersReason, 'SOME keep it:', 'Through that number, anyone'),
+    // `$privacy` has its tags taken out, so the list ends at its own last words.
+    'the privacy notice (privacy/policy.php)' => $listIn($privacy, 'but some keep it:', '(see the next point)'),
+    'the policy (docs/gdpr-erasure-policy.md)' => $listIn($policyDoc, 'but SOME keep it', ' - so an emptied account'),
+];
+$listMissing = [];
+foreach ($listPlaces as $place => $list) {
+    if ($list === '') {
+        $listMissing[] = $place . ': the list itself could not be found';
+        continue;
+    }
+    foreach ($keepsTheNumber as $item) {
+        if (stripos($list, $item) === false) {
+            $listMissing[] = $place . ': "' . $item . '"';
+        }
+    }
+}
+// The policy doc used to say "the pastoral, safeguarding and check-in records
+// in the row above" when the row above is the activity log: a direction is a
+// line number with the digits filed off. It names the records now.
+if (str_contains($policyDoc, 'in the row above') === true) {
+    $listMissing[] = 'the policy still points at "the row above"';
+}
+check(
+    'D-113: every place that lists the records keeping an erased person\'s account number lists ALL of them - expense claims, own DBS checks, tax declarations, giving statements, gifts kept for tax, offering envelopes, the change history, rate-limit records, an approval step, and the worker records (#703 round 4)',
+    $listMissing === [],
+    implode(' | ', $listMissing)
+);
+
 check(
     'D-113, WHAT A MEMBER IS SHOWN: the reasons My data and Request erasure print for an erased worker\'s kept records, their account and their expense claims - and the erasure report\'s own lines - say plainly that the name and number stay and can be matched back to them (#703)',
     $shownWrong === [],

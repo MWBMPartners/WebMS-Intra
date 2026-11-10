@@ -720,7 +720,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             was decided deliberately (3 and 10 November 2026): a safeguarding record that cannot say
             who carried it out is worse for the people it exists to protect. Their account itself is
             still emptied &mdash; contact details, sign-in, everything else &mdash; and their name
-            and account number are the only things about them left on those records.
+            and account number are the only things about them left on those records, unless the
+            record is also about them (a visit on a case about them, or their own DBS check).
             <strong>Be clear about what that costs:</strong> because the number stays beside the
             name, anyone who can read the database or a backup can use those records to work out
             which of the erased person's other kept records were theirs &mdash; an expense claim, for

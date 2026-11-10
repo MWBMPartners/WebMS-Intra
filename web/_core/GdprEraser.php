@@ -528,11 +528,11 @@ class GdprEraser
             //    an erased helper can be re-identified on their other records.
             ['table' => 'tblKidCheckins',      'userCol' => 'checkedInByID',  'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked in keep your name and your account number as the helper who checked them in, '
                 . 'even after your account is erased (decision D-111): who handed a child over must stay answerable. '
-                . 'Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . 'Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records '
                 . '- an expense claim, for instance - back to you (D-113)'],
             ['table' => 'tblKidCheckins',      'userCol' => 'checkedOutByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked out keep your name and your account number as the helper who checked them '
                 . 'out, even after your account is erased (decision D-111): who handed a child over, and to whom, must '
-                . 'stay answerable. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . 'stay answerable. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records '
                 . '- an expense claim, for instance - back to you (D-113)'],
 
             // #257 Pastoral Care Register. personUserID is the case SUBJECT
@@ -670,7 +670,7 @@ class GdprEraser
             //    because the opener's own account is still emptied.
             ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral care cases you opened keep your name and your account number as the person who opened '
                 . 'them, even after your account is erased (decision D-110): a pastoral record must still say who opened '
-                . 'it. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . 'it. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records '
                 . '- an expense claim, for instance - back to you (D-113)'],
 
             // 🚪 Room bookings (#715, the owner's decision of 3 November 2026).
@@ -718,7 +718,7 @@ class GdprEraser
             //    they cannot expect.
             ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral visits you made keep your name and your account number as the person who made them, '
                 . 'even after your account is erased (decision D-016): a pastoral or safeguarding record must still say '
-                . 'who carried it out. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . 'who carried it out. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records '
                 . '- an expense claim, for instance - back to you (D-113)'],
             ['table' => 'tblCareVisit',      'userCol' => 'followUpAssignedToID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who its follow-up was given to is detached'],
             ['table' => 'tblCareAccessLog',  'userCol' => 'viewerID',     'action' => 'delete'],
@@ -745,7 +745,7 @@ class GdprEraser
             ['table' => 'tblDbsChecks',      'userCol' => 'userID',       'action' => 'retain',    'nullCols' => [], 'reason' => 'Safeguarding record. Kept and flagged, never quietly removed (how long it is kept: as required by safeguarding policy)'],
             ['table' => 'tblDbsChecks',      'userCol' => 'recordedByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'DBS checks you recorded keep your name and your account number as the person who recorded them, '
                 . 'even after your account is erased (decision D-016): a safeguarding check must still say who carried it '
-                . 'out. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . 'out. Nothing else about you is on them unless the record is also about you. Through that number, anyone who can read the database or a backup can match your other kept records '
                 . '- an expense claim, for instance - back to you (D-113)'],
 
             // #393 Asset Tracker. tblAssetFoundReports is deliberately
@@ -1234,9 +1234,20 @@ class GdprEraser
              'reason' => 'your account is kept as an empty shell so that the records pointing at it do not break: '
                  . 'your name becomes "[Deleted User]", and your e-mail address, telephone, address, biography, map '
                  . 'position, language, sign-in secrets, calendar link and notification choices are emptied. Most '
+                 // 🧾 #703 round 4: this list is MEASURED, not remembered - every
+                 //    column still holding the number after a real erasure in the
+                 //    eraser self-test's loaded schema (any column type), plus the
+                 //    shapes that world does not build (an open count's envelopes,
+                 //    the change history about the account, a rate-limit record).
+                 //    The same items are said in privacy/policy.php, the catalogue
+                 //    and docs/gdpr-erasure-policy.md, and section 23 of the coverage
+                 //    test pins each item in all four. Add a kind of record here and
+                 //    there together.
                  . 'records lose your account number. SOME keep it: your expense claims, your own DBS checks, your '
-                 . 'tax declarations and giving statements, gifts kept for tax (which also keep your name until the '
-                 . 'organisation\'s keep-until date), and any pastoral visits, care cases, DBS checks or children\'s '
+                 . 'tax declarations and giving statements, gifts kept for tax and offering envelopes that will become '
+                 . 'such gifts (which also keep your name until the organisation\'s keep-until date), the change history '
+                 . 'about your account, rate-limit records (for a short while, until they are tidied away), an approval '
+                 . 'step given to you by name, and any pastoral visits, care cases, DBS checks or children\'s '
                  . 'check-ins you made (which keep your name too, on purpose: D-016, D-110, D-111). Through that number '
                  . 'and those names, anyone who can read the database or a backup can match those records back to you '
                  . '(D-113)'],
