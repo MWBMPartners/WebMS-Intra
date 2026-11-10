@@ -211,54 +211,62 @@ CLASSIFIED: dict[str, object] = {
 #    one-edit bypass this repository has recorded five times.
 #
 #    An entry may need MORE THAN ONE pin, so the guard is a tuple of whole
-#    statements, each required exactly once. The import's step (d) has three:
-#    the outer condition decides a cell is a plain reading (no zone, no offset,
-#    no relative time); the UTC read gives the reading the cell wrote; and the
-#    inner condition returns it when it is in the skipped hour.
+#    statements, each required exactly once. The import's step (d) has five:
+#    the condition that decides a cell has no zone or offset and a full date
+#    (with the `$relative` line it reads, pinned in the same string so
+#    emptying it cannot pass); the zone the readings are made in; PHP's own
+#    UTC reading of the cell; the canonical cell built from what was WRITTEN;
+#    and the test that returns the UTC reading only when the two agree and
+#    the reading is in the skipped hour.
 #
-#    What the pins cannot see: whether the guarded code is REACHED. That is
-#    behavioural, and K07 to K07e drive it (D-065). One of the three pins
+#    What the pins cannot see: whether the guarded code is REACHED, and what
+#    the lines between them compute (the written base and its date rules).
+#    That is behavioural, and K07 to K07f drive it (D-065). One pinned clause
 #    guards something no behaviour can: removing the `readingIsReal()` test
-#    was measured to change NOTHING over 89,376 generated cells (the UTC read
+#    was measured to change NOTHING over 255,094 generated cells (the UTC read
 #    agrees with the zone on every reading that exists), so it is pinned as a
 #    statement of what the step is for, not as a fault guard.
 #
-# ⚠️ TWO EARLIER VERSIONS OF STEP (d) WERE PINNED HERE, AND BOTH WERE WRONG.
-#    * The first REFUSED such a cell -- a refusal by SPELLING, which round 14
-#      of #777 rules out (`2026-03-29 01:30`, the same reading, was stored).
-#      Planted back it fails K07b, and K07c: it also refused `2026-03-29
-#      24:00`.
-#    * The second rebuilt the reading from `date_parse()`'s fields, and the
-#      independent check found it storing the wrong DATE, with no refusal,
-#      for `+1 weekday`, `first/last day of` and an ordinal date with `+1
-#      month` -- 1,912 cells in its sweep. Planted back it fails K07b and
-#      K07e. **A pin pins whatever is there; it is never evidence that what
-#      is there is right.**
+# ⚠️ THREE EARLIER VERSIONS OF STEP (d) WERE PINNED HERE, AND ALL THREE WERE
+#    WRONG. **A pin pins whatever is there; it is never evidence that what is
+#    there is right.**
+#    * Round 0 REFUSED such a cell -- a refusal by SPELLING, which round 14
+#      of #777 rules out. Planted back it fails K07b, K07c and K07f2.
+#    * Round 1 rebuilt the reading from `date_parse()`'s fields and STORED
+#      it: the wrong DATE for `+1 weekday`, `first/last day of` and an
+#      ordinal `+1 month`. Planted back it fails K07b and K07e.
+#    * Round 2 stored PHP's UTC reading whenever `date_parse()` reported no
+#      relative hours, minutes or seconds -- and msec/usec are reported
+#      NOWHERE, so `+3600000 msec` was stored an hour early. Planted back it
+#      fails K07b and K07f2.
 IMPORT_STEP3_GUARD = (
+    "$relative = $parsed['relative'] ?? []; "
     "if ($parsed['is_localtime'] === false "
-    "&& (int) ($relative['hour'] ?? 0) === 0 "
-    "&& (int) ($relative['minute'] ?? 0) === 0 "
-    "&& (int) ($relative['second'] ?? 0) === 0) {",
-    "try { "
-    "$written = (new \\DateTimeImmutable($trimmed, new \\DateTimeZone('UTC')))->format('Y-m-d H:i:s'); "
-    "}",
-    "if ($written !== null "
-    "&& \\Portal\\Core\\EventRecurrence::readingIsReal($written, date_default_timezone_get()) === false) { "
+    "&& is_int($parsed['year']) === true "
+    "&& is_int($parsed['month']) === true "
+    "&& is_int($parsed['day']) === true) {",
+    "$utc = new \\DateTimeZone('UTC');",
+    "$asRead = (new \\DateTimeImmutable($trimmed, $utc))->format('Y-m-d H:i:s.u');",
+    "$dayName . $writtenBase->format('Y-m-d H:i:s.u') . ($dateRules === [] ? '' : ' ' . implode(' ', $dateRules)),",
+    "if ($asRead !== null "
+    "&& $asRead === $asWritten "
+    "&& \\Portal\\Core\\EventRecurrence::readingIsReal(substr($asRead, 0, 19), date_default_timezone_get()) === false) { "
     "$why = ''; "
-    "return $written; "
+    "return substr($asRead, 0, 19); "
     "}",
 )
 _IMPORT_REASON = (
     "The CSV import's loose-spreadsheet step (`$fmtClockRaw` step 3) builds a "
     "moment with strtotime() ON PURPOSE: it is the only reader of Excel's long "
     "date, US slash dates and the rest, and the strict steps before it store "
-    "the text without one. Since #785, for a plain reading (no zone, offset or "
-    "relative time), step (d) also reads the cell in UTC, where nothing moves, "
-    "and returns THAT whenever the reading is in the hour the zone skipped -- "
-    "so what reaches this column is the reading the cell wrote. Measured over "
-    "89,376 generated cells: the only change from the original reader is "
-    "skipped-hour readings now stored as written. Driven by K07-K07e of "
-    "tools/clock-change-selftest.php."
+    "the text without one. Since #785, for a cell with no zone or offset, step "
+    "(d) also reads the cell in UTC, where nothing moves, and returns THAT when "
+    "it equals PHP's reading of a canonical cell built from only what was "
+    "WRITTEN (so no time arithmetic, reported or hidden) and is in the hour "
+    "the zone skipped -- so what reaches this column is the reading the cell "
+    "wrote. Measured over 255,094 generated cells: the only change from the "
+    "original reader is skipped-hour readings now stored as written. Driven "
+    "by K07-K07f of tools/clock-change-selftest.php."
 )
 ALLOWED: dict[str, tuple[str, str | tuple[str, ...]]] = {
     "web/_apps/calendar/manage/import.php::$startSql::tblEvents.startDateTime::$fmtclockraw":

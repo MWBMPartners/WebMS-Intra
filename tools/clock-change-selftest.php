@@ -1037,6 +1037,19 @@ if ($foundBoth === false) {
         // Beirut's go forward at midnight too: `tomorrow` with a DATE is
         // allowed (a bare `tomorrow` is refused by #797's rule).
         ['Asia/Beirut',      '2026-03-28 tomorrow 00:30',   '2026-03-29 01:30', '2026-03-29 00:30:00'],
+        // SECONDS, so a UTC read that dropped them goes red here and not only
+        // on the gate's text pin (the independent check's round 2).
+        ['Europe/London',    'Sun, 29 Mar 2026 01:30:45',   '2026-03-29 02:30', '2026-03-29 01:30:45'],
+        // DELIBERATE: net-zero arithmetic is no arithmetic. `date_parse()`
+        // reports a relative time of zero, so these name the 01:30 they write
+        // and are stored as it, exactly like `2026-03-29 01:30`.
+        ['Europe/London',    '2026-03-29 01:30 +0 hours',       '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Europe/London',    '2026-03-29 01:30 +1 hour -1 hour', '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        // ... in mixed units too, where `date_parse()` sees the hour and not
+        // the msec. Round 2's "no relative hours" test sent this one to the
+        // old line while storing `+1 hour -1 hour` as written; the equality
+        // treats every zero the same.
+        ['Europe/London',    '2026-03-29 01:30 +1 hour -3600000 msec', '2026-03-29 02:30', '2026-03-29 01:30:00'],
     ];
     $premiseWrong = [];
     $gapWrong     = [];
@@ -1083,6 +1096,10 @@ if ($foundBoth === false) {
         ['2026-03-29 00:30 +1 hour',      '2026-03-29 02:30:00'],
         ['2026-03-29 00:45 +45 minutes',  '2026-03-29 02:30:00'],
         ['2026-03-28 01:30 +24 hours',    '2026-03-29 02:30:00'],
+        // msec and usec on an ordinary day: exact time, nothing to move.
+        ['2026-03-28 10:00 +3600000 msec',       '2026-03-28 11:00:00'],
+        ['2026-03-28 10:00 +3600000000 usec',    '2026-03-28 11:00:00'],
+        ['2026-03-28 10:00 +1800000 ms',         '2026-03-28 10:30:00'],
     ] as [$keepCell, $keepWant]) {
         $keepGot = $fmtStore($keepCell);
         if ($keepGot !== $keepWant) {
@@ -1129,6 +1146,47 @@ if ($foundBoth === false) {
     }
     check('K07e +1 weekday, first/last day of and ordinal +1 month match the original reader',
         $classWrong === [] ? 'all as before' : implode(' | ', $classWrong), 'all as before');
+
+    // K07f — TIME ARITHMETIC `date_parse()` CANNOT SEE. msec, ms,
+    //        milliseconds, usec and microseconds are applied by PHP and
+    //        reported nowhere in `date_parse()`'s `relative` array, so round 2
+    //        of #785 read each of these as a plain reading and stored it an
+    //        hour EARLY (the independent check found 2,444 such cells). An
+    //        exact hour after 00:30 that morning is 02:30 on the clock, so the
+    //        right answer is the line's old one. `+86400000 msec` is exactly a
+    //        day, so it leaves the time of day unchanged: a test comparing
+    //        only the clock time cannot catch it, which is why step (d)
+    //        compares whole readings.
+    //
+    // PREMISE FIRST: each cell's own UTC reading must fall IN the skipped
+    // hour, or a reader treating it as a reading would store it unchanged and
+    // this check could not fail.
+    $exactCells = [
+        ['2026-03-29 00:30 +3600000 msec',          '2026-03-29 02:30:00'],
+        ['2026-03-29 00:30 +3600000 ms',            '2026-03-29 02:30:00'],
+        ['2026-03-29 00:30 +3600000 milliseconds',  '2026-03-29 02:30:00'],
+        ['2026-03-29 00:30 +3600000000 usec',       '2026-03-29 02:30:00'],
+        ['2026-03-29 00:30 +3600000000 microseconds', '2026-03-29 02:30:00'],
+        ['2026-03-29 00:59 +60000001 usec',         '2026-03-29 02:00:00'],
+        ['2026-03-28 01:30 +86400000 msec',         '2026-03-29 02:30:00'],
+        ['2026-03-28 00:30 +1 day +3600000 msec',   '2026-03-29 02:30:00'],
+    ];
+    $exactPremise = [];
+    $exactWrong   = [];
+    foreach ($exactCells as [$exactCell, $exactWant]) {
+        $exactRead = (new \DateTimeImmutable($exactCell, new \DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+        if (\Portal\Core\EventRecurrence::readingIsReal($exactRead, 'Europe/London') === true) {
+            $exactPremise[] = $exactCell;
+        }
+        $exactGot = $fmtStore($exactCell);
+        if ($exactGot !== $exactWant) {
+            $exactWrong[] = $exactCell . ' gave ' . ($exactGot ?? 'REFUSED') . ', wanted ' . $exactWant;
+        }
+    }
+    check('K07f premise: each exact-time cell, read in UTC, falls in the skipped hour',
+        $exactPremise === [] ? 'all in the gap' : implode(' | ', $exactPremise), 'all in the gap');
+    check('K07f2 msec/usec time arithmetic keeps its EXACT answer, not stored an hour early',
+        $exactWrong === [] ? 'all exact' : implode(' | ', $exactWrong), 'all exact');
 
     // K03 — THE PREMISE, so K02 cannot pass by refusing everything. If the
     //       closure simply returned null the checks above would both be

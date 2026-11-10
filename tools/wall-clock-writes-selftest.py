@@ -364,6 +364,90 @@ $stmt->bind_param('ss', $copyStart, $copyEnd);
 """),
 ]
 
+# ── GENERATED: one must-be-reported case for EVERY entry of every list ─────
+# ⚠️ HAND-PICKED PLANTS MISSED WHOLE LIST ENTRIES, TWICE. Round 1's check
+#    found that emptying PASS_THROUGH left every case green; round 2's found
+#    that removing `'gmdate'` from FORMATTERS, `'datetime'` from CONSTRUCTED,
+#    or `'strftime'`/`'gmstrftime'` did the same -- while `gmdate(` appears
+#    25 times under web/ and `new DateTime(` 14 times. "All 16 defence
+#    removals go red" was true only of the 16 that had been chosen.
+#
+#    So one case is GENERATED per entry, and removing ANY single entry turns
+#    the case named after it red.
+#
+# ⚠️ GENERATED FROM A PINNED COPY, NEVER FROM THE LIST UNDER TEST. The first
+#    version read the lists out of the probe and generated from THEM -- so
+#    removing an entry removed its own case too, and the removal loop measured
+#    0 of 38 removals caught. A test generated from the thing it tests cannot
+#    see that thing shrink. The copy below is checked against the probe's and
+#    the check's lists BOTH WAYS (LIST checks): an entry removed there fails,
+#    and an entry added there without a case here fails too.
+#
+#    `tools/wall-clock-writes-selftest.py --only GEN` runs just these, which
+#    is how the removal loop proving it runs in reasonable time.
+PINNED_LISTS = {
+    "CONSTRUCTED": ["datetime", "datetimeimmutable"],
+    "SETTERS": ["settime", "setdate", "setisodate", "modify"],
+    "FORMATTERS": ["date", "gmdate", "date_format", "strftime", "gmstrftime"],
+    "PASS_THROUGH": ["trim", "ltrim", "rtrim", "substr", "mb_substr", "strval", "intval",
+                     "sprintf", "str_pad", "str_replace", "strtolower", "strtoupper", "max", "min", "abs"],
+    "BINDERS": ["bind_param", "execute", "bindvalue", "bindparam"],
+}
+# The moment functions the check hands the probe, with each one's VALUE
+# argument (-1 means any) -- the int entries of CLASSIFIED.
+PINNED_SOURCES = {
+    "strtotime": 0, "strptime": 0, "date_create": 0, "date_create_immutable": 0,
+    "date_create_from_format": 1, "date_create_immutable_from_format": 1,
+    "mktime": -1, "gmmktime": -1,
+}
+PROBE_SOURCE = open(os.path.join(HERE, "audit-checks", "wall-clock-writes-probe.php"), encoding="utf-8").read()
+
+
+def probe_list(name: str) -> list[str] | None:
+    """A `const NAME = [...]` list from the probe's source, entries in order."""
+    found = re.search(r"^const " + name + r" = \[(.*?)\];", PROBE_SOURCE, re.S | re.M)
+    return None if found is None else re.findall(r"'([^']*)'", found.group(1))
+
+
+SQL_START = "$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');\n"
+GENERATED: list[tuple[str, str, set]] = []
+WANT = {("$s", "tblEvents.startDateTime")}
+
+for name, how in sorted(PINNED_SOURCES.items()):
+    if how < 0:
+        args = "(int) $_POST['v'], 0, 0"
+    else:
+        slots = ["'Y-m-d H:i'"] * (how + 1)
+        slots[how] = "(string) $_POST['v']"
+        args = ", ".join(slots)
+    GENERATED.append((f"GEN source {name}()", HEAD + f"$m = {name}({args});\n"
+                      f"$s = date('Y-m-d H:i:s', $m);\n" + SQL_START + "$stmt->bind_param('s', $s);\n", WANT))
+for name in PINNED_LISTS["CONSTRUCTED"]:
+    GENERATED.append((f"GEN constructed new {name}()", HEAD + f"$m = new \\{name}((string) $_POST['v']);\n"
+                      f"$s = $m->format('Y-m-d H:i:s');\n" + SQL_START + "$stmt->bind_param('s', $s);\n", WANT))
+for name in PINNED_LISTS["SETTERS"]:
+    arg = "(string) $_POST['v']" if name == "modify" else "(int) $_POST['h'], (int) $_POST['m']"
+    GENERATED.append((f"GEN setter ->{name}()", HEAD + f"$m = (new \\DateTimeImmutable('today'))->{name}({arg});\n"
+                      f"$s = $m->format('Y-m-d H:i:s');\n" + SQL_START + "$stmt->bind_param('s', $s);\n", WANT))
+for name in PINNED_LISTS["FORMATTERS"]:
+    GENERATED.append((f"GEN formatter {name}()", HEAD + "$m = strtotime((string) $_POST['v']);\n"
+                      f"$s = {name}('Y-m-d H:i:s', $m);\n" + SQL_START + "$stmt->bind_param('s', $s);\n", WANT))
+for name in PINNED_LISTS["PASS_THROUGH"]:
+    GENERATED.append((f"GEN pass-through {name}()", HEAD +
+                      f"$s = {name}(date('Y-m-d H:i:s', strtotime((string) $_POST['v'])));\n"
+                      + SQL_START + "$stmt->bind_param('s', $s);\n", WANT))
+BIND_CALL = {
+    "bind_param": "$stmt->bind_param('s', $s);",
+    "execute": "$stmt->execute([$s]);",
+    "bindvalue": "$stmt->bindValue(1, $s);",
+    "bindparam": "$stmt->bindParam(1, $s);",
+}
+for name in PINNED_LISTS["BINDERS"]:
+    if name not in BIND_CALL:
+        raise SystemExit(f"FAIL: BINDERS has `{name}`, which this test does not know how to call. Add it to BIND_CALL.")
+    GENERATED.append((f"GEN binder ->{name}()", HEAD + "$s = date('Y-m-d H:i:s', strtotime((string) $_POST['v']));\n"
+                      + SQL_START + BIND_CALL[name] + "\n", WANT))
+
 FINDING = re.compile(r"^FAIL: (\S+?):\d+ stores `([^`]+)` into (\S+) after")
 
 
@@ -408,13 +492,41 @@ def record(name: str, ok: bool, detail: str = "") -> None:
     print(f"  {'✓' if ok else '✗'} {name}" + ("" if ok else f"\n      {detail}"))
 
 
-print("Plants -- each reported exactly as expected, and by nothing else:")
-for name, php, want in PLANTS:
+# `--only GEN` runs just the generated cases (the removal loop uses it).
+ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else ""
+
+
+def plant(name: str, php: str, want: set) -> None:
     rel = os.path.join("web", "_apps", "plant.php")
     code, found, other = run({rel: php})
     expected = {(rel, var, col) for var, col in want}
     record(name, code == 1 and found == expected and other == [],
            f"exit {code}; found {sorted(found)}; expected {sorted(expected)}; other {other}")
+
+
+print("The pinned lists match the probe and the check, both ways:")
+for const, pinned in PINNED_LISTS.items():
+    actual = probe_list(const)
+    record(f"LIST {const} in the probe is exactly the pinned copy",
+           actual == pinned,
+           f"probe {actual}; pinned {pinned}. A removed entry loses its "
+           f"detection; an added one has no case here -- change both together.")
+actual_sources = {k: v for k, v in check.CLASSIFIED.items() if isinstance(v, int)}
+record("LIST the check's classified moment functions are exactly the pinned copy",
+       actual_sources == PINNED_SOURCES,
+       f"check {actual_sources}; pinned {PINNED_SOURCES}")
+
+print(f"\nGenerated -- one per entry of every list ({len(GENERATED)}):")
+for name, php, want in GENERATED:
+    plant(name, php, want)
+if ONLY == "GEN":
+    failed = [r for r in results if r[1] is False]
+    print(f"\n{len(results)} generated checks: {len(results) - len(failed)} passed, {len(failed)} failed.")
+    sys.exit(1 if len(failed) > 0 else 0)
+
+print("\nPlants -- each reported exactly as expected, and by nothing else:")
+for name, php, want in PLANTS:
+    plant(name, php, want)
 
 print("\nMust stay green:")
 for name, php in GREEN:
@@ -518,12 +630,19 @@ record("E09 with two pins, the second one missing makes the exemption FAIL",
 failed = [r for r in results if r[1] is False]
 plants = len(PLANTS)
 greens = len(GREEN)
+generated = len(GENERATED)
+lists = len([r for r in results if r[0].startswith("LIST ")])
+refusals = len([r for r in results if re.match(r"E\d\d ", r[0]) is not None])
 print(f"\n{len(results)} checks: {len(results) - len(failed)} passed, {len(failed)} failed "
-      f"({plants} plants, {greens} must-stay-green, {len(results) - plants - greens} refusals).")
+      f"({lists} list pins, {generated} generated, {plants} plants, {greens} must-stay-green, "
+      f"{refusals} refusals).")
 # ⚠️ THE COUNTS ARE PINNED, so a case deleted from a list cannot leave this
-#    printing "all passed" over less than it used to test (#697, #485).
-if plants != 16 or greens != 11:
-    print(f"FAIL: the plant or green list has changed size ({plants} / {greens}, "
-          f"pinned 16 / 11). Change the pin in the same edit, deliberately.")
+#    printing "all passed" over less than it used to test (#697, #485). The
+#    generated count follows the pinned lists, which the LIST checks hold to
+#    the probe and the check, so it is pinned through them.
+if plants != 16 or greens != 11 or refusals != 9 or lists != 6:
+    print(f"FAIL: a case list has changed size ({plants} plants / {greens} green / "
+          f"{refusals} refusals / {lists} list pins; pinned 16 / 11 / 9 / 6). "
+          f"Change the pin in the same edit, deliberately.")
     sys.exit(1)
 sys.exit(1 if len(failed) > 0 else 0)
