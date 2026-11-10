@@ -14,7 +14,7 @@ Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102
 | Package | Worktree / branch | State |
 |---|---|---|
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 7726c55f | Round 7 built (sentences fixed after a full read of every member-facing erasure page; phrase scan deleted; pins: exactly-one match, four giving states, ancestor chain, plain-text sidecar); check round 7 running |
-| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 8d7e03a4 | Round 2 (D-118/D-119 applied) built. Check round 1 on 747c0194 NOT CLEAN: behaviour right in all 45 combinations, but the lock, the form-token check, the organisation prefill and the editor lock are pinned by nothing; one untrue comment — builder fixing. Member wording after #703 |
+| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 6cad0316 | Round 1's five findings fixed (lock, form token, org prefill, editor lock each now pinned and planted red; comment). Check round 2 running over 747c0194..6cad0316 (incl. D-118/D-119) |
 | #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | `agent-aacc4726f08c2aabc` / `p782-build`, 637a398d | Built (e2e harness passed); check round 1 running. Raised #935-#937 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
