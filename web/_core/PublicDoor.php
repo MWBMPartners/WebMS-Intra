@@ -42,8 +42,8 @@
  *                     (checkProof()) — a keyed hash of the organisation's
  *                     number, the public address and that random value,
  *                     keyed by the door's own random name. See checkProof()
- *                     for why it cannot be forged into a false "it reaches
- *                     your door" and gives nothing away.
+ *                     for what a matching answer does and does not prove,
+ *                     and why it gives nothing away.
  *
  * WHY "page.html", AND NOT THE BARE /w/{name}/ (#493 P4c): one name that is
  * the SAME on both forms of address, so `addressFor()` builds it exactly as it
@@ -514,30 +514,40 @@ final class PublicDoor
      * value, keyed by the door's random NAME (`tblPublicDoorNames`, 96 random
      * bits). Pure, so the check works out the same value to compare.
      *
-     * WHY IT CANNOT BE SPOOFED INTO A FALSE "IT REACHES YOUR DOOR":
+     * WHAT A MATCHING ANSWER PROVES, AND WHAT IT DOES NOT:
      *   - the random value is new for every run of the check, so a copy of an
      *     earlier answer (a cache, a mirror, a parked domain replaying what it
      *     once saw) never matches;
-     *   - nobody can make the proof without the door's name, and another
-     *     portal, or another organisation's door on this one, has a different
-     *     name and number, so its answer is in the same FORM and never
-     *     matches — which is how the check can say "a door answered, but not
-     *     this one";
-     *   - the only thing that CAN produce it is a server that passes the
-     *     request on to this door. That is what "the address reaches this
-     *     door" means, and the check says so plainly: it cannot tell whether
-     *     something sits in between.
+     *   - the proof cannot be made without the door's CURRENT name, and
+     *     another portal, or another organisation's door on this one, has a
+     *     different name and number, so its answer is in the same FORM and
+     *     never matches — which is how the check can say "a door answered,
+     *     but not this one";
+     *   - so a match means the answer came from something holding this
+     *     organisation's current door name: this door, a server passing the
+     *     request on to it (which really does reach the door, and cannot be
+     *     told apart), or somebody who knows the name. The check's words
+     *     claim exactly that — "a door holding your door's current name" —
+     *     and never "only this door could make it" (round 1 of P4d's check).
      * The name is not a secret the way a password is — a copy pasted with
-     * /w/{name}/ shows it — but knowing it adds nothing to an attacker who
-     * would also need to control the address being checked: such a party can
-     * already pass the request on to the real door.
+     * /w/{name}/ shows it — so somebody who knows it COULD answer with a
+     * matching proof. That is no use to them: they would also have to control
+     * the address being checked, and such a party can already pass the
+     * request on to the real door. All they could gain is a false "it
+     * answers as your door" about an address they ALREADY control — and an
+     * organisation whose public address somebody else controls has lost it
+     * already, whatever this check says.
      *
      * WHY IT GIVES NOTHING AWAY: the answer is a keyed hash, so it reveals
      * neither the name nor the number, and the address is part of what is
      * hashed, so two addresses cannot be matched up as one organisation's by
-     * comparing answers. It is only ever sent on a public address that
-     * already answers the door's feeds, after every question the feeds are
-     * asked (the door on, D-087 on a test copy).
+     * comparing answers. It is sent only on an organisation's public address
+     * IN EFFECT, with its door on and its organisation active, and on a
+     * testers-only test copy only to a tester. It does NOT ask whether
+     * Calendar and Events or the Noticeboard is switched on (round 1 of P4d's
+     * check: an earlier sentence here said it was sent only where the feeds
+     * answer, which was untrue): it says whether the ADDRESS reaches the
+     * door, and nothing about what is shown there.
      */
     public static function checkProof(string $doorName, int $siteId, string $host, string $nonce): string
     {
@@ -1102,7 +1112,29 @@ final class PublicDoor
         if ($host !== '') {
             return 'https://' . $host . '/' . $what;
         }
-        if (PortalAddress::visitorCanChooseHost() === true) {
+
+        return self::nameAddressFor($db, $siteId, $what);
+    }
+
+    /**
+     * 🔗 The door's address on the PORTAL'S OWN address — /w/{name}/… —
+     * whether or not a public address is in effect, or '' when the door is
+     * off or no such address can be built without trusting a host the visitor
+     * chose. `addressFor()` uses it when there is no public address.
+     *
+     * WHY IT IS ASKED ON ITS OWN (#493 P4d, round 1 of its check): on a test
+     * copy whose door answers signed-in testers only, this is the ONLY form a
+     * tester can use. A browser sends the portal's sign-in only to the
+     * address it signed in at (the session cookie names no domain), and a
+     * public address answers the door alone (D-098), so nobody is ever signed
+     * in there: a public address answers NOBODY on such a test copy. The card
+     * and the set-up check name this address in that state, never the public
+     * one.
+     */
+    public static function nameAddressFor(\mysqli $db, int $siteId, string $what): string
+    {
+        $door = PublicWebsiteSetup::doorStateFor($db, $siteId);
+        if ($door['state'] !== 'on' || PortalAddress::visitorCanChooseHost() === true) {
             return '';
         }
         $base = PortalAddress::base($siteId);

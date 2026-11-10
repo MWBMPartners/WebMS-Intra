@@ -42,10 +42,13 @@
  *      nothing more. It says whether the public door is on and gives its
  *      addresses. Since #493 P4d it also FETCHES the organisation's public
  *      address, when one is in effect and the door would answer there, and
- *      says whether the answer came from THIS organisation's door on THIS
- *      portal (`PublicDoor::checkProof()`, `publicAddressVerdict()`).
+ *      says whether the answer carried the proof only a door holding this
+ *      organisation's current door name can work out
+ *      (`PublicDoor::checkProof()`, `publicAddressVerdict()`).
  *      Whether a WEBSITE really shows the door is still always "not
- *      tested": the check never fetches the organisation's own pages.
+ *      tested": the only page of the organisation's own website it fetches is the
+ *      main website's FRONT page, to see that it answers; it never looks
+ *      for the door there.
  *   5. THE PUBLIC DOOR'S NAME (#493 P4a, D-097): whether the door is on, its
  *      random public name, and the three writers that turn it on, replace
  *      its name and switch it off (`turnDoorOn()`, `replaceDoorName()`,
@@ -1533,6 +1536,10 @@ final class PublicWebsiteSetup
         }
         $wasWord = $was === 'either' ? 'either' : 'testers';
         $several = $chose === 1 ? '' : 's';
+        // Worded from what the door REALLY does now (round 1 of P4d's check):
+        // with the test copy's own staff gate switched off, every page of it
+        // is open to anybody whatever the limit says.
+        $ungated = self::testCopyDoorRule($db, 0) === self::DOOR_TEST_UNGATED;
         Logger::activity(
             'PublicDoorTestCopyLimitSaved',
             'Test copies\' public doors: the installation\'s limit ' . $wasWord . ' → ' . $value . ' (' . ($value === 'either'
@@ -1540,11 +1547,24 @@ final class PublicWebsiteSetup
                 . $chose . ' organisation' . $several . ' had chosen "open to anybody".',
             $actorId
         );
+        if ($ungated === true) {
+            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: ' . ($value === 'either'
+                ? 'each organisation may choose to open its public door to anybody on this test copy.'
+                : 'organisations\' public doors on this test copy are for signed-in testers only.')
+                . ' This test copy\'s own staff sign-in gate is switched off, though, so every page of it — every public door '
+                . 'included — is open to anybody until that gate is switched back on. This limit takes effect then.'];
+        }
         if ($value === 'either') {
+            // Counted from the stored choices alone: an organisation that is
+            // switched off, or whose door is off, answers nothing at all, so
+            // the sentence says what happens to a door that answers, and no
+            // more (round 1 of P4d's check: it said "open to anybody now" of
+            // every one).
             return ['saved' => true, 'type' => 'success', 'message' => 'Saved: on this test copy, each organisation\'s global '
                 . 'administrator may now choose to open its public door to anybody (search engines are always told not to list it).'
-                . ($chose > 0 ? ' ' . $chose . ' organisation' . $several . ' had already chosen that, so '
-                    . ($chose === 1 ? 'its door is' : 'their doors are') . ' open to anybody now.' : '')];
+                . ($chose > 0 ? ' ' . $chose . ' organisation' . $several . ' had already chosen that; from now on, whenever '
+                    . ($chose === 1 ? 'that door answers' : 'those doors answer') . ' at all, '
+                    . ($chose === 1 ? 'it answers' : 'they answer') . ' anybody.' : '')];
         }
 
         return ['saved' => true, 'type' => 'success', 'message' => 'Saved: on this test copy every organisation\'s public door '
@@ -1607,10 +1627,21 @@ final class PublicWebsiteSetup
             $actorId
         );
 
+        // Worded from what the door REALLY does now (round 1 of P4d's check):
+        // the choice is stored either way, but a test copy whose own staff
+        // gate is switched off is open to anybody whatever is chosen.
+        if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_UNGATED) {
+            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: your choice is '
+                . ($value === 'anybody' ? 'open to anybody' : 'signed-in testers only') . '. This test copy\'s own staff sign-in '
+                . 'gate is switched off, though, so every page of it — your public door included — is open to anybody until that '
+                . 'gate is switched back on. Your choice takes effect then.'];
+        }
+
         return ['saved' => true, 'type' => 'success', 'message' => $value === 'anybody'
             ? 'Saved: on this test copy your public door answers anybody, so a copy pasted into a real website works. Search '
                 . 'engines are told not to list anything it sends.'
-            : 'Saved: on this test copy your public door answers only people signed in here who may use the test copy.'];
+            : 'Saved: on this test copy your public door answers only people signed in here who may use the test copy, and only '
+                . 'at its address on the portal\'s own address (with /w/ in it).'];
     }
 
     /** What both test-copy writers say on the live portal, where the setting does nothing. */
@@ -1784,7 +1815,9 @@ final class PublicWebsiteSetup
      * `publicAddressVerdict()` — whenever the door would answer there; when
      * it would not, the row says why it was not checked (`publicAddressRow()`).
      * Whether a WEBSITE really shows the door is ALWAYS 'untested': the
-     * check never fetches the organisation's own pages.
+     * only page of the organisation's own website the check fetches is the
+     * main website's FRONT page, to see that it answers, and it never looks
+     * for the door there.
      *
      * ⚠️ IT TAKES NO "FETCH" ARGUMENT ANY MORE (round 3 of P3's check). A test
      *    hook that replaced the fetch let the real path pass different options
@@ -1894,7 +1927,9 @@ final class PublicWebsiteSetup
 
         // 🚪 The public door (#493 P4a): on or off, with its addresses — said,
         //    never ticked. Whether a website really shows it is ALWAYS
-        //    untested here, because this check does not fetch the door.
+        //    untested here, because this check never looks for the door on
+        //    the organisation's website (it fetches the main website's front
+        //    page only to see that it answers).
         if ($door['state'] === 'on') {
             $eventsAt  = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);
             $postersAt = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_POSTERS);
@@ -1907,7 +1942,8 @@ final class PublicWebsiteSetup
                 : 'Switched off, so nothing the portal holds reaches any outside website.'];
         }
         $rows[] = ['label' => 'The public door', 'state' => 'untested', 'words' => 'Whether your website really shows it is not '
-            . 'tested by this check, which never fetches your website\'s own pages. Open its addresses in your own browser to see what a website gets.'];
+            . 'tested by this check, which fetches only your main website\'s front page (to see that it answers) and never looks for the '
+            . 'door on your website\'s pages. Open its addresses in your own browser to see what a website gets.'];
 
         return $rows;
     }
@@ -1923,8 +1959,16 @@ final class PublicWebsiteSetup
      *     fetch — the row above it says why;
      *   - the door off, spoiled or unreadable: 'untested', the same reason;
      *   - a test copy whose door answers signed-in testers only
-     *     (`testCopyDoorRule()`): 'untested' — this check is not signed in
-     *     when it fetches, so the door would refuse it, which proves nothing;
+     *     (`testCopyDoorRule()`): 'untested'. This check is not signed in
+     *     when it fetches, so the door would refuse it, which proves nothing
+     *     — and neither is anybody else at the public address: a browser
+     *     sends the portal's sign-in only to the address it signed in at (the
+     *     session cookie names no domain), so on such a test copy the public
+     *     address answers NOBODY. The row says so, and names the door's
+     *     /w/{name}/ address on the portal's own address
+     *     (`PublicDoor::nameAddressFor()`), the one place a tester can try it
+     *     (round 1 of P4d's check: it told people to open the public address
+     *     "in this browser", which can never work);
      *   - otherwise it FETCHES `https://{address}/door-check.txt?n={a random
      *     value made for this run}` through `SafeFetch` (the ONE way to fetch
      *     an address somebody typed; it never sets `CURLOPT_ENCODING`, #716)
@@ -1957,9 +2001,15 @@ final class PublicWebsiteSetup
                 . 'not switched on, so') . ' nothing answers there for your organisation.'];
         }
         if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_TESTERS) {
+            $tryAt = PublicDoor::nameAddressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);
+
             return ['label' => $label, 'state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door was not '
-                . 'checked: on this test copy the door answers only people signed in here who may use the test copy, and this '
-                . 'check is not signed in when it fetches. Open https://' . $public . '/events.json in this browser to see it.'];
+                . 'checked: on this test copy the door answers only people signed in here who may use the test copy, and a browser '
+                . 'sends that sign-in only to the portal\'s own address, never to a public address — so ' . $public . ' answers '
+                . 'nobody here until the door is opened to anybody. ' . ($tryAt !== ''
+                    ? 'Testers can try the door at ' . $tryAt . ' in a browser signed in here.'
+                    : 'The portal cannot build the door\'s address on its own address either, so testers cannot try it here '
+                        . 'until that is put right (see the public door card).')];
         }
         $nonce = bin2hex(random_bytes(32));
         $proof = PublicDoor::checkProof($door['name'], $siteId, $public, $nonce);
@@ -2001,8 +2051,13 @@ final class PublicWebsiteSetup
      *   - this server has no curl: 'untested', it could not be checked here;
      *   - a complete HTTP 200 whose whole body is exactly
      *     `PublicDoor::CHECK_FORMAT`, a space, `$expectedProof` and a line
-     *     break (compared with `hash_equals()`): 'ok' — the answer came from
-     *     this organisation's door on this portal, made for this run alone;
+     *     break (compared with `hash_equals()`): 'ok' — the answer carried
+     *     this run's proof, which only something holding this organisation's
+     *     CURRENT door name can work out: this portal's door, a server
+     *     passing the request on to it, or somebody who knows the name (it is
+     *     in any copy pasted with /w/{name}/ — see `PublicDoor::checkProof()`
+     *     for why that last is no use to anybody). The words claim exactly
+     *     that and no more (round 1 of P4d's check);
      *   - a complete HTTP 200 in that same form with ANY OTHER proof:
      *     'problem' — a public door of this kind answered, but not this one.
      *     It does not say whose: another installation of the portal and
@@ -2023,14 +2078,14 @@ final class PublicWebsiteSetup
         if (function_exists('curl_init') !== true) {
             return ['state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door could not be checked on this '
                 . 'server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed or is switched '
-                . 'off on this server). Open https://' . $public . '/events.json in your own browser: it should show your events.'];
+                . 'off on this server). Open https://' . $public . '/events.json in your own browser to see what the door gives there.'];
         }
         $status = (int) ($got['status'] ?? 0);
         $body   = is_string($got['body'] ?? null) === true ? $got['body'] : '';
         if ($status === 200 && ($got['ok'] ?? false) === true) {
             if (hash_equals(PublicDoor::CHECK_FORMAT . ' ' . $expectedProof . "\n", $body) === true) {
-                return ['state' => 'ok', 'words' => 'It reaches this organisation\'s public door on this portal: the answer from '
-                    . 'https://' . $public . '/ carried a proof only this door could make, for this check alone.'];
+                return ['state' => 'ok', 'words' => 'It answers as your organisation\'s public door: the answer from https://'
+                    . $public . '/ carried this check\'s one-off proof, which only a door holding your door\'s current name can work out.'];
             }
             if (preg_match('/^' . preg_quote(PublicDoor::CHECK_FORMAT, '/') . ' [0-9a-f]{64}\n$/D', $body) === 1) {
                 return ['state' => 'problem', 'words' => 'A public door answered at https://' . $public . '/, but not this '
@@ -2043,7 +2098,7 @@ final class PublicWebsiteSetup
             . $public . '/. That can happen, for example, when the address points at a different server, something in front of '
             . 'it answers instead or sends visitors on to another address, its security certificate does not cover the name, the '
             . 'portal is closed for maintenance, or this server cannot reach outside addresses or its own public address. Open '
-            . 'https://' . $public . '/events.json in your own browser: it should show your events.'
+            . 'https://' . $public . '/events.json in your own browser to see what the door gives there.'
             . ($status === 0 ? '' : ' The last answer this check received was HTTP ' . $status . '.')];
     }
 

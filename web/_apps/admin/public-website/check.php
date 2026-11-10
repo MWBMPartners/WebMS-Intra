@@ -29,12 +29,14 @@
  * and gives its addresses, and since #493 P4d it also fetches the
  * organisation's public address — once, at the door's check address, when
  * that address is approved and the door would answer there — and says
- * whether the answer came from THIS organisation's door on THIS portal
+ * whether the answer carried the proof only a door holding this
+ * organisation's current door name can work out
  * (`PublicWebsiteSetup::publicAddressRow()`). That is one more outside
  * fetch, inside the same limit below. Whether a WEBSITE really shows the
- * door is still always "not tested": the check never fetches the
- * organisation's own pages, so a tick there would be a claim nobody can
- * stand behind.
+ * door is still always "not tested": the only page of the organisation's
+ * own website the check fetches is the main website's front page, to see
+ * that it answers, and it never looks for the door there, so a tick would be
+ * a claim nobody can stand behind.
  *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)

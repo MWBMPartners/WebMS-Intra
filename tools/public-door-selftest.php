@@ -111,10 +111,14 @@
  *      choose), each posted DIRECTLY to the handler: "open to anybody" under
  *      a ceiling of testers refused with the reason, every refusal recorded,
  *      nothing written, both writers refusing on the live portal. Open to
- *      anybody, every surface on BOTH forms answers with no sign-in and
- *      noindex, nofollow, noarchive; the ceiling lowered, every surface on
- *      both forms is the identical 404 again. The test copy's own gate
- *      switched off. The door's check address (/door-check.txt, public
+ *      anybody, every surface on BOTH forms — a poster's picture included,
+ *      with its whole header set — answers with no sign-in and noindex,
+ *      nofollow, noarchive; the ceiling lowered, every surface on both forms
+ *      is the identical 404 again, and a tester is served at the /w/ address
+ *      (the only form a browser carries the sign-in to: the card and the
+ *      check say a public address answers nobody then, and name the /w/
+ *      one). The test copy's own gate switched off, and what saving says
+ *      while it is. The door's check address (/door-check.txt, public
  *      address only): its proof, whole header set and every refusal. And
  *      "Check my set-up"'s reach row in each state — waiting, a members'
  *      address, the door off, testers only, not reachable — over HTTP, then
@@ -164,7 +168,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 297; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18
+const PDS_EXPECTED_CHECKS = 306; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2581,11 +2585,15 @@ $uReachWords = [
     'waiting' => 'Whether it reaches this portal\'s public door was not checked: until the installation\'s administrator approves it, the door does not answer there.',
     'not in effect' => 'Whether it reaches this portal\'s public door was not checked: as said above, the door does not answer on it.',
     'door off' => 'Whether it reaches this portal\'s public door was not checked: the door is not switched on, so nothing answers there for your organisation.',
-    'testers' => 'Whether it reaches this portal\'s public door was not checked: on this test copy the door answers only people signed in here who may use the test copy, and this check is not signed in when it fetches. Open https://' . $hostA . '/events.json in this browser to see it.',
-    'not reached' => 'This check did not get an answer from this organisation\'s public door at https://' . $hostA . '/. That can happen, for example, when the address points at a different server, something in front of it answers instead or sends visitors on to another address, its security certificate does not cover the name, the portal is closed for maintenance, or this server cannot reach outside addresses or its own public address. Open https://' . $hostA . '/events.json in your own browser: it should show your events.',
+    // Round 1 of P4d's check: the address a tester can use is the /w/ one on
+    // the portal's OWN address — a browser never carries the sign-in to a
+    // public address — so the words name it, and say the public address
+    // answers nobody. The name is read when the check runs (see U21).
+    'testers' => static fn (string $wAddress): string => 'Whether it reaches this portal\'s public door was not checked: on this test copy the door answers only people signed in here who may use the test copy, and a browser sends that sign-in only to the portal\'s own address, never to a public address — so ' . $hostA . ' answers nobody here until the door is opened to anybody. Testers can try the door at ' . $wAddress . ' in a browser signed in here.',
+    'not reached' => 'This check did not get an answer from this organisation\'s public door at https://' . $hostA . '/. That can happen, for example, when the address points at a different server, something in front of it answers instead or sends visitors on to another address, its security certificate does not cover the name, the portal is closed for maintenance, or this server cannot reach outside addresses or its own public address. Open https://' . $hostA . '/events.json in your own browser to see what the door gives there.',
     'another door' => 'A public door answered at https://' . $hostA . '/, but not this organisation\'s door on this portal. That can happen, for example, when the address leads to another installation of the portal, or to another organisation\'s door. Make sure the address points at this portal.',
-    'reached' => 'It reaches this organisation\'s public door on this portal: the answer from https://' . $hostA . '/ carried a proof only this door could make, for this check alone.',
-    'no curl' => 'Whether it reaches this portal\'s public door could not be checked on this server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed or is switched off on this server). Open https://' . $hostA . '/events.json in your own browser: it should show your events.',
+    'reached' => 'It answers as your organisation\'s public door: the answer from https://' . $hostA . '/ carried this check\'s one-off proof, which only a door holding your door\'s current name can work out.',
+    'no curl' => 'Whether it reaches this portal\'s public door could not be checked on this server, because this server cannot fetch outside addresses (PHP\'s curl extension is not installed or is switched off on this server). Open https://' . $hostA . '/events.json in your own browser to see what the door gives there.',
 ];
 $uCheckHeaders = ['Cache-Control: no-store', 'Content-Length: 91', "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; sandbox",
     'Content-Type: text/plain; charset=utf-8', 'Referrer-Policy: no-referrer', 'X-Content-Type-Options: nosniff', 'X-Robots-Tag: noindex, nofollow, noarchive'];
@@ -2860,7 +2868,7 @@ $u10 = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])[
 check('U10 on a test copy the card is drawn for A\'s global administrator: signed-in testers only now, what the installation allows (testers only), the choice form, NO installation form (they are not the installation\'s), and the plain statement that "signed-in testers only" works only when the address is opened directly',
     [str_contains($u10, 'data-door-test-card="testers"'), str_contains($u10, 'data-door-test-now="testers"'), str_contains($u10, 'data-door-test-limit="testers"'),
         str_contains($u10, 'data-door-test-form="choice"'), str_contains($u10, 'data-door-test-form="limit"'),
-        str_contains($u10, 'Browsers do not send this portal\'s sign-in to a script, a feed or a frame on another website')],
+        str_contains($u10, 'A browser sends this portal\'s sign-in only to the address it signed in at: never to a script, a feed or a frame on another website, and never to your public address')],
     [true, true, true, true, false, true]);
 $uRootRefusedBefore = $logged('PublicWebsiteSetupRefused', $people['root']['id']);
 $u11 = $card('root', 'door_test_choice', ['value' => 'anybody']);
@@ -2889,9 +2897,12 @@ check('U15 with the installation allowing it, A\'s global administrator chooses 
     [$uOwnRow($siteA, 'public.door.testCopies.open'), $logged('PublicDoorTestCopyChoiceSaved', $people['root']['id']), str_contains($u15['page'], 'data-door-test-now="anybody"')],
     ['anybody', 1, true]);
 // Every surface, on BOTH forms of address, with no sign-in at all.
-$uSurfaces = static function () use ($http, $doorName, $siteA, $hostA, $uNonce): array {
+// Round 1 of P4d's check: MEDIA was missing from this list, so skipping the
+// testers-only gate for media alone (and sending media with plain `noindex`)
+// each left every check green. A poster's picture is a surface like any other.
+$uSurfaces = static function () use ($http, $doorName, $siteA, $hostA, $uNonce, $upA): array {
     $out = [];
-    foreach (['events.json', 'posters.json', 'door.js', 'page.html'] as $what) {
+    foreach (['events.json', 'posters.json', 'door.js', 'page.html', 'media/' . $upA] as $what) {
         $out['/w/ ' . $what]    = $http('GET', '/w/' . (string) $doorName($siteA) . '/' . $what);
         $out['public ' . $what] = $http('GET', '/' . $what, ['host' => $hostA]);
     }
@@ -2907,8 +2918,29 @@ $uOpenWant = [];
 foreach (array_keys($uOpen) as $what) {
     $uOpenWant[$what] = [200, $what === 'public door-check.txt' ? 'no-store' : 'public, max-age=60', 'noindex, nofollow, noarchive', ''];
 }
-check('U16 open to anybody: EVERY surface — both feeds, the script and the page on /w/ AND on the public address, and the check address — answers with no sign-in, kept for a minute (the check never), every answer telling search engines not to list it, no cookie, no session file',
+check('U16 open to anybody: EVERY surface — both feeds, the script, the page and a poster\'s picture on /w/ AND on the public address, and the check address — answers with no sign-in, kept for a minute (the check never), every answer telling search engines not to list it, no cookie, no session file',
     [$uOpen, $sessionFiles() - $uOpenBefore], [$uOpenWant, 0]);
+/** A media answer's whole header set, as it must be: `$cache` and `$vary` differ by who may be served. */
+$uMediaWant = static function (array $r, string $cache, string $vary, string $perm) use ($uHeaderSet): array {
+    $want = ['Access-Control-Allow-Origin: *', 'Cache-Control: ' . $cache, 'Content-Length: ' . strlen($r['body']),
+        "Content-Security-Policy: default-src 'none'; frame-ancestors 'none'; sandbox", 'Content-Type: image/png',
+        'Cross-Origin-Resource-Policy: cross-origin', 'Referrer-Policy: no-referrer', 'X-Content-Type-Options: nosniff',
+        'X-Robots-Tag: noindex, nofollow, noarchive'];
+    if ($vary !== '') {
+        $want[] = 'Vary: ' . $vary;
+    }
+    if ($perm !== '') {
+        $want[] = 'Permissions-Policy: ' . $perm;
+    }
+    sort($want);
+    return $want;
+};
+$uMediaW = $http('GET', '/w/' . (string) $doorName($siteA) . '/media/' . $upA);
+$uMediaP = $http('GET', '/media/' . $upA, ['host' => $hostA]);
+$uMediaPerm = $uMediaW['headers']['permissions-policy'] ?? '';
+check('U16b open to anybody, a poster\'s picture on BOTH forms carries its WHOLE header set: image/png, readable and loadable from any website, data only, kept a minute, and noindex, nofollow, noarchive — the test copy\'s words, never plain noindex',
+    [$uMediaW['status'], $uHeaderSet($uMediaW), $uMediaP['status'], $uHeaderSet($uMediaP)],
+    [200, $uMediaWant($uMediaW, 'public, max-age=60', '', $uMediaPerm), 200, $uMediaWant($uMediaP, 'public, max-age=60', '', $uMediaPerm)]);
 $uRowsOpen = $uCheckRows('root');
 check('U17 open to anybody, "Check my set-up" on the test copy FETCHES the public address (this server cannot reach it, so a problem — never "not tested" for the testers reason)',
     $uRowsOpen[3] ?? null, ['problem', $uReachWords['not reached']]);
@@ -2923,11 +2955,29 @@ check('U19 the installation lowers the limit to testers only: saved, its message
     [$uFlash($u19['page']), $uOwnRow($siteA, 'public.door.testCopies.open'), $uClosed, $logged('PublicDoorTestCopyLimitSaved', $people['instroot']['id'])],
     ['Saved: on this test copy every organisation\'s public door answers signed-in testers only. 1 organisation had chosen "open to anybody"; that choice is kept but does nothing while this limit stands.',
         'anybody', array_fill_keys(array_keys($uOpen), [404, true]), 2]);
-$uTesterBack = $http('GET', '/events.json', ['host' => $hostA, 'cookie' => $cookieOf($people['tester']['jar'])]);
-check('U20 …and a signed-in tester is still served on the public address, answered privately (private, no-store, Vary: Cookie)',
-    [$uTesterBack['status'], $uTesterBack['headers']['cache-control'] ?? '', $uTesterBack['headers']['vary'] ?? ''], [200, 'private, no-store', 'Cookie']);
-check('U21 with the door for testers only on a test copy, "Check my set-up" does NOT fetch and says why — the check is not signed in when it fetches',
-    ($uCheckRows('root'))[3] ?? null, ['untested', $uReachWords['testers']]);
+$u19b = $card('instroot', 'door_test_limit', ['value' => 'either']);
+check('U19b raising the limit again says what happens to the one organisation that had chosen "open to anybody" — only whenever its door answers at all, never "open now" of a door that may be off',
+    $uFlash($u19b['page']), 'Saved: on this test copy, each organisation\'s global administrator may now choose to open its public door to anybody (search engines are always told not to list it). 1 organisation had already chosen that; from now on, whenever that door answers at all, it answers anybody.');
+$card('instroot', 'door_test_limit', ['value' => 'testers']);
+// Round 1 of P4d's check: U20 used to send the tester's cookie with the PUBLIC
+// address's Host by hand — a state no browser produces, because the session
+// cookie is host-only (it names no domain) and the public address answers the
+// door alone. A tester is served at the /w/ address on the portal's own
+// address, which is where the card and the set-up check now send them.
+$uTesterW = $feedA('events.json', ['cookie' => $cookieOf($people['tester']['jar'])]);
+$uTesterMedia = $feedA('media/' . $upA, ['cookie' => $cookieOf($people['tester']['jar'])]);
+check('U20 …and a signed-in tester is still served at the door\'s /w/ address on the portal\'s own address — the only form a browser carries the sign-in to — answered privately (private, no-store, Vary: Cookie); a poster\'s picture too, with its WHOLE header set',
+    [$uTesterW['status'], $uTesterW['headers']['cache-control'] ?? '', $uTesterW['headers']['vary'] ?? '', $uTesterMedia['status'], $uHeaderSet($uTesterMedia)],
+    [200, 'private, no-store', 'Cookie', 200, $uMediaWant($uTesterMedia, 'private, no-store', 'Cookie', $uMediaPerm)]);
+$uWEvents = $base . '/w/' . (string) $doorName($siteA) . '/events.json';
+check('U21 with the door for testers only on a test copy, "Check my set-up" does NOT fetch and says why: nobody is signed in at a public address, so it answers nobody — and it names the /w/ address on the portal\'s own address for testers',
+    ($uCheckRows('root'))[3] ?? null, ['untested', ($uReachWords['testers'])($uWEvents)]);
+$u21card = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+check('U21b with a public address in effect on a testers-only test copy, the door card says the addresses it lists (on the public address) answer NOBODY, gives testers the /w/ addresses on the portal\'s own address instead, and never tells them to open the public ones "in this browser"',
+    [str_contains($u21card, 'data-door-testers-public="1"'), str_contains($u21card, '<code data-door-testers-try="events">' . $uWEvents . '</code>'),
+        str_contains($u21card, '<code data-door-testers-try="posters">' . $base . '/w/' . (string) $doorName($siteA) . '/posters.json</code>'),
+        str_contains($u21card, 'open the addresses above in a browser signed in here instead'), str_contains($u21card, 'and never to your public address')],
+    [true, true, true, false, true]);
 $u22a = $card('root', 'door_test_choice', ['value' => 'open']);
 $u22b = $card('root', 'door_test_choice');
 $u22c = $card('instroot', 'door_test_limit', ['value' => 'anybody']);
@@ -2943,10 +2993,19 @@ $setInstallation('portal.gatekeeper.enabled', 'false');
 $u24card = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
 $u24w = $feedA();
 $u24p = $http('GET', '/events.json', ['host' => $hostA]);
+// Round 1 of P4d's check: saving while the gate is off said the door answers
+// testers only — false here. Both messages are worded from what the door does.
+$u24choice = $card('root', 'door_test_choice', ['value' => 'testers']);
+$u24limit  = $card('instroot', 'door_test_limit', ['value' => 'testers']);
 $setInstallation('portal.gatekeeper.enabled', $uGateWas);
 check('U24 with the test copy\'s own staff sign-in gate switched off, the card says the door is open to anybody whatever is chosen, and it is — on both forms, still telling search engines not to list it',
     [str_contains($u24card, 'data-door-test-card="ungated"'), [$u24w['status'], $u24w['headers']['x-robots-tag'] ?? ''], [$u24p['status'], $u24p['headers']['x-robots-tag'] ?? '']],
     [true, [200, 'noindex, nofollow, noarchive'], [200, 'noindex, nofollow, noarchive']]);
+check('U24b with the gate switched off, saving "signed-in testers only" — the organisation\'s choice and the installation\'s limit — is stored, and each message says the door is open to anybody until the gate is back on, never that it answers testers only',
+    [$uFlash($u24choice['page']), $uFlash($u24limit['page']), $uOwnRow($siteA, 'public.door.testCopies.open'), $installationRow('public.door.testCopies.permitted')],
+    ['Saved: your choice is signed-in testers only. This test copy\'s own staff sign-in gate is switched off, though, so every page of it — your public door included — is open to anybody until that gate is switched back on. Your choice takes effect then.',
+        'Saved: organisations\' public doors on this test copy are for signed-in testers only. This test copy\'s own staff sign-in gate is switched off, though, so every page of it — every public door included — is open to anybody until that gate is switched back on. This limit takes effect then.',
+        'testers', 'testers']);
 $db->query("UPDATE `tblUsers` SET `isAdmin` = 0 WHERE `userID` = {$people['setup']['id']}");
 $setOwn($siteA, 'public.door.testCopies.open', null);
 $setInstallation('public.door.testCopies.permitted', 'testers');
@@ -3798,6 +3857,39 @@ $p = $plant('_core/PublicWebsiteSetup.php', "if (\$value !== 'testers' && \$valu
         return $got;
     }, 'alpha');
 check('PU18 with the ceiling\'s list of answers taken out, a word nobody offers is stored as the installation\'s ceiling (U22 catches it)', [$p['applied'], $p['result']], [true, 'anybody']);
+// Round 1 of P4d's check: the two media plants that left 297/297 green.
+$p = $plant('_core/PublicDoor.php', "        if (\$testersOnly === true) {\n            if (Gatekeeper::mayUseTestCopy(",
+    "        if (\$testersOnly === true && \$media === '') {\n            if (Gatekeeper::mayUseTestCopy(",
+    static fn (): int => $feedA('media/' . $upA)['status'], 'alpha');
+check('PU19 with the testers-only gate skipped for media alone, a test copy serves a poster\'s picture to anybody (U19 catches it)', [$p['applied'], $p['result']], [true, 200]);
+$p = $plant('_core/PublicDoor.php', 'self::sendDataHeaders($file[\'type\'], $testCopy, $testersOnly);', 'self::sendDataHeaders($file[\'type\'], false, $testersOnly);',
+    static function () use ($setInstallation, $setOwn, $siteA, $feedA, $upA): string {
+        $setInstallation('public.door.testCopies.permitted', 'either');
+        $setOwn($siteA, 'public.door.testCopies.open', 'anybody');
+        $r = $feedA('media/' . $upA)['headers']['x-robots-tag'] ?? '';
+        $setOwn($siteA, 'public.door.testCopies.open', null);
+        $setInstallation('public.door.testCopies.permitted', 'testers');
+        return $r;
+    }, 'alpha');
+check('PU20 with a test copy\'s media sent with the live portal\'s plain noindex, search engines may follow and archive it (U16 and U16b catch it)', [$p['applied'], $p['result']], [true, 'noindex']);
+$p = $plant('_core/PublicWebsiteSetup.php', "if (self::testCopyDoorRule(\$db, \$siteId) === self::DOOR_TEST_UNGATED) {\n            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: your choice is '",
+    "if (false) {\n            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: your choice is '",
+    static function () use ($card, $installationRow, $setInstallation, $uFlash): bool {
+        $was = $installationRow('portal.gatekeeper.enabled');
+        $setInstallation('portal.gatekeeper.enabled', 'false');
+        $page = $card('root', 'door_test_choice', ['value' => 'testers'])['page'];
+        $setInstallation('portal.gatekeeper.enabled', $was);
+        return str_contains($uFlash($page), 'answers only people signed in here');
+    }, 'alpha');
+check('PU21 with the "gate switched off" wording taken out of the choice\'s save, it tells a test copy open to anybody that its door answers signed-in testers only (U24b catches it)', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_core/PublicWebsiteSetup.php', '$tryAt = PublicDoor::nameAddressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);',
+    '$tryAt = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);',
+    static fn (): bool => str_contains((string) (($uCheckRows('root'))[3][1] ?? ''), 'Testers can try the door at https://' . $hostA . '/'), 'alpha');
+check('PU22 with the set-up check naming the door\'s usual address instead of its /w/ one, it sends testers to the public address, which answers nobody (U21 catches it)', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_apps/admin/public-website/index.php', "<?php if (\$publicHostInEffect !== ''): ?>\n                        <div class=\"alert alert-warning\" data-door-testers-only=\"1\" data-door-testers-public=\"1\">",
+    "<?php if (false): ?>\n                        <div class=\"alert alert-warning\" data-door-testers-only=\"1\" data-door-testers-public=\"1\">",
+    static fn (): bool => str_contains($http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'], 'open the addresses above in a browser signed in here instead'), 'alpha');
+check('PU23 with the card\'s "public address answers nobody" alert taken out, it tells testers to open the public addresses, which answer nobody (U21b catches it)', [$p['applied'], $p['result']], [true, true]);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

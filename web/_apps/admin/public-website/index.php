@@ -126,6 +126,13 @@ $framingInForce = PublicWebsiteSetup::frameOriginsInForce($mysqli, $siteId);
 // first, so on the live portal nothing else is asked.
 $doorTestRule    = PublicWebsiteSetup::testCopyDoorRule($mysqli, $siteId);
 $doorTestersOnly = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_TESTERS;
+// On a testers-only test copy with a public address in effect, the door's /w/
+// addresses on the portal's own address are the ONLY ones a tester can use
+// (a browser never carries the sign-in to the public address).
+$doorTesterEvents  = $doorTestersOnly === true && $door['state'] === 'on'
+    ? PublicDoor::nameAddressFor($mysqli, $siteId, PublicDoor::SURFACE_EVENTS) : '';
+$doorTesterPosters = $doorTestersOnly === true && $door['state'] === 'on'
+    ? PublicDoor::nameAddressFor($mysqli, $siteId, PublicDoor::SURFACE_POSTERS) : '';
 $isOrgGlobal     = PublicWebsiteSetup::isGlobalAdministratorOf($mysqli, $userId, $siteId);
 $doorTestLimit   = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_LIVE ? null : PublicWebsiteSetup::testCopyLimit($mysqli);
 $doorTestChoice  = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_LIVE ? null : PublicWebsiteSetup::testCopyChoice($mysqli, $siteId);
@@ -217,7 +224,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                 <?php endif; ?>
                 <?php if ($doorTestersOnly === true): ?>
-                    <div class="alert alert-warning" data-door-testers-only="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. Browsers do not send your sign-in to another website, so a copy pasted into a real website — a script or a frame — shows nothing from this test copy; open the addresses above in this browser instead.</div>
+                    <?php // #493 P4d, round 1 of its check: a browser sends the sign-in only to the portal's own address, so with a public address in effect the addresses above (which are on it) answer NOBODY here; testers are given the /w/ address instead. ?>
+                    <?php if ($publicHostInEffect !== ''): ?>
+                        <div class="alert alert-warning" data-door-testers-only="1" data-door-testers-public="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. A browser sends that sign-in only to the portal's own address — never to your public address, <?php echo $esc($publicHostInEffect); ?>, and never to a script, a feed or a frame on another website — so the addresses above answer <strong>nobody</strong> here, and neither does any copy pasted into a website, until the door is opened to anybody below.
+                            <?php if ($doorTesterEvents !== ''): ?>
+                                Testers can try the door at its address on the portal's own address, in a browser signed in here: <code data-door-testers-try="events"><?php echo $esc($doorTesterEvents); ?></code> (events) and <code data-door-testers-try="posters"><?php echo $esc($doorTesterPosters); ?></code> (posters).
+                            <?php else: ?>
+                                The portal cannot build the door's address on its own address either, so testers cannot try it here until that is put right.
+                            <?php endif; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="alert alert-warning" data-door-testers-only="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. Browsers do not send your sign-in to another website, so a copy pasted into a real website — a script or a frame — shows nothing from this test copy; open the addresses above in a browser signed in here instead.</div>
+                    <?php endif; ?>
                 <?php endif; ?>
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-2" data-door-form="replace">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
@@ -275,7 +293,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php else: ?>
                     <p data-door-test-now="testers"><span class="badge text-bg-secondary me-1">Signed-in testers only</span> Your public door here answers only people signed in to this test copy who are allowed to use it.</p>
                 <?php endif; ?>
-                <p class="small" data-door-test-cookie="1"><strong>"Signed-in testers only" works only when the door's address is opened directly</strong>, in a browser signed in here. Browsers do not send this portal's sign-in to a script, a feed or a frame on another website, so a copy pasted into a real website shows nothing from this test copy. To try one on a real website, choose "open to anybody".</p>
+                <p class="small" data-door-test-cookie="1"><strong>"Signed-in testers only" works only at the door's address on the portal's own address</strong> — the one with /w/ in it — opened directly in a browser signed in here. A browser sends this portal's sign-in only to the address it signed in at: never to a script, a feed or a frame on another website, and never to your public address. So while the door is for testers only, a copy pasted into a real website shows nothing from this test copy, and a public address answers nobody. To try it on a real website or at your public address, choose "open to anybody".</p>
                 <?php if ($doorTestLimit === null || $doorTestChoice === null): ?>
                     <div class="alert alert-warning" data-door-test-unreadable="1">What is chosen here could not be read just now, so nothing can be changed here.<?php echo $doorTestRule === PublicWebsiteSetup::DOOR_TEST_UNGATED ? '' : ' While it cannot be read, the door answers signed-in testers only.'; ?> Try again later.</div>
                 <?php else: ?>
@@ -313,7 +331,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card mb-3 border-primary" data-setup-check="1">
             <div class="card-body">
                 <h2 class="h5">What the set-up check found</h2>
-                <p class="small text-muted">Shown once. It changed no setting, and nothing here is a promise that your website shows the public door — this check never fetches your website's own pages.</p>
+                <p class="small text-muted">Shown once. It changed no setting, and nothing here is a promise that your website shows the public door — the only page of your website this check fetches is your main website's front page, to see that it answers, and it never looks for the door there.</p>
                 <ul class="list-unstyled mb-0">
                     <?php foreach ($checkRows as $row): ?>
                         <?php [$word, $colour] = $stateWords[(string) ($row['state'] ?? 'note')] ?? $stateWords['note']; ?>
@@ -463,7 +481,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h5">Check my set-up</h2>
-            <p class="text-muted">Checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched), whether your public address's name exists and — when it is approved and the door is on — whether it really reaches this organisation's public door on this portal, whether each framing website is valid, what is marked to appear on the public website today, whether the portal's own address is set, and whether the public door is on, with its addresses. It never fetches your website's own pages, so it cannot say whether your website really shows the door. It changes no setting.</p>
+            <p class="text-muted">Checks what can be known today: whether your main website answers over https (a website at a port other than the standard https one is not fetched), whether your public address's name exists and — when it is approved and the door is on — whether it answers as this organisation's public door, whether each framing website is valid, what is marked to appear on the public website today, whether the portal's own address is set, and whether the public door is on, with its addresses. Of your own website it fetches only your main website's front page, and never looks for the door there, so it cannot say whether your website really shows the door. It changes no setting.</p>
             <p class="small text-muted mb-2">The portal's own address is <?php echo PortalAddress::state() === PortalAddress::STATE_SET ? 'set' : 'not set'; ?>.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/check')); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
