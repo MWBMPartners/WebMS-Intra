@@ -13,15 +13,16 @@ Last whole suite (with #703): 104/104 green; e2e harness all phases. Decisions t
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, 4fe9b574 | Check round 1 NOT CLEAN: rebuilding the reading from date_parse() fields mis-stores 3 classes (weekday relatives, first/last day of, ordinal + relative month; 1,912 of 155,040 cells); PASS_THROUGH defence unguarded. Round 2: read the cell in UTC instead |
-| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 7f4e784f | Check round 1 NOT CLEAN: Sabbath::place() fast path reads the wrong organisation's position after Site::forceContext() (API keys); near-zero coordinate in exponent form refused; other-org path and preview pinned by nothing; audit check cries wolf on a display-only read. Round 2 building. Raised #942, #943 |
+| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, b82a4c00 | Round 3 built (step (d) decides by comparing the cell's UTC reading with a canonical cell from date_parse's written fields: 0 wrong of 255,094 swept cells; one generated self-test case per list entry, 38/38). Check round 3 running. Raised #946 |
+| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 3b971faf | Round 2 built (place() reads the given organisation; an older day-late sunset fault fixed; plain-decimal coordinates; preview and other-org paths pinned; audit check no longer cries wolf). Check round 2 running. Raised #942, #943, #945 |
 
+| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | worktree agent (p940-build) | Building |
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782, landed), 274 (#935). Next free: 275.
 
 ## Next, in this order
 
-1. #940 next (the activity-log 'never delete' wording on the privacy and help pages, now that #703 has landed). #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
+1. Finish #785, #935/#936 and #940 (check → integrate → whole suite → push).
 2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#943. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
