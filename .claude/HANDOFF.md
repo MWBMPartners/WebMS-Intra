@@ -7,15 +7,15 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 `claude/alpha-wip`, pushed after every commit (D-088). Latest pushed: e9ebf2a1. Landed since 9 November, all
 pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912,
-#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-114.
+#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-115.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 3: behaviour CORRECT; fixing wording (restore log reason, a docblock, admin message) and two test gaps (reset/admin pages' after-commit order); raised #922 |
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 314e9bf0 (rebased on b761ff5a) | Round 2 fixes and D-114 built (#921 fixed too); round 3 check running |
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab (rebased on b761ff5a) | D-110 to D-113 built, round 1 fixed; round 2 check running |
+| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | 00d94451: round 3's wording and test gaps fixed; round 4 check running (no e2e — #923) |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 314e9bf0 | Round 3: no wrong behaviour; fixing three small things (double delete; a help sentence; a file header) + D-115 (API keys may delete) |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab | Round 2: code correct; D-113's wording missed the sentences members actually read (GdprEraser's own reasons, the erasure report) — fixing |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed). Next free: 273.
@@ -35,7 +35,7 @@ cherry-picks a clean package, writes its docs FROM THE FINAL STATE (builders' fi
 rounds corrected), runs the whole suite, pushes, closes the issue. Brief checkers neutrally. When the same item
 fails two rounds running, simplify (P4d's sentences, #620's and #902's static checks — D-065: presence only,
 behaviour proven over HTTP). A round whose findings are all in tooling counts toward the three-round cap (D-064).
-Recurring findings: a refusal tested on only ONE form of address; a test that passes on broken code; an existence
+**The e2e migration harness has ONE fixed container name — never run it while another package might (#923); it corrupted #703's run once.** Recurring findings: a refusal tested on only ONE form of address; a test that passes on broken code; an existence
 leak (403 vs 404) on one endpoint of a class — enumerate the class.
 
 ## Blocked on the owner

@@ -170,7 +170,8 @@ appended with its real date and a note that it was added later.
 | [D-112](112-a-workers-name-stays-on-their-own-case.md) | 2026-11-10 | A worker's name stays on a visit they made on their own care case | in force |
 | [D-113](113-kept-worker-names-and-numbers-are-said-plainly.md) | 2026-11-10 | A kept worker's name and number both stay, and the portal says so plainly | in force |
 | [D-114](114-who-may-delete-a-past-attendance-session.md) | 2026-11-10 | A past attendance session can be deleted by administrators, the attendance role and its recorder | in force |
+| [D-115](115-an-api-key-with-attendance-write-may-delete-sessions.md) | 2026-11-10 | An API key with attendance-write may still delete attendance sessions | in force |
 
-*114 decisions. This index is checked against the folder by
+*115 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
