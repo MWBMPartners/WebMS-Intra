@@ -250,17 +250,24 @@ try {
     // 🚪 AND SIGN THE PERSON OUT OF EVERY OTHER BROWSER (#598 item 1, D-104).
     //    WHAT WAS WRONG: this page cancelled remembered devices and nothing
     //    else, so somebody already signed in as this person — the very worry
-    //    that sends people here — stayed signed in after the reset. Now every
-    //    session whose sign-in began before this moment is ended on its next
-    //    request. If THIS browser is signed in as the same person, it stays.
-    //    Inside the transaction, so it stands or falls with the password. It
-    //    answers false only on a database still waiting for migration 270, and
-    //    the reset is then still made: refusing the one way back in without an
-    //    administrator would be worse. The error is recorded for the
-    //    administrator by Auth::endOtherSessionsOf() itself.
+    //    that sends people here — stayed signed in after the reset. Now the
+    //    account's sign-in number goes up, and every session carrying any
+    //    other number is ended on its next request. If THIS browser is signed
+    //    in as the same person, it is given the new number after the commit
+    //    below, and stays. Inside the transaction, so it stands or falls with
+    //    the password. It answers false only on a database still waiting for
+    //    migration 270, and the reset is then still made: refusing the one way
+    //    back in without an administrator would be worse. The error is
+    //    recorded for the administrator by Auth::endOtherSessionsOf() itself.
     $othersSignedOut = Auth::endOtherSessionsOf($mysqli, $userId);
 
     $mysqli->commit();
+
+    // 🖥️ Committed: only now may this browser take the new number (#598
+    //    check round 2: given before, a rollback left it holding a number the
+    //    account never had). Does nothing unless this browser is signed in as
+    //    the same person.
+    Auth::passwordChangeCommitted();
 
     // 📝 Log the successful password reset
     Logger::activity(

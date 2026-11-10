@@ -196,7 +196,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 153; // four added by #598 (part L)
+const EXPECTED_CHECKS = 154; // five added by #598 (part L)
 
 function refuse(string $why): never
 {
@@ -2742,11 +2742,12 @@ if ((string) file_get_contents($scratchAuth) !== $authAsCopied) {
 // =============================================================================
 head('L. A sign-in half way through when the password is changed elsewhere is ended once its code is given (#598, D-104)');
 // =============================================================================
-// The sign-in moment a session carries is set at the PASSWORD step and KEPT by
-// the code step (Auth::beginSessionFor(), same person). So somebody who typed
+// The sign-in NUMBER a session carries (tblUsers.signInVersion, read with the
+// password) is set at the PASSWORD step and KEPT by the code step
+// (Auth::codeStepCompletesSignInOf(), verify.php only). So somebody who typed
 // the OLD password and is waiting for a code must not come out of the code
-// step with a sign-in that outlives the change. Driven, because "is the moment
-// kept, or written afresh at the second step?" is behaviour, not shape.
+// step with a sign-in that outlives the change. Driven, because "is the number
+// kept, or read afresh at the second step?" is behaviour, not shape.
 $wesOn = switchOn('wes', ip(170));
 [$waiting, $first] = passwordStep('wes', ip(171));
 ok('L1 set-up: one browser is signed in with two-step sign-in on, a second has given the password and waits for its code',
@@ -2784,6 +2785,25 @@ $coded = codeStep($third, ip(172), ['code' => nth($wesOn['codes'], 1), 'use_back
 ok('L4 waiting at the code step when the password changed, the person types the NEW password again and then a code: they are signed in and STAY signed in (red on round 1: bounced)',
     $again['location'] === '/auth/2fa/verify' && $coded['status'] === 302 && signedIn($third, ip(172)) === true && signedIn($third, ip(172)) === true,
     describe($again) . ' then ' . describe($coded));
+
+// L5 (#598 check round 2, item 6): a sign-in waiting for its code when the
+// password changes must not be handed a "trust this device" cookie at the code
+// step — the change has just cancelled every remembered device, and the old
+// password is what this browser typed.
+$fourth = newJar();
+$form   = req($fourth, 'GET', '/login', null, ip(173));
+req($fourth, 'POST', '/login', ['csrf_token' => token($form['body']), 'username' => login('wes'), 'password' => $wesNewer], ip(173));
+$wesNewest   = 'Wes-Newest-598-' . bin2hex(random_bytes(6)) . 'Cc3!';
+$accountPage = req($wesOn['jar'], 'GET', '/account', null, ip(170));
+req($wesOn['jar'], 'POST', '/account/change-password', [
+    'csrf_token' => token($accountPage['body']), 'current_password' => $wesNewer, 'new_password' => $wesNewest, 'new_password_confirm' => $wesNewest,
+], ip(170));
+$liveDevices = static fn (): int => (int) one('SELECT COUNT(*) AS n FROM tblTrustedDevices WHERE userID = ? AND revokedAt IS NULL', 'i', [PEOPLE['wes']])['n'];
+$devicesBefore = $liveDevices();
+$trusted = codeStep($fourth, ip(173), ['code' => nth($wesOn['codes'], 2), 'use_backup' => '1', 'trust_device' => '1']);
+ok('L5 that browser, asking to be trusted at the code step after the change, is given NO remembered device, the refusal is recorded, and it is not left signed in (red on round 2: a device was issued)',
+    $devicesBefore === 0 && $liveDevices() === 0 && records('wes', 'TotpDeviceTrustRefused') === 1 && signedIn($fourth, ip(173)) === false,
+    describe($trusted) . '; live devices before ' . $devicesBefore . ', after ' . $liveDevices() . '; refusals recorded ' . records('wes', 'TotpDeviceTrustRefused'));
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

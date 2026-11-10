@@ -620,6 +620,9 @@ if ($action === 'update') {
         $signInWasCreated = false;
         // 🚪 D-108: null = no password was set, so nobody was signed out.
         $othersSignedOut  = null;
+        // Is the administrator editing their OWN account? Then this browser
+        // stays signed in (see the message below), and the words must say so.
+        $setOwn = (int) $userID === (int) ($_SESSION['user_id'] ?? 0);
 
         if ($password !== '') {
             // 🔑 ONE PLACE STORES A PASSWORD (#728). This branch used to
@@ -691,6 +694,12 @@ if ($action === 'update') {
         }
 
         App::commit();
+
+        // 🖥️ D-108, after the commit: only if the administrator set their OWN
+        //    password here does this browser take the account's new number
+        //    and stay signed in. Setting somebody else's leaves the
+        //    administrator's number exactly as it was (#598 check round 2).
+        Auth::passwordChangeCommitted();
     } catch (\Throwable $ex) {
         App::rollback();
         Logger::exception($ex);
@@ -711,7 +720,8 @@ if ($action === 'update') {
         'UserUpdated',
         'Updated user #' . $userID . ': ' . $fullName
             . ($signInWasCreated === true ? ' (a password sign-in was created for this account)' : '')
-            . ($othersSignedOut === true ? ' (the password was set, and the person was signed out of every browser)' : '')
+            . ($othersSignedOut === true && $setOwn === false ? ' (the password was set, and the person was signed out of every browser)' : '')
+            . ($othersSignedOut === true && $setOwn === true ? ' (the administrator set their own password; their other browsers were signed out)' : '')
             . ($othersSignedOut === false ? ' (the password was set, but the person could NOT be signed out: database upgrade waiting)' : ''),
         $_SESSION['user_id'] ?? null
     );
@@ -721,9 +731,15 @@ if ($action === 'update') {
             ? ' A password sign-in was created for this account, under the sign-in name "' . $signInName . '"; '
               . 'the person can sign in with that or with their e-mail address.'
             : '')
-        // D-108: say what really happened, never more.
-        . ($othersSignedOut === true
+        // D-108: say what really happened, never more. Two different
+        //    sentences, because setting your OWN password here keeps THIS
+        //    browser signed in (#598 check round 2: one sentence claimed
+        //    "every browser" in both cases, untrue in the second).
+        . ($othersSignedOut === true && $setOwn === false
             ? ' The new password is set, and the person has been signed out of every browser where they were signed in.'
+            : '')
+        . ($othersSignedOut === true && $setOwn === true
+            ? ' Your new password is set. You are still signed in here, and you have been signed out of every other browser.'
             : '')
         . ($othersSignedOut === false
             ? ' The new password is set, but the person could NOT be signed out of the browsers where they are signed in: '

@@ -791,9 +791,10 @@ class Auth
      *
      * A SECOND REASON, since #598 (D-104, D-108): the same row's
      * `signInVersion`. Every password reset or change (and an administrator
-     * setting the password) adds one to it. A session carries the number it
-     * was signed in under; one carrying an OLDER number is ended the same way,
-     * and the browser that made the change (given the new number by
+     * setting the password) adds a random amount to it. A session carries the number it
+     * was signed in under; one carrying ANY OTHER number (higher included:
+     * a restore, see below) is ended the same way, and the browser that
+     * made the change (given the new number after its commit by
      * endOtherSessionsOf()) is not. Read in the same query, so it costs
      * nothing extra. See SIGN_IN_VERSION_KEY for why a number and not a time.
      *
@@ -914,14 +915,26 @@ class Auth
         //    as the whole number 1, not the text '1'; `=== '1'` here would
         //    sign every active person out on every request.
         if ($row !== null && (int) $row['isActive'] === 1) {
-            // 🔐 Still allowed in. Now: was this session signed in under an
-            //    OLDER number than the account's (#598, D-104, D-108)? Every
-            //    account starts at 0, and a session with no number (signed in
-            //    before this existed) counts as 0, so nothing changes for
-            //    anybody until their password is first reset or changed.
-            //    EQUAL is not older: that is the browser that made the change.
+            // 🔐 Still allowed in. Now: was this session signed in under the
+            //    account's CURRENT number (#598, D-104, D-108)? Every account
+            //    starts at 0, and a session with no number (signed in before
+            //    this existed) counts as 0, so nothing changes for anybody
+            //    until their password is first reset, changed or set.
+            //
+            //    ANY DIFFERENCE ENDS IT, NOT ONLY A LOWER NUMBER (check round
+            //    2, measured). A session can hold a number HIGHER than the
+            //    account's in two ordinary ways: a whole-database RESTORE puts
+            //    tblUsers back to lower numbers while session files are not
+            //    restored, and a change that ROLLED BACK after giving its
+            //    browser the new number. With "end only a lower number" such a
+            //    session outlived the member's next reset: account at 1, a
+            //    session carrying 1, account restored to 0, the member resets
+            //    to 1 — and that session was still signed in. The browser
+            //    that made a change is given the number only AFTER the change
+            //    commits (passwordChangeCommitted()), so the only session
+            //    meant to be equal is.
             if ($readsVersion === false
-                || self::sessionVersion() >= (int) ($row['signInVersion'] ?? 0)
+                || self::sessionVersion() === (int) ($row['signInVersion'] ?? 0)
             ) {
                 return;
             }
@@ -1074,10 +1087,11 @@ class Auth
      *
      * HOW. A session is a PHP file and the portal keeps no list of whose files
      * are whose, so nothing is found and deleted. The account's
-     * `signInVersion` goes up by one, and endSessionOfInactiveAccount() ends
-     * every session of this person carrying an older number, on that
+     * `signInVersion` goes up by a random amount, and endSessionOfInactiveAccount() ends
+     * every session of this person carrying any other number, on that
      * session's next request. If THIS browser's session is this person's, it
-     * is given the new number, so it is the one that stays; the browser of an
+     * is given the new number once the caller has committed and called
+     * passwordChangeCommitted(), so it is the one that stays; the browser of an
      * administrator setting somebody else's password is a different person
      * and is not touched.
      *
@@ -1119,8 +1133,18 @@ class Auth
         if ($userId <= 0) {
             return false;
         }
+        // 🎲 UP BY A RANDOM AMOUNT, NOT BY ONE (#598 check round 2). A number
+        //    must never come BACK. A whole-database restore puts the account's
+        //    number back while session files stay as they were; counting up by
+        //    one, the member's next reset would then reach the very number a
+        //    session from before the restore is still carrying — "account at 1,
+        //    session carrying 1, restored to 0, reset to 1" — and that session
+        //    would match again and stay signed in. A random step (1 to
+        //    2,147,483,647, into a BIGINT) makes landing on the same number
+        //    again a chance of about one in two thousand million.
+        $step = random_int(1, 2147483647);
         try {
-            $stmt = $db->prepare('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + 1 WHERE `userID` = ?');
+            $stmt = $db->prepare('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + ? WHERE `userID` = ?');
         } catch (\mysqli_sql_exception $unknownColumn) {
             if ($unknownColumn->getCode() !== 1054) {
                 throw $unknownColumn;
@@ -1139,26 +1163,72 @@ class Auth
         if ($stmt === false) {
             return false;
         }
-        $stmt->bind_param('i', $userId);
+        $stmt->bind_param('ii', $step, $userId);
         $stmt->execute();
         $stmt->close();
 
-        // 🖥️ This browser stays signed in: it is given the account's new
-        //    number, which is not older than itself. Only when it is THIS
-        //    person's session — a reset made on a browser where somebody else
-        //    is signed in, or an administrator setting somebody else's
-        //    password, leaves that other person alone. Read back on the same
-        //    connection, so inside the caller's transaction it sees its own
-        //    increase.
+        // 🖥️ The new number, read back on the same connection (so inside the
+        //    caller's transaction it sees its own increase), is NOT written
+        //    into this browser's session yet: it is kept until the caller
+        //    says the change committed (passwordChangeCommitted()). Written
+        //    here, a change that then ROLLED BACK left this browser holding a
+        //    number higher than the account's, which outlived later resets
+        //    (check round 2). Not committed, nothing written: the session keeps
+        //    the number it had, which is still the account's.
         $now = self::accountVersion($db, $userId);
         if ($now === null) {
             return false;
         }
-        if (session_status() === PHP_SESSION_ACTIVE && (int) ($_SESSION['user_id'] ?? 0) === $userId) {
-            $_SESSION[self::SIGN_IN_VERSION_KEY] = $now;
-        }
+        self::$numberAfterCommit = ['userId' => $userId, 'version' => $now];
 
         return true;
+    }
+
+    /**
+     * The number the last endOtherSessionsOf() produced, waiting for its
+     * caller's commit; null when none is waiting. See passwordChangeCommitted().
+     *
+     * @var array{userId:int, version:int}|null
+     */
+    private static ?array $numberAfterCommit = null;
+
+    /**
+     * 🖥️ Say that the change endOtherSessionsOf() was part of has COMMITTED,
+     * so this browser keeps its sign-in (#598 check round 2). Call it straight
+     * after the commit, and only then; on a rollback, do not.
+     *
+     * It gives this browser the new number ONLY WHEN THIS BROWSER IS SIGNED IN
+     * AS THAT SAME PERSON. A reset made on a browser where somebody else is
+     * signed in, and above all an administrator setting somebody else's
+     * password (D-108), leave that other person's number exactly as it was —
+     * which matters more now that any difference ends a session: an
+     * administrator's browser given the member's number would be signed out.
+     */
+    public static function passwordChangeCommitted(): void
+    {
+        $waiting                 = self::$numberAfterCommit;
+        self::$numberAfterCommit = null;
+        if ($waiting !== null
+            && session_status() === PHP_SESSION_ACTIVE
+            && (int) ($_SESSION['user_id'] ?? 0) === $waiting['userId']
+        ) {
+            $_SESSION[self::SIGN_IN_VERSION_KEY] = $waiting['version'];
+        }
+    }
+
+    /**
+     * 🔐 Is this session's sign-in still under the account's CURRENT number?
+     * Asked by the two-factor code step before it issues a "trust this device"
+     * cookie (#598 check round 2): a sign-in that typed its password before a
+     * reset is ended on its next request anyway, but it must not leave behind
+     * a remembered device the reset has just cancelled. A database still
+     * waiting for migration 270 has no numbers: yes.
+     */
+    public static function signInStillCurrentFor(int $userId): bool
+    {
+        $account = self::accountVersion(App::db(), $userId);
+
+        return $account === null || self::sessionVersion() === $account;
     }
 
     /**

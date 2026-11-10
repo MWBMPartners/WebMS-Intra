@@ -182,7 +182,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 168; // seven added by #887 (sections 0 and 0b); 44 by #598 (one in H, and parts T to Z2)
+const EXPECTED_CHECKS = 177; // seven added by #887 (sections 0 and 0b); 53 by #598 (one in H, parts T to Z2, and Q4)
 
 function refuse(string $why): never
 {
@@ -327,6 +327,7 @@ const PEOPLE = [
     'whiskey' => 919033, // V: wrong current passwords, one limit for two pages
     'xray'    => 919034, // H: an administrator of ONE organisation (not global)
     'yankee'  => 919035, // T2: an old-password sign-in held at a barrier while the password changes
+    'zulu'    => 919036, // T3 and Q4: a session holding a number the account no longer has
 ];
 /** How this test names itself to the portal, so the records it causes can be found and removed whatever address they carry. */
 const AGENT = 'sign-in-limits-selftest';
@@ -466,6 +467,13 @@ function cleanup(): void
         stopServer($state['extra'][$n]);
     }
     try {
+        // #598 Q4: the column renamed for one check, and the limited user.
+        if (($state['columnAway'] ?? false) === true) {
+            q('ALTER TABLE `tblUsers` RENAME COLUMN `signInVersionAway598` TO `signInVersion`');
+        }
+        if (isset($state['limUser']) === true) {
+            q("DROP USER IF EXISTS '" . $state['limUser'] . "'@'%'");
+        }
         // The database server's own clock, put back as it was (part Z sets it
         // five hours ahead of UTC). Done first: everything below writes times.
         if (isset($state['globalZone']) === true) {
@@ -2280,6 +2288,66 @@ file_put_contents($authFile, $authAsWas);
 ok('T2d the barrier is gone: the scratch Auth.php is back byte for byte', (string) file_get_contents($authFile) === $authAsWas);
 
 // =============================================================================
+head('T3. A session holding a number the account no longer has is ended, a HIGHER one included (#598, check round 2)');
+// =============================================================================
+// Round 2 ended only a LOWER number. Two ordinary ways leave a session HIGHER
+// than its account, and such a session then outlived the member's next reset.
+//
+// (a) A WHOLE-DATABASE RESTORE puts tblUsers back; session files are not
+//     restored. Stood in for, as the check did, by setting the account's
+//     number back by hand.
+$at = ip(165);
+q('UPDATE tblUsers SET signInVersion = 1 WHERE userID = ?', 'i', [PEOPLE['zulu']]);
+$zuluA  = signedInJar('zulu', $at, $password);
+$zuluA2 = signedInJar('zulu', $at, $password);
+q('UPDATE tblUsers SET signInVersion = 0 WHERE userID = ?', 'i', [PEOPLE['zulu']]);   // the restore
+ok('T3a0 straight after the restore, a session carrying a number HIGHER than the account\'s is ended on its next request (any difference ends it; round 2 ended only a lower one)',
+    sentToSignIn($zuluA, $at) === true);
+$zuluPassword = bin2hex(random_bytes(12)) . 'Pp7!';
+useLink($at, storedLink('zulu'), $zuluPassword);                                     // the member resets
+ok('T3a and one that made no request in between does NOT come back to life when the member\'s next reset raises the account again — the number goes up by a random amount, so it never comes back (red on round 2: up by one, back to 1, still signed in)',
+    passwordIs('zulu', $zuluPassword) === true && (int) one('SELECT signInVersion AS v FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zulu']])['v'] !== 0
+        && sentToSignIn($zuluA2, $at) === true);
+
+// (b) A change that ROLLED BACK. The scratch change-password page is made to
+//     fail AFTER the sign-out was recorded and BEFORE the commit (a file arms
+//     it); the transaction rolls back. Round 2 had already written the new
+//     number into the changing browser's session, so that browser held a
+//     number the account never kept, and survived the next reset.
+$pageFile  = $child . $sep . 'web' . $sep . '_apps' . $sep . 'auth' . $sep . 'account' . $sep . 'change-password.php';
+$pageAsWas = (string) file_get_contents($pageFile);
+$pageMark  = '    $othersSignedOut = Auth::endOtherSessionsOf($mysqli, $userId);' . "\n";
+if (substr_count($pageAsWas, $pageMark) !== 1) {
+    refuse('part T3: the place to make the change fail is not in change-password.php exactly once');
+}
+$failFlag = $child . $sep . 'p598-fail-change';
+file_put_contents($pageFile, str_replace(
+    $pageMark,
+    $pageMark . '    if (is_file(' . var_export($failFlag, true) . ") === true) { throw new \\RuntimeException('selftest: made to fail after the sign-out was recorded'); }\n",
+    $pageAsWas
+));
+// ⏱️ The portal server keeps compiled pages (PHP's opcache is on for the built-
+//    in server here, and looks at a file's time at most every
+//    `opcache.revalidate_freq` = 2 seconds), so the edited page is only seen
+//    once that has passed. Measured: without this wait the change was made
+//    from the copy compiled before the edit and committed.
+sleep(3);
+$zuluB  = signedInJar('zulu', $at, $zuluPassword);
+$zuluNumber = (int) one('SELECT signInVersion AS v FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zulu']])['v'];
+touch($failFlag);
+$failed = changePassword($zuluB, $at, $zuluPassword, 'Never-Stored-598Qq8!');
+unlink($failFlag);
+file_put_contents($pageFile, $pageAsWas);
+ok('T3b set-up: the change failed and rolled back — the page says so, the password and the account\'s number are as they were, and the browser is still signed in',
+    $failed['location'] === '/account?error=db' && passwordIs('zulu', $zuluPassword) === true
+        && (int) one('SELECT signInVersion AS v FROM tblUsers WHERE userID = ?', 'i', [PEOPLE['zulu']])['v'] === $zuluNumber && stillSignedIn($zuluB, $at) === true,
+    describe($failed));
+useLink($at, storedLink('zulu'), bin2hex(random_bytes(12)) . 'Rr9!');
+ok('T3c and the member\'s next reset signs that browser out like any other (red on round 2: the rolled-back change had already given it the new number)',
+    sentToSignIn($zuluB, $at) === true);
+ok('T3d the scratch change-password page is back byte for byte', (string) file_get_contents($pageFile) === $pageAsWas);
+
+// =============================================================================
 head('U. Changing the password while signed in signs out the others; this browser stays (D-104)');
 // =============================================================================
 $at      = ip(162);
@@ -2517,6 +2585,74 @@ ok('a Microsoft 365 "from" address that is not an e-mail address is "not set up"
 mailSetup('google');
 $text = $mailNote();
 ok('and the real key file, by a plain name, is still ready (the rule did not shut out a good set-up)', str_starts_with($text, 'not-ready:') === false, $text);
+
+// =============================================================================
+head('Q4. Only a MISSING column falls back; any other database error is NOT quietly passed over (#598, check round 2)');
+// =============================================================================
+// The sign-in number's reads and write fall back when the column is not there
+// yet (error 1054: a database still waiting for migration 270), so an
+// administrator can sign in to run the upgrade. That fallback must be for 1054
+// ALONE: one that caught every error would let a refused read skip the
+// sign-out check in silence. Driven against the real methods, in this process,
+// with a database user that may read and write every column of tblUsers EXCEPT
+// signInVersion — so the very same statements fail with 1143 ("column command
+// denied"), a real error that is not 1054.
+$limUser = 'p598lim';
+$limPass = bin2hex(random_bytes(12));
+$dbNow   = (string) one('SELECT DATABASE() AS d')['d'];
+q("DROP USER IF EXISTS '" . $limUser . "'@'%'");
+q("CREATE USER '" . $limUser . "'@'%' IDENTIFIED BY '" . $limPass . "'");
+q('GRANT SELECT (`userID`, `isActive`), UPDATE (`isActive`) ON `' . $dbNow . "`.`tblUsers` TO '" . $limUser . "'@'%'");
+$state['limUser'] = $limUser;
+// This file already runs with MYSQLI_REPORT_STRICT | MYSQLI_REPORT_ERROR, as
+// DbServer::connect() sets it for the portal, so a refused statement THROWS.
+$limDb = new mysqli(
+    getenv('SELFTEST_DB_HOST') !== false ? (string) getenv('SELFTEST_DB_HOST') : '127.0.0.1',
+    $limUser,
+    $limPass,
+    $dbNow,
+    getenv('SELFTEST_DB_PORT') !== false ? (int) getenv('SELFTEST_DB_PORT') : 3306
+);
+$authRef = new ReflectionClass(\Portal\Core\Auth::class);
+$askedProp = $authRef->getProperty('activeAccountAsked');
+$askedProp->setAccessible(true);
+/** What one call answered: 'threw <code>' or 'answered <value>'. */
+$outcome = static function (callable $call): string {
+    try {
+        return 'answered ' . var_export($call(), true);
+    } catch (\Throwable $e) {
+        // Anything else thrown (a class this process has not loaded, say) is
+        // named, so it can never pass for the database's own refusal.
+        return $e instanceof \mysqli_sql_exception ? 'threw ' . $e->getCode() : 'threw ' . get_class($e) . ': ' . $e->getMessage();
+    }
+};
+\Portal\Core\App::init($limDb, []);
+$_SESSION = ['user_id' => PEOPLE['zulu'], 'sign_in_version' => 12345];
+$askedProp->setValue(null, null);
+$endCheck = $authRef->getMethod('endSessionOfInactiveAccount');
+$endCheck->setAccessible(true);
+$sessionCheck = $outcome(static fn () => $endCheck->invoke(null));
+$writeCheck   = $outcome(static fn () => \Portal\Core\Auth::endOtherSessionsOf($limDb, PEOPLE['zulu']));
+$readMethod   = $authRef->getMethod('accountVersion');
+$readMethod->setAccessible(true);
+$readCheck    = $outcome(static fn () => $readMethod->invoke(null, $limDb, PEOPLE['zulu']));
+ok('Q4a the per-request sign-out check does NOT fall back on a refused read of the number (1143): the error stands (planted catch-all: it fell back in silence)', $sessionCheck === 'threw 1143', $sessionCheck);
+ok('Q4b nor does raising the number after a password change: the error stands, never a quiet "could not sign them out"', $writeCheck === 'threw 1143', $writeCheck);
+ok('Q4c nor does reading the number at a sign-in', $readCheck === 'threw 1143', $readCheck);
+// The other half: a column that really is not there (1054) DOES fall back, quietly.
+\Portal\Core\App::init($db, []);
+q('ALTER TABLE `tblUsers` RENAME COLUMN `signInVersion` TO `signInVersionAway598`');
+$state['columnAway'] = true;
+$askedProp->setValue(null, null);
+$missing = $outcome(static fn () => $endCheck->invoke(null));
+q('ALTER TABLE `tblUsers` RENAME COLUMN `signInVersionAway598` TO `signInVersion`');
+$state['columnAway'] = false;
+ok('Q4d and a column that is really missing (1054, a database waiting for migration 270) falls back quietly and leaves the session alone',
+    $missing === 'answered NULL' && (int) ($_SESSION['user_id'] ?? 0) === PEOPLE['zulu'], $missing);
+$_SESSION = [];
+$limDb->close();
+q("DROP USER IF EXISTS '" . $limUser . "'@'%'");
+unset($state['limUser']);
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

@@ -102,7 +102,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED = 50; // five added by #598 (part G, D-108)
+const EXPECTED = 52; // seven added by #598 (part G, D-108)
 
 // 👥 The made-up people. Every one of these numbers is this test's own.
 const ADMIN    = 927001; // a global administrator, who does the editing
@@ -949,6 +949,50 @@ ok('G03 BOTH of the member\'s browsers are sent to sign in on their next request
     $accountStatus($memberA) === 302 && $accountStatus($memberB) === 302);
 ok('G04 the administrator who set it is a different person and is still signed in',
     req($adminJar, 'GET', '/admin/users')['status'] === 200);
+/**
+ * The sign-in number a browser's session carries, read from the session FILE
+ * (the server keeps its sessions in this run's own folder), or null when it has
+ * none. Read from the file because what matters is what was WRITTEN into the
+ * session, which no page shows.
+ */
+$sessionNumber = static function (string $jar): ?int {
+    global $child, $sep;
+    foreach ((array) @file($jar, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $parts = explode("\t", (string) $line);
+        $file  = $child . $sep . 'sessions' . $sep . 'sess_' . (string) end($parts);
+        if (count($parts) === 7 && preg_match('/^[A-Za-z0-9,-]{16,}$/', (string) end($parts)) === 1 && is_file($file) === true) {
+            clearstatcache(true, $file);
+
+            return preg_match('/(?:^|;|\})sign_in_version\|i:(\d+);/', (string) file_get_contents($file), $m) === 1 ? (int) $m[1] : null;
+        }
+    }
+
+    return null;
+};
+$adminNumber  = (int) (one('SELECT signInVersion FROM tblUsers WHERE userID = ?', 'i', [ADMIN])['signInVersion'] ?? -1);
+$memberNumber = (int) (one('SELECT signInVersion FROM tblUsers WHERE userID = ?', 'i', [WITHPWD])['signInVersion'] ?? -1);
+// 🔢 #598 check round 2 (plant Q3): only the SAME person's browser may take an
+//    account's new number. The administrator's session must still carry the
+//    ADMINISTRATOR's own number — given the member's, it would be signed out
+//    by the next request (any difference ends a session) or, worse, survive a
+//    later reset of the administrator's own password if the numbers happened to
+//    meet. The two numbers are made to differ first, or this could not fail.
+ok('G06 the administrator\'s own session still carries the ADMINISTRATOR\'s sign-in number, never the member\'s it has just changed',
+    $adminNumber !== $memberNumber && $sessionNumber($adminJar) === $adminNumber,
+    'administrator\'s session: ' . var_export($sessionNumber($adminJar), true) . '; administrator\'s account: ' . $adminNumber . '; member\'s account: ' . $memberNumber);
+// The administrator now sets their OWN password on the same page. Their
+// browser stays signed in (the same person, given the new number after the
+// commit), and the message says THAT, not "signed out of every browser"
+// (#598 check round 2, item 4).
+$adminElsewhere = $browserOf('selftest-586-admin', $oldPassword);
+$adminNew       = $newPassword . 'Ad9!';
+$ownSave        = pressSave(ADMIN, $adminNew);
+ok('G07 an administrator setting their OWN password here stays signed in, the page says so in those words, and their other browser is signed out',
+    $ownSave['type'] === 'success' && str_contains($ownSave['flash'], 'You are still signed in here') === true
+        && str_contains($ownSave['flash'], 'signed out of every browser where they were signed in') === false
+        && req($adminJar, 'GET', '/admin/users')['status'] === 200 && $adminElsewhere !== '' && $accountStatus($adminElsewhere) === 302
+        && $sessionNumber($adminJar) === (int) (one('SELECT signInVersion FROM tblUsers WHERE userID = ?', 'i', [ADMIN])['signInVersion'] ?? -1),
+    $ownSave['type'] . ': ' . $ownSave['flash']);
 $memberC = $browserOf($address(WITHPWD), $d108Password);
 ok('G05 the member signs in with the new password, and that browser stays signed in',
     $memberC !== '' && $accountStatus($memberC) === 200 && $accountStatus($memberC) === 200);

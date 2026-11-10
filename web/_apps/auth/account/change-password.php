@@ -166,9 +166,15 @@ try {
     exit();
 }
 
+// 🖥️ Committed: NOW this browser takes the account's new sign-in number, so it
+//    is the one that stays signed in. Only after the commit — given before, a
+//    change that rolled back left this browser holding a number the account
+//    never had (#598 check round 2).
+Auth::passwordChangeCommitted();
+
 // 🔄 Regenerate session ID after credential change (security best practice).
-//    The session's entries, including the sign-in moment endOtherSessionsOf()
-//    has just given it, are kept.
+//    The session's entries, including the sign-in number just given to it,
+//    are kept.
 // See: https://owasp.org/www-community/attacks/Session_fixation
 session_regenerate_id(true);
 

@@ -261,9 +261,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // 🔐 "Trust this device" — if the user opted in, issue a cookie that
     // bypasses 2FA on this browser for the configured window. Done AFTER
     // session promotion so it's only set on a successful verification.
+    //
+    // 🚫 NOT for a sign-in whose password step came before a reset or change
+    //    (#598 check round 2). Such a session is ended on its next request
+    //    anyway, but the reset has just CANCELLED every remembered device, and
+    //    issuing one here would hand a fresh one back to whoever typed the old
+    //    password. Auth::signInStillCurrentFor() compares this session's
+    //    sign-in number with the account's.
     if (isset($_POST['trust_device']) === true && $_POST['trust_device'] === '1') {
-        Auth::issueTrustedDevice($pendingUserId);
-        Logger::activity('TotpDeviceTrusted', 'Device marked trusted (2FA bypass for the trust window)', $pendingUserId);
+        if (Auth::signInStillCurrentFor($pendingUserId) === true) {
+            Auth::issueTrustedDevice($pendingUserId);
+            Logger::activity('TotpDeviceTrusted', 'Device marked trusted (2FA bypass for the trust window)', $pendingUserId);
+        } else {
+            Logger::activity('TotpDeviceTrustRefused', 'Not marked trusted: the password was reset or changed after this sign-in began', $pendingUserId);
+        }
     }
 
     Logger::activity('TotpVerified', '2FA verification successful' . ($useBackup === true ? ' (backup code)' : ''), $pendingUserId);

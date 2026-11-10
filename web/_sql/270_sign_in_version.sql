@@ -8,9 +8,11 @@
 --
 --   tblUsers.signInVersion      a whole number, 0 to begin with. Every
 --                               password reset, change, or new password set by
---                               an administrator adds one. Each browser
+--                               an administrator adds a RANDOM amount to it
+--                               (so a number never comes back after a
+--                               restore; BIGINT for the room). Each browser
 --                               session carries the number it signed in under,
---                               and one carrying an OLDER number is ended on
+--                               and one carrying ANY OTHER number is ended on
 --                               its next request. Every existing account
 --                               starts at 0 and every existing session counts
 --                               as 0, so nobody notices anything until their
@@ -29,7 +31,10 @@
 -- under, and `Auth::endSessionOfInactiveAccount()`, which already reads this
 -- account's row once for every signed-in request, ends a session carrying an
 -- older one. No extra query per request. The browser that MADE the change is
--- given the new number, so it is the one that stays signed in.
+-- given the new number once the change commits, so it is the one that
+-- stays signed in. Any other number ends a session, a HIGHER one included
+-- (a whole-database restore puts the account's number back; session files
+-- are not restored).
 --
 -- WHY A NUMBER AND NOT A TIME. The first version of this migration added a
 -- "sign-ins valid from" moment instead. The independent check broke it over
@@ -84,7 +89,7 @@ SET @hasCol := (
 --    PREPARE reads. It must also be word for word the comment on the column
 --    in `full_schema.sql`, or an upgraded database and a fresh install differ.
 SET @sql := IF(@hasCol = 0,
-    'ALTER TABLE `tblUsers` ADD COLUMN `signInVersion` INT NOT NULL DEFAULT 0 COMMENT ''Goes up by one every time the password is reset, changed or set by an administrator (#598, D-104, D-108). A browser session signed in under a lower number is ended on its next request. Written only by Auth::endOtherSessionsOf().'' AFTER `createdAt`',
+    'ALTER TABLE `tblUsers` ADD COLUMN `signInVersion` BIGINT NOT NULL DEFAULT 0 COMMENT ''Goes up by a RANDOM amount every time the password is reset, changed or set by an administrator (#598, D-104, D-108), so a number never comes back after a restore. A browser session carrying any other number is ended on its next request. Written only by Auth::endOtherSessionsOf().'' AFTER `createdAt`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
