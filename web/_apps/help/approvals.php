@@ -145,6 +145,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         the other leads and required approvers of its department or, when there are none, by another approver
         or an administrator.
     </p>
+    <?php
+    // #648 (D-103, the owner, 10 November 2026): who can READ a claim, and what the Export button
+    // downloads. Until then the Expense Approver role opened any claim in the organisation and its
+    // spreadsheet held every claim, while this list showed only the person's own departments. Checked
+    // against Portal\Core\ExpenseRules::reachToSee() and ::mayExportClaims().
+    ?>
+    <p id="who-can-see-a-claim">
+        <strong>Who can see a claim.</strong> You can open a claim, and see it in the spreadsheet the
+        <strong>Export</strong> button downloads, when it is charged to a department you are a lead, approver or
+        required approver of. The Expense Approver role does not add any other department. Administrators and
+        treasurers can see every claim in the organisation, and you can always see your own. The Export button is
+        offered to administrators, treasurers and holders of the Expense Approver role; for a role holder the
+        file holds only their own departments' claims. A claim you cannot see is answered as though it did not
+        exist.
+    </p>
     <!-- #542: this used to say the Expense Approver role was ALSO needed unless you were an
          administrator. That was true, and it was a trap: the role and the flags are set on different
          pages, so a lead or required approver without the role was refused while the claim still

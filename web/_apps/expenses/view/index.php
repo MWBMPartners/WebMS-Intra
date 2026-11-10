@@ -6,7 +6,11 @@
  * -----------------------------------------------------------------------------
  * Displays full claim details including line items, uploaded evidence files,
  * approval history, payment records, and PDF download links.
- * Accessible to: the claimant, approvers for the dept, treasury, and admins.
+ * Accessible to: the claimant; a lead, approver or required approver of the
+ * claim's own department; a treasurer; and an administrator. The
+ * organisation-wide Approver role on its own opens only the claims of the
+ * departments its holder approves for (#648, D-103). Anybody else is told
+ * the claim does not exist.
  *
  * It also shows the one-off message another Expenses page left for this
  * person (#587): the withdraw page sends people here, and until 12 October
@@ -27,7 +31,6 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
-use Portal\Core\Departments;
 use Portal\Core\ExpenseRules;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -50,10 +53,37 @@ if ($claimID <= 0) {
 }
 
 // -----------------------------------------------------------------------------
+// 👁️ Whose claims this person may open — worked out BEFORE the claim is read
+// -----------------------------------------------------------------------------
+// #648 (D-103, the owner, 10 November 2026): the organisation-wide Approver
+// role opens only the claims of the departments its holder approves for —
+// exactly what the approvals list shows them and what the decision handler
+// lets them decide. Administrators and treasurers open every claim, as
+// before; the claimant always opens their own.
+//
+// WHAT WAS WRONG. This page let `App::can(Capabilities::EXPENSES_APPROVE)`
+// (the role) through before it looked at departments at all — the department
+// read was even skipped for a role holder — so the role opened ANY claim in
+// the organisation in full: line items, suppliers, receipts, approval
+// history and payments. #542's comment here said in so many words that this
+// was #541 item 3 and had not been decided; D-103 decided it.
+//
+// THE RULE IS NOT HERE. `ExpenseRules::reachToSee()` works out the reach and
+// `ExpenseRules::mayViewClaim()` answers for this one claim; the spreadsheet
+// (`expenses/api/export.php`) asks the same reach inside its query. Do not
+// put a role or department test back into this page.
+//
+// It is worked out FIRST, before the claim is looked up, so that somebody
+// whose answer is "no" costs the same database work whether the claim number
+// is real or made up.
+$siteId        = Site::id();
+$currentUserId = (int) ($_SESSION['user_id'] ?? 0);
+$reach         = ExpenseRules::reachToSee($mysqli, $currentUserId, $siteId);
+
+// -----------------------------------------------------------------------------
 // 📋 Fetch claim header with claimant and department info
 // -----------------------------------------------------------------------------
 $claim = null;
-$siteId = Site::id();
 $stmt = $mysqli->prepare(
     'SELECT EC.*, U.fullName AS claimantName, U.emailAddress AS claimantEmail, D.deptName '
     . 'FROM tblExpenseClaims EC '
@@ -68,47 +98,40 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-if ($claim === null) {
+// 🛡️ A claim this person may not open is answered EXACTLY as a claim that
+//    does not exist: the same 404, from the same call, after the same reads.
+//    It used to be a 403, which told anybody holding a sign-in that the
+//    number was a real claim of this organisation. (Ownership before status:
+//    a stranger is never told a claim exists — the money pages' rule.)
+if ($claim === null
+    || ExpenseRules::mayViewClaim($reach, (int) $claim['userID'], (int) $claim['deptID'], $currentUserId) === false) {
     Router::renderError(404);
     return;
 }
 
-// 🛡️ Access check: claimant, dept approvers, treasury, or admin
-$currentUserId = (int) ($_SESSION['user_id'] ?? 0);
 $isClaimant    = ((int) $claim['userID'] === $currentUserId);
 $isAdmin       = App::isAdmin();
-// 🚪 #739: was `App::hasRole('Approver')`. It is now the `expenses.approve`
-//    capability — the same door as deciding a claim — which this organisation
-//    may point at roles of its own on the Roles page. It ships pointing at the
-//    `approver` role and falls open for a global administrator, so this answers
-//    exactly what it answered before on an installation that has never opened
-//    that page. The department branch below is untouched.
-$hasApprover   = App::can(Capabilities::EXPENSES_APPROVE);
+// 🚪 Only for the "Go to Treasury" button and its note below — NOT for who may
+//    open the page, which `reachToSee()` above decided (and which asks the
+//    same capability). #739 made this a capability, `expenses.treasury`,
+//    that an organisation may point at roles of its own on the Roles page.
 $hasTreasurer  = App::can(Capabilities::EXPENSES_TREASURY);
 
-// 🏢 #542: a lead, approver or required approver of THIS claim's department,
-//    through an active membership of this organisation, may open the claim
-//    too. Before this, the page asked for the Expense Approver role (or an
-//    administrator, the claimant, a treasurer) and nothing else, so a
-//    department lead without the role saw the claim in their approvals list
-//    and was refused the moment they opened it — and refused again when they
-//    tried to decide it, leaving the claim waiting for them for ever (see
-//    approve/save.php). The read is skipped for an administrator or a role
-//    holder, who are let in anyway, so their cost is unchanged.
-//
-//    This opens ONE department's claims, not every claim in the organisation:
-//    whether a role holder should be able to open any claim here at all is
-//    #541 item 3, and is not changed by this. Someone with none of these is
-//    refused exactly as before.
-$hasDeptFlag = false;
-if ($isAdmin === false && $hasApprover === false) {
-    $hasDeptFlag = isset(Departments::approverDepts($mysqli, $currentUserId, $siteId)[(int) $claim['deptID']]);
-}
-
-if ($isClaimant === false && $isAdmin === false && $hasApprover === false && $hasTreasurer === false
-    && $hasDeptFlag === false) {
-    Router::renderError(403);
-    return;
+// ✔️ May this person DECIDE this claim — for the "Go to Approvals" button and
+//    the claimant's "you cannot decide your own claim" note. Asked of
+//    `ExpenseRules::reachToDecide()`, the rule the approvals list follows and
+//    the one `expenses/approve/save.php` applies: an administrator, or a lead,
+//    approver or required approver of THIS claim's department. The
+//    organisation-wide role on its own is not authority to decide (it never
+//    was), so it no longer draws a button that leads to a list where the claim
+//    is not shown. Read only for a claim still waiting for a decision, which
+//    is the only state either use is drawn in.
+$mayDecide = false;
+if ($claim['status'] === 'Pending') {
+    $mayDecide = ExpenseRules::reachCovers(
+        ExpenseRules::reachToDecide($mysqli, $currentUserId, $siteId),
+        (int) $claim['deptID']
+    );
 }
 
 // ✏️ May this person change the claim? (#651)
@@ -525,7 +548,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 // is shown only to a claimant who holds that authority; an ordinary claimant
 // never had the button and is shown nothing new.
 ?>
-<?php if ($claim['status'] === 'Pending' && $isClaimant === true && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
+<?php if ($claim['status'] === 'Pending' && $isClaimant === true && $mayDecide === true): ?>
     <p class="small text-secondary" id="own-claim-note"><?php echo htmlspecialchars(ExpenseRules::MSG_OWN_CLAIM_PAGE, ENT_QUOTES, 'UTF-8'); ?></p>
 <?php endif; ?>
 <?php
@@ -553,7 +576,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     // claim is not listed. $isClaimant is worked out at the top of this
     // page, from the same account number ExpenseRules::isOwnClaim() compares.
     ?>
-    <?php if ($claim['status'] === 'Pending' && $isClaimant === false && ($hasApprover === true || $isAdmin === true || $hasDeptFlag === true)): ?>
+    <?php if ($claim['status'] === 'Pending' && $isClaimant === false && $mayDecide === true): ?>
         <a href="<?php echo htmlspecialchars(Router::url('expenses/approve'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary">
             <i class="fa-solid fa-check me-1"></i> Go to Approvals
         </a>

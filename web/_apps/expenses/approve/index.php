@@ -38,64 +38,61 @@ $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 
-// 📋 Fetch pending claims — admins see all, approvers see their dept claims
+// 📋 Fetch pending claims — admins see all, everybody else their own departments' claims
 $claims = [];
 $currentUserId = (int) ($_SESSION['user_id'] ?? 0);
 $siteId = Site::id();
 
-if (App::isAdmin() === true) {
-    // 🛡️ Admins see all pending claims for this site — except their own
-    //    (#545). `EC.userID <> ?` is in BOTH queries here and in the
-    //    treasury list: the handlers refuse a person's own claim, so a list
-    //    that offered it would be offering a button that cannot work.
-    $stmt = $mysqli->prepare(
-        'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
-        . 'FROM tblExpenseClaims EC '
-        . 'JOIN tblUsers U ON U.userID = EC.userID '
-        . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-        . "WHERE EC.status = 'Pending' AND EC.siteID = ? AND EC.userID <> ? "
-        . 'ORDER BY EC.createdAt DESC'
-    );
-} else {
-    // 📋 Approvers see claims from their assigned departments.
-    //
-    //    #517: the department membership must belong to the CLAIM's own
-    //    organisation (UD.siteID = EC.siteID), and the approver's own
-    //    membership of that organisation must be active (the join to
-    //    tblUserSites). Before #517 neither was tested: a membership row
-    //    left behind after somebody left the organisation, or a hand-made
-    //    row naming this department from another organisation, still
-    //    showed them the claim (measured before #517: a member of another
-    //    organisation only was listed as an approver here).
-    //
-    //    DELIBERATELY NO TEST THAT THE DEPARTMENT IS SWITCHED ON (owner's
-    //    answer Q3, 21 September 2026): retiring a department stops NEW
-    //    claims being charged to it, while claims already submitted are
-    //    finished by its own approvers, exactly as before it was retired.
-    //    Adding `D.isActive = 1` here was considered and rejected: it was
-    //    proven during planning to strand such a claim for ever, because
-    //    save.php still requires every lead and required approver to
-    //    approve, and an administrator's approval alone never satisfies
-    //    that.
-    $stmt = $mysqli->prepare(
-        'SELECT DISTINCT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
-        . 'FROM tblExpenseClaims EC '
-        . 'JOIN tblUsers U ON U.userID = EC.userID '
-        . 'JOIN tblDepts D ON D.deptID = EC.deptID '
-        . 'JOIN tblUserDepts UD ON UD.deptID = EC.deptID AND UD.siteID = EC.siteID AND UD.userID = ? '
-        . 'JOIN tblUserSites US ON US.userID = UD.userID AND US.siteID = UD.siteID AND US.isActive = 1 '
-        . "WHERE EC.status = 'Pending' AND EC.siteID = ? AND EC.userID <> ? "
-        . 'AND (UD.isApprover = 1 OR UD.isDeptLead = 1 OR UD.isMandatoryApprover = 1) '
-        . 'ORDER BY EC.createdAt DESC'
-    );
-}
+// 👁️ WHICH claims are listed: `ExpenseRules::reachToDecide()` (#648).
+//
+//    An administrator sees every pending claim of this organisation; anybody
+//    else sees the pending claims of the departments they are a lead,
+//    approver or required approver of — exactly the claims
+//    `expenses/approve/save.php` will let them decide. The organisation-wide
+//    Approver role on its own adds NO department (it never did on this page,
+//    and since D-103 it does not on the claim page or in the spreadsheet
+//    either). A treasurer is not offered other departments' claims here: they
+//    pay claims, they do not decide them.
+//
+//    This used to be two queries, one per kind of person, with the department
+//    rule written out as a join in the second. The join is now
+//    `Departments::approverDepts()` — the same read the decision handler, the
+//    claim page and the spreadsheet use — turned into a condition by
+//    `ExpenseRules::reachSql()`, so the four places cannot disagree about
+//    which departments somebody has. What that read already did, and the old
+//    join did too, is unchanged:
+//
+//    #517: the department membership must belong to THIS organisation, and
+//    the approver's own membership of it must be active. Before #517 neither
+//    was tested: a membership row left behind after somebody left the
+//    organisation, or a hand-made row naming this department from another
+//    organisation, still showed them the claim (measured before #517: a
+//    member of another organisation only was listed as an approver here).
+//
+//    DELIBERATELY NO TEST THAT THE DEPARTMENT IS SWITCHED ON (owner's answer
+//    Q3, 21 September 2026): retiring a department stops NEW claims being
+//    charged to it, while claims already submitted are finished by its own
+//    approvers, exactly as before it was retired. Adding `D.isActive = 1`
+//    here was considered and rejected: it was proven during planning to
+//    strand such a claim for ever, because save.php still requires every lead
+//    and required approver to approve, and an administrator's approval alone
+//    never satisfies that.
+//
+//    🙅 #545: `EC.userID <> ?` leaves the viewer's OWN claims out, for an
+//    administrator too: the handlers refuse a person's own claim, so a list
+//    that offered it would be offering a button that cannot work.
+$reach = ExpenseRules::reachSql(ExpenseRules::reachToDecide($mysqli, $currentUserId, $siteId), 'EC.deptID');
+$stmt  = $mysqli->prepare(
+    'SELECT EC.claimID, EC.claimTitle, U.fullName, D.deptName, EC.totalAmount, EC.createdAt '
+    . 'FROM tblExpenseClaims EC '
+    . 'JOIN tblUsers U ON U.userID = EC.userID '
+    . 'JOIN tblDepts D ON D.deptID = EC.deptID '
+    . "WHERE EC.status = 'Pending' AND EC.siteID = ? AND EC.userID <> ? AND " . $reach['sql'] . ' '
+    . 'ORDER BY EC.createdAt DESC'
+);
 
 if ($stmt !== false) {
-    if (App::isAdmin() === true) {
-        $stmt->bind_param('ii', $siteId, $currentUserId);
-    } else {
-        $stmt->bind_param('iii', $currentUserId, $siteId, $currentUserId);
-    }
+    $stmt->bind_param('ii' . $reach['types'], $siteId, $currentUserId, ...$reach['params']);
     $stmt->execute();
     $res = $stmt->get_result();
     while ($row = $res->fetch_assoc()) {
@@ -129,10 +126,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     //    ExpenseRules::mayExportClaims() is the ONE place that decides, and
     //    `expenses/api/export.php` asks the same question. Never test the
     //    role here instead: two copies is how this broke.
+    //
+    //    Since #648 the file is not "every claim" for everybody shown the
+    //    button: a holder of the Approver role gets the claims of the
+    //    departments they approve for, and an administrator or a treasurer
+    //    (D-040) every claim. The title used to say "Export all claims",
+    //    which stopped being true for the first of those.
     if (ExpenseRules::mayExportClaims() === true):
     ?>
         <a href="<?php echo htmlspecialchars(Router::url('expenses/api/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
-           class="btn btn-outline-success" title="Export all claims CSV">
+           class="btn btn-outline-success" title="Export the claims you may see as a CSV file">
             <i class="fa-solid fa-file-csv me-1"></i> Export
         </a>
     <?php endif; ?>

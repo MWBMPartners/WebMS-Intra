@@ -85,6 +85,14 @@
  *      `approver` role opens the button and the file together, which is how
  *      the two are shown to be reading one rule; and the ApiRouter address
  *      for the same file stays shut.
+ *  L3. #648 (D-103) — the Approver role sees only its own departments'
+ *      claims. An approver of one department holding the role opens and
+ *      downloads that department's claims and not another's; a claim they
+ *      may not open is answered byte for byte as a made-up number is; the
+ *      role with no department opens nothing and downloads the heading row;
+ *      administrators, a global administrator and the treasurer see both
+ *      claims and download both; the approvals list follows the DECIDING
+ *      reach; and the claimant always opens their own.
  *   M. Withdrawing a claim, through the real page, reading back what is
  *      STORED. The claimant withdraws a pending claim and its status reads
  *      Withdrawn; a second press, and an approved, a paid and a rejected
@@ -259,7 +267,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 348; // 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 361; // 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -2169,11 +2177,15 @@ $buttonDrawn = static fn (string $html): bool
     => ap_find('#href="[^"]*/expenses/api/export[^"]*"#i', $html) === 1;
 
 // --- who is offered the button -----------------------------------------------
-// An administrator and a global administrator may export; the four below may
-// not. The handler's rule is "an administrator, or the `approver` ROLE", and
-// none of these four hold that role: APPR has `tblUserDepts.isApprover`, which
-// is a different thing with a confusingly similar name.
-foreach (['adm' => true, 'gadm' => true, 'appr' => false, 'lead' => false, 'trs' => false, 'mem' => false] as $who => $mayExport) {
+// An administrator, a global administrator and — since D-040, built with #648 —
+// a treasurer may export; the three below may not. The handler's rule is "an
+// administrator, a treasurer, or the `approver` ROLE", and none of these three
+// hold either role: APPR has `tblUserDepts.isApprover`, which is a different
+// thing with a confusingly similar name, and LEAD is a department lead (LEAD is
+// ALSO a treasurer in this world, so it is offered the button too).
+// (Until #648 TRS was listed here as refused: D-040 was decided on 1 November
+// 2026 and not built.)
+foreach (['adm' => true, 'gadm' => true, 'trs' => true, 'lead' => true, 'appr' => false, 'mem' => false] as $who => $mayExport) {
     $page = $approvalsNow($who);
     ok(
         sprintf('the Export button is %s for "%s"', $mayExport === true ? 'SHOWN' : 'not shown', $who),
@@ -2183,9 +2195,9 @@ foreach (['adm' => true, 'gadm' => true, 'appr' => false, 'lead' => false, 'trs'
 }
 
 // --- the handler refuses on its own, button or no button ---------------------
-// This is the half a hidden button cannot provide. Each of the four asks for
+// This is the half a hidden button cannot provide. Each of the two asks for
 // the address directly, carrying a perfectly good form token.
-foreach (['appr', 'lead', 'trs', 'mem'] as $who) {
+foreach (['appr', 'mem'] as $who) {
     $page   = $approvalsNow($who);
     $answer = req($jar[$who], 'GET', $exportAddress . '?csrf_token=' . urlencode($page['token']));
     ok(
@@ -2295,6 +2307,166 @@ ok('…and taking the role away again puts both back as they were', $buttonDrawn
 $page = $approvalsNow('adm');
 $viaApi = req($jar['adm'], 'GET', ADDR_A . '/api/expenses/export?csrf_token=' . urlencode($page['token']));
 ok('the ApiRouter address is shut for an administrator too: 403, and no file', $viaApi['status'] === 403 && str_contains(strtolower($viaApi['head']), 'text/csv') === false, 'HTTP ' . $viaApi['status']);
+
+// =============================================================================
+head('L3. #648 — the Approver role sees only its own departments\' claims (D-103)');
+// =============================================================================
+/**
+ * WHAT WAS WRONG. The organisation-wide Approver role (the `expenses.approve`
+ * capability) opened ANY claim of the organisation on the claim page — line
+ * items, suppliers, receipts — and the spreadsheet download gave it every
+ * claim, while the approvals list and the decision handler kept it to the
+ * departments its holder approves for. The owner's answer (D-103, 10 November
+ * 2026): the role sees and downloads only those departments' claims;
+ * administrators and treasurers see everything. A claim somebody may not open
+ * is answered EXACTLY as a claim that does not exist.
+ *
+ * THE WORLD. A second department of A, L3_DEPT, in which nobody of this test
+ * holds a flag, and two pending claims made by LEAD: one in DEPT (where APPR is
+ * an approver) and one in L3_DEPT (where APPR is nothing). LEAD makes them so
+ * that neither APPR nor MEM nor TRS is ever the claimant — "it is their own" is
+ * a ground every one of these checks must not be able to lean on.
+ */
+const L3_DEPT       = 916105;
+const L3_OWN_DEPT   = 916396; // LEAD's claim in DEPT
+const L3_OTHER_DEPT = 916395; // LEAD's claim in L3_DEPT
+const L3_NO_CLAIM   = 916398; // matches no claim at all
+const L3_ROLE       = 916297;
+q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'ACCESS L3 second dept', 'L3D', 1)", 'ii', [L3_DEPT, ORG_A]);
+q(
+    "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES "
+    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN THE APPROVERS DEPT', CURDATE(), 31.00, 'Pending'), "
+    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN ANOTHER DEPT', CURDATE(), 32.00, 'Pending')",
+    'iiiiiiii', [L3_OWN_DEPT, ORG_A, LEAD, DEPT, L3_OTHER_DEPT, ORG_A, LEAD, L3_DEPT]
+);
+$l3Own   = 'ACCESS L3 CLAIM IN THE APPROVERS DEPT';
+$l3Other = 'ACCESS L3 CLAIM IN ANOTHER DEPT';
+/** Grant or take away the `approver` role in A. */
+$l3Role = static function (int $userId, bool $give): void {
+    if (one('SELECT roleID FROM tblRoles WHERE roleID = ?', 'i', [L3_ROLE]) === null) {
+        q("INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (?, ?, 'approver', 'Expense Approver', 1)", 'ii', [L3_ROLE, ORG_A]);
+    }
+    q('DELETE FROM tblUserRoles WHERE userID = ? AND roleID = ?', 'ii', [$userId, L3_ROLE]);
+    if ($give === true) {
+        q('INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, ?, ?)', 'iii', [$userId, L3_ROLE, ORG_A]);
+    }
+};
+/** The claim page, as HTTP status and body. */
+$l3Open = static fn (string $who, int $claimId): array => req($jar[$who], 'GET', ADDR_A . '/expenses/view?id=' . $claimId);
+/**
+ * A page with the parts that differ between ANY two answers removed: the
+ * per-answer script nonce, by NAME (never a 32-hex pattern, which would blind
+ * the comparison to a real difference of that length — CLAUDE.md, 31 October
+ * 2026). Nothing else is removed, so a 404 that said anything about the claim
+ * — its title, its number, "not allowed" — would make the two differ.
+ */
+$l3Bare = static fn (string $body): string => ap_replace('/\snonce="[^"]*"/', ' nonce=""', $body);
+/** The spreadsheet, fetched with a fresh token from the person's own approvals page. */
+$l3Csv = static function (string $who) use (&$jar, $approve, $exportAddress): array {
+    $page = req($jar[$who], 'GET', $approve);
+
+    return req($jar[$who], 'GET', $exportAddress . '?csrf_token=' . urlencode(token($page['body'])));
+};
+
+// --- the role holder who approves for DEPT ------------------------------------
+$l3Role(APPR, true);
+$own   = $l3Open('appr', L3_OWN_DEPT);
+$other = $l3Open('appr', L3_OTHER_DEPT);
+$none  = $l3Open('appr', L3_NO_CLAIM);
+ok(
+    'L3-1. an approver of DEPT holding the Approver role opens a claim of DEPT',
+    $own['status'] === 200 && str_contains($own['body'], $l3Own) === true,
+    'HTTP ' . $own['status']
+);
+ok(
+    'L3-2. …and does NOT open a claim of a department they do not approve for: HTTP 404, and the claim is nowhere in the answer (D-103)',
+    $other['status'] === 404 && str_contains($other['body'], $l3Other) === false && str_contains($other['body'], (string) L3_OTHER_DEPT) === false,
+    'HTTP ' . $other['status']
+);
+ok(
+    'L3-3. …and that refusal is EXACTLY the answer a made-up claim number gets — same status, same page, byte for byte apart from the nonce',
+    $other['status'] === $none['status'] && $l3Bare($other['body']) === $l3Bare($none['body']) && strlen($none['body']) > 200,
+    'statuses ' . $other['status'] . '/' . $none['status'] . ', lengths ' . strlen($other['body']) . '/' . strlen($none['body'])
+);
+$csv = $l3Csv('appr');
+ok(
+    'L3-4. the role holder\'s spreadsheet holds DEPT\'s claim and NOT the other department\'s (D-103: filtered in the query)',
+    $csv['status'] === 200 && str_contains($csv['body'], $l3Own) === true && str_contains($csv['body'], $l3Other) === false,
+    'HTTP ' . $csv['status'] . '; own ' . (str_contains($csv['body'], $l3Own) === true ? 'in' : 'NOT in') . ', other ' . (str_contains($csv['body'], $l3Other) === true ? 'IN' : 'not in')
+);
+$list = req($jar['appr'], 'GET', $approve)['body'];
+ok(
+    'L3-5. …which is what their approvals list shows them: DEPT\'s claim listed, the other department\'s not',
+    str_contains($list, $l3Own) === true && str_contains($list, $l3Other) === false
+);
+ok(
+    'L3-6. …and on DEPT\'s claim they are offered "Go to Approvals", because they may decide it',
+    str_contains($own['body'], 'Go to Approvals') === true
+);
+
+// --- the role holder with NO department ---------------------------------------
+// MEM is a member of A, in DEPT with no flag. With the role and nothing else,
+// they reach no department: no claim page, and a file with the heading alone.
+$l3Role(MEM, true);
+$memOwn = $l3Open('mem', L3_OWN_DEPT);
+$memCsv = $l3Csv('mem');
+$memPage = req($jar['mem'], 'GET', $approve)['body'];
+ok(
+    'L3-7. the Approver role on its own, with no department, opens no claim of anybody else: HTTP 404',
+    $memOwn['status'] === 404 && str_contains($memOwn['body'], $l3Own) === false,
+    'HTTP ' . $memOwn['status']
+);
+ok(
+    'L3-8. …is still offered the Export button (who may download is unchanged), and the file is the heading row and nothing else',
+    $buttonDrawn($memPage) === true && $memCsv['status'] === 200
+        && trim(ap_replace('/^\xEF\xBB\xBF/', '', $memCsv['body'])) === 'claimID,Claimant,Department,Title,Date,Amount,Status',
+    'HTTP ' . $memCsv['status'] . ', body: ' . mb_substr(trim($memCsv['body']), 0, 160)
+);
+$l3Role(MEM, false);
+
+// --- the department approver WITHOUT the role: as before ----------------------
+$l3Role(APPR, false);
+$plainOwn   = $l3Open('appr', L3_OWN_DEPT);
+$plainOther = $l3Open('appr', L3_OTHER_DEPT);
+ok(
+    'L3-9. without the role, the department approver still opens DEPT\'s claim (#542) and still not the other department\'s, and still has no spreadsheet',
+    $plainOwn['status'] === 200 && $plainOther['status'] === 404 && $l3Csv('appr')['status'] === 403,
+    'HTTP ' . $plainOwn['status'] . '/' . $plainOther['status']
+);
+
+// --- administrators and the treasurer keep seeing everything -----------------
+foreach (['adm' => 'an administrator', 'gadm' => 'a global administrator', 'trs' => 'a treasurer'] as $who => $what) {
+    $a = $l3Open($who, L3_OWN_DEPT);
+    $b = $l3Open($who, L3_OTHER_DEPT);
+    $f = $l3Csv($who);
+    ok(
+        'L3-10. ' . $what . ' opens BOTH claims, and the spreadsheet holds both',
+        $a['status'] === 200 && $b['status'] === 200 && str_contains($b['body'], $l3Other) === true
+            && $f['status'] === 200 && str_contains($f['body'], $l3Own) === true && str_contains($f['body'], $l3Other) === true,
+        'claim pages HTTP ' . $a['status'] . '/' . $b['status'] . ', file HTTP ' . $f['status']
+    );
+}
+$trsList = req($jar['trs'], 'GET', $approve)['body'];
+$admList = req($jar['adm'], 'GET', $approve)['body'];
+ok(
+    'L3-11. the approvals list is the DECIDING reach: an administrator is offered both claims, a treasurer (who pays, not decides) neither',
+    str_contains($admList, $l3Own) === true && str_contains($admList, $l3Other) === true
+        && str_contains($trsList, $l3Own) === false && str_contains($trsList, $l3Other) === false
+);
+ok(
+    'L3-12. the claimant opens both of their own claims, whatever department they are in',
+    $l3Open('lead', L3_OWN_DEPT)['status'] === 200 && $l3Open('lead', L3_OTHER_DEPT)['status'] === 200
+);
+ok(
+    'L3-13. an ordinary member with no role and no flag is answered 404 for a real claim, exactly as for a made-up one (it used to be 403, which said the claim was real)',
+    $l3Open('mem', L3_OTHER_DEPT)['status'] === 404
+        && $l3Bare($l3Open('mem', L3_OTHER_DEPT)['body']) === $l3Bare($l3Open('mem', L3_NO_CLAIM)['body'])
+);
+
+q('DELETE FROM tblUserRoles WHERE roleID = ?', 'i', [L3_ROLE]);
+q('DELETE FROM tblRoles WHERE roleID = ?', 'i', [L3_ROLE]);
+q('DELETE FROM tblExpenseClaims WHERE claimID IN (?, ?)', 'ii', [L3_OWN_DEPT, L3_OTHER_DEPT]);
+q('DELETE FROM tblDepts WHERE deptID = ?', 'i', [L3_DEPT]);
 
 // =============================================================================
 head('M. #587 — withdrawing a claim through the real page, reading back what is STORED');

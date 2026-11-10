@@ -42,6 +42,8 @@
  * served right now, and passing that in would invite a caller to supply a
  * stale answer. It is here, rather than in the page or the handler, because
  * BOTH of them have to ask it and they must never be able to disagree (#675).
+ * `reachToSee()` and `reachToDecide()` (#648) read the session the same way
+ * and for the same reason; their pure core, `reachFrom()`, takes facts.
  *
  * WHAT THIS CLASS CANNOT DO
  * -------------------------
@@ -525,6 +527,15 @@ final class ExpenseRules
      * `expenses.approve` declares `globalAdminFallsOpen` — so there is no
      * separate test for one here, and adding one would be a second rule.
      *
+     * ⚠️ THIS SAYS WHETHER, NOT WHICH (#648, D-103). Being allowed the file
+     *    is no longer being allowed every claim in it. An administrator and a
+     *    treasurer get every claim of the organisation; a holder of the
+     *    `expenses.approve` capability gets the claims of the departments
+     *    they approve for and nothing else — which, for somebody holding the
+     *    role and no department at all, is the heading row alone. The rows
+     *    are decided by `reachToSee()` and filtered inside the query by
+     *    `reachSql()`; never filter them after reading.
+     *
      * @return bool True when this person may download the spreadsheet.
      */
     public static function mayExportClaims(): bool
@@ -533,7 +544,271 @@ final class ExpenseRules
             return true;
         }
 
+        // 💷 D-040 (the owner, 1 November 2026): a treasurer may download the
+        //    spreadsheet alongside an approver. Decided on #541 (item 2) and
+        //    not built until #648: a treasurer already sees every claim on the
+        //    claim page and pays the approved ones, so refusing them the file
+        //    of what to pay was the odd case rather than a safeguard. WHICH
+        //    rows they get is `reachToSee()`, below — every claim, as on the
+        //    claim page.
+        if (App::can(Capabilities::EXPENSES_TREASURY) === true) {
+            return true;
+        }
+
         return App::can(Capabilities::EXPENSES_APPROVE);
+    }
+
+    // 👁️ ─────────────────────────────────────────────────────────────────────
+    //    WHOSE CLAIMS A PERSON MAY SEE (#648, D-103)
+    // ────────────────────────────────────────────────────────────────────────
+    //
+    // WHAT WAS WRONG. The organisation-wide Approver role (now the
+    // `expenses.approve` capability) meant two different things in four
+    // places. The approvals list and the decision handler both said, and did,
+    // "only the departments you approve for": a role-holder who is not a
+    // lead, approver or required approver of a claim's department is shown
+    // none of its claims and may decide none of them. But the claim page let
+    // the role through before it looked at departments at all, so it opened
+    // ANY claim in the organisation in full — line items, suppliers, receipts
+    // — and the spreadsheet download had no department condition at all, so
+    // it handed over every claimant's name, department, title, date and
+    // amount in one file. Expense claims are personal financial information.
+    //
+    // THE OWNER'S ANSWER (D-103, 10 November 2026): the role sees and
+    // downloads only the claims of departments its holder approves for,
+    // exactly as the approvals list and the decision page already work.
+    // Administrators and the treasurer keep seeing everything, as before.
+    //
+    // HOW IT IS KEPT TO ONE RULE. A "reach" is worked out once per request
+    // and then asked two ways:
+    //
+    //   * `mayViewClaim()` — one claim, in PHP, by the claim page.
+    //   * `reachSql()`     — a list, as a condition INSIDE the query, by the
+    //                        spreadsheet and by the approvals list. Filtering
+    //                        rows after reading them would put every claim in
+    //                        PHP's memory first and make the filter one
+    //                        forgotten line away from not happening.
+    //
+    // Both read the same two fields of the same array, side by side in this
+    // class, so they cannot drift without somebody editing one of them here.
+    //
+    // TWO REACHES, AND THE DIFFERENCE IS DELIBERATE.
+    //   * `reachToSee()`    — what a person may READ: an administrator or a
+    //                         treasurer, everything; anybody else, the
+    //                         departments they approve for.
+    //   * `reachToDecide()` — what a person may DECIDE: an administrator,
+    //                         everything; anybody else, the departments they
+    //                         approve for. A treasurer PAYS an approved claim;
+    //                         they do not decide one, so the approvals list
+    //                         does not offer them other departments' claims.
+    //                         `expenses/approve/save.php` applies the same rule
+    //                         through `Departments::approverDepts()` directly,
+    //                         because it also needs WHICH flag the person holds
+    //                         to record their part in the decision.
+    //
+    // WHAT GIVES SOMEBODY A DEPARTMENT. `Departments::approverDepts()`, the
+    // ONE read of the lead / approver / required-approver flags through an
+    // active membership of this organisation — the same read the decision
+    // handler and (since #542) the claim page already used. The role itself
+    // gives NO department: that is the whole of D-103. Retired departments are
+    // deliberately included, as everywhere else in Expenses (owner's answer
+    // Q3, 21 September 2026: a retired department's waiting claims are still
+    // finished by its own approvers).
+    //
+    // WHAT THIS DOES NOT DECIDE.
+    //   * The claimant's OWN claims. `mayViewClaim()` lets the claimant in
+    //     first, whatever their reach. The two lists leave a person's own
+    //     claims to their own Expenses page: the approvals list never shows
+    //     them (#545), and the spreadsheet follows the reach alone, so a
+    //     role-holder's own claim in another department is not in their file.
+    //   * Who may download the file AT ALL — that is `mayExportClaims()`.
+    //   * The organisation. Every caller still asks `EC.siteID = ?`. A reach
+    //     names departments, and its department numbers come from this
+    //     organisation's own membership rows, but the organisation test stays
+    //     in each query as the first boundary.
+
+    /**
+     * Build a reach from facts. Pure — no connection, no session — so the
+     * self-test can drive every combination by hand.
+     *
+     * @param bool              $seesEveryClaim True for somebody who may see every claim of
+     *                                          the organisation (an administrator; for
+     *                                          reading, a treasurer too).
+     * @param array<int, mixed> $approverDepts  `Departments::approverDepts()`'s answer, keyed
+     *                                          by department number. Only the KEYS are read.
+     *
+     * @return array{all: bool, depts: list<int>} `all` true means every claim; otherwise
+     *                                            `depts` is the sorted, de-duplicated list of
+     *                                            department numbers, possibly empty.
+     */
+    public static function reachFrom(bool $seesEveryClaim, array $approverDepts): array
+    {
+        if ($seesEveryClaim === true) {
+            return ['all' => true, 'depts' => []];
+        }
+        $ids = [];
+        foreach (array_keys($approverDepts) as $key) {
+            $id = (int) $key;
+            if ($id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        ksort($ids);
+
+        return ['all' => false, 'depts' => array_values($ids)];
+    }
+
+    /**
+     * What the person being served may READ (the claim page, the
+     * spreadsheet). An administrator or a treasurer: every claim. Anybody
+     * else, the `expenses.approve` role included: the departments they
+     * approve for.
+     *
+     * The department read is skipped for somebody who sees everything, so
+     * their cost is what it was. For everybody else it happens on every call,
+     * BEFORE any claim is looked up — which is what lets the claim page treat
+     * "out of reach" and "no such claim" with the same database work as well
+     * as the same answer.
+     *
+     * Reads the session through `App::`, like `mayExportClaims()` and for the
+     * same reason: it answers a question about the person being served now.
+     *
+     * @param mysqli $db     An open connection.
+     * @param int    $userId The signed-in account.
+     * @param int    $siteId The open organisation.
+     *
+     * @return array{all: bool, depts: list<int>}
+     */
+    public static function reachToSee(mysqli $db, int $userId, int $siteId): array
+    {
+        // 💷 The treasurer's "everything" is what the claim page already gave
+        //    them before #648 (`$hasTreasurer` let them open any claim), and
+        //    D-103 keeps it: they pay claims from every department.
+        $everything = App::isAdmin() === true || App::can(Capabilities::EXPENSES_TREASURY) === true;
+        if ($everything === true) {
+            return self::reachFrom(true, []);
+        }
+
+        return self::reachFrom(false, Departments::approverDepts($db, $userId, $siteId));
+    }
+
+    /**
+     * What the person being served may DECIDE (the approvals list). An
+     * administrator: every claim. Anybody else — a treasurer and the
+     * `expenses.approve` role included — the departments they approve for,
+     * which is exactly what `expenses/approve/save.php` lets them decide.
+     *
+     * @param mysqli $db     An open connection.
+     * @param int    $userId The signed-in account.
+     * @param int    $siteId The open organisation.
+     *
+     * @return array{all: bool, depts: list<int>}
+     */
+    public static function reachToDecide(mysqli $db, int $userId, int $siteId): array
+    {
+        if (App::isAdmin() === true) {
+            return self::reachFrom(true, []);
+        }
+
+        return self::reachFrom(false, Departments::approverDepts($db, $userId, $siteId));
+    }
+
+    /**
+     * Does this reach include a claim of this department?
+     *
+     * Anything that is not exactly `true` in `all` is NOT everything, and a
+     * department not in the list is not reached — so a malformed reach
+     * reaches nothing rather than everything.
+     *
+     * @param array<string, mixed> $reach  From `reachFrom()`, `reachToSee()` or `reachToDecide()`.
+     * @param int                  $deptId The claim's department.
+     *
+     * @return bool
+     */
+    public static function reachCovers(array $reach, int $deptId): bool
+    {
+        if (($reach['all'] ?? false) === true) {
+            return true;
+        }
+        if ($deptId <= 0 || is_array($reach['depts'] ?? null) === false) {
+            return false;
+        }
+
+        return in_array($deptId, $reach['depts'], true);
+    }
+
+    /**
+     * May this person open this claim? Their own claim, always; otherwise only
+     * a claim of a department their reach covers.
+     *
+     * A claim that fails this must be answered EXACTLY as a claim that does
+     * not exist (the claim page answers both with the same 404), so that
+     * nobody learns from the answer that a claim number is real — the money
+     * pages' rule that ownership is answered before anything else is said
+     * about a claim.
+     *
+     * @param array<string, mixed> $reach       From `reachToSee()`.
+     * @param int                  $claimantId  `tblExpenseClaims.userID`.
+     * @param int                  $claimDeptId `tblExpenseClaims.deptID`.
+     * @param int                  $viewerId    The signed-in account.
+     *
+     * @return bool
+     */
+    public static function mayViewClaim(array $reach, int $claimantId, int $claimDeptId, int $viewerId): bool
+    {
+        if (self::isOwnClaim($claimantId, $viewerId) === true) {
+            return true;
+        }
+
+        return self::reachCovers($reach, $claimDeptId);
+    }
+
+    /**
+     * The same reach as a condition for a query's WHERE clause, on the
+     * claim's department column, with its bound values.
+     *
+     *   everything        → `1 = 1`, nothing bound
+     *   no department     → `1 = 0`, nothing bound — the query answers no rows,
+     *                       which for the spreadsheet is the heading row alone
+     *   some departments  → `<column> IN (?, ?, …)`, one integer per department
+     *
+     * The column name is code, never input, and is refused unless it is a
+     * plain `alias.column` — it is put into the SQL as written, so this is the
+     * line that keeps that safe. Department numbers are always BOUND.
+     *
+     * Like `reachCovers()`, a malformed reach reaches nothing.
+     *
+     * @param array<string, mixed> $reach      From `reachToSee()` or `reachToDecide()`.
+     * @param string               $deptColumn For example `EC.deptID`.
+     *
+     * @return array{sql: string, types: string, params: list<int>}
+     *
+     * @throws \InvalidArgumentException When the column is not a plain `alias.column`.
+     */
+    public static function reachSql(array $reach, string $deptColumn): array
+    {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$/', $deptColumn) !== 1) {
+            throw new \InvalidArgumentException('reachSql() takes a plain alias.column, not ' . $deptColumn);
+        }
+        if (($reach['all'] ?? false) === true) {
+            return ['sql' => '1 = 1', 'types' => '', 'params' => []];
+        }
+        $ids = [];
+        foreach ((is_array($reach['depts'] ?? null) === true ? $reach['depts'] : []) as $id) {
+            if (is_int($id) === true && $id > 0) {
+                $ids[$id] = $id;
+            }
+        }
+        if (count($ids) === 0) {
+            return ['sql' => '1 = 0', 'types' => '', 'params' => []];
+        }
+        $ids = array_values($ids);
+
+        return [
+            'sql'    => $deptColumn . ' IN (' . implode(', ', array_fill(0, count($ids), '?')) . ')',
+            'types'  => str_repeat('i', count($ids)),
+            'params' => $ids,
+        ];
     }
 
     /* ---------------------------------------------------------------------- */

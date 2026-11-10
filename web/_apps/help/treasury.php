@@ -96,6 +96,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         made yourself is left off this list and the portal refuses if you try to pay it. Another treasurer or an
         administrator must pay it.
     </p>
+
+    <?php // #648 / D-040: a treasurer may download the claims spreadsheet, and sees every claim in it. ?>
+    <p class="mb-0 mt-3">
+        <strong>A spreadsheet of every claim.</strong> As a treasurer you can open any claim in your organisation,
+        and the <strong>Export</strong> button on the <code>/expenses/approve</code> page downloads every claim as a
+        spreadsheet (claim number, claimant, department, title, date, amount and status).
+    </p>
 </div>
 
 <!-- Section 2: Recording a Reimbursement -->

@@ -25,6 +25,10 @@
  *      dashboard's number leaves the administrator's own claims out; and
  *      the "no authority at all" refusal is still exactly what it was, and
  *      still comes before any claim is looked up.
+ *   5. whose claims a person may see (#648, D-103): the reach rule's pure
+ *      parts by hand; its SQL form against real rows, required to pick
+ *      exactly the claims its PHP form opens; and the claim page, the
+ *      spreadsheet and the approvals list each asking it.
  *
  * WHY PART 4 READS THE PAGES AS TEXT
  * ----------------------------------
@@ -77,7 +81,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 58;
+const EXPECTED_CHECKS = 91;
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -690,15 +694,18 @@ check(
 );
 
 // --- the three lists ---------------------------------------------------------
+// #648: the two list queries (one for an administrator, one with the department
+// join written out) became ONE query whose department condition comes from
+// ExpenseRules::reachSql(reachToDecide()). Section 5 pins that it asks the rule;
+// these two still pin that the viewer's own claims are left out, for everybody.
 check(
-    'approve/index.php: BOTH list queries (the administrator\'s and the approver\'s) leave the viewer\'s own claims out',
-    substr_count($approveList, "WHERE EC.status = 'Pending' AND EC.siteID = ? AND EC.userID <> ? ") === 2
-        && substr_count($approveList, "EC.status = 'Pending'") === 2
+    'approve/index.php: its ONE list query leaves the viewer\'s own claims out, for an administrator and everybody else alike',
+    substr_count($approveList, "WHERE EC.status = 'Pending' AND EC.siteID = ? AND EC.userID <> ? AND ") === 1
+        && substr_count($approveList, "EC.status = 'Pending'") === 1
 );
 check(
-    '…and each binds the signed-in account to that question mark',
-    str_contains($approveList, "\$stmt->bind_param('ii', \$siteId, \$currentUserId);") === true
-        && str_contains($approveList, "\$stmt->bind_param('iii', \$currentUserId, \$siteId, \$currentUserId);") === true
+    '…and binds the signed-in account to that question mark',
+    str_contains($approveList, "\$stmt->bind_param('ii' . \$reach['types'], \$siteId, \$currentUserId, ...\$reach['params']);") === true
         && str_contains($approveList, '$currentUserId = (int) ($_SESSION[\'user_id\'] ?? 0);') === true
 );
 check(
@@ -717,13 +724,13 @@ check(
 // --- the claim page, the e-mail and the dashboard ----------------------------
 check(
     'the claim page offers neither "Go to Approvals" nor "Go to Treasury" on a person\'s own claim',
-    str_contains($claimPage, "\$claim['status'] === 'Pending' && \$isClaimant === false && (\$hasApprover === true || \$isAdmin === true || \$hasDeptFlag === true)") === true
+    str_contains($claimPage, "\$claim['status'] === 'Pending' && \$isClaimant === false && \$mayDecide === true") === true
         && str_contains($claimPage, "\$claim['status'] === 'Approved' && \$isClaimant === false && (\$hasTreasurer === true || \$isAdmin === true)") === true
         && str_contains($claimPage, "\$isClaimant    = ((int) \$claim['userID'] === \$currentUserId);") === true
 );
 check(
     'the claim page tells a claimant who could otherwise have decided the claim who does decide it, with the rule\'s own sentence',
-    str_contains($claimPage, "\$claim['status'] === 'Pending' && \$isClaimant === true && (\$hasApprover === true || \$isAdmin === true || \$hasDeptFlag === true)") === true
+    str_contains($claimPage, "\$claim['status'] === 'Pending' && \$isClaimant === true && \$mayDecide === true") === true
         && str_contains($claimPage, "htmlspecialchars(ExpenseRules::MSG_OWN_CLAIM_PAGE, ENT_QUOTES, 'UTF-8')") === true
 );
 check(
@@ -740,6 +747,247 @@ check(
     'the dashboard\'s "Pending Claims" number leaves the administrator\'s own claims out, like the list it links to',
     str_contains($dashboard, "WHERE status = \\'Pending\\' AND siteID = ? AND userID <> ?'") === true
         && str_contains($dashboard, "\$expStmt->bind_param('ii', \$siteId, \$userId);") === true
+);
+
+// -----------------------------------------------------------------------------
+// 5. Whose claims a person may see (#648, D-103)
+// -----------------------------------------------------------------------------
+// The organisation-wide Approver role used to open ANY claim on the claim page
+// and put EVERY claim in the spreadsheet, while the approvals list and the
+// decision handler kept it to the departments its holder approves for. The
+// owner's answer (D-103): the role sees and downloads only those departments'
+// claims; an administrator and a treasurer see everything.
+//
+// 5a drives the rule's pure parts by hand. 5b runs `reachSql()` against REAL
+// rows and requires it to pick exactly the claims `reachCovers()` says yes to,
+// for every reach in a list that includes the empty one and a malformed one —
+// so the PHP answer the claim page gives and the SQL answer the spreadsheet
+// and the approvals list give cannot drift apart. 5c reads the three pages as
+// text (comments removed) and requires each to ask the rule; it cannot see a
+// page that asks and then ignores the answer — `tools/access-pages-selftest.php`
+// section L3 is what proves, over real HTTP, that a person is refused.
+echo "\n5. Whose claims a person may see (#648)\n";
+
+$deptFile = $web . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Departments.php';
+if (is_file($deptFile) === true && class_exists('Portal\\Core\\Departments') === false) {
+    require $deptFile;
+}
+
+// --- 5a. the rule's pure parts ------------------------------------------------
+$all      = $classExists === true ? $rules::reachFrom(true, [7 => ['isDeptLead' => true]]) : null;
+$two      = $classExists === true ? $rules::reachFrom(false, [9 => [], 4 => [], 0 => [], -3 => []]) : null;
+$none     = $classExists === true ? $rules::reachFrom(false, []) : null;
+check(
+    'reachFrom(): somebody who sees everything reaches everything, whatever departments are passed',
+    $all === ['all' => true, 'depts' => []],
+    json_encode($all)
+);
+check(
+    'reachFrom(): anybody else reaches the KEYS of approverDepts(), sorted, with nonsense numbers dropped',
+    $two === ['all' => false, 'depts' => [4, 9]],
+    json_encode($two)
+);
+check('reachFrom(): no department is no reach at all', $none === ['all' => false, 'depts' => []], json_encode($none));
+
+// mayViewClaim(reach, claimant, claim's department, viewer) — every row written out by hand.
+$viewTable = [
+    ['the claimant opens their own claim with no reach at all',                          ['all' => false, 'depts' => []],  50, 4, 50, true],
+    ['the claimant opens their own claim in a department they do not approve for',      ['all' => false, 'depts' => [9]], 50, 4, 50, true],
+    ['an approver of department 4 opens a claim of department 4',                        ['all' => false, 'depts' => [4]], 50, 4, 60, true],
+    ['an approver of department 4 does NOT open a claim of department 9 (D-103)',        ['all' => false, 'depts' => [4]], 50, 9, 60, false],
+    ['somebody with no department opens nobody else\'s claim (the role alone, D-103)',   ['all' => false, 'depts' => []],  50, 4, 60, false],
+    ['somebody who reaches everything opens any claim',                                  ['all' => true,  'depts' => []],  50, 9, 60, true],
+    ['viewer 0 is nobody, and nobody\'s claim (claimant 0) is not theirs',               ['all' => false, 'depts' => []],  0,  4, 0,  false],
+    ['a malformed reach ("all" not exactly true) reaches nothing',                       ['all' => 1,     'depts' => []],  50, 4, 60, false],
+    ['a malformed reach (department numbers as text) reaches nothing',                   ['all' => false, 'depts' => ['4']], 50, 4, 60, false],
+    ['a reach with no department list at all reaches nothing',                           ['all' => false],                 50, 4, 60, false],
+];
+foreach ($viewTable as [$what, $reachRow, $claimant, $dept, $viewer, $expected]) {
+    $got = $classExists === true ? $rules::mayViewClaim($reachRow, $claimant, $dept, $viewer) : null;
+    check('mayViewClaim(): ' . $what, $got === $expected, 'got ' . var_export($got, true));
+}
+
+$sqlAll  = $classExists === true ? $rules::reachSql(['all' => true, 'depts' => [4]], 'EC.deptID') : null;
+$sqlNone = $classExists === true ? $rules::reachSql(['all' => false, 'depts' => []], 'EC.deptID') : null;
+$sqlTwo  = $classExists === true ? $rules::reachSql(['all' => false, 'depts' => [4, 9, 4]], 'EC.deptID') : null;
+check('reachSql(): everything is `1 = 1` with nothing bound', $sqlAll === ['sql' => '1 = 1', 'types' => '', 'params' => []], json_encode($sqlAll));
+check('reachSql(): no department is `1 = 0` with nothing bound — no rows, never "every row"', $sqlNone === ['sql' => '1 = 0', 'types' => '', 'params' => []], json_encode($sqlNone));
+check(
+    'reachSql(): some departments are an IN list with every number BOUND, never written into the SQL',
+    $sqlTwo === ['sql' => 'EC.deptID IN (?, ?)', 'types' => 'ii', 'params' => [4, 9]],
+    json_encode($sqlTwo)
+);
+$refused = false;
+try {
+    $rules::reachSql(['all' => false, 'depts' => [4]], 'EC.deptID OR 1=1');
+} catch (\InvalidArgumentException $e) {
+    $refused = true;
+}
+check('reachSql(): a column that is not a plain alias.column is refused, because it is put into the SQL as written', $refused === true);
+
+// --- 5b. the SQL answer is the PHP answer, on real rows ----------------------
+const S_D1 = 915201; // three departments of A
+const S_D2 = 915202;
+const S_D3 = 915203; // retired: its claims are still reached by its own approvers
+const S_DB = 915204; // a department of B
+const S_CLAIMANT = 915031;
+const S_APPROVER = 915032; // approver of S_D1, required approver of S_D3
+const S_LEFT     = 915033; // lead of S_D2 whose membership of A has ENDED
+const S_NOFLAG   = 915034; // in S_D1 with no flag
+const S_BLEAD    = 915035; // lead of B's department, member of B only
+/** @var array<int, int> claim number => its department */
+$sClaims = [915301 => S_D1, 915302 => S_D1, 915303 => S_D2, 915304 => S_D3, 915305 => S_DB];
+
+$sBuilt = false;
+$mysqli->begin_transaction();
+try {
+    $mysqli->query(
+        'INSERT INTO tblSites (siteID, siteKey, siteName, isActive) VALUES '
+        . '(' . ORG_A . ", 'selftest-exp-a', 'Selftest expenses A', 1), (" . ORG_B . ", 'selftest-exp-b', 'Selftest expenses B', 1)"
+    );
+    foreach ([S_CLAIMANT, S_APPROVER, S_LEFT, S_NOFLAG, S_BLEAD] as $userId) {
+        $mysqli->query(
+            'INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES '
+            . "({$userId}, 'Selftest reach {$userId}', 'u{$userId}.exp@selftest.invalid', 1, 0, 0)"
+        );
+    }
+    foreach ([S_CLAIMANT => 1, S_APPROVER => 1, S_LEFT => 0, S_NOFLAG => 1] as $userId => $active) {
+        $mysqli->query('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (' . $userId . ', ' . ORG_A . ", {$active}, 0, 0)");
+    }
+    $mysqli->query('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (' . S_BLEAD . ', ' . ORG_B . ', 1, 0, 0)');
+    $mysqli->query(
+        'INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES '
+        . '(' . S_D1 . ', ' . ORG_A . ", 'Reach D1', 'RD1', 1), (" . S_D2 . ', ' . ORG_A . ", 'Reach D2', 'RD2', 1), "
+        . '(' . S_D3 . ', ' . ORG_A . ", 'Reach D3 retired', 'RD3', 0), (" . S_DB . ', ' . ORG_B . ", 'Reach DB', 'RDB', 1)"
+    );
+    foreach ([[S_APPROVER, S_D1, ORG_A, 0, 1, 0], [S_APPROVER, S_D3, ORG_A, 0, 0, 1], [S_LEFT, S_D2, ORG_A, 1, 0, 0],
+        [S_NOFLAG, S_D1, ORG_A, 0, 0, 0], [S_BLEAD, S_DB, ORG_B, 1, 0, 0]] as [$userId, $deptId, $siteId, $lead, $approver, $required]) {
+        $mysqli->query(
+            'INSERT INTO tblUserDepts (userID, deptID, siteID, isDeptLead, isApprover, isMandatoryApprover) VALUES '
+            . "({$userId}, {$deptId}, {$siteId}, {$lead}, {$approver}, {$required})"
+        );
+    }
+    foreach ($sClaims as $claimId => $deptId) {
+        $siteId = $deptId === S_DB ? ORG_B : ORG_A;
+        $mysqli->query(
+            'INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES '
+            . "({$claimId}, {$siteId}, " . S_CLAIMANT . ", {$deptId}, 'Reach claim {$claimId}', CURDATE(), 10.00, 'Pending')"
+        );
+    }
+    $sBuilt = true;
+} catch (Throwable $e) {
+    echo '  (the made-up world for section 5 could not be built: ' . $e->getMessage() . ")\n";
+}
+check('the made-up world for section 5 was built (two organisations, four departments, five claims)', $sBuilt === true);
+
+/** The claim numbers of A that reachSql() picks, in order. @return list<int>|null */
+$picked = static function (array $reach) use ($mysqli, $rules, $classExists, $sBuilt): ?array {
+    if ($classExists === false || $sBuilt === false) {
+        return null;
+    }
+    $cond = $rules::reachSql($reach, 'EC.deptID');
+    $stmt = $mysqli->prepare(
+        'SELECT EC.claimID FROM tblExpenseClaims EC WHERE EC.siteID = ? AND EC.claimID BETWEEN 915301 AND 915399 AND '
+        . $cond['sql'] . ' ORDER BY EC.claimID'
+    );
+    $stmt->bind_param('i' . $cond['types'], ...array_merge([ORG_A], $cond['params']));
+    $stmt->execute();
+    $ids = array_map(static fn (array $r): int => (int) $r['claimID'], $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
+    $stmt->close();
+
+    return $ids;
+};
+/** The claim numbers of A that reachCovers() says yes to, in order. @return list<int> */
+$covered = static function (array $reach) use ($rules, $sClaims): array {
+    $ids = [];
+    foreach ($sClaims as $claimId => $deptId) {
+        if ($deptId !== S_DB && $rules::reachCovers($reach, $deptId) === true) {
+            $ids[] = $claimId;
+        }
+    }
+
+    return $ids;
+};
+
+try {
+    $deptsOf = static fn (int $userId): array => $sBuilt === true && class_exists('Portal\\Core\\Departments') === true
+        ? $rules::reachFrom(false, \Portal\Core\Departments::approverDepts($mysqli, $userId, ORG_A))
+        : ['all' => false, 'depts' => [-1]];
+    $cases = [
+        'an approver of D1 and required approver of the RETIRED D3' => [$deptsOf(S_APPROVER), [915301, 915302, 915304]],
+        'a lead of D2 whose membership has ENDED'                   => [$deptsOf(S_LEFT),     []],
+        'a member of D1 with no flag'                               => [$deptsOf(S_NOFLAG),   []],
+        'a lead of B\'s department, asked about A'                  => [$deptsOf(S_BLEAD),    []],
+        'everything (an administrator, or a treasurer reading)'      => [$rules::reachFrom(true, []), [915301, 915302, 915303, 915304]],
+        'a malformed reach'                                         => [['all' => 'yes', 'depts' => ['915201']], []],
+    ];
+    foreach ($cases as $what => [$reachCase, $expected]) {
+        $sqlIds = $picked($reachCase);
+        check(
+            'on real rows, ' . $what . ': the SQL picks exactly the claims the PHP rule opens, and they are the expected ones',
+            $sqlIds === $covered($reachCase) && $sqlIds === $expected,
+            'SQL ' . json_encode($sqlIds) . ', PHP ' . json_encode($covered($reachCase)) . ', expected ' . json_encode($expected)
+        );
+    }
+    check(
+        'control: the "ended membership" answer is the membership, not a missing row — switched back on, D2\'s claim IS reached',
+        $sBuilt === true && $mysqli->query('UPDATE tblUserSites SET isActive = 1 WHERE userID = ' . S_LEFT . ' AND siteID = ' . ORG_A) === true
+            && $picked($deptsOf(S_LEFT)) === [915303]
+    );
+} finally {
+    $mysqli->rollback();
+}
+$left = $mysqli->query('SELECT (SELECT COUNT(*) FROM tblSites WHERE siteID IN (' . ORG_A . ', ' . ORG_B . ')) + (SELECT COUNT(*) FROM tblExpenseClaims WHERE claimID BETWEEN 915301 AND 915399) AS n')->fetch_assoc();
+check('nothing section 5 made is left in the database', (int) ($left['n'] ?? -1) === 0, 'rows left: ' . ($left['n'] ?? '?'));
+
+// --- 5c. the pages ask the rule ---------------------------------------------
+$exportPage = codeOnly($apps . 'expenses/api/export.php');
+$claimTight = squeezed((string) @file_get_contents($apps . 'expenses/view/index.php'));
+$exportTight = squeezed((string) @file_get_contents($apps . 'expenses/api/export.php'));
+$listTight  = squeezed((string) @file_get_contents($apps . 'expenses/approve/index.php'));
+// The whole statement, so `&& false`, or a second ground written in front of
+// it, changes the text and fails here.
+$claimGate = "\$reach=ExpenseRules::reachToSee(\$mysqli,\$currentUserId,\$siteId);";
+$claimRefusal = "if(\$claim===null||ExpenseRules::mayViewClaim(\$reach,(int)\$claim['userID'],(int)\$claim['deptID'],\$currentUserId)===false){Router::renderError(404);return;}";
+check(
+    'the claim page works out the reach BEFORE it reads the claim, at the top level of the page',
+    at($claimTight, $claimGate) >= 0 && at($claimTight, $claimGate) < at($claimTight, 'FROM tblExpenseClaims EC')
+        && depthAt($claimTight, at($claimTight, $claimGate)) === 0
+);
+check(
+    '…and answers a claim it may not open EXACTLY as a missing claim — one statement, one 404 — at the top level, once',
+    substr_count($claimTight, $claimRefusal) === 1 && depthAt($claimTight, at($claimTight, $claimRefusal)) === 0
+        && at($claimTight, $claimRefusal) < at($claimTight, 'FROM tblExpenseClaimItems'),
+    'The statement must read exactly: if ($claim === null || ExpenseRules::mayViewClaim($reach, (int) $claim[\'userID\'], (int) $claim[\'deptID\'], $currentUserId) === false) { Router::renderError(404); return; }'
+);
+check(
+    '…and no longer lets the Approver role (the expenses.approve capability) in, or answers 403',
+    str_contains($claimPage, 'EXPENSES_APPROVE') === false && str_contains($claimPage, 'renderError(403)') === false
+);
+check(
+    'the spreadsheet\'s rows follow the SAME reach as the claim page, inside the query',
+    str_contains($exportTight, "\$reach=ExpenseRules::reachSql(ExpenseRules::reachToSee(\$mysqli,\$userId,\$siteId),'EC.deptID');") === true
+        && str_contains($exportTight, "WHERE EC.siteID = ? AND \".\$reach['sql'].\"") === true
+        && str_contains($exportTight, "\$stmt->bind_param('i'.\$reach['types'],\$siteId,...\$reach['params']);") === true
+        && substr_count($exportPage, 'FROM tblExpenseClaims') === 1,
+    'The handler must build its condition from reachSql(reachToSee(...)) and bind its numbers after the organisation.'
+);
+check(
+    'the approvals list asks the DECIDING reach, in its one query',
+    str_contains($listTight, "\$reach=ExpenseRules::reachSql(ExpenseRules::reachToDecide(\$mysqli,\$currentUserId,\$siteId),'EC.deptID');") === true
+        && str_contains($listTight, "EC.userID <> ? AND \".\$reach['sql'].'") === true
+        && str_contains($listTight, "\$stmt->bind_param('ii'.\$reach['types'],\$siteId,\$currentUserId,...\$reach['params']);") === true
+        && str_contains($approveList, 'FROM tblUserDepts') === false,
+    'and it no longer carries its own copy of the department join.'
+);
+check(
+    'mayExportClaims() admits a treasurer (D-040) as well as an administrator and the Approver role',
+    $classExists === true
+        && str_contains(squeezed((string) @file_get_contents($classFile)), "if(App::can(Capabilities::EXPENSES_TREASURY)===true){returntrue;}returnApp::can(Capabilities::EXPENSES_APPROVE);}") === true
+);
+check(
+    'the claim page offers "Go to Approvals" only to somebody who may DECIDE this claim — the approvals list\'s own reach, not the Approver role',
+    str_contains($claimTight, "\$mayDecide=ExpenseRules::reachCovers(ExpenseRules::reachToDecide(\$mysqli,\$currentUserId,\$siteId),(int)\$claim['deptID']);") === true
 );
 
 // -----------------------------------------------------------------------------

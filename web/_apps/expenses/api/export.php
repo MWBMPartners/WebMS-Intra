@@ -2,8 +2,11 @@
 /**
  * 📄 web/_apps/expenses/api/export.php
  *
- * Hands back every expense claim in the organisation as a CSV file, for an
- * administrator or a holder of the `approver` role.
+ * Hands back the organisation's expense claims as a CSV file — every claim
+ * for an administrator or a treasurer, and for a holder of the `approver`
+ * role only the claims of the departments they approve for (#648, D-103).
+ * Who may download it at all is `ExpenseRules::mayExportClaims()`; which rows
+ * they get is `ExpenseRules::reachToSee()`, applied inside the query.
  *
  * NOT AN API ENDPOINT, despite the folder (#675). This file is reached through
  * the ORDINARY page router: `tblRoutes` holds
@@ -44,8 +47,8 @@ use Portal\Core\ExpenseRules;
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🔑 Only an administrator, or somebody holding the `approver` role, may
-//    download the spreadsheet.
+// 🔑 Only an administrator, a treasurer (D-040), or somebody holding the
+//    `approver` role may download the spreadsheet.
 //
 //    THE RULE ITSELF IS NOT HERE ANY MORE (#675). It is
 //    ExpenseRules::mayExportClaims(), because the Export button on
@@ -90,6 +93,29 @@ if (Auth::verifyCsrfWithoutSpending($_GET['csrf_token'] ?? '') === false) {
 // 🌐 Site context
 $siteId = Site::id();
 
+// 👁️ WHICH claims go in the file (#648, D-103).
+//
+//    WHAT WAS WRONG. The query below asked `WHERE EC.siteID = ?` and nothing
+//    else, so a holder of the organisation-wide Approver role — who on the
+//    approvals page this button sits on is shown only their own departments'
+//    claims — downloaded every claimant's name, department, claim title,
+//    date, amount and status for the whole organisation in one file.
+//
+//    The owner's answer: the role downloads only the claims of the
+//    departments its holder approves for; an administrator and a treasurer
+//    get every claim, as they see every claim on the claim page. The rule is
+//    `ExpenseRules::reachToSee()` — the SAME reach the claim page asks, so a
+//    claim is in this file exactly when its holder could open it there (their
+//    own claims in other departments aside: those are on their own Expenses
+//    page). It is applied INSIDE the query, never by dropping rows after
+//    reading them, so no other department's claim is ever read into memory
+//    for this person.
+//
+//    Somebody with the role and no department at all gets the heading row
+//    alone (`1 = 0`), which is what their approvals page shows them: nothing.
+$userId = (int) ($_SESSION['user_id'] ?? 0);
+$reach  = ExpenseRules::reachSql(ExpenseRules::reachToSee($mysqli, $userId, $siteId), 'EC.deptID');
+
 // 📊 Query expense claims
 $sql = "SELECT
             EC.claimID,
@@ -102,7 +128,7 @@ $sql = "SELECT
         FROM tblExpenseClaims EC
         JOIN tblUsers U ON U.userID = EC.userID
         LEFT JOIN tblDepts D ON D.deptID = EC.deptID
-        WHERE EC.siteID = ?
+        WHERE EC.siteID = ? AND " . $reach['sql'] . "
         ORDER BY EC.claimDate DESC";
 
 // 🔌 Use $mysqli rather than $db, because $mysqli works under BOTH routers.
@@ -124,7 +150,7 @@ $sql = "SELECT
 //    a way for this page to break later for a reason nobody would connect to
 //    this line.
 $stmt = $mysqli->prepare($sql);
-$stmt->bind_param('i', $siteId);
+$stmt->bind_param('i' . $reach['types'], $siteId, ...$reach['params']);
 $stmt->execute();
 $result = $stmt->get_result();
 

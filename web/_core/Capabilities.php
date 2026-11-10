@@ -596,8 +596,14 @@ final class Capabilities
         //       them together would hand somebody every department's figures.
         self::EXPENSES_TREASURY => [
             'label' => 'Pay approved expense claims',
-            'opens' => 'The treasury side of expenses: seeing every approved claim, recording a '
-                . 'payment reference and marking a claim reimbursed.',
+            // #648 / D-040: a treasurer opens ANY claim of the organisation on
+            // the claim page (as before), and since D-040 may download the
+            // claims spreadsheet, which for them holds every claim. Both are
+            // decided in `Portal\Core\ExpenseRules` (`reachToSee()`,
+            // `mayExportClaims()`), which is why that file is listed below.
+            'opens' => 'The treasury side of expenses: seeing every approved claim, opening any '
+                . 'claim to read it, recording a payment reference and marking a claim '
+                . 'reimbursed, and downloading the spreadsheet of every claim.',
             'standard' => ['treasurer'],
             'globalAdminFallsOpen' => true,
             'organisationMayRepoint' => true,
@@ -609,6 +615,7 @@ final class Capabilities
                 'web/_apps/expenses/treasury/index.php',
                 'web/_apps/expenses/treasury/save.php',
                 'web/_apps/expenses/view/index.php',
+                'web/_core/ExpenseRules.php',
             ],
         ],
 
@@ -666,21 +673,41 @@ final class Capabilities
         //    role through `self::EXPORT_ROLE`, so it is the same set of
         //    people and the same list of claims seen another way. Splitting
         //    it would be a new switch that answered the same question.
+        //
+        //    ⚠️ WHAT IT OPENS SHRANK, ON PURPOSE (#648, D-103, the owner,
+        //       10 November 2026). This entry used to say it opened "approving
+        //       or rejecting expense claims across the whole organisation,
+        //       opening any claim to read it, and downloading the claims
+        //       spreadsheet". The first part was never true — the decision
+        //       handler has always asked for a flag in the claim's OWN
+        //       department after this gate — and the other two were the
+        //       fault #648 fixed: the role opened every claim on the claim
+        //       page and put every claim in the spreadsheet. Now the role
+        //       holder sees and downloads only the claims of the departments
+        //       they approve for (`ExpenseRules::reachToSee()`), so what this
+        //       door opens by itself is the spreadsheet of those claims. The
+        //       label says so, because the Roles page is where an
+        //       organisation reads what it is handing out.
         self::EXPENSES_APPROVE => [
-            'label' => 'Decide expense claims',
-            'opens' => 'Approving or rejecting expense claims across the whole organisation, '
-                . 'opening any claim to read it, and downloading the claims spreadsheet.',
+            'label' => 'Expense approver: download the claims spreadsheet',
+            'opens' => 'Downloading the claims spreadsheet from the approvals page, holding the '
+                . 'claims of the departments the person approves for. It does not, by itself, '
+                . 'let anybody decide or open a claim: that comes from being marked as a lead, '
+                . 'approver or required approver of the claim\'s own department, with or '
+                . 'without this.',
             'standard' => ['approver'],
             'globalAdminFallsOpen' => true,
             'organisationMayRepoint' => true,
-            'emptyMeans' => 'No role will decide claims for the whole organisation. Administrators '
-                . 'of this organisation will still be able to, because the gate lets an '
-                . 'administrator in as well, and anybody marked as a lead or an approver of a '
-                . 'particular department keeps the claims of that department. Paying an approved '
-                . 'claim is a different door and is not affected.',
+            'emptyMeans' => 'No role will download the claims spreadsheet, except that administrators '
+                . 'of this organisation and treasurers still can, because the gate lets them in as '
+                . 'well. Anybody marked as a lead, approver or required approver of a department '
+                . 'still decides and opens that department\'s claims. Paying an approved claim is '
+                . 'a different door and is not affected.',
+            // `view/index.php` asked this until #648 and no longer does: who
+            // may open a claim is `ExpenseRules::reachToSee()`, in which this
+            // capability plays no part (D-103).
             'askedAt' => [
                 'web/_apps/expenses/approve/save.php',
-                'web/_apps/expenses/view/index.php',
                 'web/_core/ExpenseRules.php',
             ],
         ],
