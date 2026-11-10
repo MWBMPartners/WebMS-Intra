@@ -243,7 +243,26 @@ final class Brs
     public static bool $proofOk = true;
     public static int $checks = 0;
     public static bool $sessionLinkAtStart = false;   // see brs_sessionLink()
+    /**
+     * What `brs_differences()` needs to NAME a difference rather than only the
+     * table it is in (#912): for every state of a table that `brs_fingerprint()`
+     * has read, keyed by "table + that state's fingerprint", a checksum per
+     * COLUMN and (for a table of up to BRS_ROW_DETAIL_LIMIT rows) a checksum
+     * per ROW keyed by its primary key. It never decides a verdict — the
+     * fingerprint alone does that, exactly as before. It only says where to look.
+     *
+     * @var array<string, array{pk: list<string>, cols: array<string, int>, rows: array<string, string>|null}>
+     */
+    public static array $detail = [];
 }
+
+/**
+ * A table with more rows than this is described by column only in a failure
+ * message, never row by row: keeping one checksum per row of proof 5's
+ * 60,000-row table for every state it passes through would cost memory for
+ * nothing.
+ */
+const BRS_ROW_DETAIL_LIMIT = 5000;
 
 // =============================================================================
 // 🔌 Connections
@@ -378,7 +397,8 @@ function brs_fingerprint(array $leaveOut = []): array
 {
     $hexTypes = ['char', 'varchar', 'tinytext', 'text', 'mediumtext', 'longtext', 'binary', 'varbinary',
                  'tinyblob', 'blob', 'mediumblob', 'longblob', 'geometry', 'point', 'bit'];
-    $columns = [];
+    $columns  = [];
+    $colNames = [];
     $rs = Brs::$reader->query(
         'SELECT c.TABLE_NAME, c.COLUMN_NAME, c.DATA_TYPE FROM information_schema.COLUMNS c '
         . 'JOIN information_schema.TABLES t ON t.TABLE_SCHEMA = c.TABLE_SCHEMA AND t.TABLE_NAME = c.TABLE_NAME '
@@ -387,6 +407,20 @@ function brs_fingerprint(array $leaveOut = []): array
     while (($row = $rs->fetch_row()) !== null) {
         $quoted = '`' . $row[1] . '`';
         $columns[(string) $row[0]][] = in_array(strtolower((string) $row[2]), $hexTypes, true) === true ? 'HEX(' . $quoted . ')' : $quoted;
+        $colNames[(string) $row[0]][] = (string) $row[1];
+    }
+    $rs->free();
+
+    // 🔑 Each table's primary key, read fresh every time (a scratch table can
+    //    be dropped and made again in another shape). Used ONLY to name a row
+    //    in a failure message (#912) — never to decide anything.
+    $keys = [];
+    $rs = Brs::$reader->query(
+        'SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE '
+        . "WHERE TABLE_SCHEMA = DATABASE() AND CONSTRAINT_NAME = 'PRIMARY' ORDER BY TABLE_NAME, ORDINAL_POSITION"
+    );
+    while (($row = $rs->fetch_row()) !== null) {
+        $keys[(string) $row[0]][] = (string) $row[1];
     }
     $rs->free();
 
@@ -395,6 +429,18 @@ function brs_fingerprint(array $leaveOut = []): array
         if (in_array($table, $leaveOut, true) === true) {
             continue;
         }
+        $names   = $colNames[$table] ?? [];
+        $pkNames = $keys[$table] ?? [];
+        $pkAt    = [];
+        foreach ($pkNames as $pkName) {
+            $at = array_search($pkName, $names, true);
+            if ($at !== false) {
+                $pkAt[] = (int) $at;
+            }
+        }
+        $colSums = array_fill(0, count($expressions), 0);
+        $rowSums = [];
+
         // Ordered by every column, so the order rows happen to be stored in
         // cannot change the answer.
         $rs = Brs::$reader->query(
@@ -404,20 +450,61 @@ function brs_fingerprint(array $leaveOut = []): array
         $hash  = hash_init('sha256');
         $count = 0;
         while (($row = $rs->fetch_row()) !== null) {
+            $rowText = '';
             foreach ($row as $value) {
                 // An empty value and no value at all must not look the same.
-                hash_update($hash, $value === null ? "N\n" : 'S' . $value . "\n");
+                $one = $value === null ? "N\n" : 'S' . $value . "\n";
+                hash_update($hash, $one);
+                $rowText .= $one;
             }
             hash_update($hash, "--row--\n");
             $count++;
+
+            // 🔎 The naming detail (#912). Each column's checksum is a SUM, so
+            //    it does not depend on the order rows come back in, and each
+            //    value is summed together with its row's key, so a value that
+            //    moved from one row to another still shows. Never a verdict.
+            $pkText = '';
+            foreach ($pkAt as $at) {
+                $pkText .= ($pkText === '' ? '' : ',') . $names[$at] . '=' . ($row[$at] ?? 'NULL');
+            }
+            foreach ($row as $i => $value) {
+                $colSums[$i] += crc32($pkText . "\0" . ($value === null ? "\1N" : 'S' . $value));
+            }
+            if ($pkAt !== [] && $count <= BRS_ROW_DETAIL_LIMIT) {
+                $rowSums[$pkText] = md5($rowText);
+            }
         }
         $rs->free();
         $print[$table] = $count . ' rows ' . hash_final($hash);
+
+        $detailKey = $table . ' ' . $print[$table];
+        if (isset(Brs::$detail[$detailKey]) === false) {
+            $byName = [];
+            foreach ($colSums as $i => $sum) {
+                $byName[$names[$i] ?? ('column ' . ($i + 1))] = $sum;
+            }
+            Brs::$detail[$detailKey] = [
+                'pk'   => $pkNames,
+                'cols' => $byName,
+                'rows' => ($pkAt !== [] && $count <= BRS_ROW_DETAIL_LIMIT) ? $rowSums : null,
+            ];
+        }
     }
     return $print;
 }
 
-/** The tables in which two fingerprints differ, as text; empty when they are the same. */
+/**
+ * The tables in which two fingerprints differ, as text; empty when they are
+ * the same.
+ *
+ * WHETHER the answer is empty is decided by the fingerprints alone, exactly as
+ * it always was. When it is NOT empty, each table is followed by what
+ * `brs_whereTheyDiffer()` can say about it — which columns, and which rows by
+ * primary key — because "these tables differ: tblUsers" alone sent #912 off to
+ * guess. No VALUE is ever printed, only column names and key values, so a
+ * failure message cannot carry a person's details.
+ */
 function brs_differences(array $before, array $after): string
 {
     $differ = [];
@@ -427,7 +514,73 @@ function brs_differences(array $before, array $after): string
         }
     }
     sort($differ);
-    return implode(', ', array_slice($differ, 0, 12)) . (count($differ) > 12 ? ' and ' . (count($differ) - 12) . ' more' : '');
+    $named = [];
+    foreach (array_slice($differ, 0, 12) as $table) {
+        $where   = brs_whereTheyDiffer((string) $table, $before[$table] ?? null, $after[$table] ?? null);
+        $named[] = $table . ($where === '' ? '' : ' (' . $where . ')');
+    }
+    return implode(', ', $named) . (count($differ) > 12 ? ' and ' . (count($differ) - 12) . ' more' : '');
+}
+
+/**
+ * Which columns and which rows of one table differ between two of its states,
+ * in words; '' when nothing is recorded about one of them (a state that
+ * `brs_fingerprint()` did not read in this process). Diagnosis only: nothing
+ * ever asks it whether two states are the same.
+ */
+function brs_whereTheyDiffer(string $table, ?string $before, ?string $after): string
+{
+    if ($before === null || $after === null) {
+        return $before === null ? 'not there before' : 'not there after';
+    }
+    $was = Brs::$detail[$table . ' ' . $before] ?? null;
+    $now = Brs::$detail[$table . ' ' . $after] ?? null;
+    if ($was === null || $now === null) {
+        return '';
+    }
+    $parts = [];
+    $cols  = [];
+    foreach (array_unique(array_merge(array_keys($was['cols']), array_keys($now['cols']))) as $col) {
+        if (($was['cols'][$col] ?? null) !== ($now['cols'][$col] ?? null)) {
+            $cols[] = (string) $col;
+        }
+    }
+    if ($cols !== []) {
+        $parts[] = 'column' . (count($cols) === 1 ? ' ' : 's ') . implode(', ', $cols);
+    }
+    $list = static fn (array $keys): string => implode('; ', array_slice($keys, 0, 5))
+        . (count($keys) > 5 ? ' and ' . (count($keys) - 5) . ' more' : '');
+    if ($was['rows'] !== null && $now['rows'] !== null) {
+        $changed = [];
+        $gone    = [];
+        $added   = [];
+        foreach ($was['rows'] as $key => $sum) {
+            if (isset($now['rows'][$key]) === false) {
+                $gone[] = (string) $key;
+            } elseif ($now['rows'][$key] !== $sum) {
+                $changed[] = (string) $key;
+            }
+        }
+        foreach (array_keys($now['rows']) as $key) {
+            if (isset($was['rows'][$key]) === false) {
+                $added[] = (string) $key;
+            }
+        }
+        if ($changed !== []) {
+            $parts[] = 'changed row' . (count($changed) === 1 ? ' ' : 's ') . $list($changed);
+        }
+        if ($gone !== []) {
+            $parts[] = 'row' . (count($gone) === 1 ? ' ' : 's ') . $list($gone) . ' gone';
+        }
+        if ($added !== []) {
+            $parts[] = 'row' . (count($added) === 1 ? ' ' : 's ') . $list($added) . ' added';
+        }
+    } elseif ($was['pk'] === [] || $now['pk'] === []) {
+        $parts[] = 'no primary key, so its rows cannot be named';
+    } else {
+        $parts[] = 'more than ' . BRS_ROW_DETAIL_LIMIT . ' rows, so they are not named one by one';
+    }
+    return implode('; ', $parts);
 }
 
 // =============================================================================
@@ -1086,6 +1239,28 @@ function brs_waitFor(callable $condition, float $seconds): bool
         usleep(2000);
     }
     return false;
+}
+
+/**
+ * Wait until the DATABASE's clock has moved on to the next second, and say
+ * whether it did.
+ *
+ * A column declared `DEFAULT CURRENT_TIMESTAMP` (or `ON UPDATE
+ * CURRENT_TIMESTAMP`) is stamped to the second. If a restore, or a put-back,
+ * let the database stamp such a column instead of writing the value it was
+ * given, the result would differ from the original ONLY when the two moments
+ * fall in different seconds — so a comparison made without this passes or
+ * fails on the timing of the run, not on the code (#912; the re-stamped
+ * `updatedAt` of #694 was this shape). Calling this after taking the "before"
+ * picture makes every later stamp land in a later second, so such a fault
+ * fails EVERY run. The database's clock is asked rather than PHP's, because it
+ * is the database that does the stamping.
+ */
+function brs_waitForTheNextSecond(): bool
+{
+    $now   = static fn (): string => (string) Brs::$writer->query('SELECT NOW()')->fetch_row()[0];
+    $start = $now();
+    return brs_waitFor(static fn (): bool => $now() !== $start, 3.0);
 }
 
 /** The snapshot folder a child is writing into, once the large table's file has appeared in it. */
@@ -3496,6 +3671,16 @@ function brs_proof27(): void
     $before      = brs_fingerprint();
     $heldBackWas = brs_savedHeldBack();
 
+    // ⏱️ EVERYTHING BELOW HAPPENS IN A LATER SECOND THAN THE ROWS ABOVE WERE
+    //    WRITTEN, on purpose (#912). Three tables here carry a column the
+    //    database stamps for itself (`tblUsers.createdAt`,
+    //    `tblTotpBackupCodes.createdAt`, `tblSettings.updatedAt`), and a
+    //    restore or put-back that let one be stamped again would only differ
+    //    from the original when the run crossed a second — which made the
+    //    decisive comparison in section D pass or fail on timing. With this it
+    //    is decided by the code, every run.
+    brs_check(brs_waitForTheNextSecond(), 'the database\'s clock has moved on a second since these rows were written, so any column the database stamps for itself would now show a different value');
+
     // Counters asked of the database every time, never remembered.
     $settingRows = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblSettings WHERE settingID = 970941')->fetch_row()[0];
     $codeRows    = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblTotpBackupCodes WHERE codeID >= 970940')->fetch_row()[0];
@@ -3663,6 +3848,19 @@ function brs_proof27(): void
     //    This is the check that fails if putHeldRowsBack() ever marks rows by
     //    "did any succeed" rather than "did THIS one".
     // ---------------------------------------------------------------------
+    // 🧷 THE ACCOUNT IS KEPT WHOLE AND PUT BACK COLUMN BY COLUMN (#912).
+    //    `tblUsers.createdAt` is `DEFAULT CURRENT_TIMESTAMP`, and this used to
+    //    put the account back by id and e-mail address alone — so the database
+    //    gave it a NEW created date, and section D's comparison failed whenever
+    //    the run crossed a second between the row's first INSERT and this one.
+    //    That is the TEST changing a value, not the restore: measured, the one
+    //    difference was column `createdAt` of row userID=970941 and nothing
+    //    else, while 970940 — restored by the very same restore — was exact.
+    //    It is copied from the table AS IT STANDS NOW, after the restore, and
+    //    never from before it: copying the earlier row would paper over a
+    //    restore that had got this row wrong. tools/backup-page-selftest.php
+    //    met the same trap in its own section P and does the same.
+    $accountB = Brs::$writer->query('SELECT * FROM tblUsers WHERE userID = 970941')->fetch_assoc();
     brs_sql('DELETE FROM tblUsers WHERE userID = 970941');
     $mixed = $backup->putHeldRowsBack('tblTotpBackupCodes');
     brs_check(
@@ -3680,8 +3878,17 @@ function brs_proof27(): void
     );
     brs_check($codeRows() === 2, 'the two that went back are really in the table again', 'codes: ' . $codeRows());
 
-    // Now give the missing account back and ask again.
-    brs_sql("INSERT INTO tblUsers (userID, emailAddress) VALUES (970941, 'brs-p27-b@example.invalid')");
+    // Now give the missing account back — every column as it was, created date
+    // included (see the note above the DELETE) — and ask again.
+    $names  = array_keys($accountB);
+    $insert = Brs::$writer->prepare(
+        'INSERT INTO tblUsers (`' . implode('`, `', $names) . '`) VALUES ('
+        . implode(', ', array_fill(0, count($names), '?')) . ')'
+    );
+    $values = array_values($accountB);
+    $insert->bind_param(str_repeat('s', count($values)), ...$values);
+    $insert->execute();
+    $insert->close();
     $second = $backup->putHeldRowsBack('tblTotpBackupCodes');
     brs_check(
         $second['success'] === true && $second['put_back'] === 1 && $second['still_missing'] === 0,
