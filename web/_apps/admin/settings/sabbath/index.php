@@ -35,10 +35,6 @@
  * does, so it needs its own decision. Reserving the portal-wide save for a
  * global administrator is safe either way.
  *
- * @package   Portal\Admin
- * @author    MWBM Partners Ltd (t/a MWservices)
- * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
- * @license   All Rights Reserved
  * THE BOXES SHOW THE INSTALLATION'S ROW, AND A SAVE CHANGES ONLY WHAT WAS SENT (#936)
  * -----------------------------------------------------------------------------
  * Because the save writes the installation's row, the boxes are filled from that
@@ -48,6 +44,10 @@
  * form's `switches_shown` marker arrived, because an unticked box sends nothing.
  * A value the page cannot use is refused with its reason, and nothing is saved.
  *
+ * @package   Portal\Admin
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
  * @version   1.2.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/251
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
@@ -388,11 +388,17 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
 <?php if ($methodInForce === 'sunset_calc' && $placeInForce === null): ?>
     <?php // 📍 #935: sunset needs a place and none is known. The window is worked out by the fixed
           //    method instead (Sabbath::computeWindow()), and this is the sentence that says so. ?>
+    <?php // Said exactly (round 1 of the independent check): "no latitude and longitude" was
+          // untrue when half a place, or a value that is not a number, is stored. ?>
+    <?php $placeTyped = trim((string) ($inForce['location_lat'] ?? '')) !== '' || trim((string) ($inForce['location_lng'] ?? '')) !== ''; ?>
     <div class="alert alert-warning" data-sabbath-no-place>
         <i class="fa-solid fa-location-dot me-2"></i>
-        Sunset is chosen, but no place is set for this organisation: there is no latitude and longitude
-        below, and none on its organisation settings. Until one is set, quiet hours use the fixed times
-        instead: 18:00 on Friday to 18:00 on Saturday, with the offsets below.
+        Sunset is chosen, but no usable place is known for this organisation:
+        <?php echo $placeTyped === true
+            ? 'the latitude and longitude in force here are not a usable pair (both are needed, each a number in range),'
+            : 'no latitude and longitude are given here,'; ?>
+        and its organisation settings have no usable map position. Until there is one, quiet hours use the
+        fixed times instead: 18:00 on Friday to 18:00 on Saturday, with the offsets below.
         Set a place below, or this organisation's map position at
         <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Settings, Organisation</a>.
     </div>

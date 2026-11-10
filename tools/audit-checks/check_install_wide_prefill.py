@@ -102,19 +102,33 @@ than none
    (#936): it is its own saver, and it read its boxes through
    `$settings = App::settings();` -- both blind spots at once. Such a page is now
    reported when it contains a `<form>`, never reads the layer, and reads out
-   of the merged settings (through `App::settings()`, `App::settings('a.b')`,
-   `$SETTINGS`, or a variable assigned `App::settings()`) a dotted key it also
-   names as a literal it writes. EXACT keys, not groups: the group rule would
-   report any page writing one `portal.*` key that showed another. Measured
-   over every page under `admin/` when it was added, it reported three pages,
-   and all three really have the fault: the Sabbath page (fixed by #936),
-   `admin/maintenance/backup.php` (`backup.schedule.frequency` and `keep`) and
-   `admin/settings/qr/index.php` (`portal.qr.provider` and the CueRCode
-   address). The last two are on the pending list.
+   of the merged settings (through `App::settings()`, `App::settings('a.b')` or
+   `App::settings("a.b")`, `$SETTINGS`, or a variable assigned
+   `App::settings()`) a dotted key that the SAME FILE WRITES. EXACT keys, not
+   groups: the group rule would report any page writing one `portal.*` key
+   that showed another.
+   **"Writes" means one of three shapes, and nothing else** (`keys_written()`):
+   the key of an array entry (`'a.b' => …`, the values map every self-saver
+   here loops over), an assignment to an element (`$values['a.b'] = …`), or a
+   literal inside an `INSERT INTO tblSettings …` statement's own text. The
+   first version counted EVERY single-quoted dotted literal in the file, so a
+   named READ, `App::settings('org.name')`, matched itself: one display-only
+   read on a self-saving page made the check fail on a page with no fault
+   (round 1 of the independent check, planted). A cry-wolf check gets switched
+   off (#483).
+   Measured over every page under `admin/` when it was added, it reported three
+   pages, and all three really have the fault: the Sabbath page (fixed by
+   #936), `admin/maintenance/backup.php` (`backup.schedule.frequency` and
+   `keep`) and `admin/settings/qr/index.php` (`portal.qr.provider` and the
+   CueRCode address). The last two are on the pending list.
    What it still cannot see: a key the page builds rather than writes out
-   whole (`'backup.' . $part`), a box filled from a PARENT array read into a
-   variable first (`$s = $SETTINGS['backup']; … $s['keep']`), and a page whose
-   own saver writes with the level chosen at run time (see below).
+   whole (`'backup.' . $part`), a key written through a helper whose argument
+   is not one of the three shapes (`$save('a.b', $value)`), a box filled from a
+   PARENT array read into a variable first (`$s = $SETTINGS['backup'];
+   … $s['keep']`), and a page whose own saver writes with the level chosen at
+   run time (see below). The first shape can also over-report: an array entry
+   keyed by a setting name that is NOT a write (a list of labels, say) counts
+   as one.
 Both 6 and 7 were missing from this list until the independent check of
 30 October 2026 planted them. **A list of limits that omitted a LIVE instance
 overstated the gate**, which this project treats as worse than no guarantee --
@@ -266,9 +280,26 @@ def reads_merged(code: str, group: str) -> bool:
             or re.search(r"App::settings\(\s*'" + re.escape(group) + r"[.'\)]", code) is not None)
 
 
+DOTTED_KEY = r"([a-z_][a-zA-Z0-9_]*\.[a-zA-Z0-9_.]+)"
+
+
 def keys_written(code: str) -> set[str]:
-    """Every whole dotted setting key a page names as a literal (#936)."""
-    return set(re.findall(r"'([a-z_][a-zA-Z0-9_]*\.[a-zA-Z0-9_.]+)'", code))
+    """
+    The whole dotted setting keys a page WRITES (#936): see limit 7 in the
+    header for the three shapes, and why a named read is not one of them.
+    """
+    written: set[str] = set()
+    # 1. The key of an array entry: 'a.b' => …
+    written |= set(re.findall(r"['\"]" + DOTTED_KEY + r"['\"]\s*=>", code))
+    # 2. An assignment to an element: $values['a.b'] = … (never ==, never =>)
+    written |= set(re.findall(r"\$\w+\s*\[\s*['\"]" + DOTTED_KEY + r"['\"]\s*\]\s*=(?![=>])", code))
+    # 3. A literal inside an INSERT INTO tblSettings statement's own text, which
+    #    runs to the end of the PHP statement (the next ';' outside a string is
+    #    not tracked: a ';' inside the SQL text ends the span early, which can
+    #    only make this under-report).
+    for statement in re.finditer(r"INSERT\s+INTO\s+`?tblSettings`?[^;]*", code, re.IGNORECASE):
+        written |= set(re.findall(r"'" + DOTTED_KEY + r"'", statement.group(0)))
+    return written
 
 
 # 🔎 The MERGED settings, in every spelling a page uses to reach them (#936):
@@ -293,7 +324,7 @@ def merged_keys_read(code: str) -> set[str]:
     for root in roots:
         for chain in re.finditer(root + r"((?:\s*\[\s*'[A-Za-z0-9_]+'\s*\])+)", code):
             found.add(".".join(re.findall(r"'([A-Za-z0-9_]+)'", chain.group(1))))
-    for named in re.finditer(r"App::settings\(\s*'([A-Za-z0-9_.]+)'\s*\)", code):
+    for named in re.finditer(r"App::settings\(\s*['\"]([A-Za-z0-9_.]+)['\"]\s*\)", code):
         found.add(named.group(1))
     return found
 

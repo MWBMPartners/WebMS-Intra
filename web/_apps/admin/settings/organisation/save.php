@@ -400,8 +400,18 @@ $upsert($db, 'org.address.city', (string) ($address['city'] ?? ''), $siteId);
 $upsert($db, 'org.address.region', (string) ($address['region'] ?? ''), $siteId);
 $upsert($db, 'org.address.postcode', (string) ($address['postcode'] ?? ''), $siteId);
 $upsert($db, 'org.address.countryCode', $address['countryCode'], $siteId);
-$upsert($db, 'org.latitude', $coords !== null ? (string) $coords['lat'] : '', $siteId);
-$upsert($db, 'org.longitude', $coords !== null ? (string) $coords['lng'] : '', $siteId);
+// 📍 A coordinate is stored as a PLAIN decimal (#935). `(string)` on a float writes
+//    anything under 0.0001 with an exponent ('4.0E-5'), which is not what a person or
+//    most readers expect of a latitude; the Sabbath window's first reader refused it
+//    and silently used the fixed times. Seven places (the precision validateCoords()
+//    rounds to), trailing zeros trimmed, and never "-0".
+$plainCoordinate = static function (float $value): string {
+    $text = rtrim(rtrim(sprintf('%.7F', $value), '0'), '.');
+
+    return $text === '-0' ? '0' : $text;
+};
+$upsert($db, 'org.latitude', $coords !== null ? $plainCoordinate((float) $coords['lat']) : '', $siteId);
+$upsert($db, 'org.longitude', $coords !== null ? $plainCoordinate((float) $coords['lng']) : '', $siteId);
 $upsert($db, 'org.what3words', $w3w ?? '', $siteId);
 
 Logger::activity('OrgAddressSaved', 'Organisation address updated');

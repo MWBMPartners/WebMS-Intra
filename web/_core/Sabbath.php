@@ -244,13 +244,22 @@ class Sabbath
             return ['lat' => $lat, 'lng' => $lng, 'from' => 'setting'];
         }
 
-        // 🏢 The organisation's own map position. For the organisation the
-        //    current request belongs to, the merged settings already hold its
-        //    own row where it has one. For ANOTHER organisation (a scheduled job
-        //    working through several), it is read from the database, that
-        //    organisation's own row first (App::settingForSite()). A read that
-        //    fails means "no place known", never a made-up one.
-        if ($siteId === null || $siteId === Site::id()) {
+        // 🏢 The organisation's own map position. GIVEN an organisation, it is
+        //    ALWAYS read from the database, that organisation's own row first
+        //    (App::settingForSite()), never from the merged settings.
+        //    WHAT WAS WRONG (round 1 of the independent check): the first version
+        //    took a short cut when the organisation given was Site::id(), reading
+        //    the merged settings. But those were merged at start-up for the
+        //    organisation the ADDRESS resolved to, and Site::forceContext() (an
+        //    API key belonging to another organisation, ApiAuth) changes
+        //    Site::id() without merging again. A prayer request sent that way
+        //    reaches Sms::send($siteId) → isQuietNow(…, $siteId), and the window
+        //    was opened at the ADDRESS organisation's sunset on the KEY
+        //    organisation's clock. Measured: London's position, Sydney's clock.
+        //    Only with NO organisation given (something that belongs to the
+        //    request itself) are the merged settings read. A read that fails
+        //    means "no place known", never a made-up one.
+        if ($siteId === null) {
             $orgLat = App::settings('org.latitude');
             $orgLng = App::settings('org.longitude');
         } else {
@@ -275,10 +284,18 @@ class Sabbath
      *
      * The ONE test of what counts as a coordinate here, asked by place() AND by
      * the settings page's save, so the page cannot accept what the window then
-     * ignores. A plain decimal written as text (optionally signed), finite, and
-     * no further from zero than `$limit` (90 for a latitude, 180 for a
-     * longitude). Anything else (empty text, words, a list, an exponent such as
-     * "1e2") is null.
+     * ignores. A decimal written as text (optionally signed, optionally with an
+     * exponent such as "4.0E-5"), finite, and no further from zero than
+     * `$limit` (90 for a latitude, 180 for a longitude). Anything else (empty
+     * text, words, a list) is null. Exactly 0 is a real coordinate.
+     *
+     * WHY THE EXPONENT IS ACCEPTED (round 1 of the independent check): the
+     * organisation page stored a coordinate as PHP writes a float, and PHP
+     * writes anything under 0.0001 with an exponent ('4.0E-5'). The first
+     * version refused that, so a place just off the Greenwich meridian or the
+     * equator silently fell back to the fixed times while the page said the
+     * organisation had no map position. The organisation page now stores a
+     * plain decimal (#935), and this still reads what it stored before.
      *
      * WHAT WAS WRONG: the value was cast with (float), so empty text, a word or
      * a missing field all read as 0: a place in the Gulf of Guinea.
@@ -292,7 +309,7 @@ class Sabbath
             return null;
         }
         $text = trim($value);
-        if (preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', $text) !== 1) {
+        if (preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d{1,3})?$/', $text) !== 1) {
             return null;
         }
         $number = (float) $text;
@@ -303,9 +320,28 @@ class Sabbath
         return $number;
     }
 
+    /**
+     * Sunset at a place, on the calendar date `$date` has on ITS OWN clock.
+     *
+     * ⚠️ `date_sun_info()` decides WHICH DAY from PHP's DEFAULT time zone, not
+     * from anything it is given. Measured on PHP 8.5: Friday 16 June 2028 at
+     * noon in Santiago, at Santiago's position, gives Friday's sunset with the
+     * default zone on UTC and SATURDAY's (24 hours later) with it on Sydney.
+     * Start-up sets the default zone to the organisation the ADDRESS resolved
+     * to, so for any other organisation (a scheduled job working through
+     * several, or Site::forceContext()) the window could open a day late. So
+     * the default zone is set to the window's own for the one call and put
+     * back, whatever happens. Found by #935's round-2 check (P16).
+     */
     private static function sunsetAt(\DateTimeImmutable $date, float $lat, float $lng): int
     {
-        $info = date_sun_info($date->getTimestamp(), $lat, $lng);
+        $defaultZone = date_default_timezone_get();
+        try {
+            date_default_timezone_set($date->getTimezone()->getName());
+            $info = date_sun_info($date->getTimestamp(), $lat, $lng);
+        } finally {
+            date_default_timezone_set($defaultZone);
+        }
         if (is_array($info) && isset($info['sunset']) && is_int($info['sunset'])) {
             return $info['sunset'];
         }

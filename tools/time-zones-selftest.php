@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 224;  // + twenty in part P (#935, #936: P00-P07, six P08, P09-P14) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 231;  // + twenty-seven in part P (#935, #936: P00-P07, six P08, P09-P21) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -209,6 +209,14 @@ if (($argv[1] ?? '') === '--child') {
                 $out['start']  = (new DateTimeImmutable('@' . $winStart))->setTimezone(new DateTimeZone((string) $job['showIn']))->format('D Y-m-d H:i');
                 $out['startTs'] = $winStart;
                 $out['place']   = \Portal\Core\Sabbath::place(); // #935: where sunset is worked out, or null
+                break;
+            case 'sabbathForced': // #935 round 2: another organisation forced in AFTER start-up, as ApiAuth does
+                \Portal\Core\Site::forceContext((int) $job['site']);
+                $out['siteNow'] = \Portal\Core\Site::id();
+                $out['place']   = \Portal\Core\Sabbath::place((int) $job['site']);
+                foreach ((array) $job['moments'] as $moment) {
+                    $out['quiet'][] = \Portal\Core\Sabbath::isQuietNow(null, (int) $moment, (int) $job['site']);
+                }
                 break;
             default:
                 $out['threw'] = 'the child was given a task it does not know';
@@ -3539,14 +3547,15 @@ setting('livestream.enabled', $nLiveWas === null ? '0' : (string) $nLiveWas);
 // organisation's own clock are hours apart (the same premise as part N).
 head('P. #935, #936: no place is built in, and the Sabbath page saves only what it was sent');
 const P_KEYS = "('portal.sabbath.enabled','portal.sabbath.method','portal.sabbath.timezone','portal.sabbath.location_lat','portal.sabbath.location_lng',"
-    . "'portal.sabbath.start_offset_minutes','portal.sabbath.end_offset_minutes','portal.sabbath.bypass_critical','org.latitude','org.longitude','org.address.countryCode')";
-$pWas      = q('SELECT siteID, settingKey, settingValue FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND (siteID IS NULL OR siteID = 1)');
+    . "'portal.sabbath.start_offset_minutes','portal.sabbath.end_offset_minutes','portal.sabbath.bypass_critical','org.latitude','org.longitude','org.address.countryCode',"
+    . "'multisite.enabled','org.address.line1','org.address.line2','org.address.city','org.address.region','org.address.postcode','org.what3words')";
+$pWas      = q('SELECT siteID, settingKey, settingValue FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND (siteID IS NULL OR siteID IN (1, ' . ORG_TWO . '))');
 $pOrgZone  = one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? null;
-/** One organisation-1 row of its own: written, or removed when $value is null. */
-$siteRow = static function (string $key, ?string $value): void {
-    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', [$key]);
+/** One organisation's own row (organisation 1 unless told): written, or removed when $value is null. */
+$siteRow = static function (string $key, ?string $value, int $site = 1): void {
+    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID = ?', 'si', [$key, $site]);
     if ($value !== null) {
-        q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (1, ?, ?, ?, 0)', 'sss', [$key, $value, $value]);
+        q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss', [$site, $key, $value, $value]);
     }
 };
 /** Every installation-wide Sabbath row, key => value. */
@@ -3609,17 +3618,27 @@ $pPage = req($adminJar, 'GET', '/admin/settings/sabbath');
 ok(
     'P02 the Sabbath page SAYS that sunset has no place and that the fixed times are used instead',
     $pPage['status'] === 200 && str_contains($pPage['body'], 'data-sabbath-no-place') === true
-        && str_contains(words($pPage['body']), 'no place is set for this organisation') === true
+        && str_contains(words($pPage['body']), 'no usable place is known for this organisation: no latitude and longitude are given here') === true
         && str_contains(words($pPage['body']), 'quiet hours use the fixed times instead') === true,
     said($pPage)
 );
 // The organisation's own map position (Admin, Settings, Organisation).
 $siteRow('org.latitude', '-33.87');
 $siteRow('org.longitude', '151.21');
-$sunsetOn = static function (float $lat, float $lng): string {
-    $noon = new DateTimeImmutable('2028-06-16 12:00:00', new DateTimeZone(N_ZONE));
+// Sunset on Friday 16 June 2028 as the window's own clock reads that date.
+// date_sun_info() picks the DAY by PHP's default zone (measured, round 2 of the
+// independent check), so the expected value is worked out with the default zone
+// set to the zone the date is read on, exactly as Sabbath::sunsetAt() now does.
+$sunsetFriday = static function (string $zone, float $lat, float $lng): int {
+    $was = date_default_timezone_get();
+    date_default_timezone_set($zone);
+    $at = (int) date_sun_info((new DateTimeImmutable('2028-06-16 12:00:00', new DateTimeZone($zone)))->getTimestamp(), $lat, $lng)['sunset'];
+    date_default_timezone_set($was);
 
-    return (new DateTimeImmutable('@' . date_sun_info($noon->getTimestamp(), $lat, $lng)['sunset']))->setTimezone(new DateTimeZone(N_ZONE))->format('D Y-m-d H:i');
+    return $at;
+};
+$sunsetOn = static function (float $lat, float $lng) use ($sunsetFriday): string {
+    return (new DateTimeImmutable('@' . $sunsetFriday(N_ZONE, $lat, $lng)))->setTimezone(new DateTimeZone(N_ZONE))->format('D Y-m-d H:i');
 };
 $atOrg = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);
 ok(
@@ -3754,14 +3773,108 @@ ok(
 q("DELETE FROM tblVenueUsageTypes WHERE venueID IN (SELECT venueID FROM tblVenues WHERE venueName LIKE 'Selftest place 935%')");
 q("DELETE FROM tblVenues WHERE venueName LIKE 'Selftest place 935%'");
 
+// ---- round 2 of the independent check (#935) ------------------------------------------
+// P15/P16: ANOTHER organisation forced in after start-up (Site::forceContext(), as
+// ApiAuth does for an API key of another organisation). The settings were merged at
+// start-up for organisation 1; the place must still be organisation TWO's. Organisation
+// 1 is given London's position and organisation two Santiago's, on Santiago's clock.
+$pMultisiteWas = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL")['settingValue'] ?? null;
+setting('multisite.enabled', 'true'); // Site::forceContext() refuses to switch otherwise; put back straight after P16
+setting('portal.sabbath.enabled', '1');
+setting('portal.sabbath.method', 'sunset_calc');
+setting('portal.sabbath.location_lat', '');
+setting('portal.sabbath.location_lng', '');
+setting('portal.sabbath.timezone', '');
+setting('portal.sabbath.start_offset_minutes', '0');
+setting('portal.sabbath.end_offset_minutes', '0');
+$siteRow('org.latitude', '51.5');
+$siteRow('org.longitude', '-0.12');
+$siteRow('org.latitude', '-33.45', ORG_TWO);
+$siteRow('org.longitude', '-70.66', ORG_TWO);
+// The child's PHP default zone is organisation 1's (Sydney, set by start-up), where
+// Santiago's Friday noon is already SATURDAY: P16 is what found that date_sun_info()
+// read the day on that clock and opened the window a day late.
+$santiagoSunset = $sunsetFriday('America/Santiago', -33.45, -70.66);
+$forced = child(['task' => 'sabbathForced', 'site' => ORG_TWO, 'moments' => [$santiagoSunset - 1800, $santiagoSunset + 600]]);
+ok(
+    'P15 with another organisation forced in after start-up, its OWN map position is used (-33.45, -70.66), not the start-up organisation\'s (51.5, -0.12)',
+    $forced['threw'] === '' && ($forced['siteNow'] ?? 0) === ORG_TWO
+        && abs((float) ($forced['place']['lat'] ?? 0) - -33.45) < 0.0001 && ($forced['place']['from'] ?? '') === 'organisation',
+    json_encode($forced)
+);
+ok(
+    'P16 …so its quiet hours begin at ITS sunset on its clock: quiet 10 minutes after Santiago\'s Friday sunset, not 30 minutes before (London\'s sunset made it quiet over an hour early)',
+    $forced['threw'] === '' && ($forced['quiet'] ?? null) === [false, true],
+    json_encode($forced['quiet'] ?? null)
+);
+$siteRow('org.latitude', null, ORG_TWO);
+$siteRow('org.longitude', null, ORG_TWO);
+if ($pMultisiteWas === null) {
+    q("DELETE FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL");
+} else {
+    setting('multisite.enabled', (string) $pMultisiteWas);
+}
+
+// P17/P18: the organisation page's own format for a coordinate near zero, and exactly zero.
+$orgSaved = post($adminJar, '/admin/settings/organisation', '/admin/settings/organisation/save',
+    ['addressLine1' => 'Selftest 935', 'countryCode' => 'GB', 'latitude' => '0.00004', 'longitude' => '0']);
+$orgLat = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', ['org.latitude'])['settingValue'] ?? null;
+$orgLng = one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', ['org.longitude'])['settingValue'] ?? null;
+ok(
+    'P17 the organisation page stores a near-zero coordinate as a PLAIN decimal (0.00004, and 0), never PHP\'s exponent ("4.0E-5")',
+    $orgLat === '0.00004' && $orgLng === '0',
+    said($orgSaved) . '; stored ' . json_encode([$orgLat, $orgLng])
+);
+$nearZero = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);
+ok(
+    'P18 …and the Sabbath window uses it: a place at latitude 0.00004 and longitude exactly 0 is a real place, from the organisation (it used to fall back to the fixed times)',
+    $nearZero['threw'] === '' && ($nearZero['place']['from'] ?? '') === 'organisation'
+        && (float) ($nearZero['place']['lat'] ?? -1) === 4.0E-5 && is_numeric($nearZero['place']['lng'] ?? null) === true
+        && (float) $nearZero['place']['lng'] === 0.0, // JSON carries 0.0 as 0, so compared as a number
+    json_encode($nearZero)
+);
+// P19: what the organisation page stored BEFORE round 2 is still read.
+$siteRow('org.latitude', '4.0E-5');
+$exponent = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);
+ok(
+    'P19 a coordinate already stored with an exponent ("4.0E-5", as the organisation page used to write it) is read as a place, not as "no place"',
+    $exponent['threw'] === '' && ($exponent['place']['from'] ?? '') === 'organisation' && ($exponent['place']['lat'] ?? null) === 4.0E-5,
+    json_encode($exponent)
+);
+// P20: 0 and 0 typed on the Sabbath page is saved and used.
+$siteRow('org.latitude', '');
+$siteRow('org.longitude', '');
+post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', ['location_lat' => '0', 'location_lng' => '0'] + $pNew);
+$zeroes = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);
+ok(
+    'P20 a place of exactly 0, 0 typed on the Sabbath page is stored and used as a place (a real point, not "no place")',
+    $placeNow('portal.sabbath.location_lat') === '0' && $placeNow('portal.sabbath.location_lng') === '0'
+        && $zeroes['threw'] === '' && ($zeroes['place']['from'] ?? '') === 'setting',
+    json_encode([$placeNow('portal.sabbath.location_lat'), $placeNow('portal.sabbath.location_lng'), $zeroes])
+);
+// P21: the preview on the answer to a save shows what was JUST saved.
+setting('portal.sabbath.method', 'fixed');
+setting('portal.sabbath.start_offset_minutes', '0');
+$previewed = post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath',
+    ['method' => 'fixed', 'start_offset_minutes' => '30', 'end_offset_minutes' => '0', 'switches_shown' => '1', 'enabled' => 'on',
+     'location_lat' => '', 'location_lng' => '', 'timezone' => '']);
+ok(
+    'P21 the answer to a save previews the window JUST saved: a start offset of 30 minutes shows the window beginning at 18:30 (start-up had read 0, so it showed 18:00)',
+    str_contains(words($previewed['body']), 'Sabbath settings saved.') === true && tz_find('#Current window \(your settings\):\s*\S+ \d+ \S+ 18:30 →#', words($previewed['body'])) === 1,
+    said($previewed) . '; ' . (tz_find('#Current window \(your settings\):[^(]*#', words($previewed['body']), $pv) === 1 ? $pv[0] : 'no preview found')
+);
+
 // ---- put everything back as part P found it ------------------------------------------
-q('DELETE FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND siteID = 1');
+q('DELETE FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND siteID IN (1, ' . ORG_TWO . ')');
 foreach ($pWas as $row) {
     if ($row['siteID'] === null) {
         setting((string) $row['settingKey'], (string) $row['settingValue']);
     } else {
-        $siteRow((string) $row['settingKey'], (string) $row['settingValue']);
+        $siteRow((string) $row['settingKey'], (string) $row['settingValue'], (int) $row['siteID']);
     }
+}
+if (array_filter($pWas, static fn (array $row): bool => $row['siteID'] === null && $row['settingKey'] === 'multisite.enabled') === []) {
+    q("DELETE FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL");
 }
 orgZone(1, $pOrgZone === null ? null : (string) $pOrgZone);
 

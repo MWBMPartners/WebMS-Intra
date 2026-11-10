@@ -217,8 +217,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                       //    when it has none (and then the box is required). It used to start with
                       //    'GB' for every customer anywhere. ?>
                 <?php $venueCountryOwn = Venues::organisationCountry(Site::id()); ?>
+                <?php // The browser's two-letter `pattern` is left off for a venue whose STORED country
+                      // is not two letters (only SQL can put one there): Venues::countryToStore() still
+                      // accepts it unchanged, and the pattern would stop the browser saving the venue
+                      // at all, even to correct its caretaker's number. ?>
+                <?php $venueCountryOdd = $editVenue !== null && preg_match('/^[A-Za-z]{2}$/', (string) $editVenue['countryCode']) !== 1; ?>
                 <input type="text" class="form-control form-control-sm text-uppercase" id="countryCode" name="countryCode" maxlength="2"
-                       pattern="[A-Za-z]{2}" title="A two-letter country code, such as FR or US"<?php echo $venueCountryOwn === '' ? ' required' : ''; ?>
+                       <?php echo $venueCountryOdd === true ? '' : 'pattern="[A-Za-z]{2}" '; ?>title="A two-letter country code, such as FR or US"<?php echo $venueCountryOwn === '' && $editVenue === null ? ' required' : ''; ?>
                        value="<?php echo htmlspecialchars($editVenue !== null ? (string) $editVenue['countryCode'] : $venueCountryOwn, ENT_QUOTES, 'UTF-8'); ?>">
             </div>
 
