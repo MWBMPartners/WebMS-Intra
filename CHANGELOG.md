@@ -4,6 +4,28 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### No time zone is built in any more (#782, migration 273)
+
+- **The livestream schedule, venues, the venue availability check and the Sabbath quiet window now use
+  the organisation's own time zone** (Admin → Organisations). Each used to answer "Europe/London"
+  whenever nobody had chosen a zone, so an organisation anywhere else had its livestream countdown,
+  its hall bookings and its quiet hours worked out on London's clock.
+- The livestream and venue forms start on the organisation's zone. They now **refuse** a zone the
+  portal does not know, where they used to store it or quietly replace it with London. That includes
+  names PHP accepts and that were stored before: the `Etc/*` names, legacy aliases such as `GB` and
+  `US/Eastern`, and other capitalisation (`europe/london`), the same rule the event and organisation
+  forms already use. A venue already holding such a name still saves when its zone is left unchanged.
+- The Sabbath page has a new first choice, **"Each organisation's own time zone"**, which new
+  installations start on. An upgraded installation keeps the zone it already holds. With that choice,
+  each held text is judged on the quiet hours of the organisation it belongs to.
+- `/api/venues/check` without `tz` now reads times on the organisation's clock. It used to read them
+  as London's, and the API description said so.
+- `tblLivestreamSchedule.timezone` and `tblVenues.timezone` no longer default to London. No stored
+  value is changed: both columns were always written by their own pages, so a stored London may be a
+  choice.
+- A new hard gate, `check_no_built_in_time_zone.py`, fails when a zone name is written into the code.
+- Open: #935, #936, #937.
+
 ### Attendance: who sees the totals, who sees a session's figures, and who may delete a session (#529, #917, #921, D-106, D-109, D-114, D-115, migration 271)
 
 - **The attendance totals are seen by administrators and by a role the organisation chooses (D-106).**

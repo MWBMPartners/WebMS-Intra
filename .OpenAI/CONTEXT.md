@@ -3190,6 +3190,12 @@ tell whether a page RENDERS in the chosen language** — that needs HTTP
 and a seeded installation, and both say so in their own output. The
 technical record is DEV_NOTES.md, "A question asked too early (#763)".
 
+- **No time zone is built in (#782, migration 273).** `Livestream::zoneOf()`, `Venues::zoneToStore()` /
+  `venueTimezone()` and `Sabbath::zone()` are the one answers for a livestream slot's, a venue's and the
+  quiet window's clock; each falls back to `Site::timezone()`. The quiet window is per ORGANISATION: pass
+  the message's own organisation to `Sabbath::isQuietNow()` wherever one run handles several (`Sms::sendDue()`
+  does). Never write a zone name as a fallback; `tools/audit-checks/check_no_built_in_time_zone.py` is a
+  hard gate (its `ON_PURPOSE` list fails both ways). The record is DEV_NOTES.md, "No time zone is built in (#782)".
 - **Attendance figures (#529; D-106, D-109, D-114, D-115).** `AttendanceAccess::mayViewTotals()` is the ONE
   question for the totals AND each session's headcount (permission `attendance.reports`); `mayDeleteSession()`
   is the ONE delete rule, asked by both delete addresses. A refusal is the same 404 as an address that does

@@ -22287,6 +22287,40 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
 
+### No time zone is built in (#782)
+
+- **One answer per question, each falling back to `Site::timezone()` through `Site::zoneFor()`:**
+  - `Livestream::zoneOf()` for a schedule slot's clock (asked by `currentlyLive()`, `nextScheduled()`
+    and `cron/push-golive.php`);
+  - `Venues::zoneToStore()` for what a venue save stores, and `Venues::venueTimezone()` for reading it;
+  - `Sabbath::zone($siteId)` for the quiet window's clock.
+- **There were three old fallbacks for one question, and none was the organisation's:**
+  `?? 'Europe/London'` (unreachable, because the column is NOT NULL), PHP's own zone, and UTC. A zone
+  the old livestream form accepted as free text ("Austrlia/Sydney") was read as UTC.
+- **The column defaults were never what a page stored.** `git log -S"INSERT INTO tblLivestreamSchedule"`
+  answers only `4e579970`, and `git log -S"INSERT INTO tblVenues"` only `37bf4184`; both writers named
+  the zone in every INSERT. So removing the defaults changes no row, and existing rows are left alone
+  because a London there may be a choice. Contrast D-060, where nothing had ever written the column.
+- **Migration 217 section C rewrites `tblVenues.timezone` (with the old default) whenever its comment
+  differs from 217's**, so 273 keeps that comment word for word.
+- **The quiet window belongs to an ORGANISATION once the zone setting is empty.** `Sabbath::zone()`,
+  `computeWindow()` and `isQuietNow()` take the organisation. Any caller that handles more than one
+  organisation's messages in one run (the held-texts job) must pass each message's own, and a
+  once-a-run cache of the answer must be keyed by organisation AND person. The other Sabbath settings
+  (on/off, method, offsets, place) are installation-wide.
+- **The e2e harness names `portal.sabbath.timezone | every organisation | → Europe/London` on both
+  upgrade phases** (migration 273 changes only the default value, never the value in force). Delete the
+  phase-5 line the day this reaches `main`.
+- **The guard reads PHP with `token_get_all()`**, because nearly every fixed file now carries a COMMENT
+  quoting the old literal, and a text search would report the comment as the fault it records. A name
+  counts as "UTC itself" only when it has offset 0 in January and July, is shown as UTC/UCT/GMT, and
+  has never had another offset. Exactly nine names pass, measured; `WET` and `Factory` looked like UTC
+  to a looser test. What it cannot see is listed in its header: a name built from pieces, a named
+  argument, extra brackets, and a slash-less name outside the three zone calls.
+- **Tests:** part N of `tools/time-zones-selftest.php` and part N of `tools/held-texts-selftest.php`
+  (driven in Sydney and London organisations, premise first; each old fallback planted back one at a
+  time), plus the hard gate.
+
 ### Who sees the attendance figures, and who may delete a session (#529, D-106, D-109, D-114, D-115)
 
 - **`AttendanceAccess::mayViewTotals($db, $userId, $siteId, App::isAdmin(), App::isRootAdmin())` is the ONE
