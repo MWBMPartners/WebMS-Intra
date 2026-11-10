@@ -6,15 +6,14 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782.
-Last whole suite (with #782): 103/103 green. Decisions taken this stretch: D-102 to D-119 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
+#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932.
+Last whole suite (with #932): 104/104 green. Decisions taken this stretch: D-102 to D-119 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 0b545ae0 | Check round 9 NOT CLEAN (narrow): refactor behaviour-neutral on 1,608 givers and outlook agrees on 1,056; but Delete page asserts removal under a hold, the multi-organisation join says 'this organisation' twice, and the statement-record reason is wrong about period-less files; the hold is tested by nothing. Round 10 building. Raised #941 (pre-existing) |
-| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, de3c05c8 | Cherry-picked (4fda0046..4f42bdb9) with docs; whole suite running, then push and close. Member wording is #940, after #703 |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 0381b94c | Round 10 built (Delete page states every case incl. holds; per-organisation rows 'At <name>'; statement-file reason exact; hold now tested). Check round 10 running. Then #940 (activity-log wording) follows |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782). #932 needs none. Next free: 274.
