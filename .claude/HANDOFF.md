@@ -1,43 +1,43 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only. 9 November 2026.*
+*Overwritten, never appended. Current state only. 10 November 2026.*
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest: #790 (calendar import, four commits + docs),
-D-099, D-100, #667 (NotifyPrefs), D-097/D-098, #493 P3, #649. Whole suite 96/96. Nothing uncommitted in the
-main checkout.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest pushed: 29e33d77 (#902). Landed this stretch:
+#887 (MySQL 9.7 sign-in), #493 P4a and P4b, #869/#870/#871 (expense claim form), #900 (a sign-in keeps nothing
+of the previous person's session), #902 (its guard; passkey and kiosk driven). Whole suite 100/100.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
-- **#493 P4a** — the public door's gate, naming, feeds and media (migration 263). Worktree
-  `.claude/worktrees/agent-ad88601b284f3771c`, branch `p4a-build`, commits `f432f2ae`, `cde9f9c3` (+ round-2
-  fixes in progress). Protected arm. Notes: that worktree's `.claude-work/evidence/p4a/notes.md`.
-- **#877** — a calendar-import row's web address from name + date, and D-100's "already in the calendar"
-  skip. Worktree `.claude/worktrees/agent-ab394d4cf0e7bde23`, branch `p877-build`, commit `a5c02cc0` (+ round-1
-  fixes and D-100 in progress).
+| Package | Worktree / branch | State |
+|---|---|---|
+| #493 P4c — the frameable page | `agent-a11d2cd63347a435e` / `p4c-build`, ed4aad97 | Round 2 check running (protected arm) |
+| #903 — passkey RP ID empty on a fresh install | `agent-a59d23f3de8a73c08` / `p903-build` | Being built (protected arm) |
+| #615 — outbound webhooks to private addresses | `agent-ad58911c67b8b8018` / `p615-build` | Being built (protected arm) |
+
+Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
+**P4c's browser test needs PHP in pr-security.yml's `security` job** (its notes recommend a separate job).
 
 ## Next, in this order
 
-1. P4a to commit; then **P4b** (script; delete `web/public_html/widget/` with its routes, migration 264),
-   **P4c** (page and frame), **P4d** (D-087 card; the check confirming a public address reaches this door) —
-   one at a time, they share files. The plan is on #493.
-2. The rest of the backlog (D-055), two at a time where files do not overlap; one package at a time in
-   `web/_sql/`.
-3. #821 items 4-8 (open). 4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
+1. P4c to commit, then **P4d** (D-087 card; the check confirming a public address reaches this door).
+2. The rest of the backlog (D-055: everything before the release), highest priority first, up to three at a
+   time where files do not overlap; one package at a time in `web/_sql/`.
+3. #821 items 4-8. 4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
 
 ## Working pattern that is paying off
 
-Builders and checkers run in their own worktrees; the commissioning session cherry-picks a clean package,
-adds its docs from the worktree's notes, runs the whole suite, pushes. When the same item fails two check
-rounds running, simplify the design (P3's verdict, #649's after-commit path). A round whose only findings are
-comments or documentation does not send a package round again.
+Builders and checkers run in their own worktrees; the commissioning session cherry-picks a clean package, adds
+its docs from the worktree's notes, runs the whole suite, pushes. Brief checkers neutrally (not with the
+builder's conclusions). When the same item fails two rounds running, simplify (P3's verdict, #649's
+after-commit path, #902's static check). A round whose findings are all in tooling counts toward the three-round
+cap (D-064). Recurring finding: a refusal tested on only ONE form of address — test both.
 
 ## Blocked on the owner
 
 | What | Why |
 |---|---|
-| Dangling volume `293105ed…` | A checker's leftover; only the owner can remove it (D-067). Count is 1 |
 | SIGNula.id | Five local commits waiting for the owner's push approval |
 
 ## Six standing facts a reader needs
@@ -61,56 +61,10 @@ comments or documentation does not send a package round again.
 
 ## Decisions in force
 
-Every decision lives once, in `docs/decisions/`, one file each (D-027). 91 on file; read the README
-index there. **Codex has reviewed none of this work.**
+Every decision lives once, in `docs/decisions/`, one file each (D-027); the README there is the index. Count
+them from the folder. **Codex has reviewed none of this work.**
 
-## Open, unscheduled, each with an issue
+## What is open
 
-| Issue | What |
-|---|---|
-| #769 | Nothing exercises `api/livechat/prompt-publish`; no test drove two rotating actions in sequence |
-| #779 | No setting for which languages an installation offers (D-062) |
-| #782 | Eighteen hard-coded `Europe/London` literals, and two columns that default to it |
-| #780 | Saved reports filtering on a member's language changed answer at migration 251 |
-| #764 | Three smaller findings from #485/#761 |
-| #766 | No rate limit on a money-spending endpoint |
-| #767 | A cookie-consent decision is silently lost after a token-rotating post |
-| #679 | What an approval step becomes when its one person is erased |
-| #725 | Nothing exercises the documents API over HTTP |
-| #726 | Can `move_uploaded_file()` report success after a partial write? |
-| #729 | The Edit dialog's "leave blank to keep current" for an account with none |
-| #733 | Migration 241 can grant the role to an account that cannot sign in |
-| #734 | A person erased at one organisation keeps free text at another |
-| #736 | Three small things from #724 |
-| #748 | version-bump and changelog write straight to `alpha`/`beta` |
-| #749 | The in-string blindness is wider than `.php` |
-| #750 | Four self-tests cut a code block four ways; only one knows heredocs |
-| #755 | An organisation cannot express its own "no" for the self-add password |
-| #758 | What `tblWorkflowSteps.assigneeValue` may hold is undecided |
-| #759 | Settings with an empty stored default where a fresh install has a value |
-| #760 | Nothing lints `tools/e2e-migrations/run.sh` |
-| #789 | A real run of a scheduled job is driven on two of fifteen pages |
-| #791 | Record WHICH of three reasons a job refused |
-| #794 | Shapes the scheduled-jobs nesting check cannot see |
-| #795 | A self-referential test, a duplicated helper, four wording faults (#775) |
-| #843 | The events API's list and detail do not report the website fields (#493) |
-| #844 | The series bulk-edit page has no website control (#493) |
-| #847 | A repeating series copies one website date window onto every date (#493) |
-| #851 | Ten gaps in the top-bar and phone-width self-test (#832/#833 rounds 2 and 3) |
-| #856 | Some public-website-tick plant checks pass when their scenario fails for any reason |
-| #858 | Without JavaScript, a saved outside-calendar choice's redraw can show a Yes the person unticked |
-| #859 | The public event-suggestion form promises an e-mail on approval, and nothing sends one |
-| #865 | The offline page never retries by itself; nothing tests that the service worker refuses `private` |
-| #866 | D-093's hand-out rule is not judged inside the transaction that writes |
-| #867-#871 | Expense receipts: cannot be opened, added later, PDF after rollback, refused form loses typing, chooser hides types |
-| #872 | The portal's own database connection has no read deadline |
-| #873 | SafeFetch reads any 'HTTP/x NNN' header line as a new status |
-| #874 | tblUsers.notifyPrefs' column comment names two retired keys |
-| #875 | Saving notification choices can unsubscribe a member from a newsletter they never saw |
-| #876 | Other public pages on an organisation's public address (D-098) |
-| #878 | top-bar-selftest.mjs missing from the whole-suite runner |
-| #879 | check_public_door_reads.py matches text |
-| #880 | Media routes do not answer byte-range requests (Safari video) |
-| #881 | Calendar import: check-rule level unpinned; 'database problem' sentence stated as certain |
-| #882 | Public door: an event with no end leaves the feed at its start; per-organisation headers |
-| #883 | Events API and other copies of slug code still make addresses from the name alone |
+The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
+first release. New ones this stretch: #892-#899, #901, #903, #904.
