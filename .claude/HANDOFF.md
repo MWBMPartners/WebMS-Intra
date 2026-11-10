@@ -6,16 +6,15 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921).
-Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102 to D-119 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
+#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782.
+Last whole suite (with #782): 103/103 green. Decisions taken this stretch: D-102 to D-119 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 87d01592 | Check round 8 NOT CLEAN (narrowing): keep-step refactor measured behaviour-neutral (old vs new byte-identical on 75 givers); outlook wrong for the 'due' case (past keep-until) and 'none of your gifts' ignores envelopes; tblUsers reason still groups statements with number-only records. Round 9 building |
-| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 154be792 | Round 2's findings fixed (installation 'never' with organisations present pinned; D-118 driven with a true organisation admin, section M; comments say 'for example'). Check round 3 running. Member wording after #703 |
-| #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | `agent-aacc4726f08c2aabc` / `p782-build`, 4e7b5813 | Clean: round 3 was a comment and gate fix, reviewed by me (no further round needed). Cherry-picked with docs; whole suite running, then push. Raised #935-#937 |
+| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, de3c05c8 | Clean (round 3 a comment fix, reviewed by me). Integrating next: cherry-pick 747c0194, 8d7e03a4, 6cad0316, 154be792, de3c05c8; docs from notes; whole suite; push. Member wording is #940, after #703 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782). #932 needs none. Next free: 274.
@@ -23,7 +22,7 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 ## Next, in this order
 
 1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
-2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#939. #931 closed by D-116.
+2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#940. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
