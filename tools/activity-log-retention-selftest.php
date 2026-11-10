@@ -22,18 +22,24 @@
  *      organisation that chose never, one that follows the installation's
  *      never, and rows owned by nobody — while an organisation that chose 7
  *      days has its own old row deleted
- *   E  lowering the installation to 30 days is allowed (D-013) and says how
- *      many organisations are now held to it; the page warns about a stored
- *      never it is not obeying
- *   F  THE REFUSAL: under an installation of 30 days an organisation's never is
- *      refused with the reason, nothing is stored, and the refusal is
- *      recorded; 0 typed as a NUMBER is refused too (never is its own choice);
- *      31 is refused, never clamped; 20 is stored; "follow" removes the row
+ *   E  D-119: lowering the installation below an organisation's own figure
+ *      ("never" counting as the longest) is REFUSED, naming the organisation,
+ *      and recorded with a count; once that organisation's OWN administrator
+ *      (D-118) lowers its figure, the installation's lowering is accepted; a
+ *      lowering nobody blocks is accepted
+ *   F  THE REFUSAL, met by the organisation's own administrator: under an
+ *      installation of 30 days an organisation's never is refused with the
+ *      reason, nothing is stored, and the refusal is recorded; 0 typed as a
+ *      NUMBER is refused too (never is its own choice); 31 is refused, never
+ *      clamped; 20 is stored; "follow" removes the row
  *   G  the installation's 3651 days is refused, not clamped
  *   H  an untouched Save over a stored never the installation does not allow
- *      (SQL-only state) changes nothing (#687)
- *   I  an organisation's own administrator and a member are refused (403) and
- *      nothing is stored — the page is a global administrator's
+ *      (SQL-only state) changes nothing (#687), and the page says the reader
+ *      holds it to the installation's figure
+ *   I  D-118's gate on every action: a member is refused everything; an
+ *      organisation's administrator gets a page with their own organisation's
+ *      form and nothing installation-wide, and is refused (403) the
+ *      installation's form and the old sweep action
  *   J  an action the page does not know runs NOTHING — not the sweep — while
  *      a post with no action is still the sweep, as it always was
  *   K  the ERROR log is untouched: its stored 0 still reads as a year on the
@@ -44,10 +50,10 @@
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It runs ONE engine at a time, whichever the caller points it at.
- *   - The server runs ONE worker, so two saves never overlap here; the lock is
- *     the same `FOR UPDATE` inside a transaction that
- *     `retention-caps-selftest.php` section D proves for its own class, and is
- *     NOT separately proved for this one.
+ *   - The server runs ONE worker, so two saves never overlap here. D-119's
+ *     race — a lowering made while an organisation's never is being saved — is
+ *     driven with a second PROCESS in `retention-caps-selftest.php` section F
+ *     instead, which is where it can fail.
  *   - The general settings editor's refusal of `audit.retentionDays` is not
  *     driven here: `tools/settings-locks-selftest.php` finds every lock
  *     method by name and drives all three of the editor's paths for each.
@@ -77,7 +83,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const AL_EXPECTED_CHECKS = 46;
+const AL_EXPECTED_CHECKS = 58;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -296,6 +302,11 @@ if ($siteOne <= 0) {
     refuse('the database has no organisation');
 }
 
+$siteOneName = (string) ($db->query("SELECT `siteName` FROM `tblSites` WHERE `siteID` = {$siteOne}")->fetch_assoc()['siteName'] ?? '');
+if ($siteOneName === '') {
+    refuse('the first organisation has no name, so a refusal that names it cannot be checked');
+}
+
 /** Remove a person and everything naming them, children first (the i18n test's lesson). */
 $removeMember = static function (int $who) use ($db): void {
     $rs = $db->query(
@@ -407,6 +418,15 @@ $activityCount = static function (string $type) use ($db): int {
     return $n;
 };
 
+$lastActivity = static function (string $type) use ($db): string {
+    $stmt = $db->prepare('SELECT `activityDescription` FROM `tblActivityLogs` WHERE `activityType` = ? ORDER BY `logID` DESC LIMIT 1');
+    $stmt->bind_param('s', $type);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return (string) ($row['activityDescription'] ?? '');
+};
+
 // ── Page helpers ────────────────────────────────────────────────────────────
 const AL_PAGE = '/admin/maintenance/retention';
 $page = static fn (): array => $http('GET', AL_PAGE);
@@ -467,10 +487,10 @@ $waitForServer();
 // it is about did its job, so a plant must make it answer FALSE.
 // ═════════════════════════════════════════════════════════════════════════════
 
-/** Under 30 days, an organisation's never is refused and nothing is stored. */
+/** Under 30 days, an organisation's never — asked by ITS OWN administrator (D-118) — is refused and nothing is stored. */
 $scnRefuseNever = static function () use ($world, $signIn, $forOrg, $setting, $siteOne): bool {
     $world('30', null, null);
-    $signIn('globaladmin');
+    $signIn('orgadmin');
     $r = $forOrg(['choice' => 'never']);
     return $setting(AL_KEY, $siteOne) === null && $r['flash']['type'] === 'danger';
 };
@@ -484,6 +504,38 @@ $scnInstallNever = static function () use ($world, $signIn, $install, $setting):
     // what rows owned by nobody follow: a clamp to 3650 shows only in the second.
     return $setting(AL_KEY, null) === '0' && str_contains($r['page'], 'data-activity-log-in-force="0"')
         && str_contains($r['page'], '<strong>any number of days, or never deleted</strong>');
+};
+/** D-119: lowering the installation from never to 30 days while organisation one holds never is refused, NAMING it. */
+$scnLoweringRefused = static function () use ($world, $signIn, $install, $setting, $siteOneName): bool {
+    $world('0', '0', null);
+    $signIn('globaladmin');
+    $r = $install(['choice' => 'days', 'days' => '30']);
+    return $setting(AL_KEY, null) === '0' && $r['flash']['type'] === 'danger'
+        && str_contains($r['flash']['text'], $siteOneName . ' (never deleted)');
+};
+/** D-118: an organisation's own administrator stores their own figure within the installation's. */
+$scnOrgAdminSaves = static function () use ($world, $signIn, $forOrg, $setting, $siteOne): bool {
+    $world('30', null, null);
+    $signIn('orgadmin');
+    $r = $forOrg(['choice' => 'days', 'days' => '20']);
+    return $setting(AL_KEY, $siteOne) === '20' && $r['flash']['type'] === 'success';
+};
+/** D-118: ...and cannot touch the installation's figure: 403, nothing stored. */
+$scnOrgAdminNoInstallation = static function () use ($world, $signIn, $http, $tokenOn, $page, $setting): bool {
+    $world('30', null, null);
+    $signIn('orgadmin');
+    $ans = $http('POST', AL_PAGE, ['csrf_token' => $tokenOn($page()['body']), 'action' => 'activity-retention-installation', 'choice' => 'never']);
+    return $ans['status'] === 403 && $setting(AL_KEY, null) === '30';
+};
+/** D-118: ...nor run the sweep (a POST with no action): 403, and a 400-day-old row survives. */
+$scnOrgAdminNoSweep = static function () use ($db, $world, $signIn, $http, $tokenOn, $page, $logRow): bool {
+    $db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
+    $world('30', null, null);
+    $old = $logRow(null, 400);
+    $signIn('orgadmin');
+    $ans = $http('POST', AL_PAGE, ['csrf_token' => $tokenOn($page()['body'])]);
+    return $ans['status'] === 403
+        && (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `logID` = {$old}")->fetch_assoc()['n'] ?? 0) === 1;
 };
 /** The real job keeps every row under never. */
 $scnJobKeeps = static function () use ($scnNeverKeeps): bool {
@@ -574,17 +626,32 @@ check('D2 ...while an organisation that chose 7 days under that installation has
     ['one' => false, 'two' => true, 'nobody' => true]);
 $db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
 
-echo "E. Lowering the installation to 30 days\n";
-$world('0', '0', null);
+echo "E. Lowering the installation (D-119), and an organisation's own administrator (D-118)\n";
+$beforeRefused = $activityCount('ActivityLogRetentionRefused');
+check('E1 (scenario) lowering the installation from never to 30 days while an organisation holds never is REFUSED, naming it, and nothing changes',
+    $scnLoweringRefused(), true);
+check('E2 ...the refusal is recorded, with a COUNT and not the name', [
+    $activityCount('ActivityLogRetentionRefused'),
+    str_contains($lastActivity('ActivityLogRetentionRefused'), '1 organisation(s) have chosen a longer figure'),
+    str_contains($lastActivity('ActivityLogRetentionRefused'), $siteOneName),
+], [$beforeRefused + 1, true, false]);
+$signIn('orgadmin');
+$r = $forOrg(['choice' => 'days', 'days' => '20']);
+check('E3 the organisation\'s OWN administrator lowers its own figure to 20 days (D-118)', [$setting(AL_KEY, $siteOne), $r['flash']['type']], ['20', 'success']);
 $signIn('globaladmin');
+$r = $install(['choice' => 'days', 'days' => '10']);
+check('E4 the installation\'s 10 days is still refused while that organisation holds 20, and says so', [
+    $setting(AL_KEY, null), $r['flash']['type'], str_contains($r['flash']['text'], $siteOneName . ' (20 days)'),
+], ['0', 'danger', true]);
 $r = $install(['choice' => 'days', 'days' => '30']);
-check('E1 it is stored', $setting(AL_KEY, null), '30');
-check('E2 ...and the message says that 1 organisation is now held to it',
-    [$r['flash']['type'], str_contains($r['flash']['text'], '1 organisation(s) had chosen to keep them longer, or for ever')], ['warning', true]);
-check('E3 the page warns that the stored never is not being obeyed, and says what is in force',
-    [str_contains($r['page'], 'data-activity-log-never-held="1"'), str_contains($r['page'], 'data-activity-log-in-force="30"')], [true, true]);
+check('E5 ...while 30 days, which nobody is above, is ACCEPTED, and says nothing about holding anybody',
+    [$setting(AL_KEY, null), $r['flash']['type'], str_contains($r['flash']['text'], 'held')], ['30', 'success', false]);
+$world('0', null, null);
+$r = $install(['choice' => 'days', 'days' => '90']);
+check('E6 with no organisation figure at all, a lowering from never is accepted', [$setting(AL_KEY, null), $r['flash']['type']], ['90', 'success']);
+check('E7 (scenario) the organisation\'s administrator saves their own figure (D-118)', $scnOrgAdminSaves(), true);
 
-echo "F. The refusal\n";
+echo "F. The refusal, met by the organisation's own administrator\n";
 $beforeRefused = $activityCount('ActivityLogRetentionRefused');
 check('F1 (scenario) under 30 days an organisation\'s never is refused and nothing is stored', $scnRefuseNever(), true);
 $r = $forOrg(['choice' => 'never']);
@@ -606,6 +673,7 @@ check('F8 a post with no choice at all changes nothing (#677) and says so',
     [$setting(AL_KEY, $siteOne), $r['flash']['type']], [null, 'danger']);
 
 echo "G. The installation's hard maximum\n";
+$signIn('globaladmin');
 $r = $install(['choice' => 'days', 'days' => '3651']);
 check('G1 3651 days is refused, not clamped, and the stored 30 is untouched', [$setting(AL_KEY, null), $r['flash']['type']], ['30', 'danger']);
 check('G2 ...and the message points at "Never delete" for longer', str_contains($r['flash']['text'], 'choose "Never delete" instead'), true);
@@ -616,16 +684,34 @@ $world('30', '0', null);
 $signIn('globaladmin');
 $r = $forOrg(['choice' => 'never']);
 check('H1 it changes nothing and says so, rather than refusing a figure nobody typed', [$setting(AL_KEY, $siteOne), $r['flash']['type']], ['0', 'info']);
+check('H2 ...and the page warns that the stored never is not being obeyed, and says what is in force: the READER caps it',
+    [str_contains($r['page'], 'data-activity-log-never-held="1"'), str_contains($r['page'], 'data-activity-log-in-force="30"')], [true, true]);
 
-echo "I. Who may use it\n";
+echo "I. Who may use it (D-118)\n";
 $world('30', null, null);
-foreach (['orgadmin', 'member'] as $role) {
-    $signIn($role);
-    $token = $tokenOn($http('GET', '/')['body']);
-    $ans   = $http('POST', AL_PAGE, ['csrf_token' => $token, 'action' => 'activity-retention-installation', 'choice' => 'never']);
-    $ans2  = $http('POST', AL_PAGE, ['csrf_token' => $token, 'action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '5']);
-    check("I1 {$role}: refused (403) and nothing stored", [$ans['status'], $ans2['status'], $setting(AL_KEY, null), $setting(AL_KEY, $siteOne)], [403, 403, '30', null]);
-}
+$signIn('member');
+$token = $tokenOn($http('GET', '/')['body']);
+$m = [
+    $http('GET', AL_PAGE)['status'],
+    $http('POST', AL_PAGE, ['csrf_token' => $token, 'action' => 'activity-retention-installation', 'choice' => 'never'])['status'],
+    $http('POST', AL_PAGE, ['csrf_token' => $token, 'action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '5'])['status'],
+    $http('POST', AL_PAGE, ['csrf_token' => $token])['status'],
+];
+check('I1 a member is refused EVERYTHING — the page, both forms and the sweep — and nothing is stored',
+    [$m, $setting(AL_KEY, null), $setting(AL_KEY, $siteOne)], [[403, 403, 403, 403], '30', null]);
+$signIn('orgadmin');
+$o = $page();
+check('I2 an organisation\'s administrator gets the page (200), with their organisation\'s form and NOTHING installation-wide', [
+    $o['status'], str_contains($o['body'], '</html>'),
+    str_contains($o['body'], 'value="activity-retention-organisation"'),
+    str_contains($o['body'], 'value="activity-retention-installation"'),
+    str_contains($o['body'], 'Run Sweep Now'),
+    str_contains($o['body'], 'Rows that would be deleted now'),
+], [200, true, true, false, false, false]);
+$beforeRefused = $activityCount('ActivityLogRetentionRefused');
+check('I3 (scenario) ...posting the installation\'s form is refused (403), nothing is stored', $scnOrgAdminNoInstallation(), true);
+check('I4 ...and that refusal is recorded', $activityCount('ActivityLogRetentionRefused'), $beforeRefused + 1);
+check('I5 (scenario) ...and the old sweep action (a post with no action) is refused (403) and deletes nothing', $scnOrgAdminNoSweep(), true);
 
 echo "J. The page's other POST\n";
 check('J1 (scenario) an action the page does not know runs NOTHING — not the sweep, not a save', $scnUnknownAction(), true);
@@ -678,6 +764,16 @@ check('P6 with an unknown action let fall through to the sweep, the unknown-acti
 $p7 = $plant('_apps/admin/maintenance/retention.php', "if (preg_match('/^\\d{1,6}\$/', \$alrRaw) !== 1 || (int) \$alrRaw < 1) {",
     "if (preg_match('/^\\d{1,6}\$/', \$alrRaw) !== 1) {", $scnZeroNumber);
 check('P7 with 0 typed as a number accepted, the installation stores 0 and the zero-number scenario goes red', [$p7['applied'], $p7['result']], [true, false]);
+$p9 = $plant('_core/ActivityLogRetention.php', 'if ($above !== []) {', 'if (false) {', $scnLoweringRefused);
+check('P9 with D-119\'s refusal taken out, the installation is lowered beneath an organisation\'s never', [$p9['applied'], $p9['result']], [true, false]);
+$p10 = $plant('_apps/admin/maintenance/retention.php', "|| (\$postedAction === 'activity-retention-installation' && \$isGlobalAdmin === true))",
+    "|| \$postedAction === 'activity-retention-installation')", $scnOrgAdminNoInstallation);
+check('P10 with the page letting an organisation\'s administrator into the installation\'s save, it is no longer refused with a 403', [$p10['applied'], $p10['result']], [true, false]);
+$p11 = $plant('_apps/admin/maintenance/retention.php', 'ActivityLogRetention::saveForSite($mysqli, $alrSiteId, $alrDays, App::isAdmin())',
+    'ActivityLogRetention::saveForSite($mysqli, $alrSiteId, $alrDays, App::isRootAdmin())', $scnOrgAdminSaves);
+check('P11 with D-118 undone (global administrators only), the organisation\'s administrator cannot save their own figure', [$p11['applied'], $p11['result']], [true, false]);
+$p12 = $plant('_apps/admin/maintenance/retention.php', 'if ($isGlobalAdmin === false) {', 'if (false) {', $scnOrgAdminNoSweep);
+check('P12 with the global-administrator gate taken out, an organisation\'s administrator runs the sweep', [$p12['applied'], $p12['result']], [true, false]);
 check('P8 with every plant removed again, the refusal is green once more', $scnRefuseNever(), true);
 
 // 🧾 The server's own error log. A page that throws part-way can still answer

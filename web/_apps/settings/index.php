@@ -809,8 +809,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     //    global administrator can change there).
                                     $registrationsLocked = \Portal\Core\RegistrationRetention::lockedInGeneralEditor((string) $row['settingKey']);
                                     // 🔒 And for how long the activity log is kept (#932): set at
-                                    //    Admin, Maintenance, Retention, which only a global
-                                    //    administrator can open.
+                                    //    Admin, Maintenance, Retention — an organisation's figure by
+                                    //    its own administrator (D-118), the installation's by a global
+                                    //    administrator.
                                     $activityLogLocked = \Portal\Core\ActivityLogRetention::lockedInGeneralEditor((string) $row['settingKey']);
                                     $copiedRuleLocked = \Portal\Core\PublicWebsite::lockedInGeneralEditor((string) $row['settingKey']);
                                     // #493 P3: WHICH page — the copied-in rule's or Admin, Public website — is
@@ -855,11 +856,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php elseif ($foyerLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('noticeboard/foyer/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Noticeboard, Foyer screen</a>
                                     <?php elseif ($activityLogLocked === true): ?>
-                                        <?php if ($isRoot === true): ?>
-                                            <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Maintenance, Retention</a>
-                                        <?php else: ?>
-                                            <span class="small text-secondary">Changed by a global administrator, at Admin, Maintenance, Retention</span>
-                                        <?php endif; ?>
+                                        <?php /* D-118: an organisation's administrator can open that page for
+                                                 THEIR organisation's figure; the installation's is a global
+                                                 administrator's, which the page itself enforces. */ ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Maintenance, Retention</a>
                                     <?php elseif ($registrationsLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/settings/registrations'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Admin, Registration retention</a>
                                     <?php elseif ($givingLocked === true): ?>

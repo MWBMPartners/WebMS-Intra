@@ -222,11 +222,11 @@ function log_retention_installation_days(string $key): int
  * installation's own row as a clash and refuses — so such a row can only be
  * here because somebody wrote it with SQL or because a whole-database restore
  * brought it back. Since #932 the ACTIVITY log's per-organisation row IS
- * written by a page (Admin, Maintenance, Retention, through
- * `ActivityLogRetention`, which refuses a figure above the installation's);
- * its reader caps as well, because a row from SQL, a restore, or a later
- * lowering of the installation's figure is precisely what a save-time refusal
- * never sees.
+ * written by a page (Admin, Maintenance, Retention, by that organisation's own
+ * administrator — D-118 — through `ActivityLogRetention`, which refuses a
+ * figure above the installation's, and refuses an installation figure below an
+ * organisation's — D-119); its reader caps as well, because a row from SQL or
+ * a restore is precisely what a save-time refusal never sees.
  */
 function log_retention_days(string $key, int $siteId): int
 {

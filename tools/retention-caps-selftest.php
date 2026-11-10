@@ -63,6 +63,9 @@
  *      with a number of days holds an organisation's never to that number
  *      (reader) and refuses it (save, `ActivityLogRetention`); never is not
  *      clamped to 3650; and the sweep counts and deletes nothing under it.
+ *      D-119: lowering the installation below an organisation's own figure is
+ *      refused, naming it — including a lowering made WHILE an organisation's
+ *      never is being saved, driven with a second process (`--hold-activity`).
  *      The ERROR log's 0 still falls back to a year, pinned on its own so the
  *      shared helpers cannot drift.
  *   G. #810 — the REGISTRATIONS clear-out, driven for real: a registration's
@@ -125,7 +128,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const RC_EXPECTED_CHECKS = 135; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six; 116 until #932 replaced section F's three 0-means-a-year pins with twenty-two.
+const RC_EXPECTED_CHECKS = 141; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six; 116 until #932 replaced section F's three 0-means-a-year pins with twenty-two; 135 until D-118/D-119 (#932 round 2) added six, including the race and the unreadable case.
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -174,6 +177,22 @@ if (($argv[1] ?? '') === '--hold-ceiling') {
     $up->bind_param('ss', $holdTo, $key);
     $up->execute();
     $up->close();
+    usleep($holdForMs * 1000);
+    $holder->commit();
+    $holder->close();
+    exit(0);
+}
+
+// 🔒 THIRD ROLE (#932, D-119): an organisation's save of "never" in flight. It
+//    locks the INSTALLATION's activity-log row first, exactly as
+//    ActivityLogRetention::saveForSite() does, writes organisation 1's never,
+//    and waits before committing — the window a lowering has to be caught in.
+if (($argv[1] ?? '') === '--hold-activity') {
+    $holdForMs = (int) ($argv[2] ?? 2500);
+    $holder    = new mysqli($rcHost, $rcUser, $rcPass, $dbName, $rcPort);
+    $holder->begin_transaction();
+    $holder->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'audit.retentionDays' AND `siteID` IS NULL FOR UPDATE");
+    $holder->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (1, 'audit.retentionDays', '0', '', 0)");
     usleep($holdForMs * 1000);
     $holder->commit();
     $holder->close();
@@ -923,18 +942,88 @@ $rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 3651, tru
 rc_check('the installation\'s 3651 days is refused (above the hard maximum), and its stored never is untouched — not clamped to 3650',
     $rcSave['outcome'] === 'refused' && $rcSave['refusal'] === 'above-hard-max' && $rcAlSetting(null) === '0',
     json_encode($rcSave) . ' stored: ' . var_export($rcAlSetting(null), true));
+// 🚫 D-119 (the owner, 10 November 2026): lowering the installation below a
+//    figure an organisation has ALREADY chosen is REFUSED, naming it — never
+//    counting as the longest — and nothing is deleted until that organisation
+//    lowers its own first. (Until D-119 this check asserted the opposite: the
+//    lowering was allowed and the organisation silently held to it.)
+$rcSite1Name = (string) ($mysqli->query('SELECT `siteName` FROM `tblSites` WHERE `siteID` = 1')->fetch_assoc()['siteName'] ?? '');
 $rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, true);
-rc_check('lowering the installation to 30 days is allowed (D-013), and says that 1 organisation is now held to it',
-    $rcSave['outcome'] === 'stored' && $rcSave['heldDown'] === 1 && $rcAlSetting(null) === '30'
-    && str_contains($rcSave['message'], '1 organisation(s)') === true, json_encode($rcSave));
+rc_check('D-119: lowering the installation from never to 30 days is REFUSED while organisation 1 holds never, naming it, and nothing changes',
+    $rcSave['outcome'] === 'refused' && $rcSave['refusal'] === 'organisations-above' && $rcSave['blockedOrganisations'] === 1
+    && $rcSite1Name !== '' && str_contains($rcSave['message'], $rcSite1Name . ' (never deleted)') === true
+    && $rcAlSetting(null) === '0' && $rcAlSetting(1) === '0',
+    json_encode($rcSave) . ' stored: ' . var_export([$rcAlSetting(null), $rcAlSetting(1)], true));
+\Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 400, true);
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 365, true);
+rc_check('…and so is 365 days while it holds 400 — "below" means shorter than ANY figure an organisation chose',
+    $rcSave['outcome'] === 'refused' && $rcAlSetting(null) === '0' && str_contains($rcSave['message'], '(400 days)') === true,
+    json_encode($rcSave));
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 400, true);
+rc_check('…while 400 days, equal to the longest figure chosen, is stored: nobody is above it',
+    $rcSave['outcome'] === 'stored' && $rcAlSetting(null) === '400', json_encode($rcSave));
+// 🪤 NEVER A FALSE REFUSAL (the giving-records lesson): an untouched Save of
+//    the installation's figure is not judged, even where an organisation holds
+//    MORE than it — a state only SQL or a restore can produce, and the reader
+//    holds that organisation down meanwhile. Refusing it would block the page.
+rc_world($mysqli, $AL, '30', '400');
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, true);
+rc_check('…and an untouched Save of the installation\'s 30, with an organisation holding 400 by SQL, is NOT refused: "nothing was different"',
+    $rcSave['outcome'] === 'unchanged' && $rcAlSetting(null) === '30', json_encode($rcSave));
+rc_world($mysqli, $AL, '400', null);
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, true);
+rc_check('once the organisation follows the installation again, lowering to 30 days is accepted — a lowering nobody blocks',
+    $rcSave['outcome'] === 'stored' && $rcAlSetting(null) === '30', json_encode($rcSave));
 $rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 0, true);
-rc_check('and the installation\'s never is stored as 0, never as 3650',
+rc_check('and the installation\'s never is stored as 0, never as 3650 — never shortens nobody, so it is never refused',
     $rcSave['outcome'] === 'stored' && $rcAlSetting(null) === '0', json_encode($rcSave));
-$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 0, false);
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, false);
 $rcSave2 = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 5, false);
-rc_check('both saves refuse anybody who is not a global administrator',
-    $rcSave['outcome'] === 'refused' && $rcSave2['outcome'] === 'refused' && $rcAlSetting(1) === '0',
+rc_check('the installation\'s save refuses anybody not a global administrator, and an organisation\'s refuses anybody not its administrator (D-118)',
+    $rcSave['outcome'] === 'refused' && $rcSave2['outcome'] === 'refused' && $rcAlSetting(null) === '0' && $rcAlSetting(1) === null,
     json_encode([$rcSave, $rcSave2]));
+
+// 🚫 D-119: IF THE ORGANISATIONS' FIGURES CANNOT BE READ, THE LOWERING IS
+//    REFUSED — never treated as "nobody is above it". Made real by renaming
+//    `tblSites` (which only that read touches) for the length of one save, and
+//    put back in a `finally` so a failure here cannot leave the database broken.
+rc_world($mysqli, $AL, '0', '0');
+$mysqli->query('RENAME TABLE `tblSites` TO `tblSitesP932Away`');
+try {
+    $rcBlind = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, true);
+} finally {
+    $mysqli->query('RENAME TABLE `tblSitesP932Away` TO `tblSites`');
+}
+rc_check('D-119: when the organisations\' own figures cannot be read, lowering the installation is REFUSED and nothing is stored',
+    $rcBlind['outcome'] === 'refused' && $rcBlind['refusal'] === 'database' && $rcAlSetting(null) === '0',
+    json_encode($rcBlind) . ' stored: ' . var_export($rcAlSetting(null), true));
+$mysqli->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'audit.retentionDays' AND `siteID` IS NOT NULL");
+
+// 🔒 D-119's RACE (#687's lesson). An organisation's save in flight — holding
+//    the installation's row, as saveForSite() does, and writing "never" — must
+//    make a lowering WAIT and then see the never and refuse. Driven with a
+//    second PROCESS, because one process cannot block itself. Without the
+//    locked, live read the lowering reads a snapshot, misses the uncommitted
+//    never, and stores 30 under it.
+rc_world($mysqli, $AL, '0', null);
+$rcHoldCmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' --hold-activity 2500';
+$rcHoldPipes = [];
+$rcHolder = proc_open($rcHoldCmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $rcHoldPipes, dirname(__DIR__), [
+    'SELFTEST_DB_NAME' => $dbName, 'SELFTEST_DB_HOST' => $rcHost, 'SELFTEST_DB_USER' => $rcUser,
+    'SELFTEST_DB_PASS' => $rcPass, 'SELFTEST_DB_PORT' => (string) $rcPort,
+] + $_ENV);
+usleep(800_000);
+$rcRaceStart = microtime(true);
+$rcRaced     = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, true);
+$rcRaceWait  = microtime(true) - $rcRaceStart;
+if (is_resource($rcHolder) === true) {
+    fclose($rcHoldPipes[1]);
+    fclose($rcHoldPipes[2]);
+    proc_close($rcHolder);
+}
+rc_check('D-119 RACE: a lowering made while an organisation\'s "never" is being saved WAITS for it, then refuses — the installation stays never',
+    $rcRaceWait > 1.0 && $rcRaced['outcome'] === 'refused' && $rcAlSetting(null) === '0' && $rcAlSetting(1) === '0',
+    sprintf('waited %.2fs; ', $rcRaceWait) . json_encode($rcRaced) . ' stored: ' . var_export([$rcAlSetting(null), $rcAlSetting(1)], true));
 $mysqli->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'audit.retentionDays' AND `siteID` IS NOT NULL");
 
 // 🚨 THE ERROR LOG DID NOT CHANGE, and these pins are what stop a shared
