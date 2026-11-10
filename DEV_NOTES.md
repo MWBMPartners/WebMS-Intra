@@ -21977,3 +21977,74 @@ answered 200: a feed that answers nothing reads as "not shown" and would pass ev
 ordered by clock reading rather than real moment (#898), which the countdown works round by asking for 50
 and choosing by moment; the script's own words are English only (#899).
 
+### The page a website frames (#493, package P4c)
+
+`PublicDoor::SURFACE_PAGE` (`page.html`) is answered by the door's one gate, exactly as the feeds
+and the script are. `renderPage()` is pure (given what `events()` and `posters()` answered);
+`pageHeaderLines()` is pure and is what `sendPageHeaders()` sends; `pageCsp()` is the content rule.
+
+- **Why `page.html` and not the bare `/w/{name}/`.** One name that is the same on both forms of
+  address, so `addressFor()` builds it unchanged; and the empty address keeps meaning what P4a
+  pinned — the door's identical 404 on `/w/{name}/` and on a public address's own `/`.
+- **`frame-ancestors` is asked of `PublicWebsiteSetup::frameAncestorsFor()` on every request and
+  nowhere else.** The test pins it in every state: nothing listed, two listed, a hand-edited list
+  holding lines the page would refuse (only the good one survives), the installation's switch "no"
+  and an unreadable value (both `'none'`), another organisation (its own `'none'`), and a test copy.
+  A plant that builds the value from the stored list skips the installation's switch (PV03).
+- **X-Frame-Options is sent (DENY) only when `frame-ancestors` is `'none'`.** It cannot name a
+  website (`ALLOW-FROM` is obsolete), browsers that know `frame-ancestors` ignore it when both are
+  present (the HTML standard), and DENY or SAMEORIGIN alongside a list would refuse the listed
+  websites in any browser that honoured it. So it only adds a refusal for browsers too old for
+  `frame-ancestors`, and only where the answer is refusal anyway. **The cost, stated:** once
+  websites are listed, a browser that knows only X-Frame-Options (Internet Explorer 11) sees no
+  framing rule and lets ANY website frame the page. The page holds only what is already on the
+  public website; the card and the help page say so in plain words.
+- **The content rule:** `default-src 'none'` with no `script-src`; `img-src https:`; the page's ONE
+  stylesheet allowed by the SHA-256 of `PAGE_CSS`, worked out per request so the two cannot
+  disagree; `base-uri`/`form-action 'none'`; `sandbox allow-popups allow-popups-to-escape-sandbox`
+  (links open an ordinary new tab; nothing can script or steer the website). The pasted `<iframe>`
+  carries the same sandbox and `referrerpolicy="no-referrer"`.
+- **A `<title>` cannot test its own escaping with markup alone.** Inside `<title>` an HTML parser
+  reads tags as text, so an unescaped name full of `<img …>` still read back identically and VP02
+  passed on broken code; only a value carrying `</title>` can break out, so both fixtures carry one.
+- **"Is the frame refused?" is asked of a real browser (D-065).** The browser test serves the
+  REAL `renderPage()` output with the REAL `pageHeaderLines()` (frame-ancestors from
+  `frameAncestorsValue()`), made by PHP from `web/_core`, over https. A refused frame is
+  Chromium's own error page (`chrome-error://chromewebdata/`) — a positive sign waited for, never
+  read from an empty frame. **The three made-up hosts must be three different SITES**
+  (`portal-selftest.test`, `listed-selftest.test`, `unlisted-selftest.test`): two names under one
+  `.test` name are one site, the frame then runs in the same process and is never announced as a
+  target, so nothing inside it could be read (measured: FX4 timed out). A sandboxed frame IS put
+  in a process of its own, which is why the sandboxed cases worked first and the bare one did not.
+- **Pictures on the `/w/` form:** with an approved public address, `addressFor()` points the door's
+  media at it whichever form the page was asked on, so both forms draw the same https pictures. A
+  door media address built on a plain-http portal address is dropped by the page (https only); the
+  renderer test drives that.
+- **`show=both` with either app off is refused**, not half-drawn: a switched-off app is never shown
+  and never silently dropped.
+- **Not driven:** browsers other than Chromium; an old browser that honours only X-Frame-Options;
+  a real outside website; what a website builder does to a pasted frame; a phone's layout of the
+  page inside a frame (no layout audit runs on it); the page's words in any language but English
+  (#899). The tester-only test copy is driven over HTTP with the tester's cookie sent directly; a
+  real frame on another website gets no cookie (the card and help page say so).
+- **Round 1 of the check: every refusal and gate on BOTH address forms.** Three faults confined to
+  the approved public address (`/page.html`) passed 247 of 247 — a bad `show`/`limit` answered as a
+  bare 404, D-087's tester question skipped, maintenance skipped — because R01, T11 and V18 asked on
+  `/w/` only, and no test-copy check had ever asked on a public address for ANY surface. P4a's and
+  P4b's lesson a third time. Every page refusal now joins R01 on both forms, T12 drives a test copy
+  on the public address for all four surfaces, V18 asks both forms, and PV15-PV17 plant each fault
+  by ADDING a condition beside the existing line, so other plants' anchors stay intact. DENY on a
+  testers-only `'none'` answer was asserted nowhere either (T11, PV18). **Round 2 found the same
+  shape once more:** on a test copy's public address, for a tester, only four headers were compared,
+  so the page sent with `frame-ancestors *` passed; T12 now compares the page's whole header set
+  there (PV19 `*`, PV20 DENY dropped). Compare the WHOLE header set on every form and every
+  channel, not a sample of it.
+- **`X-Frame-Options: ALLOW-FROM` was considered and is not sent:** only Internet Explorer 11 obeys
+  it (out of support since June 2022), it names only one website, and current browsers ignore it.
+- Tests: section V, VP01-VP16, T11, T12 and PV01-PV20 of `tools/public-door-selftest.php` (totals pinned in each file); section F and FX1-FX5 of `tools/public-door-script-selftest.mjs` ;
+  two more probes in `tools/htaccess-apache-selftest.php` (`/w/…/page.html` and `/page.html` reach
+  index.php).
+- **CI:** the browser test runs in its own job in `pr-security.yml` (`public-door-browser`), because since P4c it
+  needs PHP with openssl, and a `setup-php` step inside the `security` job would move every later step there
+  off the runner image's PHP.
+

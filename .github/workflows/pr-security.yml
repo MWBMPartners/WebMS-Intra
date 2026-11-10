@@ -1634,14 +1634,6 @@ jobs:
         if: always()
         run: node tools/csrf-carriers-selftest.mjs
 
-      # 🚪 #493 P4b: the script an organisation pastes into its own website
-      #    draws TEXT ONLY, in a shadow root, under a strict content policy —
-      #    behaviour, so it is driven in a real browser (D-065). It refuses
-      #    rather than skipping when no Chromium-family browser is found.
-      - name: 'The public door''s script draws text only, in a real browser (#493 P4b)'
-        id: public_door_script_browser
-        if: always()
-        run: node tools/public-door-script-selftest.mjs
 
       # 🎨 D-091: the colours worked out from an organisation's own colour are
       #    really the ones a browser applies — the style block outweighs
@@ -2065,3 +2057,33 @@ jobs:
 
       - name: Run the real .htaccess on a real Apache (hard gate)
         run: php tools/htaccess-apache-selftest.php
+
+  # 🚪 #493 P4b and P4c: the script an organisation pastes into its own website
+  #    draws TEXT ONLY in a shadow root under a strict content policy, and the
+  #    page a website FRAMES is refused by a real browser on any website not
+  #    listed (D-082). Behaviour, so it is driven in a real browser (D-065).
+  #    A job of its own, as htaccess-apache has: since P4c the test also needs
+  #    PHP with openssl, and a setup-php step inside `security` would move every
+  #    LATER step there (the brand-colour test among them) off the runner
+  #    image's PHP. It refuses rather than skipping without a browser or PHP.
+  public-door-browser:
+    name: "The public door's script and framed page, in a real browser (#493 P4b, P4c)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: openssl
+          coverage: none
+
+      - name: Node for the browser test
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: "The public door's script and framed page, in a real browser (#493 P4b, P4c)"
+        run: node tools/public-door-script-selftest.mjs

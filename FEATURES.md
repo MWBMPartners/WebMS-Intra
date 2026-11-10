@@ -244,8 +244,10 @@ screens and didn't say what it meant.
   reach, works under a strict content security policy, shows each event's time on that event's own clock,
   and draws nothing while the door is off. Its own few words are English (#899); dates follow `data-lang`.
   **The old countdown widget is removed** (`/widget/countdown.js`, `/widget/countdown.json`,
-  `/widget/countdown` and the old `/widget` page); the script's countdown mode replaces it. Still to come:
-  the frameable page (P4c).
+  `/widget/countdown` and the old `/widget` page); the script's countdown mode replaces it. **A page for a
+  frame (#493 P4c):** `page.html` — events, posters or both, drawn on the server with no script; framable
+  only by the websites the organisation lists, and by none while the installation forbids framing (D-094);
+  the card prints the frame to paste.
 - **Admin → Server Information** (`/admin/system-info`, any
   administrator): PHP version, the database verdict, connection facts
   asked of the live connection itself rather than read from the

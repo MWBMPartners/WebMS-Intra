@@ -3228,7 +3228,8 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   TEXT ONLY — never `innerHTML` or any other HTML sink — and its behaviour is driven in a real browser by
   `tools/public-door-script-selftest.mjs`, so change the script and run it. The old `/widget…` addresses are
   deleted (D-084, migration 264): do not bring one back. Record: DEV_NOTES.md, "The public door's script
-  (#493, package P4b)".
+  (#493, package P4b)". `PublicDoor::SURFACE_PAGE` (`page.html`, #493 P4c) is the framed page; its
+  `frame-ancestors` is `PublicWebsiteSetup::frameAncestorsFor()` and nothing else — never build it on a page.
   The technical record is DEV_NOTES.md, "Show on the public website, for events (#493, package P1)".
 
 ## A time on a clock is not a moment, and the test for it cannot work (#777 part one)

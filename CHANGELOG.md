@@ -4,6 +4,26 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The public door, part three: a page an organisation's website can frame (#493 P4c)
+
+- **Added: a page for a frame** (D-056, D-082, D-094), for a website that cannot take a script. It is
+  `/w/{name}/page.html` on the portal's own address, or `/page.html` on the organisation's approved public
+  address, and takes `?show=events` (the default), `posters` or `both`, and `limit` (1 to 50, default 10 of
+  each). It is drawn on the server with no JavaScript, every value escaped, pictures and links only to `https:`
+  addresses, and each event's time on its own clock as stored. Only the websites the organisation lists may
+  frame it, and none while the installation forbids framing: its framing rule comes from
+  `PublicWebsiteSetup::frameAncestorsFor()` alone. It answers through the door's one gate, so every refusal is
+  the door's identical "not found". Admin → Public website prints the frame to paste and says where it will and
+  will not work — only on the listed websites, in every current browser; a very old browser such as Internet
+  Explorer 11 does not understand that rule and would let any website frame it; and nothing while its app is
+  switched off. The in-app help says the same.
+- **Tests:** sections V and T of `tools/public-door-selftest.php` over real HTTP on BOTH forms of address, and
+  section F of `tools/public-door-script-selftest.mjs`, where a real browser frames the page from a listed and
+  an unlisted website (each total pinned in its file). The browser test now runs in its own job in
+  `pr-security.yml`, because it needs PHP. Three check rounds by fresh Claude agents (protected arm: outside
+  websites); every finding was a test that asked on only one form of address, and round 3's was confirmed
+  fixed by planting the same fault. Codex has not reviewed it.
+
 ### No new way of signing in can skip what #900 fixed; the passkey sign-in tested for real (#902)
 
 - **A new hard gate, `tools/audit-checks/check_sign_in_begins_session.py`,** reads every PHP file under `web/`
