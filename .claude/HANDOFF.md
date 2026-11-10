@@ -13,7 +13,7 @@ Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 7726c55f | Round 7 built (sentences fixed after a full read of every member-facing erasure page; phrase scan deleted; pins: exactly-one match, four giving states, ancestor chain, plain-text sidecar); check round 7 running |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 7726c55f | Check round 7 NOT CLEAN (closer): My data / Request erasure call gifts 'kept' that will lose the name (inventory counts all rows; needs the eraser's own rule); statements grouped with number-only records; 'how each is cleared' vs D-116; two pin boundary gaps (help list end, any-heading end). Round 8 building |
 | #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 6cad0316 | Round 1's five findings fixed (lock, form token, org prefill, editor lock each now pinned and planted red; comment). Check round 2 running over 747c0194..6cad0316 (incl. D-118/D-119) |
 | #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | `agent-aacc4726f08c2aabc` / `p782-build`, 637a398d | Check round 1 NOT CLEAN: Sabbath 'each organisation's own' not honoured for held texts (sendHeld walks all organisations, Sabbath::zone() takes none); stored-zone-in-force unpinned; an untrue check.php comment; gate misses GB / lower case / leading space — builder fixing. Raised #935-#937 |
 
