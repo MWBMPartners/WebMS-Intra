@@ -5492,7 +5492,7 @@ CREATE TABLE IF NOT EXISTS `tblErasureAudit` (
 CREATE TABLE IF NOT EXISTS `tblGivingKeptDonors` (
     `keptDonorID`      INT          NOT NULL AUTO_INCREMENT,
     `siteID`           INT          NOT NULL COMMENT 'Which organisation these giving records belong to. Each organisation has its own rule for how long the name is kept',
-    `donorID`          INT          NOT NULL COMMENT 'The emptied account that the kept gifts, declarations and statements still point at. The account names nobody; the name is only on this row',
+    `donorID`          INT          NOT NULL COMMENT 'The emptied account that the kept gifts, declarations and statements still point at. The account has no name on it; the name is kept on this row, and beside the same number on any pastoral, safeguarding or check-in record the person made (D-113, #703)',
     `erasureRequestID` INT          DEFAULT NULL COMMENT 'The erasure request that made this row. The line written when the name is finally cleared goes on that request''s audit trail, so one report tells the whole story',
     `fullName`         VARCHAR(255) DEFAULT NULL COMMENT 'The donor''s name as it was when they were erased. Emptied by the retention job when the keep-until date has passed. Empty from the start if the account had already been emptied by other means',
     `address`          VARCHAR(500) DEFAULT NULL COMMENT 'Home address when erased: from the newest tax declaration at this organisation, otherwise from the account. Emptied by the retention job with the name',

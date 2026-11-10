@@ -181,14 +181,15 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 86; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 87; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
                             // check-out pages (D-111) record the worker by name; a
                             // renamed worker is shown under the name they have NOW;
                             // and the privacy page says what keeping the number
-                            // costs (D-113). 82 + 4 = 86.
+                            // costs (D-113). 82 + 4 = 86. Round 3 added one: My
+                            // data tells a worker what is kept (D-113). 87.
 
 function refuse(string $why): never
 {
@@ -978,6 +979,29 @@ ok('the DBS page records who recorded a check by NAME as well as number, read fr
     $dbsForm['status'] === 200 && $dbsSaved['status'] === 302
     && $admDbs !== null && (int) $admDbs['recordedByID'] === ADM && $admDbs['recordedByName'] === 'Ada Admin',
     'form HTTP ' . $dbsForm['status'] . ', save HTTP ' . $dbsSaved['status'] . ' ' . $dbsSaved['location'] . '; row: ' . json_encode($admDbs));
+
+// 🗣️ #703 round 3 (D-113): what a WORKER is told on My data before asking to
+//    be erased. Mel has now made visits, opened a case, checked a child in and
+//    recorded a DBS check, so her own page must say, for each, that her name
+//    and number stay and can be matched back to her; and her account's own line
+//    must say that SOME records keep the number. These are GdprEraser's own
+//    reasons (inventory() shows those), which the round-2 check never read.
+$myData = text(req($jar['mel'], 'GET', '/account/my-data')['body']);
+$myDataSays = [
+    'visits'  => 'pastoral visits you made keep your name and your account number as the person who made them',
+    'case'    => 'pastoral care cases you opened keep your name and your account number as the person who opened them',
+    'checkin' => 'children you checked in keep your name and your account number as the helper who checked them in',
+    'dbs'     => 'DBS checks you recorded keep your name and your account number as the person who recorded them',
+    'match'   => 'Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
+    'account' => 'Most records lose your account number. SOME keep it:',
+];
+$myDataMissing = array_keys(array_filter($myDataSays, static fn (string $words): bool => str_contains($myData, $words) === false));
+ok('MY DATA tells a worker, before they ask to be erased, that the visits, case, check-in and DBS check they made keep their name and number, that through that number their other kept records can be matched back to them, and that SOME records keep their account number (#703, D-113)',
+    // EXACTLY four: one per kept record Mel made (visits, case, check-in, DBS
+    // check). Counting only "back to you (D-113)" let the independent check's
+    // plant PF through, because her account's own line ends the same way.
+    $myDataMissing === [] && substr_count($myData, 'match your other kept records - an expense claim, for instance - back to you (D-113)') === 4,
+    'missing: ' . implode(', ', $myDataMissing) . ' | ' . mb_substr($myData, (int) strpos($myData, 'tblCareVisit'), 700));
 
 $was = $pages();
 // 🧾 #703: the name written on a visit is the name THEN. While the account is

@@ -20,7 +20,9 @@ so the request can be recorded as COMPLETED with that person's details still in
 the table.
 
 That is the right behaviour for a column that is only a LINK to an account —
-the account itself has been emptied, so the row no longer names anybody. It is
+the account itself has been emptied, so the row has no name of its own (though the
+number can still be matched back to the person wherever another record keeps their
+name beside it - D-113, #703). It is
 the wrong behaviour for a column holding the person's own details, and nothing
 tells the two apart. Found by the Codex review of GdprEraser.php on
 27 October 2026.

@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 102; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 103; // 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -82,6 +82,8 @@ const EXPECTED_CHECKS = 102; // 81 before the #709 fix round added section 8d; r
                             // #703 round 2 (D-110, D-111, D-113) widened the five to
                             // the five kept columns and added one: the sentences a
                             // member reads say what keeping the number costs. 102.
+                            // #703 round 3 added one: the reasons a member is really
+                            // SHOWN (GdprEraser's own, not the written list's). 103.
 
 $failures = 0;
 $passes   = 0;
@@ -3054,6 +3056,12 @@ foreach ([
     'tblApiRateLimits reason' => [$reasonOf('tblApiRateLimits'), 'no longer identifies anybody'],
     'help/admin.php'          => [$helpAdmin, 'What stops the claim naming anybody'],
     'privacy/policy.php'      => [$privacy, 'your name and the link to you are removed, and the amounts and dates stay'],
+    // #703 round 3: said flatly, and untrue - most records DO lose the number.
+    'privacy/policy.php (2)'  => [$privacy, 'Your account number is not removed from the records that point at it'],
+    'tblUsers reason (2)'     => [$reasonOf('tblUsers'), 'Its NUMBER is not removed from the records that point at it'],
+    'gdpr-erasure-policy.md'  => [$policyDoc, 'The account NUMBER is not removed from those records'],
+    // #703 round 3: the claim applied only to pastoral visits.
+    'help/admin.php (2)'      => [$helpAdmin, 'so those older records still show'],
 ] as $where => [$text, $old]) {
     if (str_contains($text, $old) === true) {
         $saysTheOpposite[] = $where . ' still says "' . $old . '"';
@@ -3071,13 +3079,77 @@ $saysItPlainly = [
         && str_contains($helpAdmin, 'which of the erased person\'s other kept records were theirs'),
     'privacy/policy.php'      => str_contains($privacy, 'keep your name and account number as the person who did it, even after you are erased')
         && str_contains($privacy, 'could use them to tell which of your other kept records'),
-    'gdpr-erasure-policy.md'  => str_contains($policyDoc, 'can use these records to re-identify the erased person on every other record that kept their number'),
+    'gdpr-erasure-policy.md'  => str_contains($policyDoc, 'can use these records to re-identify the erased person on every other record that kept their number')
+        && str_contains($policyDoc, 'Most of those records lose the account NUMBER, but SOME keep it'),
+    'privacy/policy.php (2)'  => str_contains($privacy, 'Most records that point at it lose your account number, but some keep it')
+        && str_contains($privacy, 'gifts kept for tax keep your name with your number until this organisation\'s keep-until date'),
+    'help/admin.php (2)'      => str_contains($helpAdmin, 'their older pastoral visits still show'),
 ];
 check(
     'D-113: no page or reason a member reads still says an emptied account stops a record naming them, and each says plainly that an erased worker can be re-identified through the records they made (#703)',
     $saysTheOpposite === [] && array_filter($saysItPlainly, static fn (bool $ok): bool => $ok === false) === [],
     implode('; ', $saysTheOpposite) . ' | missing the plain sentence: '
     . implode(', ', array_keys(array_filter($saysItPlainly, static fn (bool $ok): bool => $ok === false)))
+);
+
+// 🗣️ D-113, WHAT A MEMBER IS ACTUALLY SHOWN (#703 round 3). My data and
+//    Request erasure print `GdprEraser::inventory()`, which carries the reason
+//    of each INSTRUCTION - and for a table written out by hand in
+//    GdprEraser::catalogue() that is GdprEraser's own reason, never the
+//    written list's (fromPersonalDataCatalogue() skips such a table). So the
+//    check above, which read the written list, guarded text no member reads:
+//    the independent check made the check-in reason reassuring (plant PF) and
+//    every suite stayed green. These are the sentences on the page, taken from
+//    the real instructions, and pinned both ways. The erasure REPORT's own
+//    lines - the refused-column line every expense claim gets, and the giving
+//    clearing line - are pinned beside them, from the code, because a sealed
+//    trail cannot be corrected afterwards.
+$shown = [];
+foreach ($instructions as $instruction) {
+    $shown[(string) $instruction['table'] . '.' . (string) $instruction['userCol']] = (string) ($instruction['reason'] ?? '');
+}
+$keptLines = [
+    'tblCareVisit.visitedByID'      => ['pastoral visits you made keep your name and your account number as the person who made them', 'D-016'],
+    'tblDbsChecks.recordedByID'     => ['DBS checks you recorded keep your name and your account number as the person who recorded them', 'D-016'],
+    'tblCareCase.openedByID'        => ['pastoral care cases you opened keep your name and your account number as the person who opened them', 'D-110'],
+    'tblKidCheckins.checkedInByID'  => ['children you checked in keep your name and your account number as the helper who checked them in', 'D-111'],
+    'tblKidCheckins.checkedOutByID' => ['children you checked out keep your name and your account number as the helper who checked them out', 'D-111'],
+];
+$shownWrong = [];
+foreach ($keptLines as $key => [$opening, $decision]) {
+    $line = $shown[$key] ?? '';
+    if (str_starts_with($line, $opening) === false
+        || str_contains($line, '(decision ' . $decision . ')') === false
+        || str_ends_with($line, 'Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)') === false
+    ) {
+        $shownWrong[] = $key . ': "' . mb_substr($line, 0, 120) . '…"';
+    }
+}
+$usersLine = $shown['tblUsers.userID'] ?? '';
+if (str_contains($usersLine, 'Most records lose your account number. SOME keep it:') === false
+    || str_contains($usersLine, 'can match those records back to you (D-113)') === false
+    || str_contains($usersLine, 'historical FK integrity') === true
+) {
+    $shownWrong[] = 'tblUsers.userID: "' . mb_substr($usersLine, 0, 120) . '…"';
+}
+if (str_contains($shown['tblExpenseClaims.userID'] ?? '', 'the number on the claim can still be matched back to you through any record that keeps your name beside it') === false) {
+    $shownWrong[] = 'tblExpenseClaims.userID';
+}
+$eraserCodeNow = (string) gc_replace("/'\s*\.\s*'/", '', $codeOnly((string) file_get_contents($eraserFile)));
+if (str_contains($eraserCodeNow, "to be empty, so the account number stays on the row. The account itself has been emptied, but the number can still be matched back to the person through any record that keeps their name beside it (D-113). See migration 192.") === false
+    || str_contains($eraserCodeNow, 'no longer names anybody') === true
+) {
+    $shownWrong[] = 'the erasure report\'s refused-column line (every expense claim)';
+}
+if (str_contains($eraserCodeNow, 'points at names nobody') === true
+    || str_contains($eraserCodeNow, 'points at has no name on it, though the number can still be matched back to the person through any record that keeps their name beside it (D-113).') === false
+) {
+    $shownWrong[] = 'the erasure report\'s giving clearing line';
+}
+check(
+    'D-113, WHAT A MEMBER IS SHOWN: the reasons My data and Request erasure print for an erased worker\'s kept records, their account and their expense claims - and the erasure report\'s own lines - say plainly that the name and number stay and can be matched back to them (#703)',
+    $shownWrong === [],
+    implode(' | ', $shownWrong)
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";

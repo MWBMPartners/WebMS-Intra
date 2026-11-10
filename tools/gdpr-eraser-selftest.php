@@ -226,7 +226,7 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 274; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 275; // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
@@ -266,7 +266,9 @@ const EXPECTED_CHECKS = 274; // 235 before section 19 (#709) added nine; the fix
                              // check the person RECORDED keeps their number
                              // and name. 272 + 1 = 273. #703 round 2 (D-110)
                              // added one: a care case the person OPENED keeps
-                             // their number and name. 273 + 1 = 274.
+                             // their number and name. 273 + 1 = 274. Round 3
+                             // (D-113) added one: what the erasure REPORT says
+                             // about kept workers and expense claims. 275.
 
 // The headings that must all be reached for a pass.
 const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
@@ -2488,10 +2490,37 @@ ge_ok('tblCareVisit: THREE audit lines, in order - the note emptied through the 
     && str_starts_with((string) $visitLine[0]['details'], 'matched through `tblCareCase`.`personUserID`.')
     && str_contains((string) $visitLine[0]['details'], 'the note on a pastoral visit describes the person the case is about')
     && str_contains((string) $visitLine[0]['details'], 'a visit on somebody else\'s case is untouched')
-    && str_starts_with((string) $visitLine[1]['details'], 'kept on purpose: pastoral visits you made keep your name as the person who made them')
+    && str_starts_with((string) $visitLine[1]['details'], 'kept on purpose: pastoral visits you made keep your name and your account number as the person who made them')
     && str_contains((string) $visitLine[1]['details'], 'D-016')
     && str_contains((string) $visitLine[2]['details'], 'who its follow-up was given to is detached')
     && str_contains((string) $visitLine[0]['details'], 'not searched') === false, json_encode($visitLine));
+
+// 🗣️ #703 round 3 (D-113): what the erasure REPORT says, read out of the sealed
+//    trail. Every kept-worker line carries its WHOLE reason - nothing cuts it,
+//    so the D-113 sentence at its end really reaches the report - and the line
+//    every expense claim gets, because its account column cannot be emptied,
+//    no longer says the row "no longer names anybody".
+$keptWhole = [];
+foreach (['tblCareVisit' => 'visitedByID', 'tblDbsChecks' => 'recordedByID', 'tblCareCase' => 'openedByID',
+          'tblKidCheckins' => 'checkedInByID'] as $keptTable => $keptCol) {
+    $reasonNow = '';
+    foreach (GdprEraser::catalogue() as $instr) {
+        if ($instr['table'] === $keptTable && $instr['userCol'] === $keptCol) {
+            $reasonNow = (string) $instr['reason'];
+        }
+    }
+    $lines = array_values(array_filter($auditA, static fn (array $l): bool => $l['tableName'] === $keptTable && $l['action'] === 'retain'
+        && (string) $l['details'] === 'kept on purpose: ' . $reasonNow));
+    if ($reasonNow === '' || count($lines) !== 1 || str_ends_with($reasonNow, '(D-113)') === false) {
+        $keptWhole[] = $keptTable . '.' . $keptCol;
+    }
+}
+$claimLine = array_values(array_filter($auditA, static fn (array $l): bool => $l['tableName'] === 'tblExpenseClaims'));
+ge_ok('THE REPORT says D-113\'s truth: each kept worker line carries its whole reason, ending "(D-113)", and the expense claim\'s line says its number can still be matched back to the person rather than that it "no longer names anybody" (#703)',
+    $keptWhole === [] && count($claimLine) === 1 && $claimLine[0]['action'] === 'skip'
+    && str_contains((string) $claimLine[0]['details'], 'can still be matched back to the person through any record that keeps their name beside it (D-113). See migration 192.')
+    && str_contains((string) $claimLine[0]['details'], 'no longer names anybody') === false,
+    json_encode(['not whole' => $keptWhole, 'claim' => $claimLine]));
 
 // =============================================================================
 ge_section('3', 'Every instruction did what it says, and only that');

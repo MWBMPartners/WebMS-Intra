@@ -727,9 +727,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             instance, which also keeps the number. Somebody asking to be erased cannot expect their
             name to come off these records. The name is the one their account had when the record
             was made. Two limits, said plainly: a worker erased before this change cannot be given
-            their name back, so those older records still show &ldquo;Somebody no longer
-            recorded&rdquo;; and what a visit says about the person <em>being cared for</em> is still
-            emptied when <em>they</em> ask to be erased.
+            their name back, so their older pastoral visits still show &ldquo;Somebody no longer
+            recorded&rdquo; on the case page (no page shows who opened a case, who recorded a DBS
+            check or who checked a child in or out); and what a visit says about the person
+            <em>being cared for</em> is still emptied when <em>they</em> ask to be erased.
         </li>
         <li>
             <strong>Kept because it is the organisation's own record, not the person's.</strong> A

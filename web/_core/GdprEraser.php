@@ -226,7 +226,7 @@ class GdprEraser
             //    those records keep their NAME beside the same number on
             //    purpose (D-016, D-110, D-111), so anyone who can read the
             //    database or a backup can match the claim back to them.
-            ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'an expense claim is a financial record kept for six years because HMRC requires it, and the claimant is deliberately kept with it (the owner, 3 November 2026): a claim that cannot say who was paid is of little use as one. The database also will not allow this column to be empty, so the attempt fails and the trail records that'],
+            ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'an expense claim is a financial record kept for six years because HMRC requires it, and the claimant is deliberately kept with it (the owner, 3 November 2026): a claim that cannot say who was paid is of little use as one. The database also will not allow this column to be empty, so the attempt fails and the trail records that. Your account is emptied, but the number on the claim can still be matched back to you through any record that keeps your name beside it - a pastoral, safeguarding or check-in record you made, or a giving record kept for tax (D-113)'],
             // 🧾 KEPT, since roll-out package A2b (Salem874, 11 October 2026).
             //    This line said 'anonymise' until then: every gift lost its
             //    donor at once. A gift given before the erasure but not yet
@@ -435,7 +435,9 @@ class GdprEraser
             //
             //    What that later step does NOT do: empty `donorID`. The
             //    database does not allow it to be empty on this table, so the
-            //    row goes on pointing at an account that names nobody.
+            //    row goes on pointing at an account with no name on it - which
+            //    is not anonymous where the person's name is kept beside the
+            //    same number elsewhere (D-113, #703).
             ['table' => 'tblGiftAidDeclaration','userCol' => 'donorID', 'action' => 'retain', 'nullCols' => [], 'reason' => 'a tax declaration is the organisation\'s evidence for tax relief claimed on a donor\'s gifts. Kept unchanged, with the donor\'s giving records, until the organisation\'s keep-until date; see the "GivingRecords" line of this report'],
             // The person's own connection to Zoom: their Zoom account's number
             // and the keys that let the portal act as them. Deleted.
@@ -524,8 +526,14 @@ class GdprEraser
             //    Nothing in this list empties either name. The account number
             //    stays too, and D-113 says what that costs: through these rows
             //    an erased helper can be re-identified on their other records.
-            ['table' => 'tblKidCheckins',      'userCol' => 'checkedInByID',  'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked in keep your name as the helper who checked them in, even after your account is erased. This is kept on purpose (decision D-111): who handed a child over must stay answerable. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
-            ['table' => 'tblKidCheckins',      'userCol' => 'checkedOutByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked out keep your name as the helper who checked them out, even after your account is erased. This is kept on purpose (decision D-111): who handed a child over, and to whom, must stay answerable. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
+            ['table' => 'tblKidCheckins',      'userCol' => 'checkedInByID',  'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked in keep your name and your account number as the helper who checked them in, '
+                . 'even after your account is erased (decision D-111): who handed a child over must stay answerable. '
+                . 'Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . '- an expense claim, for instance - back to you (D-113)'],
+            ['table' => 'tblKidCheckins',      'userCol' => 'checkedOutByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked out keep your name and your account number as the helper who checked them '
+                . 'out, even after your account is erased (decision D-111): who handed a child over, and to whom, must '
+                . 'stay answerable. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . '- an expense claim, for instance - back to you (D-113)'],
 
             // #257 Pastoral Care Register. personUserID is the case SUBJECT
             // (the person being cared for) — anonymise rather than delete so
@@ -660,7 +668,10 @@ class GdprEraser
             //    detached them ("authorship attribution detached"). The name is
             //    `openedByName` (migration 272), written by `care/case-save.php`,
             //    because the opener's own account is still emptied.
-            ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral care cases you opened keep your name as the person who opened them, even after your account is erased. This is kept on purpose (decision D-110): a pastoral record must still say who opened it. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
+            ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral care cases you opened keep your name and your account number as the person who opened '
+                . 'them, even after your account is erased (decision D-110): a pastoral record must still say who opened '
+                . 'it. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . '- an expense claim, for instance - back to you (D-113)'],
 
             // 🚪 Room bookings (#715, the owner's decision of 3 November 2026).
             //    `purpose` is the person's own stated reason for wanting the
@@ -705,7 +716,10 @@ class GdprEraser
             //    the #709 instruction. The reason is the sentence a worker
             //    reads on "Request data erasure", so it says plainly what
             //    they cannot expect.
-            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral visits you made keep your name as the person who made them, even after your account is erased. This is kept on purpose (decision D-016): a pastoral or safeguarding record must still say who carried it out. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
+            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral visits you made keep your name and your account number as the person who made them, '
+                . 'even after your account is erased (decision D-016): a pastoral or safeguarding record must still say '
+                . 'who carried it out. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . '- an expense claim, for instance - back to you (D-113)'],
             ['table' => 'tblCareVisit',      'userCol' => 'followUpAssignedToID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who its follow-up was given to is detached'],
             ['table' => 'tblCareAccessLog',  'userCol' => 'viewerID',     'action' => 'delete'],
 
@@ -729,7 +743,10 @@ class GdprEraser
             //    `tblUsers` step and their number alone would point at
             //    "[Deleted User]". Nothing in this list empties it.
             ['table' => 'tblDbsChecks',      'userCol' => 'userID',       'action' => 'retain',    'nullCols' => [], 'reason' => 'Safeguarding record. Kept and flagged, never quietly removed (how long it is kept: as required by safeguarding policy)'],
-            ['table' => 'tblDbsChecks',      'userCol' => 'recordedByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'DBS checks you recorded keep your name as the person who recorded them, even after your account is erased. This is kept on purpose (decision D-016): a safeguarding check must still say who carried it out. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
+            ['table' => 'tblDbsChecks',      'userCol' => 'recordedByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'DBS checks you recorded keep your name and your account number as the person who recorded them, '
+                . 'even after your account is erased (decision D-016): a safeguarding check must still say who carried it '
+                . 'out. Nothing else about you is on them. Through that number, anyone who can read the database or a backup can match your other kept records '
+                . '- an expense claim, for instance - back to you (D-113)'],
 
             // #393 Asset Tracker. tblAssetFoundReports is deliberately
             // NOT catalogued here — it's filled by the public, anonymous
@@ -1207,7 +1224,22 @@ class GdprEraser
             ['table' => 'tblUsers', 'userCol' => 'userID', 'action' => 'anonymise',
              'nullCols' => ['emailAddress','phoneNumber','displayAddress','displayPhone','displayBio','latitude','longitude','what3words','locale','totpSecret','calendarToken','notifyPrefs'],
              'overrides' => ['fullName' => self::TOMBSTONE_NAME, 'isActive' => 0, 'isAdmin' => 0, 'isRootAdmin' => 0, 'totpEnabled' => 0],
-             'reason' => 'user row retained for historical FK integrity; PII removed'],
+             // 🗣️ #703, D-113: this is the sentence a member reads about their own
+             //    account on My data and Request erasure (a hand-written entry is
+             //    what inventory() shows; the catalogue's own reason for tblUsers
+             //    is never shown, because fromPersonalDataCatalogue() skips a table
+             //    written out here). It said "user row retained for historical FK
+             //    integrity; PII removed", which told a worker nothing about the
+             //    number that stays, or what it can still be matched to.
+             'reason' => 'your account is kept as an empty shell so that the records pointing at it do not break: '
+                 . 'your name becomes "[Deleted User]", and your e-mail address, telephone, address, biography, map '
+                 . 'position, language, sign-in secrets, calendar link and notification choices are emptied. Most '
+                 . 'records lose your account number. SOME keep it: your expense claims, your own DBS checks, your '
+                 . 'tax declarations and giving statements, gifts kept for tax (which also keep your name until the '
+                 . 'organisation\'s keep-until date), and any pastoral visits, care cases, DBS checks or children\'s '
+                 . 'check-ins you made (which keep your name too, on purpose: D-016, D-110, D-111). Through that number '
+                 . 'and those names, anyone who can read the database or a backup can match those records back to you '
+                 . '(D-113)'],
         ];
 
         // 📚 Everything else comes from the one written list of where
@@ -4219,11 +4251,18 @@ class GdprEraser
                         'skip',
                         $table,
                         null,
+                        // 🗣️ #703, D-113: this line used to end "so the row no
+                        //    longer names anybody". That is not true once a
+                        //    worker's name is kept beside the same number on
+                        //    the records they made (D-016, D-110, D-111), or a
+                        //    donor's on a kept giving record, and this line is
+                        //    what an administrator reads in the erasure report.
                         'nothing could be emptied: the database does not allow '
-                        . implode(', ', $refused) . ' to be empty. The account '
-                        . 'they point at has itself been anonymised, so the row '
-                        . 'no longer names anybody - but the link remains. See '
-                        . 'migration 192.'
+                        . implode(', ', $refused) . ' to be empty, so the account '
+                        . 'number stays on the row. The account itself has been '
+                        . 'emptied, but the number can still be matched back to the '
+                        . 'person through any record that keeps their name beside it '
+                        . '(D-113). See migration 192.'
                     );
 
                     return self::STEP_UNCHANGED;
@@ -5439,7 +5478,12 @@ class GdprEraser
                     . $gone . ' kept statement ' . ($gone === 1 ? 'file was' : 'files were') . ' deleted. Amounts, dates and '
                     . 'methods are kept, and no record was deleted. The tax declarations and statement records still carry '
                     . 'the account number, because the database does not allow it to be empty there; the account it '
-                    . 'points at names nobody. Worked out from: last gift ' . GivingRetention::dateInWords((string) $state['countedFromGift']) . '; '
+                    // 🗣️ #703, D-113: it said "points at names nobody", untrue where the
+                    //    person's name is kept beside the same number on a pastoral,
+                    //    safeguarding or check-in record they made. This line is read in
+                    //    the erasure report.
+                    . 'points at has no name on it, though the number can still be matched back to the person through any '
+                    . 'record that keeps their name beside it (D-113). Worked out from: last gift ' . GivingRetention::dateInWords((string) $state['countedFromGift']) . '; '
                     . ($state['usedFallback'] === true
                         ? 'no financial year end set, so one year after it was used'
                         : 'financial year ends ' . GivingRetention::yearEndInWords((string) $rule['yearEnd']))
@@ -6370,7 +6414,11 @@ class GdprEraser
                 //    recorded under #518, and the account itself is emptied by
                 //    the main walk. So after an erasure they already said
                 //    "account 4211 was added to department 7", where 4211
-                //    identifies nobody. There was no identifying residue. What
+                //    has no name on it any more - though it is NOT anonymous
+                //    where the person's name is kept beside the same number on
+                //    a pastoral, safeguarding or check-in record they made, or
+                //    a kept giving record (D-113, #703). No NAME was left in
+                //    these payloads themselves. What
                 //    this closes is the day somebody adds a NAME to one of
                 //    those payloads: #707's fault would be back in a table
                 //    nothing covered, and nothing would have noticed.

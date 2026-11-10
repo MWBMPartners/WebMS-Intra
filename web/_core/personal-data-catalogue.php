@@ -1384,7 +1384,7 @@ return [
         // `avatarPath`, `displayPhoto` and `displayBio` were not named here, and
         // were not cleared, until 11 October 2026: an erased account kept its
         // photo and the biography its owner had written.
-        'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone with no name on it. Its NUMBER is not removed from the records that point at it, and if the person made pastoral visits, opened care cases, recorded DBS checks or checked children in or out, those records keep their name beside that number on purpose (the owner\'s decisions D-016, D-110, D-111). Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
+        'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone with no name on it. Most records that point at it lose the account NUMBER, but SOME keep it: the person\'s expense claims, their own DBS checks, their tax declarations and giving statements, gifts kept for tax (with their name kept in tblGivingKeptDonors until the organisation\'s keep-until date), and the pastoral visits, care cases, DBS checks and children\'s check-ins they made, which keep their name beside the number on purpose (the owner\'s decisions D-016, D-110, D-111). Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
         'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'displayBio', 'avatarPath', 'displayPhoto', 'latitude', 'longitude', 'what3words', 'phoneNumber', 'displayPhone'],
         'notEmptiedHere' => [
             'avatarPath' => 'Emptied elsewhere, on purpose: GdprEraser::eraseProfileImages() reads this column to find the file, deals with the file, and only then empties both columns in one statement of its own. Emptying it from this instruction instead would throw away the only record of where the file is and leave the image on disk.',
@@ -2184,7 +2184,7 @@ return [
         // safeguarding grounds, which contradicted the line in `notEmptiedHere`
         // below.
         'reason'   => 'A pastoral visit. The case history is kept for as long as safeguarding policy keeps the '
-                    . 'case. Who made the visit is KEPT, by name, when that person is erased (the owner\'s decision '
+                    . 'case. Who made the visit is KEPT, by name and account number, when that person is erased (the owner\'s decision '
                     . 'D-016, #703): a pastoral record must still say who carried it out. Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113). Who its follow-up was given '
                     . 'to is detached. The note on a visit is the subject\'s own record and IS emptied when the person '
                     . 'cared for is erased, matched through the case (#709)',
