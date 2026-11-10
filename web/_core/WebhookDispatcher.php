@@ -44,6 +44,13 @@
  *   redirect, caps the time and the reply, and never sets CURLOPT_ENCODING
  *   (#716).
  *
+ *   WHICH PORT NUMBERS: 443 and 80 unless the installation's global
+ *   administrator has allowed any port on a public address
+ *   (`WebhookPorts`, the owner's decision D-102). A webhook whose address
+ *   is WRITTEN in a way that is not allowed (a port, a user name or
+ *   password inside it — which curl used to send as a basic sign-in) is
+ *   recorded `not-allowed`; one that LEADS somewhere private is `refused`.
+ *
  *   `responseSnippet` NO LONGER HOLDS THE OTHER SERVER'S REPLY. It holds one
  *   word from `SafeFetch::POST_REASONS` when a delivery did not succeed, and
  *   NULL when it did. The reply was shown on no page, so it bought nothing,
@@ -98,6 +105,21 @@ class WebhookDispatcher
      * stops a hostile receiver streaming for ever.
      */
     private const MAX_REPLY_BYTES = 65536;
+
+    /**
+     * How long one delivery may take, from the `webhooks.timeout` setting: a
+     * whole number of seconds from 1 to `MAX_TIMEOUT_SECONDS`. Missing means
+     * the built-in 10; anything that is not a positive number becomes 1
+     * rather than "no limit" (a 0 handed to curl would be no limit at all).
+     *
+     * Public so the self-test can pin the arithmetic directly: the ceiling
+     * cannot be watched from outside without waiting half a minute.
+     */
+    public static function timeoutSeconds(mixed $setting): int
+    {
+        $seconds = $setting === null ? 10 : (int) (is_scalar($setting) === true ? $setting : 0);
+        return max(1, min(self::MAX_TIMEOUT_SECONDS, $seconds));
+    }
 
     // 🔁 Retry ceiling shared by attemptDelivery()'s dead-letter check and
     // retryDue()'s own selection filter (attemptCount < MAX_ATTEMPTS) — one
@@ -319,8 +341,7 @@ class WebhookDispatcher
     ): string {
         try {
             $signature = 'sha256=' . hash_hmac('sha256', $body, $signingSecret);
-            $timeout   = (int) (App::settings('webhooks.timeout') ?? '10');
-            $timeout   = max(1, min(self::MAX_TIMEOUT_SECONDS, $timeout));
+            $timeout   = self::timeoutSeconds(App::settings('webhooks.timeout'));
 
             // 📤 Sent through SafeFetch (#615): checked NOW, pinned to the
             //    checked addresses, no proxy, no redirect, capped. The
@@ -340,6 +361,9 @@ class WebhookDispatcher
                     'timeoutSeconds'        => $timeout,
                     'connectTimeoutSeconds' => min(5, $timeout),
                     'maxBytes'              => self::MAX_REPLY_BYTES,
+                    // 🚪 D-102: other port numbers only when the
+                    //    INSTALLATION allows them (never an organisation's row).
+                    'anyPort'               => WebhookPorts::allowsAnyPort(),
                 ]
             );
             $code = (int) $sent['status'];

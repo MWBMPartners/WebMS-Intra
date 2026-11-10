@@ -96,6 +96,13 @@
  *   far enough to know the status and are then thrown away, so no caller
  *   can store or show them — the reply of a server somebody chose is
  *   exactly what a request-forgery attempt is trying to read.
+ * - It can be told `anyPort` (#615, the owner's decision D-102): a webhook
+ *   may use any port number from 1 to 65535 on a PUBLIC address when the
+ *   installation's global administrator has allowed it. `get()`, the
+ *   calendar fetcher, never takes that option and keeps the standard-ports
+ *   rule; `normaliseUrl()` and `check()` take it as an argument that is
+ *   false unless a caller says otherwise. Private and internal addresses are
+ *   refused whatever it says.
  * - Its refusal record names NO host at all. The calendar fetcher records
  *   the host because a calendar's secret is in its path; a webhook's
  *   address was typed by an administrator who may be probing names inside
@@ -295,6 +302,10 @@ final class SafeFetch
      *   timeoutSeconds        — the most time the whole send may take.
      *   connectTimeoutSeconds — the most time connecting may take.
      *   httpsOnly             — refuse plain http.
+     *   anyPort               — allow any port from 1 to 65535 (D-102). The
+     *                           address must still be public. False unless
+     *                           the caller has been told otherwise by the
+     *                           installation (`WebhookPorts`).
      *
      * There is no `maxRedirects` (a send never follows one), no `accept`
      * and no `deadline` (one send is one hop).
@@ -304,6 +315,7 @@ final class SafeFetch
         'timeoutSeconds'        => 10,
         'connectTimeoutSeconds' => 5,
         'httpsOnly'             => false,
+        'anyPort'               => false,
     ];
 
     /**
@@ -312,16 +324,29 @@ final class SafeFetch
      * (#615): a word says enough for an administrator to act on, and nothing
      * about where the address led.
      *
-     *   refused     — the address may not be used (private, internal,
-     *                 reserved, an unusual port, not found), or the
-     *                 connection went somewhere that was not approved.
+     *   refused     — where the address LEADS may not be used (private,
+     *                 internal, reserved, or its name was not found), or
+     *                 the connection went somewhere that was not approved.
+     *   not-allowed — how the address is WRITTEN is not allowed: a port
+     *                 the caller has not allowed, a user name or password
+     *                 inside it, a scheme other than http or https, an
+     *                 unusual spelling of a number. Kept apart from
+     *                 `refused` because the two send an administrator to
+     *                 look in different places (#615 round 1: one word for
+     *                 both told somebody whose webhook had `:8443` in it to
+     *                 go and look at their name server).
      *   too-slow    — no answer within the time limit.
      *   unreachable — no connection could be made.
      *   http-status — the other server answered, with a status that is not
      *                 2xx (a redirect included: it is not followed).
      *   no-curl     — this server has no curl extension.
      */
-    public const POST_REASONS = ['refused', 'too-slow', 'unreachable', 'http-status', 'no-curl'];
+    public const POST_REASONS = ['refused', 'not-allowed', 'too-slow', 'unreachable', 'http-status', 'no-curl'];
+
+    /** The message for `not-allowed`. Depends only on the text of the address. */
+    public const NOT_ALLOWED_MESSAGE = 'This address cannot be used: it is written in a way that is not allowed here '
+        . '(a port number that is not allowed, a user name or password inside it, a scheme other than http or https, '
+        . 'or an unusual spelling of a number).';
 
     /**
      * TEST ONLY. Always null in the running portal; nothing under `web/`
@@ -373,10 +398,14 @@ final class SafeFetch
      *
      * Not changed: the path and the query, which are kept exactly as typed.
      * They matter only to the other server.
+     *
+     * `$anyPort` (#615, D-102; webhooks only): any port from 1 to 65535 is
+     * accepted and kept in the address, written as a plain number with no
+     * leading zero. The default, false, is the calendar rule.
      */
-    public static function normaliseUrl(string $input): ?string
+    public static function normaliseUrl(string $input, bool $anyPort = false): ?string
     {
-        $parts = self::parse($input);
+        $parts = self::parse($input, $anyPort);
         return $parts === null ? null : $parts['url'];
     }
 
@@ -441,11 +470,14 @@ final class SafeFetch
      * `ips` lists the approved addresses, in their standard spelling. `get()`
      * connects to these and nothing else.
      *
+     * `$anyPort` is `normaliseUrl()`'s: false (the calendar rule) unless a
+     * caller says otherwise. It changes nothing about which ADDRESSES pass.
+     *
      * @return array{ok: bool, message: string, host: string, port: int, ips: list<string>}
      */
-    public static function check(string $url): array
+    public static function check(string $url, bool $anyPort = false): array
     {
-        $parts = self::parse($url);
+        $parts = self::parse($url, $anyPort);
         if ($parts === null) {
             return self::refusal('');
         }
@@ -686,7 +718,7 @@ final class SafeFetch
      * delivery row), and one Notice per failed retry would bury the log.
      *
      * @param list<string> $headers
-     * @param array{maxBytes?: int, timeoutSeconds?: int, connectTimeoutSeconds?: int, httpsOnly?: bool} $opts
+     * @param array{maxBytes?: int, timeoutSeconds?: int, connectTimeoutSeconds?: int, httpsOnly?: bool, anyPort?: bool} $opts
      * @return array{ok: bool, status: int, bytes: int, message: string, reason: string, capped: bool}
      * @throws \InvalidArgumentException on an unknown option, a nonsensical
      *         value, or a header that is not one single line (a programming
@@ -699,9 +731,15 @@ final class SafeFetch
                 throw new \InvalidArgumentException('SafeFetch::post(): unknown option "' . $name . '".');
             }
         }
+        $wanted  = array_merge(self::POST_OPTIONS, $opts);
+        $anyPort = $wanted['anyPort'];
+        if (is_bool($anyPort) === false) {
+            throw new \InvalidArgumentException('SafeFetch::post(): option "anyPort" must be true or false.');
+        }
+        unset($wanted['anyPort']);
         // The shared option checks, with the two settings a send never uses
         // pinned: no redirect is ever followed, and one send is one hop.
-        $o = self::options(array_merge(self::POST_OPTIONS, $opts, ['maxRedirects' => 0, 'deadline' => null]));
+        $o = self::options(array_merge($wanted, ['maxRedirects' => 0, 'deadline' => null]), 'post');
 
         // A header is sent as it is; a line break inside one would let it
         // write a header (or a whole request) of its own.
@@ -715,17 +753,21 @@ final class SafeFetch
             return self::sent(false, 0, 0, self::MSG_NO_CURL, 'no-curl', false);
         }
 
-        $parts = self::parse($url);
+        // ✍️ How it is WRITTEN first: `not-allowed`, never `refused` (see
+        //    POST_REASONS). Only http and https are sent to — `parse()` would
+        //    turn a calendar app's `webcal://` into https, which is right for
+        //    a calendar and not something a webhook form ever offered.
+        $parts = preg_match('~^\s*https?://~i', $url) === 1 ? self::parse($url, $anyPort) : null;
         if ($parts === null) {
-            self::logProblem('SEND_REFUSED', '', 0, false);
-            return self::sent(false, 0, 0, self::REFUSED_MESSAGE, 'refused', false);
+            self::logProblem('SEND_NOT_ALLOWED', '', 0, false);
+            return self::sent(false, 0, 0, self::NOT_ALLOWED_MESSAGE, 'not-allowed', false);
         }
         if ($o['httpsOnly'] === true && $parts['scheme'] !== 'https') {
-            return self::sent(false, 0, 0, self::MSG_HTTPS_ONLY, 'refused', false);
+            return self::sent(false, 0, 0, self::MSG_HTTPS_ONLY, 'not-allowed', false);
         }
 
         // 🔎 Checked NOW, at the moment of sending (#615 point 1).
-        $checked = self::check($parts['url']);
+        $checked = self::check($parts['url'], $anyPort);
         if ($checked['ok'] === false) {
             self::logProblem('SEND_REFUSED', '', 0, false);
             return self::sent(false, 0, 0, self::REFUSED_MESSAGE, 'refused', false);
@@ -789,7 +831,7 @@ final class SafeFetch
      *
      * @return array{scheme: string, host: string, port: int, url: string, ipLiteral: ?string}|null
      */
-    private static function parse(string $input): ?array
+    private static function parse(string $input, bool $anyPort = false): ?array
     {
         $s = trim($input);
         if ($s === '' || strlen($s) > self::MAX_URL_LENGTH) {
@@ -862,15 +904,25 @@ final class SafeFetch
             $ipLiteral = filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false ? $host : null;
         }
 
-        // 🚪 Only the scheme's own port, and then it is simply dropped.
+        // 🚪 Only the scheme's own port, and then it is simply dropped —
+        //    unless the caller allows any port (#615, D-102, webhooks only):
+        //    then 1 to 65535, written as a plain number with no leading zero
+        //    (one spelling, so this class and curl cannot read it two ways),
+        //    and kept in the address when it is not the scheme's own.
         $port = self::DEFAULT_PORTS[$scheme];
         if ($portText !== null) {
-            if (preg_match('/^[0-9]{1,5}$/', $portText) !== 1 || (int) $portText !== $port) {
+            if ($anyPort === true) {
+                if (preg_match('/^[1-9][0-9]{0,4}$/', $portText) !== 1 || (int) $portText > 65535) {
+                    return null;
+                }
+                $port = (int) $portText;
+            } elseif (preg_match('/^[0-9]{1,5}$/', $portText) !== 1 || (int) $portText !== $port) {
                 return null;
             }
         }
+        $authorityOut = $port === self::DEFAULT_PORTS[$scheme] ? $host : $host . ':' . $port;
 
-        $url = $scheme . '://' . $host . ($path === '' ? '/' : $path) . $query;
+        $url = $scheme . '://' . $authorityOut . ($path === '' ? '/' : $path) . $query;
         if (strlen($url) > self::MAX_URL_LENGTH) {
             return null;
         }
@@ -1080,32 +1132,35 @@ final class SafeFetch
      *
      * @return array{maxBytes: int, timeoutSeconds: int, connectTimeoutSeconds: int, maxRedirects: int, httpsOnly: bool, accept: string, deadline: float|int|null}
      */
-    private static function options(array $opts): array
+    private static function options(array $opts, string $caller = 'get'): array
     {
+        // The method the caller used, so a mistake made through post() is
+        // not reported as get()'s (#615 round 1).
+        $who = 'SafeFetch::' . ($caller === 'post' ? 'post' : 'get') . '()';
         foreach (array_keys($opts) as $name) {
             if (array_key_exists((string) $name, self::DEFAULT_OPTIONS) === false) {
-                throw new \InvalidArgumentException('SafeFetch::get(): unknown option "' . $name . '".');
+                throw new \InvalidArgumentException($who . ': unknown option "' . $name . '".');
             }
         }
         $o = array_merge(self::DEFAULT_OPTIONS, $opts);
         foreach (['maxBytes', 'timeoutSeconds', 'connectTimeoutSeconds'] as $name) {
             if (is_int($o[$name]) === false || $o[$name] < 1) {
-                throw new \InvalidArgumentException('SafeFetch::get(): option "' . $name . '" must be a whole number of at least 1.');
+                throw new \InvalidArgumentException($who . ': option "' . $name . '" must be a whole number of at least 1.');
             }
         }
         if (is_int($o['maxRedirects']) === false || $o['maxRedirects'] < 0 || $o['maxRedirects'] > 10) {
-            throw new \InvalidArgumentException('SafeFetch::get(): option "maxRedirects" must be a whole number from 0 to 10.');
+            throw new \InvalidArgumentException($who . ': option "maxRedirects" must be a whole number from 0 to 10.');
         }
         if (is_bool($o['httpsOnly']) === false) {
-            throw new \InvalidArgumentException('SafeFetch::get(): option "httpsOnly" must be true or false.');
+            throw new \InvalidArgumentException($who . ': option "httpsOnly" must be true or false.');
         }
         // The Accept value becomes a request header; a line break in it would
         // let it add headers of its own.
         if (is_string($o['accept']) === false || $o['accept'] === '' || preg_match('/[\x00-\x1F\x7F]/', $o['accept']) === 1) {
-            throw new \InvalidArgumentException('SafeFetch::get(): option "accept" must be a single line of text.');
+            throw new \InvalidArgumentException($who . ': option "accept" must be a single line of text.');
         }
         if ($o['deadline'] !== null && is_float($o['deadline']) === false && is_int($o['deadline']) === false) {
-            throw new \InvalidArgumentException('SafeFetch::get(): option "deadline" must be a microtime(true) moment or null.');
+            throw new \InvalidArgumentException($who . ': option "deadline" must be a microtime(true) moment or null.');
         }
         return $o;
     }

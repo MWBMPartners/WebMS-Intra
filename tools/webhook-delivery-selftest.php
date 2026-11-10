@@ -42,6 +42,18 @@
  *      switching it back on is; the refusal is recorded in the activity log
  *      with no part of the address; and the deliveries list shows a reason
  *      word and never a stored reply.
+ *   D-102 (the owner, 10 November 2026): which port numbers a webhook may
+ *      use is an INSTALLATION setting, standard ports by default. A9 and
+ *      B7 prove any port on a public address goes through when — and only
+ *      when — the installation's own row allows it (B7b and C6f: an
+ *      organisation's row saying yes changes nothing; C6: an ordinary
+ *      administrator cannot set it; C6d: a private address stays refused on
+ *      any port), A9e that the calendar fetcher's rule is unchanged, and A9
+ *      that the connection goes through post()'s OWN pin entry (the test's
+ *      name-to-port entry is not given, so it cannot carry the connection).
+ *      A2a, B1e and C5b: an address WRITTEN in a way that is not allowed (a
+ *      port, a user name and password, webcal) is `not-allowed` with its own
+ *      true sentence, never `refused`. B8: the 1-30 second time limit.
  *   P. Plants. Each guard is taken out, in a COPY, and the run must go red
  *      on the check meant to catch it; then the copy is put back and must be
  *      green again. One plant puts the ORIGINAL pre-#615 send code back into
@@ -84,10 +96,12 @@
  * Exit:   0 only when every check ran and passed; 1 otherwise; 2 when it
  *         refused to run.
  *
- * WHAT IT CHANGES, AND PUTS BACK. Webhooks numbered 961501-961599 and their
- * deliveries, one made-up global administrator numbered 961599 with a
- * sign-in of their own, and the activity and error rows written while it ran
- * (removed by number at the end, and on the way out when it stops early).
+ * WHAT IT CHANGES, AND PUTS BACK. Webhooks numbered 961501-961598 and their
+ * deliveries, a made-up global administrator (961599) and a made-up ordinary
+ * administrator (961600) with sign-ins of their own, every `webhooks.anyPort`
+ * row (there is none on a fresh install), and the activity and error rows
+ * written while it ran (removed by number at the end, and on the way out when
+ * it stops early).
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -100,8 +114,10 @@
 
 declare(strict_types=1);
 
-/** The made-up administrator. Nothing else in tools/ uses 9615xx. */
+/** The made-up global administrator. Nothing else in tools/ uses 9615xx/961600. */
 const WD_ADMIN = 961599;
+/** A made-up ORDINARY administrator (not global), for the port setting's gate. */
+const WD_ORDINARY = 961600;
 /** Webhook numbers this run owns: 961501 up to (not including) WD_ADMIN. */
 const WD_FIRST_HOOK = 961501;
 const WD_LAST_HOOK  = 961598;
@@ -310,7 +326,7 @@ if (isset($opts['worker']) === true) {
         check('A1e no Accept-Encoding was sent: CURLOPT_ENCODING is not set (#716)', headerOf($one, 'Accept-Encoding') === null, (string) headerOf($one, 'Accept-Encoding'));
         $SF::$testResolverOverride = null;
 
-        // A2. Refused before any connection, every one with the one word.
+        // A2. Refused before any connection. Where it LEADS: "refused".
         $refusedCases = [
             'http://127.0.0.1/p615probe',
             'http://localhost/p615probe',
@@ -318,10 +334,6 @@ if (isset($opts['worker']) === true) {
             'http://10.0.0.1/p615probe',
             'http://192.168.1.1/p615probe',
             'http://[::1]/p615probe',
-            'http://2130706433/p615probe',
-            'http://0177.0.0.1/p615probe',
-            'http://0x7f000001/p615probe',
-            'http://127.0.0.1:' . $rport . '/ok?t=A2port',
         ];
         $allRefused = true;
         $detail     = [];
@@ -333,8 +345,34 @@ if (isset($opts['worker']) === true) {
                 $detail[]   = $u . ' => ' . $r['reason'];
             }
         }
-        check('A2 ' . count($refusedCases) . ' private, internal, reserved and oddly-spelled addresses are refused with the word "refused"', $allRefused, implode('; ', $detail));
-        check('A2b and the receiver behind 127.0.0.1:' . $rport . ' heard nothing', heardTag($rlog, 'A2port') === []);
+        check('A2 ' . count($refusedCases) . ' private, internal and reserved addresses are refused with the word "refused"', $allRefused, implode('; ', $detail));
+
+        // A2a. How it is WRITTEN: "not-allowed", with its own true sentence
+        //      (#615 round 1: one word for both sent an administrator with
+        //      `:8443` in their address to look at their name server).
+        $notAllowedCases = [
+            'http://2130706433/p615probe',
+            'http://0177.0.0.1/p615probe',
+            'http://0x7f000001/p615probe',
+            'http://127.0.0.1:' . $rport . '/ok?t=A2port',
+            'http://user:secret@hooks.test/ok?t=A2cred',
+            'webcal://hooks.test/ok?t=A2webcal',
+        ];
+        $SF::$testResolverOverride = ['hooks.test' => ['ips' => ['127.0.0.1'], 'port' => $rport]];
+        $allNot = true;
+        $detail = [];
+        foreach ($notAllowedCases as $u) {
+            $r = $SF::post($u, $body, $headers, ['timeoutSeconds' => 2]);
+            $messages[] = $r['message'];
+            if ($r['ok'] !== false || $r['reason'] !== 'not-allowed' || $r['message'] !== $SF::NOT_ALLOWED_MESSAGE) {
+                $allNot   = false;
+                $detail[] = $u . ' => ' . $r['reason'];
+            }
+        }
+        $SF::$testResolverOverride = null;
+        check('A2a ' . count($notAllowedCases) . ' addresses WRITTEN in a way not allowed (odd numbers, a port, a user name and password, webcal) give "not-allowed", not "refused"',
+            $allNot, implode('; ', $detail));
+        check('A2b and the receiver heard none of them', heardTag($rlog, 'A2port') === [] && heardTag($rlog, 'A2cred') === [] && heardTag($rlog, 'A2webcal') === []);
 
         $nip   = @dns_get_record('10.0.0.1.nip.io', DNS_A);
         $nipOk = is_array($nip) === true && count($nip) === 1 && ($nip[0]['ip'] ?? '') === '10.0.0.1';
@@ -405,6 +443,42 @@ if (isset($opts['worker']) === true) {
             $threw++;
         }
         check('A7 an unknown option, a download-only option, and a header with a line break all throw', $threw === 4, (string) $threw);
+        $said = '';
+        try {
+            $SF::post('http://hooks.test/', '', [], ['timeoutSeconds' => 0]);
+        } catch (InvalidArgumentException $e) {
+            $said = $e->getMessage();
+        }
+        check('A7b a mistake made through post() is reported as post()\'s, not get()\'s', str_starts_with($said, 'SafeFetch::post()'), $said);
+
+        // A9. Any port, when the caller allows it (D-102) — and the pin is
+        //     post()'s OWN: hooks.test is given an address with NO port of the
+        //     test's, so the only entry pinning it is the one post() writes
+        //     for the address's own port (#615 round 1: the test's port entry
+        //     carried the connection when the real one was missing).
+        $SF::$testResolverOverride = ['hooks.test' => ['ips' => ['127.0.0.1']]];
+        $r = $SF::post('http://hooks.test:' . $rport . '/ok?t=A9', $body, $headers, ['timeoutSeconds' => 3, 'anyPort' => true]);
+        check('A9 with any port allowed, a send to a public-looking name on port ' . $rport . ' goes through post()\'s own pin',
+            $r['ok'] === true && count(heardTag($rlog, 'A9')) === 1, json_encode($r));
+        $r = $SF::post('http://hooks.test:' . $rport . '/ok?t=A9b', $body, $headers, ['timeoutSeconds' => 3]);
+        check('A9b without it, the same address is "not-allowed" and nothing is sent', $r['reason'] === 'not-allowed' && heardTag($rlog, 'A9b') === [], json_encode($r));
+        $SF::$testResolverOverride = null;
+        $bad = 0;
+        foreach (['http://127.0.0.1:' . $rport . '/ok?t=A9c', 'http://10.0.0.1:8443/p615probe', 'http://[::1]:8443/p615probe'] as $u) {
+            $r = $SF::post($u, $body, $headers, ['timeoutSeconds' => 2, 'anyPort' => true]);
+            $messages[] = $r['message'];
+            $bad += $r['reason'] === 'refused' ? 0 : 1;
+        }
+        check('A9c with any port allowed, a private address on any port is still "refused", and nothing is sent', $bad === 0 && heardTag($rlog, 'A9c') === [], (string) $bad);
+        $badPorts = 0;
+        foreach (['0', '65536', '08443', '99999'] as $port) {
+            $badPorts += $SF::normaliseUrl('https://example.org:' . $port . '/', true) === null ? 0 : 1;
+        }
+        check('A9d any port means 1 to 65535 written plainly: 0, 65536, 08443 and 99999 are still refused', $badPorts === 0, (string) $badPorts);
+        check('A9e the CALENDAR rule is unchanged: normaliseUrl() and check() without the option refuse :8443',
+            $SF::normaliseUrl('https://example.org:8443/x') === null && $SF::check('https://example.org:8443/x')['ok'] === false
+            && $SF::normaliseUrl('https://example.org:8443/x', true) === 'https://example.org:8443/x'
+            && $SF::normaliseUrl('https://example.org:443/x', true) === 'https://example.org/x');
 
         $leaky = array_filter($messages, static function (string $m) use ($addressPieces): bool {
             foreach ($addressPieces as $p) {
@@ -443,7 +517,10 @@ if (isset($opts['worker']) === true) {
         \Portal\Core\WebhookDispatcher::retryDue();
     };
 
-    // B1. A webhook saved BEFORE #615, pointing at this machine.
+    // B1. A webhook saved BEFORE #615, pointing at this machine — with any
+    //     port ALLOWED by the installation, so that where it leads is the
+    //     only thing that can refuse it.
+    \Portal\Core\InstallationSettings::remember(['webhooks' => ['anyPort' => '1']]);
     $hook(961501, 'http://127.0.0.1:' . $rport . '/ok?t=B1');
     $d1 = $delivery(961501, '{"n":1}');
     $retry();
@@ -453,6 +530,64 @@ if (isset($opts['worker']) === true) {
     check('B1b and the receiver behind it heard NOTHING', heardTag($rlog, 'B1') === []);
     check('B1c the refusal is retried like any failure: attempt 1, next try in about 120 seconds',
         (int) ($row['attemptCount'] ?? 0) === 1 && (int) ($row['retryIn'] ?? 0) >= 100 && (int) ($row['retryIn'] ?? 0) <= 125, json_encode($row));
+    \Portal\Core\InstallationSettings::remember([]);
+
+    // B1e. A webhook saved before #615 with a port, while the installation
+    //      allows only the standard ones: "not-allowed", never "refused".
+    \Portal\Core\SafeFetch::$testResolverOverride = ['hooks.test' => ['ips' => ['127.0.0.1']]];
+    $hook(961506, 'http://hooks.test:' . $rport . '/ok?t=B1e');
+    $d6 = $delivery(961506, '{"n":6}');
+    $retry();
+    $row = $rowOf($d6);
+    check('B1e a webhook with a port, on an installation allowing only the standard ports, is recorded "not-allowed" and nothing is sent',
+        ($row['status'] ?? '') === 'failed' && ($row['responseSnippet'] ?? '') === 'not-allowed' && heardTag($rlog, 'B1e') === [], json_encode($row));
+
+    // B7. The installation allows any port: the same webhook is delivered.
+    \Portal\Core\InstallationSettings::remember(['webhooks' => ['anyPort' => '1']]);
+    $d7 = $delivery(961506, '{"n":7}');
+    $retry();
+    $row = $rowOf($d7);
+    check('B7 once the INSTALLATION allows any port, that webhook is delivered (through post()\'s own pin)',
+        ($row['status'] ?? '') === 'delivered' && count(heardTag($rlog, 'B1e')) === 1, json_encode($row));
+    // B7b. An organisation saying yes cannot loosen it: the merged settings
+    //      say "1", the installation's own row says nothing.
+    \Portal\Core\InstallationSettings::remember([]);
+    \Portal\Core\App::init($db, ['webhooks' => ['enabled' => 'true', 'timeout' => '3', 'anyPort' => '1']]);
+    $d7b = $delivery(961506, '{"n":7.5}');
+    $retry();
+    $row = $rowOf($d7b);
+    check('B7b an ORGANISATION\'s "yes" (in the merged settings) does not loosen it: still "not-allowed"',
+        ($row['responseSnippet'] ?? '') === 'not-allowed' && count(heardTag($rlog, 'B1e')) === 1, json_encode($row));
+    \Portal\Core\App::init($db, ['webhooks' => ['enabled' => 'true', 'timeout' => '3']]);
+    \Portal\Core\SafeFetch::$testResolverOverride = null;
+
+    // B8. The time limit: 1 to 30 seconds whatever the setting says.
+    $WD = \Portal\Core\WebhookDispatcher::class;
+    if (method_exists($WD, 'timeoutSeconds') === false) {
+        check('B8 the dispatcher works out its time limit in one place', false, 'no timeoutSeconds()');
+    } else {
+        $cases = [[null, 10], ['10', 10], ['30', 30], ['31', 30], ['120', 30], ['999999', 30], ['0', 1], ['-5', 1], ['abc', 1], [['x'], 1]];
+        $wrong = [];
+        foreach ($cases as [$in, $want]) {
+            $got = $WD::timeoutSeconds($in);
+            if ($got !== $want) {
+                $wrong[] = json_encode($in) . ' gave ' . $got . ', not ' . $want;
+            }
+        }
+        check('B8 the setting becomes 1 to 30 seconds: missing is 10, above 30 is 30, nothing sensible is 1', $wrong === [], implode('; ', $wrong));
+    }
+    // B8b. ...and the dispatcher really USES that answer: a setting of 0 is
+    //      sent as 1 second, where 0 handed straight on would be refused by
+    //      post() as a mistake and the delivery would never be attempted.
+    \Portal\Core\App::init($db, ['webhooks' => ['enabled' => 'true', 'timeout' => '0']]);
+    \Portal\Core\SafeFetch::$testResolverOverride = ['hooks.test' => ['ips' => ['127.0.0.1'], 'port' => $rport]];
+    $hook(961507, 'http://hooks.test/ok?t=B8');
+    $d8 = $delivery(961507, '{"n":8}');
+    $retry();
+    $row = $rowOf($d8);
+    check('B8b with the setting at 0, the dispatcher sends with its clamped limit and the webhook is delivered', ($row['status'] ?? '') === 'delivered', json_encode($row));
+    \Portal\Core\App::init($db, ['webhooks' => ['enabled' => 'true', 'timeout' => '3']]);
+    \Portal\Core\SafeFetch::$testResolverOverride = null;
 
     // B2. A public-looking name, delivered through the pin.
     \Portal\Core\SafeFetch::$testResolverOverride = ['hooks.test' => ['ips' => ['127.0.0.1'], 'port' => $rport]];
@@ -602,9 +737,10 @@ $cleanUp = static function () use (&$cleanedUp, &$procs, $work, $db, $errorsFrom
         foreach (rows($db, "SELECT c.`TABLE_NAME` AS `t` FROM `information_schema`.`COLUMNS` c JOIN `information_schema`.`TABLES` t "
             . "ON t.`TABLE_SCHEMA` = c.`TABLE_SCHEMA` AND t.`TABLE_NAME` = c.`TABLE_NAME` AND t.`TABLE_TYPE` = 'BASE TABLE' "
             . "WHERE c.`TABLE_SCHEMA` = DATABASE() AND c.`COLUMN_NAME` = 'userID'") as $row) {
-            run($db, 'DELETE FROM `' . $row['t'] . '` WHERE `userID` = ?', 'i', [WD_ADMIN]);
+            run($db, 'DELETE FROM `' . $row['t'] . '` WHERE `userID` IN (?, ?)', 'ii', [WD_ADMIN, WD_ORDINARY]);
         }
         $db->query('SET FOREIGN_KEY_CHECKS = 1');
+        run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ?', 's', ['webhooks.anyPort']);
     } catch (Throwable $e) {
         echo "  ! the clean-up could not finish (" . get_class($e) . "); rows numbered 9615xx may be left.\n";
     }
@@ -842,23 +978,30 @@ $site     = (int) (rows($db, 'SELECT siteID FROM tblSites WHERE isActive = 1 ORD
 if ($site === 0) {
     refuse('the database has no organisation switched on');
 }
-run($db, 'DELETE FROM `tblLocalAccounts` WHERE `username` = ?', 's', ['selftest-webhook-delivery']);
-run($db, 'INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`, `createdAt`) VALUES (?, ?, ?, 1, 1, 1, NOW())',
-    'iss', [WD_ADMIN, 'Selftest webhook delivery', 'webhook-delivery@selftest.invalid']);
-run($db, 'INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES (?, ?, 1)', 'ii', [$site, WD_ADMIN]);
-run($db, 'INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)',
-    'iss', [WD_ADMIN, 'selftest-webhook-delivery', password_hash($password, PASSWORD_DEFAULT)]);
+foreach ([[WD_ADMIN, 'selftest-webhook-delivery', 1], [WD_ORDINARY, 'selftest-webhook-delivery-ordinary', 0]] as [$uid, $uname, $root]) {
+    run($db, 'DELETE FROM `tblLocalAccounts` WHERE `username` = ?', 's', [$uname]);
+    run($db, 'INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`, `createdAt`) VALUES (?, ?, ?, 1, 1, ?, NOW())',
+        'issi', [$uid, 'Selftest webhook delivery ' . $uid, $uname . '@selftest.invalid', $root]);
+    run($db, 'INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES (?, ?, 1)', 'ii', [$site, $uid]);
+    run($db, 'INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)',
+        'iss', [$uid, $uname, password_hash($password, PASSWORD_DEFAULT)]);
+}
 for ($i = 0; $i < 80 && $http('GET', '/login')['status'] === 0; $i++) {
     usleep(250000);
 }
-$token = $tokenOn($http('GET', '/login')['body']);
-if ($token === '') {
-    refuse('the sign-in page carried no form token');
-}
-$in = $http('POST', '/login', ['csrf_token' => $token, 'username' => 'selftest-webhook-delivery', 'password' => $password]);
-if ($in['status'] !== 302 && $in['status'] !== 303) {
-    refuse("signing in did not answer a redirect (HTTP {$in['status']})");
-}
+/** Sign in afresh as one of the two made-up administrators. */
+$signIn = static function (string $uname) use ($http, $tokenOn, $jar, $password): void {
+    @unlink($jar);
+    $token = $tokenOn($http('GET', '/login')['body']);
+    if ($token === '') {
+        refuse('the sign-in page carried no form token');
+    }
+    $in = $http('POST', '/login', ['csrf_token' => $token, 'username' => $uname, 'password' => $password]);
+    if ($in['status'] !== 302 && $in['status'] !== 303) {
+        refuse("signing in as {$uname} did not answer a redirect (HTTP {$in['status']})");
+    }
+};
+$signIn('selftest-webhook-delivery');
 
 /**
  * Press Save on the webhook form, then read the page the redirect lands on.
@@ -876,15 +1019,18 @@ $hooksNamed = static function (string $name) use ($db): array {
 };
 
 $refusedMsg = 'This address cannot be used: it points at a private or internal network, or its name could not be found.';
-$formatMsg  = 'This address cannot be used: a webhook needs an ordinary http:// or https:// address on the usual port (80 or 443), with no user name or password in it and no unusual spelling of a number.';
+$formatMsg        = 'This address cannot be used: a webhook needs an ordinary http:// or https:// address on the usual port (443 for https, 80 for http — this installation does not allow others), with no user name or password in it and no unusual spelling of a number.';
+$formatMsgAnyPort = 'This address cannot be used: a webhook needs an ordinary http:// or https:// address, with no user name or password in it and no unusual spelling of a number.';
 
 /**
  * Part C. Returns nothing; reports through check(). Run once on the real
  * page, and again for each plant.
  */
-$partC = static function () use ($http, $press, $hooksNamed, $db, $refusedMsg, $formatMsg, $activityFrom, $errorsFrom, $site): void {
+$partC = static function () use ($http, $press, $hooksNamed, $db, $refusedMsg, $formatMsg, $formatMsgAnyPort, $activityFrom, $errorsFrom, $site, $signIn): void {
     $db->query("DELETE FROM tblWebhookDeliveries WHERE webhookID IN (SELECT webhookID FROM tblWebhooks WHERE name LIKE 'selftest615%')");
     $db->query("DELETE FROM tblWebhooks WHERE name LIKE 'selftest615%'");
+    run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ?', 's', ['webhooks.anyPort']);
+    $signIn('selftest-webhook-delivery');
     $activityStart = maxId($db, 'tblActivityLogs', 'logID');
 
     // C1. Controls: a public-looking address is saved, in the standard spelling.
@@ -908,6 +1054,8 @@ $partC = static function () use ($http, $press, $hooksNamed, $db, $refusedMsg, $
         ['octal 0177.0.0.1',          'http://0177.0.0.1/p615probe7',                       $formatMsg],
         ['hexadecimal 0x7f.0.0.1',    'http://0x7f.0.0.1/p615probe8',                       $formatMsg],
         ['an unusual port',           'http://public-hooks.test:8080/p615probe9',           $formatMsg],
+        ['a user name and password',  'https://user:pw@public-hooks.test/p615probe14',      $formatMsg],
+        ['a webcal:// address',       'webcal://public-hooks.test/p615probe15',             $formatMsg],
         ['a name resolving to 10.0.0.1 ('
             . ($nipOk === true ? 'it did here' : 'NOTE: it did not resolve here, so this proves "not found", not "private"') . ')',
                                       'http://10.0.0.1.nip.io/p615probe10',                 $refusedMsg],
@@ -941,7 +1089,7 @@ $partC = static function () use ($http, $press, $hooksNamed, $db, $refusedMsg, $
 
     // C4. Recorded as refused — and nothing of any address, anywhere.
     $refusals = (int) rows($db, "SELECT COUNT(*) AS n FROM tblActivityLogs WHERE logID > ? AND activityType = 'WebhookTargetRefused' AND userID = ?", 'ii', [$activityStart, WD_ADMIN])[0]['n'];
-    check('C4 every refusal about where an address leads is in the activity log (8: six typed, one switching on, one re-aimed)', $refusals === 8, (string) $refusals);
+    $c4Refusals = $refusals; // C6 below adds one more; C4 is judged after it
     $pieces = ['p615probe', '169.254.169.254', '10.20.30.40', '2130706433', '0177.0.0.1', '0x7f.0.0.1', 'nip.io', '10.9.8.7', ':8080'];
     $found  = [];
     foreach (rows($db, 'SELECT * FROM tblActivityLogs WHERE logID > ?', 'i', [$activityFrom]) as $row) {
@@ -964,9 +1112,46 @@ $partC = static function () use ($http, $press, $hooksNamed, $db, $refusedMsg, $
     $legId = WD_LAST_HOOK;
     run($db, "INSERT INTO tblWebhookDeliveries (webhookID, eventType, payload, status, attemptCount, responseCode, responseSnippet) VALUES (?, 'selftest.a', '{}', 'failed', 1, 0, 'refused')", 'i', [$legId]);
     run($db, "INSERT INTO tblWebhookDeliveries (webhookID, eventType, payload, status, attemptCount, responseCode, responseSnippet) VALUES (?, 'selftest.b', '{}', 'failed', 1, 500, '<b>RECEIVER-REPLY-MARKER</b> kept from before #615')", 'i', [$legId]);
+    run($db, "INSERT INTO tblWebhookDeliveries (webhookID, eventType, payload, status, attemptCount, responseCode, responseSnippet) VALUES (?, 'selftest.c', '{}', 'dead', 6, 0, 'not-allowed')", 'i', [$legId]);
     $page = $http('GET', '/admin/integrations/webhooks')['body'];
     check('C5 the deliveries list says why one failed, in words', str_contains($page, 'the address was refused: it points at a private or internal network'));
-    check('C5b and never prints a reply stored before #615', str_contains($page, WD_REPLY_MARKER) === false);
+    check('C5b and a "not-allowed" one is told the TRUE reason: a port, a user name or password, the scheme — not the name server',
+        str_contains($page, 'the address is written in a way that is not allowed: a port number this installation does not allow'));
+    check('C5c and never prints a reply stored before #615', str_contains($page, WD_REPLY_MARKER) === false);
+
+    // C6. Which port numbers (D-102): an INSTALLATION setting, a global
+    //     administrator only, never loosened by an organisation's row.
+    $portRow = static fn (): array => rows($db, 'SELECT siteID, settingValue FROM tblSettings WHERE settingKey = ?', 's', ['webhooks.anyPort']);
+    $signIn('selftest-webhook-delivery-ordinary');
+    $r = $press(['action' => 'webhook_ports', 'anyPort' => '1']);
+    check('C6 an ORDINARY administrator cannot allow other ports: nothing is stored, and they are told why',
+        $portRow() === [] && str_contains($r['page'], 'Only a global administrator can choose which port numbers'), json_encode($portRow()));
+    $signIn('selftest-webhook-delivery');
+    $activityBefore = maxId($db, 'tblActivityLogs', 'logID');
+    $press(['action' => 'webhook_ports', 'anyPort' => '1']);
+    $changed = (int) rows($db, "SELECT COUNT(*) AS n FROM tblActivityLogs WHERE logID > ? AND activityType = 'WebhookPortsChanged' AND userID = ?", 'ii', [$activityBefore, WD_ADMIN])[0]['n'];
+    check('C6b a global administrator can: the INSTALLATION\'s row says 1, and the change is in the activity log',
+        $portRow() === [['siteID' => null, 'settingValue' => '1']] && $changed === 1, json_encode($portRow()) . ' / ' . $changed);
+    $press(['name' => 'selftest615-c6', 'targetUrl' => 'https://public-hooks.test:8443/p', 'eventTypes' => 'all', 'isActive' => '1']);
+    check('C6c then a public-looking address on port 8443 is saved, port and all', ($hooksNamed('selftest615-c6')[0]['targetUrl'] ?? '') === 'https://public-hooks.test:8443/p', json_encode($hooksNamed('selftest615-c6')));
+    $r = $press(['name' => 'selftest615-c6d', 'targetUrl' => 'http://127.0.0.1:8443/p615probe13', 'eventTypes' => 'all', 'isActive' => '1']);
+    check('C6d and a PRIVATE address on any port is still refused', $hooksNamed('selftest615-c6d') === []
+        && str_contains($r['page'], htmlspecialchars($refusedMsg, ENT_QUOTES, 'UTF-8')));
+    $r = $press(['name' => 'selftest615-c6g', 'targetUrl' => 'https://user:pw@public-hooks.test:8443/p615probe16', 'eventTypes' => 'all', 'isActive' => '1']);
+    check('C6g a user name and password are refused whatever the port rule, with the any-port wording', $hooksNamed('selftest615-c6g') === []
+        && str_contains($r['page'], htmlspecialchars($formatMsgAnyPort, ENT_QUOTES, 'UTF-8')));
+    $press(['action' => 'webhook_ports', 'anyPort' => '0']);
+    $r = $press(['name' => 'selftest615-c6e', 'targetUrl' => 'https://public-hooks.test:8443/q', 'eventTypes' => 'all', 'isActive' => '1']);
+    check('C6e put back to standard ports, port 8443 is refused again with the standard-ports wording', $hooksNamed('selftest615-c6e') === []
+        && str_contains($r['page'], htmlspecialchars($formatMsg, ENT_QUOTES, 'UTF-8')));
+    run($db, "INSERT INTO tblSettings (siteID, settingKey, settingValue) VALUES (?, 'webhooks.anyPort', '1')", 'i', [$site]);
+    $press(['name' => 'selftest615-c6f', 'targetUrl' => 'https://public-hooks.test:8443/r', 'eventTypes' => 'all', 'isActive' => '1']);
+    check('C6f an ORGANISATION\'s own row saying 1 does not loosen it (the installation\'s says 0)', $hooksNamed('selftest615-c6f') === []);
+    run($db, 'DELETE FROM `tblSettings` WHERE `settingKey` = ?', 's', ['webhooks.anyPort']);
+
+    $refusals = (int) rows($db, "SELECT COUNT(*) AS n FROM tblActivityLogs WHERE logID > ? AND activityType = 'WebhookTargetRefused' AND userID = ?", 'ii', [$activityStart, WD_ADMIN])[0]['n'];
+    check('C4 every refusal about where an address LEADS is in the activity log (9: six typed, one switching on, one re-aimed, one on port 8443) — and none about how one is written',
+        $refusals === 9 && $c4Refusals === 8, $c4Refusals . ' then ' . $refusals);
 };
 
 head('C. The admin page, over real HTTP' . ($oldSave !== null ? ' — WITH THE SAVE HANDLER FROM ' . $oldSave : ''));
@@ -1046,6 +1231,9 @@ if ($sendStart !== false && $sendEnd !== false && $sendEnd > $sendStart) {
     $wdOld = str_replace('$reason = $delivered === true ? null : (string) $sent[\'reason\'];', '$reason = $sent[\'reason\'];', $wdOld);
 }
 
+$wpReal = (string) file_get_contents($coreCopy . $sep . 'WebhookPorts.php');
+$originals = ['SafeFetch.php' => $sfReal, 'WebhookDispatcher.php' => $wdReal, 'WebhookPorts.php' => $wpReal];
+
 $workerPlants = [
     [
         'P1 the ORIGINAL pre-#615 send put back in the dispatcher (plain curl, reply stored)',
@@ -1055,11 +1243,11 @@ $workerPlants = [
     [
         'P2 SafeFetch::post() ignores check()\'s verdict (the delivery-time check gone)',
         'SafeFetch.php',
-        $plantText($sfReal, "        \$checked = self::check(\$parts['url']);\n        if (\$checked['ok'] === false) {", "        \$checked = self::check(\$parts['url']);\n        if (false) {"),
+        $plantText($sfReal, "        \$checked = self::check(\$parts['url'], \$anyPort);\n        if (\$checked['ok'] === false) {", "        \$checked = self::check(\$parts['url'], \$anyPort);\n        if (false) {"),
         ['A2 '],
     ],
     [
-        'P3 the pin taken out of the shared curl handle (CURLOPT_RESOLVE)',
+        'P3 the whole pin taken out of the shared curl handle (CURLOPT_RESOLVE)',
         'SafeFetch.php',
         $plantText($sfReal, "            CURLOPT_RESOLVE           => \$resolve,\n", ''),
         ['A1 ', 'B2 '],
@@ -1075,6 +1263,55 @@ $workerPlants = [
         'SafeFetch.php',
         $plantText($sfReal, "        if (\$checked['ok'] === false) {\n            self::logProblem('SEND_REFUSED', '', 0, false);", "        if (\$checked['ok'] === false) {\n            self::logProblem('SEND_REFUSED', \$parts['host'], 0, true);"),
         ['B6 '],
+    ],
+    [
+        'P6 ONLY post()\'s own pin entry taken out (the test\'s port entry left in place)',
+        'SafeFetch.php',
+        $plantText($sfReal, "        \$resolve   = [\$host . ':' . \$port . ':' . implode(',', \$pinned)];", "        \$resolve   = [];"),
+        ['A9 ', 'B7 '],
+    ],
+    [
+        'P7 the 1-30 second clamp taken out of timeoutSeconds()',
+        'WebhookDispatcher.php',
+        $plantText($wdReal, "        return max(1, min(self::MAX_TIMEOUT_SECONDS, \$seconds));", "        return \$seconds;"),
+        ['B8 '],
+    ],
+    [
+        'P8 the dispatcher reading the time-limit setting raw, round the clamp',
+        'WebhookDispatcher.php',
+        $plantText($wdReal, "\$timeout   = self::timeoutSeconds(App::settings('webhooks.timeout'));", "\$timeout   = (int) (App::settings('webhooks.timeout') ?? '10');"),
+        ['B8b'],
+    ],
+    [
+        'P9 the port rule read from the MERGED settings (an organisation could loosen it)',
+        'WebhookPorts.php',
+        $plantText($wpReal, "\$layer = InstallationSettings::layer();", "\$layer = App::settings();"),
+        ['B7b'],
+    ],
+    [
+        'P10 the dispatcher never passing the port rule on',
+        'WebhookDispatcher.php',
+        $plantText($wdReal, "'anyPort'               => WebhookPorts::allowsAnyPort(),", "'anyPort'               => false,"),
+        ['B7 '],
+    ],
+    [
+        'P11 the CALENDAR rule loosened: any port by default',
+        'SafeFetch.php',
+        // check() is what get() calls, with no option: its default IS the calendar rule.
+        $plantText($sfReal, "public static function check(string \$url, bool \$anyPort = false)", "public static function check(string \$url, bool \$anyPort = true)"),
+        ['A9e'],
+    ],
+    [
+        'P12 post() ignoring the port option',
+        'SafeFetch.php',
+        $plantText($sfReal, "self::parse(\$url, \$anyPort) : null;", "self::parse(\$url) : null;"),
+        ['A9 '],
+    ],
+    [
+        'P13 "not-allowed" folded back into "refused"',
+        'SafeFetch.php',
+        $plantText($sfReal, "return self::sent(false, 0, 0, self::NOT_ALLOWED_MESSAGE, 'not-allowed', false);", "return self::sent(false, 0, 0, self::REFUSED_MESSAGE, 'refused', false);"),
+        ['A2a', 'B1e'],
     ],
 ];
 foreach ($workerPlants as [$label, $file, $planted, $mustFail]) {
@@ -1096,27 +1333,42 @@ foreach ($workerPlants as [$label, $file, $planted, $mustFail]) {
     }
     check($label . ': caught by ' . implode(', ', array_map('trim', $mustFail)), $missed === [],
         'not caught by ' . implode(', ', $missed) . '; it failed: ' . implode(' | ', array_slice($res['failedLabels'], 0, 6)));
-    file_put_contents($coreCopy . $sep . $file, $file === 'SafeFetch.php' ? $sfReal : $wdReal);
+    file_put_contents($coreCopy . $sep . $file, $originals[$file]);
 }
 $back = $runWorker($coreCopy, false);
-check('P1-P5 put back: the copy is green again (' . $back['passed'] . ' passed)', $back['failed'] === 0, implode(' | ', $back['failedLabels']));
+check('P1-P13 put back: the copy is green again (' . $back['passed'] . ' passed)', $back['failed'] === 0, implode(' | ', $back['failedLabels']));
 
 // Page plants: the copy's save handler with one guard taken out.
 $pagePlants = [
     [
-        'P6 the save-time check taken out of the save handler',
-        $plantText($saveReal, "    if (SafeFetch::check(\$normal)['ok'] === false) {", '    if (false) {'),
+        'P14 the save-time check taken out of the save handler',
+        $plantText($saveReal, "    if (SafeFetch::check(\$normal, \$anyPort)['ok'] === false) {", '    if (false) {'),
         ['C2 saving a webhook aimed at 127.0.0.1', 'C2 saving a webhook aimed at 169.254', 'C4 '],
     ],
     [
-        'P7 the address checked on EVERY update, pausing included',
+        'P15 the address checked on EVERY update, pausing included',
         $plantText($saveReal, "(\$urlArrived === true || \$switchingOn === true)", 'true'),
         ['C3 PAUSING'],
     ],
     [
-        'P8 switching a webhook back on no longer checks its address',
+        'P16 switching a webhook back on no longer checks its address',
         $plantText($saveReal, "(\$urlArrived === true || \$switchingOn === true)", '($urlArrived === true)'),
         ['C3b'],
+    ],
+    [
+        'P17 the port setting changeable by ANY administrator',
+        $plantText($saveReal, "        App::isRootAdmin() === true,\n", "        true,\n"),
+        ['C6 '],
+    ],
+    [
+        'P18 the save page ignoring the installation\'s port setting',
+        $plantText($saveReal, "\$anyPort = WebhookPorts::allowsAnyPort();", "\$anyPort = false;"),
+        ['C6c'],
+    ],
+    [
+        'P19 webcal:// let through and quietly stored as https',
+        $plantText($saveReal, "preg_match('~^https?://~i', \$targetUrl) === 1 ? SafeFetch::normaliseUrl(\$targetUrl, \$anyPort) : null", "SafeFetch::normaliseUrl(\$targetUrl, \$anyPort)"),
+        ['C2 saving a webhook aimed at a webcal'],
     ],
 ];
 foreach ($pagePlants as [$label, $planted, $mustFail]) {
@@ -1159,7 +1411,7 @@ $again        = array_slice($failedLabels, count($before));
 $passed       = $bp;
 $failed       = $bf;
 $failedLabels = $before;
-check('P6-P8 put back: part C is green again', $again === [], implode(' | ', $again));
+check('P14-P19 put back: part C is green again', $again === [], implode(' | ', $again));
 
 head('Summary');
 echo "  {$passed} passed, {$failed} failed here; the worker's own " . $real['passed'] . " checks (parts A and B) are the one line\n"

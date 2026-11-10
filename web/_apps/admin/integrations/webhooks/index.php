@@ -32,6 +32,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
+use Portal\Core\WebhookPorts;
 use Portal\Core\WebhookRetention;
 
 // 🛡️ Admin gate — identical to api-keys.php.
@@ -87,7 +88,13 @@ $stmt->close();
 //    is NEVER printed, escaped or not. The other server's words are the one
 //    thing a request aimed somewhere it should not go is trying to read back.
 $reasonWords = [
-    'refused'     => 'the address was refused: it points at a private or internal network, or its name could not be found',
+    'refused'     => 'the address was refused: it points at a private or internal network, its name could not be found, '
+        . 'or the connection went somewhere other than the address that was checked',
+    // #615 round 1: kept apart from `refused`, which would send somebody whose
+    // webhook has `:8443` or a password in it to go and look at their name server.
+    'not-allowed' => 'the address is written in a way that is not allowed: a port number this installation does not '
+        . 'allow, a user name or password inside it (no longer sent), a scheme other than http or https, or an '
+        . 'unusual spelling of a number',
     'too-slow'    => 'the other server took too long to answer',
     'unreachable' => 'the other server could not be reached',
     'http-status' => 'the other server answered with an error',
@@ -234,6 +241,30 @@ if (isset($_SESSION['webhook_secret_minted']) === true) {
             </div>
         </form>
     </details>
+
+    <?php
+    // 🚪 Which port numbers a webhook may use (#615, the owner's decision
+    //    D-102). An INSTALLATION setting: shown to everybody so an ordinary
+    //    administrator knows the rule, changeable by a global administrator
+    //    only, and read from the installation's row alone.
+    $anyPortNow = WebhookPorts::allowsAnyPort();
+    ?>
+    <div class="small text-secondary mb-3" id="webhook-ports">
+        Port numbers: <?php echo $anyPortNow === true
+            ? 'any port on a public address is allowed on this installation'
+            : 'only the standard ports (443 for https, 80 for http) are allowed on this installation'; ?>.
+        Addresses on a private or internal network are always refused.
+        <?php if ($isGlobalAdm === true): ?>
+            <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/webhooks/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline ms-1">
+                <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
+                <input type="hidden" name="action" value="webhook_ports">
+                <input type="hidden" name="anyPort" value="<?php echo $anyPortNow === true ? '0' : '1'; ?>">
+                <button class="btn btn-sm btn-outline-secondary"><?php echo $anyPortNow === true
+                    ? 'Allow only the standard ports'
+                    : 'Allow any port on a public address'; ?></button>
+            </form>
+        <?php endif; ?>
+    </div>
 
     <details class="mb-4" <?php echo count($webhooks) === 0 ? 'open' : ''; ?>>
         <summary class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-plus me-1"></i>Create a webhook</summary>

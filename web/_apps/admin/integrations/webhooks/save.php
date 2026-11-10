@@ -32,6 +32,14 @@
  *     on nothing but the text that was typed.
  *   - The address is NEVER written into the activity log or the error log:
  *     a refusal is recorded as having happened, with no part of the address.
+ *   - WHICH PORT NUMBERS (the owner's decision D-102): 443 and 80 unless the
+ *     installation's global administrator has allowed any port on a public
+ *     address, which is asked of `WebhookPorts::allowsAnyPort()` — the
+ *     installation's row only, never an organisation's — and set by the
+ *     `webhook_ports` action below, for a global administrator only.
+ *   - A user name or password inside the address is refused. Before #615
+ *     curl sent one as a basic sign-in to the receiver; it is now refused at
+ *     save and recorded `not-allowed` at delivery.
  *   - PAUSING is never refused. A webhook saved before #615 may point
  *     somewhere it no longer may, and the one thing an administrator must
  *     always be able to do with it is switch it off. Changing the address or
@@ -55,6 +63,7 @@ use Portal\Core\InstallationSettings;
 use Portal\Core\SafeFetch;
 use Portal\Core\SettingLimit;
 use Portal\Core\Site;
+use Portal\Core\WebhookPorts;
 use Portal\Core\WebhookRetention;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -116,15 +125,21 @@ $checkTarget = static function (string $targetUrl): array {
     if (mb_strlen($targetUrl) > 500) {
         return ['url' => '', 'error' => 'Target URL must be 500 characters or fewer.', 'refused' => false];
     }
-    $normal = SafeFetch::normaliseUrl($targetUrl);
+    // 🚪 D-102: other port numbers only when the INSTALLATION allows them.
+    $anyPort = WebhookPorts::allowsAnyPort();
+    // Only http and https: `normaliseUrl()` would turn a calendar app's
+    // `webcal://` into https, which this form has never offered (#615 round 1).
+    $normal = preg_match('~^https?://~i', $targetUrl) === 1 ? SafeFetch::normaliseUrl($targetUrl, $anyPort) : null;
     if ($normal === null) {
-        // Depends only on the text typed, never on where it leads, so it
-        // reveals nothing about the network.
+        // Depends only on the text typed (and the installation's port rule),
+        // never on where it leads, so it reveals nothing about the network.
         return [
             'url'     => '',
-            'error'   => 'This address cannot be used: a webhook needs an ordinary http:// or https:// address '
-                . 'on the usual port (80 or 443), with no user name or password in it and no unusual '
-                . 'spelling of a number.',
+            'error'   => 'This address cannot be used: a webhook needs an ordinary http:// or https:// address'
+                . ($anyPort === true
+                    ? ''
+                    : ' on the usual port (443 for https, 80 for http — this installation does not allow others)')
+                . ', with no user name or password in it and no unusual spelling of a number.',
             'refused' => false,
         ];
     }
@@ -133,7 +148,7 @@ $checkTarget = static function (string $targetUrl): array {
     if (mb_strlen($normal) > 500) {
         return ['url' => '', 'error' => 'Target URL must be 500 characters or fewer.', 'refused' => false];
     }
-    if (SafeFetch::check($normal)['ok'] === false) {
+    if (SafeFetch::check($normal, $anyPort)['ok'] === false) {
         return ['url' => '', 'error' => SafeFetch::REFUSED_MESSAGE, 'refused' => true];
     }
     return ['url' => $normal, 'error' => ''];
@@ -153,6 +168,33 @@ $recordRefusal = static function (int $siteId, int $userId): void {
         $userId
     );
 };
+
+// ============================================================================
+// (a1) WHICH PORT NUMBERS A WEBHOOK MAY USE (#615, the owner's decision D-102)
+// ============================================================================
+// An INSTALLATION setting: a global administrator only, the installation's row
+// only, recorded in the activity log. `WebhookPorts` decides and writes it, and
+// asks who is asking itself as well (the boundary is stated at the writer).
+// Ask whether the field ARRIVED (#677): a post without it changes nothing.
+if ((string) ($_POST['action'] ?? '') === 'webhook_ports') {
+    $back = Site::url('admin/integrations/webhooks');
+    if (array_key_exists('anyPort', $_POST) === false) {
+        $_SESSION['flash_msg']  = 'Nothing was chosen, so nothing was saved.';
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: ' . $back);
+        exit();
+    }
+    $result = WebhookPorts::saveForInstallation(
+        $mysqli,
+        (string) $_POST['anyPort'] === '1',
+        App::isRootAdmin() === true,
+        $userId
+    );
+    $_SESSION['flash_msg']  = $result['message'];
+    $_SESSION['flash_type'] = $result['saved'] === true ? 'success' : 'danger';
+    header('Location: ' . $back);
+    exit();
+}
 
 // ============================================================================
 // (a2) HOW LONG A PAYLOAD IS KEPT (#713)

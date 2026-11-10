@@ -368,6 +368,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             header('Location: ' . Site::url('settings'));
             exit();
         }
+
+        // 🚪 #615, D-102: nor which port numbers a webhook may use. Deleting the
+        //    row would quietly put the installation back to standard ports, a
+        //    change nobody recorded. See WebhookPorts::lockedInGeneralEditor().
+        if ($lockedKey !== null && \Portal\Core\WebhookPorts::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" decides which port numbers a webhook may use and cannot be deleted here',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\WebhookPorts::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
     }
 
     if ($deleteId > 0 && $isRoot === false) {
@@ -782,6 +797,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     $publicWebsitePage = \Portal\Core\PublicWebsite::lockedPageFor((string) $row['settingKey']);
                                     // 🔒 And for the noticeboard foyer screen's two settings (#493 P2b).
                                     $foyerLocked = \Portal\Core\NoticeboardFoyer::lockedInGeneralEditor((string) $row['settingKey']);
+                                    // 🔒 And for which port numbers a webhook may use (#615, D-102).
+                                    $webhookPortsLocked = \Portal\Core\WebhookPorts::lockedInGeneralEditor((string) $row['settingKey']);
                                     ?>
                                     <?php if ($zoneLocked === true && Site::timezoneFacts()['inRow'] === false): ?>
                                         <?php // Before migration 217 has run, neither page takes a zone: the way on is the upgrade. ?>
@@ -812,6 +829,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php elseif ($copiedRuleLocked === true): ?>
                                         <?php // No link: this viewer cannot change it there (D-085, D-094). Who CAN is said per key, by PublicWebsite::lockedPageFor(). ?>
                                         <span class="small text-secondary" data-locked-page="<?php echo htmlspecialchars((string) ($publicWebsitePage['route'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">Changed by <?php echo htmlspecialchars((string) ($publicWebsitePage['who'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>, at <?php echo htmlspecialchars((string) ($publicWebsitePage['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <?php elseif ($webhookPortsLocked === true): ?>
+                                        <a class="small" href="<?php echo htmlspecialchars(Site::url('admin/integrations/webhooks'), ENT_QUOTES, 'UTF-8'); ?>"><?php echo $isRoot === true ? 'Changed at Admin, Integrations, Webhooks' : 'Changed by a global administrator, at Admin, Integrations, Webhooks'; ?></a>
                                     <?php elseif ($foyerLocked === true): ?>
                                         <a class="small" href="<?php echo htmlspecialchars(Site::url('noticeboard/foyer/setup'), ENT_QUOTES, 'UTF-8'); ?>">Changed at Noticeboard, Foyer screen</a>
                                     <?php elseif ($registrationsLocked === true): ?>
@@ -831,7 +850,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php /* 🔒 `$capabilityLocksLocked` joined this list with #727: the delete handler
                                              refuses the row anyway, so drawing the button would offer a
                                              control that cannot work. */ ?>
-                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false && $outsideLocked === false && $registrationsLocked === false && $copiedRuleLocked === false && $foyerLocked === false): ?>
+                                    <?php if ($isRoot === true && $isGivingRule === false && $organisationsLocked === false && $mailLocked === false && $versionLocked === false && $capabilityLocksLocked === false && $zoneLocked === false && $outsideLocked === false && $registrationsLocked === false && $copiedRuleLocked === false && $foyerLocked === false && $webhookPortsLocked === false): ?>
                                         <form method="post" action="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                             <input type="hidden" name="action" value="delete">

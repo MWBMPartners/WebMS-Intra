@@ -6364,7 +6364,7 @@ CREATE TABLE IF NOT EXISTS `tblWebhookDeliveries` (
     `lastAttemptAt` DATETIME     DEFAULT NULL,
     `nextRetryAt`   DATETIME     DEFAULT NULL COMMENT 'Earliest time the async retry worker may re-attempt this delivery (exponential backoff, migration 166, #324 v1.1)',
     `responseCode`  INT          DEFAULT NULL,
-    `responseSnippet` VARCHAR(500) DEFAULT NULL COMMENT 'first 500 chars of response body for debug',
+    `responseSnippet` VARCHAR(500) DEFAULT NULL COMMENT 'Why a delivery did not succeed: ONE word from SafeFetch::POST_REASONS (refused, not-allowed, too-slow, unreachable, http-status, no-curl); NULL once delivered. Never the receiver reply and never the address (#615). Rows written before #615 may hold up to 500 characters of a reply until the payload clear-out (#713) empties them',
     `createdAt`     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`deliveryID`),
     KEY `idx_wd_webhook`  (`webhookID`, `status`),

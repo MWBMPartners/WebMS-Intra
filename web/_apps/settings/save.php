@@ -537,6 +537,22 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🚪 #615, D-102: which port numbers a webhook may use. An INSTALLATION
+    //    setting, changed by a global administrator on the Webhooks page, where
+    //    the change is recorded; this editor would neither check who is asking
+    //    nor record it. See WebhookPorts::lockedInGeneralEditor().
+    if (\Portal\Core\WebhookPorts::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" decides which port numbers a webhook may use and is written only by the Webhooks page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\WebhookPorts::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if ($isPortalWideRow === true && $isGlobalAdmin === false) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -1066,6 +1082,21 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\OutsideServices::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🚪 #615, D-102, the same refusal on the ADD path: an organisation's row
+    //    would be ignored by the reader (it reads the installation's row only),
+    //    and an installation row added here would be a change nobody recorded.
+    if (\Portal\Core\WebhookPorts::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" decides which port numbers a webhook may use and is written only by the Webhooks page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\WebhookPorts::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();
