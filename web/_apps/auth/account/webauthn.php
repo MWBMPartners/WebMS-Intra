@@ -20,9 +20,9 @@
 
 declare(strict_types=1);
 
-use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PasskeyAddress;
 use Portal\Core\WebAuthn;
 
 Auth::ensureSession();
@@ -71,13 +71,23 @@ if (Auth::verifyCsrf($csrf) === false) {
     exit();
 }
 
-// 📋 Get WebAuthn RP settings
-$rpName = App::settings('auth.webauthn.rpName') ?? ($SETTINGS['site']['name'] ?? 'Portal');
-$rpID   = App::settings('auth.webauthn.rpID') ?? ($_SERVER['HTTP_HOST'] ?? 'localhost');
-
-// 📋 Determine origin from request
-$scheme = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$origin = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+// 🔑 The name a passkey is tied to (the "relying party ID"), the origin the
+//    browser must report, and the name it shows beside the passkey.
+//    `PasskeyAddress` is the ONE place that decides all three (#903). WHAT WAS
+//    HERE: each setting read with `??`. The install script seeds both as EMPTY
+//    strings and `??` falls back only on null, so a stock installation sent
+//    `rp.id: ""`, which a browser refuses (measured), so no member could add
+//    a passkey at all.
+$rp     = PasskeyAddress::relyingParty();
+$rpName = PasskeyAddress::displayName();
+$rpID   = $rp['id'];
+$origin = $rp['origin'];
+if (($action === 'register_options' || $action === 'register_verify') && $rpID === '') {
+    // Never send an empty rpId. The token was spent above, so the answer
+    // carries its replacement, as every answer from here on does (#770).
+    echo json_encode(['success' => false, 'error' => $rp['problem'], 'csrfToken' => Auth::csrfToken()]);
+    exit();
+}
 
 // =========================================================================
 // 📋 Action: register_options — generate creation options

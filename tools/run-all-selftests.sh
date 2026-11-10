@@ -281,6 +281,7 @@ document-write-check|python3 -I tools/document-write-check-selftest.py
 csrf-carriers|node tools/csrf-carriers-selftest.mjs
 public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs
+passkey-address-browser|node tools/passkey-address-browser-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 
 if [ "$LIST_ONLY" -eq 1 ]; then

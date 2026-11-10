@@ -21,9 +21,9 @@
 declare(strict_types=1);
 require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
-use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
+use Portal\Core\PasskeyAddress;
 use Portal\Core\SelfServicePassword;
 use Portal\Core\Site;
 use Portal\Core\WebAuthn;
@@ -36,10 +36,21 @@ header('Content-Type: application/json; charset=utf-8');
 $input  = json_decode(file_get_contents('php://input'), true) ?? [];
 $action = $input['action'] ?? '';
 
-// 📋 Get WebAuthn RP settings
-$rpID   = App::settings('auth.webauthn.rpID') ?? ($_SERVER['HTTP_HOST'] ?? 'localhost');
-$scheme = (isset($_SERVER['HTTPS']) === true && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-$origin = $scheme . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost');
+// 🔑 The name a passkey is tied to (the "relying party ID") and the origin
+//    the browser must report. `PasskeyAddress::relyingParty()` is the ONE
+//    place that decides both (#903). WHAT WAS HERE: the setting read with
+//    `?? $_SERVER['HTTP_HOST']`. The install script seeds that setting as an
+//    EMPTY string and `??` falls back only on null, so every installation
+//    where nobody had typed a value sent `rpId: ""`, which a browser refuses
+//    (measured), so nobody could sign in with a passkey.
+$rp     = PasskeyAddress::relyingParty();
+$rpID   = $rp['id'];
+$origin = $rp['origin'];
+if (($action === 'auth_options' || $action === 'auth_verify') && $rpID === '') {
+    // Never send an empty rpId, and never check an answer against one.
+    echo json_encode(['success' => false, 'error' => $rp['problem']]);
+    exit();
+}
 
 // =========================================================================
 // 📋 Action: auth_options — generate assertion options

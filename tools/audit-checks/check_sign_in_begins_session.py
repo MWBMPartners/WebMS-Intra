@@ -363,7 +363,12 @@ def new_file(body: str) -> list:
 # 🔴 Faults: each must be reported, with a finding containing `words`.
 PLANTS = [
     ("the passkey call removed", "web/_apps/auth/login/webauthn.php",
-        [("            Auth::beginSessionFor($webauthnUserId);\n", "")], "webauthn.php:13"),
+        # The finding is named by WHAT is written, never by its line number:
+        # this said "webauthn.php:13" (the write was on line 132) until #903
+        # added lines above it and moved it to 141, which turned this case red
+        # on correct code. The 2fa write's finding names `2fa_user_id`, so
+        # this text still picks out the sign-in write alone.
+        [("            Auth::beginSessionFor($webauthnUserId);\n", "")], "`$_SESSION['user_id']` is written"),
     ("the call moved AFTER the write", VERIFY,
         [(VERIFY_PAIR, "    $_SESSION['user_id']    = $pendingUserId;\n    Auth::beginSessionFor($pendingUserId);")], "verify.php:"),
     ("the call left only in a comment", ACCEPT, [(CALL, "// " + CALL)], "accept.php:"),

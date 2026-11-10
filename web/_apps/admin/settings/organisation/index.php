@@ -71,6 +71,9 @@ $addressSaved       = PortalAddress::saved();
 $addressInUse       = PortalAddress::fromRequest();
 $addressForHere     = PortalAddress::base();
 $ownAddressEach     = Site::isMultisiteEnabled() === true && Site::detectionMode() === Site::MODE_HOST;
+// #903: the passkey name an administrator set, if any, so the help under the
+// address box says what passkeys really follow.
+$passkeyName        = \Portal\Core\PasskeyAddress::nameSetByAdministrator();
 // 📧 The support e-mail address, read from THIS ORGANISATION'S OWN ROW — and
 //    deliberately NOT from the merged settings.
 //
@@ -248,6 +251,43 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         The address people type to reach this portal, with nothing after the name:
                         for example <code>https://portal.example.org</code>.
                         Every link in an e-mail the portal sends begins with it.
+                        <?php /* #903: what passkeys are tied to (Portal\Core\PasskeyAddress). Said here
+                                 because this box is where a change that strands them is made — but ONLY
+                                 when passkeys really follow this box. They do not when an administrator
+                                 has set a passkey name of their own (`auth.webauthn.rpID`), and in "own
+                                 address each" mode they follow each organisation's own name, this box
+                                 giving only the http/https part and the port. The first version printed
+                                 the warning unconditionally, which was untrue in both (independent check,
+                                 round 1). Round 2 then found each branch's wording untrue in a case it
+                                 did not name: a passkey also needs the page to be AT the portal's address
+                                 exactly (the origin check compares it whole), the default organisation in
+                                 "own address each" mode with no name of its own follows THIS box, and an
+                                 EMPTY box means passkeys follow whatever name people use. Each branch now
+                                 says only what Portal\Core\PasskeyAddress really does in that state. */ ?>
+                        <?php if ($passkeyName !== ''): ?>
+                            Passkeys are tied to the name <code><?php echo $e($passkeyName); ?></code>, set for them
+                            separately (the <code>auth.webauthn.rpID</code> setting). They work only on the portal's
+                            own address, and only while that address is <code><?php echo $e($passkeyName); ?></code>
+                            or a name under it: before changing it to a name outside that, change the passkey setting
+                            too, and members will have to add their passkeys again.
+                        <?php elseif ($ownAddressEach === true): ?>
+                            <?php /* Round 4: two sentences about changing only the http/https part or the
+                                     port were added here and removed again — they told an administrator who
+                                     had recorded a REAL move to undo it. A passkey is tied to the name alone,
+                                     so no passkey is lost that way; nothing more is said about it. */ ?>
+                            Passkeys follow each organisation's own address (Admin, Organisations), and the portal's
+                            address (this box, or while it is empty the name people use) for an organisation with none
+                            of its own: changing any of those to a different name stops the passkeys made at the old
+                            name working, and they have to be added again.
+                        <?php elseif ($addressSaved !== ''): ?>
+                            Passkeys are tied to the name in it and work only at this address: if you change it to a
+                            different name, passkeys members made at the old name stop working and have to be added
+                            again.
+                        <?php else: ?>
+                            While it is empty, passkeys are tied to the name people use to reach the portal. Setting it
+                            to a different name stops the passkeys made at the old name working, and they have to be
+                            added again.
+                        <?php endif; ?>
                         <?php if ($addressSaved === ''): ?>
                             <strong>It is not set.</strong> Until it is, each link uses the address of whatever
                             request caused the e-mail, and a visitor can choose that.

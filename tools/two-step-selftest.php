@@ -95,6 +95,20 @@
  *      give different answers; and an invitation whose sign-in fails AFTER
  *      the account is made says so, rather than "that username is taken".
  *      Four more plants, each caught.
+ *      Since #903 the name a passkey is tied to (the "rpId") is JUDGED, not
+ *      printed as a note: on a STOCK installation (both settings as the
+ *      install script seeds them, read out of it) the sign-in and add-a-
+ *      passkey options name the host the portal was reached at, with no port,
+ *      and every passkey journey above runs on that state with nothing set by
+ *      hand; a value an administrator sets wins, tidied; a stored value a
+ *      passkey cannot be tied to is ignored; with the portal's address set the
+ *      name and the origin follow it (a portal behind a proxy); with no
+ *      address at all both pages refuse rather than send an empty rpId; the
+ *      Settings page refuses an unusable value with its reason; and the one
+ *      test of a typed value is asked case by case; an organisation's own row is
+ *      ignored; the Settings page refuses adding the key for one organisation;
+ *      and the portal-address card warns only when passkeys follow it. Ten
+ *      plants, each caught.
  *
  * SAFETY
  * ------
@@ -146,6 +160,11 @@
  *   in readable text; this file proves only that no NEW record carries one.
  * - Apache, a real proxy or https: the router only imitates `.htaccess`, on
  *   plain http on 127.0.0.1.
+ * - That a BROWSER accepts the rpId the portal now sends. The passkey
+ *   journeys sign with openssl for whatever rpId and origin they are told,
+ *   and a browser would refuse 127.0.0.1 outright (it allows no passkeys on a
+ *   page reached by a number). What a real browser accepts and refuses is
+ *   measured separately by tools/passkey-address-browser-selftest.mjs (#903).
  * - MariaDB. It has been run on MySQL 8.0.36 and 8.4.11.
  * - That part D's requests overlap on every run. Each takes a second or
  *   more of work inside the database before it finishes, and they are sent
@@ -177,7 +196,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 127;
+const EXPECTED_CHECKS = 149;
 
 function refuse(string $why): never
 {
@@ -302,6 +321,7 @@ const PEOPLE = [
     'sam'   => 922029, // K: "A", signed in, with entries waiting in her session
     'tia'   => 922030, // K: "B", who signs in next on A's browser
     'uma'   => 922031, // K: "C", with two-step sign-in on
+    'vic'   => 922032, // K (#903): a GLOBAL administrator, who sets the passkey address on the Settings page
 ];
 /** Part K's invitation: the account it makes is a NEW person, numbered by the database, so it is found by these. */
 const INVITEE_EMAIL = 'invitee.twostep@selftest.invalid';
@@ -354,6 +374,9 @@ function removeWorld(): void
     }
     // #902: the test passkeys (they would go with their accounts anyway, by the cascade).
     q('DELETE FROM tblWebAuthnCredentials WHERE userID BETWEEN 922000 AND 922999');
+    // #903: K51 and K53/K54 may leave an organisation's own passkey-address row
+    // if interrupted. A real installation never holds one (no page can make it).
+    q("DELETE FROM tblSettings WHERE settingKey = 'auth.webauthn.rpID' AND siteID IS NOT NULL");
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUserSites WHERE userID BETWEEN 922000 AND 922999');
     q('DELETE FROM tblUsers WHERE userID BETWEEN 922000 AND 922999');
@@ -939,6 +962,8 @@ foreach (PEOPLE as $who => $id) {
     q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, 1, 1, 0, 0)', 'i', [$id]);
     q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$id, login($who), $hash]);
 }
+// #903: vic alone is a global administrator (part K uses her on the Settings page).
+q('UPDATE tblUsers SET isAdmin = 1, isRootAdmin = 1 WHERE userID = ?', 'i', [PEOPLE['vic']]);
 // Believe the "X-Forwarded-For" header from 127.0.0.1, so each part has a visitor address of its own.
 setting('portal.trustedProxies', '127.0.0.1');
 setting('portal.trustedProxyHeader', 'x-forwarded-for');
@@ -2167,11 +2192,17 @@ function passkeyFor(string $who): array
  * the assertion. With `$tamper` the signature is over different bytes, so a
  * portal that really checks it must refuse.
  *
+ * #903: by default the answer is signed for the rpId the OPTIONS named and
+ * reports the origin this test's server really has, which is what a browser
+ * on that page would do. `$signFor` and `$origin` override each, to stand in
+ * for a browser on ANOTHER page (one behind a proxy, or a different address),
+ * which a real authenticator would sign for that page's own name and origin.
+ *
  * @param array{key:\OpenSSLAsymmetricKey, id:string, count:int} $pk
  *
- * @return array{rpId:string, verify:array, answer:array}
+ * @return array{rpId:string, options:array, verify:array, answer:array}
  */
-function passkeyIn(string $jar, array &$pk, string $ip, string $redirect, bool $tamper = false): array
+function passkeyIn(string $jar, array &$pk, string $ip, string $redirect, bool $tamper = false, ?string $signFor = null, ?string $origin = null): array
 {
     global $port;
     $options   = req($jar, 'POST', '/login/webauthn', (string) json_encode(['action' => 'auth_options']), $ip);
@@ -2180,8 +2211,8 @@ function passkeyIn(string $jar, array &$pk, string $ip, string $redirect, bool $
     $rpId      = (string) ($decoded['options']['rpId'] ?? '');
     $pk['count']++;
     // rpIdHash, flags (user present + user verified), signature counter.
-    $authData   = hash('sha256', $rpId, true) . "\x05" . pack('N', $pk['count']);
-    $clientData = (string) json_encode(['type' => 'webauthn.get', 'challenge' => $challenge, 'origin' => 'http://127.0.0.1:' . $port, 'crossOrigin' => false]);
+    $authData   = hash('sha256', $signFor ?? $rpId, true) . "\x05" . pack('N', $pk['count']);
+    $clientData = (string) json_encode(['type' => 'webauthn.get', 'challenge' => $challenge, 'origin' => $origin ?? ('http://127.0.0.1:' . $port), 'crossOrigin' => false]);
     $signed     = $authData . hash('sha256', $clientData . ($tamper === true ? 'tampered' : ''), true);
     $signature  = '';
     if (openssl_sign($signed, $signature, $pk['key'], OPENSSL_ALGO_SHA256) === false) {
@@ -2195,7 +2226,7 @@ function passkeyIn(string $jar, array &$pk, string $ip, string $redirect, bool $
         ]],
     ]), $ip);
 
-    return ['rpId' => $rpId, 'verify' => $verify, 'answer' => (array) (json_decode($verify['body'], true) ?? [])];
+    return ['rpId' => $rpId, 'options' => (array) (is_array($decoded) === true ? $decoded : []), 'verify' => $verify, 'answer' => (array) (json_decode($verify['body'], true) ?? [])];
 }
 
 /** Plant into any SCRATCH file, proved applied; returns what to put back. */
@@ -2224,13 +2255,85 @@ $unplantFile = static function (string $rel, string $before) use ($child, $sep):
     }
 };
 
-// The address the passkey is for. Read what a stock installation would send
-// first — a NOTE, not a check — then set it as an administrator would.
+// =============================================================================
+// #903: THE NAME A PASSKEY IS TIED TO, ON A STOCK INSTALLATION.
+// =============================================================================
+// Until #903 this was a NOTE: `auth.webauthn.rpID` is seeded EMPTY, both
+// passkey pages read it with `??`, which falls back only on null, so a stock
+// installation sent `rpId: ""` — which a real browser refuses (measured by
+// tools/passkey-address-browser-selftest.mjs) — and #902 then SET the value by
+// hand so its passkey journeys could run at all. Now nothing is set: the two
+// settings `PasskeyAddress` reads are put to their SEEDED values (read out of
+// the install script, so this is the state a new installation is in), and
+// every passkey journey below runs on that.
+
+/**
+ * One request with a Host header of our choosing (the server answers whatever
+ * name it is sent). The browser's cookies are sent BY HAND: curl matches a
+ * jar's cookies against a custom Host header rather than the address it
+ * connects to (measured), so a jar made at 127.0.0.1 would otherwise send
+ * nothing and every signed-in page would answer as if signed out.
+ */
+function reqWithHost(string $jar, string $path, string $json, string $host): array
+{
+    global $port, $state;
+    $cookies = [];
+    foreach ((array) @file($jar, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $parts = explode("\t", (string) $line);
+        if (count($parts) === 7) {
+            $cookies[] = $parts[5] . '=' . $parts[6];
+        }
+    }
+    $headers = ['Expect:', 'User-Agent: ' . AGENT, 'Content-Type: application/json', 'Host: ' . $host, 'X-Forwarded-For: ' . ip(133)];
+    if ($cookies !== []) {
+        $headers[] = 'Cookie: ' . implode('; ', $cookies);
+    }
+    $handle = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 60,
+        CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_POST => true, CURLOPT_POSTFIELDS => $json,
+        CURLOPT_HTTPHEADER => $headers,
+    ]);
+    $raw      = (string) curl_exec($handle);
+    $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+    unset($handle);
+    $head = substr($raw, 0, $headSize);
+
+    return preg_match('/^X-Two-Step-Selftest:\s*' . $state['token'] . '\s*$/mi', $head) === 1
+        ? ['body' => substr($raw, $headSize), 'json' => (array) (json_decode(substr($raw, $headSize), true) ?? [])]
+        : ['body' => 'an answer without this run\'s header', 'json' => []];
+}
+
+/** The SEEDED value of one installation-wide setting, read out of the install script itself. */
+function seeded(string $key): ?string
+{
+    $schema = (string) file_get_contents(dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_sql' . DIRECTORY_SEPARATOR . 'full_schema.sql');
+    if (preg_match("/VALUES \\('" . preg_quote($key, '/') . "', '([^']*)'/", $schema, $m) === 1) {
+        return $m[1];
+    }
+    // site.url is seeded in a multi-row INSERT: (NULL, 'site.url', '', '', 0)
+    return preg_match("/\\(NULL, '" . preg_quote($key, '/') . "', '([^']*)'/", $schema, $m) === 1 ? $m[1] : null;
+}
+
+$seededRp  = seeded('auth.webauthn.rpID');
+$seededUrl = seeded('site.url');
+if ($seededRp !== '' || $seededUrl !== '') {
+    refuse('the install script no longer seeds auth.webauthn.rpID and site.url as empty (' . var_export($seededRp, true) . ', ' . var_export($seededUrl, true) . '), so part K\'s "stock installation" is no longer the state a new installation is in: read #903 and decide what K35 should judge');
+}
+setting('auth.webauthn.rpID', $seededRp);
+setting('site.url', $seededUrl);
+
 $rpProbe = newJar();
 $rpSeen  = (array) (json_decode(req($rpProbe, 'POST', '/login/webauthn', (string) json_encode(['action' => 'auth_options']), ip(118))['body'], true) ?? []);
-note('with auth.webauthn.rpID as this database holds it, the passkey options name rpId ' . var_export($rpSeen['options']['rpId'] ?? null, true)
-    . ' (an empty value is not one any browser accepts; see #902\'s notes)');
-setting('auth.webauthn.rpID', '127.0.0.1');
+ok('K35 on a STOCK installation (the passkey address and the portal address both as the install script seeds them: empty) the sign-in options name the host the portal was reached at, 127.0.0.1 — not empty, and with no port',
+    ($rpSeen['success'] ?? null) === true && ($rpSeen['options']['rpId'] ?? null) === '127.0.0.1',
+    'answer ' . json_encode($rpSeen));
+[$rpRegJar] = passwordStep('sam', ip(118));
+$rpAccount  = req($rpRegJar, 'GET', '/account', null, ip(118));
+$rpReg      = (array) (json_decode(req($rpRegJar, 'POST', '/account/webauthn', (string) json_encode(['action' => 'register_options', 'csrf_token' => token($rpAccount['body'])]), ip(118))['body'], true) ?? []);
+ok('K36 ...and so do the options for ADDING a passkey (rp.id 127.0.0.1), with a name the browser can show beside it (rp.name not empty: it is seeded empty too)',
+    ($rpReg['success'] ?? null) === true && ($rpReg['options']['rp']['id'] ?? null) === '127.0.0.1' && trim((string) ($rpReg['options']['rp']['name'] ?? '')) !== '',
+    'answer ' . mb_substr(json_encode($rpReg), 0, 400));
 $passkeys = ['sam' => passkeyFor('sam'), 'tia' => passkeyFor('tia')];
 
 // --- K8. A is signed in; B signs in with a PASSKEY on that browser.
@@ -2270,6 +2373,289 @@ $unplantFile($webauthnRel, $wasWebauthn);
 ok('K29 PLANT, the passkey sign-in put back as it was before #900 (a bare session_regenerate_id): A\'s message reaches B, so K26 and K27 can fail',
     ($p6['pk']['answer']['success'] ?? null) === true && (int) ($p6['now']['user_id'] ?? 0) === PEOPLE['tia'] && in_array('flash_msg', stillThere($p6['now'], $p6['waiting']), true) === true,
     'answer ' . $p6['pk']['verify']['body'] . '; still there under the plant: ' . implode(', ', stillThere($p6['now'], $p6['waiting'])));
+
+// --- #903, continued. The passkey journeys above ran on the STOCK state.
+//     Now: a value an administrator sets wins (tidied); a value a passkey
+//     cannot be tied to is ignored; with the portal's address set, the name
+//     and the origin follow IT and not the request (a portal behind a proxy);
+//     with no address at all, nothing empty is ever sent; the settings page
+//     refuses an unusable value with the reason; and the one test of a typed
+//     value, case by case. Then a plant for each.
+/** A signed-out passkey sign-in as tia, on a fresh browser. */
+$pkFresh = static function (string $ip, ?string $signFor = null, ?string $origin = null) use (&$passkeys): array {
+    return passkeyIn(newJar(), $passkeys['tia'], $ip, '/', false, $signFor, $origin);
+};
+$pkOk = static fn (array $pk): bool => ($pk['answer']['success'] ?? null) === true;
+
+setting('auth.webauthn.rpID', 'Passkeys.Example.ORG.');
+$k37  = $pkFresh(ip(128));
+$k37b = $pkFresh(ip(128), '127.0.0.1');
+ok('K37 a passkey address an administrator SET wins over the portal\'s own, tidied of its capitals and closing dot (both of which a browser refuses): the options name passkeys.example.org, an answer signed for it is accepted, and one signed for the host the portal was reached at is refused',
+    $k37['rpId'] === 'passkeys.example.org' && $pkOk($k37) === true && $pkOk($k37b) === false,
+    'rpId ' . var_export($k37['rpId'], true) . '; signed for it: ' . $k37['verify']['body'] . '; signed for 127.0.0.1: ' . $k37b['verify']['body']);
+
+$k38 = [];
+foreach (['127.0.0.1:' . $port, 'https://passkeys.example.org', 'passkeys.example.org/sign-in', '10.0.0.1'] as $unusable) {
+    setting('auth.webauthn.rpID', $unusable);
+    $one            = $pkFresh(ip(129));
+    $k38[$unusable] = $one['rpId'] . ' / ' . (($one['answer']['success'] ?? null) === true ? 'signed in' : 'refused: ' . $one['verify']['body']);
+}
+ok('K38 a stored passkey address a passkey CANNOT be tied to (a port, a scheme, a path, a number) is IGNORED, and the portal\'s own host is used: the options name 127.0.0.1 and the sign-in works, for each',
+    array_values($k38) === array_fill(0, 4, '127.0.0.1 / signed in'),
+    (string) json_encode($k38));
+
+setting('auth.webauthn.rpID', '');
+setting('site.url', 'https://portal.example.org');
+$k39  = $pkFresh(ip(130), null, 'https://portal.example.org');
+$k39b = $pkFresh(ip(130));
+setting('site.url', $seededUrl);
+ok('K39 with the portal\'s ADDRESS set (https://portal.example.org) and requests arriving at another name, as behind a proxy: the options name portal.example.org, an answer from a page at https://portal.example.org is accepted, and one reporting the name the request arrived at is refused',
+    $k39['rpId'] === 'portal.example.org' && $pkOk($k39) === true && $pkOk($k39b) === false,
+    'rpId ' . var_export($k39['rpId'], true) . '; from the set address: ' . $k39['verify']['body'] . '; from the request\'s own: ' . $k39b['verify']['body']);
+
+$k40 = reqWithHost(newJar(), '/login/webauthn', (string) json_encode(['action' => 'auth_options']), 'not_a_host_name');
+ok('K40 with NO address to give (no address set, and the request names a host that is not a host name): the sign-in options are REFUSED with a sentence saying why, and no rpId — empty or otherwise — is sent',
+    ($k40['json']['success'] ?? null) === false && array_key_exists('options', $k40['json']) === false
+        && str_contains((string) ($k40['json']['error'] ?? ''), 'does not know this organisation\'s web address') === true,
+    'answer ' . $k40['body']);
+[$k40RegJar] = passwordStep('sam', ip(134));
+$k40Reg      = static function () use ($k40RegJar): array {
+    $page = req($k40RegJar, 'GET', '/account', null, ip(134));
+
+    return reqWithHost($k40RegJar, '/account/webauthn', (string) json_encode(['action' => 'register_options', 'csrf_token' => token($page['body'])]), 'not_a_host_name');
+};
+$k40b = $k40Reg();
+ok('K40b ...and so are the options for ADDING a passkey, for a member signed in, with the replacement form token on the refusal (#770)',
+    ($k40b['json']['success'] ?? null) === false && array_key_exists('options', $k40b['json']) === false
+        && str_contains((string) ($k40b['json']['error'] ?? ''), 'does not know this organisation\'s web address') === true
+        && preg_match('/^[0-9a-f]{64}$/', (string) ($k40b['json']['csrfToken'] ?? '')) === 1,
+    'answer ' . $k40b['body']);
+
+// The settings page, as a global administrator would use it.
+$rpRowId  = (int) (one("SELECT settingID FROM tblSettings WHERE settingKey = 'auth.webauthn.rpID' AND siteID IS NULL")['settingID'] ?? 0);
+[$vicJar] = passwordStep('vic', ip(131));
+$k41Save  = static function (string $value) use ($vicJar, $rpRowId): array {
+    $page = req($vicJar, 'GET', '/settings', null, ip(131));
+    $save = req($vicJar, 'POST', '/settings/save', ['csrf_token' => token($page['body']), 'settingID' => (string) $rpRowId, 'settingKey' => 'auth.webauthn.rpID', 'settingValue' => $value], ip(131));
+    $back = req($vicJar, 'GET', '/settings', null, ip(131));
+
+    return ['save' => $save, 'flash' => $back['body'], 'stored' => (string) (one('SELECT settingValue FROM tblSettings WHERE settingID = ?', 'i', [$rpRowId])['settingValue'] ?? '?')];
+};
+setting('auth.webauthn.rpID', '');
+$k41a = $k41Save('https://portal.example.org:8443');
+$k41b = $k41Save('Portal.Example.ORG');
+setting('auth.webauthn.rpID', '');
+ok('K41 the settings page REFUSES a passkey address a passkey cannot be tied to, saying why and saving nothing, and stores a usable one tidied (portal.example.org)',
+    $rpRowId > 0 && $k41a['save']['status'] === 302 && $k41a['stored'] === '' && str_contains($k41a['flash'], 'Nothing was saved') === true
+        && str_contains($k41a['flash'], 'without &quot;https://&quot;') === true
+        && $k41b['stored'] === 'portal.example.org',
+    'row ' . $rpRowId . '; refused case: ' . describe($k41a['save']) . ', stored ' . var_export($k41a['stored'], true) . ', message ' . (str_contains($k41a['flash'], 'Nothing was saved') === true ? 'shown' : 'NOT shown')
+        . '; usable case stored ' . var_export($k41b['stored'], true));
+
+// The one test of a typed value, case by case (it uses nothing but PHP, so it is asked here directly).
+require_once dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'PasskeyAddress.php';
+$k42Cases = [
+    ['', ''],
+    ['  portal.example.org  ', 'portal.example.org'],
+    ['Portal.Example.ORG.', 'portal.example.org'],
+    ['localhost', 'localhost'],
+    ['xn--bcher-kva.example', 'xn--bcher-kva.example'],
+    ['https://portal.example.org', null],
+    ['portal.example.org:8443', null],
+    ['portal.example.org/x', null],
+    ['portal.example.org?a=b', null],
+    ['me@portal.example.org', null],
+    ['portal example.org', null],
+    ["portal.\nexample.org", null],
+    ['192.168.1.10', null],
+    ['[::1]', null],
+    ['bücher.example', null],
+    ['-bad.example.org', null],
+    ['.', null],
+];
+$k42Wrong = [];
+foreach ($k42Cases as [$typed, $want]) {
+    $got = \Portal\Core\PasskeyAddress::check($typed);
+    $as  = $got['problem'] === '' ? $got['id'] : null;
+    if ($as !== $want) {
+        $k42Wrong[] = json_encode($typed) . ' gave ' . var_export($as, true) . ', wanted ' . var_export($want, true);
+    }
+}
+ok('K42 the one test of a typed passkey address: a bare host name is kept (tidied of capitals, a closing dot and surrounding spaces); a scheme, a port, a path, a "?", a user name, an inner space or line break, an IP address, letters outside a-z and a malformed name are each refused with a reason — ' . count($k42Cases) . ' cases',
+    $k42Wrong === [], implode('; ', $k42Wrong));
+
+// The plants. Each is put into the SCRATCH copy, proved applied, judged, and taken out.
+$loginPage = '_apps/auth/login/webauthn.php';
+$rpCore    = '_core/PasskeyAddress.php';
+$rpStock   = static function (): array {
+    $seen = (array) (json_decode(req(newJar(), 'POST', '/login/webauthn', (string) json_encode(['action' => 'auth_options']), ip(132))['body'], true) ?? []);
+
+    return ['ok' => ($seen['success'] ?? null) === true && ($seen['options']['rpId'] ?? null) === '127.0.0.1', 'seen' => $seen];
+};
+
+$was = $plantFile($loginPage, "\$rpID   = \$rp['id'];\n", "\$rpID   = (string) (\\Portal\\Core\\App::settings('auth.webauthn.rpID') ?? (\$_SERVER['HTTP_HOST'] ?? 'localhost'));\n");
+$q1  = $rpStock();
+$unplantFile($loginPage, $was);
+// Judged by the page's OWN refusal (success false, no options), not by "anything
+// but success": a plant that broke the page outright would also not succeed, and
+// would then pass for the wrong reason (independent check, round 1).
+ok('K43 PLANT, the sign-in page reading the setting with `??` as it did before #903: on the stock installation it has no rpId to give (the seeded empty string) and its own guard refuses, so K35 can fail',
+    $q1['ok'] === false && ($q1['seen']['success'] ?? null) === false && array_key_exists('options', $q1['seen']) === false && array_key_exists('error', $q1['seen']) === true,
+    'answer under the plant ' . json_encode($q1['seen']));
+
+$was = $plantFile($rpCore, "'#^https?://([^:/]+)#'", "'#^https?://([^/]+)#'");
+$q2  = $rpStock();
+$unplantFile($rpCore, $was);
+ok('K44 PLANT, the port kept on the host name: the options name "127.0.0.1:<port>", which a browser refuses, so K35 can fail',
+    $q2['ok'] === false && ($q2['seen']['options']['rpId'] ?? '') === '127.0.0.1:' . $port, 'answer under the plant ' . json_encode($q2['seen']));
+
+setting('auth.webauthn.rpID', '127.0.0.1:' . $port);
+$was = $plantFile($rpCore, "\$checked = self::check(\$stored['value']);", "\$checked = ['id' => \$stored['value'], 'problem' => ''];");
+$q3  = $pkFresh(ip(132));
+$unplantFile($rpCore, $was);
+setting('auth.webauthn.rpID', '');
+ok('K45 PLANT, a stored value believed without the check: the options name "127.0.0.1:<port>", so K38 can fail',
+    $q3['rpId'] === '127.0.0.1:' . $port, 'rpId under the plant ' . var_export($q3['rpId'], true));
+
+setting('site.url', 'https://portal.example.org');
+$was = $plantFile($rpCore, "\$origin = PortalAddress::base();", "\$origin = PortalAddress::fromRequest();");
+$q4  = $pkFresh(ip(132), null, 'https://portal.example.org');
+$unplantFile($rpCore, $was);
+setting('site.url', $seededUrl);
+ok('K46 PLANT, the name and origin taken from the REQUEST as before #903: with the portal\'s address set, the options name 127.0.0.1 and the answer from the set address is refused, so K39 can fail',
+    $q4['rpId'] === '127.0.0.1' && $pkOk($q4) === false, 'rpId under the plant ' . var_export($q4['rpId'], true) . '; ' . $q4['verify']['body']);
+
+$was = $plantFile($loginPage, "if ((\$action === 'auth_options' || \$action === 'auth_verify') && \$rpID === '') {", 'if (false) {');
+$q5  = reqWithHost(newJar(), '/login/webauthn', (string) json_encode(['action' => 'auth_options']), 'not_a_host_name');
+$unplantFile($loginPage, $was);
+ok('K47 PLANT, the sign-in page\'s "never send an empty rpId" guard switched off: with no address it sends rpId "" again, so K40 can fail',
+    ($q5['json']['success'] ?? null) === true && ($q5['json']['options']['rpId'] ?? null) === '', 'answer under the plant ' . $q5['body']);
+
+$accountPage = '_apps/auth/account/webauthn.php';
+$was = $plantFile($accountPage, "if ((\$action === 'register_options' || \$action === 'register_verify') && \$rpID === '') {", 'if (false) {');
+$q7  = $k40Reg();
+$unplantFile($accountPage, $was);
+ok('K49 PLANT, the add-a-passkey page\'s "never send an empty rpId" guard switched off: with no address it sends rp.id "" again, so K40b can fail',
+    ($q7['json']['success'] ?? null) === true && ($q7['json']['options']['rp']['id'] ?? null) === '', 'answer under the plant ' . mb_substr($q7['body'], 0, 300));
+
+$was = $plantFile($accountPage, "\$rpID   = \$rp['id'];\n", "\$rpID   = (string) (\\Portal\\Core\\App::settings('auth.webauthn.rpID') ?? (\$_SERVER['HTTP_HOST'] ?? 'localhost'));\n");
+[$q8Jar] = passwordStep('sam', ip(135));
+$q8Page  = req($q8Jar, 'GET', '/account', null, ip(135));
+$q8      = (array) (json_decode(req($q8Jar, 'POST', '/account/webauthn', (string) json_encode(['action' => 'register_options', 'csrf_token' => token($q8Page['body'])]), ip(135))['body'], true) ?? []);
+$unplantFile($accountPage, $was);
+ok('K50 PLANT, the add-a-passkey page reading the setting with `??` as it did before #903: on the stock installation it has no rp.id to give, so K36 can fail',
+    ($q8['success'] ?? null) === false && array_key_exists('options', $q8) === false && preg_match('/^[0-9a-f]{64}$/', (string) ($q8['csrfToken'] ?? '')) === 1,
+    'answer under the plant ' . mb_substr((string) json_encode($q8), 0, 300));
+
+$was = $plantFile('_apps/settings/save.php', "if (PasskeyAddress::isTheSetting(\$storedKey) === true && \$settingVal !== '') {", 'if (false) {');
+$q6  = $k41Save('https://portal.example.org:8443');
+$unplantFile('_apps/settings/save.php', $was);
+setting('auth.webauthn.rpID', '');
+ok('K48 PLANT, the settings page\'s check switched off: the unusable value is SAVED as typed, so K41 can fail',
+    $q6['stored'] === 'https://portal.example.org:8443', 'stored under the plant ' . var_export($q6['stored'], true));
+
+// --- #903, round 1 of the independent check: three things nothing pinned.
+// (1) ONLY the installation-wide row is read. An organisation's own row — which
+//     no page can make (K54), so it is made here in SQL — must be ignored: a
+//     wider name lets more sites ask members' authenticators for answers, and
+//     that is the installation's decision. Without this check the read could be
+//     swapped for App::settings() (where an organisation's row wins) with every
+//     other check green, because no other fixture holds such a row.
+$orgRowValue = 'p903-org-row.example.org';
+q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (1, ?, ?, ?, 0)', 'sss', ['auth.webauthn.rpID', $orgRowValue, $orgRowValue]);
+$k51 = $pkFresh(ip(136));
+ok('K51 an ORGANISATION\'S own passkey-address row (made in SQL; no page can make one) is IGNORED: only the installation-wide row counts, so the options still name 127.0.0.1',
+    $k51['rpId'] === '127.0.0.1' && $pkOk($k51) === true, 'rpId ' . var_export($k51['rpId'], true) . '; ' . $k51['verify']['body']);
+$was = $plantFile($rpCore, '`siteID` IS NULL ORDER BY `settingID` DESC', '(`siteID` IS NULL OR `siteID` = 1) ORDER BY `siteID` IS NULL, `settingID` DESC');
+$q9  = $pkFresh(ip(136));
+$unplantFile($rpCore, $was);
+q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID = 1 AND settingValue = ?', 'ss', ['auth.webauthn.rpID', $orgRowValue]);
+ok('K52 PLANT, an organisation\'s row allowed to win over the installation\'s: the options name ' . $orgRowValue . ', so K51 can fail',
+    $q9['rpId'] === $orgRowValue, 'rpId under the plant ' . var_export($q9['rpId'], true));
+
+// (2) The Settings page's ADD path refuses the key for one organisation, and says why.
+//     Said plainly: the "no row is made" half cannot fail on its own here,
+//     because the installation-wide row exists and the duplicate check after
+//     this refusal would stop the row too. The MESSAGE and the RECORD are what
+//     only this refusal produces, and K54 proves the message goes without it.
+//     The case where the installation-wide row has been removed is not driven.
+$k53Add = static function () use ($vicJar): array {
+    $page = req($vicJar, 'GET', '/settings', null, ip(131));
+    $save = req($vicJar, 'POST', '/settings/save', ['csrf_token' => token($page['body']), 'settingKey' => 'auth.webauthn.rpID', 'settingValue' => 'passkeys.example.org'], ip(131));
+    $back = req($vicJar, 'GET', '/settings', null, ip(131));
+
+    return ['save' => $save, 'flash' => $back['body'], 'orgRows' => (int) (one("SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey = 'auth.webauthn.rpID' AND siteID IS NOT NULL")['n'] ?? -1)];
+};
+$k53 = $k53Add();
+ok('K53 ADDING the passkey address as one organisation\'s own setting on the Settings page is refused with the reason (only the installation-wide value is used), no row is made, and the refusal is recorded',
+    $k53['save']['status'] === 302 && $k53['orgRows'] === 0 && str_contains($k53['flash'], 'is used only as one value for the whole installation') === true
+        && (int) (one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'SettingsUpdateRefused' AND activityDescription LIKE ?", 'is', [PEOPLE['vic'], '%was not added for one organisation%'])['n'] ?? 0) === 1,
+    describe($k53['save']) . '; organisation rows ' . $k53['orgRows'] . '; message ' . (str_contains($k53['flash'], 'is used only as one value') === true ? 'shown' : 'NOT shown'));
+$was = $plantFile('_apps/settings/save.php', "    if (PasskeyAddress::isTheSetting(\$settingKey) === true) {\n", "    if (false) {\n");
+$q10 = $k53Add();
+$unplantFile('_apps/settings/save.php', $was);
+q("DELETE FROM tblSettings WHERE settingKey = 'auth.webauthn.rpID' AND siteID IS NOT NULL");
+ok('K54 PLANT, that refusal switched off: the page answers with something else (the bare "already exists"), so K53 can fail',
+    str_contains($q10['flash'], 'is used only as one value for the whole installation') === false, 'organisation rows under the plant ' . $q10['orgRows']);
+
+// (3) The help under the portal-address box says what passkeys really follow.
+//     The card's sentence turns on THREE yes-or-no facts — a passkey name set
+//     separately, each organisation with its own address, the box set — so
+//     EVERY COMBINATION is drawn (twenty-four: see the next notes), and each must show exactly
+//     the sentence the rule picks (passkey name first, then own-address mode,
+//     then box set or empty). Rounds 3 and 4 of the independent check each
+//     planted two branches in the wrong order and stayed green, because the
+//     states drawn then never held both facts that tell those two branches
+//     apart; drawing them all is what pins the order of every pair.
+$k55Card  = static fn (): string => req($vicJar, 'GET', '/admin/settings/organisation', null, ip(131))['body'];
+$k55Words = [
+    'empty'   => 'While it is empty, passkeys are tied to the name people use to reach the portal.',
+    'set'     => 'Passkeys are tied to the name in it and work only at this address',
+    'passkey' => 'Passkeys are tied to the name <code>passkeys.example.org</code>, set for them',
+    'own'     => 'Passkeys follow each organisation\'s own address (Admin, Organisations), and the portal\'s address',
+];
+$k55Says = static function (string $page) use ($k55Words): array {
+    return array_keys(array_filter($k55Words, static fn (string $words): bool => str_contains((string) preg_replace('/\s+/', ' ', $page), $words)));
+};
+$k55 = [];
+$k55Want = [];
+//     And "each organisation with its own address" is itself TWO settings:
+//     several organisations switched on AND told apart by their address
+//     (`subdomain`). Round 5 widened that branch to "several organisations,
+//     any way" with every check green, because the only multi-organisation
+//     state drawn was `subdomain`. So the other two ways — `session` and
+//     `path`, where every organisation shares the portal's address — are drawn
+//     too, and must NOT show the own-address sentence.
+//     And BOTH settings take every value they can hold, in every pairing:
+//     round 6 read the stored detection mode alone (ignoring whether several
+//     organisations are switched on) with every check green, because "off"
+//     was drawn only with the seeded mode. Switching several organisations
+//     off does not reset the mode, so "off, but subdomain" is a real state.
+$k55Modes = [];
+foreach (['false', 'true'] as $k55Enabled) {
+    foreach (['session', 'path', 'subdomain'] as $k55Detect) {
+        $k55Modes[($k55Enabled === 'true' ? 'on-' : 'off-') . $k55Detect] = [$k55Enabled, $k55Detect];
+    }
+}
+foreach ([false, true] as $k55Passkey) {
+    foreach ($k55Modes as $k55Mode => [$k55Enabled, $k55Detect]) {
+        foreach ([false, true] as $k55Box) {
+            setting('auth.webauthn.rpID', $k55Passkey === true ? 'passkeys.example.org' : '');
+            setting('multisite.enabled', $k55Enabled);
+            setting('multisite.detectionMode', $k55Detect);
+            setting('site.url', $k55Box === true ? 'https://portal.example.org' : $seededUrl);
+            $name           = ($k55Passkey === true ? 'passkey' : '-') . '/' . $k55Mode . '/' . ($k55Box === true ? 'box' : '-');
+            $k55[$name]     = $k55Says($k55Card());
+            $k55Want[$name] = [$k55Passkey === true ? 'passkey' : ($k55Mode === 'on-subdomain' ? 'own' : ($k55Box === true ? 'set' : 'empty'))];
+        }
+    }
+}
+setting('auth.webauthn.rpID', '');
+setting('multisite.enabled', (string) seeded('multisite.enabled'));
+setting('multisite.detectionMode', (string) seeded('multisite.detectionMode'));
+setting('site.url', $seededUrl);
+ok('K55 the help under the portal-address box says what passkeys really follow in ALL TWENTY-FOUR combinations of a passkey name set, several organisations switched on or off, the three ways of telling them apart (session, path, each by its own address), and the box set — and only the sentence the rule picks for each',
+    $k55 === $k55Want, 'seen ' . json_encode($k55) . '; wanted ' . json_encode($k55Want));
 
 // --- K9. A KIOSK browser: the Asset Tracker hand-over put a member in the
 //     session (`kiosk_user_id`), which is NOT a sign-in. Then somebody really

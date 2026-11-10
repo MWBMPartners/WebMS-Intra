@@ -96,8 +96,17 @@
  *   has to be at the top of its address, which is why check() refuses a
  *   path.
  * - It does not cover addresses that must match what the browser itself
- *   sent: passkeys (`auth.webauthn.rpID`), working out the organisation, the
- *   Twitch player. Those still read the request, correctly.
+ *   sent: working out the organisation, the Twitch player. Those still read
+ *   the request, correctly.
+ * - PASSKEYS DO use it now (#903). This line used to list them with the
+ *   two above. `Portal\Core\PasskeyAddress` takes the name a passkey is tied
+ *   to, when no administrator has set one, and the origin a browser must
+ *   report, from base() — so they follow the same rule as a link: the set
+ *   address when there is one (which is what the visitor's browser really
+ *   shows when something in front of the portal hands the request on), each
+ *   organisation's own name in "own address each" mode, and otherwise the
+ *   address this request arrived at. Its header says why a made-up host name
+ *   is safe there.
  *
  * Test: tools/portal-address-selftest.php
  *

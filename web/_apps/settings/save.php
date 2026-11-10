@@ -49,6 +49,7 @@ use Portal\Core\GivingRetention;
 use Portal\Core\Logger;
 use Portal\Core\MailQueue;
 use Portal\Core\MailRoutes;
+use Portal\Core\PasskeyAddress;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
 use Portal\Core\Site;
@@ -632,6 +633,34 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 🔑 THE NAME A PASSKEY IS TIED TO must be a bare host name (#903).
+    //    `PasskeyAddress::check()` is the ONE test, the same one its reader
+    //    applies, so this page cannot accept what the passkey pages would
+    //    ignore. A browser refuses a scheme, a port, a path, capitals, a
+    //    closing dot and a number (all measured), and a value it refuses means
+    //    no member can add or use a passkey — so it is refused HERE with the
+    //    reason, rather than saved and quietly ignored. Capitals and a closing
+    //    dot are tidied, not refused. An EMPTY value is allowed: it means "use
+    //    the portal's own address", which is the seeded state.
+    //    It sits after every refusal above, so somebody who may not change
+    //    the row is told the real reason, and before the secret handling,
+    //    because this row is never a secret.
+    if (PasskeyAddress::isTheSetting($storedKey) === true && $settingVal !== '') {
+        $passkeyCheck = PasskeyAddress::check($settingVal);
+        if ($passkeyCheck['problem'] !== '') {
+            Logger::activity(
+                'SettingsUpdateRefused',
+                'Refused: "' . $storedKey . '" was not saved, because a passkey cannot be tied to what was typed',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = 'Nothing was saved. ' . $passkeyCheck['problem'];
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
+        $settingVal = $passkeyCheck['id'];
+    }
+
     // 🔐 A secret is stored encrypted, and stays a secret (#597).
     //    Decided from the mark on the STORED row, never from the form: see
     //    "SECRETS" in the header. This sits after every refusal above, so a
@@ -832,6 +861,34 @@ if ($settingId > 0) {
         $_SESSION['flash_msg']  = 'A setting name can only contain the letters A to Z, '
             . 'numbers, full stops (.), hyphens (-) and underscores (_). Spaces, '
             . 'accented letters and other symbols are not allowed.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 🔑 Nor may the name a passkey is tied to be ADDED as one organisation's
+    //    own value (#903). Its reader takes the installation-wide row ONLY
+    //    (`PasskeyAddress`, which says why: a wider name lets more sites ask
+    //    members' authenticators for answers, a decision for whoever runs the
+    //    whole installation). A row added here would be saved, shown on this
+    //    page and never used — a setting that says one thing and does nothing.
+    //    It runs BEFORE the duplicate check below, so it is what anybody
+    //    adding this key is told, whether or not the installation-wide row
+    //    exists (the install script seeds it; the duplicate check would refuse
+    //    with "already exists", which does not say why). Where that row has
+    //    been removed, it is also what stops an organisation's row appearing.
+    if (PasskeyAddress::isTheSetting($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . PasskeyAddress::SETTING . '" was not added for one organisation, because only the installation-wide value is ever used',
+            $_SESSION['user_id'] ?? null
+        );
+        // The message does not say "a global administrator sets it here":
+        // where the installation-wide row has been removed, this page cannot
+        // create one (this branch always writes an organisation's row).
+        $_SESSION['flash_msg']  = 'Nothing was saved. "' . PasskeyAddress::SETTING . '" is used only as '
+            . 'one value for the whole installation, never as one organisation\'s own, so a row added '
+            . 'here would have no effect. Passkeys follow the portal\'s own address while it is not set.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();
