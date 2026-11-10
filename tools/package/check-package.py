@@ -329,7 +329,12 @@ ALLOWED_KINDS: dict[str, tuple[tuple[str, ...], str]] = {
     ".sql": (("_sql/",), "the install script and the numbered database upgrades; the name must also fit SQL_NAME"),
     ".json": (("_core/",), "the API description and the data files the code reads, with their schemas"),
     ".css": ((WEB + "/",), "stylesheets a browser fetches"),
-    ".js": ((WEB + "/",), "scripts a browser fetches"),
+    ".js": (
+        (WEB + "/", "_core/data/"),
+        "scripts a browser fetches; and, in _core/data/ ONLY, the public door's pasted-in script "
+        "(public-door.js, #493 P4b), kept OUTSIDE the web folder on purpose so that only the door's gate "
+        "(Portal\\Core\\PublicDoor) can serve it — a copy in the web folder would answer with the door off",
+    ),
     ".svg": ((WEB + "/",), "drawings: icons, logos and brand artwork"),
     ".png": ((WEB + "/",), "pictures"),
     ".gif": ((WEB + "/",), "pictures (the animated brand emblems)"),
