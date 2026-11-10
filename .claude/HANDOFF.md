@@ -14,7 +14,7 @@ pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900,
 | Package | Worktree / branch | State |
 |---|---|---|
 | #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 1's findings fixed (the race closed with `tblUsers.signInVersion` read in the same SELECT as the password; D-108 built); round 2 check running |
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 727a68ec | Round 1 NOT CLEAN (one untrue Roles sentence; header comparison and membership fixture missing); fixing, and building D-109 (#917) |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, a3f4d93e (rebased on bfa3525d) | Round 1 fixes and D-109 built; round 2 check running. Raised #921 |
 | #703 — keep the worker's name on pastoral/safeguarding records (D-016; code contradicts it; migration 272 if needed) | `agent-afd8a19e73dcfa23c` / `p703-build` | Being built |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
