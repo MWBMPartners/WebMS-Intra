@@ -2656,8 +2656,10 @@ return [
                     . 'Some of those messages really do carry personal details: a registration message '
                     . 'carries the person\'s full name, an event submitted by somebody not signed in '
                     . 'carries their e-mail address, and a prayer-request message carries the subject line, '
-                    . 'which is free text. The reply the other system sent back is also kept, and what is '
-                    . 'in that reply is decided by whoever runs it. Nothing on the row links it to an '
+                    . 'which is free text. Until #615 the first 500 characters of the reply the other '
+                    . 'system sent back were kept as well, and what is in a reply is decided by whoever runs '
+                    . 'it; a delivery made since then keeps only one word saying why it failed, never the '
+                    . 'reply, and older replies are emptied by the time limit below. Nothing on the row links it to an '
                     . 'account, so an erasure request cannot match it; what reaches these rows is the time '
                     . 'limit below. The row itself is kept even once emptied, because it is the record that '
                     . 'something was sent, when, after how many attempts and with what answer.',

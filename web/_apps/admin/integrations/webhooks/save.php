@@ -16,6 +16,27 @@
  *       button can post just `webhookID` + `isActive` without clobbering
  *       name/targetUrl/eventTypes on a simple toggle.
  *
+ * WHERE A WEBHOOK MAY POINT (#615). The target is checked by
+ * `SafeFetch::check()`, the same test the outside-calendar importer uses, so
+ * an address inside the hosting company's network, on this machine, or at the
+ * cloud "metadata" address is refused BEFORE it is saved — and the address is
+ * then stored in SafeFetch's one standard spelling, so what was checked is
+ * what is stored. This is the first line only: `WebhookDispatcher` checks it
+ * AGAIN at every delivery, because a name can be re-pointed after it is saved.
+ *
+ *   - Every refusal that involves where an address LEADS gets the one message
+ *     `SafeFetch::REFUSED_MESSAGE`, whether it points somewhere private or
+ *     simply does not exist, so trying names cannot map the host's network.
+ *     An address refused for how it is WRITTEN (a scheme, a port, a user name,
+ *     an unusual spelling of a number) gets a second message, which depends
+ *     on nothing but the text that was typed.
+ *   - The address is NEVER written into the activity log or the error log:
+ *     a refusal is recorded as having happened, with no part of the address.
+ *   - PAUSING is never refused. A webhook saved before #615 may point
+ *     somewhere it no longer may, and the one thing an administrator must
+ *     always be able to do with it is switch it off. Changing the address or
+ *     switching a webhook back ON checks it.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -31,6 +52,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\InstallationSettings;
+use Portal\Core\SafeFetch;
 use Portal\Core\SettingLimit;
 use Portal\Core\Site;
 use Portal\Core\WebhookRetention;
@@ -56,33 +78,80 @@ $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
 /**
- * 🔍 Validate name + targetUrl. Returns an error string, or '' if OK.
+ * 🔍 Validate the name. Returns an error string, or '' if OK.
  *
- * @param string $name      Webhook display name (≤100 chars, required).
- * @param string $targetUrl Delivery URL (required, http(s) only, ≤500 chars).
+ * @param string $name Webhook display name (≤100 chars, required).
  */
-$validateFields = static function (string $name, string $targetUrl): string {
+$validateName = static function (string $name): string {
     if ($name === '') {
         return 'Name is required.';
     }
     if (mb_strlen($name) > 100) {
         return 'Name must be 100 characters or fewer.';
     }
+    return '';
+};
+
+/**
+ * 🛡️ May a webhook point at this address? (#615)
+ *
+ * Returns `['url' => <the standard spelling to store>, 'error' => '']`, or
+ * `['url' => '', 'error' => <message>, 'refused' => <bool>]`. `refused` is
+ * true when `SafeFetch::check()` said no — the case worth recording, because
+ * an administrator trying addresses inside the host's network is exactly what
+ * this guards against.
+ *
+ * The one test is SafeFetch's: `normaliseUrl()` for how the address is
+ * written, `check()` for where it leads. There is no second copy of the rule
+ * here (the old `FILTER_VALIDATE_URL` and scheme test are gone — they let
+ * `http://127.0.0.1/` through, and `parse_url()` reads some spellings
+ * differently from curl, which is how guards like this are got round).
+ *
+ * @return array{url: string, error: string, refused?: bool}
+ */
+$checkTarget = static function (string $targetUrl): array {
     if ($targetUrl === '') {
-        return 'Target URL is required.';
+        return ['url' => '', 'error' => 'Target URL is required.', 'refused' => false];
     }
     if (mb_strlen($targetUrl) > 500) {
-        return 'Target URL must be 500 characters or fewer.';
+        return ['url' => '', 'error' => 'Target URL must be 500 characters or fewer.', 'refused' => false];
     }
-    $validated = filter_var($targetUrl, FILTER_VALIDATE_URL);
-    if ($validated === false) {
-        return 'Target URL must be a valid URL.';
+    $normal = SafeFetch::normaliseUrl($targetUrl);
+    if ($normal === null) {
+        // Depends only on the text typed, never on where it leads, so it
+        // reveals nothing about the network.
+        return [
+            'url'     => '',
+            'error'   => 'This address cannot be used: a webhook needs an ordinary http:// or https:// address '
+                . 'on the usual port (80 or 443), with no user name or password in it and no unusual '
+                . 'spelling of a number.',
+            'refused' => false,
+        ];
     }
-    $scheme = parse_url($targetUrl, PHP_URL_SCHEME);
-    if (in_array($scheme, ['http', 'https'], true) === false) {
-        return 'Target URL must use http:// or https://.';
+    // The column counts characters, and a converted non-English host name
+    // ("xn--…") can be longer than what was typed, so this is asked again.
+    if (mb_strlen($normal) > 500) {
+        return ['url' => '', 'error' => 'Target URL must be 500 characters or fewer.', 'refused' => false];
     }
-    return '';
+    if (SafeFetch::check($normal)['ok'] === false) {
+        return ['url' => '', 'error' => SafeFetch::REFUSED_MESSAGE, 'refused' => true];
+    }
+    return ['url' => $normal, 'error' => ''];
+};
+
+/**
+ * 🧾 Record that a target address was refused — and NOTHING of the address
+ * (#615): not the name, not the number it led to, not the path. What is kept
+ * is enough to notice somebody probing: who, which organisation, when.
+ */
+$recordRefusal = static function (int $siteId, int $userId): void {
+    Logger::activity(
+        'WebhookTargetRefused',
+        'A webhook target address was refused for organisation #' . $siteId
+        . ' because it points at a private or internal network, or its name could not be found; '
+        . 'the address is deliberately not recorded',
+        $userId
+    );
 };
 
 // ============================================================================
@@ -252,7 +321,25 @@ if ($webhookId > 0) {
     }
     $isActive = ((string) ($_POST['isActive'] ?? (string) $existing['isActive']) === '1') ? 1 : 0;
 
-    $error = $validateFields($name, $targetUrl);
+    $error = $validateName($name);
+
+    // 🛡️ The address is checked when it CHANGES or when the webhook is
+    //    switched back ON (#615) — never for pausing, which must always work.
+    //    Ask whether the field ARRIVED, never what it holds (#677): the
+    //    pause/reactivate button posts no address at all.
+    $urlArrived    = isset($_POST['targetUrl']) === true;
+    $switchingOn   = $isActive === 1 && (int) $existing['isActive'] !== 1;
+    if ($error === '' && ($urlArrived === true || $switchingOn === true)) {
+        $target = $checkTarget($targetUrl);
+        if ($target['error'] !== '') {
+            if (($target['refused'] ?? false) === true) {
+                $recordRefusal($siteId, $userId);
+            }
+            $error = $target['error'];
+        } else {
+            $targetUrl = $target['url'];
+        }
+    }
     if ($error !== '') {
         $_SESSION['flash_msg']  = $error;
         $_SESSION['flash_type'] = 'danger';
@@ -265,7 +352,7 @@ if ($webhookId > 0) {
         . 'WHERE webhookID = ? AND siteID = ?'
     );
     if ($stmt === false) {
-        Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', $mysqli->error, '');
+        Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', 'MySQL error ' . (string) $mysqli->errno, ''); // the number, never the text: it can quote the address (#615)
         $_SESSION['flash_msg']  = 'Could not update webhook — database error.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
@@ -274,7 +361,7 @@ if ($webhookId > 0) {
     $stmt->bind_param('sssiii', $name, $eventTypes, $targetUrl, $isActive, $webhookId, $siteId);
     $ok = $stmt->execute();
     if ($ok === false) {
-        Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', $mysqli->error, '');
+        Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', 'MySQL error ' . (string) $mysqli->errno, ''); // the number, never the text: it can quote the address (#615)
         $stmt->close();
         $_SESSION['flash_msg']  = 'Could not update webhook — database error.';
         $_SESSION['flash_type'] = 'danger';
@@ -302,7 +389,20 @@ if ($eventTypes === '') {
 }
 $isActive = ((string) ($_POST['isActive'] ?? '0') === '1') ? 1 : 0;
 
-$error = $validateFields($name, $targetUrl);
+$error = $validateName($name);
+if ($error === '') {
+    // 🛡️ Where it may point (#615). Stored in SafeFetch's standard spelling,
+    //    so the address delivered to is the address that was checked.
+    $target = $checkTarget($targetUrl);
+    if ($target['error'] !== '') {
+        if (($target['refused'] ?? false) === true) {
+            $recordRefusal($siteId, $userId);
+        }
+        $error = $target['error'];
+    } else {
+        $targetUrl = $target['url'];
+    }
+}
 if ($error !== '') {
     $_SESSION['flash_msg']  = $error;
     $_SESSION['flash_type'] = 'danger';
@@ -319,7 +419,7 @@ $stmt = $mysqli->prepare(
     . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
 );
 if ($stmt === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', $mysqli->error, '');
+    Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', 'MySQL error ' . (string) $mysqli->errno, ''); // the number, never the text: it can quote the address (#615)
     $_SESSION['flash_msg']  = 'Could not create webhook — database error.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/integrations/webhooks'), true, 302);
@@ -328,7 +428,7 @@ if ($stmt === false) {
 $stmt->bind_param('issssii', $siteId, $name, $eventTypes, $targetUrl, $signingSecret, $isActive, $userId);
 $ok = $stmt->execute();
 if ($ok === false) {
-    Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', $mysqli->error, '');
+    Logger::errorPlatform('MySQL', 'Error', 'WEBHOOK_SAVE', 'MySQL error ' . (string) $mysqli->errno, ''); // the number, never the text: it can quote the address (#615)
     $stmt->close();
     $_SESSION['flash_msg']  = 'Could not create webhook — database error.';
     $_SESSION['flash_type'] = 'danger';

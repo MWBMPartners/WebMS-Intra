@@ -29,6 +29,38 @@
  * cURL + result-recording implementation, no duplicated retry-vs-first-try
  * logic to drift apart (#324 v1.1 review note).
  *
+ * WHERE A DELIVERY MAY GO, AND WHAT IS KEPT OF IT (#615)
+ *   An administrator types the target address, and until #615 it was posted
+ *   to with plain curl: nothing refused an address inside the hosting
+ *   company's network or on this machine (a database port, an internal
+ *   admin panel, the "metadata" address cloud servers hand their own
+ *   passwords out from), nothing pinned the connection to the address that
+ *   was checked (because nothing was checked), and the first 500 characters
+ *   of whatever answered were stored on the delivery row. Every delivery now
+ *   goes through `SafeFetch::post()`, the ONE place an address a person
+ *   typed is sent to: it checks the address AT THE MOMENT OF SENDING (a
+ *   name that has been re-pointed since it was saved is refused now), pins
+ *   the connection to the checked addresses, ignores proxies, follows no
+ *   redirect, caps the time and the reply, and never sets CURLOPT_ENCODING
+ *   (#716).
+ *
+ *   `responseSnippet` NO LONGER HOLDS THE OTHER SERVER'S REPLY. It holds one
+ *   word from `SafeFetch::POST_REASONS` when a delivery did not succeed, and
+ *   NULL when it did. The reply was shown on no page, so it bought nothing,
+ *   and it was the one way a request aimed somewhere it should not go could
+ *   be READ back — the reply of a server somebody chose is exactly what a
+ *   request-forgery attempt wants, and what is in it is decided by whoever
+ *   runs that server, personal details included. curl's own error text went
+ *   there too and named the host ("Failed to connect to <name> port 80").
+ *   Rows written before #615 may still hold a reply until the nightly
+ *   clear-out empties it (#713); the admin page shows only the known words,
+ *   never the stored text.
+ *
+ *   THE ADDRESS IS NEVER WRITTEN DOWN by this class: not on the delivery
+ *   row, not in PHP's error log (an exception is logged by its CLASS, not
+ *   its message, because a message can quote what it was handed), and
+ *   `SafeFetch::post()` records a refusal with no part of the address.
+ *
  * v1.2 follow-ups (intentionally NOT in this PR):
  *   • Admin CRUD UI at /admin/integrations/webhooks (routes reserved in 111).
  *   • Replay-from-UI button on a single delivery.
@@ -38,7 +70,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/324
  * -----------------------------------------------------------------------------
  */
@@ -51,6 +83,22 @@ use mysqli;
 
 class WebhookDispatcher
 {
+    /**
+     * The longest one delivery may take, in seconds, whatever
+     * `webhooks.timeout` says (#615). `emit()` sends SYNCHRONOUSLY, inside the
+     * request that caused the event, so a receiver that holds the connection
+     * open holds that person's page open with it; before #615 the setting had
+     * no ceiling at all. The default (10) is well inside it.
+     */
+    private const MAX_TIMEOUT_SECONDS = 30;
+
+    /**
+     * The most of a receiver's reply that is read before the connection is
+     * cut. The reply is thrown away (see the class header), so this only
+     * stops a hostile receiver streaming for ever.
+     */
+    private const MAX_REPLY_BYTES = 65536;
+
     // 🔁 Retry ceiling shared by attemptDelivery()'s dead-letter check and
     // retryDue()'s own selection filter (attemptCount < MAX_ATTEMPTS) — one
     // constant so the two can never drift apart (#324 v1.1).
@@ -192,7 +240,10 @@ class WebhookDispatcher
                 }
             }
         } catch (\Throwable $e) {
-            error_log('WebhookDispatcher::retryDue() failed: ' . $e->getMessage());
+            // The CLASS, never the message: a message can quote what it was
+            // handed, and what this method handles includes target addresses
+            // (#615).
+            error_log('WebhookDispatcher::retryDue() failed (' . get_class($e) . ', code ' . (string) $e->getCode() . ')');
         }
 
         return $summary;
@@ -223,7 +274,7 @@ class WebhookDispatcher
     }
 
     /**
-     * SHARED sign + POST + record-result implementation — used by BOTH
+     * SHARED sign + send + record-result implementation — used by BOTH
      * `emit()`'s initial synchronous attempt and `retryDue()`'s later
      * re-attempts (#324 v1.1 review note: one implementation, not two that
      * could silently drift apart). Signs the body, POSTs it, then advances
@@ -243,7 +294,11 @@ class WebhookDispatcher
      *                             that `retryDue()`'s WHERE clause compares
      *                             it against.
      *
-     * Never throws — any cURL/DB failure is caught, logged, and reported
+     * The send is `SafeFetch::post()` (#615): a refused address is recorded
+     * exactly like any other failure — the same backoff, the same
+     * dead-lettering — with `responseCode` 0 and the word `refused`.
+     *
+     * Never throws — any send/DB failure is caught, logged, and reported
      * back as a 'failed' outcome so the caller's own loop is never broken
      * by one bad delivery.
      *
@@ -265,40 +320,31 @@ class WebhookDispatcher
         try {
             $signature = 'sha256=' . hash_hmac('sha256', $body, $signingSecret);
             $timeout   = (int) (App::settings('webhooks.timeout') ?? '10');
+            $timeout   = max(1, min(self::MAX_TIMEOUT_SECONDS, $timeout));
 
-            $code        = 0;
-            $respSnippet = '';
-            $curlError   = '';
+            // 📤 Sent through SafeFetch (#615): checked NOW, pinned to the
+            //    checked addresses, no proxy, no redirect, capped. The
+            //    signing headers and the body are exactly what they always
+            //    were, so a receiver notices nothing.
+            $sent = SafeFetch::post(
+                $targetUrl,
+                $body,
+                [
+                    'Content-Type: application/json',
+                    'User-Agent: WebMS-Intra-Webhook/1.0',
+                    'X-Webhook-Event: ' . $eventType,
+                    'X-Webhook-Delivery: ' . $deliveryId,
+                    'X-Webhook-Signature: ' . $signature,
+                ],
+                [
+                    'timeoutSeconds'        => $timeout,
+                    'connectTimeoutSeconds' => min(5, $timeout),
+                    'maxBytes'              => self::MAX_REPLY_BYTES,
+                ]
+            );
+            $code = (int) $sent['status'];
 
-            $ch = curl_init($targetUrl);
-            if ($ch !== false) {
-                curl_setopt_array($ch, [
-                    CURLOPT_POST           => true,
-                    CURLOPT_POSTFIELDS     => $body,
-                    CURLOPT_HTTPHEADER     => [
-                        'Content-Type: application/json',
-                        'User-Agent: WebMS-Intra-Webhook/1.0',
-                        'X-Webhook-Event: ' . $eventType,
-                        'X-Webhook-Delivery: ' . $deliveryId,
-                        'X-Webhook-Signature: ' . $signature,
-                    ],
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT        => max(1, $timeout),
-                    CURLOPT_CONNECTTIMEOUT => 5,
-                    CURLOPT_FOLLOWLOCATION => false,
-                ]);
-                $rawResponse = curl_exec($ch);
-                $respSnippet = is_string($rawResponse) ? mb_substr($rawResponse, 0, 500) : '';
-                $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-                if ($code === 0) {
-                    $curlError = curl_error($ch);
-                }
-                // No curl_close() here: the handle has been an object since PHP 8.0 and is
-                // freed when it goes out of scope. The call has done nothing since then,
-                // and PHP 8.5 raises a "deprecated" notice every time it runs (#673).
-            }
-
-            $delivered       = ($code >= 200 && $code < 300);
+            $delivered       = $sent['ok'] === true;
             $newAttemptCount = $currentAttemptCount + 1;
 
             if ($delivered === true) {
@@ -310,7 +356,10 @@ class WebhookDispatcher
                 $status = 'failed';
             }
 
-            $errorOrResp = $curlError !== '' ? mb_substr('curl: ' . $curlError, 0, 500) : $respSnippet;
+            // 🏷️ One word, never the reply and never the address (#615): see
+            //    the class header. NULL once delivered — there is nothing to
+            //    say, and the nightly clear-out (#713) then has nothing to do.
+            $reason = $delivered === true ? null : (string) $sent['reason'];
 
             // ⏳ Exponential backoff — only 'failed' rows ever get a future
             // nextRetryAt; 'delivered'/'dead' both clear it (NULL) since
@@ -329,9 +378,9 @@ class WebhookDispatcher
             );
             if ($stmt !== false) {
                 if ($status === 'failed') {
-                    $stmt->bind_param('sisiii', $status, $code, $errorOrResp, $newAttemptCount, $backoffSeconds, $deliveryId);
+                    $stmt->bind_param('sisiii', $status, $code, $reason, $newAttemptCount, $backoffSeconds, $deliveryId);
                 } else {
-                    $stmt->bind_param('sisii', $status, $code, $errorOrResp, $newAttemptCount, $deliveryId);
+                    $stmt->bind_param('sisii', $status, $code, $reason, $newAttemptCount, $deliveryId);
                 }
                 $stmt->execute();
                 $stmt->close();
@@ -347,7 +396,8 @@ class WebhookDispatcher
 
             return $status;
         } catch (\Throwable $e) {
-            error_log('WebhookDispatcher::attemptDelivery() failed for delivery #' . $deliveryId . ': ' . $e->getMessage());
+            // The CLASS, never the message (#615): see retryDue().
+            error_log('WebhookDispatcher::attemptDelivery() failed for delivery #' . $deliveryId . ' (' . get_class($e) . ', code ' . (string) $e->getCode() . ')');
             return 'failed';
         }
     }

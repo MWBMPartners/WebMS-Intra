@@ -221,6 +221,7 @@ password-writer|tools/password-writer-selftest.php|selftest_pwwriter|
 retention-caps|tools/retention-caps-selftest.php|selftest_retcaps|
 rate-limit-privacy|tools/rate-limit-privacy-selftest.php|selftest_ratelimit|
 webhook-retention|tools/webhook-retention-selftest.php|selftest_webhookret|
+webhook-delivery|tools/webhook-delivery-selftest.php|selftest_webhookdelivery|SELFTEST_WEB_PORT=10930 WEBHOOK_SELFTEST_RECEIVER_PORT=10931
 reserved-words-live|tools/reserved-words-live-selftest.php|selftest_reservedwords|
 event-visibility|tools/event-visibility-selftest.php|selftest_visibility|
 feed-resolver|tools/feed-resolver-selftest.php|selftest_resolver|

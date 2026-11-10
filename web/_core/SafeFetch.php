@@ -77,14 +77,35 @@
  *   test, so both features refuse exactly the same kinds of address. The
  *   hymn lookup's download is not pinned yet; that is a follow-up issue
  *   raised by part P11 of #514.
- * - Outbound webhooks and Web Push do NOT use it yet (a follow-up issue,
- *   also from part P11).
+ * - Outbound webhooks (#615): `WebhookDispatcher` sends every delivery
+ *   through `post()`, and the webhook form refuses an address `check()`
+ *   refuses before it is ever saved.
+ * - Web Push does NOT use it yet (a follow-up issue from part P11).
+ *
+ * SENDING AS WELL AS FETCHING (#615)
+ * ----------------------------------
+ * `post()` is `get()`'s sibling for SENDING a body to an address somebody
+ * typed — an outbound webhook. It shares every guard through the same
+ * `check()` and the same `buildHandle()`: the connection is pinned to the
+ * approved addresses, the pre-request check runs, proxies are off, the time
+ * and the size of the reply are capped, and `CURLOPT_ENCODING` is NOT set
+ * (#716). Three things differ, each on purpose:
+ * - It never follows a redirect. A webhook is answered or it is not; a
+ *   redirect is reported as the HTTP status it is.
+ * - It never hands the reply back. The other server's words are read only
+ *   far enough to know the status and are then thrown away, so no caller
+ *   can store or show them — the reply of a server somebody chose is
+ *   exactly what a request-forgery attempt is trying to read.
+ * - Its refusal record names NO host at all. The calendar fetcher records
+ *   the host because a calendar's secret is in its path; a webhook's
+ *   address was typed by an administrator who may be probing names inside
+ *   the host's network, and recording the name would keep the probe.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/514
  * -----------------------------------------------------------------------------
  */
@@ -263,6 +284,44 @@ final class SafeFetch
         'accept'                => '*/*',
         'deadline'              => null,
     ];
+
+    /**
+     * Every option `post()` accepts, with its default. The same rule as
+     * `DEFAULT_OPTIONS`: an unknown name throws rather than falling back.
+     *
+     *   maxBytes              — the most of the REPLY read before it is cut
+     *                           off. The reply is never kept; this only stops
+     *                           a hostile server streaming for ever. 64 KB.
+     *   timeoutSeconds        — the most time the whole send may take.
+     *   connectTimeoutSeconds — the most time connecting may take.
+     *   httpsOnly             — refuse plain http.
+     *
+     * There is no `maxRedirects` (a send never follows one), no `accept`
+     * and no `deadline` (one send is one hop).
+     */
+    private const POST_OPTIONS = [
+        'maxBytes'              => 65536,
+        'timeoutSeconds'        => 10,
+        'connectTimeoutSeconds' => 5,
+        'httpsOnly'             => false,
+    ];
+
+    /**
+     * The one-word reasons `post()` gives for a send that did not succeed.
+     * A caller records the WORD, never the address and never the reply
+     * (#615): a word says enough for an administrator to act on, and nothing
+     * about where the address led.
+     *
+     *   refused     — the address may not be used (private, internal,
+     *                 reserved, an unusual port, not found), or the
+     *                 connection went somewhere that was not approved.
+     *   too-slow    — no answer within the time limit.
+     *   unreachable — no connection could be made.
+     *   http-status — the other server answered, with a status that is not
+     *                 2xx (a redirect included: it is not followed).
+     *   no-curl     — this server has no curl extension.
+     */
+    public const POST_REASONS = ['refused', 'too-slow', 'unreachable', 'http-status', 'no-curl'];
 
     /**
      * TEST ONLY. Always null in the running portal; nothing under `web/`
@@ -583,6 +642,130 @@ final class SafeFetch
             }
             return self::result(true, 200, $state->body, $state->received, '', false);
         }
+    }
+
+    // =========================================================================
+    // 📤 post() — send a body to an address somebody typed (#615)
+    // =========================================================================
+
+    /**
+     * Send `$body` to `$url` as an HTTP POST, with every guard `get()` has.
+     *
+     * IN ORDER
+     * - The address is parsed by the same parser (`parse()`) and `check()`ed
+     *   AT THE MOMENT OF SENDING — never trusted because it passed when it
+     *   was saved. A name that pointed somewhere public last week and points
+     *   at the host's own network now is refused now.
+     * - The connection is pinned to the addresses that check approved
+     *   (`CURLOPT_RESOLVE`), so the name cannot be re-pointed between the
+     *   check and the connection ("DNS rebinding"), and the pre-request check
+     *   stops a connection that ended up anywhere else.
+     * - Proxies are off, redirects are not followed, the time is capped and
+     *   the reply is cut off at `maxBytes`. `CURLOPT_ENCODING` is NOT set
+     *   (#716) — `buildHandle()` sets nothing for either method.
+     * - The reply's body is read and THROWN AWAY. Only the status is kept.
+     *
+     * `$headers` are sent exactly as given, one `Name: value` line each, and
+     * nothing is added to them except what curl itself always sends (the
+     * Host header, and curl's own default Accept header unless the caller
+     * names one). No
+     * User-Agent is added: a caller that wants one names it, so a webhook's
+     * headers stay exactly what its receiver has always been sent.
+     *
+     * RESULT: `ok` for any 2xx answer. A 2xx whose reply ran past `maxBytes`
+     * is still ok (`capped` says so): the reply only arrives once the request
+     * has been received and accepted, so cutting off what follows loses
+     * nothing the caller needs. `status` is the HTTP status (0 when nothing
+     * was received). `reason` is one of `POST_REASONS`, '' when ok.
+     * `message` is plain English, empty when ok, and never contains the
+     * address. There is NO body in the result, on purpose.
+     *
+     * A refusal is recorded in the error log WITHOUT any part of the address
+     * (see the class header). Other failures are not logged here at all: the
+     * caller records the outcome where it belongs (for a webhook, on its
+     * delivery row), and one Notice per failed retry would bury the log.
+     *
+     * @param list<string> $headers
+     * @param array{maxBytes?: int, timeoutSeconds?: int, connectTimeoutSeconds?: int, httpsOnly?: bool} $opts
+     * @return array{ok: bool, status: int, bytes: int, message: string, reason: string, capped: bool}
+     * @throws \InvalidArgumentException on an unknown option, a nonsensical
+     *         value, or a header that is not one single line (a programming
+     *         mistake, never something a visitor can cause).
+     */
+    public static function post(string $url, string $body, array $headers, array $opts): array
+    {
+        foreach (array_keys($opts) as $name) {
+            if (array_key_exists((string) $name, self::POST_OPTIONS) === false) {
+                throw new \InvalidArgumentException('SafeFetch::post(): unknown option "' . $name . '".');
+            }
+        }
+        // The shared option checks, with the two settings a send never uses
+        // pinned: no redirect is ever followed, and one send is one hop.
+        $o = self::options(array_merge(self::POST_OPTIONS, $opts, ['maxRedirects' => 0, 'deadline' => null]));
+
+        // A header is sent as it is; a line break inside one would let it
+        // write a header (or a whole request) of its own.
+        foreach ($headers as $header) {
+            if (is_string($header) === false || preg_match('/^[A-Za-z0-9-]+:[^\x00-\x1F\x7F]*$/', $header) !== 1) {
+                throw new \InvalidArgumentException('SafeFetch::post(): every header must be one "Name: value" line.');
+            }
+        }
+
+        if (function_exists('curl_init') === false) {
+            return self::sent(false, 0, 0, self::MSG_NO_CURL, 'no-curl', false);
+        }
+
+        $parts = self::parse($url);
+        if ($parts === null) {
+            self::logProblem('SEND_REFUSED', '', 0, false);
+            return self::sent(false, 0, 0, self::REFUSED_MESSAGE, 'refused', false);
+        }
+        if ($o['httpsOnly'] === true && $parts['scheme'] !== 'https') {
+            return self::sent(false, 0, 0, self::MSG_HTTPS_ONLY, 'refused', false);
+        }
+
+        // 🔎 Checked NOW, at the moment of sending (#615 point 1).
+        $checked = self::check($parts['url']);
+        if ($checked['ok'] === false) {
+            self::logProblem('SEND_REFUSED', '', 0, false);
+            return self::sent(false, 0, 0, self::REFUSED_MESSAGE, 'refused', false);
+        }
+
+        $state  = self::newHopState();
+        $handle = self::buildHandle(
+            $parts['url'],
+            $checked['host'],
+            $checked['port'],
+            $checked['ips'],
+            $o,
+            $o['timeoutSeconds'] * 1000,
+            $state,
+            ['body' => $body, 'headers' => array_values($headers)]
+        );
+        if ($handle === null) {
+            return self::sent(false, 0, 0, self::MSG_UNREACHABLE, 'unreachable', false);
+        }
+        curl_exec($handle);
+        $errno = curl_errno($handle);
+        // Released when it goes out of scope; curl_close() is deprecated from
+        // PHP 8.5 and has done nothing since 8.0 (#673).
+        unset($handle);
+
+        $status = $state->status;
+        if ($state->prereqRefused === true) {
+            self::logProblem('SEND_REFUSED', '', 0, false);
+            return self::sent(false, 0, $state->received, self::REFUSED_MESSAGE, 'refused', false);
+        }
+        if ($status >= 200 && $status < 300) {
+            return self::sent(true, $status, $state->received, '', '', $state->capped);
+        }
+        if ($status === 0 && $errno === CURLE_OPERATION_TIMEDOUT) {
+            return self::sent(false, 0, $state->received, self::MSG_TOO_SLOW, 'too-slow', false);
+        }
+        if ($status === 0) {
+            return self::sent(false, 0, $state->received, self::MSG_UNREACHABLE, 'unreachable', false);
+        }
+        return self::sent(false, $status, $state->received, sprintf(self::MSG_STATUS, $status), 'http-status', $state->capped);
     }
 
     // =========================================================================
@@ -948,8 +1131,16 @@ final class SafeFetch
      * options (then nothing is fetched at all).
      *
      * @param list<string> $ips The approved addresses from `check()`.
+     * @param array{body: string, headers: list<string>}|null $send
+     *        Null for a download (`get()`). For a send (`post()`, #615): the
+     *        body to POST and the caller's own headers, sent instead of the
+     *        Accept header and the User-Agent; the reply's body is then
+     *        counted and thrown away rather than kept. EVERY guard below —
+     *        the pin, the pre-request check, no proxy, no redirects, the
+     *        time limits, no content decoding — is the same for both,
+     *        because it is the same code.
      */
-    private static function buildHandle(string $url, string $host, int $port, array $ips, array $o, int $timeoutMs, \stdClass $state): ?\CurlHandle
+    private static function buildHandle(string $url, string $host, int $port, array $ips, array $o, int $timeoutMs, \stdClass $state, ?array $send = null): ?\CurlHandle
     {
         $handle = curl_init();
         if ($handle === false) {
@@ -982,6 +1173,8 @@ final class SafeFetch
         // proxy or redirect settings at curl's defaults. Its answer is
         // therefore checked, and a handle it could not fully set up is
         // never used (null: the caller reports "could not be reached").
+        $isSend = $send !== null;
+
         $allSet = curl_setopt_array($handle, [
             CURLOPT_URL               => $url,
             CURLOPT_RESOLVE           => $resolve,
@@ -1051,8 +1244,10 @@ final class SafeFetch
             //    option unset, and every one of them is immune for that reason.
             //    This one was the exception. `check_no_brotli_decode.py` fails
             //    if the option comes back here at all.
-            CURLOPT_USERAGENT         => self::userAgent(),
-            CURLOPT_HTTPHEADER        => ['Accept: ' . $o['accept']],
+            // A send carries the caller's own headers, exactly (#615); a
+            // download carries the Accept header, and its User-Agent is set
+            // just below.
+            CURLOPT_HTTPHEADER        => $isSend === true ? $send['headers'] : ['Accept: ' . $o['accept']],
             CURLOPT_HEADERFUNCTION    => static function ($h, string $line) use ($state): int {
                 $text = rtrim($line, "\r\n");
                 if (preg_match('~^HTTP/\S+\s+([0-9]{3})~', $text, $m) === 1) {
@@ -1064,17 +1259,33 @@ final class SafeFetch
                 }
                 return strlen($line);
             },
-            CURLOPT_WRITEFUNCTION     => static function ($h, string $chunk) use ($state, $maxBytes): int {
+            CURLOPT_WRITEFUNCTION     => static function ($h, string $chunk) use ($state, $maxBytes, $isSend): int {
                 $state->received += strlen($chunk);
                 if ($state->received > $maxBytes) {
                     $state->capped = true;
                     return 0; // a short answer tells curl to stop the transfer
                 }
-                $state->body .= $chunk;
+                // 🗑️ A send's reply is counted and thrown away, never kept
+                //    (#615): it is the other server's words, and holding
+                //    them is the first step to storing or showing them.
+                if ($isSend === false) {
+                    $state->body .= $chunk;
+                }
                 return strlen($chunk);
             },
         ]);
         if ($allSet === false) {
+            return null;
+        }
+        // 📤 A send: the method and the body. This class's own User-Agent
+        //    only for a download — a send's caller names its own (#615).
+        if ($isSend === true) {
+            if (curl_setopt($handle, CURLOPT_POST, true) === false
+                || curl_setopt($handle, CURLOPT_POSTFIELDS, $send['body']) === false
+            ) {
+                return null;
+            }
+        } elseif (curl_setopt($handle, CURLOPT_USERAGENT, self::userAgent()) === false) {
             return null;
         }
         if ($connectTo !== [] && curl_setopt($handle, CURLOPT_CONNECT_TO, $connectTo) === false) {
@@ -1227,6 +1438,12 @@ final class SafeFetch
         return ['ok' => false, 'message' => self::REFUSED_MESSAGE, 'host' => $host, 'port' => 0, 'ips' => []];
     }
 
+    /** @return array{ok: bool, status: int, bytes: int, message: string, reason: string, capped: bool} */
+    private static function sent(bool $ok, int $status, int $bytes, string $message, string $reason, bool $capped): array
+    {
+        return ['ok' => $ok, 'status' => $status, 'bytes' => $bytes, 'message' => $message, 'reason' => $reason, 'capped' => $capped];
+    }
+
     /** @return array{ok: bool, status: int, body: string, bytes: int, message: string, capped: bool} */
     private static function result(bool $ok, int $status, string $body, int $bytes, string $message, bool $capped): array
     {
@@ -1246,15 +1463,20 @@ final class SafeFetch
      *
      * A failure to log never changes the result of the fetch.
      */
-    private static function logProblem(string $code, string $host, int $status): void
+    private static function logProblem(string $code, string $host, int $status, bool $nameHost = true): void
     {
+        // 🙈 A send (`post()`, #615) names no host at all: see the class
+        //    header. The record then says only that an address was refused.
+        $title = $nameHost === true
+            ? 'Outside address fetch did not succeed (host ' . ($host === '' ? 'unknown' : $host) . ', HTTP status ' . $status . ')'
+            : 'An outside address was refused for sending (the address is deliberately not recorded)';
         try {
             Logger::errorPlatformForSite(
                 null,
                 'SafeFetch',
                 'Notice',
                 $code,
-                'Outside address fetch did not succeed (host ' . ($host === '' ? 'unknown' : $host) . ', HTTP status ' . $status . ')',
+                $title,
                 ''
             );
         } catch (\Throwable $ignored) {

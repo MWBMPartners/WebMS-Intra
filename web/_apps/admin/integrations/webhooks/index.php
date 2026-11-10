@@ -67,7 +67,7 @@ $stmt->close();
 // ============================================================================
 $deliveries = [];
 $stmt = $mysqli->prepare(
-    'SELECT d.deliveryID, d.eventType, d.status, d.attemptCount, d.responseCode, '
+    'SELECT d.deliveryID, d.eventType, d.status, d.attemptCount, d.responseCode, d.responseSnippet, '
     . '       d.lastAttemptAt, d.createdAt, w.name AS webhookName '
     . 'FROM tblWebhookDeliveries d INNER JOIN tblWebhooks w ON w.webhookID = d.webhookID '
     . 'WHERE w.siteID = ? ORDER BY d.createdAt DESC LIMIT 25'
@@ -79,6 +79,20 @@ while (($r = $result->fetch_assoc()) !== null) {
     $deliveries[] = $r;
 }
 $stmt->close();
+
+// 🏷️ Why a delivery did not succeed, in words (#615). `responseSnippet` now
+//    holds ONE word from `SafeFetch::POST_REASONS`. Only those words are ever
+//    shown, through this fixed list: anything else in the column — a reply a
+//    receiver sent before #615, which the nightly clear-out empties in time —
+//    is NEVER printed, escaped or not. The other server's words are the one
+//    thing a request aimed somewhere it should not go is trying to read back.
+$reasonWords = [
+    'refused'     => 'the address was refused: it points at a private or internal network, or its name could not be found',
+    'too-slow'    => 'the other server took too long to answer',
+    'unreachable' => 'the other server could not be reached',
+    'http-status' => 'the other server answered with an error',
+    'no-curl'     => 'this server cannot send to outside addresses (the PHP curl extension is missing)',
+];
 
 // 🍞 Generic flash (create/update/delete redirects land here)
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -334,6 +348,12 @@ if (isset($_SESSION['webhook_secret_minted']) === true) {
                             &middot; last attempt <?php echo htmlspecialchars(date('j M, H:i', strtotime((string) $d['lastAttemptAt'])), ENT_QUOTES, 'UTF-8'); ?>
                         <?php endif; ?>
                         &middot; queued <?php echo htmlspecialchars(date('j M, H:i', strtotime((string) $d['createdAt'])), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php
+                        // Only a word from the fixed list above; never the column's own text.
+                        $reasonKey = (string) ($d['responseSnippet'] ?? '');
+                        if ($status !== 'delivered' && isset($reasonWords[$reasonKey]) === true): ?>
+                            <br>why: <?php echo htmlspecialchars($reasonWords[$reasonKey], ENT_QUOTES, 'UTF-8'); ?>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
