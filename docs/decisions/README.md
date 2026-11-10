@@ -173,7 +173,9 @@ appended with its real date and a note that it was added later.
 | [D-115](115-an-api-key-with-attendance-write-may-delete-sessions.md) | 2026-11-10 | An API key with attendance-write may still delete attendance sessions | in force |
 | [D-116](116-the-change-history-is-kept-for-ever.md) | 2026-11-10 | The change history (audit trail) is kept for ever; members are told plainly | in force |
 | [D-117](117-the-activity-log-may-be-kept-for-ever.md) | 2026-11-10 | The activity log may be kept for ever, by choice (0 = never, capped by the installation) | in force |
+| [D-118](118-an-organisation-sets-its-own-activity-log-period.md) | 2026-11-10 | An organisation's own administrator sets its activity-log period, within the installation's | in force |
+| [D-119](119-lowering-the-activity-log-ceiling-is-refused-below-an-organisation.md) | 2026-11-10 | Lowering the installation's activity-log period below an organisation's is refused, naming them | in force |
 
-*117 decisions. This index is checked against the folder by
+*119 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

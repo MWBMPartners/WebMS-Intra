@@ -7,14 +7,14 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
 #493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921).
-Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102 to D-117 (D-116: the change history is kept for ever; D-117: the activity log may be kept for ever by choice).
+Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102 to D-119 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, b662a5d1 | Round 6 built (rendered-page pins over HTTP; the whole untraceable-sentence class fixed); check round 6 running |
-| #932 — activity log may be kept for ever (D-117) | worktree agent (p932-build) | Building: code part only (sweep, retention page, retention-caps test); member wording after #703 |
+| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 747c0194 | Built; check round 1 running on 747c0194. Owner reversed both build calls: an organisation's admin sets its own figure (D-118); lowering the installation below an organisation is refused, naming them (D-119) — builder reworking. Member wording after #703 |
 | #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | worktree agent (p782-build) | Building |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
