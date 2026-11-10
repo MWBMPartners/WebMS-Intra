@@ -378,7 +378,10 @@ PLANTS = [
           "    $p902 = static function () use ($pendingUserId): void { Auth::beginSessionFor($pendingUserId); };\n")], "verify.php:"),
     ("the Microsoft callback's call removed (both of its writes go)", "web/_core/Auth.php",
         [("on purpose (#731).\n        self::beginSessionFor($userId);", "on purpose (#731).\n        session_regenerate_id(true);")],
-        "Auth.php:1921"),
+        # Named by what is written, never by a line number: the number moved
+        # when Auth.php grew (#620), and this self-test — a hard gate in
+        # pr-security.yml — went red on correct code (found by #598's check).
+        "(Auth::callbackMS365): `$_SESSION['user_id']` is written"),
     ("a loginLocal call standing in for the call, on a grant not listed as delegated", VERIFY,
         [("    Auth::beginSessionFor($pendingUserId);\n", "    Auth::loginLocal('p902', 'p902');\n")], "with no call"),
     ("a method of the same name on another class", ACCEPT, [(CALL, "Other::beginSessionFor($newUserId);")], "accept.php:"),
