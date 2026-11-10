@@ -6,24 +6,22 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598.
-Last whole suite (with #598): 102/103, the one red being the eraser test's exact column list missing #598's
-`signInVersion` — fixed in the test, re-run green. Decisions taken this stretch: D-102 to D-115.
+#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921).
+Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102 to D-117 (D-116: the change history is kept for ever; D-117: the activity log may be kept for ever by choice).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, e1f4afed (rebased on 6a5bfd20) | Round 4 CLEAN; cherry-picked onto the working branch with docs (schema conflict with 270 resolved: both blocks, in order); whole suite running, then push. Raised #925, #930 |
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab | Round 4 (c4542370) NOT CLEAN: the number also survives in the activity log and other records' change history; rate-limit wording untrue; list items checked by words, so a reversed meaning passes. Redesign sent: stop presenting the list as complete, add a plain statement about logs with their real clearing rule, pin whole text in all four places |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, a77d046c | Round 5 NOT CLEAN: other reasons members read still say the activity log / change history / expense items are untraceable; page pins strip PHP blocks and tag attributes, so an echoed or hidden sentence passes. Round 6: fix the contradicting class, pin the RENDERED pages over HTTP |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
-**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed). Next free: 273.
+**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed). #932 needs none (a setting's meaning). Next free: 273.
 
 ## Next, in this order
 
-1. Integrate #529 (cherry-pick, docs, whole suite, push); #703 round 5 → check → integrate.
-2. Raised this stretch, in the backlog: #919, #920, #922-#929.
+1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
+2. Raised this stretch, in the backlog: #919, #920, #922-#930. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.

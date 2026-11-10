@@ -171,7 +171,9 @@ appended with its real date and a note that it was added later.
 | [D-113](113-kept-worker-names-and-numbers-are-said-plainly.md) | 2026-11-10 | A kept worker's name and number both stay, and the portal says so plainly | in force |
 | [D-114](114-who-may-delete-a-past-attendance-session.md) | 2026-11-10 | A past attendance session can be deleted by administrators, the attendance role and its recorder | in force |
 | [D-115](115-an-api-key-with-attendance-write-may-delete-sessions.md) | 2026-11-10 | An API key with attendance-write may still delete attendance sessions | in force |
+| [D-116](116-the-change-history-is-kept-for-ever.md) | 2026-11-10 | The change history (audit trail) is kept for ever; members are told plainly | in force |
+| [D-117](117-the-activity-log-may-be-kept-for-ever.md) | 2026-11-10 | The activity log may be kept for ever, by choice (0 = never, capped by the installation) | in force |
 
-*115 decisions. This index is checked against the folder by
+*117 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
