@@ -158,7 +158,8 @@ appended with its real date and a note that it was added later.
 | [D-100](100-a-reimported-row-already-in-the-calendar-is-skipped.md) | 2026-11-09 | A calendar-import row already in the calendar is skipped unless the manager ticks to import it | in force |
 | [D-101](101-a-public-address-takes-effect-only-once-approved.md) | 2026-11-09 | An organisation's public address takes effect only once the installation's global administrator approves it | in force |
 | [D-102](102-webhook-ports-are-an-installation-setting.md) | 2026-11-10 | Which port numbers a webhook may use is an installation setting, standard ports by default | in force |
+| [D-103](103-the-approver-role-sees-only-its-own-departments-claims.md) | 2026-11-10 | The organisation-wide Approver role sees only its own departments' expense claims | in force |
 
-*102 decisions. This index is checked against the folder by
+*103 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
