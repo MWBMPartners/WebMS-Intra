@@ -987,6 +987,61 @@ if ($foundBoth === false) {
     check('K05 each refusal says WHICH refusal it is, not "not parseable"',
         $reasonsWrong === [] ? 'all correct' : implode(' | ', $reasonsWrong), 'all correct');
 
+    // ── K07. THE HOUR THAT DOES NOT EXIST, through the loose fallback (#785) ──
+    //
+    // Step 3 of the reader builds a moment with `strtotime()` and formats it
+    // back. Until #785 a loose spreadsheet cell in the skipped hour was STORED
+    // moved -- `Sun, 29 Mar 2026 01:30` as 02:30 in London, and in Nuuk
+    // `28 March 2026 11:30pm` as 00:30 on the NEXT DAY -- while the same
+    // reading written `2026-03-29 01:30` was stored as typed. Found by
+    // `check_wall_clock_writes_not_moments.py` on its first run; nothing in
+    // section K had a cell in the skipped hour, so nothing here could see it.
+    //
+    // PREMISE FIRST, as section I does: each cell must really name a time PHP
+    // moves in that zone, or the refusal checks below prove nothing.
+    $gapCells = [
+        ['Europe/London',    'Sun, 29 Mar 2026 01:30', '2026-03-29 02:30'],
+        ['Europe/London',    '03/29/2026 01:30',       '2026-03-29 02:30'],
+        ['America/New_York', 'Sun, 8 Mar 2026 2:30am', '2026-03-08 03:30'],
+        ['America/Nuuk',     '28 March 2026 11:30pm',  '2026-03-29 00:30'],
+    ];
+    $premiseWrong = [];
+    $gapWrong     = [];
+    foreach ($gapCells as [$gapZone, $gapCell, $movedTo]) {
+        date_default_timezone_set($gapZone);
+        $moment = strtotime($gapCell);
+        if ($moment === false || date('Y-m-d H:i', $moment) !== $movedTo) {
+            $premiseWrong[] = $gapZone . ' ' . $gapCell;
+        }
+        $gapWhy = null;
+        $gapOut = $fmtStore($gapCell, $gapWhy);
+        if ($gapOut !== null || strpos((string) $gapWhy, 'does not exist on that day') === false) {
+            $gapWrong[] = $gapZone . ' ' . $gapCell . ' gave ' . ($gapOut ?? ('"' . (string) $gapWhy . '"'));
+        }
+    }
+    date_default_timezone_set('Europe/London');
+    check('K07 premise: PHP really moves each of these cells in its zone',
+        $premiseWrong === [] ? 'all moved' : implode(' | ', $premiseWrong), 'all moved');
+    check('K07b each is REFUSED, with the reason that is true of it, not stored moved',
+        $gapWrong === [] ? 'all refused' : implode(' | ', $gapWrong), 'all refused');
+    // Over-reach, the other direction: a time just after the gap, the hour
+    // that happens TWICE, the ISO spelling of the gap reading, and a cell that
+    // names its own zone must all still store exactly as before.
+    $keepWrong = [];
+    foreach ([
+        ['Sun, 29 Mar 2026 02:30',        '2026-03-29 02:30:00'],
+        ['Sun, 25 Oct 2026 01:30',        '2026-10-25 01:30:00'],
+        ['2026-03-29 01:30',              '2026-03-29 01:30:00'],
+        ['Mon, 01 Jun 2026 10:00:00 GMT', '2026-06-01 11:00:00'],
+    ] as [$keepCell, $keepWant]) {
+        $keepGot = $fmtStore($keepCell);
+        if ($keepGot !== $keepWant) {
+            $keepWrong[] = $keepCell . ' gave ' . ($keepGot ?? 'REFUSED');
+        }
+    }
+    check('K07c and nothing outside the skipped hour is refused by it',
+        $keepWrong === [] ? 'all stored' : implode(' | ', $keepWrong), 'all stored');
+
     // K03 — THE PREMISE, so K02 cannot pass by refusing everything. If the
     //       closure simply returned null the checks above would both be
     //       satisfied in one direction and K01 would catch it -- but state it

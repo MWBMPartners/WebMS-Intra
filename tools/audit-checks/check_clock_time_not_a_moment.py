@@ -131,10 +131,12 @@ for three rounds:
     `calendar/submit-save.php` for exactly that reason**: a public form whose
     01:30 submission was stored for ever as 02:30, found by reading the FORM
     rather than by any check. `resources/book.php` was the same class and was
-    also found by eye. Both are fixed. A guard for the class is #785; until it
-    exists, the fingerprint worth grepping is
-    `date('Y-m-d H:i:s', ... strtotime ...)` applied to anything that is not a
-    relative string.
+    also found by eye. Both are fixed. The guard for the class is
+    `check_wall_clock_writes_not_moments.py` (#785), which follows the VALUE
+    from the moment to the `?` it fills. (This paragraph used to recommend
+    grepping for `date('Y-m-d H:i:s', ... strtotime ...)`; #785's own comments
+    measured that idiom catching NEITHER fault, the two calls being seven and
+    fifteen lines apart.)
   * **A call split over lines.** The search stops at a newline, which is what
     stopped it crying wolf over a date and a time side by side in one array
     literal — so
@@ -1649,8 +1651,9 @@ def main() -> int:
         "     * a reading pulled into a VARIABLE several lines earlier and "
         "converted there -- two faults, in the attendance API;\n"
         "     * a WRITE path, which reads no column at all, so the whole class "
-        "of 'store the moved hour' is invisible here -- FOUR faults, every one "
-        "found by eye (#785);\n"
+        "of 'store the moved hour' is invisible HERE -- FOUR faults were found "
+        "by eye; check_wall_clock_writes_not_moments.py is the guard for that "
+        "class (#785);\n"
         "     * a reading reaching a conversion through a function PARAMETER, "
         "which defeats this check and the one-hop sweep in DEV_NOTES alike.\n"
         "   Each stays a question for a person, and a stated blind spot is a "

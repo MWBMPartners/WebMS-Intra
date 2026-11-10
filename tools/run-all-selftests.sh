@@ -281,6 +281,7 @@ EXTRA_SHELL='deploy-settings|bash tools/deploy/resolve-settings-selftest.sh
 api-spec-check|python3 -I tools/api-spec-check-selftest.py
 scheduled-jobs-gate|python3 -I tools/scheduled-jobs-gate-selftest.py
 document-write-check|python3 -I tools/document-write-check-selftest.py
+clock-writes-check|python3 -I tools/wall-clock-writes-selftest.py
 csrf-carriers|node tools/csrf-carriers-selftest.mjs
 public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs

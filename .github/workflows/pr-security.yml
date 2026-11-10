@@ -1931,6 +1931,29 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_clock_time_not_a_moment.py
 
+      # 🕐 #785. The same mistake on the way IN, which is the worse direction:
+      #    a reader shows a wrong hour until somebody fixes it, a writer stores
+      #    it for ever. A handler that builds a moment from a posted reading,
+      #    formats it back and binds it into the place that fills a clock
+      #    column stores the moved hour on the morning the clocks go forward.
+      #    Two such faults (the room booking and the public event form) were
+      #    found by eye, never by a check. This follows the VALUE with PHP's
+      #    tokeniser, inside one function, to the `?` it fills.
+      - name: 'A clock reading is never STORED through a moment (hard gate, #785)'
+        id: clock_writes_not_moments
+        if: always()
+        run: python3 -I tools/audit-checks/check_wall_clock_writes_not_moments.py
+
+      # And the test OF that check: every shape it claims to see is planted
+      #    in a fixture tree and must be reported exactly, and every
+      #    must-stay-green case must stay green. A guard is worth what its
+      #    plants prove (#763, #775), and a proof that runs once is not a
+      #    guard (#646).
+      - name: 'That check actually catches things (hard gate, #785)'
+        id: clock_writes_selftest
+        if: always()
+        run: python3 -I tools/wall-clock-writes-selftest.py
+
       # 🌍 #782. "Never hard-code a zone": an organisation's zone is
       #    Site::timezone() (#604). Eighteen places wrote "Europe/London" as
       #    the answer when nobody had chosen, so a church in Sydney had its
