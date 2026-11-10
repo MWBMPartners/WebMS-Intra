@@ -161,7 +161,9 @@ appended with its real date and a note that it was added later.
 | [D-103](103-the-approver-role-sees-only-its-own-departments-claims.md) | 2026-11-10 | The organisation-wide Approver role sees only its own departments' expense claims | in force |
 | [D-104](104-changing-or-resetting-a-password-signs-out-other-browsers.md) | 2026-11-10 | Resetting or changing a password signs the person out of every other browser | in force |
 | [D-105](105-the-health-pages-mail-count-covers-the-viewers-own-organisation.md) | 2026-11-10 | The health page's mail status counts only the viewer's own organisation | in force |
+| [D-106](106-attendance-totals-are-seen-by-administrators-and-a-chosen-role.md) | 2026-11-10 | An organisation's attendance totals are seen by administrators and a role it chooses | in force |
+| [D-107](107-no-change-to-the-password-minimum-on-running-installations.md) | 2026-11-10 | No change to the minimum password length on running installations: none exists | in force |
 
-*105 decisions. This index is checked against the folder by
+*107 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
