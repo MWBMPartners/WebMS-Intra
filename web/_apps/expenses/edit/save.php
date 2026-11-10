@@ -229,10 +229,20 @@ $lookStmt->execute();
 $claim = $lookStmt->get_result()->fetch_assoc();
 $lookStmt->close();
 
-// 🙈 A claim of another organisation's, or one that is not there, is simply
-//    "not found" — never a sentence that confirms it exists.
-if ($claim === null) {
-    $refuse('That claim could not be found.', 0, 'warning');
+// 🙈 A claim of another organisation's, one that is not there, OR ONE THAT IS
+//    SOMEBODY ELSE'S is simply "not found" — never a sentence that confirms
+//    it exists.
+//
+//    WHAT WAS WRONG (#648). Somebody else's claim got `MSG_EDIT_NOT_YOURS`
+//    ("You can only change your own expense claim…") while a made-up number
+//    got "That claim could not be found." — two different sentences, so a
+//    signed-in member posting numbers here could tell which were real claims.
+//    Ownership is asked first, through the same `ExpenseRules::isOwnClaim()`
+//    that `whyNotEditable()` asks, and BEFORE the approval count is read, so
+//    the two cost the same database work too.
+$notFound = 'That claim could not be found.';
+if ($claim === null || ExpenseRules::isOwnClaim((int) $claim['userID'], $userId) === false) {
+    $refuse($notFound, 0, 'warning');
 }
 
 $earlyReason = ExpenseRules::whyNotEditable(
@@ -242,11 +252,13 @@ $earlyReason = ExpenseRules::whyNotEditable(
     $userId
 );
 if ($earlyReason !== ExpenseRules::EDIT_ALLOWED) {
-    // 🙈 Somebody else's claim gets the list page, not that claim's page: the
-    //    edit page would refuse them too, and bouncing them to it would be a
-    //    loop that tells them nothing.
-    $where = $earlyReason === ExpenseRules::EDIT_NOT_YOURS ? 0 : $claimID;
-    $refuse(ExpenseRules::editRefusalWords($earlyReason), $where, 'warning');
+    // 🙈 `EDIT_NOT_YOURS` was answered above as "not found", and is answered
+    //    the same way here should it ever be reached: the list page and the
+    //    not-found sentence, never words that say the claim is real.
+    if ($earlyReason === ExpenseRules::EDIT_NOT_YOURS) {
+        $refuse($notFound, 0, 'warning');
+    }
+    $refuse(ExpenseRules::editRefusalWords($earlyReason), $claimID, 'warning');
 }
 
 // -----------------------------------------------------------------------------
@@ -305,8 +317,10 @@ try {
     );
     if ($lockedReason !== ExpenseRules::EDIT_ALLOWED) {
         $mysqli->rollback();
-        $where = $lockedReason === ExpenseRules::EDIT_NOT_YOURS ? 0 : $claimID;
-        $refuse(ExpenseRules::editRefusalWords($lockedReason), $where, 'warning');
+        if ($lockedReason === ExpenseRules::EDIT_NOT_YOURS) {
+            $refuse($notFound, 0, 'warning');
+        }
+        $refuse(ExpenseRules::editRefusalWords($lockedReason), $claimID, 'warning');
     }
 
     // 1. 🗂️ What it used to say, for the audit trail. Read before anything is

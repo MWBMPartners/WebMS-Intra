@@ -34,7 +34,6 @@ require_once dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\App;
 use Portal\Core\Auth;
-use Portal\Core\Capabilities;
 use Portal\Core\Departments;
 use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
@@ -54,10 +53,11 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
     exit();
 }
 
-// 🛡️ Who may record a decision at all: an administrator, a holder of the
-//    Expense Approver role, or — since #542 — anyone holding an approval
-//    flag (lead, approver or required approver) in at least one department
-//    of THIS organisation, through an active membership of it.
+// 🛡️ Who may record a decision at all: an administrator, or — since #542 —
+//    anyone holding an approval flag (lead, approver or required approver)
+//    in at least one department of THIS organisation, through an active
+//    membership of it. Until #648/#915 a holder of the Expense Approver role
+//    was a third way in; see the note at the gate below for why it is not.
 //
 //    WHAT WAS WRONG BEFORE (#542): this gate asked for the role or an
 //    administrator and nothing else, before the claim was even loaded. The
@@ -68,37 +68,45 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 //    approved, and so never paid. Owner's decision (21 September 2026): a
 //    flag in the claim's own department is enough.
 //
-//    The flags are read only when the two cheaper tests both say no, so an
-//    administrator or a role holder costs exactly what they did before. The
+//    The flags are read for everybody who is not an administrator, and the
 //    one read is kept for the per-department gate further down. This gate
 //    asks "any department here?" rather than "this claim's department?" on
 //    purpose: the claim is not loaded yet, and it must stay that way, so a
 //    visitor with no authority at all is answered before any claim lookup
 //    and can learn nothing about which claim numbers exist or are pending.
 //    Which department they may decide is settled below, once the claim is
-//    known; a flag in some OTHER department gets the same "Forbidden" answer
-//    there that a role holder without a flag has always had.
+//    known; a flag in some OTHER department gets, there, exactly the answer a
+//    missing or already-decided claim gets (since #648/#915 — it used to be a
+//    bare "Forbidden", which said the number was a real pending claim).
 //
-//    The refusal is byte-for-byte what it was — the same message, the same
-//    redirect — for someone with neither the role nor a flag; the message's
-//    wording is kept for that reason even though a flag is now a third way in.
+//    The refusal is the same redirect it always was. Its WORDS changed with
+//    #648: they used to be "Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.",
+//    which became untrue the moment the role stopped being a way in — a
+//    role-holder with no department would have been told they needed the
+//    role they already held.
 $userId  = (int) ($_SESSION['user_id'] ?? 0);
 $siteId  = Site::id();
 $isAdmin = App::isAdmin();
 
 /** @var array<int, array{isDeptLead: bool, isMandatoryApprover: bool, isApprover: bool}>|null */
 $approverDepts = null;
-// 🚪 #739: was `App::hasRole('Approver')`. It is now the `expenses.approve`
-//    capability, which this organisation may point at roles of its own on the
-//    Roles page. It ships pointing at the `approver` role and falls open for a
-//    global administrator, so this answers exactly what it answered before on
-//    an installation that has never opened that page. The department-flag
-//    branch below is untouched: a lead or approver of a particular department
-//    still decides that department's claims with no role at all.
-if ($isAdmin === false && App::can(Capabilities::EXPENSES_APPROVE) === false) {
+// 🚪 THE APPROVER ROLE IS NOT A WAY IN ANY MORE (#648, #915, D-103). This
+//    used to read `$isAdmin === false && App::can(Capabilities::EXPENSES_APPROVE)
+//    === false` (and before #739, `App::hasRole('Approver')`): a holder of the
+//    organisation-wide role skipped this check entirely. It never let them
+//    DECIDE anything — the per-department gate below always asked for a flag in
+//    the claim's own department — but it did let a role-holder with NO
+//    department reach the claim lookup, where a real pending claim of another
+//    department answered "Forbidden" and a made-up number "Claim not found".
+//    That told them which numbers were real (#541 item 5, #915). Under D-103
+//    the role gives no department and no deciding authority of its own, so it
+//    has no place here: an administrator, or somebody holding a flag in at
+//    least one department of this organisation, gets past; nobody else does,
+//    before any claim is looked up.
+if ($isAdmin === false) {
     $approverDepts = Departments::approverDepts($mysqli, $userId, $siteId);
     if (count($approverDepts) === 0) {
-        $_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';
+        $_SESSION['flash_msg']  = 'Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Router::url('expenses/approve'));
         exit();
@@ -222,7 +230,8 @@ if ($claim === null) {
 //
 //    It comes BEFORE the per-department test below on purpose. A claimant
 //    who has authority somewhere, but not over this claim's department,
-//    would otherwise get the bare "Forbidden" answer; this sentence tells
+//    would otherwise get the "not found" answer below (a bare "Forbidden"
+//    until #648/#915); this sentence tells
 //    them what is actually wrong, and tells them nothing new, because it is
 //    their own claim. Somebody with no authority anywhere was already
 //    answered at the top, before any claim was looked up, and that answer
@@ -255,15 +264,26 @@ if ($isAdmin === true) {
     // organisation the person had left still let them decide, and there is
     // deliberately NO test that the department is switched on, because a
     // retired department's pending claims are finished by its own approvers
-    // (owner's answer Q3). A role holder skipped the read at the top, so it
-    // happens here instead — still one read per decision, as before.
+    // (owner's answer Q3). Since #648/#915 the read at the top is made for
+    // everybody who is not an administrator, so this second chance to read it
+    // is only a guard against that top block being changed later.
     if ($approverDepts === null) {
         $approverDepts = Departments::approverDepts($mysqli, $userId, $siteId);
     }
     $deptFlags = $approverDepts[(int) $claim['deptID']] ?? null;
+    // 🙈 A claim of a department this person does not approve for is answered
+    //    EXACTLY as a claim that is missing or already decided — the same
+    //    message, the same redirect — never a bare "Forbidden", which told a
+    //    flag-holder of another department that the number was a real pending
+    //    claim (#541 item 5, #915; the same shape #648 closed on the claim
+    //    page). The database work is the same too: the department read happened
+    //    above, before the claim was looked up, for everybody who is not an
+    //    administrator.
     if ($deptFlags === null) {
-        http_response_code(403);
-        exit('Forbidden');
+        $_SESSION['flash_msg']  = 'Claim not found or not in Pending status.';
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: ' . Router::url('expenses/approve'));
+        exit();
     }
     if ($deptFlags['isDeptLead'] === true) {
         $approverRole = 'dept_lead';

@@ -125,9 +125,16 @@ final class Roles
             'label'       => 'Treasurer',
             'description' => 'Records giving, sees every expense claim and pays approved ones',
         ],
+        // 💷 REWORDED 10 November 2026 (#648, D-103), with migration 269 doing
+        //    the same to every organisation still holding the old sentence,
+        //    "Approves or rejects expense claims". That was never true on its
+        //    own (deciding has always needed a flag in the claim's own
+        //    department) and since #648 the role opens no claim either: what it
+        //    gives is the spreadsheet of its holder's own departments.
         'approver' => [
             'label'       => 'Expense Approver',
-            'description' => 'Approves or rejects expense claims',
+            'description' => "Downloads the expense claims spreadsheet for the departments they approve for. "
+                . "Deciding and opening claims comes from being a department's lead or approver.",
         ],
         'care_team' => [
             'label'       => 'Care Team',

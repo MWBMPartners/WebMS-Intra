@@ -652,42 +652,44 @@ final class Capabilities
         // The six added by #739
         // =====================================================================
 
-        // 💷 DECIDING AN EXPENSE CLAIM — and it is NOT the treasury above.
-        //    `expenses.treasury` is PAYING a claim somebody else approved;
-        //    this is saying yes or no to one. The repository has already paid
-        //    for muddling the two (#675), so they stay separate doors even
-        //    though one organisation may well point both at one role.
+        // 💷 THE EXPENSE APPROVER ROLE — and since #648 (D-103) it is NOT the
+        //    door to deciding a claim.
         //
-        //    ⚠️ IT DOES NOT COVER THE PER-DEPARTMENT APPROVER FLAG, and that
-        //       is the whole reason this entry is not simply "approvals".
-        //       `tblUserDepts.isApprover` is a flag on ONE department and is
-        //       read separately in `expenses/approve/save.php` AFTER this
-        //       gate: a department lead with no role at all still decides
-        //       their own department's claims, exactly as before. Pointing
-        //       this capability at nobody therefore shuts out the
-        //       organisation-wide approver and leaves every department's own
-        //       people working.
+        //    WHAT IT OPENS NOW: the claims SPREADSHEET, and in it only the
+        //    claims of the departments the holder approves for. Nothing else.
+        //    `ExpenseRules::mayExportClaims()` is the one place that asks it.
         //
-        //    The claims SPREADSHEET is part of this door on purpose:
-        //    `ExpenseRules::mayExportClaims()` asked for the same `approver`
-        //    role through `self::EXPORT_ROLE`, so it is the same set of
-        //    people and the same list of claims seen another way. Splitting
-        //    it would be a new switch that answered the same question.
+        //    WHAT IT USED TO BE SAID TO OPEN, AND WHY EACH PART WENT.
+        //      • "Approving or rejecting expense claims across the whole
+        //        organisation" — never true. `expenses/approve/save.php` always
+        //        asked for a lead, approver or required-approver flag in the
+        //        claim's OWN department after this gate. Since #648/#915 that
+        //        handler does not ask this capability at all: the role's only
+        //        effect there had been to let a holder with no department reach
+        //        the claim lookup and learn which claim numbers were real.
+        //      • "Opening any claim to read it" — the fault #648 fixed. The
+        //        claim page now asks `ExpenseRules::reachToSee()`, in which this
+        //        capability plays no part.
+        //      • "The same set of people and the same list of claims seen
+        //        another way" — the reason this file once gave for the
+        //        spreadsheet belonging to this door. False twice over now: the
+        //        spreadsheet's people are not this set alone (D-040 added the
+        //        treasurer, and administrators always had it), and the claims
+        //        in it depend on who is asking (D-103). The spreadsheet stays
+        //        on this door simply because the organisation-wide approver is
+        //        who was given it, and a separate switch would change who holds
+        //        it on every installation.
         //
-        //    ⚠️ WHAT IT OPENS SHRANK, ON PURPOSE (#648, D-103, the owner,
-        //       10 November 2026). This entry used to say it opened "approving
-        //       or rejecting expense claims across the whole organisation,
-        //       opening any claim to read it, and downloading the claims
-        //       spreadsheet". The first part was never true — the decision
-        //       handler has always asked for a flag in the claim's OWN
-        //       department after this gate — and the other two were the
-        //       fault #648 fixed: the role opened every claim on the claim
-        //       page and put every claim in the spreadsheet. Now the role
-        //       holder sees and downloads only the claims of the departments
-        //       they approve for (`ExpenseRules::reachToSee()`), so what this
-        //       door opens by itself is the spreadsheet of those claims. The
-        //       label says so, because the Roles page is where an
-        //       organisation reads what it is handing out.
+        //    ⚠️ IT DOES NOT COVER THE PER-DEPARTMENT APPROVER FLAG.
+        //       `tblUserDepts.isApprover` is a flag on ONE department, read by
+        //       `Departments::approverDepts()`: a department lead with no role
+        //       at all decides, and opens, their own department's claims.
+        //       Pointing this capability at nobody therefore takes the
+        //       spreadsheet away from role-holders and changes nothing else.
+        //
+        //    `expenses.treasury` above is PAYING a claim somebody else
+        //    approved; the two stay separate doors (#675), even though one
+        //    organisation may well point both at one role.
         self::EXPENSES_APPROVE => [
             'label' => 'Expense approver: download the claims spreadsheet',
             'opens' => 'Downloading the claims spreadsheet from the approvals page, holding the '
@@ -703,11 +705,12 @@ final class Capabilities
                 . 'well. Anybody marked as a lead, approver or required approver of a department '
                 . 'still decides and opens that department\'s claims. Paying an approved claim is '
                 . 'a different door and is not affected.',
-            // `view/index.php` asked this until #648 and no longer does: who
-            // may open a claim is `ExpenseRules::reachToSee()`, in which this
-            // capability plays no part (D-103).
+            // `view/index.php` and `approve/save.php` asked this until #648
+            // and no longer do: who may open a claim is
+            // `ExpenseRules::reachToSee()` and who may decide one is the
+            // department rule, and this capability plays no part in either
+            // (D-103, #915).
             'askedAt' => [
-                'web/_apps/expenses/approve/save.php',
                 'web/_core/ExpenseRules.php',
             ],
         ],

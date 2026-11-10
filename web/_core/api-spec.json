@@ -7751,7 +7751,7 @@
           "Expenses"
         ],
         "summary": "Delete an expense claim (v1; only status = Pending may be deleted)",
-        "description": "Requires scope `expenses:write` (bearer) or an owner-or-admin session. Bearer mode: scope + the key's site-pin is sufficient (no separate ownership check — a key already operates within one site). Returns 409 if the claim has left the 'Pending' status. **Legacy alias:** `POST /api/expenses/delete?id={id}`.",
+        "description": "Requires scope `expenses:write` (bearer) or an owner-or-admin session. Bearer mode: scope + the key's site-pin is sufficient (no separate ownership check — a key already operates within one site). Returns 409 if the claim has left the 'Pending' status. A signed-in caller who is neither the claimant nor an administrator gets 404 with the message `Expense claim not found`, exactly as for a claim number that does not exist, so the answer never says which claim numbers are real (#648). It used to be 403. **Legacy alias:** `POST /api/expenses/delete?id={id}`.",
         "security": [
           {
             "bearerAuth": []

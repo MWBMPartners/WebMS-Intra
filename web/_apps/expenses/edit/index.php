@@ -82,9 +82,23 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
-// 🙈 A claim that is not there, or belongs to another organisation, is "not
-//    found". Never a page that confirms it exists.
-if ($claim === null) {
+// 🙈 A claim that is not there, belongs to another organisation, OR BELONGS TO
+//    SOMEBODY ELSE is "not found" — one statement, one 404. Never a page that
+//    confirms it exists.
+//
+//    WHAT WAS WRONG (#648, round 1 of its check, 10 November 2026). Somebody
+//    else's claim used to get a 403 here, further down, while a made-up
+//    number got this 404 — so any signed-in member could walk the numbers and
+//    learn which were real claims. The comment beside that 403 justified it by
+//    saying `view/index.php` "already answers 403 and 404 in exactly the same
+//    pattern"; #648 made the claim page answer 404 for both, so that reason
+//    went and the leak was all that was left.
+//
+//    Ownership is asked through `ExpenseRules::isOwnClaim()`, the rule
+//    `whyNotEditable()` itself asks first, and it is asked BEFORE the approval
+//    count is read — so somebody else's claim and a made-up number cost the
+//    same database work as well as getting the same answer.
+if ($claim === null || ExpenseRules::isOwnClaim((int) $claim['userID'], $userId) === false) {
     Router::renderError(404);
     return;
 }
@@ -96,26 +110,12 @@ $reason = ExpenseRules::whyNotEditable(
     $userId
 );
 
-// 🙅 Somebody else's claim is refused WITHOUT a reason. Telling a stranger
-//    "you cannot edit this because it has been approved" would confirm the
-//    claim is real AND say where it has got to; a bare 403 says neither.
-//
-//    SAID ACCURATELY, because an earlier version of this comment claimed the
-//    answer was "the same as a claim that does not exist" and an independent
-//    check on 28 October 2026 pointed out that it is not: a missing claim, or
-//    one belonging to another organisation, gets 404 a few lines above, and
-//    this gets 403. So the two ARE distinguishable, and somebody probing can
-//    learn that a claim exists.
-//
-//    That is deliberate and it is not a new disclosure: `view/index.php`
-//    already answers 403 and 404 in exactly the same pattern, so anybody who
-//    can reach this page can learn the same thing from the claim page. Making
-//    this one answer 404 would only make it disagree with the rest of the
-//    app. What is NOT disclosed either way is anything about the claim
-//    itself — who made it, what it is for, how much, or whether it has been
-//    decided.
+// 🙅 Somebody else's claim was already answered "not found" above, so
+//    `EDIT_NOT_YOURS` cannot be reached here today. It is still answered the
+//    same way, so that a later change to the check above can never turn it
+//    back into a page that confirms the claim exists.
 if ($reason === ExpenseRules::EDIT_NOT_YOURS) {
-    Router::renderError(403);
+    Router::renderError(404);
     return;
 }
 

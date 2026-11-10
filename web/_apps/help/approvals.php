@@ -152,13 +152,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     // against Portal\Core\ExpenseRules::reachToSee() and ::mayExportClaims().
     ?>
     <p id="who-can-see-a-claim">
-        <strong>Who can see a claim.</strong> You can open a claim, and see it in the spreadsheet the
-        <strong>Export</strong> button downloads, when it is charged to a department you are a lead, approver or
-        required approver of. The Expense Approver role does not add any other department. Administrators and
-        treasurers can see every claim in the organisation, and you can always see your own. The Export button is
-        offered to administrators, treasurers and holders of the Expense Approver role; for a role holder the
-        file holds only their own departments' claims. A claim you cannot see is answered as though it did not
-        exist.
+        <strong>Who can see a claim.</strong> You can open a claim when it is charged to a department you are a
+        lead, approver or required approver of. The Expense Approver role does not add any other department.
+        Administrators and treasurers can see every claim in the organisation, and you can always see your own.
+    </p>
+    <p id="who-gets-the-spreadsheet">
+        <strong>The spreadsheet.</strong> The <strong>Export</strong> button is offered only to administrators,
+        treasurers and holders of the Expense Approver role. Being a department's lead or approver does not, on its
+        own, give you the button. Administrators and treasurers get every claim in the file; a holder of the Expense
+        Approver role gets only the claims of the departments they approve for.
+    </p>
+    <p>
+        <strong>Somebody else's claim that you may not open, change, decide or delete</strong> is answered exactly
+        as though it did not exist, so nobody can find out which claim numbers are real.
     </p>
     <!-- #542: this used to say the Expense Approver role was ALSO needed unless you were an
          administrator. That was true, and it was a trap: the role and the flags are set on different

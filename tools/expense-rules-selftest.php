@@ -488,6 +488,14 @@ check(
 //    grounds in the same order. What is new is that a customer may point the
 //    door at a role of their own without editing PHP.
 //
+// 🚪 AND AGAIN ON 10 NOVEMBER 2026 (#648, #915, D-103): the role is no longer
+//    a way past this gate at all. Its only effect here had been to let a
+//    role-holder with no department reach the claim lookup, where a real
+//    pending claim answered "Forbidden" and a made-up number "Claim not
+//    found" — telling them which numbers were real. The condition is now the
+//    administrator test alone, and the words no longer name the role, because
+//    a role-holder would have been told they needed the role they held.
+//
 //    ⚠️ THE PIN IS STILL THE WHOLE BLOCK, AND IT HAD TO BE UPDATED RATHER
 //       THAN LOOSENED. The temptation on seeing this check go red is to match
 //       the inside of the block and let the condition be anything; that would
@@ -495,10 +503,10 @@ check(
 //       is the only thing then standing between a signed-in member and the
 //       approvals handler. If this goes red again, read what the condition
 //       has become and decide whether it is right — do not widen the pattern.
-$noAuthority = "if (\$isAdmin === false && App::can(Capabilities::EXPENSES_APPROVE) === false) {\n"
+$noAuthority = "if (\$isAdmin === false) {\n"
     . "    \$approverDepts = Departments::approverDepts(\$mysqli, \$userId, \$siteId);\n"
     . "    if (count(\$approverDepts) === 0) {\n"
-    . "        \$_SESSION['flash_msg']  = 'Access denied — Approver or Admin role required.';\n"
+    . "        \$_SESSION['flash_msg']  = 'Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.';\n"
     . "        \$_SESSION['flash_type'] = 'danger';\n"
     . "        header('Location: ' . Router::url('expenses/approve'));\n"
     . "        exit();\n"
@@ -639,13 +647,13 @@ foreach (['approve', 'treasury', 'withdraw'] as $handler) {
 
 
 check(
-    'the refusal for somebody with no authority at all is exactly what it was',
+    'the refusal for somebody with no authority at all is the whole block, word for word — administrator or a department flag, and NOT the Approver role (#915)',
     str_contains($rawApprove, $noAuthority) === true
 );
 check(
     '…and still comes before any claim is looked up, so it reveals nothing about which claims exist',
-    at($approveSave, "'Access denied — Approver or Admin role required.'") >= 0
-        && at($approveSave, "'Access denied — Approver or Admin role required.'") < at($approveSave, 'FROM tblExpenseClaims EC')
+    at($approveSave, "'Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.'") >= 0
+        && at($approveSave, "'Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.'") < at($approveSave, 'FROM tblExpenseClaims EC')
 );
 // The answer under the lock was reworded on 12 October 2026 (#587). It used to
 // say "already been decided by another approver", which is untrue when the

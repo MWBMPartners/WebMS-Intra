@@ -31,6 +31,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\ExpenseRules;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -64,12 +65,18 @@ if ($old === null) {
 }
 
 // 🛡️ Session mode: owner-or-admin. Bearer mode: scope + site-pin suffices.
+//
+//    Somebody who may not delete this claim is answered EXACTLY as for a
+//    claim that does not exist — the same 404 and the same words (#648). It
+//    used to be a 403 "Access denied — only the claimant or an admin may
+//    delete this claim", which told any signed-in member that the number was
+//    a real claim of this organisation.
 if (ApiAuth::source() === 'session') {
     $actorId  = ApiAuth::actorUserId() ?? 0;
-    $isOwner  = (int) $old['userID'] === $actorId;
+    $isOwner  = ExpenseRules::isOwnClaim((int) $old['userID'], $actorId);
     $isAdmin  = App::isAdmin() === true;
     if ($isOwner === false && $isAdmin === false) {
-        ApiResponse::error('Access denied — only the claimant or an admin may delete this claim', 403);
+        ApiResponse::error('Expense claim not found', 404);
     }
 }
 

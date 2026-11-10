@@ -22,7 +22,6 @@
 
 declare(strict_types=1);
 
-use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\ExpenseRules;
 use Portal\Core\Router;

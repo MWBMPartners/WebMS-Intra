@@ -11512,6 +11512,19 @@ COMMENT='The links each newsletter contains; the click counter forwards only to 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('268_newsletter_links.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 269_expense_approver_role_description.sql (#648) ───────────────────
+-- The "from 202" block above seeds the Expense Approver role with migration
+-- 202's sentence, "Approves or rejects expense claims", which was never true on
+-- its own and stopped describing the role at all with #648 (D-103). Rewritten
+-- here only where it is still that sentence, exactly as the migration does.
+UPDATE `tblRoles`
+   SET `description` = 'Downloads the expense claims spreadsheet for the departments they approve for. Deciding and opening claims comes from being a department''s lead or approver.'
+ WHERE `roleKey` = 'approver'
+   AND `description` = 'Approves or rejects expense claims';
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('269_expense_approver_role_description.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
 -- WHY THESE ARE HERE AND NOT BESIDE tblEvents. `tblEvents` is declared near the
 -- top of this file; `tblVenues` and `tblVenueRooms` are declared about seven

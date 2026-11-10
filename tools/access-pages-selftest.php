@@ -267,7 +267,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 361; // 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 369; // 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -1314,7 +1314,7 @@ ok('a treasurer pays somebody else\'s approved claim as before: Reimbursed', cla
 post($jar['appr'], $approve, $approve . '/save', ['claimID' => 916304, 'decision' => 'Rejected', 'comments' => 'no receipt']);
 ok('rejecting somebody else\'s claim works as before: Rejected at once', claimState(916304) === 'Rejected, 1 approval(s), 0 payment(s)', claimState(916304));
 $answer = post($jar['mem'], $approve, $approve . '/save', ['claimID' => 916305, 'decision' => 'Approved', 'comments' => '']);
-ok('somebody with no authority at all is still refused, with the old sentence, and nothing is recorded', $answer['status'] === 302 && claimState(916305) === $untouched && str_contains(req($jar['mem'], 'GET', $approve)['body'], 'Access denied — Approver or Admin role required.') === true, claimState(916305));
+ok('somebody with no authority at all is still refused, with the sentence that names who can decide (#648), and nothing is recorded', $answer['status'] === 302 && claimState(916305) === $untouched && str_contains(req($jar['mem'], 'GET', $approve)['body'], 'Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.') === true, claimState(916305));
 
 head('E5. #545 — the claim\'s own page');
 $own   = req($jar['lead'], 'GET', ADDR_A . '/expenses/view?id=916305')['body'];
@@ -2331,14 +2331,19 @@ const L3_DEPT       = 916105;
 const L3_OWN_DEPT   = 916396; // LEAD's claim in DEPT
 const L3_OTHER_DEPT = 916395; // LEAD's claim in L3_DEPT
 const L3_NO_CLAIM   = 916398; // matches no claim at all
+const L3_MEM_CLAIM  = 916394; // MEM's OWN claim, in L3_DEPT, where MEM has no row at all
 const L3_ROLE       = 916297;
 q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'ACCESS L3 second dept', 'L3D', 1)", 'ii', [L3_DEPT, ORG_A]);
 q(
     "INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES "
     . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN THE APPROVERS DEPT', CURDATE(), 31.00, 'Pending'), "
-    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN ANOTHER DEPT', CURDATE(), 32.00, 'Pending')",
-    'iiiiiiii', [L3_OWN_DEPT, ORG_A, LEAD, DEPT, L3_OTHER_DEPT, ORG_A, LEAD, L3_DEPT]
+    . "(?, ?, ?, ?, 'ACCESS L3 CLAIM IN ANOTHER DEPT', CURDATE(), 32.00, 'Pending'), "
+    . "(?, ?, ?, ?, 'ACCESS L3 MEMBERS OWN CLAIM', CURDATE(), 33.00, 'Pending')",
+    'iiiiiiiiiiii', [L3_OWN_DEPT, ORG_A, LEAD, DEPT, L3_OTHER_DEPT, ORG_A, LEAD, L3_DEPT, L3_MEM_CLAIM, ORG_A, MEM, L3_DEPT]
 );
+// Every claim needs a line to be a claim anybody could edit; the edit checks
+// below must get past the handler's own checks to reach the claim lookup.
+q("INSERT INTO tblExpenseClaimItems (claimID, itemName, quantity, unitCost, lineTotal) VALUES (?, 'L3 line', 1, 31.00, 31.00), (?, 'L3 line', 1, 32.00, 32.00)", 'ii', [L3_OWN_DEPT, L3_OTHER_DEPT]);
 $l3Own   = 'ACCESS L3 CLAIM IN THE APPROVERS DEPT';
 $l3Other = 'ACCESS L3 CLAIM IN ANOTHER DEPT';
 /** Grant or take away the `approver` role in A. */
@@ -2361,6 +2366,30 @@ $l3Open = static fn (string $who, int $claimId): array => req($jar[$who], 'GET',
  * — its title, its number, "not allowed" — would make the two differ.
  */
 $l3Bare = static fn (string $body): string => ap_replace('/\snonce="[^"]*"/', ' nonce=""', $body);
+/**
+ * The response HEADERS with the parts that differ between any two answers
+ * taken out — the date, a cookie, and the nonce inside the page rule — so an
+ * extra header on one refusal (a hint, a different cache rule) is seen.
+ */
+$l3Head = static function (string $head): string {
+    $keep = [];
+    foreach (preg_split('/\r?\n/', trim($head)) as $line) {
+        if (ap_find('/^(Date|Set-Cookie):/i', $line) === 1) {
+            continue;
+        }
+        $keep[] = ap_replace("/'nonce-[^']*'/", "'nonce-'", $line);
+    }
+
+    return implode("\n", $keep);
+};
+/** The one-off message waiting on a page, read (and so cleared) from it. */
+$l3Flash = static function (string $who, string $page) use (&$jar): string {
+    $body = req($jar[$who], 'GET', $page)['body'];
+
+    return ap_find('#<div class="alert alert-(\w+) alert-dismissible fade show">\s*(.*?)\s*<button#s', $body, $m) === 1
+        ? $m[1] . ': ' . html_entity_decode(trim($m[2]), ENT_QUOTES, 'UTF-8')
+        : '(no message)';
+};
 /** The spreadsheet, fetched with a fresh token from the person's own approvals page. */
 $l3Csv = static function (string $who) use (&$jar, $approve, $exportAddress): array {
     $page = req($jar[$who], 'GET', $approve);
@@ -2384,9 +2413,49 @@ ok(
     'HTTP ' . $other['status']
 );
 ok(
-    'L3-3. …and that refusal is EXACTLY the answer a made-up claim number gets — same status, same page, byte for byte apart from the nonce',
-    $other['status'] === $none['status'] && $l3Bare($other['body']) === $l3Bare($none['body']) && strlen($none['body']) > 200,
+    'L3-3. …and that refusal is EXACTLY the answer a made-up claim number gets — same status, same page byte for byte apart from the nonce, and the same headers apart from the date, a cookie and the nonce',
+    $other['status'] === $none['status'] && $l3Bare($other['body']) === $l3Bare($none['body']) && strlen($none['body']) > 200
+        && $l3Head($other['head']) === $l3Head($none['head']) && str_contains($l3Head($none['head']), 'Content-Type') === true,
     'statuses ' . $other['status'] . '/' . $none['status'] . ', lengths ' . strlen($other['body']) . '/' . strlen($none['body'])
+        . '; headers only in one: ' . implode(' | ', array_merge(
+            array_diff(explode("\n", $l3Head($other['head'])), explode("\n", $l3Head($none['head']))),
+            array_diff(explode("\n", $l3Head($none['head'])), explode("\n", $l3Head($other['head'])))
+        ))
+);
+// --- …and the SAME DATABASE WORK, counted in the server's own query log ------
+// The claim page works out the reach BEFORE it reads the claim, so a real
+// claim out of reach and a made-up number send the same statements, in the
+// same order. Numbers are blanked, because the claim number differs. The log
+// is switched on for these two requests only and put back as part K does
+// (the clean-up puts it back too if the run stops early).
+$l3LogWas = one('SELECT @@GLOBAL.general_log AS general_log, @@GLOBAL.log_output AS log_output');
+if ($l3LogWas === null || ap_find('/^[A-Z,]+$/', (string) $l3LogWas['log_output']) !== 1) {
+    refuse('the database would not say how its query log is set');
+}
+$state['queryLog'] = ['general_log' => (int) $l3LogWas['general_log'], 'log_output' => (string) $l3LogWas['log_output']];
+q("SET GLOBAL log_output = 'TABLE'");
+q('SET GLOBAL general_log = 1');
+/** The statements the portal sent for one request, numbers blanked. @return list<string> */
+$l3Statements = static function (string $who, int $claimId) use ($l3Open): array {
+    q('TRUNCATE TABLE mysql.general_log');
+    $l3Open($who, $claimId);
+    $rows = q("SELECT CONVERT(argument USING utf8mb4) AS a FROM mysql.general_log WHERE command_type IN ('Query', 'Execute') AND thread_id <> CONNECTION_ID() ORDER BY event_time, thread_id");
+
+    return array_map(static fn (array $r): string => ap_replace('/\d+/', '0', (string) $r['a']), $rows);
+};
+$sqlOther = $l3Statements('appr', L3_OTHER_DEPT);
+$sqlNone  = $l3Statements('appr', L3_NO_CLAIM);
+q('SET GLOBAL general_log = ' . (int) $state['queryLog']['general_log']);
+q("SET GLOBAL log_output = '" . $state['queryLog']['log_output'] . "'");
+q('TRUNCATE TABLE mysql.general_log');
+$state['queryLog'] = null;
+$readsClaim = static fn (array $sql): bool => array_filter($sql, static fn (string $a): bool => str_contains($a, 'FROM tblExpenseClaims EC')) !== [];
+$readsDepts = static fn (array $sql): bool => array_filter($sql, static fn (string $a): bool => str_contains($a, 'FROM tblUserDepts')) !== [];
+ok(
+    'L3-3b. …and the SAME DATABASE WORK: the same statements, in the same order, numbers aside — the department read and the claim read in both',
+    $sqlOther === $sqlNone && $readsClaim($sqlNone) === true && $readsDepts($sqlNone) === true,
+    count($sqlOther) . ' statements against ' . count($sqlNone) . '; first difference: '
+        . (string) (array_values(array_diff_assoc($sqlOther, $sqlNone))[0] ?? array_values(array_diff_assoc($sqlNone, $sqlOther))[0] ?? 'none')
 );
 $csv = $l3Csv('appr');
 ok(
@@ -2453,9 +2522,17 @@ ok(
     str_contains($admList, $l3Own) === true && str_contains($admList, $l3Other) === true
         && str_contains($trsList, $l3Own) === false && str_contains($trsList, $l3Other) === false
 );
+// MEM holds no role and no flag at this point (L3-8 took the role away), and
+// has no row at all in L3_DEPT — so "it is their own" is the ONLY ground on
+// which they can open this claim. (The first version used LEAD, who is also a
+// treasurer, so deleting the claimant ground left it green.)
+$memOwnClaim = $l3Open('mem', L3_MEM_CLAIM);
 ok(
-    'L3-12. the claimant opens both of their own claims, whatever department they are in',
-    $l3Open('lead', L3_OWN_DEPT)['status'] === 200 && $l3Open('lead', L3_OTHER_DEPT)['status'] === 200
+    'L3-12. a claimant with no role and no flag opens their own claim in a department they have nothing to do with',
+    $memOwnClaim['status'] === 200 && str_contains($memOwnClaim['body'], 'ACCESS L3 MEMBERS OWN CLAIM') === true
+        && (int) one('SELECT COUNT(*) AS n FROM tblUserRoles WHERE userID = ?', 'i', [MEM])['n'] === 0
+        && (int) one('SELECT COUNT(*) AS n FROM tblUserDepts WHERE userID = ? AND (isDeptLead = 1 OR isApprover = 1 OR isMandatoryApprover = 1)', 'i', [MEM])['n'] === 0,
+    'HTTP ' . $memOwnClaim['status']
 );
 ok(
     'L3-13. an ordinary member with no role and no flag is answered 404 for a real claim, exactly as for a made-up one (it used to be 403, which said the claim was real)',
@@ -2463,9 +2540,88 @@ ok(
         && $l3Bare($l3Open('mem', L3_OTHER_DEPT)['body']) === $l3Bare($l3Open('mem', L3_NO_CLAIM)['body'])
 );
 
+$trsPage = $l3Open('trs', L3_OWN_DEPT);
+ok(
+    'L3-14. a treasurer opening somebody else\'s pending claim is NOT offered "Go to Approvals": they pay claims, they do not decide them',
+    $trsPage['status'] === 200 && str_contains($trsPage['body'], $l3Own) === true && str_contains($trsPage['body'], 'Go to Approvals') === false,
+    'HTTP ' . $trsPage['status']
+);
+
+// --- every other expense address: somebody else's claim is a made-up number ----
+// (#648 round 1: the class, not one instance. Enumerated with
+// `git grep -n "403\|Forbidden\|http_response_code" web/_apps/expenses/`.)
+$editOther = req($jar['mem'], 'GET', ADDR_A . '/expenses/edit?id=' . L3_OWN_DEPT);
+$editNone  = req($jar['mem'], 'GET', ADDR_A . '/expenses/edit?id=' . L3_NO_CLAIM);
+ok(
+    'L3-15. the edit form: somebody else\'s real claim gets EXACTLY what a made-up number gets — 404, the same page and the same headers (it was 403)',
+    $editOther['status'] === 404 && $editNone['status'] === 404 && $l3Bare($editOther['body']) === $l3Bare($editNone['body'])
+        && $l3Head($editOther['head']) === $l3Head($editNone['head']) && str_contains($editOther['body'], $l3Own) === false,
+    'HTTP ' . $editOther['status'] . '/' . $editNone['status']
+);
+ok(
+    'L3-15b. …while the claimant opens the same edit form (so the 404 above is about who asked, not a broken page)',
+    req($jar['lead'], 'GET', ADDR_A . '/expenses/edit?id=' . L3_OWN_DEPT)['status'] === 200
+);
+$editSave = static function (int $claimId) use (&$jar, $l3Flash): string {
+    $answer = post($jar['mem'], ADDR_A . '/expenses/submit', ADDR_A . '/expenses/edit/save', [
+        'claimID' => $claimId, 'claimTitle' => 'L3 HIJACKED TITLE', 'deptID' => DEPT,
+        'itemDesc' => ['x'], 'itemQty' => ['1'], 'itemUnit' => ['1.00'],
+    ]);
+
+    return 'HTTP ' . $answer['status'] . ' to ' . $answer['location'] . ' — ' . $l3Flash('mem', $answer['location'] === '' ? ADDR_A . '/expenses/submit' : $answer['location']);
+};
+$saveOther = $editSave(L3_OWN_DEPT);
+$saveNone  = $editSave(L3_NO_CLAIM);
+ok(
+    'L3-16. the edit form\'s save: somebody else\'s real claim gets EXACTLY the redirect and the message a made-up number gets, and nothing is changed',
+    $saveOther === $saveNone && str_contains($saveNone, 'That claim could not be found.') === true
+        && one('SELECT claimTitle FROM tblExpenseClaims WHERE claimID = ?', 'i', [L3_OWN_DEPT])['claimTitle'] === $l3Own,
+    $saveOther . '  ||  ' . $saveNone
+);
+$deleteAs = static function (int $claimId) use (&$jar): array {
+    $page = req($jar['mem'], 'GET', ADDR_A . '/expenses/submit');
+
+    return postJson($jar['mem'], ADDR_A . '/api/expenses/delete', ['claimID' => $claimId, 'csrf_token' => token($page['body'])]);
+};
+$delOther = $deleteAs(L3_OWN_DEPT);
+$delNone  = $deleteAs(L3_NO_CLAIM);
+ok(
+    'L3-17. the delete API: somebody else\'s real claim gets EXACTLY what a made-up number gets — 404 "Expense claim not found" (it was 403) — and the claim is still there',
+    $delOther['status'] === 404 && $delNone['status'] === 404 && stable($delOther) === stable($delNone) && said($delNone) === '404: Expense claim not found'
+        && (int) one('SELECT COUNT(*) AS n FROM tblExpenseClaims WHERE claimID = ?', 'i', [L3_OWN_DEPT])['n'] === 1,
+    said($delOther) . '  ||  ' . said($delNone)
+);
+$decide = static function (string $who, int $claimId) use (&$jar, $approve, $l3Flash): string {
+    $answer = post($jar[$who], $approve, $approve . '/save', ['claimID' => $claimId, 'decision' => 'Approved', 'comments' => 'L3']);
+
+    return 'HTTP ' . $answer['status'] . ' to ' . $answer['location'] . ' — ' . $l3Flash($who, $approve);
+};
+$approvalsOn = static fn (int $claimId): int => (int) one('SELECT COUNT(*) AS n FROM tblExpenseClaimApprovals WHERE claimID = ?', 'i', [$claimId])['n'];
+// #915: the Approver role with NO department used to pass the handler's first
+// check, then hear "Forbidden" for a real pending claim and "Claim not found"
+// for a made-up number. The role is no longer a way past that check.
+$l3Role(MEM, true);
+$roleOther = $decide('mem', L3_OTHER_DEPT);
+$roleNone  = $decide('mem', L3_NO_CLAIM);
+$l3Role(MEM, false);
+ok(
+    'L3-18. the decision handler: the Approver role with no department gets the SAME answer for a real pending claim and a made-up number — refused before any claim is looked up — and nothing is recorded (#915)',
+    $roleOther === $roleNone && str_contains($roleNone, 'Access denied — only an administrator, or a lead or approver of a department, can decide expense claims.') === true
+        && $approvalsOn(L3_OTHER_DEPT) === 0,
+    $roleOther . '  ||  ' . $roleNone
+);
+$deptOther = $decide('appr', L3_OTHER_DEPT);
+$deptNone  = $decide('appr', L3_NO_CLAIM);
+ok(
+    'L3-19. the decision handler: an approver of DEPT gets the SAME answer for another department\'s real pending claim as for a made-up number — "Claim not found or not in Pending status." (it was a bare "Forbidden") — and nothing is recorded',
+    $deptOther === $deptNone && str_contains($deptNone, 'Claim not found or not in Pending status.') === true && $approvalsOn(L3_OTHER_DEPT) === 0,
+    $deptOther . '  ||  ' . $deptNone
+);
+
 q('DELETE FROM tblUserRoles WHERE roleID = ?', 'i', [L3_ROLE]);
 q('DELETE FROM tblRoles WHERE roleID = ?', 'i', [L3_ROLE]);
-q('DELETE FROM tblExpenseClaims WHERE claimID IN (?, ?)', 'ii', [L3_OWN_DEPT, L3_OTHER_DEPT]);
+q('DELETE FROM tblExpenseClaimItems WHERE claimID IN (?, ?, ?)', 'iii', [L3_OWN_DEPT, L3_OTHER_DEPT, L3_MEM_CLAIM]);
+q('DELETE FROM tblExpenseClaims WHERE claimID IN (?, ?, ?)', 'iii', [L3_OWN_DEPT, L3_OTHER_DEPT, L3_MEM_CLAIM]);
 q('DELETE FROM tblDepts WHERE deptID = ?', 'i', [L3_DEPT]);
 
 // =============================================================================
