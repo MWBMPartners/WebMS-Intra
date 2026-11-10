@@ -163,7 +163,8 @@ appended with its real date and a note that it was added later.
 | [D-105](105-the-health-pages-mail-count-covers-the-viewers-own-organisation.md) | 2026-11-10 | The health page's mail status counts only the viewer's own organisation | in force |
 | [D-106](106-attendance-totals-are-seen-by-administrators-and-a-chosen-role.md) | 2026-11-10 | An organisation's attendance totals are seen by administrators and a role it chooses | in force |
 | [D-107](107-no-change-to-the-password-minimum-on-running-installations.md) | 2026-11-10 | No change to the minimum password length on running installations: none exists | in force |
+| [D-108](108-an-administrator-setting-a-password-signs-the-person-out.md) | 2026-11-10 | An administrator setting someone's password signs that person out of every browser | in force |
 
-*107 decisions. This index is checked against the folder by
+*108 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

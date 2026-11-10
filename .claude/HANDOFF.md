@@ -1,43 +1,48 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only. 10 November 2026.*
+*Overwritten, never appended. Current state only. 10 November 2026. Updated at every commit boundary and every
+change of a package's state (the owner, 10 November 2026: "update our handoff document regularly at each stage").*
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest pushed: 29e33d77 (#902). Landed this stretch:
-#887 (MySQL 9.7 sign-in), #493 P4a and P4b, #869/#870/#871 (expense claim form), #900 (a sign-in keeps nothing
-of the previous person's session), #902 (its guard; passkey and kiosk driven). Whole suite 100/100.
+`claude/alpha-wip`, pushed after every commit (D-088). Latest pushed: e9ebf2a1. Landed since 9 November, all
+pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912,
+#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-108.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #493 P4c — the frameable page | `agent-a11d2cd63347a435e` / `p4c-build`, ed4aad97 | Round 2 check running (protected arm) |
-| #903 — passkey RP ID empty on a fresh install | `agent-a59d23f3de8a73c08` / `p903-build` | Being built (protected arm) |
-| #615 — outbound webhooks to private addresses | `agent-ad58911c67b8b8018` / `p615-build` | Being built (protected arm) |
+| #598 — ten sign-in findings (D-104, D-105; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 34829fa1 | Round 1 NOT CLEAN: a sign-in under way while the password changes survives (race, measured) — fix by a version counter read with the password; settings-secrets red (per-person reset cap); Integrations page a second key-file judge; untrue comments; D-108 (admin sets a password → sign out) to build |
+| #529 — attendance totals gate (D-106; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 727a68ec | Built; round 1 check next. Raised #917 (owner question), #918 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
-**P4c's browser test needs PHP in pr-security.yml's `security` job** (its notes recommend a separate job).
+**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529). Next free: 272.
 
 ## Next, in this order
 
-1. P4c to commit, then **P4d** (D-087 card; the check confirming a public address reaches this door).
-2. The rest of the backlog (D-055: everything before the release), highest priority first, up to three at a
-   time where files do not overlap; one package at a time in `web/_sql/`.
-3. #821 items 4-8. 4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
+1. #598 round 2 → integrate; #529 check rounds → integrate.
+2. #703 (decided by D-016: confirm the code keeps the worker's name, then close).
+3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
+   at a time where files do not overlap; one migration number per package, assigned up front.
+4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
 
 ## Working pattern that is paying off
 
-Builders and checkers run in their own worktrees; the commissioning session cherry-picks a clean package, adds
-its docs from the worktree's notes, runs the whole suite, pushes. Brief checkers neutrally (not with the
-builder's conclusions). When the same item fails two rounds running, simplify (P3's verdict, #649's
-after-commit path, #902's static check). A round whose findings are all in tooling counts toward the three-round
-cap (D-064). Recurring finding: a refusal tested on only ONE form of address — test both.
+Builders and checkers run in their own worktrees and their own scratch folders under /tmp/claude-501/<pkg>/
+(never the shared session scratchpad — one builder overwrote another's files there). The commissioning session
+cherry-picks a clean package, writes its docs FROM THE FINAL STATE (builders' first drafts carry claims later
+rounds corrected), runs the whole suite, pushes, closes the issue. Brief checkers neutrally. When the same item
+fails two rounds running, simplify (P4d's sentences, #620's and #902's static checks — D-065: presence only,
+behaviour proven over HTTP). A round whose findings are all in tooling counts toward the three-round cap (D-064).
+Recurring findings: a refusal tested on only ONE form of address; a test that passes on broken code; an existence
+leak (403 vs 404) on one endpoint of a class — enumerate the class.
 
 ## Blocked on the owner
 
 | What | Why |
 |---|---|
+| #917 | Whether ordinary members still see each attendance session's own headcount (raised by #529) |
 | SIGNula.id | Five local commits waiting for the owner's push approval |
 
 ## Six standing facts a reader needs
@@ -67,4 +72,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. New ones this stretch: #892-#899, #901, #903, #904.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919.
