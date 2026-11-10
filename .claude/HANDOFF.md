@@ -15,7 +15,7 @@ pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900,
 |---|---|---|
 | #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 4 CLEAN; on the working branch with docs; whole suite running, then push |
 | #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, e1f4afed (rebased on 6a5bfd20) | Round 4 CLEAN; integrating after #598's suite run. Raised #925 |
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab | Round 2: code correct; D-113's wording missed the sentences members actually read (GdprEraser's own reasons, the erasure report) — fixing |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab | Round 3 (4fd93496) NOT CLEAN: kept-number list incomplete and unpinned, a policy-doc row reference, D-112 own-record wording, and a test that passes with a sentence added mid-reason — fixing |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed). Next free: 273.
