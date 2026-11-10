@@ -13,7 +13,7 @@ Last whole suite (with #932): 104/104 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 5eec9289 | Round 12 built (table-driven K13 over all 16 hold states; K11e narrowed; K11r which-organisation; four untrue sentences fixed). Check round 12 running. Then #940 |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 5eec9289 | CLEAN at round 12. Cherry-picked (00563b32..6ca6fb3e; 272/273 schema blocks kept in order) with docs; e2e harness then whole suite, then push. Then #940 |
 | #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, 4fe9b574 | Built; the gate found a SIXTH live fault (CSV import, loose cells in the skipped hour stored an hour out), fixed to store the written reading. Check round 1 running |
 | #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 7f4e784f | Built (empty place = organisation's map position, sunset falls back to fixed times; country from the organisation or refused; page reads the installation layer, writes only arrived fields). Check round 1 running. Raised #942, #943 |
 

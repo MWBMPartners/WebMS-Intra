@@ -22295,6 +22295,47 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
 
+### Keeping a worker's name on a safeguarding record, and saying what an erasure leaves (#703)
+
+- **Keeping the NUMBER is not keeping the NAME.** `GdprEraser` empties the person's own `tblUsers` row
+  (`fullName` becomes `[Deleted User]`), so keeping `visitedByID` alone keeps a link to nothing readable.
+  The name has to live on the record.
+- **The name is written when the record is made, not copied at erasure.** Copying at erasure would make it
+  depend on one step running before another and succeeding. Each table's one writer (`care/visit-save.php`,
+  `admin/safeguarding/dbs-save.php`, `care/case-save.php`, `kids/checkin-do.php`, `kids/checkout.php`) takes the
+  name from the account in the same statement, never from the session. Migration 272's copy guard is pinned
+  whole against `GdprEraser::emptiedAccountSql()`.
+- **A table in the hand-written list is skipped entirely by `fromPersonalDataCatalogue()`**, so every one of
+  its instructions must be written out. Also, the member-facing sentences for such a table are GdprEraser's
+  OWN reasons, not the catalogue's. Round 3 found D-113's wording in the catalogue while members read
+  GdprEraser's.
+- **A list of "everywhere the number survives" cannot be completed**, because the number turns up in free
+  text and in stored copies of rows. Rounds 3 to 5 each found more. The design that held was two statements
+  (kept on purpose; kept for security and history), neither claimed complete.
+- **What members read about their gifts must come from the erasure's own rules, never a copy (#647).**
+  `givingOutlook()` asks the same helpers the keep step uses: `sortingScope()`, `accountEmptiedForGiving()`,
+  `keptEnvelopeWhere()`, `givingFactsAt()`, `keepsNothing()`, `keptCountedFrom()` and
+  `GivingRetention::stateFor()`. Two refactors of the keep step were each proved behaviour-neutral by erasing
+  identical worlds (1,608 givers) with the old and new code and diffing every table. Two limits are stated:
+  a kept row already cleared, and a clearing that fails at the end of a run.
+- **Each round pinned the case it was handed, one state over from the next fault** (both holds, then the
+  installation-only hold). What ended it was ONE table-driven check (K13) walking organisation hold ×
+  installation hold × confirmed × date passed, with expected text written literally in the test.
+- **Wording checks: phrase lists failed and were deleted.** A "class scan" for untrue phrases let rephrasings
+  through and flagged true sentences: a phrase list cannot judge truth. Whether a sentence is true is checked
+  by a person reading every member-facing page in full.
+- **Pins are taken from the RENDERED page over HTTP (D-065).** Each pinned region must match exactly once (a
+  correct copy placed first passed otherwise, the #485 and #763 lesson again). It ends only at a heading of
+  the same or higher level, and is compared with the tag and attributes of every ancestor up to `<body>`. That
+  catches hiding wrappers without a list of hiding methods. Every branch of a section is drawn. What stays
+  outside is said: a `<style>` rule or a script elsewhere on the page.
+- **Escaping was guarded by nothing** until a test gave an organisation a name with `<b>`, `&` and a quote. The
+  first version of that check was satisfied by the organisation switcher in the menu, so it now reads only the
+  inventory items and also refuses double-escaping.
+- Guards: sections 23 of `tools/gdpr-coverage-selftest.php`, the worker-record sections of
+  `tools/gdpr-eraser-selftest.php`, and sections F and K (K5–K13) of `tools/erasure-pages-selftest.php`,
+  with its pins in `tools/erasure-pages-selftest.rendered-pins.txt`.
+
 ### The activity log kept for ever, by choice (#932; D-117, D-118, D-119)
 
 - **`Portal\Core\ActivityLogRetention` is the ONE place** that decides the activity log's period and the

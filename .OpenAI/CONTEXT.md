@@ -3190,6 +3190,12 @@ tell whether a page RENDERS in the chosen language** — that needs HTTP
 and a seeded installation, and both say so in their own output. The
 technical record is DEV_NOTES.md, "A question asked too early (#763)".
 
+- **What an erasure keeps, and what members are told (#703; D-016, D-110 to D-113, D-116).** A worker's
+  name and number stay on the safeguarding records they made (written when made, migration 272). What a
+  giver is told about their gifts comes from `GdprEraser::givingOutlook()`, which asks the keep step's own
+  helpers; never write a second copy of that rule. Member-facing pages are pinned as RENDERED
+  (`tools/erasure-pages-selftest.rendered-pins.txt`); whether a sentence is TRUE is a person's job at review,
+  not a phrase list's. The record is DEV_NOTES.md, "Keeping a worker's name on a safeguarding record (#703)".
 - **The activity log's period: `Portal\Core\ActivityLogRetention` is the ONE place (#932; D-117, D-118,
   D-119).** 0 = never delete, the largest value; set on Admin → Maintenance → Retention only (an organisation's
   figure by its own administrator, the installation's by a global administrator); an installation figure below

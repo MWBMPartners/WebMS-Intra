@@ -4,6 +4,40 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Erasure keeps the worker's name on the records they made, and says plainly what stays (#703; D-016, D-110 to D-113, D-116; migration 272)
+
+- **An erased worker's NAME and account number stay on the safeguarding records they made**:
+  - the pastoral visits they made (D-016);
+  - the DBS checks they recorded;
+  - the care cases they opened (D-110);
+  - the children they checked in or out (D-111).
+
+  Before, the erasure removed the number and kept no name, so a safeguarding record lost who had acted.
+  Migration 272 adds `visitedByName`, `recordedByName`, `openedByName`, `checkedInByName` and `checkedOutByName`,
+  written by each record's own page when the record is made. Names are copied onto older records from the
+  account they point at, never from an account already emptied. The pastoral page shows the kept name once the
+  worker's account has been emptied. A worker's name is kept even on a visit to their own case (D-112).
+- **What members read about erasure is now true, and says the number can be matched back (D-113).** My data,
+  Request erasure, Delete my account, the privacy notice and its retention section, the admin help and
+  `docs/gdpr-erasure-policy.md` were read in full and corrected. Two statements are now given everywhere:
+  - the records that keep a person's name or number ON PURPOSE (expense claims, own DBS checks, tax
+    declarations, giving statements, kept gifts and envelopes, an approval step given by name, and the worker
+    records above);
+  - the records kept for security and as a history (the activity log, the change history, which is kept for
+    ever (D-116), and rate-limit records). These can mention the person.
+
+  Neither list is claimed to be complete. No page says an erased person "cannot be traced" any more.
+- **A giver is told what will really happen to each of their gifts.** My data and Request erasure now work it
+  out with the erasure's own rules (`GdprEraser::givingOutlook()`), per organisation and by name:
+  - gifts and envelopes that keep the name, and until when;
+  - those that lose it;
+  - those already past their keep-until date, which lose it as the erasure runs;
+  - those under the organisation's hold, the installation's hold, or both.
+
+  Before, every gift was counted as kept.
+- Organisation names in these sentences are shown as text, never markup.
+- Open: #926–#931, #933, #934, #938–#941. #940 (the activity log's "never delete" wording) follows next.
+
 ### The activity log can be kept for ever, by choice (#932, D-117, D-118, D-119)
 
 - **"Never delete" is now a choice for the activity log** (`audit.retentionDays`, stored as 0), on Admin →
