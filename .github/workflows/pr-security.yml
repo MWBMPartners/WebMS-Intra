@@ -2087,3 +2087,31 @@ jobs:
 
       - name: "The public door's script and framed page, in a real browser (#493 P4b, P4c)"
         run: node tools/public-door-script-selftest.mjs
+
+  # 🔑 #903: what a real browser accepts as the name a passkey is tied to, and
+  #    that Portal\Core\PasskeyAddress::check() agrees with it — measured in a
+  #    headless browser with a virtual authenticator, because the rules live in
+  #    the browser, not the portal (D-065). It calls PHP for the class, so it
+  #    gets PHP 8.4 in a job of its own, as public-door-browser does. It refuses
+  #    rather than skipping without a browser or PHP.
+  passkey-address-browser:
+    name: "What a browser accepts as a passkey's name, in a real browser (#903)"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup PHP 8.4
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Node for the browser test
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: "What a browser accepts as a passkey's name, in a real browser (#903)"
+        run: node tools/passkey-address-browser-selftest.mjs
+

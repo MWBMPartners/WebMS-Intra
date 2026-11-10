@@ -4,6 +4,33 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Passkeys work on a fresh installation (#903)
+- The name a passkey is tied to (WebAuthn's "relying party ID") was read with
+  `??` from a setting the install script seeds as an EMPTY string, so every
+  installation where nobody had typed a value sent `rpId: ""`. Measured in a
+  real browser (Edge 157 with a virtual authenticator): an empty rpId is
+  refused for adding a passkey and for signing in with one. So passkeys could
+  not work at all until an administrator set the value by hand.
+- `Portal\Core\PasskeyAddress` is now the ONE place that decides the rpId and
+  the origin a browser must report. The rpId is the installation-wide
+  `auth.webauthn.rpID` setting when it holds a usable name, else the host name
+  of the portal's own address (`PortalAddress::base()`, with no port); the
+  origin is `PortalAddress::base()`. With no address at all, both passkey pages
+  refuse with a sentence saying why, rather than send an empty rpId.
+- The general Settings page refuses an unusable passkey address (a scheme, a
+  port, a path, a user name, an IP address) with the reason, tidies capitals
+  and a closing dot, and refuses adding it as one organisation's own row.
+- The "Address of this portal" card says that passkeys are tied to that name.
+- Behind a proxy with the portal's address set, the passkey origin is now the
+  address the visitor's browser shows, not the inside name and http.
+- **Tests:** `tools/two-step-selftest.php` (passkey sign-in on the stock state, the name chosen in every case,
+  the Settings page's refusals and the card's sentence in all its states) and the new
+  `tools/passkey-address-browser-selftest.mjs` (a real headless browser with a virtual authenticator, measuring
+  what browsers accept as a passkey name); each total is pinned in its file. The browser test runs in its own
+  job in `pr-security.yml`. The builder ran seven check rounds of its own; a separately briefed independent
+  check (protected arm: sign-in) was clean. Raised from it: #905, #906, #907. Codex has not reviewed it.
+
+
 ### The public door, part three: a page an organisation's website can frame (#493 P4c)
 
 - **Added: a page for a frame** (D-056, D-082, D-094), for a website that cannot take a script. It is

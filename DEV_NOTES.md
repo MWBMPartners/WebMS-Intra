@@ -22048,3 +22048,41 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   needs PHP with openssl, and a `setup-php` step inside the `security` job would move every later step there
   off the runner image's PHP.
 
+### The name a passkey is tied to (#903)
+
+- **`??` falls back only on null.** A setting seeded `''` is never null, so
+  `App::settings('x') ?? fallback` NEVER falls back for a seeded key. Every
+  seeded setting with an "empty means not set" meaning needs an explicit empty
+  test. (Same fault, cosmetic, on `auth.webauthn.rpName`. `auth.totpIssuer`
+  in `_apps/auth/2fa/setup.php` has the `??` shape too, but is seeded
+  `'WebMS Portal'` (full_schema.sql), so it bites only if an administrator
+  empties it.)
+- **What a browser refuses, measured (Edge 157, headless, virtual
+  authenticator — `tools/passkey-address-browser-selftest.mjs`):** an empty
+  rpId (create AND get), a port, CAPITALS, a closing dot, a scheme, a path. A
+  page reached by an IP address gets NO passkeys at all, with any rpId or none.
+  An empty `rp.name` is accepted. The authenticator signs SHA-256 of exactly
+  the rpId string and reports the page's own origin.
+- **Why tidying capitals cannot strand a passkey:** the browser refuses a
+  capitalised rpId, so no passkey can ever have been made under one.
+- **Why a visitor-chosen Host is safe as the rpId while no address is set:**
+  the rpId and the expected origin come from the same request; a member's
+  passkey is bound to the real name, so a replay with a made-up Host makes the
+  portal expect the fingerprint of the made-up name, which the member's
+  authenticator never signs. ANY rpId set by hand (not only a wider one: even the portal's own exact name
+  lets a site below it ask) is only safe while the origin is FIXED, i.e. with `site.url` set — said in
+  `PasskeyAddress`'s header, corrected after the independent check.
+- **Effect on existing passkeys:** with the setting empty (seeded) none can
+  exist (the browser refused ""). With a usable name set, the rpId is unchanged;
+  the origin becomes `PortalAddress::base()`, the same as before unless
+  `site.url` names a different address from the one members use. With an
+  unusable value set, none can exist either (every such shape is refused by the
+  browser). CHANGING `site.url` to a different name later (with the setting
+  empty) strands every passkey made at the old name — the organisation card now
+  says so. No customer installation existed when this was written.
+- **Test traps met:** `curl` matches a jar's cookies against a CUSTOM Host
+  header, not the address it connects to (measured), so a signed-in request
+  with a made-up Host must send the cookies by hand. And the sign-in check's
+  self-test (`check_sign_in_begins_session.py`) pinned a LINE NUMBER
+  ("webauthn.php:13") for one plant; any edit above the line turned it red on
+  correct code. It now names the finding by what is written.
