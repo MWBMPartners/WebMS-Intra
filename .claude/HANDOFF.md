@@ -13,8 +13,8 @@ pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900,
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 2's fixes in 213fec83 (`!==`, a random step, the number written after commit; Q3/Q4 pinned); round 3 check next |
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, a3f4d93e | Round 2 NOT CLEAN (Q20 passes with a count in the delete button; three paths unpinned); fixing, and building D-114 (who may delete a session) |
+| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 3: behaviour CORRECT; fixing wording (restore log reason, a docblock, admin message) and two test gaps (reset/admin pages' after-commit order); raised #922 |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 314e9bf0 (rebased on b761ff5a) | Round 2 fixes and D-114 built (#921 fixed too); round 3 check running |
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, a94ec50c | Round 1 NOT CLEAN (three reassuring sentences now untrue — D-113 says correct them; a pin too weak); building D-110 (case opener), D-111 (check-in helpers) |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
