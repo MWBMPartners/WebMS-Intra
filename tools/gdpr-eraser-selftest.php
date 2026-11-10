@@ -3813,10 +3813,12 @@ $ownAllKeptH      = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statemen
 //    that really has kept records, so the branch is live here.
 $ownPartH         = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(120) . '_' . $ago(90) . '.pdf' . Pdf::PART_MARK . 'a1b2c3d4e5f6', 'half a made-up statement');
 $ownMixedH        = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(510) . '_' . $ago(290) . '.pdf', 'made-up statement, mixed');
-// 🧾 #703 round 11: a statement file whose NAME GIVES NO PERIOD. Three sentences
-//    members read promise it is KEPT at an organisation keeping the donor's name
-//    (keeping is the mistake that can be put right) and deleted where nothing is
-//    kept. Reversing statementFileIsKept()'s fallback failed nothing until this.
+// 🧾 #703 round 11: a statement file whose NAME GIVES NO PERIOD. The statement
+//    record's reason (the written list) and Delete my account say both halves -
+//    KEPT at an organisation keeping the donor's name (keeping is the mistake
+//    that can be put right), DELETED at one keeping nothing; the account summary
+//    says the first (round 12 made it say "at an organisation keeping your
+//    name"). Reversing statementFileIsKept()'s fallback failed nothing until this.
 $noPeriodH        = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-copy.pdf', 'made-up statement, period not in its name');
 $h['envelope']    = ge_linked('tblCountEnvelopes', ['giverID' => P_H], ['giverName' => null, 'amount' => '12.50']);
 $h['giftAllOne']  = ge_gift(SITE_G2, P_H, $ago(900), 700, $catG2);
@@ -3850,6 +3852,9 @@ ge_ok('the linked giving rows were built, and organisation 3 has set nothing yet
     in_array(null, $hWas, true) === false && in_array(null, $iWas, true) === false && in_array(null, $kWas, true) === false
     && $settingsOfG1 === [] && is_file($issuedH['file']) === true && is_file($ownFileH) === true && is_file($fileAllH) === true
     && is_file($ownFileI) === true && is_file($issuedK['file']) === true
+    // #703 round 12: both no-period files really exist BEFORE the runs, so
+    // "deleted" afterwards means the run deleted them.
+    && is_file($noPeriodH) === true && is_file($noPeriodI) === true
     && GivingRetention::ruleForSite(SITE_G1)['confirmed'] === false && GivingRetention::ruleForSite(SITE_G2)['scope'] === GivingRetention::SCOPE_ALL);
 
 $resultH = ge_execute(REQ_H, P_H);
@@ -4014,7 +4019,7 @@ ge_ok('A DONOR WITHOUT A TAX DECLARATION: both gifts keep their amount, date and
     && str_contains((string) $lineI[0]['details'], 'nothing has to be kept with the donor\'s name. 2 gifts keep the amount, date and method and no longer name the donor'),
     $resultI instanceof Throwable ? $resultI->getMessage() : json_encode([$iNow, $lineI]));
 
-ge_ok('A STATEMENT FILE WHOSE NAME GIVES NO PERIOD is KEPT at an organisation keeping the donor\'s name (Hana, after her erasure) and DELETED at one keeping nothing of the donor\'s (Ian) - as the written list, the account statement and Delete my account all say (#703 round 11)',
+ge_ok('A STATEMENT FILE WHOSE NAME GIVES NO PERIOD is KEPT at an organisation keeping the donor\'s name (Hana, after her erasure) and DELETED at one keeping nothing of the donor\'s (Ian) - as the statement record\'s reason and Delete my account say, and as the account summary says of the first half (#703 rounds 11 and 12)',
     is_file($noPeriodH) === true && file_get_contents($noPeriodH) === 'made-up statement, period not in its name'
     && is_file($noPeriodI) === false,
     json_encode([is_file($noPeriodH), is_file($noPeriodI)]));

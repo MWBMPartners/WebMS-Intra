@@ -1275,8 +1275,8 @@ class GdprEraser
                  . 'checks, your tax declarations, an approval step given to you by name and the record of each giving '
                  . 'statement issued to you. Some keep your name as well: gifts kept for tax (or every gift, where an '
                  . 'organisation keeps them all), offering envelopes that will become such gifts, your tax declarations and '
-                 . 'a giving statement\'s file where every gift on it is kept, or whose period cannot be told from it - with any '
-                 . 'home address held for you, until the '
+                 . 'a giving statement\'s file at an organisation keeping your name, where every gift on it is kept or its period '
+                 . 'cannot be told from it - with any home address held for you, until the '
                  . 'organisation\'s keep-until date if it has confirmed one, or longer while a hold is on (what is shown for '
                  . 'your gifts says which of yours, and until when) - and any pastoral visits, care cases, DBS checks or '
                  . 'children\'s check-ins you made (D-016, '
@@ -5113,11 +5113,18 @@ class GdprEraser
                 $state = (string) GivingRetention::stateFor($rule, self::keptCountedFrom($facts, $live === true ? $keptRow : null)['date'])['state'];
             }
             // Whose hold: the words differ, and an installation-wide hold is
-            // not this organisation's to lift.
+            // not this organisation's to lift. And what happens once it IS
+            // lifted (round 12): the same rule asked with no hold - not-due,
+            // not-confirmed or due - so a record already past its date is not
+            // promised a keep-until date that has gone.
             if ($state === 'on-hold') {
-                $own   = ($rule['holdOwn'] ?? false) === true;
-                $wide  = ($rule['holdEverybody'] ?? false) === true;
-                $state = $own === true && $wide === true ? 'on-hold-both' : ($wide === true ? 'on-hold-installation' : 'on-hold');
+                $own    = ($rule['holdOwn'] ?? false) === true;
+                $wide   = ($rule['holdEverybody'] ?? false) === true;
+                $lifted = (string) GivingRetention::stateFor(
+                    ['hold' => false] + $rule,
+                    self::keptCountedFrom($facts, $live === true ? $keptRow : null)['date']
+                )['state'];
+                $state  = ($own === true && $wide === true ? 'on-hold-both' : ($wide === true ? 'on-hold-installation' : 'on-hold')) . ':' . $lifted;
             }
 
             // Which organisations will take the name off some of this
@@ -5201,20 +5208,35 @@ class GdprEraser
             $scope === GivingRetention::SCOPE_ALL   => 'because the organisation keeps the giver\'s name on every gift',
             default                                 => 'for tax reasons, because a tax declaration or giving statement of yours covers its date',
         };
-        $until = static fn (string $state): string => match ($state) {
-            'not-due'              => 'until the organisation\'s keep-until date',
-            'not-confirmed'        => 'with no end date yet: the organisation has not confirmed how many years it keeps such records, and nothing is cleared until it does',
-            // Round 11: a hold is not an upper limit. Once it is lifted a
-            // confirmed, not-yet-due record is still kept until its date.
-            'on-hold'              => 'for as long as the organisation\'s hold is on, and once it is lifted, until the organisation\'s '
-                . 'keep-until date if it has confirmed one (or with no end date if it has not): nothing is cleared while the hold is on',
-            'on-hold-installation' => 'for as long as the hold on the whole installation is on, and once whoever runs it lifts it, until the '
-                . 'organisation\'s keep-until date if it has confirmed one (or with no end date if it has not): nothing is cleared while '
-                . 'that hold is on',
-            'on-hold-both'         => 'for as long as the organisation\'s hold or the hold on the whole installation is on, and once both are '
-                . 'lifted, until the organisation\'s keep-until date if it has confirmed one (or with no end date if it has not): nothing '
-                . 'is cleared while either hold is on',
-            default                => 'with no date it could be cleared on worked out, so nothing is cleared',
+        // A hold is "<whose>:<what happens once it is lifted>" (round 12): a hold
+        // is not an upper limit, and what follows it depends on the rule
+        // without it - kept until the date, kept with no end date, or (the date
+        // having passed) the name goes as the erasure runs or at the next
+        // clear-out.
+        $until = static function (string $state): string {
+            [$hold, $lifted] = array_pad(explode(':', $state, 2), 2, '');
+            $held = match ($hold) {
+                'on-hold'              => ['for as long as the organisation\'s hold is on', 'once it is lifted', 'while the hold is on'],
+                'on-hold-installation' => ['for as long as the hold on the whole installation is on', 'once whoever runs it lifts it', 'while that hold is on'],
+                'on-hold-both'         => ['for as long as the organisation\'s hold or the hold on the whole installation is on', 'once both are lifted', 'while either hold is on'],
+                default                => null,
+            };
+            if ($held === null) {
+                return match ($hold) {
+                    'not-due'       => 'until the organisation\'s keep-until date',
+                    'not-confirmed' => 'with no end date yet: the organisation has not confirmed how many years it keeps such records, and nothing is cleared until it does',
+                    default         => 'with no date it could be cleared on worked out, so nothing is cleared',
+                };
+            }
+            $after = match ($lifted) {
+                'not-due'       => 'until the organisation\'s keep-until date',
+                'not-confirmed' => 'with no end date until the organisation confirms how many years it keeps such records',
+                'due'           => 'the name goes - as the erasure runs, or at the next nightly clear-out after that if that scheduled job has been '
+                    . 'set up - because the keep-until date has already passed',
+                default         => 'with no date it could be cleared on worked out',
+            };
+
+            return $held[0] . ', and ' . $held[1] . ', ' . $after . ': nothing is cleared ' . $held[2];
         };
         $noun  = static fn (int $n): string => $n . ' ' . $kind . ($n === 1 ? '' : 's');
         $names = static fn (array $list): string => count($list) <= 1
@@ -5267,8 +5289,8 @@ class GdprEraser
                     // the kept-donor row beside it (tblGivingKeptDonors), and
                     // clearKeptGivingIdentity() empties both.
                     default    => 'your tax declarations stay, with their dates and your account number, but the name kept beside them is '
-                        . 'removed and the address, the network address each was made from, the signature and any notes on them are '
-                        . 'emptied, ',
+                        . 'removed and the address and postcode, the network address each was made from, the signature and any notes on '
+                        . 'them are emptied, ',
                 } . implode('; ', $causes)
                     . ($kind !== 'declaration' && $outlook['keep'] === 0 && $otherKeep === 0
                         ? '. None of your gifts' . ($kind === 'envelope' ? ' or envelopes' : '') . ' will keep your name'
