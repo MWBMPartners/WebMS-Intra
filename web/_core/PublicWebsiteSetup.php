@@ -1696,11 +1696,16 @@ final class PublicWebsiteSetup
      * SameSite=Lax. So it is NEVER sent to a public address (another host),
      * and never to a website's own server reading a feed; and the pasted
      * script's own feed requests are made without cookies, so the script
-     * shows nothing to anybody. But a FRAME pasted into a website that
-     * shares the portal's registrable domain (www.example.org beside
-     * portal.example.org) IS sent it, so a tester signed in here sees a
-     * framed copy there. The public never does. The words say exactly that,
-     * and claim no "never" a browser does not guarantee.
+     * shows nothing to anybody. The words say exactly that.
+     *
+     * ⚠️ THESE SENTENCES SAY NOTHING ABOUT FRAMES, on purpose (round 4 of
+     *    P4d's check). Whether a framed copy shows anything depends on the
+     *    browser's cookie rules AND on the framing list and the
+     *    installation's framing switch, which this method is not given; a
+     *    sentence about frames here was untrue two rounds running (first a
+     *    "never", then a promise the framing rule refuses by default). Frames
+     *    are the framing card's business, which knows its list. The
+     *    self-test fails if a sentence here mentions a frame.
      *
      * "Until it is opened to anybody" is always followed by who decides it,
      * which is true whoever is reading, so no sentence depends on the viewer.
@@ -1758,7 +1763,6 @@ final class PublicWebsiteSetup
                     : 'Testers can try the door at ' . $wp . ' (posters), in a browser signed in here; Calendar and Events is '
                         . 'switched off for your organisation, so the door gives no events.'));
         $firstTry = $cal === true ? $we : $wp;
-        $sameSite = 'a website that shares this portal\'s domain name (such as www.example.org beside portal.example.org)';
 
         $out = ['alert' => null, 'card' => null, 'reachRow' => null, 'doorRow' => '', 'savedChoice' => '', 'savedChoiceType' => 'warning',
             'savedLimit' => '', 'savedLimitType' => 'success'];
@@ -1792,7 +1796,7 @@ final class PublicWebsiteSetup
         } elseif ($cal === false && $nb === false) {
             // 3️⃣ On, with nothing to show.
             $out['card']    = 'Your public door is on, but Calendar and Events and the Noticeboard are both switched off for your '
-                . 'organisation, so it has nothing to show: every feed, script, framed page and picture it serves answers nothing, '
+                . 'organisation, so it has nothing to show: its feeds, its script, its page and its pictures all answer nothing, '
                 . 'whatever is chosen here.';
             $out['doorRow'] = $notTested . ' With Calendar and Events and the Noticeboard both switched off for your organisation, '
                 . 'the door has nothing to show, so a website gets nothing from it.';
@@ -1810,8 +1814,9 @@ final class PublicWebsiteSetup
                     . 'included — answers anybody, whatever is chosen here, until that gate is switched back on. Every answer '
                     . 'from the door tells search engines not to list it.' . $appsNote;
             } elseif ($rule === self::DOOR_TEST_ANYBODY) {
-                $out['card'] = 'Your public door here answers anybody on the internet, so a copy pasted into a real website shows '
-                    . 'what it gives. Every answer from the door tells search engines not to list it.' . $appsNote;
+                $out['card'] = 'Your public door here answers anybody on the internet, so a script pasted into a real website, and a '
+                    . 'website reading its feeds, get what it gives. Every answer from the door tells search engines not to list it.'
+                    . $appsNote;
                 $out['savedChoiceType'] = 'success';
             }
         } else {
@@ -1820,13 +1825,11 @@ final class PublicWebsiteSetup
             $publicNobody = 'your public address, ' . $host . ', answers nobody, because a browser never sends that sign-in there';
             if ($we !== '') {
                 $out['card'] = 'Your public door here answers only people signed in to this test copy who may use it, so the public '
-                    . 'sees nothing from it. A tester signed in here sees it at its address on the portal\'s own address, such as '
-                    . $firstTry . ', and in a frame using that address on ' . $sameSite . ' — nowhere else: a pasted script shows '
-                    . 'nothing, a website\'s own server gets nothing' . ($host !== '' ? ', and ' . $publicNobody : '') . ','
-                    . $until . '.' . $appsNote;
+                    . 'sees nothing from it. A tester signed in here can open it directly at its address on the portal\'s own '
+                    . 'address, such as ' . $firstTry . '; a pasted script shows nothing, a website\'s own server gets nothing'
+                    . ($host !== '' ? ', and ' . $publicNobody : '') . ',' . $until . '.' . $appsNote;
                 $out['doorRow'] = $notTested . ' On this test copy the public sees nothing from the door: it answers only people '
-                    . 'signed in here. A tester signed in here may see it in a frame using its address on the portal\'s own address '
-                    . 'on ' . $sameSite . ', but a pasted script shows nothing and a website\'s own server gets nothing'
+                    . 'signed in here, a pasted script shows nothing and a website\'s own server gets nothing'
                     . ($host !== '' ? ', and ' . $publicNobody : '') . '.' . $appsNote;
                 $out['alert'] = $host !== ''
                     ? 'This is a test copy, and its public door answers only people signed in here who may use the test copy, so '
@@ -1834,9 +1837,8 @@ final class PublicWebsiteSetup
                         . 'browser never sends that sign-in to — so they answer nobody, and neither does any copy pasted into a '
                         . 'website that uses them,' . $until . '. ' . $try
                     : 'This is a test copy, and its public door answers only people signed in here who may use the test copy, so '
-                        . 'the public sees nothing from it. Opened in a browser signed in here, the addresses above show what '
-                        . 'testers get; a frame using them on ' . $sameSite . ' shows it to a tester signed in here too, but '
-                        . 'nowhere else, and a pasted script shows nothing,' . $until . '. ' . $try;
+                        . 'the public sees nothing from it. Opened directly in a browser signed in here, the addresses above show '
+                        . 'what testers get; a pasted script shows nothing,' . $until . '. ' . $try;
             } else {
                 // A public address only: a browser never sends the sign-in there.
                 $out['card'] = 'Your public door here answers only people signed in to this test copy who may use it, so the public '

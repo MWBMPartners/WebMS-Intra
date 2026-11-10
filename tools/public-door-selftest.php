@@ -168,7 +168,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 309; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28
+const PDS_EXPECTED_CHECKS = 309; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -3164,18 +3164,26 @@ foreach ($uTable as $i => $f) {
     if (($w['reachRow'] !== null) !== $skip) {
         $why[] = 'the reach row skipped or fetched wrongly';
     }
-    // What a browser really sends (round 3, measured): never a "never" about
-    // scripts, feeds or frames on another website; a testers-only door with a
-    // /w/ address names the same-domain frame.
-    if (str_contains($all, 'never sends that sign-in to a script') === true || str_contains($all, 'to a script, a feed or a frame') === true) {
-        $why[] = 'claims a frame on another website never gets the sign-in';
+    // NO FRAME CLAIM, of any kind (round 4 of P4d's check): the sentence about
+    // frames was untrue two rounds running — a "never" the browser does not
+    // keep, then a promise the framing rule refuses by default. Whether a frame
+    // shows anything is the framing card's business; these sentences say who
+    // the door answers, and where a tester can open it DIRECTLY.
+    if (preg_match('/fram/i', $all) === 1) {
+        $why[] = 'says something about frames';
     }
-    if ($class === 'testers' && $f['wEvents'] !== '' && (str_contains((string) $w['card'], 'shares this portal\'s domain name') === false
-        || str_contains($w['doorRow'], 'shares this portal\'s domain name') === false || str_contains($w['doorRow'], 'a website gets nothing') === true)) {
-        $why[] = 'a testers-only door does not say a tester may see a same-domain frame';
+    if (str_contains($all, 'never sends that sign-in to a script') === true) {
+        $why[] = 'claims a browser never sends the sign-in to a script';
     }
+    if ($class === 'testers' && $f['wEvents'] !== '' && (str_contains((string) $w['card'], 'can open it directly at its address on the portal\'s own address') === false
+        || str_contains($w['doorRow'], 'a pasted script shows nothing and a website\'s own server gets nothing') === false
+        || str_contains($w['doorRow'], 'a website gets nothing') === true)) {
+        $why[] = 'a testers-only door does not say where a tester opens it, or that a script and a website\'s server get nothing';
+    }
+    // Round 4's finding P9: the door row too.
     if ($class === 'testers' && $f['public'] !== '' && (str_contains((string) $w['card'], $f['public'] . ', answers nobody') === false
-        || str_contains((string) $w['alert'], 'so they answer nobody') === false || str_contains((string) $w['reachRow'], $f['public'] . ' answers nobody here') === false)) {
+        || str_contains((string) $w['alert'], 'so they answer nobody') === false || str_contains((string) $w['reachRow'], $f['public'] . ' answers nobody here') === false
+        || str_contains($w['doorRow'], $f['public'] . ', answers nobody') === false)) {
         $why[] = 'a testers-only public address not said to answer nobody';
     }
     if ($f['public'] !== '' && str_contains($all, 'https://' . $f['public']) === true) {
@@ -3206,8 +3214,8 @@ foreach ($uTable as $i => $f) {
             $why[] = 'one app off, not said';
         }
     }
-    if (str_contains($all, ' works') === true) {
-        $why[] = 'says a pasted copy "works"';
+    if (str_contains($all, ' works') === true || str_contains($all, 'a copy pasted into a real website') === true) {
+        $why[] = 'promises what a pasted copy does';
     }
     if ($f['rule'] !== 'live') {
         if ($w['savedChoice'] !== 'Saved: your choice is ' . ($f['choice'] === 'anybody' ? 'open to anybody' : 'signed-in testers only') . '. ' . $w['card']) {
@@ -3375,29 +3383,61 @@ foreach ($uCombos as $label => $facts) {
 check('U27 over real HTTP, in every one of ' . count($uCombos) . ' states a page can be in (the live portal and a test copy for testers, open to anybody, or with its gate off; × the door off, its name spoiled, its state unreadable, a public address and a /w/ address, a public address only, a /w/ address only, no address, Calendar off, both apps off), the door card\'s warning, the test-copy card\'s sentence and the set-up check\'s door and reach rows are EXACTLY doorReachWords()\'s for that state — each read from its own element',
     [count($uCombos), $uMismatch], [36, []]);
 
-// U28 (round 3's plant D): the choice's save message must describe the state
-// the save LEFT. Each change of choice is POSTED, with and without a public
-// address, and the message and its colour compared with doorReachWords() for
-// the facts AFTER the save — which differ from those before, because the
-// choice changes the rule.
+// U28 (round 3's plant D; round 4's plant P3): the choice's save message must
+// describe the state the save LEFT, in the colour that state calls for. Each
+// change of choice is POSTED and the message compared with doorReachWords()
+// for the facts AFTER the save, and the colour the HANDLER returned compared
+// with a colour written here — four transitions end green, three must end
+// AMBER (the door off, a public address only, the test copy's gate off), so a
+// handler that always answered green fails.
 $channel = 'alpha';
 $startServer();
 $waitForServer();
 $setInstallation('public.door.testCopies.permitted', 'either');
 $uTransitions = [];
-foreach ([true, false] as $withPublic) {
-    $db->query('UPDATE `tblPublicHosts` SET `approvedAtUtc` = ' . ($withPublic === true ? 'UTC_TIMESTAMP()' : 'NULL') . " WHERE `siteID` = {$siteA}");
-    foreach ([['testers', 'anybody'], ['anybody', 'testers']] as [$from, $to]) {
-        $setOwn($siteA, 'public.door.testCopies.open', $from);
-        $page  = $card('root', 'door_test_choice', ['value' => $to])['page'];
-        $after = ['rule' => $to, 'door' => 'on', 'public' => $withPublic === true ? $hostA : '',
-            'wEvents' => $base . '/w/' . (string) $doorName($siteA) . '/events.json', 'wPosters' => $base . '/w/' . (string) $doorName($siteA) . '/posters.json',
-            'calendar' => true, 'noticeboard' => true, 'choice' => $to];
-        $words = ($uWords([$after]))[0];
-        $colour = preg_match('#<div class="alert alert-([a-z]+)" role="alert">#', $page, $m) === 1 ? $m[1] : '';
-        $uTransitions[$from . ' → ' . $to . ($withPublic === true ? ', with a public address' : ', no public address')] =
-            [$uFlash($page) === $words['savedChoice'], $colour === $words['savedChoiceType'], $uOwnRow($siteA, 'public.door.testCopies.open')];
+$uSlots = [
+    'testers → anybody, with a public address' => ['testers', 'anybody', 'public and /w/'],
+    'anybody → testers, with a public address' => ['anybody', 'testers', 'public and /w/'],
+    'testers → anybody, no public address'     => ['testers', 'anybody', '/w/ only'],
+    'anybody → testers, no public address'     => ['anybody', 'testers', '/w/ only'],
+    'testers → anybody, the door off'          => ['testers', 'anybody', 'door off'],
+    'anybody → testers, a public address only' => ['anybody', 'testers', 'public only'],
+    'testers → anybody, the gate off'          => ['testers', 'anybody', 'gate off'],
+];
+foreach ($uSlots as $label => [$from, $to, $where]) {
+    $name = (string) $doorName($siteA);
+    $db->query('UPDATE `tblPublicHosts` SET `approvedAtUtc` = ' . ($where === '/w/ only' ? 'NULL' : 'UTC_TIMESTAMP()') . " WHERE `siteID` = {$siteA}");
+    if ($where === 'public only') {
+        $setInstallation('site.url', null);
     }
+    if ($where === 'door off') {
+        $uDoorOff(true);
+    }
+    if ($where === 'gate off') {
+        $setInstallation('portal.gatekeeper.enabled', 'false');
+    }
+    $setOwn($siteA, 'public.door.testCopies.open', $from);
+    try {
+        $page = $card('root', 'door_test_choice', ['value' => $to])['page'];
+    } finally {
+        if ($where === 'public only') {
+            $setInstallation('site.url', $base);
+        }
+        if ($where === 'door off') {
+            $uDoorOff(false);
+        }
+        if ($where === 'gate off') {
+            $setInstallation('portal.gatekeeper.enabled', $uGateKept);
+        }
+    }
+    $wOk   = $where === 'public and /w/' || $where === '/w/ only' || $where === 'gate off';
+    $after = ['rule' => $where === 'gate off' ? 'ungated' : $to, 'door' => $where === 'door off' ? 'off' : 'on',
+        'public' => $where === '/w/ only' ? '' : $hostA,
+        'wEvents' => $wOk === true ? $base . '/w/' . $name . '/events.json' : '', 'wPosters' => $wOk === true ? $base . '/w/' . $name . '/posters.json' : '',
+        'calendar' => true, 'noticeboard' => true, 'choice' => $to];
+    $words  = ($uWords([$after]))[0];
+    $colour = preg_match('#<div class="alert alert-([a-z]+)" role="alert">#', $page, $m) === 1 ? $m[1] : '';
+    $uTransitions[$label] = [$uFlash($page) === $words['savedChoice'], $colour, $words['savedChoiceType'], $uOwnRow($siteA, 'public.door.testCopies.open')];
 }
 $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
 $setOwn($siteA, 'public.door.testCopies.open', null);
@@ -3405,9 +3445,16 @@ $setInstallation('public.door.testCopies.permitted', 'testers');
 $channel = 'prod';
 $startServer();
 $waitForServer();
-check('U28 each change of choice, POSTED with and without a public address — testers → anybody and anybody → testers — stores the new choice, and its message and colour are doorReachWords()\'s for the state AFTER the save',
-    $uTransitions, ['testers → anybody, with a public address' => [true, true, 'anybody'], 'anybody → testers, with a public address' => [true, true, 'testers'],
-        'testers → anybody, no public address' => [true, true, 'anybody'], 'anybody → testers, no public address' => [true, true, 'testers']]);
+check('U28 each change of choice, POSTED in ' . count($uSlots) . ' states, stores the new choice; its message is doorReachWords()\'s for the state AFTER the save; and the colour the HANDLER returned is green where the door answers somebody and AMBER where it does not (the door off, a public address only, the test copy\'s gate off)',
+    $uTransitions, [
+        'testers → anybody, with a public address' => [true, 'success', 'success', 'anybody'],
+        'anybody → testers, with a public address' => [true, 'success', 'success', 'testers'],
+        'testers → anybody, no public address'     => [true, 'success', 'success', 'anybody'],
+        'anybody → testers, no public address'     => [true, 'success', 'success', 'testers'],
+        'testers → anybody, the door off'          => [true, 'warning', 'warning', 'anybody'],
+        'anybody → testers, a public address only' => [true, 'warning', 'warning', 'testers'],
+        'testers → anybody, the gate off'          => [true, 'warning', 'warning', 'anybody'],
+    ]);
 
 // =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario re-run\n";
