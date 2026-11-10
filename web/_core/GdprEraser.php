@@ -217,10 +217,15 @@ class GdprEraser
             //    than a tidy one — and if the column is ever made emptiable,
             //    the decision above is what must be reconsidered first.
             //
-            //    What stops this naming the person in practice: the account row
-            //    itself is emptied at the end of the run, so the claim points
-            //    at an account that names nobody. The NUMBER remains, which is
-            //    why this is a retention decision and not a no-op.
+            //    The account row itself is emptied at the end of the run, so
+            //    the claim points at an account with no name on it. The NUMBER
+            //    remains, which is why this is a retention decision and not a
+            //    no-op - and since #703 that is NOT enough to stop the claim
+            //    naming the person (D-113): if they made pastoral visits, opened
+            //    care cases, recorded DBS checks or checked children in or out,
+            //    those records keep their NAME beside the same number on
+            //    purpose (D-016, D-110, D-111), so anyone who can read the
+            //    database or a backup can match the claim back to them.
             ['table' => 'tblExpenseClaims',    'userCol' => 'userID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'an expense claim is a financial record kept for six years because HMRC requires it, and the claimant is deliberately kept with it (the owner, 3 November 2026): a claim that cannot say who was paid is of little use as one. The database also will not allow this column to be empty, so the attempt fails and the trail records that'],
             // 🧾 KEPT, since roll-out package A2b (Salem874, 11 October 2026).
             //    This line said 'anonymise' until then: every gift lost its
@@ -505,8 +510,22 @@ class GdprEraser
             // nothing but these two lines ever would.
             // What this does NOT do: `pickupName` is a name typed by hand and
             // may spell this person's name. Nothing ties it to an account.
-            ['table' => 'tblKidCheckins',      'userCol' => 'checkedInByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the check-in is the child\'s record and stays; who checked them in is detached'],
-            ['table' => 'tblKidCheckins',      'userCol' => 'checkedOutByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the check-in is the child\'s record and stays; who checked them out is detached'],
+            //
+            // 🧾 BOTH HELPERS ARE KEPT NOW (#703, the owner's decision D-111,
+            //    10 November 2026, extending D-016): who handed a child over,
+            //    and to whom, stays answerable after the helper leaves. From
+            //    11 October 2026 until #703 these two lines DETACHED the helper
+            //    ("anonymise"); D-111 rules that out. Each is a "retain" now,
+            //    and the helper's NAME is on the row (`checkedInByName`,
+            //    `checkedOutByName`, migration 272), written by
+            //    `kids/checkin-do.php` and `kids/checkout.php` from the
+            //    helper's own account, because the account itself is still
+            //    emptied and its number alone would point at "[Deleted User]".
+            //    Nothing in this list empties either name. The account number
+            //    stays too, and D-113 says what that costs: through these rows
+            //    an erased helper can be re-identified on their other records.
+            ['table' => 'tblKidCheckins',      'userCol' => 'checkedInByID',  'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked in keep your name as the helper who checked them in, even after your account is erased. This is kept on purpose (decision D-111): who handed a child over must stay answerable. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
+            ['table' => 'tblKidCheckins',      'userCol' => 'checkedOutByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'children you checked out keep your name as the helper who checked them out, even after your account is erased. This is kept on purpose (decision D-111): who handed a child over, and to whom, must stay answerable. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
 
             // #257 Pastoral Care Register. personUserID is the case SUBJECT
             // (the person being cared for) — anonymise rather than delete so
@@ -515,9 +534,10 @@ class GdprEraser
             // PII blanked" convention immediately above. nullCols also blanks
             // personName defensively even though the app never populates it
             // while personUserID is set (see tblCareCase's column comment).
-            // openedByID is the STAFF author who logged the case — anonymise
-            // for authorship-attribution-detached, mirroring
-            // tblAnnouncements/tblEvents/tblRecording above.
+            // openedByID is the STAFF author who logged the case. It was
+            // detached until #703, mirroring tblAnnouncements/tblEvents/
+            // tblRecording above; since the owner's decision D-110 it is KEPT,
+            // with the opener's name on `openedByName` (see its line below).
             //
             // tblCareVisit: a pastoral visit names who MADE it (`visitedByID`,
             // and since migration 272 `visitedByName`) and who its follow-up
@@ -538,6 +558,21 @@ class GdprEraser
             //    "[Deleted User]". `visitedByName` is written when the visit is
             //    made (`_apps/care/visit-save.php`), so the name survives the
             //    account without depending on any step of the erasure.
+            //
+            //    D-112 (the owner, 10 November 2026): this holds UNIFORMLY,
+            //    including a visit the worker made on their OWN case - their
+            //    name stays as the visitor even though that case's notes and
+            //    subject are emptied when they are erased. No special case.
+            //    Section 19 of `tools/gdpr-eraser-selftest.php` pins it.
+            //
+            //    D-113 (the owner, 10 November 2026): the account NUMBER stays
+            //    beside the name, on purpose, and the portal says so. The cost:
+            //    anyone who can read the database or a backup can match that
+            //    number to the name here, and so re-identify the erased worker
+            //    on every other record that kept their number (an expense
+            //    claim, a rate-limit record). The owner declined dropping the
+            //    number. Do not "fix" it by emptying the number - that is a NEW
+            //    decision, not a tidy-up.
             //
             //    `followUpAssignedToID` is NOT covered by D-016 and is still
             //    detached: being GIVEN a follow-up is not making the visit or
@@ -620,7 +655,12 @@ class GdprEraser
             //    all stay, so the organisation keeps its record that care was
             //    given.
             ['table' => 'tblCareCase',       'userCol' => 'personUserID', 'action' => 'anonymise', 'nullCols' => ['personName','summary'], 'reason' => 'the case is kept for pastoral and safeguarding continuity; the person\'s name and what the case says about them are emptied, as the visit notes already are (#715)'],
-            ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'anonymise', 'nullCols' => [], 'reason' => 'authorship attribution detached'],
+            // 🧾 WHO OPENED THE CASE IS KEPT (#703, the owner's decision D-110,
+            //    10 November 2026, extending D-016). Until #703 this line
+            //    detached them ("authorship attribution detached"). The name is
+            //    `openedByName` (migration 272), written by `care/case-save.php`,
+            //    because the opener's own account is still emptied.
+            ['table' => 'tblCareCase',       'userCol' => 'openedByID',   'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral care cases you opened keep your name as the person who opened them, even after your account is erased. This is kept on purpose (decision D-110): a pastoral record must still say who opened it. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
 
             // 🚪 Room bookings (#715, the owner's decision of 3 November 2026).
             //    `purpose` is the person's own stated reason for wanting the
@@ -665,7 +705,7 @@ class GdprEraser
             //    the #709 instruction. The reason is the sentence a worker
             //    reads on "Request data erasure", so it says plainly what
             //    they cannot expect.
-            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral visits you made keep your name as the person who made them, even after your account is erased. This is kept on purpose (decision D-016): a pastoral or safeguarding record must still say who carried it out. Your name and your account number are the only things about you on them'],
+            ['table' => 'tblCareVisit',      'userCol' => 'visitedByID',          'action' => 'retain',    'nullCols' => [], 'reason' => 'pastoral visits you made keep your name as the person who made them, even after your account is erased. This is kept on purpose (decision D-016): a pastoral or safeguarding record must still say who carried it out. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
             ['table' => 'tblCareVisit',      'userCol' => 'followUpAssignedToID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'the pastoral visit and its notes are kept with the case; who its follow-up was given to is detached'],
             ['table' => 'tblCareAccessLog',  'userCol' => 'viewerID',     'action' => 'delete'],
 
@@ -689,7 +729,7 @@ class GdprEraser
             //    `tblUsers` step and their number alone would point at
             //    "[Deleted User]". Nothing in this list empties it.
             ['table' => 'tblDbsChecks',      'userCol' => 'userID',       'action' => 'retain',    'nullCols' => [], 'reason' => 'Safeguarding record. Kept and flagged, never quietly removed (how long it is kept: as required by safeguarding policy)'],
-            ['table' => 'tblDbsChecks',      'userCol' => 'recordedByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'DBS checks you recorded keep your name as the person who recorded them, even after your account is erased. This is kept on purpose (decision D-016): a safeguarding check must still say who carried it out. Your name and your account number are the only things about you on them'],
+            ['table' => 'tblDbsChecks',      'userCol' => 'recordedByID', 'action' => 'retain',    'nullCols' => [], 'reason' => 'DBS checks you recorded keep your name as the person who recorded them, even after your account is erased. This is kept on purpose (decision D-016): a safeguarding check must still say who carried it out. Your name and your account number are the only things about you on them, and through that number your other kept records can be matched back to you'],
 
             // #393 Asset Tracker. tblAssetFoundReports is deliberately
             // NOT catalogued here — it's filled by the public, anonymous

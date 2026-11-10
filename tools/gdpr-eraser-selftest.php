@@ -226,7 +226,7 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 273; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 274; // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
@@ -264,7 +264,9 @@ const EXPECTED_CHECKS = 273; // 235 before section 19 (#709) added nine; the fix
                              // their own but somebody else typed in is DELETED.
                              // 270 + 2 = 272. #703 (D-016) added one: a DBS
                              // check the person RECORDED keeps their number
-                             // and name. 272 + 1 = 273.
+                             // and name. 272 + 1 = 273. #703 round 2 (D-110)
+                             // added one: a care case the person OPENED keeps
+                             // their number and name. 273 + 1 = 274.
 
 // The headings that must all be reached for a pass.
 const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
@@ -451,6 +453,11 @@ const KNOWN_STILL_NAMED = [
     //    emptied again, this exact list fails in the other direction.
     'kept by the owner\'s decision D-016: who made a pastoral visit or recorded a safeguarding check' => [
         'tblCareVisit.visitedByID', 'tblDbsChecks.recordedByID',
+    ],
+    // 🧾 #703 round 2: D-110 (who opened a care case) and D-111 (who checked a
+    //    child in or out), both 10 November 2026. Emptied until #703.
+    'kept by the owner\'s decisions D-110 and D-111: who opened a care case, and who checked a child in or out' => [
+        'tblCareCase.openedByID', 'tblKidCheckins.checkedInByID', 'tblKidCheckins.checkedOutByID',
     ],
     // (A group of 37 columns stood here on 11 October 2026: every table's
     // SECOND "who did it" column, #492. 31 were built that day. The last six
@@ -1542,7 +1549,13 @@ function ge_buildLinked(int $p): array
 
     // 🧒 C's child, checked in by C and checked OUT by the person.
     $r['child']          = ge_linked('tblKidProfiles', ['parentUserID' => C], ['fullName' => 'Kit Control']);
-    $r['checkin']        = ge_linked('tblKidCheckins', ['checkedInByID' => C, 'checkedOutByID' => $p], ['childID' => ge_id($r['child'])]);
+    // 🧾 #703 (D-111): a check-in carries both helpers' NAMES, read from their
+    //    own accounts exactly as `kids/checkin-do.php` and `kids/checkout.php`
+    //    write them (both driven over HTTP by erasure-pages-selftest.php).
+    $helperName = static fn (int $id): string => (string) ge_one('SELECT fullName FROM tblUsers WHERE userID = ?', 'i', [$id])['fullName'];
+    $r['checkin']        = ge_linked('tblKidCheckins', ['checkedInByID' => C, 'checkedOutByID' => $p], ['childID' => ge_id($r['child']), 'checkedInByName' => $helperName(C), 'checkedOutByName' => $helperName($p)]);
+    // ...and one the person checked IN, somebody else checked out.
+    $r['checkinByPerson'] = ge_linked('tblKidCheckins', ['checkedInByID' => $p, 'checkedOutByID' => D], ['childID' => ge_id($r['child']), 'checkedInByName' => $helperName($p), 'checkedOutByName' => $helperName(D)]);
 
     // 📝 A child's event registration that C submitted and the person only
     //    REVIEWED. It holds the child's medical details, and a registration
@@ -1589,7 +1602,10 @@ function ge_buildLinked(int $p): array
     //    fixture in a state production cannot reach would prove nothing, so
     //    the name is the account's, not a made-up string.
     $nameOf = static fn (int $id): string => (string) ge_one('SELECT fullName FROM tblUsers WHERE userID = ?', 'i', [$id])['fullName'];
-    $r['case']           = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => D]);
+    $r['case']           = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => D], ['openedByName' => $nameOf(D)]);
+    // 🧾 #703 (D-110): a case about C that the PERSON opened. Kept whole, with
+    //    their number AND name as the one who opened it.
+    $r['caseOpened']     = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => $p], ['openedByName' => $nameOf($p), 'summary' => 'Cal has been bereaved.']);
     $r['visitByPerson']  = ge_linked('tblCareVisit', ['visitedByID' => $p, 'followUpAssignedToID' => D], ['caseID' => ge_id($r['case']), 'notes' => 'Visited Cal at home.', 'visitedByName' => $nameOf($p)]);
     $r['visitFollowUp']  = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => $p], ['caseID' => ge_id($r['case']), 'notes' => 'Cal asked for a call next week.', 'visitedByName' => $nameOf(D)]);
     // 🛡️ #703 (D-016): a DBS check the person RECORDED, for C. Kept whole, with
@@ -1708,7 +1724,9 @@ function ge_buildLinked(int $p): array
         //    person MADE now comes through the erasure byte for byte, number
         //    and name, and section 4 holds it to that. 'dbsByPerson' was never
         //    on it, for the same reason.
-        'slotOfPerson', 'slotOfC', 'swapWaiting', 'swapAccepted', 'checkin', 'visitFollowUp', 'payment',
+        //    'checkin' LEFT it too with #703 round 2 (D-111): a check-in the
+        //    person checked out now comes through byte for byte as well.
+        'slotOfPerson', 'slotOfC', 'swapWaiting', 'swapAccepted', 'visitFollowUp', 'payment',
         'pledge', 'giftToPledge', 'zoomOfPerson', 'meetingViaPerson', 'meetingViaC'];
 
     return ['refs' => $r, 'before' => $before, 'mayChange' => $mayChange];
@@ -2585,9 +2603,17 @@ ge_ok('...one already accepted keeps its status (that is history), and a request
 //    they are the proof that a worker's own erasure does not destroy a third
 //    party's safeguarding record. If the parent column were ever pointed at an
 //    actor (`openedByID`, say), these are the clauses that would go red.
-ge_ok('a CHILD\'S CHECK-IN made by somebody else and checked OUT by the person loses only the check-out number; the child\'s profile is untouched',
-    ge_same($was['checkin'], $now['checkin'], ['checkedOutByID']) === true && $now['checkin']['checkedOutByID'] === null
-    && (int) $now['checkin']['checkedInByID'] === C && $now['child'] === $was['child'], json_encode($now['checkin']));
+// CHANGED by #703 round 2 (the owner's decision D-111, 10 November 2026): it
+// used to require the check-out number to be EMPTIED. Who checked a child in or
+// out is kept now, by number and name, so both check-ins come through whole.
+ge_ok('a CHILD\'S CHECK-IN the person checked OUT, and one they checked IN, are both kept whole - their number AND their name as the helper - while their account is emptied; the child\'s profile is untouched (#703, D-111)',
+    $now['checkin'] === $was['checkin'] && (int) $now['checkin']['checkedOutByID'] === P_A
+    && $now['checkin']['checkedOutByName'] === 'Pat Erased' && $now['checkin']['checkedInByName'] === 'Cal Control'
+    && $now['checkinByPerson'] !== null && $now['checkinByPerson'] === $was['checkinByPerson']
+    && (int) $now['checkinByPerson']['checkedInByID'] === P_A && $now['checkinByPerson']['checkedInByName'] === 'Pat Erased'
+    && $now['child'] === $was['child']
+    && ge_one('SELECT fullName FROM tblUsers WHERE userID = ?', 'i', [P_A])['fullName'] === GdprEraser::TOMBSTONE_NAME,
+    json_encode(['checkin' => $now['checkin'], 'checkinByPerson' => $now['checkinByPerson']]));
 ge_ok('an INVITATION the person ACCEPTED, which holds their own email address, is deleted; one they only SENT to somebody else is kept whole, with only who sent it detached',
     (int) $was['inviteAccepted']['acceptedByID'] === P_A && $now['inviteAccepted'] === null
     && ge_same($was['inviteSent'], $now['inviteSent'], ['createdByID']) === true && $now['inviteSent']['createdByID'] === null
@@ -2720,6 +2746,12 @@ ge_ok('a PASTORAL CASE about somebody else is untouched; a visit the person MADE
 // 🛡️ #703 (D-016): the safeguarding check the person RECORDED. Until #703 the
 //    derived "who handled it" instruction emptied `recordedByID`; it is now
 //    kept, and so is the name, which is what survives the emptied account.
+// 🧾 #703 round 2 (D-110): a pastoral case the person OPENED, about Cal.
+ge_ok('a PASTORAL CASE the person OPENED, about somebody else, is kept whole, with their number AND their name as the one who opened it (#703, D-110)',
+    $now['caseOpened'] !== null && $now['caseOpened'] === $was['caseOpened']
+    && (int) $now['caseOpened']['openedByID'] === P_A && $now['caseOpened']['openedByName'] === 'Pat Erased'
+    && (int) $now['caseOpened']['personUserID'] === C && $now['caseOpened']['summary'] === 'Cal has been bereaved.',
+    json_encode(['before' => $was['caseOpened'], 'after' => $now['caseOpened']]));
 ge_ok('a DBS CHECK the person RECORDED for somebody else is kept whole, with their number AND their name as the one who recorded it (#703, D-016)',
     $now['dbsByPerson'] !== null && $now['dbsByPerson'] === $was['dbsByPerson']
     && (int) $now['dbsByPerson']['recordedByID'] === P_A && $now['dbsByPerson']['recordedByName'] === 'Pat Erased'
@@ -5617,7 +5649,7 @@ $otherVisit = ge_linked('tblCareVisit', ['visitedByID' => P_CARE, 'followUpAssig
 //     third-party check passed because nothing had been emptied at all. A
 //     plant that will not go red for the right reason means the FIXTURE is
 //     dead, and a passing run cannot tell you which.
-$openedCase  = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => P_CARE], ['siteID' => 1, 'summary' => 'Cal is in hospital too']);
+$openedCase  = ge_linked('tblCareCase', ['personUserID' => C, 'openedByID' => P_CARE], ['siteID' => 1, 'summary' => 'Cal is in hospital too', 'openedByName' => 'Ces Cared']);
 $openedVisit = ge_linked('tblCareVisit', ['visitedByID' => D, 'followUpAssignedToID' => D],
     ['caseID' => ge_id($openedCase), 'notes' => 'Cal is comfortable; ward staff are kind.']);
 // 3. A case with nobody named on it, and a visit on it.
@@ -5688,10 +5720,12 @@ ge_ok('BOTH notes on the person\'s OWN case are emptied - the one they typed the
 //    rubble with every word of the note still in it. The colleague's number
 //    stays on the visit they made; only the erased person's own comes off.
 // CHANGED by #703 (D-016): the erased person's number as the VISITOR is kept
-// now, with their name, even on a visit to their own case. That one shape - a
-// person who is both the visitor and the subject of a case - is not settled by
-// D-016's words and is put to the owner on #703; as built, the rule is the
-// plain one, "who made a visit is kept".
+// now, with their name, even on a visit to their own case. That shape - a
+// person who is both the visitor and the subject of a case - is SETTLED by the
+// owner's decision D-112 (10 November 2026): keep it, uniformly, with no
+// special case, declining the option to remove the visitor's name when they
+// are the case's subject. This check is the pin D-112 names: if somebody adds
+// that special case, `visitedByID` here goes empty and this goes red.
 ge_ok('...and only the note changes: the visit keeps its date, its kind, its follow-up, its CASE and who made it (#703), and the colleague keeps their name on their own visit',
     ge_same($careWas['ownVisitA'], $careNow['ownVisitA'], ['notes']) === true
     && (int) $careNow['ownVisitA']['visitedByID'] === P_CARE
@@ -5728,8 +5762,10 @@ ge_ok('A VISIT THE ERASED PERSON MADE ON SOMEBODY ELSE\'S CASE KEEPS ITS NOTE, a
 ge_ok('A CASE THE ERASED PERSON OPENED, ABOUT SOMEBODY ELSE, KEEPS ITS VISIT NOTE: the case is Cal\'s record, and who opened it is not who it is about',
     $careNow['openedVisit']['notes'] === 'Cal is comfortable; ward staff are kind.'
     && ge_same($careWas['openedVisit'], $careNow['openedVisit']) === true
-    && ge_same($careWas['openedCase'], $careNow['openedCase'], ['openedByID']) === true
-    && $careNow['openedCase']['openedByID'] === null
+    // CHANGED by #703 round 2 (D-110): who opened the case is KEPT now, so
+    //    the case comes through whole; it used to require openedByID emptied.
+    && ge_same($careWas['openedCase'], $careNow['openedCase']) === true
+    && (int) $careNow['openedCase']['openedByID'] === P_CARE
     && (int) $careNow['openedCase']['personUserID'] === C,
     json_encode([$careNow['openedVisit'], $careNow['openedCase']]));
 

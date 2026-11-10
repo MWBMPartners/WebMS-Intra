@@ -181,9 +181,14 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 82; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 86; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
-                            // BY NAME, driven through the real pages.
+                            // BY NAME, driven through the real pages. #703 round 2
+                            // added four: the case page (D-110) and the check-in and
+                            // check-out pages (D-111) record the worker by name; a
+                            // renamed worker is shown under the name they have NOW;
+                            // and the privacy page says what keeping the number
+                            // costs (D-113). 82 + 4 = 86.
 
 function refuse(string $why): never
 {
@@ -345,6 +350,9 @@ const ROLE_DC_A = 917030; // the Data Controller role, A's own copy of it
 const ROLE_DC_B = 917031; // and B's
 const ROLE_CARE_A = 917032; // the Care Team role, A's own copy: given to Mel in section F, so she can record a visit through the real page (#703)
 const DBS_MEL     = 917213; // a DBS check Mel recorded for Cal (#703): it must keep her name after her erasure
+const ROLE_KIDS_A = 917033; // the Kids Team role, A's own copy: given to Mel in section F, so she can check a child in (#703, D-111)
+const CHILD       = 917214; // a child in A, checked in by Mel and out by Ada through the real pages (#703, D-111)
+const VISIT_ADM   = 917215; // a visit Ada made under the name she had THEN: the page must show her name NOW (#703)
 
 const REQ_PIP_A = 917910; // Pip's request, filed in A (section J)
 const REQ_PIP_B = 917911; // Pip's request, filed in B
@@ -394,6 +402,8 @@ function removeWorld(): void
     q('DELETE FROM tblCareAccessLog WHERE caseID = ?', 'i', [CASE_ID]);
     q('DELETE FROM tblCareVisit WHERE caseID = ?', 'i', [CASE_ID]);
     q('DELETE FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999');
+    q('DELETE c FROM tblKidCheckins c JOIN tblKidProfiles k ON k.childID = c.childID WHERE k.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblKidProfiles WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblCareCase WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblExpenseClaimApprovals WHERE claimID = ?', 'i', [CLAIM]);
     q('DELETE FROM tblExpenseClaims WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
@@ -589,6 +599,11 @@ q("INSERT INTO tblCareCase (caseID, siteID, personUserID, summary, openedByID) V
 // DBS check Mel recorded, as `admin/safeguarding/dbs-save.php` writes it.
 q("INSERT INTO tblCareVisit (visitID, caseID, visitedByID, visitedByName, kind, notes) VALUES (?, ?, ?, 'Mel Member', 'visit', 'Visited Cal at home; in good spirits.')", 'iii', [VISIT, CASE_ID, MEL]);
 q("INSERT INTO tblDbsChecks (dbsCheckID, userID, dbsType, issuedDate, expiresAt, status, recordedByID, recordedByName) VALUES (?, ?, 'enhanced', '2025-01-10', '2028-01-10', 'valid', ?, 'Mel Member')", 'iii', [DBS_MEL, CAL, MEL]);
+// A visit Ada made when her account had another name (#703): the name written
+// on a visit is the name THEN, and while her account is live the page must
+// show the name she has NOW, so a renamed worker is not shown under an old one.
+q("INSERT INTO tblCareVisit (visitID, caseID, visitedByID, visitedByName, kind, notes) VALUES (?, ?, ?, 'Ada Earlier-Name', 'call', 'Ada rang Cal about the rota.')", 'iii', [VISIT_ADM, CASE_ID, ADM]);
+q('INSERT INTO tblKidProfiles (childID, siteID, fullName, isActive) VALUES (?, ?, ?, 1)', 'iis', [CHILD, ORG_A, 'Erasure child Kit']);
 q("INSERT INTO tblDepts (deptID, siteID, deptName, deptCode, isActive) VALUES (?, ?, 'Selftest erasure dept', 'SED', 1)", 'ii', [DEPT, ORG_A]);
 q("INSERT INTO tblExpenseClaims (claimID, siteID, userID, deptID, claimTitle, claimDate, totalAmount, status) VALUES (?, ?, ?, ?, 'ERASURE Cal claim', CURDATE(), 12.50, 'Approved')", 'iiii', [CLAIM, ORG_A, CAL, DEPT]);
 q("INSERT INTO tblExpenseClaimApprovals (claimID, userID, decision, comments) VALUES (?, ?, 'Approved', 'Receipts all present.')", 'ii', [CLAIM, MEL]);
@@ -934,12 +949,44 @@ $dbsForm  = req($jar['adm'], 'GET', '/admin/safeguarding/dbs');
 $dbsSaved = req($jar['adm'], 'POST', '/admin/safeguarding/dbs/save', ['csrf_token' => token($dbsForm['body']), 'userID' => (string) CAL,
     'dbsType' => 'basic', 'referenceNumber' => 'P703-DRIVEN', 'issuedDate' => '2026-01-05', 'expiresAt' => '2029-01-05', 'status' => 'valid']);
 $admDbs = one('SELECT recordedByID, recordedByName FROM tblDbsChecks WHERE userID = ? AND referenceNumber = ?', 'is', [CAL, 'P703-DRIVEN']);
+// 🧾 #703 round 2: D-110 (who opened a care case) and D-111 (who checked a
+//    child in, and out), each driven through its real page. Every accepted
+//    post replaces the form token, so each press reads a fresh one first.
+q("INSERT INTO `tblRoles` (`roleID`, `siteID`, `roleKey`, `roleName`, `description`, `isStandard`) VALUES (?, ?, 'kids_team', 'Kids Team', 'Runs children\'s check-in', 1)", 'ii', [ROLE_KIDS_A, ORG_A]);
+q('INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES (?, ?, ?)', 'iii', [MEL, ROLE_KIDS_A, ORG_A]);
+$careList  = req($jar['mel'], 'GET', '/care');
+$caseSaved = req($jar['mel'], 'POST', '/care/case-save', ['csrf_token' => token($careList['body']), 'category' => 'family', 'summary' => 'P703 a case Mel opened about a family', 'personName' => 'Fen Family']);
+$melCase   = one('SELECT caseID, openedByID, openedByName FROM tblCareCase WHERE siteID = ? AND summary = ?', 'is', [ORG_A, 'P703 a case Mel opened about a family']);
+ok('the care register records who OPENED a case by NAME as well as number, read from their own account (#703, D-110)',
+    $careList['status'] === 200 && $caseSaved['status'] === 302
+    && $melCase !== null && (int) $melCase['openedByID'] === MEL && $melCase['openedByName'] === 'Mel Member',
+    'list HTTP ' . $careList['status'] . ', save HTTP ' . $caseSaved['status'] . ' ' . $caseSaved['location'] . '; row: ' . json_encode($melCase));
+// The check-in button is drawn only beside a search result, so search first.
+$kidsForm  = req($jar['mel'], 'GET', '/kids/checkin?q=' . rawurlencode('Erasure child Kit'));
+$checkedIn = req($jar['mel'], 'POST', '/kids/checkin/do', ['csrf_token' => token($kidsForm['body']), 'childID' => (string) CHILD, 'eventID' => '0']);
+$badgeRow  = one('SELECT badgeCode FROM tblKidCheckins WHERE childID = ?', 'i', [CHILD]);
+$outForm   = req($jar['adm'], 'GET', '/kids/checkout');
+$checkedOut = req($jar['adm'], 'POST', '/kids/checkout', ['csrf_token' => token($outForm['body']), 'badgeCode' => (string) ($badgeRow['badgeCode'] ?? ''), 'pickupName' => 'Kit\'s grandmother']);
+$kidRow    = one('SELECT checkedInByID, checkedInByName, checkedOutByID, checkedOutByName FROM tblKidCheckins WHERE childID = ?', 'i', [CHILD]);
+ok('children\'s check-in records who checked a child IN and who checked them OUT by NAME as well as number, each read from their own account (#703, D-111)',
+    $kidsForm['status'] === 200 && $checkedIn['status'] === 302 && $outForm['status'] === 200 && $checkedOut['status'] === 200
+    && $kidRow !== null && (int) $kidRow['checkedInByID'] === MEL && $kidRow['checkedInByName'] === 'Mel Member'
+    && (int) $kidRow['checkedOutByID'] === ADM && $kidRow['checkedOutByName'] === 'Ada Admin',
+    'check-in form HTTP ' . $kidsForm['status'] . ', in HTTP ' . $checkedIn['status'] . ', out form HTTP ' . $outForm['status']
+    . ', out HTTP ' . $checkedOut['status'] . '; row: ' . json_encode($kidRow));
 ok('the DBS page records who recorded a check by NAME as well as number, read from their own account (#703)',
     $dbsForm['status'] === 200 && $dbsSaved['status'] === 302
     && $admDbs !== null && (int) $admDbs['recordedByID'] === ADM && $admDbs['recordedByName'] === 'Ada Admin',
     'form HTTP ' . $dbsForm['status'] . ', save HTTP ' . $dbsSaved['status'] . ' ' . $dbsSaved['location'] . '; row: ' . json_encode($admDbs));
 
 $was = $pages();
+// 🧾 #703: the name written on a visit is the name THEN. While the account is
+//    live the page shows the name it has NOW (`care/case.php` asks
+//    GdprEraser::emptiedAccountSql()), so this drives what the coverage test
+//    could only read as text.
+ok('while a worker\'s account is live, the pastoral page shows the name they have NOW, not the older name written on the visit (#703)',
+    str_contains($was['visit'], 'Ada rang Cal about the rota.') && str_contains($was['visit'], 'Ada Admin')
+    && str_contains($was['visit'], 'Ada Earlier-Name') === false, mb_substr($was['visit'], 0, 600));
 ok('before the run, five pages show records Mel worked on, each with Mel\'s name: a follow-up note, a pastoral visit, an approval on Cal\'s expense claim, a room booking, and that booking in the approvals queue',
     str_contains($was['note'], 'Rang Vera; she will come on Sunday.') && str_contains($was['note'], 'Mel Member')
     && str_contains($was['visit'], 'Visited Cal at home; in good spirits.') && str_contains($was['visit'], 'Mel Member')
@@ -969,11 +1016,13 @@ $kept = [
     'visit'    => one('SELECT notes, visitedByID, visitedByName FROM tblCareVisit WHERE visitID = ?', 'i', [VISIT]),
     'driven'   => one('SELECT visitedByID, visitedByName FROM tblCareVisit WHERE caseID = ? AND notes = ?', 'is', [CASE_ID, 'Mel rang Cal after the operation.']),
     'dbs'      => one('SELECT userID, recordedByID, recordedByName FROM tblDbsChecks WHERE dbsCheckID = ?', 'i', [DBS_MEL]),
+    'case'     => one('SELECT openedByID, openedByName FROM tblCareCase WHERE siteID = ? AND summary = ?', 'is', [ORG_A, 'P703 a case Mel opened about a family']),
+    'checkin'  => one('SELECT checkedInByID, checkedInByName, checkedOutByID, checkedOutByName FROM tblKidCheckins WHERE childID = ?', 'i', [CHILD]),
     'approval' => one('SELECT decision, comments, userID FROM tblExpenseClaimApprovals WHERE claimID = ?', 'i', [CLAIM]),
     'booking'  => one('SELECT purpose, status, bookedByID FROM tblResourceBooking WHERE bookingID = ?', 'i', [BOOKING]),
     'giftAid'  => one('SELECT donorID, address FROM tblGiftAidDeclaration WHERE declarationID = ?', 'i', [GIFTAID]),
 ];
-ok('other people\'s records are all still in the database, each with only Mel\'s number taken off: the visitor, the note, the approval, the booking; Cal\'s Gift Aid declaration is untouched; and the two pastoral visits and the DBS check Mel made KEEP her number and her name (#703, D-016)',
+ok('other people\'s records are all still in the database, each with only Mel\'s number taken off: the visitor, the note, the approval, the booking; Cal\'s Gift Aid declaration is untouched; and the two pastoral visits, the DBS check, the care case and the child\'s check-in Mel made KEEP her number and her name (#703; D-016, D-110, D-111)',
     $kept === [
         'visitor'  => ['fullName' => 'Vera Visitor', 'assignedToID' => null],
         'note'     => ['summary' => 'Rang Vera; she will come on Sunday.', 'contactedByID' => null],
@@ -983,6 +1032,9 @@ ok('other people\'s records are all still in the database, each with only Mel\'s
         'visit'    => ['notes' => 'Visited Cal at home; in good spirits.', 'visitedByID' => MEL, 'visitedByName' => 'Mel Member'],
         'driven'   => ['visitedByID' => MEL, 'visitedByName' => 'Mel Member'],
         'dbs'      => ['userID' => CAL, 'recordedByID' => MEL, 'recordedByName' => 'Mel Member'],
+        // #703 round 2: the case Mel opened (D-110) and the child she checked in (D-111).
+        'case'     => ['openedByID' => MEL, 'openedByName' => 'Mel Member'],
+        'checkin'  => ['checkedInByID' => MEL, 'checkedInByName' => 'Mel Member', 'checkedOutByID' => ADM, 'checkedOutByName' => 'Ada Admin'],
         'approval' => ['decision' => 'Approved', 'comments' => 'Receipts all present.', 'userID' => null],
         // 🔁 CHANGED BY #723 (3 November 2026): the booker's stated reason is
         //    emptied now. It used to expect 'Welcome team supper' to survive —
@@ -1028,6 +1080,13 @@ ok('the booking is still in the administrator\'s approvals queue, waiting for a 
     str_contains($now['bookings'], 'Requested by somebody no longer recorded')
     && str_contains($now['bookings'], 'Welcome team supper') === false
     && str_contains($now['bookings'], 'Purpose:') === false, mb_substr($now['bookings'], 0, 500));
+// 🗣️ D-113: the page every member can open says what keeping the number costs.
+$privacyNow = text(req($jar['cal'], 'GET', '/privacy/policy')['body']);
+ok('the PRIVACY page tells a worker plainly that their name and number stay on the records they made, and that through them their other kept records can be matched back to them (#703, D-113)',
+    str_contains($privacyNow, 'keep your name and account number as the person who did it, even after you are erased')
+    && str_contains($privacyNow, 'could use them to tell which of your other kept records')
+    && str_contains($privacyNow, 'your name and the link to you are removed, and the amounts and dates stay') === false,
+    mb_substr($privacyNow, (int) strpos($privacyNow, 'Retention policy'), 900));
 $back = $signIn('mel', 'mel-again');
 ok('Mel cannot sign in again', $back['status'] !== 302 || str_contains($back['location'], 'login') === true, 'HTTP ' . $back['status'] . ' ' . $back['location']);
 $lines = auditLines($melRequest);
@@ -1962,6 +2021,7 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblGivingEntry WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblGivingCategory WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblGivingKeptDonors WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999) '
+    . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID = ' . CHILD . ') '
     // 🧑‍⚖️ Section J's own rows (#732). Counted here as well, because the links
     //    are switched off while the world is removed, so nothing is taken away
     //    by a parent going: each has to be deleted by name or it is left

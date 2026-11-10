@@ -40,12 +40,21 @@ if ($summary === '') {
     exit();
 }
 
+// 🧾 WHO OPENED THE CASE IS WRITTEN BY NAME as well as by number (#703, the
+//    owner's decision D-110, migration 272). An erasure KEEPS who opened a
+//    pastoral case, and it empties that person's own account row, so a kept
+//    NUMBER alone would point at "[Deleted User]". The name is read from the
+//    account in the same statement, never from the session, by a sub-query so
+//    the statement writes exactly one row whatever it finds.
+//    `tools/gdpr-coverage-selftest.php` pins this statement and
+//    `tools/erasure-pages-selftest.php` drives it.
 try {
     $stmt = $db->prepare(
-        'INSERT INTO tblCareCase (siteID, personName, category, summary, openedByID) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO `tblCareCase` (`siteID`, `personName`, `category`, `summary`, `openedByID`, `openedByName`) '
+        . 'SELECT ?, ?, ?, ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?)'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('isssi', $siteId, $person, $category, $summary, $userId);
+        $stmt->bind_param('isssii', $siteId, $person, $category, $summary, $userId, $userId);
         $stmt->execute();
         $stmt->close();
     }

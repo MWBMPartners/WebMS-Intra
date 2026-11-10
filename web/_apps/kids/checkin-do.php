@@ -78,8 +78,19 @@ if ($eventIdArg !== null) {
     }
 }
 
-$stmt = $mysqli->prepare('INSERT INTO tblKidCheckins (childID, eventID, badgeCode, checkedInByID) VALUES (?, ?, ?, ?)');
-$stmt->bind_param('iisi', $childId, $eventIdArg, $badge, $staffId);
+// 🧾 WHO CHECKED THE CHILD IN IS WRITTEN BY NAME as well as by number (#703,
+//    the owner's decision D-111, migration 272). An erasure KEEPS the helper on
+//    a check-in, and it empties the helper's own account row, so a kept NUMBER
+//    alone would point at "[Deleted User]". The name is read from the account
+//    in the same statement, never from the session, by a sub-query so the
+//    statement writes exactly one row whatever it finds. This is the ONE place
+//    a check-in row is made (`kids/checkout.php` only updates one);
+//    `tools/gdpr-coverage-selftest.php` searches for any other.
+$stmt = $mysqli->prepare(
+    'INSERT INTO `tblKidCheckins` (`childID`, `eventID`, `badgeCode`, `checkedInByID`, `checkedInByName`) '
+    . 'SELECT ?, ?, ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?)'
+);
+$stmt->bind_param('iisii', $childId, $eventIdArg, $badge, $staffId, $staffId);
 $stmt->execute();
 $stmt->close();
 

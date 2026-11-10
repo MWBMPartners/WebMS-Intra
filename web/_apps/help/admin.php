@@ -702,26 +702,34 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             page used to say the claimant's name came off the claim, and that was wrong in the
             reassuring direction &mdash; the erasure does try to remove the account link, and the
             database will not allow that column to be empty, so the report of the erasure records
-            that it could do nothing there. What stops the claim naming anybody is that the account
-            itself is emptied, so the claim points at an account with no name on it; the account
-            number stays. The receipts attached to a claim also keep the filename they were
+            that it could do nothing there. The account itself is emptied, so the claim points at an
+            account with no name on it, but the account number stays &mdash; and <strong>that does
+            not always stop the claim naming the claimant</strong>: if they made pastoral visits,
+            opened care cases, recorded DBS checks or checked children in or out, those records keep
+            their name beside the same number (see below), so anyone who can read the database or a
+            backup can match the claim back to them. The receipts attached to a claim also keep the filename they were
             uploaded with, which is often a person's name. The adults authorised to
             collect a child, because the organisation's duty of care to that child does not end
             because an adult asked to be erased. A Gift Aid declaration, with the network address
             it was made from, because that is part of the evidence it was made.
             <br>
-            <strong>Who made a pastoral visit, and who recorded a DBS (safeguarding) check.</strong>
-            When a member of staff or a volunteer asks to be erased, the visits they made and the
-            checks they recorded keep their <strong>name</strong> as the person who made them.
-            That was decided deliberately on 3 November 2026: a safeguarding record that cannot say
+            <strong>Who made a pastoral visit, opened a care case, recorded a DBS (safeguarding)
+            check, or checked a child in or out.</strong> When a member of staff or a volunteer asks
+            to be erased, those records keep their <strong>name and account number</strong> as the
+            person who did it &mdash; including a visit they made on a case about themselves. That
+            was decided deliberately (3 and 10 November 2026): a safeguarding record that cannot say
             who carried it out is worse for the people it exists to protect. Their account itself is
             still emptied &mdash; contact details, sign-in, everything else &mdash; and their name
-            and account number are the only things about them left on those records. The name is
-            the one their account had when the visit or check was recorded. Two limits, said
-            plainly: a worker erased before this was decided cannot be given their name back, so
-            those older visits still show &ldquo;Somebody no longer recorded&rdquo;; and what a
-            visit says about the person <em>being cared for</em> is still emptied when
-            <em>they</em> ask to be erased.
+            and account number are the only things about them left on those records.
+            <strong>Be clear about what that costs:</strong> because the number stays beside the
+            name, anyone who can read the database or a backup can use those records to work out
+            which of the erased person's other kept records were theirs &mdash; an expense claim, for
+            instance, which also keeps the number. Somebody asking to be erased cannot expect their
+            name to come off these records. The name is the one their account had when the record
+            was made. Two limits, said plainly: a worker erased before this change cannot be given
+            their name back, so those older records still show &ldquo;Somebody no longer
+            recorded&rdquo;; and what a visit says about the person <em>being cared for</em> is still
+            emptied when <em>they</em> ask to be erased.
         </li>
         <li>
             <strong>Kept because it is the organisation's own record, not the person's.</strong> A

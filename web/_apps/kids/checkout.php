@@ -70,8 +70,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $messageClass = 'danger';
                 Logger::activity('KidCheckoutBlocked', 'Child #' . $row['childID'] . ' tried by "' . $pickupName . '"');
             } else {
-                $stmt = $mysqli->prepare('UPDATE tblKidCheckins SET checkedOutAt = NOW(), checkedOutByID = ?, pickupName = ? WHERE checkinID = ?');
-                $stmt->bind_param('isi', $staffId, $pickupName, $row['checkinID']);
+                // 🧾 Who checked the child OUT is written by name as well as
+                //    by number (#703, D-111, migration 272): an erasure keeps
+                //    it and empties the helper's own account, so the number
+                //    alone would point at "[Deleted User]". Read from the
+                //    account in the same statement, never from the session.
+                $stmt = $mysqli->prepare(
+                    'UPDATE `tblKidCheckins` SET `checkedOutAt` = NOW(), `checkedOutByID` = ?, '
+                    . '`checkedOutByName` = (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?), '
+                    . '`pickupName` = ? WHERE `checkinID` = ?'
+                );
+                $checkinId = (int) $row['checkinID'];
+                $stmt->bind_param('iisi', $staffId, $staffId, $pickupName, $checkinId);
                 $stmt->execute();
                 $stmt->close();
                 Logger::activity('KidCheckedOut', 'Child #' . $row['childID'] . ' to "' . $pickupName . '"');

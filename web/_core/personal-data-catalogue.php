@@ -1384,7 +1384,7 @@ return [
         // `avatarPath`, `displayPhoto` and `displayBio` were not named here, and
         // were not cleared, until 11 October 2026: an erased account kept its
         // photo and the biography its owner had written.
-        'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone that names nobody.',
+        'reason'   => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone with no name on it. Its NUMBER is not removed from the records that point at it, and if the person made pastoral visits, opened care cases, recorded DBS checks or checked children in or out, those records keep their name beside that number on purpose (the owner\'s decisions D-016, D-110, D-111). Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
         'columns'  => ['userID', 'fullName', 'emailAddress', 'displayAddress', 'displayBio', 'avatarPath', 'displayPhoto', 'latitude', 'longitude', 'what3words', 'phoneNumber', 'displayPhone'],
         'notEmptiedHere' => [
             'avatarPath' => 'Emptied elsewhere, on purpose: GdprEraser::eraseProfileImages() reads this column to find the file, deals with the file, and only then empties both columns in one statement of its own. Emptying it from this instruction instead would throw away the only record of where the file is and leave the image on disk.',
@@ -2050,13 +2050,22 @@ return [
         'columns'  => ['paidByID'],
     ],
     'tblKidCheckins' => [
-        'decision' => 'unlink',
+        // 🧾 'retain' SINCE #703 (the owner's decision D-111, 10 November 2026,
+        //    extending D-016). It said 'unlink' and both helpers were detached;
+        //    D-111 keeps them, by number and by name (`checkedInByName`,
+        //    `checkedOutByName`, migration 272, written by `kids/checkin-do.php`
+        //    and `kids/checkout.php`). With both instructions now "keep",
+        //    'unlink' would promise a change nothing makes, which section 7b of
+        //    `tools/gdpr-coverage-selftest.php` refuses.
+        //
         // Two person columns, so GdprEraser::catalogue() carries a
         // hand-written instruction for each. What erasure does NOT do:
         // `pickupName` is typed by hand and may spell the erased person's
         // name; nothing ties it to an account.
-        'reason'   => 'A child being checked in to, and out of, a session. It is the CHILD\'S record and stays. Whichever helper checked the child in, and whichever checked them out, is detached.',
-        'columns'  => ['checkedInByID', 'checkedOutByID', 'pickupName'],
+        'decision' => 'retain',
+        'reason'   => 'A child being checked in to, and out of, a session. It is the CHILD\'S record and stays. Whichever helper checked the child in, and whichever checked them out, is KEPT by name and account number when that helper is erased (the owner\'s decision D-111, #703): who handed a child over, and to whom, must stay answerable. Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
+        'period'   => 'as long as the child\'s own record is kept: nothing clears check-ins on a timer today',
+        'columns'  => ['checkedInByID', 'checkedInByName', 'checkedOutByID', 'checkedOutByName', 'pickupName'],
         'notEmptiedHere' => [
             'pickupName' => 'PERSONAL, AND UNREACHABLE. Nothing on this row links the name to an account - the two account columns are the HELPERS who did the checking - so the only possible match is a text comparison against the erased person\'s stored name, which would miss a nickname and hit a namesake. It is also the only record of who collected a child, so a wrong match destroys a safeguarding trail. The owner decided on 1 November 2026 to keep it and record the limit; anything better needs a real link from a check-in to the collecting adult (#708).',
         ],
@@ -2112,8 +2121,20 @@ return [
 
     'tblCareCase' => [
         'decision' => 'unlink',
-        'reason'   => 'A pastoral or wellbeing case. Safeguarding continuity matters to the remaining team, so the case stays and the person\'s name and details are removed. Kept rather than deleted because safeguarding records carry their own retention obligations.',
-        'columns'  => ['personName', 'summary'],
+        // 🧾 #703, the owner's decision D-110 (10 November 2026, extending
+        //    D-016): who OPENED a case is kept when that worker is erased, by
+        //    number and by name (`openedByName`, migration 272, written by
+        //    `care/case-save.php`). Until #703 it was detached. The number
+        //    stays beside the name by D-113, which says what that costs.
+        'reason'   => 'A pastoral or wellbeing case. Safeguarding continuity matters to the remaining team, so the case stays and the person\'s name and details are removed. Kept rather than deleted because safeguarding records carry their own retention obligations. Who OPENED the case is kept, by name and account number, when that worker is erased (the owner\'s decision D-110, #703). Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
+        'columns'  => ['personName', 'summary', 'openedByID', 'openedByName'],
+        'notEmptiedHere' => [
+            'openedByName' => 'KEPT ON PURPOSE, by the owner\'s decision D-110 (10 November 2026, #703, extending '
+                . 'D-016): when the worker who opened a pastoral case is erased, their name stays on the case as '
+                . 'the person who opened it, so the case stays accountable after they leave. Their number '
+                . '(`openedByID`) is kept too, by a "retain" instruction (D-113 says what that costs); their own '
+                . 'account is still emptied, which is why the name is written onto the case when it is opened.',
+        ],
         // 🤝 #715, the owner's decision of 3 November 2026. `summary` used to be
         //    explained here as not emptied, and the explanation said the thing
         //    that made it indefensible out loud: the VISIT NOTES on the case
@@ -2164,7 +2185,7 @@ return [
         // below.
         'reason'   => 'A pastoral visit. The case history is kept for as long as safeguarding policy keeps the '
                     . 'case. Who made the visit is KEPT, by name, when that person is erased (the owner\'s decision '
-                    . 'D-016, #703): a pastoral record must still say who carried it out. Who its follow-up was given '
+                    . 'D-016, #703): a pastoral record must still say who carried it out. Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113). Who its follow-up was given '
                     . 'to is detached. The note on a visit is the subject\'s own record and IS emptied when the person '
                     . 'cared for is erased, matched through the case (#709)',
         'columns'  => ['visitedByID', 'visitedByName', 'followUpAssignedToID', 'notes'],
@@ -2187,7 +2208,8 @@ return [
         //    recorded, because the recorder's own account is emptied by an
         //    erasure and the number alone would point at "[Deleted User]".
         'reason'   => 'Safeguarding record. Kept and flagged, never quietly removed. Who recorded the check is kept '
-                    . 'too, by name, when that person is erased (the owner\'s decision D-016, #703)',
+                    . 'too, by name and account number, when that person is erased (the owner\'s decision D-016, #703). '
+                    . 'Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
         'period'   => 'as required by safeguarding policy',
         'columns'  => ['userID', 'notes', 'recordedByID', 'recordedByName'],
     ],
@@ -2212,8 +2234,11 @@ return [
                     . 'little use as one. Be clear about the mechanism as well as the decision, because they are not the same '
                     . 'thing: the erasure does still TRY to remove the account link, the database refuses it (the column '
                     . 'cannot be empty on this table), and the report of the erasure records that it could do nothing here. '
-                    . 'What stops the claim naming anybody is that the account itself is emptied, so it points at an account '
-                    . 'with no name on it; the account NUMBER stays. Receipts attached to the claim keep the filename they '
+                    . 'The account itself is emptied, so the claim points at an account with no name on it, but the account '
+                    . 'NUMBER stays — and that does not stop the claim naming the claimant: if they made pastoral visits, '
+                    . 'opened care cases, recorded DBS checks or checked children in or out, those records keep their name '
+                    . 'beside the same number on purpose (D-016, D-110, D-111), so anyone who can read the database or a '
+                    . 'backup can match the claim back to them (D-113). Receipts attached to the claim keep the filename they '
                     . 'were uploaded with, which is often a person\'s name',
         'columns'  => ['userID'],
     ],
@@ -2602,7 +2627,11 @@ return [
                     . 'the clear-out below and not an erasure. Some buckets DO contain an account NUMBER. '
                     . 'Nothing here empties that number — the account it points at is emptied by the main '
                     . 'erasure walk, which is a different thing: the row still says "account 4211 did this", '
-                    . 'and what changes is that account 4211 no longer identifies anybody.',
+                    . 'and what changes is that account 4211 has no name on it any more. That does not always '
+                    . 'make the row anonymous: if the person made pastoral visits, opened care cases, recorded '
+                    . 'DBS checks or checked children in or out, those records keep their name beside the same '
+                    . 'number on purpose (D-016, D-110, D-111), so the row can still be matched back to them by '
+                    . 'anyone who can read the database or a backup (D-113).',
         'period'   => 'twice the limit\'s own window, tidied opportunistically (about one request in 64, up '
                     . 'to 500 rows at a time) and BY FAMILY, so a bucket never used a second time is still '
                     . 'reached — which is the normal case for a one-off code check, a single push sign-up or '

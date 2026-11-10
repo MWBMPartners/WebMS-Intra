@@ -3318,6 +3318,7 @@ CREATE TABLE IF NOT EXISTS `tblCareCase` (
     `summary`       VARCHAR(500) DEFAULT NULL COMMENT 'What the case is about. EMPTIABLE on purpose (#715, migration 240): an erasure empties it, as it already empties the visit notes, and a NOT NULL column cannot be emptied',
     `status`        ENUM('active','resolved','long-term') NOT NULL DEFAULT 'active',
     `openedByID`    INT          DEFAULT NULL,
+    `openedByName`  VARCHAR(255) DEFAULT NULL COMMENT 'The name of whoever opened the case, written when it is opened. KEPT when that person is erased, by decision D-110 of the owner (#703, migration 272)',
     `openedAt`      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `closedAt`      DATETIME     DEFAULT NULL,
     PRIMARY KEY (`caseID`),
@@ -7186,8 +7187,10 @@ CREATE TABLE IF NOT EXISTS `tblKidCheckins` (
     `badgeCode`         CHAR(6) NOT NULL COMMENT 'Numeric code shown on parent + child badge',
     `checkedInAt`       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `checkedInByID`     INT DEFAULT NULL,
+    `checkedInByName`   VARCHAR(255) DEFAULT NULL COMMENT 'The name of the helper who checked the child in, written at check-in. KEPT when that helper is erased, by decision D-111 of the owner (#703, migration 272)',
     `checkedOutAt`      DATETIME DEFAULT NULL,
     `checkedOutByID`    INT DEFAULT NULL,
+    `checkedOutByName`  VARCHAR(255) DEFAULT NULL COMMENT 'The name of the helper who checked the child out, written at check-out. KEPT when that helper is erased, by decision D-111 of the owner (#703, migration 272)',
     `pickupName`        VARCHAR(120) DEFAULT NULL,
     PRIMARY KEY (`checkinID`),
     KEY `idx_kc_child`     (`childID`, `checkedInAt`),
@@ -11588,12 +11591,15 @@ DELETE FROM `tblSettings` WHERE `settingKey` = 'attend.reports.visibleTo';
 INSERT INTO `tblMigrations` (`filename`) VALUES ('271_attendance_reports_permission.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
--- ── from 272_worker_name_kept_on_care_records.sql (#703; D-016) ─────────────
--- Two columns, both declared in their own tables above: `tblCareVisit`'s
--- `visitedByName` and `tblDbsChecks`' `recordedByName`, and a true comment on
--- `tblCareVisit.visitedByID`. They hold the NAME of whoever made a pastoral
--- visit or recorded a DBS check, written when the record is made, and an
--- erasure KEEPS them (the owner's decision D-016). The migration also copies
+-- ── from 272_worker_name_kept_on_care_records.sql (#703; D-016, D-110, D-111) ─
+-- Five columns, each declared in its own table above: `tblCareVisit`'s
+-- `visitedByName`, `tblDbsChecks`' `recordedByName`, `tblCareCase`'s
+-- `openedByName`, and `tblKidCheckins`' `checkedInByName` and
+-- `checkedOutByName`; and a true comment on `tblCareVisit.visitedByID`. They
+-- hold the NAME of the worker who made a pastoral visit, recorded a DBS check,
+-- opened a care case or checked a child in or out, written when the record is
+-- made, and an erasure KEEPS them (the owner's decisions D-016, D-110, D-111;
+-- D-113 keeps the account number beside them). The migration also copies
 -- names into records that already existed; a database built from this script
 -- has no such records, so there is nothing to copy here, and the migration's
 -- copy touches only empty names when the installer replays it.

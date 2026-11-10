@@ -68,7 +68,7 @@ $eraserFile    = __DIR__ . '/../web/_core/GdprEraser.php';
 $schemaFile    = __DIR__ . '/../web/_sql/full_schema.sql';
 
 // 🔢 How many checks this file makes — EXACTLY. See the end of the file.
-const EXPECTED_CHECKS = 101; // 81 before the #709 fix round added section 8d; round 2
+const EXPECTED_CHECKS = 102; // 81 before the #709 fix round added section 8d; round 2
                             // added four more after three plants went uncaught, giving 93.
                             // #492 part 3 added one: a child's event registration is
                             // deleted on the column saying whose record it is and
@@ -79,6 +79,9 @@ const EXPECTED_CHECKS = 101; // 81 before the #709 fix round added section 8d; r
                             // visit or recorded a DBS check is kept, the name is
                             // never emptied, every writer fills it, the columns
                             // exist, and the page shows it. 96 + 5 = 101.
+                            // #703 round 2 (D-110, D-111, D-113) widened the five to
+                            // the five kept columns and added one: the sentences a
+                            // member reads say what keeping the number costs. 102.
 
 $failures = 0;
 $passes   = 0;
@@ -2808,52 +2811,66 @@ check(
 );
 
 // -----------------------------------------------------------------------------
-// 23. WHO MADE A PASTORAL VISIT, OR RECORDED A SAFEGUARDING CHECK, IS KEPT
-//     (#703, the owner's decision D-016, 3 November 2026).
+// 23. THE WORKER ON A PASTORAL, SAFEGUARDING OR CHECK-IN RECORD IS KEPT
+//     (#703; the owner's decisions D-016, D-110, D-111, D-112, D-113).
 //
-//     D-016 "rules out unlinking the worker". Until #703 the code did exactly
-//     that: `tblCareVisit.visitedByID` had an "anonymise" instruction, and
-//     `tblDbsChecks.recordedByID` got one from the derived route. These checks
-//     fail if either comes back, and they are pinned BY NAME rather than read
-//     from the written list, for the reason `$ownerSaysKeep` gives above: a
-//     list and a routine changed back together would still agree with each
-//     other.
+//     D-016 "rules out unlinking the worker": who made a pastoral visit or
+//     recorded a DBS check. D-110 adds who OPENED a care case, D-111 who
+//     checked a child IN and OUT. Until #703 the code detached every one of
+//     them. These checks fail if any comes back, and they are pinned BY NAME
+//     rather than read from the written list, for the reason `$ownerSaysKeep`
+//     gives above: a list and a routine changed back together would still
+//     agree with each other.
 //
 //     KEEPING THE NUMBER IS NOT KEEPING THE NAME. The worker's own account is
 //     emptied by the erasure, so the name has to be on the record itself
-//     (`visitedByName`, `recordedByName`, migration 272), written when the
-//     record is made. So the checks also cover: nothing empties those two
-//     columns; every writer under `web/` fills them; the database has them; and
-//     the pastoral page shows the kept name once the account is emptied.
+//     (migration 272), written when the record is made. So the checks also
+//     cover: nothing empties a name column; every writer under `web/` fills
+//     it; the database has it; the migration's one-off copy never writes the
+//     stand-in name of an emptied account; and the pastoral page shows the
+//     kept name once the account is emptied.
+//
+//     D-113 keeps the NUMBER beside the name and requires the portal to say
+//     what that costs. The sentences that used to say the opposite are pinned
+//     at the end of this section, both ways: the reassuring wording must be
+//     gone, and the plain wording must be there.
 //
 //     What these cannot see: whether the writers RUN. Section F of
-//     `tools/erasure-pages-selftest.php` drives both over HTTP, and section 3b
-//     of `tools/gdpr-eraser-selftest.php` runs a real erasure.
+//     `tools/erasure-pages-selftest.php` drives every one of them over HTTP,
+//     and sections 3b and 19 of `tools/gdpr-eraser-selftest.php` run a real
+//     erasure.
 // -----------------------------------------------------------------------------
+// table => [account-number column => [name column, decision]]
 $d016 = [
-    'tblCareVisit' => ['number' => 'visitedByID',  'name' => 'visitedByName',  'writer' => '_apps/care/visit-save.php'],
-    'tblDbsChecks' => ['number' => 'recordedByID', 'name' => 'recordedByName', 'writer' => '_apps/admin/safeguarding/dbs-save.php'],
+    'tblCareVisit'   => ['visitedByID'    => ['visitedByName',    'D-016']],
+    'tblDbsChecks'   => ['recordedByID'   => ['recordedByName',   'D-016']],
+    'tblCareCase'    => ['openedByID'     => ['openedByName',     'D-110']],
+    'tblKidCheckins' => ['checkedInByID'  => ['checkedInByName',  'D-111'],
+                         'checkedOutByID' => ['checkedOutByName', 'D-111']],
 ];
 
 $notKeptAsDecided = [];
-foreach ($d016 as $table => $cols) {
-    $onNumber = array_values(array_filter(
-        $byTable[$table] ?? [],
-        static fn (array $e): bool => (string) $e['userCol'] === $cols['number']
-    ));
-    $actions = array_map(static fn (array $e): string => (string) $e['action'], $onNumber);
-    if ($actions !== ['retain']) {
-        $notKeptAsDecided[] = $table . '.' . $cols['number'] . ' has ' . ($actions === [] ? 'no instruction' : implode('+', $actions));
+foreach ($d016 as $table => $columns) {
+    foreach ($columns as $number => [$name, $decision]) {
+        $onNumber = array_values(array_filter(
+            $byTable[$table] ?? [],
+            static fn (array $e): bool => (string) $e['userCol'] === $number
+        ));
+        $actions = array_map(static fn (array $e): string => (string) $e['action'], $onNumber);
+        if ($actions !== ['retain']) {
+            $notKeptAsDecided[] = $table . '.' . $number . ' (' . $decision . ') has '
+                . ($actions === [] ? 'no instruction' : implode('+', $actions));
+        }
     }
 }
 check(
-    'who made a pastoral visit and who recorded a DBS check are KEPT on an erasure: exactly one "retain" instruction each, and nothing that empties or deletes on them (#703, D-016)',
+    'the worker who made a pastoral visit, opened a care case, recorded a DBS check or checked a child in or out is KEPT on an erasure: exactly one "retain" instruction for each of the five, and nothing that empties or deletes on them (#703; D-016, D-110, D-111)',
     $notKeptAsDecided === [],
-    implode('; ', $notKeptAsDecided) . ' -- D-016 rules out unlinking the worker. If this is meant to change, that is a NEW '
-    . 'decision for the owner, recorded in docs/decisions/ and naming D-016, not an edit here'
+    implode('; ', $notKeptAsDecided) . ' -- the owner ruled out unlinking the worker. If this is meant to change, that is a '
+    . 'NEW decision for the owner, recorded in docs/decisions/ and naming the one it supersedes, not an edit here'
 );
 
-$nameTouched = [];
+$nameTouched  = [];
 $nameUnlisted = [];
 foreach ($instructions as $instruction) {
     $table = (string) $instruction['table'];
@@ -2866,17 +2883,26 @@ foreach ($instructions as $instruction) {
         array_map('strval', array_keys((array) ($instruction['overrides'] ?? []))),
         array_map('strval', array_keys((array) ($instruction['sqlSets'] ?? [])))
     );
-    if (in_array($d016[$table]['name'], $touches, true) === true) {
-        $nameTouched[] = $table . '.' . $d016[$table]['name'] . ' (' . (string) $instruction['action'] . ')';
+    foreach ($d016[$table] as [$name, $decision]) {
+        if (in_array($name, $touches, true) === true) {
+            $nameTouched[] = $table . '.' . $name . ' (' . (string) $instruction['action'] . ')';
+        }
     }
 }
-foreach ($d016 as $table => $cols) {
-    if (in_array($cols['name'], array_map('strval', (array) ($catalogue[$table]['columns'] ?? [])), true) === false) {
-        $nameUnlisted[] = $table . '.' . $cols['name'] . ' is not named in the written list';
+foreach ($d016 as $table => $columns) {
+    foreach ($columns as $number => [$name, $decision]) {
+        if (in_array($name, array_map('strval', (array) ($catalogue[$table]['columns'] ?? [])), true) === false) {
+            $nameUnlisted[] = $table . '.' . $name . ' is not named in the written list';
+        }
+        $why = (string) ($catalogue[$table]['notEmptiedHere'][$name] ?? '');
+        // An 'unlink' entry must say why the name is not emptied (section 8b
+        // asks only that it be long enough; this asks that it give THE reason).
+        if ((string) ($catalogue[$table]['decision'] ?? '') === 'unlink'
+            && (strlen(trim($why)) < 40 || str_contains($why, $decision) === false)
+        ) {
+            $nameUnlisted[] = $table . '.' . $name . ' has no reason under notEmptiedHere naming ' . $decision;
+        }
     }
-}
-if (strlen(trim((string) ($catalogue['tblCareVisit']['notEmptiedHere']['visitedByName'] ?? ''))) < 40) {
-    $nameUnlisted[] = 'tblCareVisit.visitedByName has no reason under notEmptiedHere';
 }
 check(
     'the worker\'s NAME on those records is never emptied, and the written list names it and says why (#703)',
@@ -2885,10 +2911,12 @@ check(
     . ' -- the account is emptied by the erasure, so the name column is the only place the name survives'
 );
 
-// Every writer of either table, wherever it is, must fill the name. Searched
-// for rather than listed, so a SECOND writer added later is caught, and the
-// statement's pieces are joined up first so a column list split over several
-// lines of PHP is still read whole.
+// Every writer of these tables, wherever it is, must fill the name in the SAME
+// statement that writes the number. Searched for rather than listed, so a
+// SECOND writer added later is caught, and the statement's pieces are joined
+// up first so a column list split over several lines of PHP is still read
+// whole. An INSERT must name every name column whose number it names; an
+// UPDATE that sets a number must set its name.
 $writersFound   = [];
 $writerProblems = [];
 $webTree = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(__DIR__ . '/../web', FilesystemIterator::SKIP_DOTS));
@@ -2896,53 +2924,103 @@ foreach ($webTree as $file) {
     if ($file->getExtension() !== 'php') {
         continue;
     }
-    $code = (string) gc_replace("/'\s*\.\s*'/", '', $codeOnly((string) file_get_contents($file->getPathname())));
-    foreach ($d016 as $table => $cols) {
-        gc_findAll('/INSERT\s+INTO\s+`?' . $table . '`?\s*\(([^)]*)\)\s*(VALUES|SELECT)?/i', $code, $inserts, PREG_SET_ORDER);
+    $code  = (string) gc_replace("/'\s*\.\s*'/", '', $codeOnly((string) file_get_contents($file->getPathname())));
+    $where = substr($file->getPathname(), strlen(__DIR__ . '/../web/'));
+    foreach ($d016 as $table => $columns) {
+        gc_findAll('/INSERT\s+INTO\s+`?' . $table . '`?\s*\(([^)]*)\)/i', $code, $inserts, PREG_SET_ORDER);
         foreach ($inserts as $insert) {
-            $where = substr($file->getPathname(), strlen(__DIR__ . '/../web/'));
-            $writersFound[] = $where;
-            if (str_contains($insert[1], $cols['name']) === false) {
-                $writerProblems[] = $where . ' writes ' . $table . ' without ' . $cols['name'];
+            $writersFound[] = $where . ' (INSERT ' . $table . ')';
+            foreach ($columns as $number => [$name, $decision]) {
+                if (str_contains($insert[1], $number) === true && str_contains($insert[1], $name) === false) {
+                    $writerProblems[] = $where . ' inserts ' . $table . '.' . $number . ' without ' . $name;
+                }
             }
         }
+        gc_findAll('/UPDATE\s+`?' . $table . '`?\s+SET\s+([^;]*)/i', $code, $updates, PREG_SET_ORDER);
+        foreach ($updates as $update) {
+            foreach ($columns as $number => [$name, $decision]) {
+                if (gc_find('/`?' . $number . '`?\s*=/', $update[1]) === 1) {
+                    $writersFound[] = $where . ' (UPDATE ' . $table . '.' . $number . ')';
+                    if (gc_find('/`' . $name . '`\s*=\s*\(SELECT `u`\.`fullName` FROM `tblUsers` `u` WHERE `u`\.`userID` = \?\)/', $update[1]) !== 1) {
+                        $writerProblems[] = $where . ' sets ' . $table . '.' . $number . ' without reading ' . $name . ' from the account';
+                    }
+                }
+            }
+        }
+        unset($inserts, $updates);
     }
-    unset($inserts);
 }
-$visitCode = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/care/visit-save.php'));
-$dbsCode   = $codeOnly((string) @file_get_contents(__DIR__ . '/../web/_apps/admin/safeguarding/dbs-save.php'));
 sort($writersFound);
+// Each writer reads the name from the account in the same statement - pinned
+// as the exact sub-query, so a NULL or a session value in its place fails.
+$fromAccount = [
+    '_apps/care/visit-save.php'                 => "'SELECT ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?), ?, ?, ?'",
+    '_apps/care/case-save.php'                  => "'SELECT ?, ?, ?, ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?)'",
+    '_apps/admin/safeguarding/dbs-save.php'     => "(SELECT `r`.`fullName` FROM `tblUsers` `r` WHERE `r`.`userID` = ?)'",
+    '_apps/kids/checkin-do.php'                 => "'SELECT ?, ?, ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?)'",
+];
+$bindsTwice = [
+    '_apps/care/visit-save.php'             => "bind_param('iiisss', \$caseId, \$userId, \$userId,",
+    '_apps/care/case-save.php'              => "bind_param('isssii', \$siteId, \$person, \$category, \$summary, \$userId, \$userId);",
+    '_apps/admin/safeguarding/dbs-save.php' => "\$status, \$recorder, \$recorder);",
+    '_apps/kids/checkin-do.php'             => "bind_param('iisii', \$childId, \$eventIdArg, \$badge, \$staffId, \$staffId);",
+    '_apps/kids/checkout.php'               => "bind_param('iisi', \$staffId, \$staffId, \$pickupName, \$checkinId);",
+];
+foreach ($fromAccount as $page => $subQuery) {
+    if (str_contains($codeOnly((string) @file_get_contents(__DIR__ . '/../web/' . $page)), $subQuery) === false) {
+        $writerProblems[] = $page . ' no longer reads the name from the account in the same statement';
+    }
+}
+foreach ($bindsTwice as $page => $bind) {
+    if (str_contains($codeOnly((string) @file_get_contents(__DIR__ . '/../web/' . $page)), $bind) === false) {
+        $writerProblems[] = $page . ' no longer binds the signed-in account for the name as well as the number';
+    }
+}
 check(
-    'every writer of a pastoral visit or a DBS check fills in the worker\'s name, read from their own account in the same statement (#703)',
+    'every writer of these records fills in the worker\'s name, read from their own account in the same statement (#703; D-016, D-110, D-111)',
     $writerProblems === []
-        && $writersFound === ['_apps/admin/safeguarding/dbs-save.php', '_apps/care/visit-save.php']
-        && str_contains($visitCode, "'SELECT ?, ?, (SELECT `u`.`fullName` FROM `tblUsers` `u` WHERE `u`.`userID` = ?), ?, ?, ?'")
-        && str_contains($visitCode, "bind_param('iiisss', \$caseId, \$userId, \$userId,")
-        && str_contains($dbsCode, "(SELECT `r`.`fullName` FROM `tblUsers` `r` WHERE `r`.`userID` = ?)'")
-        && str_contains($dbsCode, "\$status, \$recorder, \$recorder);"),
-    'writers found: ' . implode(', ', $writersFound) . '; ' . implode('; ', $writerProblems)
+        && $writersFound === [
+            '_apps/admin/safeguarding/dbs-save.php (INSERT tblDbsChecks)',
+            '_apps/care/case-save.php (INSERT tblCareCase)',
+            '_apps/care/visit-save.php (INSERT tblCareVisit)',
+            '_apps/kids/checkin-do.php (INSERT tblKidCheckins)',
+            '_apps/kids/checkout.php (UPDATE tblKidCheckins.checkedOutByID)',
+        ],
+    'writers found: ' . implode(', ', $writersFound) . ' | ' . implode('; ', $writerProblems)
     . ' -- a record written without the name loses who made it the moment that person is erased'
 );
 
+// The columns, and migration 272's one-off copy. The copy's guard is pinned
+// WHOLE and compared with the ONE test of "emptied by an erasure",
+// GdprEraser::emptiedAccountSql(): round 1 of the independent check made the
+// e-mail half never match and the old pin, which read only the first half,
+// stayed green.
 $migration272 = (string) @file_get_contents(__DIR__ . '/../web/_sql/272_worker_name_kept_on_care_records.sql');
-$schemaNow    = (string) file_get_contents($schemaFile);
+$migrationFlat = trim((string) gc_replace('/\s+/', ' ', str_replace('`', '', $migration272)));
+$emptiedTest   = trim((string) gc_replace('/\s+/', ' ', \Portal\Core\GdprEraser::emptiedAccountSql('u')));
+$schemaNow     = (string) file_get_contents($schemaFile);
 $shapeProblems = [];
-foreach ($d016 as $table => $cols) {
-    $definition = gc_find('/CREATE TABLE IF NOT EXISTS\s+`' . $table . '`(.*?)\n\)\s*ENGINE/s', $schemaNow, $found) === 1
-        && gc_find('/^\s+`' . $cols['name'] . '`\s+([^\n]*)$/m', $found[1], $line) === 1 ? $line[1] : '';
-    if (str_starts_with($definition, 'VARCHAR(255) DEFAULT NULL') === false) {
-        $shapeProblems[] = $table . '.' . $cols['name'] . ' in the fresh-install script ("' . substr($definition, 0, 30) . '")';
-    }
-    if (gc_find('/ALTER TABLE `' . $table . '` ADD COLUMN `' . $cols['name'] . '` VARCHAR\(255\) DEFAULT NULL/', $migration272) !== 1) {
-        $shapeProblems[] = $table . '.' . $cols['name'] . ' in migration 272';
-    }
-    // The one-off copy must never write the stand-in name of an emptied account.
-    if (gc_find('/SET `\w+`\.`' . $cols['name'] . '` = `u`\.`fullName`\s+WHERE `\w+`\.`' . $cols['name'] . "` IS NULL\s+AND NOT \(`u`\.`isActive` = 0\s+AND `u`\.`fullName` = '\[Deleted User\]'/", $migration272) !== 1) {
-        $shapeProblems[] = 'migration 272 copies names into ' . $table . ' without refusing an emptied account';
+foreach ($d016 as $table => $columns) {
+    foreach ($columns as $number => [$name, $decision]) {
+        $definition = gc_find('/CREATE TABLE IF NOT EXISTS\s+`' . $table . '`(.*?)\n\)\s*ENGINE/s', $schemaNow, $found) === 1
+            && gc_find('/^\s+`' . $name . '`\s+([^\n]*)$/m', $found[1], $line) === 1 ? $line[1] : '';
+        if (str_starts_with($definition, 'VARCHAR(255) DEFAULT NULL') === false) {
+            $shapeProblems[] = $table . '.' . $name . ' in the fresh-install script ("' . substr($definition, 0, 30) . '")';
+        }
+        if (gc_find('/ALTER TABLE `' . $table . '` ADD COLUMN `' . $name . '` VARCHAR\(255\) DEFAULT NULL COMMENT .*? AFTER `' . $number . '`/', $migration272) !== 1) {
+            $shapeProblems[] = $table . '.' . $name . ' in migration 272';
+        }
+        $copy = gc_find('/UPDATE ' . $table . ' (\w+) JOIN tblUsers u ON u\.userID = \1\.' . $number
+            . ' SET \1\.' . $name . ' = u\.fullName WHERE \1\.' . $name . ' IS NULL AND NOT (\(.*?\));/', $migrationFlat, $copyParts) === 1
+            ? $copyParts[2] : '';
+        if ($copy !== $emptiedTest) {
+            $shapeProblems[] = 'migration 272 copies names into ' . $table . '.' . $name . ' guarded by "' . $copy
+                . '", which is not GdprEraser::emptiedAccountSql(\'u\') ("' . $emptiedTest . '")';
+        }
     }
 }
 check(
-    'both name columns exist and may be empty, in the fresh-install script and in migration 272, and its one-off copy never writes "[Deleted User]" as a name (#703)',
+    'all five name columns exist and may be empty, in the fresh-install script and in migration 272, and its one-off copy refuses an emptied account by EXACTLY the one test the portal uses (#703)',
     $shapeProblems === [] && \Portal\Core\GdprEraser::TOMBSTONE_NAME === '[Deleted User]',
     implode('; ', $shapeProblems)
 );
@@ -2955,6 +3033,51 @@ check(
     str_contains($casePage, "CASE WHEN u.userID IS NULL OR ' . GdprEraser::emptiedAccountSql('u') . ' THEN v.visitedByName ELSE u.fullName END AS visitorName")
         && str_contains($casePage, 'use Portal\Core\GdprEraser;'),
     'web/_apps/care/case.php no longer chooses the kept name for an emptied account, so the page would show "[Deleted User]"'
+);
+
+// 🗣️ D-113: SAY SO. Every sentence that told a member an emptied account stops
+//    a record naming anybody is gone, and the plain sentence is there instead,
+//    in the places a member or an administrator reads it. Both directions,
+//    because a check made only of absences passes on a page that says nothing.
+$reasonOf = static fn (string $table): string => (string) ($catalogue[$table]['reason'] ?? '');
+// HTML tags only are taken out (strip_tags() would also swallow the PHP
+// blocks, and with them every sentence after the first `<?php`), then every
+// run of spaces is made one, so a sentence wrapped over two lines still reads.
+$pageWords = static fn (string $page): string => (string) gc_replace('/\s+/', ' ', gc_replace('#</?[a-z][^>]*>#i', '', (string) @file_get_contents(__DIR__ . '/../web/' . $page)));
+$helpAdmin = $pageWords('_apps/help/admin.php');
+$privacy   = $pageWords('_apps/privacy/policy.php');
+$policyDoc = (string) gc_replace('/\s+/', ' ', (string) @file_get_contents(__DIR__ . '/../docs/gdpr-erasure-policy.md'));
+$saysTheOpposite = [];
+foreach ([
+    'tblUsers reason'         => [$reasonOf('tblUsers'), 'a tombstone that names nobody'],
+    'tblExpenseClaims reason' => [$reasonOf('tblExpenseClaims'), 'What stops the claim naming anybody'],
+    'tblApiRateLimits reason' => [$reasonOf('tblApiRateLimits'), 'no longer identifies anybody'],
+    'help/admin.php'          => [$helpAdmin, 'What stops the claim naming anybody'],
+    'privacy/policy.php'      => [$privacy, 'your name and the link to you are removed, and the amounts and dates stay'],
+] as $where => [$text, $old]) {
+    if (str_contains($text, $old) === true) {
+        $saysTheOpposite[] = $where . ' still says "' . $old . '"';
+    }
+}
+$saysItPlainly = [
+    'tblUsers reason'         => str_contains($reasonOf('tblUsers'), 'can match their other kept records back to them (D-113)'),
+    'tblExpenseClaims reason' => str_contains($reasonOf('tblExpenseClaims'), 'can match the claim back to them (D-113)'),
+    'tblApiRateLimits reason' => str_contains($reasonOf('tblApiRateLimits'), 'can still be matched back to them by anyone who can read the database or a backup (D-113)'),
+    'tblCareVisit reason'     => str_contains($reasonOf('tblCareVisit'), '(D-113)'),
+    'tblCareCase reason'      => str_contains($reasonOf('tblCareCase'), '(D-113)'),
+    'tblDbsChecks reason'     => str_contains($reasonOf('tblDbsChecks'), '(D-113)'),
+    'tblKidCheckins reason'   => str_contains($reasonOf('tblKidCheckins'), '(D-113)'),
+    'help/admin.php'          => str_contains($helpAdmin, 'that does not always stop the claim naming the claimant')
+        && str_contains($helpAdmin, 'which of the erased person\'s other kept records were theirs'),
+    'privacy/policy.php'      => str_contains($privacy, 'keep your name and account number as the person who did it, even after you are erased')
+        && str_contains($privacy, 'could use them to tell which of your other kept records'),
+    'gdpr-erasure-policy.md'  => str_contains($policyDoc, 'can use these records to re-identify the erased person on every other record that kept their number'),
+];
+check(
+    'D-113: no page or reason a member reads still says an emptied account stops a record naming them, and each says plainly that an erased worker can be re-identified through the records they made (#703)',
+    $saysTheOpposite === [] && array_filter($saysItPlainly, static fn (bool $ok): bool => $ok === false) === [],
+    implode('; ', $saysTheOpposite) . ' | missing the plain sentence: '
+    . implode(', ', array_keys(array_filter($saysItPlainly, static fn (bool $ok): bool => $ok === false)))
 );
 
 echo "\n" . str_repeat('=', 78) . "\n";
