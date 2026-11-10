@@ -38,9 +38,14 @@
  *    door answers there now, sets the installation's ceiling (its global
  *    administrator only) and the organisation's choice within it (the
  *    organisation's global administrator only), and says plainly that
- *    "signed-in testers only" works only when the door's address is opened
+ *    "signed-in testers only" works only at the door's /w/ address opened
  *    directly: a browser does not send the portal's sign-in to a script, a
- *    feed or a frame on another website.
+ *    feed or a frame on another website, nor to a public address.
+ *
+ * 🗣️ EVERY SENTENCE ABOUT WHO THE DOOR ANSWERS — the door card's warning and
+ *    the test-copy card's sentence — is `PublicWebsiteSetup::doorReachWords()`'s,
+ *    whole, for the state as it is. This page writes none of its own (round 2
+ *    of P4d's check: one written here was untrue in one state, twice).
  *
  * Every value is checked, refused with its reason, and recorded, by
  * `Portal\Core\PublicWebsiteSetup` — the ONE place. This page only draws.
@@ -125,14 +130,10 @@ $framingInForce = PublicWebsiteSetup::frameOriginsInForce($mysqli, $siteId);
 // card can never say something the door does not do. It asks the channel
 // first, so on the live portal nothing else is asked.
 $doorTestRule    = PublicWebsiteSetup::testCopyDoorRule($mysqli, $siteId);
-$doorTestersOnly = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_TESTERS;
-// On a testers-only test copy with a public address in effect, the door's /w/
-// addresses on the portal's own address are the ONLY ones a tester can use
-// (a browser never carries the sign-in to the public address).
-$doorTesterEvents  = $doorTestersOnly === true && $door['state'] === 'on'
-    ? PublicDoor::nameAddressFor($mysqli, $siteId, PublicDoor::SURFACE_EVENTS) : '';
-$doorTesterPosters = $doorTestersOnly === true && $door['state'] === 'on'
-    ? PublicDoor::nameAddressFor($mysqli, $siteId, PublicDoor::SURFACE_POSTERS) : '';
+// EVERY sentence on this page about who the door answers, where to try it or
+// what a website gets is doorReachWords()'s, whole, for the state as it is
+// (#493 P4d, round 2 of its check). This page writes none of its own.
+$doorReach       = PublicWebsiteSetup::doorReachWords(PublicWebsiteSetup::doorReachFacts($mysqli, $siteId));
 $isOrgGlobal     = PublicWebsiteSetup::isGlobalAdministratorOf($mysqli, $userId, $siteId);
 $doorTestLimit   = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_LIVE ? null : PublicWebsiteSetup::testCopyLimit($mysqli);
 $doorTestChoice  = $doorTestRule === PublicWebsiteSetup::DOOR_TEST_LIVE ? null : PublicWebsiteSetup::testCopyChoice($mysqli, $siteId);
@@ -223,19 +224,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <p class="small text-muted">Add <code>&amp;limit=5</code> to the address to show fewer (up to <?php echo (int) PublicDoor::MAX_LIMIT; ?> of each; <?php echo (int) PublicDoor::PAGE_DEFAULT_LIMIT; ?> without it). Change <code>height</code> to fit your page.</p>
                     <?php endif; ?>
                 <?php endif; ?>
-                <?php if ($doorTestersOnly === true): ?>
-                    <?php // #493 P4d, round 1 of its check: a browser sends the sign-in only to the portal's own address, so with a public address in effect the addresses above (which are on it) answer NOBODY here; testers are given the /w/ address instead. ?>
-                    <?php if ($publicHostInEffect !== ''): ?>
-                        <div class="alert alert-warning" data-door-testers-only="1" data-door-testers-public="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. A browser sends that sign-in only to the portal's own address — never to your public address, <?php echo $esc($publicHostInEffect); ?>, and never to a script, a feed or a frame on another website — so the addresses above answer <strong>nobody</strong> here, and neither does any copy pasted into a website, until the door is opened to anybody below.
-                            <?php if ($doorTesterEvents !== ''): ?>
-                                Testers can try the door at its address on the portal's own address, in a browser signed in here: <code data-door-testers-try="events"><?php echo $esc($doorTesterEvents); ?></code> (events) and <code data-door-testers-try="posters"><?php echo $esc($doorTesterPosters); ?></code> (posters).
-                            <?php else: ?>
-                                The portal cannot build the door's address on its own address either, so testers cannot try it here until that is put right.
-                            <?php endif; ?>
-                        </div>
-                    <?php else: ?>
-                        <div class="alert alert-warning" data-door-testers-only="1">This is a test copy of the portal, so its public door answers only people signed in here who are allowed to use the test copy. Browsers do not send your sign-in to another website, so a copy pasted into a real website — a script or a frame — shows nothing from this test copy; open the addresses above in a browser signed in here instead.</div>
-                    <?php endif; ?>
+                <?php if ($doorReach['alert'] !== null): ?>
+                    <?php // #493 P4d: who the door answers on a testers-only test copy — doorReachWords()'s sentence, whole, never one of this page's own. ?>
+                    <div class="alert alert-warning" data-door-testers-only="1"><?php echo $esc($doorReach['alert']); ?></div>
                 <?php endif; ?>
                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="mt-2" data-door-form="replace">
                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
@@ -286,16 +277,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <h2 class="h5">The public door on this test copy</h2>
                 <p class="text-muted">This is a test copy of the portal (<?php echo $esc((string) PORTAL_ENV); ?>), not the live one. Here you choose who its public door answers.</p>
-                <?php if ($doorTestRule === PublicWebsiteSetup::DOOR_TEST_UNGATED): ?>
-                    <div class="alert alert-warning" data-door-test-now="ungated">This test copy's staff sign-in gate is switched off, so every page of it — the public door included — is open to anybody, whatever is chosen below. Search engines are still told not to list anything the door sends.</div>
-                <?php elseif ($doorTestRule === PublicWebsiteSetup::DOOR_TEST_ANYBODY): ?>
-                    <p data-door-test-now="anybody"><span class="badge text-bg-warning me-1">Open to anybody</span> Your public door here answers anybody on the internet, so a copy pasted into a real website works. Every answer tells search engines not to list it.</p>
-                <?php else: ?>
-                    <p data-door-test-now="testers"><span class="badge text-bg-secondary me-1">Signed-in testers only</span> Your public door here answers only people signed in to this test copy who are allowed to use it.</p>
-                <?php endif; ?>
-                <p class="small" data-door-test-cookie="1"><strong>"Signed-in testers only" works only at the door's address on the portal's own address</strong> — the one with /w/ in it — opened directly in a browser signed in here. A browser sends this portal's sign-in only to the address it signed in at: never to a script, a feed or a frame on another website, and never to your public address. So while the door is for testers only, a copy pasted into a real website shows nothing from this test copy, and a public address answers nobody. To try it on a real website or at your public address, choose "open to anybody".</p>
+                <?php // Who the door answers here NOW: doorReachWords()'s sentence, whole (#493 P4d, round 2 of its check). ?>
+                <p class="mb-2" data-door-test-now="<?php echo $esc($doorTestRule); ?>"><?php echo $esc((string) $doorReach['card']); ?></p>
                 <?php if ($doorTestLimit === null || $doorTestChoice === null): ?>
-                    <div class="alert alert-warning" data-door-test-unreadable="1">What is chosen here could not be read just now, so nothing can be changed here.<?php echo $doorTestRule === PublicWebsiteSetup::DOOR_TEST_UNGATED ? '' : ' While it cannot be read, the door answers signed-in testers only.'; ?> Try again later.</div>
+                    <div class="alert alert-warning" data-door-test-unreadable="1">What is chosen here could not be read just now, so nothing can be changed here. Try again later.</div>
                 <?php else: ?>
                     <p class="mb-2" data-door-test-limit="<?php echo $esc($doorTestLimit); ?>"><strong>What this installation allows:</strong> <?php echo $doorTestLimit === 'either'
                         ? 'each organisation may choose, for its own door, between signed-in testers only and open to anybody.'

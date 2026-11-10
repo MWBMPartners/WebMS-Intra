@@ -59,7 +59,10 @@
  *      two writers of its tiered setting (#493 P4d) — `saveTestCopyLimit()`
  *      (the installation's global administrator sets the ceiling) and
  *      `saveTestCopyChoice()` (an organisation's global administrator
- *      chooses within it). The door itself — what it answers — is
+ *      chooses within it). Every sentence telling somebody who the door
+ *      answers, where to try it or what a website gets is
+ *      `doorReachWords()`'s, whole, per state — the card, the set-up check
+ *      and both saves ask it. The door itself — what it answers — is
  *      `Portal\Core\PublicDoor`.
  *
  * EVERY BAD VALUE IS REFUSED WITH ITS REASON, never quietly corrected (#668).
@@ -1536,10 +1539,6 @@ final class PublicWebsiteSetup
         }
         $wasWord = $was === 'either' ? 'either' : 'testers';
         $several = $chose === 1 ? '' : 's';
-        // Worded from what the door REALLY does now (round 1 of P4d's check):
-        // with the test copy's own staff gate switched off, every page of it
-        // is open to anybody whatever the limit says.
-        $ungated = self::testCopyDoorRule($db, 0) === self::DOOR_TEST_UNGATED;
         Logger::activity(
             'PublicDoorTestCopyLimitSaved',
             'Test copies\' public doors: the installation\'s limit ' . $wasWord . ' → ' . $value . ' (' . ($value === 'either'
@@ -1547,29 +1546,12 @@ final class PublicWebsiteSetup
                 . $chose . ' organisation' . $several . ' had chosen "open to anybody".',
             $actorId
         );
-        if ($ungated === true) {
-            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: ' . ($value === 'either'
-                ? 'each organisation may choose to open its public door to anybody on this test copy.'
-                : 'organisations\' public doors on this test copy are for signed-in testers only.')
-                . ' This test copy\'s own staff sign-in gate is switched off, though, so every page of it — every public door '
-                . 'included — is open to anybody until that gate is switched back on. This limit takes effect then.'];
-        }
-        if ($value === 'either') {
-            // Counted from the stored choices alone: an organisation that is
-            // switched off, or whose door is off, answers nothing at all, so
-            // the sentence says what happens to a door that answers, and no
-            // more (round 1 of P4d's check: it said "open to anybody now" of
-            // every one).
-            return ['saved' => true, 'type' => 'success', 'message' => 'Saved: on this test copy, each organisation\'s global '
-                . 'administrator may now choose to open its public door to anybody (search engines are always told not to list it).'
-                . ($chose > 0 ? ' ' . $chose . ' organisation' . $several . ' had already chosen that; from now on, whenever '
-                    . ($chose === 1 ? 'that door answers' : 'those doors answer') . ' at all, '
-                    . ($chose === 1 ? 'it answers' : 'they answer') . ' anybody.' : '')];
-        }
+        // The words are doorReachWords()'s, from the rule in force NOW (round
+        // 2 of P4d's check: every sentence about who the door answers lives
+        // there, whole, for each state).
+        $words = self::doorReachWords(['rule' => self::testCopyDoorRule($db, 0), 'limit' => $value, 'chose' => $chose]);
 
-        return ['saved' => true, 'type' => 'success', 'message' => 'Saved: on this test copy every organisation\'s public door '
-            . 'answers signed-in testers only.' . ($chose > 0 ? ' ' . $chose . ' organisation' . $several
-                . ' had chosen "open to anybody"; that choice is kept but does nothing while this limit stands.' : '')];
+        return ['saved' => true, 'type' => $words['savedLimitType'], 'message' => $words['savedLimit']];
     }
 
     /**
@@ -1627,21 +1609,227 @@ final class PublicWebsiteSetup
             $actorId
         );
 
-        // Worded from what the door REALLY does now (round 1 of P4d's check):
-        // the choice is stored either way, but a test copy whose own staff
-        // gate is switched off is open to anybody whatever is chosen.
-        if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_UNGATED) {
-            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: your choice is '
-                . ($value === 'anybody' ? 'open to anybody' : 'signed-in testers only') . '. This test copy\'s own staff sign-in '
-                . 'gate is switched off, though, so every page of it — your public door included — is open to anybody until that '
-                . 'gate is switched back on. Your choice takes effect then.'];
+        // The words are doorReachWords()'s, from the facts as they are NOW —
+        // the rule, whether the door is on, its addresses — so the message
+        // can never say the door answers somebody it does not (rounds 1 and 2
+        // of P4d's check found three such messages).
+        $words = self::doorReachWords(['choice' => $value] + self::doorReachFacts($db, $siteId));
+
+        return ['saved' => true, 'type' => 'success', 'message' => $words['savedChoice']];
+    }
+
+    /**
+     * The facts `doorReachWords()` is keyed by, read for one organisation NOW.
+     * Never throws (each reader it asks never does).
+     *
+     *   rule      `testCopyDoorRule()`: live, ungated, testers or anybody;
+     *   doorOn    the door is on (off, a spoiled name and unreadable all
+     *             count as NOT on: in each the door answers nothing);
+     *   public    the public address IN EFFECT (`publicHostInEffect()`), or '';
+     *   wEvents   the door's /w/ events address on the portal's own address
+     *             (`PublicDoor::nameAddressFor()`), or '' when it cannot be
+     *             built or the door is off;
+     *   wPosters  the same for posters.
+     *
+     * @return array{rule:string, doorOn:bool, public:string, wEvents:string, wPosters:string}
+     */
+    public static function doorReachFacts(\mysqli $db, int $siteId): array
+    {
+        return [
+            'rule'     => self::testCopyDoorRule($db, $siteId),
+            'doorOn'   => self::doorStateFor($db, $siteId)['state'] === 'on',
+            'public'   => self::publicHostInEffect($db, $siteId),
+            'wEvents'  => PublicDoor::nameAddressFor($db, $siteId, PublicDoor::SURFACE_EVENTS),
+            'wPosters' => PublicDoor::nameAddressFor($db, $siteId, PublicDoor::SURFACE_POSTERS),
+        ];
+    }
+
+    /**
+     * 🗣️ EVERY SENTENCE THAT TELLS SOMEBODY WHO THE PUBLIC DOOR ANSWERS, where
+     * to try it, or what a website gets — in ONE place, spelled out WHOLE
+     * for each state (#493 P4d, round 2 of its check; the house precedent is
+     * `DbBackup::cascadeWarning()`, #694). Pure: it takes facts
+     * (`doorReachFacts()`, plus `choice` for the choice's save and `limit` and
+     * `chose` for the limit's) and opens no connection, so the self-test asks
+     * it for every combination and compares each page with it.
+     *
+     * ⚠️ WHY IT EXISTS. Rounds 1 and 2 of P4d's check each found a sentence
+     *    about who the door answers that was untrue in one combination of
+     *    states — "open the addresses in this browser" where they answer
+     *    nobody, "the door is open to anybody" where it is off, "a copy pasted
+     *    into a real website works" while the door is off. Each was patched
+     *    where it was written, and the next combination was missed. The same
+     *    item failing two rounds running is simplified, not patched again: so
+     *    every such sentence lives here, and no page writes its own.
+     *
+     * THE STATES, decided in this order (each is a complete sentence below):
+     *   1. the door is not on → it answers nobody, anywhere;
+     *   2. it is on but has NO address (no public address in effect and no
+     *      /w/ address) → nobody can reach it;
+     *   3. the live portal, a test copy whose own staff gate is off, or a test
+     *      copy open to anybody → it answers anybody (on a test copy, every
+     *      answer tells search engines not to list it);
+     *   4. a test copy for signed-in testers only → it answers only testers,
+     *      and ONLY at its /w/ address on the portal's own address: a browser
+     *      sends the sign-in only to the address it signed in at (the session
+     *      cookie names no domain), never to another website and never to a
+     *      public address (which answers the door alone, D-098). So a public
+     *      address answers NOBODY, and a website gets nothing. Split by
+     *      whether a public address is in effect and whether the /w/ address
+     *      can be built.
+     * "Until it is opened to anybody" is always followed by who decides that
+     * — the organisation's global administrator, within what the installation
+     * allows — which is true whoever is reading and whatever is allowed, so no
+     * sentence depends on the viewer.
+     *
+     * RETURNS, for each place that shows one (null where that place shows
+     * nothing in this state):
+     *   alert           the warning in the public door card (testers only,
+     *                   door on, with an address);
+     *   card            the test-copy card's sentence (null on the live portal);
+     *   reachRow        the set-up check's reach row when it does NOT fetch
+     *                   because nobody can be signed in at the public address
+     *                   (testers only, door on, a public address in effect);
+     *                   null means "fetch, or another reason applies";
+     *   doorRow         the set-up check's "not tested" row about the door;
+     *   savedChoice     what saving the organisation's choice says (given
+     *                   `choice`): the choice, then `card` — the whole truth
+     *                   for the state the save left;
+     *   savedLimit,
+     *   savedLimitType  what saving the installation's limit says (given
+     *                   `limit` and `chose`, the number of organisations that
+     *                   had chosen "anybody"), and its colour.
+     *
+     * @param array<string,mixed> $f
+     *
+     * @return array{alert:?string, card:?string, reachRow:?string, doorRow:string, savedChoice:string, savedLimit:string, savedLimitType:string}
+     */
+    public static function doorReachWords(array $f): array
+    {
+        $rule     = (string) ($f['rule'] ?? self::DOOR_TEST_LIVE);
+        $doorOn   = ($f['doorOn'] ?? false) === true;
+        $host     = (string) ($f['public'] ?? '');
+        $we       = (string) ($f['wEvents'] ?? '');
+        $wp       = (string) ($f['wPosters'] ?? '');
+        $until    = ' until it is opened to anybody, which a global administrator of this organisation chooses on this page, '
+            . 'within what the installation\'s global administrator allows';
+        $notTested = 'Whether your website really shows it is not tested by this check, which fetches only your main website\'s '
+            . 'front page (to see that it answers) and never looks for the door on your website\'s pages.';
+
+        $out = ['alert' => null, 'card' => null, 'reachRow' => null, 'doorRow' => '', 'savedChoice' => '', 'savedLimit' => '',
+            'savedLimitType' => 'success'];
+
+        // 1️⃣ The door is not on.
+        if ($doorOn === false) {
+            $out['card']    = 'Your public door is switched off, so it answers nobody on this test copy, whatever is chosen here.';
+            $out['doorRow'] = $notTested . ' While the door is switched off, a website gets nothing from it.';
+        } elseif ($host === '' && $we === '') {
+            // 2️⃣ On, with no address at all.
+            $out['card']    = 'Your public door is on, but it has no address yet (the public door card on this page says why), so nobody can '
+                . 'reach it here.';
+            $out['doorRow'] = $notTested . ' The door has no address yet (see above), so a website gets nothing from it.';
+        } elseif ($rule !== self::DOOR_TEST_TESTERS) {
+            // 3️⃣ It answers anybody.
+            $out['doorRow'] = $notTested . ' Open its addresses in your own browser to see what a website gets.';
+            if ($rule === self::DOOR_TEST_UNGATED) {
+                $out['card'] = 'This test copy\'s own staff sign-in gate is switched off, so every page of it — your public door '
+                    . 'included — answers anybody, whatever is chosen here, until that gate is switched back on. Every answer '
+                    . 'from the door tells search engines not to list it.';
+            } elseif ($rule === self::DOOR_TEST_ANYBODY) {
+                $out['card'] = 'Your public door here answers anybody on the internet, so a copy pasted into a real website '
+                    . 'works. Every answer from the door tells search engines not to list it.';
+            }
+        } elseif ($host !== '' && $we !== '') {
+            // 4️⃣ Testers only; a public address in effect; a /w/ address.
+            $out['card'] = 'Your public door here answers only people signed in to this test copy who may use it, and only at '
+                . 'its address on the portal\'s own address, such as ' . $we . ', opened directly in a browser signed in here. A '
+                . 'browser never sends that sign-in to a script, a feed or a frame on another website, nor to your public address, '
+                . $host . ' — so a copy pasted into a website shows nothing, and ' . $host . ' answers nobody,' . $until . '.';
+            $out['alert'] = 'This is a test copy, and its public door answers only people signed in here who may use the test '
+                . 'copy. The addresses above are on your public address, ' . $host . ', and a browser never sends that sign-in '
+                . 'there — so they answer nobody, and neither does any copy pasted into a website,' . $until . '. Testers can '
+                . 'try the door at ' . $we . ' (events) and ' . $wp . ' (posters), in a browser signed in here.';
+            $out['reachRow'] = 'Whether it reaches this portal\'s public door was not checked: on this test copy the door answers '
+                . 'only people signed in here who may use the test copy, and a browser never sends that sign-in to a public '
+                . 'address — so ' . $host . ' answers nobody here,' . $until . '. Testers can try the door at ' . $we
+                . ', in a browser signed in here.';
+            $out['doorRow'] = $notTested . ' On this test copy a website gets nothing from the door: it answers only people '
+                . 'signed in here, and a browser never sends that sign-in to another website or to your public address, ' . $host . '.';
+        } elseif ($host !== '') {
+            // 4️⃣ Testers only; a public address in effect; NO /w/ address.
+            $out['card'] = 'Your public door here answers only people signed in to this test copy who may use it. A browser never '
+                . 'sends that sign-in to your public address, ' . $host . ', nor to another website, and the portal cannot build '
+                . 'the door\'s address on its own address — so nobody can reach the door here at all,' . $until . '.';
+            $out['alert'] = 'This is a test copy, and its public door answers only people signed in here who may use the test '
+                . 'copy. The addresses above are on your public address, ' . $host . ', and a browser never sends that sign-in '
+                . 'there — so they answer nobody, and neither does any copy pasted into a website,' . $until . '. The portal '
+                . 'cannot build the door\'s address on its own address either, so testers cannot try it here.';
+            $out['reachRow'] = 'Whether it reaches this portal\'s public door was not checked: on this test copy the door answers '
+                . 'only people signed in here who may use the test copy, and a browser never sends that sign-in to a public '
+                . 'address — so ' . $host . ' answers nobody here,' . $until . '. The portal cannot build the door\'s address on '
+                . 'its own address either, so testers cannot try it here.';
+            $out['doorRow'] = $notTested . ' On this test copy a website gets nothing from the door: it answers only people '
+                . 'signed in here, and a browser never sends that sign-in to another website or to your public address, ' . $host . '.';
+        } else {
+            // 4️⃣ Testers only; no public address; a /w/ address.
+            $out['card'] = 'Your public door here answers only people signed in to this test copy who may use it, at its '
+                . 'addresses on the portal\'s own address, such as ' . $we . ', opened directly in a browser signed in here. A '
+                . 'browser never sends that sign-in to a script, a feed or a frame on another website, so a copy pasted into a '
+                . 'website shows nothing,' . $until . '.';
+            $out['alert'] = 'This is a test copy, and its public door answers only people signed in here who may use the test '
+                . 'copy. Opened in a browser signed in here, the addresses above — ' . $we . ' (events) and ' . $wp . ' (posters) — '
+                . 'show what testers get; a browser never sends '
+                . 'that sign-in to a script, a feed or a frame on another website, so a copy pasted into a website shows nothing,'
+                . $until . '.';
+            $out['doorRow'] = $notTested . ' On this test copy a website gets nothing from the door: it answers only people '
+                . 'signed in here, and a browser never sends that sign-in to another website. Opened in a browser signed in here, '
+                . 'its addresses show what testers get, not what a website gets.';
+        }
+        // The live portal has no test-copy card, and the door card's warning
+        // is only for a test copy; the rows above stand.
+        if ($rule === self::DOOR_TEST_LIVE) {
+            $out['card'] = null;
+            $out['alert'] = null;
+            $out['reachRow'] = null;
         }
 
-        return ['saved' => true, 'type' => 'success', 'message' => $value === 'anybody'
-            ? 'Saved: on this test copy your public door answers anybody, so a copy pasted into a real website works. Search '
-                . 'engines are told not to list anything it sends.'
-            : 'Saved: on this test copy your public door answers only people signed in here who may use the test copy, and only '
-                . 'at its address on the portal\'s own address (with /w/ in it).'];
+        // The choice's save: the choice, then the whole truth for the state.
+        $choice = (string) ($f['choice'] ?? '');
+        if ($out['card'] !== null && ($choice === 'testers' || $choice === 'anybody')) {
+            $out['savedChoice'] = 'Saved: your choice is ' . ($choice === 'anybody' ? 'open to anybody' : 'signed-in testers only')
+                . '. ' . $out['card'];
+        }
+
+        // The limit's save, for the whole installation. It names no door: an
+        // organisation that is switched off, or whose door is off, answers
+        // nothing at all, so the sentence says what happens to a door that
+        // answers, and no more.
+        $limit   = (string) ($f['limit'] ?? '');
+        $chose   = (int) ($f['chose'] ?? 0);
+        $several = $chose === 1 ? '' : 's';
+        if ($limit === 'testers' || $limit === 'either') {
+            if ($rule === self::DOOR_TEST_UNGATED) {
+                $out['savedLimitType'] = 'warning';
+                $out['savedLimit'] = 'Saved: ' . ($limit === 'either'
+                    ? 'each organisation may choose to open its public door to anybody on this test copy.'
+                    : 'organisations\' public doors on this test copy are for signed-in testers only.')
+                    . ' This test copy\'s own staff sign-in gate is switched off, though, so every page of it answers anybody — '
+                    . 'every public door that answers at all included — until that gate is switched back on. This limit takes '
+                    . 'effect then.';
+            } elseif ($limit === 'either') {
+                $out['savedLimit'] = 'Saved: on this test copy, each organisation\'s global administrator may now choose to open '
+                    . 'its public door to anybody (search engines are always told not to list it).'
+                    . ($chose > 0 ? ' ' . $chose . ' organisation' . $several . ' had already chosen that; from now on, whenever '
+                        . ($chose === 1 ? 'that door answers' : 'those doors answer') . ' at all, '
+                        . ($chose === 1 ? 'it answers' : 'they answer') . ' anybody.' : '');
+            } else {
+                $out['savedLimit'] = 'Saved: on this test copy every organisation\'s public door answers signed-in testers only.'
+                    . ($chose > 0 ? ' ' . $chose . ' organisation' . $several
+                        . ' had chosen "open to anybody"; that choice is kept but does nothing while this limit stands.' : '');
+            }
+        }
+
+        return $out;
     }
 
     /** What both test-copy writers say on the live portal, where the setting does nothing. */
@@ -1941,9 +2129,7 @@ final class PublicWebsiteSetup
                 ? 'Whether it is on could not be read.'
                 : 'Switched off, so nothing the portal holds reaches any outside website.'];
         }
-        $rows[] = ['label' => 'The public door', 'state' => 'untested', 'words' => 'Whether your website really shows it is not '
-            . 'tested by this check, which fetches only your main website\'s front page (to see that it answers) and never looks for the '
-            . 'door on your website\'s pages. Open its addresses in your own browser to see what a website gets.'];
+        $rows[] = ['label' => 'The public door', 'state' => 'untested', 'words' => self::doorReachWords(self::doorReachFacts($db, $siteId))['doorRow']];
 
         return $rows;
     }
@@ -2000,16 +2186,11 @@ final class PublicWebsiteSetup
                 . 'checked: ' . ($door['state'] === 'unreadable' ? 'whether the door is on could not be read, so' : 'the door is '
                 . 'not switched on, so') . ' nothing answers there for your organisation.'];
         }
-        if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_TESTERS) {
-            $tryAt = PublicDoor::nameAddressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);
-
-            return ['label' => $label, 'state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door was not '
-                . 'checked: on this test copy the door answers only people signed in here who may use the test copy, and a browser '
-                . 'sends that sign-in only to the portal\'s own address, never to a public address — so ' . $public . ' answers '
-                . 'nobody here until the door is opened to anybody. ' . ($tryAt !== ''
-                    ? 'Testers can try the door at ' . $tryAt . ' in a browser signed in here.'
-                    : 'The portal cannot build the door\'s address on its own address either, so testers cannot try it here '
-                        . 'until that is put right (see the public door card).')];
+        $reach = self::doorReachWords(self::doorReachFacts($db, $siteId));
+        if ($reach['reachRow'] !== null) {
+            // A testers-only test copy: nobody is signed in at a public
+            // address, so there is nothing to fetch. doorReachWords() says so.
+            return ['label' => $label, 'state' => 'untested', 'words' => $reach['reachRow']];
         }
         $nonce = bin2hex(random_bytes(32));
         $proof = PublicDoor::checkProof($door['name'], $siteId, $public, $nonce);

@@ -168,7 +168,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 306; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced
+const PDS_EXPECTED_CHECKS = 308; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords()
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2580,16 +2580,71 @@ $uCheckRows = static function (string $role) use ($http, $tokenOn, $people, $db)
     }
     return $rows;
 };
+/**
+ * doorReachWords()'s answer for each set of facts, asked of the COPY's class in
+ * a PHP of its own (so a plant in the copy is what answers). Pure: no database.
+ *
+ * @param list<array<string,mixed>> $factsList
+ * @return list<array<string,mixed>>
+ */
+$uWords = static function (array $factsList) use ($child, $sep): array {
+    $in = $child . $sep . 'u-words-in.json';
+    file_put_contents($in, json_encode($factsList));
+    file_put_contents($child . $sep . 'u-words.php', <<<'WORDS'
+<?php
+// Written by tools/public-door-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+spl_autoload_register(static function (string $class): void {
+    $file = __DIR__ . '/web/_core/' . str_replace('Portal\\Core\\', '', $class) . '.php';
+    if (is_file($file) === true) {
+        require_once $file;
+    }
+});
+$out = [];
+foreach (json_decode((string) file_get_contents($argv[1]), true) as $facts) {
+    $out[] = \Portal\Core\PublicWebsiteSetup::doorReachWords($facts);
+}
+echo json_encode($out);
+WORDS);
+    $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($child . $sep . 'u-words.php') . ' ' . escapeshellarg($in) . ' 2>&1');
+    $got = json_decode($raw, true);
+    if (is_array($got) === false || count($got) !== count($factsList)) {
+        refuse('doorReachWords() could not be asked: ' . substr($raw, 0, 300));
+    }
+    return $got;
+};
+/** Every "Check my set-up" result row, [state, "Label: words"], in order. */
+$uCheckAll = static function (string $role) use ($http, $tokenOn, $people, $db): array {
+    $db->query("DELETE FROM `tblApiRateLimits` WHERE `bucket` LIKE 'pwsetup:check:%'");
+    $jar  = $people[$role]['jar'];
+    $page = $http('GET', '/admin/public-website', ['jar' => $jar]);
+    $http('POST', '/admin/public-website/check', ['jar' => $jar, 'post' => ['csrf_token' => $tokenOn($page['body'])]]);
+    $body  = $http('GET', '/admin/public-website', ['jar' => $jar])['body'];
+    $start = strpos($body, 'data-setup-check="1"');
+    $end   = $start === false ? false : strpos($body, '</ul>', $start);
+    if ($start === false || $end === false) {
+        return [];
+    }
+    preg_match_all('#<li class="mb-2" data-check-state="([^"]*)">(.*?)</li>#s', substr($body, $start, $end - $start), $m, PREG_SET_ORDER);
+    $rows = [];
+    foreach ($m as $one) {
+        $text = trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($one[2]), ENT_QUOTES, 'UTF-8')));
+        $rows[] = [$one[1], trim((string) preg_replace('/^[^:]*?(For information|Needs attention|Fine|Not tested)\s*/', '', $text))];
+    }
+    return $rows;
+};
+/** The text of the FIRST element on a page matching `$pattern` (its group 1), tags stripped; null when there is none. */
+$uElementText = static function (string $page, string $pattern): ?string {
+    if (preg_match($pattern, $page, $m) !== 1) {
+        return null;
+    }
+    return trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8')));
+};
 /** What the ONE reach row says, exactly as PublicWebsiteSetup words it. */
 $uReachWords = [
     'waiting' => 'Whether it reaches this portal\'s public door was not checked: until the installation\'s administrator approves it, the door does not answer there.',
     'not in effect' => 'Whether it reaches this portal\'s public door was not checked: as said above, the door does not answer on it.',
     'door off' => 'Whether it reaches this portal\'s public door was not checked: the door is not switched on, so nothing answers there for your organisation.',
-    // Round 1 of P4d's check: the address a tester can use is the /w/ one on
-    // the portal's OWN address — a browser never carries the sign-in to a
-    // public address — so the words name it, and say the public address
-    // answers nobody. The name is read when the check runs (see U21).
-    'testers' => static fn (string $wAddress): string => 'Whether it reaches this portal\'s public door was not checked: on this test copy the door answers only people signed in here who may use the test copy, and a browser sends that sign-in only to the portal\'s own address, never to a public address — so ' . $hostA . ' answers nobody here until the door is opened to anybody. Testers can try the door at ' . $wAddress . ' in a browser signed in here.',
     'not reached' => 'This check did not get an answer from this organisation\'s public door at https://' . $hostA . '/. That can happen, for example, when the address points at a different server, something in front of it answers instead or sends visitors on to another address, its security certificate does not cover the name, the portal is closed for maintenance, or this server cannot reach outside addresses or its own public address. Open https://' . $hostA . '/events.json in your own browser to see what the door gives there.',
     'another door' => 'A public door answered at https://' . $hostA . '/, but not this organisation\'s door on this portal. That can happen, for example, when the address leads to another installation of the portal, or to another organisation\'s door. Make sure the address points at this portal.',
     'reached' => 'It answers as your organisation\'s public door: the answer from https://' . $hostA . '/ carried this check\'s one-off proof, which only a door holding your door\'s current name can work out.',
@@ -2868,7 +2923,7 @@ $u10 = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])[
 check('U10 on a test copy the card is drawn for A\'s global administrator: signed-in testers only now, what the installation allows (testers only), the choice form, NO installation form (they are not the installation\'s), and the plain statement that "signed-in testers only" works only when the address is opened directly',
     [str_contains($u10, 'data-door-test-card="testers"'), str_contains($u10, 'data-door-test-now="testers"'), str_contains($u10, 'data-door-test-limit="testers"'),
         str_contains($u10, 'data-door-test-form="choice"'), str_contains($u10, 'data-door-test-form="limit"'),
-        str_contains($u10, 'A browser sends this portal\'s sign-in only to the address it signed in at: never to a script, a feed or a frame on another website, and never to your public address')],
+        str_contains($u10, 'A browser never sends that sign-in to a script, a feed or a frame on another website, nor to your public address')],
     [true, true, true, true, false, true]);
 $uRootRefusedBefore = $logged('PublicWebsiteSetupRefused', $people['root']['id']);
 $u11 = $card('root', 'door_test_choice', ['value' => 'anybody']);
@@ -2970,14 +3025,21 @@ check('U20 …and a signed-in tester is still served at the door\'s /w/ address 
     [$uTesterW['status'], $uTesterW['headers']['cache-control'] ?? '', $uTesterW['headers']['vary'] ?? '', $uTesterMedia['status'], $uHeaderSet($uTesterMedia)],
     [200, 'private, no-store', 'Cookie', 200, $uMediaWant($uTesterMedia, 'private, no-store', 'Cookie', $uMediaPerm)]);
 $uWEvents = $base . '/w/' . (string) $doorName($siteA) . '/events.json';
-check('U21 with the door for testers only on a test copy, "Check my set-up" does NOT fetch and says why: nobody is signed in at a public address, so it answers nobody — and it names the /w/ address on the portal\'s own address for testers',
-    ($uCheckRows('root'))[3] ?? null, ['untested', ($uReachWords['testers'])($uWEvents)]);
+$uFacts21 = ['rule' => 'testers', 'doorOn' => true, 'public' => $hostA, 'wEvents' => $uWEvents,
+    'wPosters' => $base . '/w/' . (string) $doorName($siteA) . '/posters.json'];
+$uWords21 = ($uWords([$uFacts21]))[0];
+check('U21 with the door for testers only on a test copy, "Check my set-up" does NOT fetch: its reach row is doorReachWords()\'s sentence for this state, which says the public address answers nobody (nobody is signed in there) and names the /w/ address for testers',
+    [($uCheckRows('root'))[3] ?? null, str_contains((string) $uWords21['reachRow'], $hostA . ' answers nobody here'), str_contains((string) $uWords21['reachRow'], 'Testers can try the door at ' . $uWEvents)],
+    [['untested', $uWords21['reachRow']], true, true]);
 $u21card = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
-check('U21b with a public address in effect on a testers-only test copy, the door card says the addresses it lists (on the public address) answer NOBODY, gives testers the /w/ addresses on the portal\'s own address instead, and never tells them to open the public ones "in this browser"',
-    [str_contains($u21card, 'data-door-testers-public="1"'), str_contains($u21card, '<code data-door-testers-try="events">' . $uWEvents . '</code>'),
-        str_contains($u21card, '<code data-door-testers-try="posters">' . $base . '/w/' . (string) $doorName($siteA) . '/posters.json</code>'),
-        str_contains($u21card, 'open the addresses above in a browser signed in here instead'), str_contains($u21card, 'and never to your public address')],
-    [true, true, true, false, true]);
+// Round 2 of P4d's check: U21b used to look for its clauses ANYWHERE on the
+// page, so the alert's own main claim could be replaced by the removed advice
+// and the test-copy card's paragraph still satisfied it. It reads the alert's
+// OWN element now, and compares it WHOLE.
+check('U21b with a public address in effect on a testers-only test copy, the door card\'s warning — its OWN element, compared whole — is doorReachWords()\'s: the addresses it lists answer nobody, and testers are given the /w/ addresses',
+    [$uElementText($u21card, '#<div class="alert alert-warning" data-door-testers-only="1">(.*?)</div>#s'), str_contains((string) $uWords21['alert'], 'so they answer nobody'),
+        str_contains((string) $uWords21['alert'], $uWEvents . ' (events) and ' . $uFacts21['wPosters'] . ' (posters)')],
+    [$uWords21['alert'], true, true]);
 $u22a = $card('root', 'door_test_choice', ['value' => 'open']);
 $u22b = $card('root', 'door_test_choice');
 $u22c = $card('instroot', 'door_test_limit', ['value' => 'anybody']);
@@ -3001,11 +3063,11 @@ $setInstallation('portal.gatekeeper.enabled', $uGateWas);
 check('U24 with the test copy\'s own staff sign-in gate switched off, the card says the door is open to anybody whatever is chosen, and it is — on both forms, still telling search engines not to list it',
     [str_contains($u24card, 'data-door-test-card="ungated"'), [$u24w['status'], $u24w['headers']['x-robots-tag'] ?? ''], [$u24p['status'], $u24p['headers']['x-robots-tag'] ?? '']],
     [true, [200, 'noindex, nofollow, noarchive'], [200, 'noindex, nofollow, noarchive']]);
-check('U24b with the gate switched off, saving "signed-in testers only" — the organisation\'s choice and the installation\'s limit — is stored, and each message says the door is open to anybody until the gate is back on, never that it answers testers only',
-    [$uFlash($u24choice['page']), $uFlash($u24limit['page']), $uOwnRow($siteA, 'public.door.testCopies.open'), $installationRow('public.door.testCopies.permitted')],
-    ['Saved: your choice is signed-in testers only. This test copy\'s own staff sign-in gate is switched off, though, so every page of it — your public door included — is open to anybody until that gate is switched back on. Your choice takes effect then.',
-        'Saved: organisations\' public doors on this test copy are for signed-in testers only. This test copy\'s own staff sign-in gate is switched off, though, so every page of it — every public door included — is open to anybody until that gate is switched back on. This limit takes effect then.',
-        'testers', 'testers']);
+$uWords24 = ($uWords([['rule' => 'ungated', 'choice' => 'testers', 'limit' => 'testers', 'chose' => 0] + $uFacts21]))[0];
+check('U24b with the gate switched off, saving "signed-in testers only" — the organisation\'s choice and the installation\'s limit — is stored, and each message is doorReachWords()\'s for that state: open to anybody until the gate is back on, never that it answers testers only',
+    [$uFlash($u24choice['page']), $uFlash($u24limit['page']), str_contains($uFlash($u24choice['page']), 'answers only people signed in'),
+        str_contains($uFlash($u24limit['page']), 'gate is switched off'), $uOwnRow($siteA, 'public.door.testCopies.open'), $installationRow('public.door.testCopies.permitted')],
+    [$uWords24['savedChoice'], $uWords24['savedLimit'], false, true, 'testers', 'testers']);
 $db->query("UPDATE `tblUsers` SET `isAdmin` = 0 WHERE `userID` = {$people['setup']['id']}");
 $setOwn($siteA, 'public.door.testCopies.open', null);
 $setInstallation('public.door.testCopies.permitted', 'testers');
@@ -3014,6 +3076,220 @@ $startServer();
 $waitForServer();
 $u25 = $http('GET', '/events.json', ['host' => $hostA]);
 check('U25 back on the live portal, the door\'s feed says only noindex — the test-copy rule asks the channel first, so it does nothing here', [$u25['status'], $u25['headers']['x-robots-tag'] ?? ''], [200, 'noindex']);
+
+// ── Round 2 of P4d's check: EVERY sentence about who the door answers ────────
+// A sentence about who the door answers was untrue in one combination of
+// states two rounds running, so the sentences now live WHOLE in ONE method,
+// PublicWebsiteSetup::doorReachWords(). U26 judges the method's truth for
+// every combination of the facts it is keyed by, by rules written HERE (not
+// copied from it); U27 renders every combination a page can be in over real
+// HTTP and requires each place to show exactly the method's sentence.
+$uHost = 'pub.selftest.test';
+$uWa   = 'https://portal.selftest.test/w/0123456789abcdef01234567/events.json';
+$uWp   = 'https://portal.selftest.test/w/0123456789abcdef01234567/posters.json';
+$uTable = [];
+foreach (['live', 'ungated', 'testers', 'anybody'] as $rule) {
+    foreach ([true, false] as $on) {
+        foreach (['', $uHost] as $pub) {
+            foreach (['', $uWa] as $w) {
+                foreach (['testers', 'anybody'] as $choice) {
+                    $uTable[] = ['rule' => $rule, 'doorOn' => $on, 'public' => $pub, 'wEvents' => $on === true ? $w : '',
+                        'wPosters' => ($on === true && $w !== '') ? $uWp : '', 'choice' => $choice];
+                }
+            }
+        }
+    }
+}
+$uTableWords = $uWords($uTable);
+$uWrong = [];
+foreach ($uTable as $i => $f) {
+    $w = $uTableWords[$i];
+    $all = implode(' | ', array_filter([$w['alert'], $w['card'], $w['reachRow'], $w['doorRow'], $w['savedChoice']], 'is_string'));
+    $reachable = $f['doorOn'] === true && ($f['public'] !== '' || $f['wEvents'] !== '');
+    $testers   = $f['rule'] === 'testers';
+    $why = [];
+    // Everywhere: no "below" (the viewer may not be the one who can choose), and
+    // every "until it is opened to anybody" names who decides it.
+    if (str_contains($all, 'below') === true) {
+        $why[] = 'says "below"';
+    }
+    if (substr_count($all, 'until it is opened to anybody') !== substr_count($all, 'until it is opened to anybody, which a global administrator of this organisation chooses')) {
+        $why[] = 'an "until" that does not say who decides';
+    }
+    if ($f['rule'] === 'live' && ($w['card'] !== null || $w['alert'] !== null || $w['reachRow'] !== null || $w['savedChoice'] !== '')) {
+        $why[] = 'a test-copy sentence on the live portal';
+    }
+    if ($reachable === false && (str_contains($all, 'answers anybody') === true || str_contains($all, 'works') === true
+        || str_contains($all, 'Open its addresses') === true || str_contains($all, 'Testers can try') === true)) {
+        $why[] = 'claims somebody can reach a door nobody can';
+    }
+    if ($f['doorOn'] === false && ($f['rule'] !== 'live' && str_contains((string) $w['card'], 'answers nobody') === false
+        || str_contains($w['doorRow'], 'switched off, a website gets nothing') === false)) {
+        $why[] = 'the door off, not said';
+    }
+    if ($f['doorOn'] === true && $reachable === false && ($f['rule'] !== 'live' && str_contains((string) $w['card'], 'nobody can reach it') === false
+        || str_contains($w['doorRow'], 'no address yet') === false)) {
+        $why[] = 'no address, not said';
+    }
+    if ($reachable === true && $testers === false) {
+        if (str_contains($w['doorRow'], 'Open its addresses in your own browser to see what a website gets') === false
+            || ($f['rule'] !== 'live' && str_contains((string) $w['card'], 'answers anybody') === false) || $w['alert'] !== null || $w['reachRow'] !== null) {
+            $why[] = 'a door open to anybody not said so';
+        }
+    }
+    if ($reachable === true && $testers === true) {
+        if (str_contains($all, 'answers anybody') === true || str_contains($all, 'Open its addresses') === true
+            || str_contains($all, 'open the addresses above') === true || str_contains($all, ' works') === true) {
+            $why[] = 'testers only, but says a website or anybody gets it';
+        }
+        if (str_contains($w['doorRow'], 'a website gets nothing from the door') === false || $w['alert'] === null) {
+            $why[] = 'testers only: the door row or the warning is missing';
+        }
+        if ($f['public'] !== '' && (str_contains((string) $w['card'], $f['public'] . ' answers nobody') === false
+            && str_contains((string) $w['card'], 'nobody can reach the door here at all') === false
+            || str_contains((string) $w['alert'], 'so they answer nobody') === false
+            || str_contains((string) $w['reachRow'], $f['public'] . ' answers nobody here') === false)) {
+            $why[] = 'a public address on a testers-only copy not said to answer nobody';
+        }
+        if (($f['public'] !== '') !== ($w['reachRow'] !== null)) {
+            $why[] = 'the reach row skipped the fetch when it should not, or fetched when nobody can be signed in';
+        }
+        if ($f['wEvents'] !== '' && (str_contains((string) $w['card'], $f['wEvents']) === false || str_contains((string) $w['alert'], $f['wEvents']) === false
+            || ($f['public'] !== '' && str_contains((string) $w['reachRow'], 'Testers can try the door at ' . $f['wEvents']) === false))) {
+            $why[] = 'the /w/ address testers can use is not named';
+        }
+        if ($f['wEvents'] === '' && str_contains($all, '/w/') === true) {
+            $why[] = 'a /w/ address named where none can be built';
+        }
+        if ($f['public'] !== '' && str_contains($all, 'https://' . $f['public']) === true) {
+            $why[] = 'sends somebody to the public address, which answers nobody';
+        }
+    }
+    if ($f['rule'] !== 'live' && $w['savedChoice'] !== 'Saved: your choice is ' . ($f['choice'] === 'anybody' ? 'open to anybody' : 'signed-in testers only') . '. ' . $w['card']) {
+        $why[] = 'the save\'s message is not the choice and then the whole state';
+    }
+    if ($why !== []) {
+        $uWrong[] = json_encode([$f['rule'], $f['doorOn'], $f['public'], $f['wEvents'] !== '', $f['choice']]) . ': ' . implode('; ', $why);
+    }
+}
+$uLimitTable = [];
+foreach (['live', 'ungated', 'testers', 'anybody'] as $rule) {
+    foreach (['testers', 'either'] as $limit) {
+        foreach ([0, 1, 2] as $chose) {
+            $uLimitTable[] = ['rule' => $rule, 'limit' => $limit, 'chose' => $chose];
+        }
+    }
+}
+foreach ($uWords($uLimitTable) as $i => $w) {
+    $f = $uLimitTable[$i];
+    $why = [];
+    if ($w['savedLimit'] === '' || str_contains($w['savedLimit'], 'is open to anybody') === true || str_contains($w['savedLimit'], 'open to anybody now') === true) {
+        $why[] = 'empty, or claims a door is open';
+    }
+    if ($f['rule'] === 'ungated' && (str_contains($w['savedLimit'], 'gate is switched off') === false || $w['savedLimitType'] !== 'warning')) {
+        $why[] = 'the gate off, not said';
+    }
+    if ($f['rule'] !== 'ungated' && $f['chose'] > 0 && str_contains($w['savedLimit'], (string) $f['chose'] . ' organisation') === false) {
+        $why[] = 'the organisations that had chosen are not counted';
+    }
+    if ($why !== []) {
+        $uWrong[] = 'limit ' . json_encode($f) . ': ' . implode('; ', $why);
+    }
+}
+check('U26 doorReachWords() is TRUE in every one of ' . count($uTable) . ' combinations of the facts it is keyed by (rule × door on × public address × /w/ address × choice) and every one of '
+    . count($uLimitTable) . ' for the limit\'s save — judged by rules written in this test: nothing reachable said unreachable or the reverse, a testers-only public address always "answers nobody", the /w/ address named whenever there is one, no "below", every "until" naming who decides',
+    [count($uTable), count($uLimitTable), $uWrong], [64, 24, []]);
+
+/** Render one state of A over real HTTP: the door card's warning, the test-copy card's sentence, and the set-up check's two rows. */
+$uRender = static function () use ($http, $people, $uElementText, $uCheckAll): array {
+    $page = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+    $rows = $uCheckAll('root');
+    $door = null;
+    $reach = null;
+    foreach ($rows as [$state, $text]) {
+        if ($state === 'untested' && str_starts_with($text, 'The public door:') === true) {
+            $door = trim(substr($text, strlen('The public door:')));
+        }
+        if (str_starts_with($text, 'Public address:') === true) {
+            $reach = [$state, trim(substr($text, strlen('Public address:')))];
+        }
+    }
+    return [
+        'alert'   => $uElementText($page, '#<div class="alert alert-warning" data-door-testers-only="1">(.*?)</div>#s'),
+        'card'    => $uElementText($page, '#<p class="mb-2" data-door-test-now="[^"]*">(.*?)</p>#s'),
+        'doorRow' => $door,
+        'reach'   => $reach,
+    ];
+};
+/** Put A in one state; return the facts that state IS (built here, from what was set). */
+$uSetState = static function (string $rule, string $state) use ($db, $siteA, $hostA, $base, $doorName, $uDoorOff, $setInstallation, $setOwn): array {
+    $setInstallation('public.door.testCopies.permitted', $rule === 'anybody' ? 'either' : 'testers');
+    $setOwn($siteA, 'public.door.testCopies.open', $rule === 'anybody' ? 'anybody' : null);
+    $setInstallation('portal.gatekeeper.enabled', $rule === 'ungated' ? 'false' : null);
+    $approved = in_array($state, ['door off', 'public and /w/', 'public only'], true);
+    $db->query('UPDATE `tblPublicHosts` SET `approvedAtUtc` = ' . ($approved === true ? 'UTC_TIMESTAMP()' : 'NULL') . " WHERE `siteID` = {$siteA}");
+    $wOk = in_array($state, ['door off', 'public and /w/', '/w/ only'], true);
+    $setInstallation('site.url', $wOk === true ? $base : null);
+    if ($state === 'door off') {
+        $uDoorOff(true);
+    }
+    $on   = $state !== 'door off';
+    $name = (string) $doorName($siteA);
+    return ['rule' => $rule, 'doorOn' => $on, 'public' => $approved === true ? $hostA : '',
+        'wEvents' => ($on === true && $wOk === true) ? $base . '/w/' . $name . '/events.json' : '',
+        'wPosters' => ($on === true && $wOk === true) ? $base . '/w/' . $name . '/posters.json' : ''];
+};
+$uPutBack = static function (string $state) use ($db, $siteA, $base, $uDoorOff, $setInstallation, $setOwn): void {
+    if ($state === 'door off') {
+        $uDoorOff(false);
+    }
+    $setInstallation('site.url', $base);
+    $setInstallation('public.door.testCopies.permitted', 'testers');
+    $setOwn($siteA, 'public.door.testCopies.open', null);
+    $setInstallation('portal.gatekeeper.enabled', null);
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+};
+$uGateKept = $installationRow('portal.gatekeeper.enabled');
+$uCombos = [];
+$uSeen   = [];
+foreach (['prod' => ['live'], 'alpha' => ['testers', 'anybody', 'ungated']] as $uChannel => $uRules) {
+    $channel = $uChannel;
+    $startServer();
+    $waitForServer();
+    foreach ($uRules as $rule) {
+        // NOT `$state`: that name is the run's own bookkeeping (the server
+        // process, the settings to put back), shared by reference.
+        foreach (['door off', 'public and /w/', 'public only', '/w/ only', 'no address'] as $uState) {
+            $facts = $uSetState($rule, $uState);
+            $uSeen[$rule . ', ' . $uState] = $uRender();
+            $uCombos[$rule . ', ' . $uState] = $facts;
+            $uPutBack($uState);
+        }
+    }
+}
+$setInstallation('portal.gatekeeper.enabled', $uGateKept);
+$channel = 'prod';
+$startServer();
+$waitForServer();
+$uComboWords = $uWords(array_values($uCombos));
+$uMismatch = [];
+$i = 0;
+foreach ($uCombos as $label => $facts) {
+    $w    = $uComboWords[$i++];
+    $seen = $uSeen[$label];
+    // The reach row: doorReachWords()'s when it skips the fetch; otherwise
+    // the row of another state — waiting for approval (not in effect), the
+    // door off, or the fetch, which this server cannot complete.
+    $reachWant = $w['reachRow'] !== null ? ['untested', $w['reachRow']]
+        : ($facts['public'] === '' ? ['untested', $uReachWords['waiting']]
+            : ($facts['doorOn'] === false ? ['untested', $uReachWords['door off']] : ['problem', $uReachWords['not reached']]));
+    $want = ['alert' => $w['alert'], 'card' => $w['card'], 'doorRow' => $w['doorRow'], 'reach' => $reachWant];
+    if ($seen !== $want) {
+        $uMismatch[$label] = ['shown' => $seen, 'doorReachWords' => $want];
+    }
+}
+check('U27 over real HTTP, in every one of ' . count($uCombos) . ' states a page can be in (the live portal and a test copy for testers, open to anybody, or with its gate off; × the door off, a public address and a /w/ address, a public address only, a /w/ address only, no address), the door card\'s warning, the test-copy card\'s sentence and the set-up check\'s door and reach rows are EXACTLY doorReachWords()\'s for that state — each read from its own element, never from anywhere on the page',
+    [count($uCombos), $uMismatch], [20, []]);
 
 // =============================================================================
 echo "P. The plants: each guard taken out of a COPY, and its scenario re-run\n";
@@ -3804,7 +4080,7 @@ $p = $plant('_core/PublicDoor.php', "return hash_hmac('sha256', \"webms-public-d
     'return hash(\'sha256\', $nonce);',
     static fn (): mixed => $uAsk('forward-b')['reach'][0] ?? null);
 check('PU10 with the proof made from the value alone (no name, number or address), every door gives the same proof and another organisation\'s door reads as yours (U01, U02 and U08 catch it)', [$p['applied'], $p['result']], [true, 'ok']);
-$p = $plant('_core/PublicWebsiteSetup.php', 'if (self::testCopyDoorRule($db, $siteId) === self::DOOR_TEST_TESTERS) {', 'if (false) {',
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$reach['reachRow'] !== null) {", 'if (false) {',
     static fn (): mixed => ($uCheckRows('root'))[3][0] ?? null, 'alpha');
 check('PU11 with "testers only: not checked" taken out, the check fetches a door that must refuse it and calls the address a problem (U21 catches it)', [$p['applied'], $p['result']], [true, 'problem']);
 $p = $plant('_core/PublicWebsiteSetup.php', "if (\$door['state'] !== 'on') {\n            return ['label' => \$label,", "if (false) {\n            return ['label' => \$label,",
@@ -3872,24 +4148,27 @@ $p = $plant('_core/PublicDoor.php', 'self::sendDataHeaders($file[\'type\'], $tes
         return $r;
     }, 'alpha');
 check('PU20 with a test copy\'s media sent with the live portal\'s plain noindex, search engines may follow and archive it (U16 and U16b catch it)', [$p['applied'], $p['result']], [true, 'noindex']);
-$p = $plant('_core/PublicWebsiteSetup.php', "if (self::testCopyDoorRule(\$db, \$siteId) === self::DOOR_TEST_UNGATED) {\n            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: your choice is '",
-    "if (false) {\n            return ['saved' => true, 'type' => 'warning', 'message' => 'Saved: your choice is '",
-    static function () use ($card, $installationRow, $setInstallation, $uFlash): bool {
+$p = $plant('_core/PublicWebsiteSetup.php', '} elseif ($rule !== self::DOOR_TEST_TESTERS) {',
+    '} elseif ($rule === self::DOOR_TEST_ANYBODY || $rule === self::DOOR_TEST_LIVE) {',
+    static function () use ($card, $installationRow, $setInstallation, $uFlash): string {
         $was = $installationRow('portal.gatekeeper.enabled');
         $setInstallation('portal.gatekeeper.enabled', 'false');
         $page = $card('root', 'door_test_choice', ['value' => 'testers'])['page'];
         $setInstallation('portal.gatekeeper.enabled', $was);
-        return str_contains($uFlash($page), 'answers only people signed in here');
+        return $uFlash($page);
     }, 'alpha');
-check('PU21 with the "gate switched off" wording taken out of the choice\'s save, it tells a test copy open to anybody that its door answers signed-in testers only (U24b catches it)', [$p['applied'], $p['result']], [true, true]);
-$p = $plant('_core/PublicWebsiteSetup.php', '$tryAt = PublicDoor::nameAddressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);',
-    '$tryAt = PublicDoor::addressFor($db, $siteId, PublicDoor::SURFACE_EVENTS);',
+// Under the fault the message is, word for word, the TESTERS-ONLY state's
+// (doorReachWords() for A as it stands, unplanted, asked in U21).
+check('PU21 with the "gate switched off" state taken out of doorReachWords(), saving the choice tells a test copy open to anybody that its door answers signed-in testers only (U24b and U27 catch it)', [$p['applied'], $p['result']],
+    [true, 'Saved: your choice is signed-in testers only. ' . $uWords21['card']]);
+$p = $plant('_core/PublicWebsiteSetup.php', "'address — so ' . \$host . ' answers nobody here,' . \$until . '. Testers can try the door at ' . \$we",
+    "'address — so ' . \$host . ' answers nobody here,' . \$until . '. Testers can try the door at https://' . \$host . '/events.json'",
     static fn (): bool => str_contains((string) (($uCheckRows('root'))[3][1] ?? ''), 'Testers can try the door at https://' . $hostA . '/'), 'alpha');
-check('PU22 with the set-up check naming the door\'s usual address instead of its /w/ one, it sends testers to the public address, which answers nobody (U21 catches it)', [$p['applied'], $p['result']], [true, true]);
-$p = $plant('_apps/admin/public-website/index.php', "<?php if (\$publicHostInEffect !== ''): ?>\n                        <div class=\"alert alert-warning\" data-door-testers-only=\"1\" data-door-testers-public=\"1\">",
-    "<?php if (false): ?>\n                        <div class=\"alert alert-warning\" data-door-testers-only=\"1\" data-door-testers-public=\"1\">",
-    static fn (): bool => str_contains($http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'], 'open the addresses above in a browser signed in here instead'), 'alpha');
-check('PU23 with the card\'s "public address answers nobody" alert taken out, it tells testers to open the public addresses, which answer nobody (U21b catches it)', [$p['applied'], $p['result']], [true, true]);
+check('PU22 with doorReachWords() naming the public address instead of the /w/ one, the set-up check sends testers to the public address, which answers nobody (U21 and U26 catch it)', [$p['applied'], $p['result']], [true, true]);
+$p = $plant('_apps/admin/public-website/index.php', "<div class=\"alert alert-warning\" data-door-testers-only=\"1\"><?php echo \$esc(\$doorReach['alert']); ?></div>",
+    "<div class=\"alert alert-warning\" data-door-testers-only=\"1\">This is a test copy, so open the addresses above in this browser to try them.</div>",
+    static fn (): bool => str_contains($http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'], 'open the addresses above in this browser to try them'), 'alpha');
+check('PU23 with the door card writing its OWN warning (round 2\'s plant m1: the removed advice back), it tells testers to open public addresses that answer nobody (U21b and U27 catch it)', [$p['applied'], $p['result']], [true, true]);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");
