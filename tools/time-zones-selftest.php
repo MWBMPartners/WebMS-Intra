@@ -67,6 +67,13 @@
  *      a call that lands just after midnight on the event's own day still
  *      sends, and only the day the clocks go back holds one back. (That is
  *      about 550 runs of the job, and most of the minute this file takes.)
+ *   P  No PLACE is built in either (#935): the Sabbath place ships empty and
+ *      sunset follows the organisation's map position, or the fixed times
+ *      when there is none, and a venue's country follows the organisation's
+ *      or is refused. And the Sabbath page (#936) fills its boxes from the
+ *      installation's row, so Save pressed untouched inside an organisation
+ *      with rows of its own changes nothing, and a field not SENT is left
+ *      alone, one field at a time.
  *
  * DATES. Nothing here depends on today's date. Every date is counted from
  * "now", both change nights are worked out from each zone's own rules (the
@@ -114,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 204;  // + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 224;  // + twenty in part P (#935, #936: P00-P07, six P08, P09-P14) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -200,6 +207,8 @@ if (($argv[1] ?? '') === '--child') {
             case 'sabbath': // #782: the quiet window at a given moment, shown on a given clock
                 [$winStart]    = \Portal\Core\Sabbath::computeWindow((int) $job['at']);
                 $out['start']  = (new DateTimeImmutable('@' . $winStart))->setTimezone(new DateTimeZone((string) $job['showIn']))->format('D Y-m-d H:i');
+                $out['startTs'] = $winStart;
+                $out['place']   = \Portal\Core\Sabbath::place(); // #935: where sunset is worked out, or null
                 break;
             default:
                 $out['threw'] = 'the child was given a task it does not know';
@@ -708,7 +717,7 @@ foreach (['reminders.cron_token' => $jobToken, 'reminders.enabled' => '1', 'main
     setting($key, $value);
 }
 // A hired hall on a clock of its own, and a second organisation.
-q('INSERT INTO tblVenues (venueID, siteID, venueName, timezone, createdByID) VALUES (?, 1, ?, ?, ?)', 'issi', [VENUE, 'Selftest Zones Hall', VENUE_ZONE, ADMIN]);
+q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone, createdByID) VALUES (?, 1, ?, 'GB', ?, ?)", 'issi', [VENUE, 'Selftest Zones Hall', VENUE_ZONE, ADMIN]);
 q("INSERT INTO tblSites (siteID, siteKey, siteName, timezone, isActive) VALUES (?, 'selftest-zones-two', 'Selftest Zones Two', 'America/Santiago', 1)", 'i', [ORG_TWO]);
 
 // The scratch copy of web/, with a throwaway connection file and key.
@@ -3413,7 +3422,7 @@ $withoutConsumingIds(static function () use ($adminJar): void {
     // Over-refusal guard: a venue saved long ago with an old zone name must still
     // save when its zone is left as it is. This passes on the old code too, on
     // purpose: it is here so the new refusal cannot grow into refusing this.
-    q("INSERT INTO tblVenues (venueID, siteID, venueName, timezone) VALUES (960782, 1, 'Selftest zones hall 782 legacy', 'US/Eastern')");
+    q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone) VALUES (960782, 1, 'Selftest zones hall 782 legacy', 'US', 'US/Eastern')");
     post($adminJar, '/venues/manage?edit=960782', '/venues/venue-save', ['venueID' => 960782] + $venueSave + ['venueName' => 'Selftest zones hall 782 legacy renamed', 'timezone' => 'US/Eastern']);
     ok(
         'N08 a venue still holding an OLD zone name ("US/Eastern") saves when that zone is left unchanged (asks whether the field CHANGED, #667)',
@@ -3423,7 +3432,7 @@ $withoutConsumingIds(static function () use ($adminJar): void {
     // The venue code's reading: a venue whose stored zone cannot be read, and an
     // event at 08:00 in Sydney. On Sydney's clock that is 15 June; on London's
     // (the old fallback) it is 23:00 on 14 June.
-    q("INSERT INTO tblVenues (venueID, siteID, venueName, timezone) VALUES (960783, 1, 'Selftest zones hall 782 unreadable', 'Atlantis/Nowhere')");
+    q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone) VALUES (960783, 1, 'Selftest zones hall 782 unreadable', 'GB', 'Atlantis/Nowhere')");
     q("INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960781, 1, 'selftest-zones-782', 'Selftest zones 782', '2028-06-15 08:00:00', '2028-06-15 09:00:00', ?, 'published', 1, 0)", 's', [N_ZONE]);
     $hall = child(['task' => 'venue', 'eventId' => 960781, 'venueId' => 960783]);
     ok(
@@ -3434,7 +3443,7 @@ $withoutConsumingIds(static function () use ($adminJar): void {
     // The check API with no `tz`: a Sydney venue, a 20:00 reading. On the
     // organisation's clock it is 15 June; read as London (the old default) it is
     // 05:00 on 16 June in Sydney.
-    q("INSERT INTO tblVenues (venueID, siteID, venueName, timezone) VALUES (960784, 1, 'Selftest zones hall 782 sydney', ?)", 's', [N_ZONE]);
+    q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone) VALUES (960784, 1, 'Selftest zones hall 782 sydney', 'AU', ?)", 's', [N_ZONE]);
     $check = req($adminJar, 'GET', '/api/venues/check?start=2028-06-15T20:00&venueID=960784');
     $answer = json_decode($check['body'], true);
     $day    = (string) ($answer['data']['perDay'][0]['date'] ?? $answer['perDay'][0]['date'] ?? '');
@@ -3517,6 +3526,244 @@ foreach ($nSabbathWas as $row) {
     setting((string) $row['settingKey'], (string) $row['settingValue']);
 }
 setting('livestream.enabled', $nLiveWas === null ? '0' : (string) $nLiveWas);
+
+// =============================================================================
+// P. NO PLACE IS BUILT IN, AND THE SABBATH PAGE SAVES ONLY WHAT IT WAS SENT (#935, #936)
+// =============================================================================
+// #935: the Sabbath place shipped as Cambridge's coordinates and fell back to
+// them, and a venue's country defaulted to 'GB', for every customer anywhere.
+// #936: the Sabbath page filled its boxes from the MERGED settings while saving
+// the installation's row (#674's shape), and a save that did not send a field
+// stored 0 or "fixed" (#677's shape). Each check says what the OLD code gave.
+// Run in an organisation on Australia/Sydney, where Cambridge's sunset and the
+// organisation's own clock are hours apart (the same premise as part N).
+head('P. #935, #936: no place is built in, and the Sabbath page saves only what it was sent');
+const P_KEYS = "('portal.sabbath.enabled','portal.sabbath.method','portal.sabbath.timezone','portal.sabbath.location_lat','portal.sabbath.location_lng',"
+    . "'portal.sabbath.start_offset_minutes','portal.sabbath.end_offset_minutes','portal.sabbath.bypass_critical','org.latitude','org.longitude','org.address.countryCode')";
+$pWas      = q('SELECT siteID, settingKey, settingValue FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND (siteID IS NULL OR siteID = 1)');
+$pOrgZone  = one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? null;
+/** One organisation-1 row of its own: written, or removed when $value is null. */
+$siteRow = static function (string $key, ?string $value): void {
+    q('DELETE FROM tblSettings WHERE settingKey = ? AND siteID = 1', 's', [$key]);
+    if ($value !== null) {
+        q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (1, ?, ?, ?, 0)', 'sss', [$key, $value, $value]);
+    }
+};
+/** Every installation-wide Sabbath row, key => value. */
+$installationSabbath = static function (): array {
+    $out = [];
+    foreach (q("SELECT settingKey, settingValue FROM tblSettings WHERE settingKey LIKE 'portal.sabbath.%' AND siteID IS NULL ORDER BY settingKey") as $row) {
+        $out[(string) $row['settingKey']] = (string) $row['settingValue'];
+    }
+
+    return $out;
+};
+/** What a browser would send for the Sabbath form exactly as drawn: "press Save untouched". */
+$drawnForm = static function (string $html): array {
+    $fields = [];
+    foreach (['location_lat', 'location_lng', 'start_offset_minutes', 'end_offset_minutes', 'switches_shown'] as $name) {
+        if (tz_find('#<input[^>]*\bname="' . $name . '"[^>]*\bvalue="([^"]*)"#s', $html, $m) === 1) {
+            $fields[$name] = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+        }
+    }
+    if (tz_find('#name="method" value="([^"]*)"\s+checked#', $html, $m) === 1) {
+        $fields['method'] = $m[1];
+    }
+    foreach (['enabled', 'bypass_critical'] as $box) {
+        if (tz_find('#name="' . $box . '"\s+checked#', $html) === 1) {
+            $fields[$box] = 'on';
+        }
+    }
+    if (tz_find('#<option value="([^"]*)"\s+selected\s*>#', $html, $m) === 1) {
+        $fields['timezone'] = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+    }
+
+    return $fields;
+};
+orgZone(1, N_ZONE);
+$siteRow('org.latitude', '');
+$siteRow('org.longitude', '');
+
+// ---- the Sabbath place --------------------------------------------------------
+$placeNow = static fn (string $key): ?string => one('SELECT settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key])['settingValue'] ?? null;
+ok(
+    'P00 a new installation ships the Sabbath place EMPTY, meaning each organisation\'s own map position (it shipped as Cambridge, 52.205 / 0.119)',
+    $placeNow('portal.sabbath.location_lat') === '' && $placeNow('portal.sabbath.location_lng') === '',
+    json_encode([$placeNow('portal.sabbath.location_lat'), $placeNow('portal.sabbath.location_lng')])
+);
+setting('portal.sabbath.method', 'sunset_calc');
+setting('portal.sabbath.location_lat', '');
+setting('portal.sabbath.location_lng', '');
+setting('portal.sabbath.timezone', '');
+setting('portal.sabbath.start_offset_minutes', '0');
+setting('portal.sabbath.end_offset_minutes', '0');
+$pAt   = (new DateTimeImmutable('2028-06-17 12:00:00', new DateTimeZone(N_ZONE)))->getTimestamp();
+$noWhere = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);
+ok(
+    'P01 sunset with NO place known uses the fixed times: the window begins Friday 18:00 on the organisation\'s clock (the old code used Cambridge\'s sunset: about 06:20 on Saturday in Sydney)',
+    $noWhere['threw'] === '' && ($noWhere['start'] ?? '') === 'Fri 2028-06-16 18:00'
+        && array_key_exists('place', $noWhere) === true && $noWhere['place'] === null,
+    json_encode($noWhere)
+);
+$pPage = req($adminJar, 'GET', '/admin/settings/sabbath');
+ok(
+    'P02 the Sabbath page SAYS that sunset has no place and that the fixed times are used instead',
+    $pPage['status'] === 200 && str_contains($pPage['body'], 'data-sabbath-no-place') === true
+        && str_contains(words($pPage['body']), 'no place is set for this organisation') === true
+        && str_contains(words($pPage['body']), 'quiet hours use the fixed times instead') === true,
+    said($pPage)
+);
+// The organisation's own map position (Admin, Settings, Organisation).
+$siteRow('org.latitude', '-33.87');
+$siteRow('org.longitude', '151.21');
+$sunsetOn = static function (float $lat, float $lng): string {
+    $noon = new DateTimeImmutable('2028-06-16 12:00:00', new DateTimeZone(N_ZONE));
+
+    return (new DateTimeImmutable('@' . date_sun_info($noon->getTimestamp(), $lat, $lng)['sunset']))->setTimezone(new DateTimeZone(N_ZONE))->format('D Y-m-d H:i');
+};
+$atOrg = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);
+ok(
+    'P03 with the Sabbath place empty, sunset is worked out at the ORGANISATION\'s own map position: Sydney\'s sunset, ' . $sunsetOn(-33.87, 151.21),
+    $atOrg['threw'] === '' && ($atOrg['start'] ?? '') === $sunsetOn(-33.87, 151.21) && ($atOrg['place']['from'] ?? '') === 'organisation',
+    json_encode($atOrg)
+);
+$pPage = req($adminJar, 'GET', '/admin/settings/sabbath');
+ok(
+    'P04 the Sabbath page names where sunset is worked out: this organisation\'s own map position',
+    str_contains($pPage['body'], 'data-sabbath-place-from="organisation"') === true && str_contains($pPage['body'], 'data-sabbath-no-place') === false,
+    said($pPage)
+);
+setting('portal.sabbath.location_lat', '51.5');
+setting('portal.sabbath.location_lng', '-0.12');
+$typed = child(['task' => 'sabbath', 'at' => $pAt, 'showIn' => N_ZONE]);
+ok(
+    'P05 a place TYPED on the Sabbath page wins over the organisation\'s map position (sunset at 51.5, -0.12: ' . $sunsetOn(51.5, -0.12) . ')',
+    $typed['threw'] === '' && ($typed['start'] ?? '') === $sunsetOn(51.5, -0.12) && ($typed['place']['from'] ?? '') === 'setting',
+    json_encode($typed)
+);
+
+// ---- #936: the boxes show the installation's row ---------------------------------
+setting('portal.sabbath.method', 'fixed');
+setting('portal.sabbath.location_lat', '');
+setting('portal.sabbath.location_lng', '');
+setting('portal.sabbath.enabled', '0');
+setting('portal.sabbath.bypass_critical', '1');
+// Organisation 1 holds rows of its OWN, which differ from every installation value.
+foreach (['portal.sabbath.method' => 'sunset_calc', 'portal.sabbath.location_lat' => '10.5', 'portal.sabbath.location_lng' => '20.5',
+    'portal.sabbath.start_offset_minutes' => '15', 'portal.sabbath.enabled' => '1'] as $key => $value) {
+    $siteRow($key, $value);
+}
+$before = $installationSabbath();
+$pPage  = req($adminJar, 'GET', '/admin/settings/sabbath');
+$sent   = $drawnForm($pPage['body']);
+$saved  = post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', $sent);
+$after  = $installationSabbath();
+ok(
+    'P06 inside an organisation with Sabbath rows of its own, pressing Save UNTOUCHED leaves every installation-wide row exactly as it was (#674; the old page made that organisation\'s 10.5 / 20.5 / sunset everyone\'s)',
+    $after === $before && str_contains(words($saved['body']), 'Sabbath settings saved.') === true && ($sent['location_lat'] ?? 'missing') === '',
+    'sent ' . json_encode($sent) . '; before ' . json_encode($before) . '; after ' . json_encode($after) . '; ' . said($saved)
+);
+ok(
+    'P07 the page SAYS this organisation has Sabbath settings of its own that the boxes do not show',
+    str_contains($pPage['body'], 'data-sabbath-own-rows') === true,
+    said($pPage)
+);
+foreach (['portal.sabbath.method', 'portal.sabbath.location_lat', 'portal.sabbath.location_lng', 'portal.sabbath.start_offset_minutes', 'portal.sabbath.enabled'] as $key) {
+    $siteRow($key, null);
+}
+
+// ---- #936: a field that was not SENT is left alone (#677) --------------------------
+$pStored = ['portal.sabbath.method' => 'sunset_calc', 'portal.sabbath.location_lat' => '12.5', 'portal.sabbath.location_lng' => '45.5',
+    'portal.sabbath.start_offset_minutes' => '-10', 'portal.sabbath.end_offset_minutes' => '20', 'portal.sabbath.enabled' => '1', 'portal.sabbath.bypass_critical' => '0'];
+$pNew = ['method' => 'fixed', 'location_lat' => '13.5', 'location_lng' => '46.5', 'start_offset_minutes' => '-11', 'end_offset_minutes' => '21',
+    'switches_shown' => '1', 'bypass_critical' => 'on', 'timezone' => ''];
+// Each field, left out on its own while every other field carries a NEW value: the
+// one left out must keep its stored value, and the others must really change (so
+// "nothing was saved" cannot pass for "the missing field was left alone").
+foreach (['method' => 'portal.sabbath.method', 'location_lat' => 'portal.sabbath.location_lat', 'location_lng' => 'portal.sabbath.location_lng',
+    'start_offset_minutes' => 'portal.sabbath.start_offset_minutes', 'end_offset_minutes' => 'portal.sabbath.end_offset_minutes',
+    'switches_shown' => 'portal.sabbath.enabled'] as $field => $key) {
+    foreach ($pStored as $k => $v) {
+        setting($k, $v);
+    }
+    $send = $pNew;
+    unset($send[$field]);
+    $answer = post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', $send);
+    $now    = $installationSabbath();
+    $others = $field === 'start_offset_minutes' ? 'portal.sabbath.end_offset_minutes' : 'portal.sabbath.start_offset_minutes';
+    ok(
+        'P08 a Sabbath save that does not SEND `' . $field . '` leaves ' . $key . ' exactly as stored (' . $pStored[$key] . '), and the rest of the save still happens',
+        ($now[$key] ?? null) === $pStored[$key] && ($now[$others] ?? null) !== $pStored[$others]
+            && str_contains(words($answer['body']), 'Sabbath settings saved.') === true,
+        $key . ' now ' . json_encode($now[$key] ?? null) . ', ' . $others . ' now ' . json_encode($now[$others] ?? null) . '; ' . said($answer)
+    );
+}
+foreach ($pStored as $k => $v) {
+    setting($k, $v);
+}
+$badLat  = post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', ['location_lat' => '95'] + $pNew);
+$afterBad = $installationSabbath();
+$halfOne = post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', ['location_lat' => ''] + $pNew);
+$afterHalf = $installationSabbath();
+ok(
+    'P09 a latitude past 90, and a place with only ONE of its two numbers, are REFUSED with a reason and NOTHING is saved (the old page stored any number, and 0 for a word)',
+    $afterBad['portal.sabbath.method'] === 'sunset_calc' && $afterBad['portal.sabbath.location_lat'] === '12.5'
+        && str_contains(words($badLat['body']), 'latitude must be a number from -90 to 90') === true
+        && $afterHalf['portal.sabbath.location_lng'] === '45.5'
+        && str_contains(words($halfOne['body']), 'give both the latitude and the longitude, or leave both empty') === true,
+    said($badLat) . ' / ' . said($halfOne) . '; ' . json_encode($afterHalf)
+);
+
+// ---- #935: a venue's country --------------------------------------------------------
+$colDefault = one("SELECT COLUMN_DEFAULT AS d, IS_NULLABLE AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblVenues' AND COLUMN_NAME = 'countryCode'");
+ok(
+    'P10 tblVenues.countryCode has NO default and may not be empty, so a writer that names no country is refused by the database (it defaulted to \'GB\')',
+    $colDefault !== null && $colDefault['d'] === null && $colDefault['n'] === 'NO',
+    json_encode($colDefault)
+);
+$siteRow('org.address.countryCode', 'AU');
+$pManage = req($adminJar, 'GET', '/venues/manage');
+ok(
+    'P11 the new-venue form\'s country box starts on the ORGANISATION\'s own country, AU (it started on \'GB\')',
+    $pManage['status'] === 200 && tz_find('#id="countryCode" name="countryCode"[^>]*value="AU"#s', $pManage['body']) === 1,
+    said($pManage) . '; ' . (tz_find('#id="countryCode" name="countryCode"[^>]*>#s', $pManage['body'], $box) === 1 ? $box[0] : 'no country box found')
+);
+$venueCountry = static fn (string $name): ?string => one('SELECT countryCode FROM tblVenues WHERE venueName = ? AND siteID = 1', 's', [$name])['countryCode'] ?? null;
+$pVenue = ['action' => 'save', 'venueID' => 0, 'timezone' => ''];
+post($adminJar, '/venues/manage', '/venues/venue-save', $pVenue + ['venueName' => 'Selftest place 935 empty', 'countryCode' => '']);
+ok(
+    'P12 a venue saved with the country box EMPTY takes the organisation\'s own country, AU (it was stored as \'GB\')',
+    $venueCountry('Selftest place 935 empty') === 'AU',
+    json_encode($venueCountry('Selftest place 935 empty'))
+);
+$siteRow('org.address.countryCode', '');
+post($adminJar, '/venues/manage', '/venues/venue-save', $pVenue + ['venueName' => 'Selftest place 935 nowhere', 'countryCode' => '']);
+$pSaid = flashAfter($adminJar, '/venues/manage');
+ok(
+    'P13 with no country typed and NONE set for the organisation, the venue is REFUSED and that is said; no venue is made (it was saved as \'GB\' without a word)',
+    $venueCountry('Selftest place 935 nowhere') === null && str_contains($pSaid, 'none is set at Admin, Settings, Organisation') === true,
+    'stored ' . json_encode($venueCountry('Selftest place 935 nowhere')) . '; said: ' . $pSaid
+);
+q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone) VALUES (960935, 1, 'Selftest place 935 kept', 'US', 'America/New_York')");
+post($adminJar, '/venues/manage?edit=960935', '/venues/venue-save', ['action' => 'save', 'venueID' => 960935, 'venueName' => 'Selftest place 935 kept renamed', 'timezone' => 'America/New_York']);
+ok(
+    'P14 an edit that does not SEND the country leaves the venue\'s own (US) exactly as it is (#677; it became \'GB\')',
+    $venueCountry('Selftest place 935 kept renamed') === 'US',
+    json_encode(one('SELECT venueName, countryCode FROM tblVenues WHERE venueID = 960935'))
+);
+q("DELETE FROM tblVenueUsageTypes WHERE venueID IN (SELECT venueID FROM tblVenues WHERE venueName LIKE 'Selftest place 935%')");
+q("DELETE FROM tblVenues WHERE venueName LIKE 'Selftest place 935%'");
+
+// ---- put everything back as part P found it ------------------------------------------
+q('DELETE FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND siteID = 1');
+foreach ($pWas as $row) {
+    if ($row['siteID'] === null) {
+        setting((string) $row['settingKey'], (string) $row['settingValue']);
+    } else {
+        $siteRow((string) $row['settingKey'], (string) $row['settingValue']);
+    }
+}
+orgZone(1, $pOrgZone === null ? null : (string) $pOrgZone);
 
 // =============================================================================
 // 🏁 The end

@@ -513,6 +513,85 @@ class Venues
     }
 
     /**
+     * 🌍 The organisation's own country, as a two-letter code, or '' when it
+     * has none a venue could use (#935).
+     *
+     * It is `org.address.countryCode`, set at Admin, Settings, Organisation and
+     * per organisation since #677, read for THIS organisation with its own row
+     * first (App::settingForSite()). A value that is not two letters, or a read
+     * that fails, is '' (no country known), never a made-up one.
+     *
+     * KNOWN LIMIT, recorded rather than hidden: the install script still seeds
+     * that setting with 'GB', and the shared address form fills an empty country
+     * box with 'GB' too, so on an installation where nobody has set the
+     * organisation's country this still answers 'GB'. It is at least ONE visible
+     * value an administrator can change in one place, rather than a default
+     * built into every venue. That is #942.
+     */
+    public static function organisationCountry(int $siteId): string
+    {
+        try {
+            $country = App::settingForSite('org.address.countryCode', $siteId);
+        } catch (\Throwable $e) {
+            return '';
+        }
+        $country = strtoupper(trim((string) $country));
+
+        return preg_match('/^[A-Z]{2}$/', $country) === 1 ? $country : '';
+    }
+
+    /**
+     * 🌍 THE ONE RULE for which country a venue save stores (#935), asked by the
+     * save handler (`venues/venue-save.php`, so a refusal can be worded) and
+     * again by saveVenue(), so no caller can store what it refuses. The same
+     * shape as zoneToStore().
+     *
+     *   - Not sent at all (or not text): on an EDIT, the venue's own stored
+     *     country, unchanged. Ask whether the field ARRIVED (#677): a form that
+     *     did not send it has not asked for a change.
+     *   - Empty, or not sent on a CREATE: the ORGANISATION's own country
+     *     (organisationCountry()), when it has one.
+     *   - Two letters: that country, in capitals.
+     *   - The venue's OWN stored text, unchanged, even if it fails that test, so
+     *     a venue can still be saved when somebody only corrects its caretaker.
+     *   - Anything else, or empty with no organisation country: null, meaning
+     *     REFUSE. Nothing is stored.
+     *
+     * WHAT WAS WRONG. The column defaulted to 'GB', the save turned a missing,
+     * empty or unreadable country into 'GB', and the form arrived with 'GB'
+     * typed in, for every customer anywhere: the same fault as the zone
+     * (#782). The country is handed to the geocoder as a hint, so a venue in
+     * France saved that way was looked up in Britain.
+     *
+     * @param mixed       $posted The posted country (anything; only text counts).
+     * @param int         $siteId The organisation the venue belongs to.
+     * @param string|null $stored The venue's stored country when editing; null when creating.
+     */
+    public static function countryToStore(mixed $posted, int $siteId, ?string $stored): ?string
+    {
+        if (is_string($posted) === false) {
+            if ($stored !== null) {
+                return $stored;
+            }
+            $posted = '';
+        }
+        $country = strtoupper(trim($posted));
+        if ($country === '') {
+            $own = self::organisationCountry($siteId);
+
+            return $own !== '' ? $own : null;
+        }
+        if (preg_match('/^[A-Z]{2}$/', $country) === 1) {
+            return $country;
+        }
+        if ($stored !== null && trim($posted) === trim($stored)) {
+            return $stored;
+        }
+
+        return null;
+    }
+
+    /**
      * $venueId = 0 creates; a positive id updates that row (site-scoped).
      * On create, seeds the six default usage types. Returns the id, or 0 on
      * validation failure (blank name / invalid landlord / etc).
@@ -550,9 +629,26 @@ class Venues
         $region = self::nullableTrim($data['region'] ?? null, 100);
         $postcode = self::nullableTrim($data['postcode'] ?? null, 20);
 
-        $countryCode = strtoupper(trim((string) ($data['countryCode'] ?? 'GB')));
-        if (preg_match('/^[A-Z]{2}$/', $countryCode) !== 1) {
-            $countryCode = 'GB';
+        // 📝 The venue as it stands, when editing: read here (it used to be read further
+        //    down) because the country rule needs the stored country (#935).
+        $old = null;
+        if ($venueId > 0) {
+            $old = self::getVenue($venueId, $siteId);
+            if ($old === null) {
+                return 0;
+            }
+        }
+
+        // 🌍 The venue's country (#935): asked of countryToStore(), the one rule, which the
+        //    save handler asks FIRST so it can word a refusal. It used to become 'GB' when
+        //    missing, empty or unreadable, for every customer anywhere.
+        $countryCode = self::countryToStore(
+            array_key_exists('countryCode', $data) === true ? $data['countryCode'] : null,
+            $siteId,
+            $old !== null ? (string) ($old['countryCode'] ?? '') : null
+        );
+        if ($countryCode === null) {
+            return 0;
         }
 
         // 📍 Geocoordinates / what3words (#456 Chunk A) — validated the
@@ -602,14 +698,6 @@ class Venues
         $caretakerName = self::nullableTrim($data['caretakerName'] ?? null, 150);
         $caretakerPhone = self::nullableTrim($data['caretakerPhone'] ?? null, 50);
         $notes = self::nullableTrim($data['notes'] ?? null, 65000);
-
-        $old = null;
-        if ($venueId > 0) {
-            $old = self::getVenue($venueId, $siteId);
-            if ($old === null) {
-                return 0;
-            }
-        }
 
         // 🕰️ The venue's clock (#782): asked of zoneToStore(), the one rule, which the save
         //    handler asks FIRST so it can word a refusal. Asked again here so that no other

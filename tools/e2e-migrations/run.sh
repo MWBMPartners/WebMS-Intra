@@ -877,14 +877,26 @@ compare_replay_with_install_script_alone() {
 #   ⚠ THE DAY THIS WORK REACHES main, phase 5 will FAIL on this line, on
 #   purpose, exactly as for the password length: delete it from the p5 list
 #   then, and not before.
+#   portal.sabbath.location_lat and location_lng are EMPTY on a fresh install
+#   and Cambridge's coordinates (52.205, 0.119) on BOTH upgraded databases
+#   (#935, migration 274). Empty means "each organisation's own map
+#   position"; the install script used to seed Cambridge for every customer.
+#   Migration 274 leaves the value IN FORCE alone for exactly the reason 273
+#   does for the zone above: the Sabbath page has always written these, so a
+#   Cambridge already there may be a church in Cambridge. Same treatment, and
+#   the same ⚠: delete both lines from the p5 list the day this reaches main.
 KNOWN_P5_VALUE_DIFFERENCES=(
     "auth.password.minLength | every organisation | 12 → 8"
     "portal.sabbath.timezone | every organisation |  → Europe/London"
+    "portal.sabbath.location_lat | every organisation |  → 52.205"
+    "portal.sabbath.location_lng | every organisation |  → 0.119"
 )
 KNOWN_P5_LEFTOVER_SETTINGS=()
 KNOWN_P6_VALUE_DIFFERENCES=(
     "auth.password.minLength | every organisation | 12 → 8"
     "portal.sabbath.timezone | every organisation |  → Europe/London"
+    "portal.sabbath.location_lat | every organisation |  → 52.205"
+    "portal.sabbath.location_lng | every organisation |  → 0.119"
 )
 #   The one setting found only on a database upgraded from March's install
 #   script (see the rule above for why it is named and not removed).

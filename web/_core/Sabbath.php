@@ -12,8 +12,19 @@
  *   1. Org default — portal.sabbath.* settings.
  *   2. Per-user override — tblUsers.sabbathHonour ('inherit'|'on'|'off').
  *
- * Calculation: date_sun_info() against the configured lat/lng. Falls back
- * to a fixed 18:00 local time on both edges if lat/lng not configured.
+ * Calculation: date_sun_info() against a PLACE (see place()). Falls back to
+ * the fixed method (18:00 local time on both edges, with the offsets) when no
+ * place is known, and the settings page says so (#935).
+ *
+ * NO PLACE IS BUILT IN (#935). The place used to ship as, and fall back to,
+ * Cambridge's latitude and longitude, for every customer anywhere: a church in
+ * Sydney that chose "sunset" had its quiet hours begin at Cambridge's sunset.
+ * The setting now ships EMPTY, and empty means "each organisation's own map
+ * position" (`org.latitude` / `org.longitude`, set at Admin, Settings,
+ * Organisation, per organisation since #677): the same shape as the zone,
+ * where empty means each organisation's own (#782). Where neither is known
+ * there is NO place, and the window is worked out by the fixed method, never
+ * at a made-up place or at 0,0 (which is in the Gulf of Guinea).
  *
  * Usage:
  *   if (Sabbath::isQuietNow($userId) === true) {
@@ -29,6 +40,7 @@
  * @version   1.0.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/231
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/782
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/935
  * -----------------------------------------------------------------------------
  */
 
@@ -94,10 +106,11 @@ class Sabbath
      * zone for everybody, so that could not happen; "each organisation's own"
      * is what made it possible. Found by the independent check.
      *
-     * The OTHER Sabbath settings (on or off, the method, the offsets, the
-     * place for sunset) are read as the current request has them. The settings
+     * The OTHER Sabbath settings (on or off, the method, the offsets, a place
+     * typed for sunset) are read as the current request has them. The settings
      * page saves them installation-wide only, so in practice they are the same
-     * for every organisation; only the clock is per organisation.
+     * for every organisation; only the clock, and (when no place is typed) the
+     * place for sunset (place(), #935), are per organisation.
      *
      * WHAT WAS WRONG. The setting shipped holding "Europe/London" for every
      * installation, the settings page offered London pre-selected, and a zone
@@ -111,11 +124,25 @@ class Sabbath
      * keeps the London it holds, because nothing can show it was not chosen;
      * an installation made after #782 starts empty.
      */
-    public static function zone(?int $siteId = null): \DateTimeZone
+    public static function zone(?int $siteId = null, ?array $sabbath = null): \DateTimeZone
     {
-        $settings = App::settings();
+        $sabbath ??= self::settingsNow();
 
-        return Site::zoneFor((string) ($settings['portal']['sabbath']['timezone'] ?? ''), $siteId);
+        return Site::zoneFor(is_scalar($sabbath['timezone'] ?? null) === true ? (string) $sabbath['timezone'] : '', $siteId);
+    }
+
+    /**
+     * The `portal.sabbath.*` settings as this request has them (merged: an
+     * organisation's own row wins), nested as in $SETTINGS['portal']['sabbath'].
+     * An empty list when there are none, never a non-list.
+     *
+     * @return array<string, mixed>
+     */
+    private static function settingsNow(): array
+    {
+        $sabbath = App::settings()['portal']['sabbath'] ?? [];
+
+        return is_array($sabbath) === true ? $sabbath : [];
     }
 
     /**
@@ -123,18 +150,23 @@ class Sabbath
      * on the clock of the organisation given (see isQuietNow() for why it
      * must be given wherever more than one organisation is in play).
      *
-     * @param int|null $siteId The organisation whose clock decides; null for the current one.
+     * @param int|null   $siteId  The organisation whose clock decides; null for the current one.
+     * @param array|null $sabbath The `portal.sabbath.*` settings to use, nested as in
+     *                            $SETTINGS['portal']['sabbath']; null (every caller but one)
+     *                            means as this request has them. The settings page passes
+     *                            what it has JUST SAVED, which start-up read before the
+     *                            save, so its preview is not one save behind (#936).
      *
      * @return array{0:int, 1:int}  [start_ts, end_ts]
      */
-    public static function computeWindow(int $referenceTs, ?int $siteId = null): array
+    public static function computeWindow(int $referenceTs, ?int $siteId = null, ?array $sabbath = null): array
     {
-        $settings = App::settings();
-        $method = (string) ($settings['portal']['sabbath']['method'] ?? 'fixed');
-        $startOffsetMin = (int) ($settings['portal']['sabbath']['start_offset_minutes'] ?? 0);
-        $endOffsetMin   = (int) ($settings['portal']['sabbath']['end_offset_minutes'] ?? 0);
+        $sabbath ??= self::settingsNow();
+        $method = (string) ($sabbath['method'] ?? 'fixed');
+        $startOffsetMin = (int) ($sabbath['start_offset_minutes'] ?? 0);
+        $endOffsetMin   = (int) ($sabbath['end_offset_minutes'] ?? 0);
 
-        $tzObj = self::zone($siteId);
+        $tzObj = self::zone($siteId, $sabbath);
 
         $ref = (new \DateTimeImmutable('@' . $referenceTs))->setTimezone($tzObj);
 
@@ -149,18 +181,126 @@ class Sabbath
         $fridayDate = $ref->modify('-' . $offsetToFriday . ' days')->setTime(12, 0, 0);
         $saturdayDate = $fridayDate->modify('+1 day');
 
-        if ($method === 'sunset_calc') {
-            $lat = (float) ($settings['portal']['sabbath']['location_lat'] ?? 52.205); // Cambridge default
-            $lng = (float) ($settings['portal']['sabbath']['location_lng'] ?? 0.119);
-            $startTs = self::sunsetAt($fridayDate, $lat, $lng) + ($startOffsetMin * 60);
-            $endTs   = self::sunsetAt($saturdayDate, $lat, $lng) + ($endOffsetMin * 60);
+        // 📍 Sunset needs a PLACE (#935). With none known, the fixed method below is
+        //    used instead: the behaviour this class's header has promised since #231
+        //    ("falls back to a fixed 18:00"), and the one the settings page states.
+        //    WHAT WAS WRONG: an empty setting fell back to Cambridge's latitude and
+        //    longitude, for every customer anywhere, and a stored '' read as 0,0.
+        $place = $method === 'sunset_calc' ? self::place($siteId, $sabbath) : null;
+        if ($place !== null) {
+            $startTs = self::sunsetAt($fridayDate, $place['lat'], $place['lng']) + ($startOffsetMin * 60);
+            $endTs   = self::sunsetAt($saturdayDate, $place['lat'], $place['lng']) + ($endOffsetMin * 60);
         } else {
-            // Fixed: 18:00 on both edges
+            // Fixed: 18:00 on both edges (also the answer when sunset has no place)
             $startTs = $fridayDate->setTime(18, 0, 0)->getTimestamp() + ($startOffsetMin * 60);
             $endTs   = $saturdayDate->setTime(18, 0, 0)->getTimestamp() + ($endOffsetMin * 60);
         }
 
         return [$startTs, $endTs];
+    }
+
+    /**
+     * 📍 THE ONE ANSWER to "where is sunset worked out?" (#935).
+     *
+     *   1. The `portal.sabbath.location_lat` / `location_lng` settings, when
+     *      BOTH hold a usable number (coordinate()): a place somebody typed on
+     *      the Sabbath settings page.
+     *   2. Otherwise (and EMPTY is the ordinary case, the value a new
+     *      installation ships with) the organisation's own map position,
+     *      `org.latitude` / `org.longitude`, from Admin, Settings,
+     *      Organisation. That is per organisation (#677), so it is read for the
+     *      organisation given, exactly as zone() reads that organisation's zone.
+     *   3. Otherwise null: there is NO place, and the caller must say so rather
+     *      than guess. computeWindow() then uses the fixed method.
+     *
+     * WHY THE ORGANISATION, AND NOT A BOX THE PAGE REQUIRES. The issue (#935)
+     * offered both. The organisation's map position is already the portal's
+     * answer to "where is this organisation?"; it is per organisation where the
+     * Sabbath settings are installation-wide; and it lets "sunset" work for
+     * several organisations on one installation without a second place to keep
+     * in step: the reasoning #782 applied to the zone.
+     *
+     * WHAT THIS CANNOT DO: tell a place somebody chose from one the install
+     * script put there. An installation made before #935 keeps the Cambridge it
+     * holds (migration 274 changes only the value to "reset to"), and a stored
+     * 0,0 (which the settings page used to write when a save did not send the
+     * boxes, #936) is a real place and is used as one. Both show in the boxes on
+     * the settings page, so they can be seen and changed.
+     *
+     * @param int|null   $siteId  The organisation whose map position is the
+     *                            fallback; null for the current one.
+     * @param array|null $sabbath As for computeWindow(); null means as this
+     *                            request has them.
+     *
+     * @return array{lat: float, lng: float, from: string}|null `from` is
+     *         'setting' or 'organisation'.
+     */
+    public static function place(?int $siteId = null, ?array $sabbath = null): ?array
+    {
+        $sabbath ??= self::settingsNow();
+        $lat     = self::coordinate($sabbath['location_lat'] ?? null, 90.0);
+        $lng     = self::coordinate($sabbath['location_lng'] ?? null, 180.0);
+        if ($lat !== null && $lng !== null) {
+            return ['lat' => $lat, 'lng' => $lng, 'from' => 'setting'];
+        }
+
+        // 🏢 The organisation's own map position. For the organisation the
+        //    current request belongs to, the merged settings already hold its
+        //    own row where it has one. For ANOTHER organisation (a scheduled job
+        //    working through several), it is read from the database, that
+        //    organisation's own row first (App::settingForSite()). A read that
+        //    fails means "no place known", never a made-up one.
+        if ($siteId === null || $siteId === Site::id()) {
+            $orgLat = App::settings('org.latitude');
+            $orgLng = App::settings('org.longitude');
+        } else {
+            try {
+                $orgLat = App::settingForSite('org.latitude', $siteId);
+                $orgLng = App::settingForSite('org.longitude', $siteId);
+            } catch (\Throwable $e) {
+                return null;
+            }
+        }
+        $lat = self::coordinate($orgLat, 90.0);
+        $lng = self::coordinate($orgLng, 180.0);
+        if ($lat !== null && $lng !== null) {
+            return ['lat' => $lat, 'lng' => $lng, 'from' => 'organisation'];
+        }
+
+        return null;
+    }
+
+    /**
+     * 📐 A stored or posted latitude or longitude, or null when it is not one.
+     *
+     * The ONE test of what counts as a coordinate here, asked by place() AND by
+     * the settings page's save, so the page cannot accept what the window then
+     * ignores. A plain decimal written as text (optionally signed), finite, and
+     * no further from zero than `$limit` (90 for a latitude, 180 for a
+     * longitude). Anything else (empty text, words, a list, an exponent such as
+     * "1e2") is null.
+     *
+     * WHAT WAS WRONG: the value was cast with (float), so empty text, a word or
+     * a missing field all read as 0: a place in the Gulf of Guinea.
+     */
+    public static function coordinate(mixed $value, float $limit): ?float
+    {
+        if (is_int($value) === true || is_float($value) === true) {
+            $value = (string) $value;
+        }
+        if (is_string($value) === false) {
+            return null;
+        }
+        $text = trim($value);
+        if (preg_match('/^[+-]?(\d+(\.\d*)?|\.\d+)$/', $text) !== 1) {
+            return null;
+        }
+        $number = (float) $text;
+        if (is_finite($number) === false || abs($number) > $limit) {
+            return null;
+        }
+
+        return $number;
     }
 
     private static function sunsetAt(\DateTimeImmutable $date, float $lat, float $lng): int

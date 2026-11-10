@@ -39,22 +39,21 @@ web/_apps/admin/integrations/what3words/index.php          # w3w — includes an
 web/_apps/admin/integrations/zoom/index.php                # zoom — includes a client secret and a webhook secret
 web/_apps/admin/sms/index.php                              # sms — includes credentials and dailyCap, another limit
 
-# ── NOT ON THIS LIST, AND THE CHECK CANNOT SEE EITHER OF THEM ────────────────
+# ── ADDED 10 NOVEMBER 2026, WHEN THE CHECK STARTED READING A PAGE THAT IS ITS OWN SAVER (#936) ──
 #
-# `web/_apps/admin/maintenance/backup.php` HAS this fault and is absent above on
-# purpose: it is its OWN saver, and the check skips a page paired with itself.
-# Measured on 30 October 2026 — it prefills `$SETTINGS['backup']['schedule']
-# ['frequency']` and `['keep']` into its form, and writes `backup.schedule.*`
-# installation-wide in the same file. An earlier version of this list accused it
-# of a DIFFERENT, non-existent fault (a `portal` prefill paired with
-# demo-data.php, which only READS with that clause), so whoever had deleted that
-# line would have recorded the page as clean. Both found by the independent
-# check.
+# Both had the fault before the check could see it; neither is new. They were
+# found the day the Sabbath page (#936) showed that "a page that is its own
+# saver is never examined" was hiding live instances, and the check was widened
+# to examine such a page key by key. The whole list is tracked as #943.
+web/_apps/admin/maintenance/backup.php                     # backup.schedule.frequency and keep, read through $SETTINGS (measured 30 October 2026; see the header's limit 7)
+web/_apps/admin/settings/qr/index.php                      # portal.qr.provider and the CueRCode address; the API key read is for the "currently set" hint only, the box itself is never prefilled
+
+# ── STILL NOT SEEN ─────────────────────────────────────────────────────────────
 #
-# `web/_apps/admin/integrations/index.php` and `backup.php` also read settings
-# through the inherited `$SETTINGS` variable rather than `App::settings()`, which
-# `reads_merged()` does not match. The `mail` finding above catches the first by
-# its other reads; nothing catches a page that uses only `$SETTINGS`.
-#
-# Both limits are now stated in the check's own header. They are recorded here
-# as well because this is the file somebody works through.
+# A SIBLING page (one whose saver is another file) that reads through the
+# inherited `$SETTINGS` variable, or through a variable assigned
+# `App::settings()`, is still invisible: widening that branch was measured and
+# cried wolf on `admin/integrations/email.php`, which reads the Microsoft 365
+# mailbox only to SHOW the sending address. `admin/integrations/index.php` is
+# caught by its other reads. This limit is stated in the check's own header too,
+# because this is the file somebody works through.

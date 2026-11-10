@@ -84,18 +84,42 @@ than none
    `siteID IS NULL`.
 5. **A page that reads BOTH layers is passed without judging which feeds which
    box** -- see above. This is the one it is most likely to be wrong about.
-6. **A read through the inherited `$SETTINGS` variable is invisible.**
-   `reads_merged()` matches `App::settings()` only, and `$SETTINGS` is the
-   variable a page inherits -- `admin/integrations/index.php` and
-   `admin/maintenance/backup.php` both use it. Proved by planting a page that
-   reads `$SETTINGS['auth']` beside a form: not reported.
-7. **A page that is its OWN saver is never examined**, because the walk skips
-   the pairing of a file with itself. `admin/maintenance/backup.php` really has
-   this fault that way -- it prefills `backup.schedule.*` and writes those same
-   keys installation-wide in one file -- and is invisible here.
+6. **Between TWO files, a read through a variable is invisible.** For a form
+   page and a SEPARATE saver, `reads_merged()` matches `App::settings()` only,
+   so a sibling page reading through the inherited `$SETTINGS`, or through
+   `$settings = App::settings();` and then `$settings['group']`, is not
+   reported. Widening the sibling branch to those spellings was MEASURED
+   (#936, 10 November 2026) and cried wolf: `admin/integrations/email.php`
+   reads `$settings['mail']['ms365']['sharedMailbox']` only to SHOW which
+   address mail is sent from, beside a form that does not save it. So the
+   wider reading is used only for a page that is its own saver (below), where
+   the keys it reads and the keys it writes are in the same file and can be
+   compared one by one.
+7. **A page that is its OWN saver is examined KEY BY KEY (#936).** Until
+   10 November 2026 the walk skipped the pairing of a file with itself, so a
+   page that prefilled a box and saved it installation-wide in ONE file was
+   invisible. That is exactly how `admin/settings/sabbath/index.php` was missed
+   (#936): it is its own saver, and it read its boxes through
+   `$settings = App::settings();` -- both blind spots at once. Such a page is now
+   reported when it contains a `<form>`, never reads the layer, and reads out
+   of the merged settings (through `App::settings()`, `App::settings('a.b')`,
+   `$SETTINGS`, or a variable assigned `App::settings()`) a dotted key it also
+   names as a literal it writes. EXACT keys, not groups: the group rule would
+   report any page writing one `portal.*` key that showed another. Measured
+   over every page under `admin/` when it was added, it reported three pages,
+   and all three really have the fault: the Sabbath page (fixed by #936),
+   `admin/maintenance/backup.php` (`backup.schedule.frequency` and `keep`) and
+   `admin/settings/qr/index.php` (`portal.qr.provider` and the CueRCode
+   address). The last two are on the pending list.
+   What it still cannot see: a key the page builds rather than writes out
+   whole (`'backup.' . $part`), a box filled from a PARENT array read into a
+   variable first (`$s = $SETTINGS['backup']; … $s['keep']`), and a page whose
+   own saver writes with the level chosen at run time (see below).
 Both 6 and 7 were missing from this list until the independent check of
 30 October 2026 planted them. **A list of limits that omitted a LIVE instance
-overstated the gate**, which this project treats as worse than no guarantee.
+overstated the gate**, which this project treats as worse than no guarantee --
+and limit 7, though written down, then hid a third live instance: the Sabbath
+page (#936). A stated blind spot is a place to go looking, not a place to stop.
 
 THE PENDING LIST
 ----------------
@@ -242,6 +266,38 @@ def reads_merged(code: str, group: str) -> bool:
             or re.search(r"App::settings\(\s*'" + re.escape(group) + r"[.'\)]", code) is not None)
 
 
+def keys_written(code: str) -> set[str]:
+    """Every whole dotted setting key a page names as a literal (#936)."""
+    return set(re.findall(r"'([a-z_][a-zA-Z0-9_]*\.[a-zA-Z0-9_.]+)'", code))
+
+
+# 🔎 The MERGED settings, in every spelling a page uses to reach them (#936):
+#    `App::settings()` itself (with or without its namespace), the inherited
+#    `$SETTINGS`, and any variable the page assigned `App::settings()` to. The
+#    Sabbath page used the last of these, which is one of the two reasons it was
+#    invisible here.
+APP_SETTINGS_CALL = r"(?:\\?Portal\\Core\\)?\\?App::settings\(\)"
+
+
+def merged_keys_read(code: str) -> set[str]:
+    """
+    Every dotted key a page reads out of the MERGED settings by a whole chain of
+    subscripts (`$settings['portal']['qr']['provider']` gives `portal.qr.provider`)
+    or by name (`App::settings('portal.qr.provider')`). Used only for a page that
+    is its own saver -- see limit 7 in the header for why not between two files.
+    """
+    aliases = set(re.findall(r"\$(\w+)\s*=\s*" + APP_SETTINGS_CALL + r"\s*;", code))
+    aliases.add("SETTINGS")
+    roots = [APP_SETTINGS_CALL] + [r"\$" + re.escape(name) + r"\b" for name in sorted(aliases)]
+    found: set[str] = set()
+    for root in roots:
+        for chain in re.finditer(root + r"((?:\s*\[\s*'[A-Za-z0-9_]+'\s*\])+)", code):
+            found.add(".".join(re.findall(r"'([A-Za-z0-9_]+)'", chain.group(1))))
+    for named in re.finditer(r"App::settings\(\s*'([A-Za-z0-9_.]+)'\s*\)", code):
+        found.add(named.group(1))
+    return found
+
+
 def reads_layer(code: str) -> bool:
     """
     Does this page read the installation-wide layer at all?
@@ -286,6 +342,14 @@ def findings() -> tuple[list[tuple[str, str, str]], str | None, list[str]]:
                 if WRITES_LEVEL_AT_RUN_TIME.search(code) is not None:
                     runtime.append(saver.relative_to(REPO).as_posix())
                 continue
+            # 🪞 The page that is its OWN saver (#936, limit 7 in the header):
+            #    compared key by key, because here the keys read and the keys
+            #    written sit in one file.
+            if ("<form" in code.lower() and reads_layer(code) is False):
+                both = sorted(keys_written(code) & merged_keys_read(code))
+                if both:
+                    rel = saver.relative_to(REPO).as_posix()
+                    out.append((rel, rel, ", ".join(both)))
             groups = groups_written(code)
             if not groups:
                 continue
@@ -327,7 +391,7 @@ def main() -> int:
         print("Forms that prefill a merged value their own Save writes installation-wide: %d"
               % len(found))
         for page, saver, groups in found:
-            print("   %-52s groups: %-16s saved by %s" % (page, groups, saver))
+            print("   %-52s prefills: %-16s saved by %s" % (page, groups, saver))
         print("\nOn the pending list: %d" % len(waiting))
         print("\nSavers that choose the level at run time, so this check cannot judge them: %d"
               % len(runtime))

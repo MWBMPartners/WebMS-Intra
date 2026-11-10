@@ -48,6 +48,12 @@ class GeoLocation
      * `Venues::saveVenue()` (408-519) — the house convention for a
      * structured address, kept identical across every app.
      *
+     * ⚠️ NO LONGER IDENTICAL FOR THE COUNTRY (#935). A venue's country now
+     * follows `Venues::countryToStore()`: the organisation's own when empty,
+     * and REFUSED when there is none, never 'GB'. This method still turns a
+     * missing or unreadable country into 'GB'; that, and the callers that rely
+     * on it, are #942.
+     *
      * @param array<string, mixed> $parts line1,line2,city,region,postcode,countryCode
      *
      * @return array{line1:?string,line2:?string,city:?string,region:?string,postcode:?string,countryCode:string}

@@ -115,7 +115,10 @@ if ($action === 'save') {
         'city'           => (string) ($_POST['city'] ?? ''),
         'region'         => (string) ($_POST['region'] ?? ''),
         'postcode'       => (string) ($_POST['postcode'] ?? ''),
-        'countryCode'    => (string) ($_POST['countryCode'] ?? 'GB'),
+        // 🌍 Passed as posted, null when NOT SENT (#935, #677): Venues::countryToStore()
+        //    decides. An empty box means the organisation's own country. It used to become
+        //    'GB' here, for every customer anywhere.
+        'countryCode'    => $_POST['countryCode'] ?? null,
         // 🕰️ Passed as posted (#782): Venues::zoneToStore() decides, and an empty box means the
         //    organisation's own zone. It used to become "Europe/London" here.
         'timezone'       => $_POST['timezone'] ?? '',
@@ -130,10 +133,27 @@ if ($action === 'save') {
     // 🕰️ A zone that is not one this portal knows is REFUSED with its own reason (#782), asked
     //    of the same rule saveVenue() applies (Venues::zoneToStore()). Without this the refusal
     //    would reach the "a venue name is required" message below, which would be untrue.
-    $storedZone = null;
+    $storedZone    = null;
+    $storedCountry = null;
     if ($isCreate === false) {
-        $existing   = Venues::getVenue($venueId, $siteId);
-        $storedZone = $existing !== null ? (string) ($existing['timezone'] ?? '') : null;
+        $existing      = Venues::getVenue($venueId, $siteId);
+        $storedZone    = $existing !== null ? (string) ($existing['timezone'] ?? '') : null;
+        $storedCountry = $existing !== null ? (string) ($existing['countryCode'] ?? '') : null;
+    }
+    // 🌍 A country the portal cannot use, or none at all where the organisation has none of
+    //    its own, is REFUSED with its own reason (#935), asked of the same rule saveVenue()
+    //    applies (Venues::countryToStore()), so the "name is required" message below is
+    //    never the untrue explanation.
+    if (Venues::countryToStore($data['countryCode'], $siteId, $storedCountry) === null) {
+        // Two causes, two sentences: each is only ever shown for the case it describes.
+        $countryTyped = is_string($data['countryCode']) === true && trim($data['countryCode']) !== '';
+        $_SESSION['flash_msg']  = $countryTyped === true
+            ? 'The venue was not saved: give its country as a two-letter code, such as FR or US.'
+            : 'The venue was not saved: give its country as a two-letter code, such as FR or US. '
+                . 'An empty box uses this organisation\'s own country, and none is set at Admin, Settings, Organisation.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
+        exit();
     }
     if (Venues::zoneToStore($data['timezone'], $siteId, $storedZone) === null) {
         $_SESSION['flash_msg']  = 'That time zone is not one this portal knows, so the venue was not saved. '

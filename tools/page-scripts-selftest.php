@@ -591,7 +591,7 @@ q('INSERT INTO tblSmallGroups (groupID, siteID, groupName, groupSlug, groupType,
 q('INSERT INTO tblSmallGroupMembers (membershipID, siteID, groupID, userID, memberRole, status) VALUES (?, ?, ?, ?, \'member\', \'active\')', 'iiii', [$n, $site, $n, MEMBER]);
 q('INSERT INTO tblForms (formID, siteID, title, status, audience, publicToken, allowMultiple) VALUES (?, ?, ?, \'published\', \'public\', ?, 1)', 'iiss', [$n, $site, 'Page Scripts Selftest Form', bin2hex(random_bytes(16))]);
 q('INSERT INTO tblFormFields (fieldID, formID, fieldKey, label, fieldType) VALUES (?, ?, \'your_name\', \'Your name\', \'text\')', 'ii', [$n, $n]);
-q('INSERT INTO tblVenues (venueID, siteID, venueName, timezone, isActive) VALUES (?, ?, ?, ?, 1)', 'iiss', [$n, $site, 'Page Scripts Selftest Venue', $zone]);
+q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone, isActive) VALUES (?, ?, ?, 'GB', ?, 1)", 'iiss', [$n, $site, 'Page Scripts Selftest Venue', $zone]);
 q('INSERT INTO tblVenueRooms (roomID, siteID, venueID, roomName, isActive) VALUES (?, ?, ?, ?, 1)', 'iiis', [$n, $site, $n, 'Page Scripts Selftest Room']);
 q('INSERT INTO tblPathways (pathwayID, siteID, name, isActive) VALUES (?, ?, ?, 1)', 'iis', [$n, $site, 'Page Scripts Selftest Pathway']);
 q('INSERT INTO tblGivingCategory (categoryID, siteID, name, isActive) VALUES (?, ?, ?, 1)', 'iis', [$n, $site, 'Page Scripts Selftest Fund']);

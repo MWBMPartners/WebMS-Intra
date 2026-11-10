@@ -213,8 +213,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
             <div class="col-md-2">
                 <label class="form-label small" for="countryCode">Country</label>
+                <?php // 🌍 #935: a NEW venue starts with the organisation's own country, or empty
+                      //    when it has none (and then the box is required). It used to start with
+                      //    'GB' for every customer anywhere. ?>
+                <?php $venueCountryOwn = Venues::organisationCountry(Site::id()); ?>
                 <input type="text" class="form-control form-control-sm text-uppercase" id="countryCode" name="countryCode" maxlength="2"
-                       value="<?php echo htmlspecialchars($editVenue !== null ? (string) $editVenue['countryCode'] : 'GB', ENT_QUOTES, 'UTF-8'); ?>">
+                       pattern="[A-Za-z]{2}" title="A two-letter country code, such as FR or US"<?php echo $venueCountryOwn === '' ? ' required' : ''; ?>
+                       value="<?php echo htmlspecialchars($editVenue !== null ? (string) $editVenue['countryCode'] : $venueCountryOwn, ENT_QUOTES, 'UTF-8'); ?>">
             </div>
 
             <?php portal_location_input([

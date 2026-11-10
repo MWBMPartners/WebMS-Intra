@@ -3574,12 +3574,17 @@ ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 --    It used to ship as "Europe/London" for every installation. Migration 273
 --    changes only the default value of an existing row, never the value in
 --    force, because a London already stored may be somebody's choice.
+-- 📍 portal.sabbath.location_lat / location_lng ship EMPTY too (#935): empty
+--    means each organisation's own map position (Sabbath::place()), and with
+--    neither known the fixed times are used. They used to ship as Cambridge's
+--    coordinates for every installation. Migration 274 changes only the
+--    default value of an existing row, for the same reason as 273.
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'portal.sabbath.enabled',              '0',              '0',              0),
     (NULL, 'portal.sabbath.method',               'fixed',          'fixed',          0),
     (NULL, 'portal.sabbath.timezone',             '',               '',               0),
-    (NULL, 'portal.sabbath.location_lat',         '52.205',         '52.205',         0),
-    (NULL, 'portal.sabbath.location_lng',         '0.119',          '0.119',          0),
+    (NULL, 'portal.sabbath.location_lat',         '',               '',               0),
+    (NULL, 'portal.sabbath.location_lng',         '',               '',               0),
     (NULL, 'portal.sabbath.start_offset_minutes', '0',              '0',              0),
     (NULL, 'portal.sabbath.end_offset_minutes',   '0',              '0',              0),
     (NULL, 'portal.sabbath.bypass_critical',      '1',              '1',              0)
@@ -8386,7 +8391,11 @@ CREATE TABLE IF NOT EXISTS `tblVenues` (
     `city`           VARCHAR(100) DEFAULT NULL,
     `region`         VARCHAR(100) DEFAULT NULL COMMENT 'County / state / province',
     `postcode`       VARCHAR(20)  DEFAULT NULL,
-    `countryCode`    CHAR(2)      NOT NULL DEFAULT 'GB' COMMENT 'ISO 3166-1 alpha-2',
+    -- 🌍 NO DEFAULT, on purpose (#935, migration 274): it used to default to
+    -- 'GB' for every customer. Venues::countryToStore() names the country on
+    -- every save (the organisation's own when the box is left empty) and
+    -- refuses a save that has none.
+    `countryCode`    CHAR(2)      NOT NULL COMMENT 'ISO 3166-1 alpha-2',
     -- 📍 from 180_location_geocoding.sql (#456) — standard location block
     `latitude`       DECIMAL(10,7) DEFAULT NULL,
     `longitude`      DECIMAL(10,7) DEFAULT NULL,
@@ -11611,6 +11620,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('272_worker_name_kept_on_care_r
 -- tblLivestreamSchedule.timezone and tblVenues.timezone are written above with
 -- no default, and portal.sabbath.timezone is seeded empty; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('273_no_built_in_time_zone.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 274_no_built_in_place.sql (#935) ───────────────────────────────────
+-- tblVenues.countryCode is written above with no default, and
+-- portal.sabbath.location_lat / location_lng are seeded empty; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('274_no_built_in_place.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

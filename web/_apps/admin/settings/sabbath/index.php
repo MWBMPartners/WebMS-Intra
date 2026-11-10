@@ -39,10 +39,21 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.0
+ * THE BOXES SHOW THE INSTALLATION'S ROW, AND A SAVE CHANGES ONLY WHAT WAS SENT (#936)
+ * -----------------------------------------------------------------------------
+ * Because the save writes the installation's row, the boxes are filled from that
+ * row (InstallationSettings::layer()), never from the merged settings (#674), and
+ * "is this the value already stored?" is asked of that row too. A setting is
+ * written only when its field ARRIVED (#677); the two switches only when the
+ * form's `switches_shown` marker arrived, because an unticked box sends nothing.
+ * A value the page cannot use is refused with its reason, and nothing is saved.
+ *
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/251
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/782
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/935
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/936
  * -----------------------------------------------------------------------------
  */
 
@@ -50,6 +61,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
 use Portal\Core\Sabbath;
 use Portal\Core\Site;
@@ -65,6 +77,16 @@ if (App::isAdmin() === false) {
 //    the file header for why. Worked out once and used by both the handler and
 //    the form below, so the two can never disagree.
 $mayChangePortalWideSettings = App::isRootAdmin();
+
+// 🏢 WHAT IS STORED INSTALLATION-WIDE, and the only thing the boxes are filled from (#936,
+//    the #674 rule). The save below writes the row with no organisation (`siteID` NULL), so
+//    the boxes must show THAT row. WHAT WAS WRONG: they were filled from the merged
+//    settings, where an organisation's own row has already won; a global administrator who
+//    opened this page inside such an organisation saw ITS values, pressed Save without
+//    touching anything, and made them every organisation's.
+$storedSabbath = InstallationSettings::layer()['portal']['sabbath'] ?? [];
+$storedSabbath = is_array($storedSabbath) === true ? $storedSabbath : [];
+$storedAtStart = $storedSabbath; // as start-up read it, before any save below
 
 $flash = '';
 $flashType = 'info';
@@ -115,17 +137,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
     } else {
         // 💾 Only a global administrator with a valid token reaches this point.
-        $db = App::db();
-        $values = [
-            'portal.sabbath.enabled'              => isset($_POST['enabled']) ? '1' : '0',
-            'portal.sabbath.method'               => in_array($_POST['method'] ?? 'fixed', ['fixed','sunset_calc'], true) ? (string) $_POST['method'] : 'fixed',
-            'portal.sabbath.timezone'             => is_string($_POST['timezone'] ?? null) === true ? trim((string) $_POST['timezone']) : '',
-            'portal.sabbath.location_lat'         => (string) ((float) ($_POST['location_lat'] ?? 0)),
-            'portal.sabbath.location_lng'         => (string) ((float) ($_POST['location_lng'] ?? 0)),
-            'portal.sabbath.start_offset_minutes' => (string) ((int) ($_POST['start_offset_minutes'] ?? 0)),
-            'portal.sabbath.end_offset_minutes'   => (string) ((int) ($_POST['end_offset_minutes'] ?? 0)),
-            'portal.sabbath.bypass_critical'      => isset($_POST['bypass_critical']) ? '1' : '0',
-        ];
+        //
+        //    ASK WHETHER EACH FIELD ARRIVED (#936, #677). A setting is written ONLY when its
+        //    field was sent. WHAT WAS WRONG: a save that did not send the latitude, the
+        //    longitude or an offset stored 0 (a place in the Gulf of Guinea, or no offset),
+        //    and one without `method` stored "fixed", so a form missing a field quietly changed
+        //    a setting nobody touched. #782 had fixed this for the zone only (check N17).
+        //
+        //    And compare with what is STORED INSTALLATION-WIDE, never with the merged
+        //    settings (#674): this page writes the installation's row, so "is this the value
+        //    already there?" is a question about that row. See $storedSabbath below.
+        $db      = App::db();
+        $values  = [];
+        $refusals = [];
+        $arrived = static fn (string $field): bool => array_key_exists($field, $_POST) === true;
+        // A posted LIST is not text: null here, and refused below wherever text is needed.
+        $posted  = static fn (string $field): ?string => is_string($_POST[$field] ?? null) === true ? trim((string) $_POST[$field]) : null;
+        $stored  = static fn (string $key): string => is_scalar($storedSabbath[$key] ?? null) === true ? trim((string) $storedSabbath[$key]) : '';
+
+        // 🔘 The two switches. A tick-box that is not ticked sends NOTHING, so "not sent"
+        //    cannot be told from "switched off" by the box itself. The form therefore sends a
+        //    marker, `switches_shown`, beside them, and the switches are written only when the
+        //    marker arrived (the NotifyPrefs::shownMarker() pattern, #667). A request without
+        //    it leaves both switches exactly as they are.
+        if ($arrived('switches_shown') === true) {
+            $values['portal.sabbath.enabled']         = isset($_POST['enabled']) === true ? '1' : '0';
+            $values['portal.sabbath.bypass_critical'] = isset($_POST['bypass_critical']) === true ? '1' : '0';
+        }
+
+        // 🧮 The method. One of the two the page offers, or exactly what is stored already;
+        //    anything else is REFUSED rather than silently made "fixed".
+        if ($arrived('method') === true) {
+            $methodWanted = $posted('method');
+            if ($methodWanted === 'fixed' || $methodWanted === 'sunset_calc') {
+                $values['portal.sabbath.method'] = $methodWanted;
+            } elseif ($methodWanted === null || $methodWanted !== $stored('method')) {
+                $refusals[] = 'the way the window is worked out must be one of the two offered';
+            }
+        }
+
+        // 📍 THE PLACE (#935). EMPTY is a real answer, like the zone's: it means "each
+        //    organisation's own map position" (Sabbath::place()), and it is what a new
+        //    installation ships with. Otherwise a number Sabbath::coordinate() accepts (the
+        //    ONE test, so the page cannot store what the window then ignores), or exactly what
+        //    is stored already, so a plain Save over a value this page drew is never refused.
+        //    Both or neither: half a place is no place, and storing one would read as a
+        //    place set while the window used none.
+        $placeArrived = false;
+        foreach (['location_lat' => 90.0, 'location_lng' => 180.0] as $field => $limit) {
+            if ($arrived($field) === false) {
+                continue;
+            }
+            $placeArrived = true;
+            $text = $posted($field);
+            if ($text === '' || ($text !== null && Sabbath::coordinate($text, $limit) !== null) || ($text !== null && $text === $stored($field))) {
+                $values['portal.sabbath.' . $field] = $text;
+            } else {
+                $refusals[] = $field === 'location_lat'
+                    ? 'the latitude must be a number from -90 to 90, or left empty'
+                    : 'the longitude must be a number from -180 to 180, or left empty';
+            }
+        }
+        if ($placeArrived === true && $refusals === []) {
+            $latAfter = (string) ($values['portal.sabbath.location_lat'] ?? $stored('location_lat'));
+            $lngAfter = (string) ($values['portal.sabbath.location_lng'] ?? $stored('location_lng'));
+            if (($latAfter === '') !== ($lngAfter === '')) {
+                $refusals[] = 'give both the latitude and the longitude, or leave both empty';
+            }
+        }
+
+        // ⏱️ The two offsets, in whole minutes, no more than a day either way. An empty box
+        //    is no offset (0). Anything else is REFUSED, unless it is what is stored already.
+        foreach (['start_offset_minutes' => 'start', 'end_offset_minutes' => 'end'] as $field => $word) {
+            if ($arrived($field) === false) {
+                continue;
+            }
+            $text = $posted($field);
+            if ($text === '') {
+                $values['portal.sabbath.' . $field] = '0';
+            } elseif ($text !== null && preg_match('/^[+-]?\d{1,4}$/', $text) === 1 && abs((int) $text) <= 1440) {
+                $values['portal.sabbath.' . $field] = (string) ((int) $text);
+            } elseif ($text === null || $text !== $stored($field)) {
+                $refusals[] = 'the ' . $word . ' offset must be a whole number of minutes from -1440 to 1440';
+            }
+        }
+
+        if ($arrived('timezone') === true) {
+            $values['portal.sabbath.timezone'] = $posted('timezone') ?? '';
+        }
         // 🕰️ THE ZONE (#782). EMPTY is a real answer here, not a missing one: it means
         //    "each organisation's own time zone" (Sabbath::zone() then asks Site::zoneFor(),
         //    which falls back to Site::timezone(), #604), and it is what a new installation
@@ -141,17 +240,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    as that instruction: the zone is then left exactly as it is and not written. The
         //    first version of #782 stored '' for a missing field, which would have moved a chosen
         //    zone to the organisation's without anybody choosing it (found by the independent check).
-        $zoneArrived = array_key_exists('timezone', $_POST) === true;
-        if ($zoneArrived === false) {
-            unset($values['portal.sabbath.timezone']);
-        }
-        $zoneNow    = (string) (App::settings()['portal']['sabbath']['timezone'] ?? '');
+        //    "What is stored already" is the INSTALLATION's row (#936): it used to be read from
+        //    the merged settings, so inside an organisation with a zone of its own an unknown
+        //    zone matching THAT organisation's row was accepted and written for everybody.
+        $zoneArrived = $arrived('timezone');
+        $zoneNow    = $stored('timezone');
         $zoneWanted = (string) ($values['portal.sabbath.timezone'] ?? $zoneNow);
         $zoneOk     = $zoneArrived === false || $zoneWanted === '' || Site::isZoneName($zoneWanted) === true || $zoneWanted === $zoneNow;
         if ($zoneOk === false) {
             // 🕰️ Refused BEFORE the first row is written, so nothing on this page has changed.
             $flash = 'That time zone is not one this portal knows, so nothing has been changed. '
                 . 'Choose one from the list, or choose "Each organisation\'s own time zone".';
+            $flashType = 'danger';
+        } elseif ($refusals !== []) {
+            // 🚫 Refused BEFORE the first row is written, with every reason at once, so
+            //    nothing on this page has changed and the administrator can fix it all in one go.
+            $flash = 'Nothing has been changed: ' . implode('; ', $refusals) . '.';
             $flashType = 'danger';
         } else {
             try {
@@ -169,6 +273,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $flash = 'Sabbath settings saved.';
                 $flashType = 'success';
+                // 🪞 The boxes below are drawn from what is stored, and start-up read that
+                //    before this save; so what was just written is laid over it, or the page
+                //    would show the old values beside "saved".
+                foreach ($values as $key => $val) {
+                    $storedSabbath[substr($key, strlen('portal.sabbath.'))] = $val;
+                }
             } catch (\Throwable $e) {
                 $flash = 'Save failed: ' . $e->getMessage();
                 $flashType = 'danger';
@@ -177,21 +287,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$settings = App::settings();
-$enabled       = (string) ($settings['portal']['sabbath']['enabled']              ?? '0') === '1';
-$method        = (string) ($settings['portal']['sabbath']['method']               ?? 'fixed');
+// 🏢 Every box from the INSTALLATION's row ($storedSabbath, above), never the merged
+//    settings (#936). The window shown further down is the one in force for THIS
+//    organisation, from Sabbath itself; the two can differ, and the page says so.
+$shown = static fn (string $key, string $none): string => is_scalar($storedSabbath[$key] ?? null) === true ? trim((string) $storedSabbath[$key]) : $none;
+$enabled        = $shown('enabled', '0') === '1';
+$method         = $shown('method', 'fixed');
 // 🕰️ What is STORED ('' means each organisation's own zone, #782), and the clock that
 //    really applies to THIS organisation, from Sabbath::zone() — the one answer.
-$timezone      = (string) ($settings['portal']['sabbath']['timezone']             ?? '');
-$zoneInUse     = Sabbath::zone();
-$lat           = (float)  ($settings['portal']['sabbath']['location_lat']         ?? 52.205);
-$lng           = (float)  ($settings['portal']['sabbath']['location_lng']         ?? 0.119);
-$startOffset   = (int)    ($settings['portal']['sabbath']['start_offset_minutes'] ?? 0);
-$endOffset     = (int)    ($settings['portal']['sabbath']['end_offset_minutes']   ?? 0);
-$bypassCritical = (string) ($settings['portal']['sabbath']['bypass_critical']     ?? '1') === '1';
+$timezone       = $shown('timezone', '');
+// 📍 Shown as stored, as TEXT (#935): '' means each organisation's own map position. It
+//    used to be cast to a number, so an empty setting showed as 0 and the next Save stored 0.
+$lat            = $shown('location_lat', '');
+$lng            = $shown('location_lng', '');
+$startOffset    = (int) $shown('start_offset_minutes', '0');
+$endOffset      = (int) $shown('end_offset_minutes', '0');
+$bypassCritical = $shown('bypass_critical', '1') === '1';
 
-// 🪞 Preview: current/next window
-[$winStart, $winEnd] = Sabbath::computeWindow(time());
+// 🏢 Does THIS organisation hold Sabbath rows of its own that differ from the installation's?
+//    Those are where the merged settings (start-up's) differ from the installation's row as
+//    start-up read it. Then the window in force here is not what the boxes say, and the page
+//    says so rather than leave the two to contradict each other in silence (the
+//    admin/transcription precedent, #674). Nothing on this page writes such a row.
+$merged = App::settings()['portal']['sabbath'] ?? [];
+$merged = is_array($merged) === true ? $merged : [];
+$orgOwn = [];
+foreach ($merged as $key => $val) {
+    $installationVal = is_scalar($storedAtStart[$key] ?? null) === true ? (string) $storedAtStart[$key] : null;
+    if (is_scalar($val) === true && (string) $val !== $installationVal) {
+        $orgOwn[$key] = $val;
+    }
+}
+$ownRowsDiffer = $orgOwn !== [];
+
+// 📍 What is IN FORCE for this organisation (#935): the installation's row as it stands now
+//    (including anything just saved, which start-up has not seen) with this organisation's
+//    own rows over it. Sunset with no place known is worked out by the fixed method, and
+//    that is said in words below, never left to be guessed.
+$inForce       = array_replace($storedSabbath, $orgOwn);
+$methodInForce = is_scalar($inForce['method'] ?? null) === true ? (string) $inForce['method'] : 'fixed';
+$placeInForce  = Sabbath::place(null, $inForce);
+$enabledInForce = is_scalar($inForce['enabled'] ?? null) === true && (string) $inForce['enabled'] === '1';
+// 🕰️ The clock the window is worked out on here, from the same settings as the window.
+$zoneInUse     = Sabbath::zone(null, $inForce);
+
+// 🪞 Preview: current/next window, from what is in force NOW (including a save just made).
+[$winStart, $winEnd] = Sabbath::computeWindow(time(), null, $inForce);
 
 $pageTitle   = 'Sabbath quiet hours';
 $pageSection = 'admin';
@@ -233,7 +374,39 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
     </div>
 <?php endif; ?>
 
-<?php if ($enabled === true): ?>
+<?php if ($ownRowsDiffer === true): ?>
+    <?php // 🏢 #936: the boxes show the installation's settings, and this organisation holds some
+          //    of its own, so what is in force here differs from the boxes. Said, not hidden. ?>
+    <div class="alert alert-warning" data-sabbath-own-rows>
+        <i class="fa-solid fa-triangle-exclamation me-2"></i>
+        This organisation has Sabbath settings of its own, which this page does not show or change.
+        The boxes below are the settings for the whole installation; the window shown here is the one
+        in force for this organisation.
+    </div>
+<?php endif; ?>
+
+<?php if ($methodInForce === 'sunset_calc' && $placeInForce === null): ?>
+    <?php // 📍 #935: sunset needs a place and none is known. The window is worked out by the fixed
+          //    method instead (Sabbath::computeWindow()), and this is the sentence that says so. ?>
+    <div class="alert alert-warning" data-sabbath-no-place>
+        <i class="fa-solid fa-location-dot me-2"></i>
+        Sunset is chosen, but no place is set for this organisation: there is no latitude and longitude
+        below, and none on its organisation settings. Until one is set, quiet hours use the fixed times
+        instead: 18:00 on Friday to 18:00 on Saturday, with the offsets below.
+        Set a place below, or this organisation's map position at
+        <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Settings, Organisation</a>.
+    </div>
+<?php elseif ($methodInForce === 'sunset_calc' && $placeInForce !== null): ?>
+    <div class="alert alert-light border" data-sabbath-place-from="<?php echo htmlspecialchars((string) $placeInForce['from'], ENT_QUOTES, 'UTF-8'); ?>">
+        <i class="fa-solid fa-location-dot me-2"></i>
+        Sunset is worked out at <?php echo htmlspecialchars(sprintf('%.4F, %.4F', $placeInForce['lat'], $placeInForce['lng']), ENT_QUOTES, 'UTF-8'); ?>,
+        <?php echo $placeInForce['from'] === 'organisation'
+            ? 'this organisation\'s own map position (from Admin, Settings, Organisation).'
+            : 'the place given below.'; ?>
+    </div>
+<?php endif; ?>
+
+<?php if ($enabledInForce === true): ?>
     <div class="alert alert-info">
         <strong>Current window (your settings):</strong>
         <?php // 🕰️ Shown on the clock the window is worked out on (#782). It used to be printed on
@@ -247,6 +420,9 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
 
 <form method="post">
     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php // 🔘 #936: says "the two switches below were drawn", so an unticked box (which sends
+          //    nothing) is read as OFF only when this form really sent it. ?>
+    <input type="hidden" name="switches_shown" value="1">
 
     <div class="card mb-3">
         <div class="card-body">
@@ -293,12 +469,19 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
                     </select>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label small">Latitude</label>
-                    <input type="number" step="0.0001" name="location_lat" class="form-control form-control-sm" value="<?php echo htmlspecialchars((string) $lat, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
+                    <label class="form-label small" for="sabbath-lat">Latitude</label>
+                    <input type="number" step="any" min="-90" max="90" id="sabbath-lat" name="location_lat" class="form-control form-control-sm" value="<?php echo htmlspecialchars($lat, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label small">Longitude</label>
-                    <input type="number" step="0.0001" name="location_lng" class="form-control form-control-sm" value="<?php echo htmlspecialchars((string) $lng, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
+                    <label class="form-label small" for="sabbath-lng">Longitude</label>
+                    <input type="number" step="any" min="-180" max="180" id="sabbath-lng" name="location_lng" class="form-control form-control-sm" value="<?php echo htmlspecialchars($lng, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $readOnlyAttr; ?>>
+                </div>
+                <div class="col-12">
+                    <?php // 📍 #935: empty is a real answer, as for the zone. Nothing is built in. ?>
+                    <div class="form-text">
+                        For sunset only. Leave both empty to use each organisation's own map position,
+                        set at Admin, Settings, Organisation. With neither set, the fixed times are used.
+                    </div>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small">Start offset (mins)</label>

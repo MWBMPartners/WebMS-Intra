@@ -909,7 +909,7 @@ q("INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, sessionD
 // H: A's hall, with one booking today. Every text carries VENUE_MARK.
 // 🕰️ The zone is named because tblVenues.timezone has no default since #782 (migration 273); London is
 //    the value this row always got from the old default, so nothing this test sees changes.
-q('INSERT INTO tblVenues (venueID, siteID, venueName, timezone, isActive) VALUES (?, ?, ?, ?, 1)', 'iiss', [VENUE, ORG_A, VENUE_MARK . ' hall', 'Europe/London']);
+q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone, isActive) VALUES (?, ?, ?, 'GB', ?, 1)", 'iiss', [VENUE, ORG_A, VENUE_MARK . ' hall', 'Europe/London']);
 q('INSERT INTO tblVenueUsageTypes (usageTypeID, siteID, venueID, typeName) VALUES (916721, ?, ?, ?)', 'iis', [ORG_A, VENUE, VENUE_MARK . ' use']);
 q('INSERT INTO tblVenueStatuses (statusID, siteID, statusName) VALUES (916731, ?, ?)', 'is', [ORG_A, VENUE_MARK . ' status']);
 q("INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, startTime, endTime, notes) VALUES (?, ?, ?, ?, 916721, 916731, '09:00:00', '12:00:00', ?)", 'iiiss', [BOOKING, ORG_A, VENUE, $today, VENUE_MARK . ' note']);
