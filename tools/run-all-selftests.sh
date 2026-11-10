@@ -239,6 +239,7 @@ page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scrip
 help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFTEST_WEB_PORT=9663
 outside-services|tools/outside-services-selftest.php|selftest_outside|SELFTEST_WEB_PORT=9778
 registration-retention|tools/registration-retention-selftest.php|selftest_regret|SELFTEST_WEB_PORT=9816
+activity-log-retention|tools/activity-log-retention-selftest.php|selftest_alret|SELFTEST_WEB_PORT=9932
 public-website-tick|tools/public-website-tick-selftest.php|selftest_pwtick|SELFTEST_WEB_PORT=9493
 public-door|tools/public-door-selftest.php|selftest_pubdoor|SELFTEST_WEB_PORT=9497
 htaccess-apache|tools/htaccess-apache-selftest.php|-|HTACCESS_SELFTEST_PORT=9499

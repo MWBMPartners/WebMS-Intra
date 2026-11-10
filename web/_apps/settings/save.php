@@ -506,6 +506,23 @@ if ($settingId > 0) {
         exit();
     }
 
+    // 📜 #932: and how long the activity log is kept, where 0 now means "never
+    //    delete" (D-117). Its page (Admin, Maintenance, Retention) refuses an
+    //    organisation's "never" under an installation with a number of days and
+    //    records the refusal; this editor judges nothing, so a figure typed here
+    //    would be one nobody checked. See ActivityLogRetention::lockedInGeneralEditor().
+    if (\Portal\Core\ActivityLogRetention::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is how long the activity log is kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\ActivityLogRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
     if (\Portal\Core\TranscriptRetention::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -1055,6 +1072,20 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\RegistrationRetention::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+
+    // 📜 #932, the same refusal on the ADD path: a key refused on update and
+    //    allowed on insert is a key anybody can set once.
+    if (\Portal\Core\ActivityLogRetention::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsInsertRefused',
+            'Refused: "' . $settingKey . '" is how long the activity log is kept and is written only on its own page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\ActivityLogRetention::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

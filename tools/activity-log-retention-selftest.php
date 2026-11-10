@@ -1,0 +1,713 @@
+<?php
+// Path: tools/activity-log-retention-selftest.php
+/**
+ * -----------------------------------------------------------------------------
+ * "Never delete" for the activity log, over real HTTP 📜♾️ (#932, D-117)
+ * -----------------------------------------------------------------------------
+ * It drives the REAL page — Admin, Maintenance, Retention — and the REAL
+ * scheduled clear-out at `/cron/retention-sweep`, with a real sign-in, and reads
+ * every result back out of the database rather than believing a message.
+ * `tools/retention-caps-selftest.php` section F proves the readers and the save
+ * class on their own; this proves the page and its handler use them, which no
+ * reading of the source can.
+ *
+ * WHAT IT COVERS
+ *   A  the page draws, and with the installation at a number of days the
+ *      organisation's form does NOT offer "never" (a choice whose own Save
+ *      always refuses is #675's fault)
+ *   B  the installation's "Never delete" is stored as 0 — never as 3650 — the
+ *      page then says so, and the organisation's form offers "never"
+ *   C  an organisation's never under an installation at never is stored
+ *   D  THE REAL CLEAR-OUT under never: 4000-day-old rows survive for an
+ *      organisation that chose never, one that follows the installation's
+ *      never, and rows owned by nobody — while an organisation that chose 7
+ *      days has its own old row deleted
+ *   E  lowering the installation to 30 days is allowed (D-013) and says how
+ *      many organisations are now held to it; the page warns about a stored
+ *      never it is not obeying
+ *   F  THE REFUSAL: under an installation of 30 days an organisation's never is
+ *      refused with the reason, nothing is stored, and the refusal is
+ *      recorded; 0 typed as a NUMBER is refused too (never is its own choice);
+ *      31 is refused, never clamped; 20 is stored; "follow" removes the row
+ *   G  the installation's 3651 days is refused, not clamped
+ *   H  an untouched Save over a stored never the installation does not allow
+ *      (SQL-only state) changes nothing (#687)
+ *   I  an organisation's own administrator and a member are refused (403) and
+ *      nothing is stored — the page is a global administrator's
+ *   J  an action the page does not know runs NOTHING — not the sweep — while
+ *      a post with no action is still the sweep, as it always was
+ *   K  the ERROR log is untouched: its stored 0 still reads as a year on the
+ *      page and the real clear-out still deletes a 400-day-old error row
+ *   P  the plants: each guard taken out of a COPY of the portal, the scenario
+ *      that should catch it run again, and it must go red. Count them from the
+ *      `$plant(` calls, never from a comment.
+ *
+ * WHAT IT CANNOT DO, said plainly
+ *   - It runs ONE engine at a time, whichever the caller points it at.
+ *   - The server runs ONE worker, so two saves never overlap here; the lock is
+ *     the same `FOR UPDATE` inside a transaction that
+ *     `retention-caps-selftest.php` section D proves for its own class, and is
+ *     NOT separately proved for this one.
+ *   - The general settings editor's refusal of `audit.retentionDays` is not
+ *     driven here: `tools/settings-locks-selftest.php` finds every lock
+ *     method by name and drives all three of the editor's paths for each.
+ *   - It drives the page and the job; it does not prove the customer's
+ *     scheduler really calls the job every night.
+ *
+ * Usage:  SELFTEST_DB_NAME=selftest_alret SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
+ *         [SELFTEST_WEB_PORT=9932] php tools/activity-log-retention-selftest.php
+ *
+ *         The database must already hold `web/_sql/full_schema.sql`. Needs
+ *         PHP's curl extension and `proc_open()`. It REFUSES rather than
+ *         skipping when anything is missing, because a skipped test reads
+ *         exactly like a passing one.
+ *
+ * Exit:   0 only when every check ran and passed AND the number of checks is
+ *         the number expected; 1 otherwise; 2 when it refused to run.
+ *
+ * @package   Portal\Tools
+ * @author    MWBM Partners Ltd (t/a MWservices)
+ * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
+ * @license   All Rights Reserved
+ * @version   1.0.0
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/932
+ * -----------------------------------------------------------------------------
+ */
+
+declare(strict_types=1);
+
+/** How many checks a full run makes. A different number means a block was skipped or ran twice. */
+const AL_EXPECTED_CHECKS = 46;
+
+$sep  = DIRECTORY_SEPARATOR;
+$repo = dirname(__DIR__);
+
+$passed = 0;
+$failed = 0;
+$state  = ['proc' => null, 'child' => null];
+
+function refuse(string $why): never
+{
+    echo "REFUSED: {$why}.\n";
+    echo "Nothing was checked, and this run fails. A skipped test reads exactly\n";
+    echo "like a passing one, which is why this refuses rather than skipping.\n";
+    exit(2);
+}
+
+function check(string $name, $got, $want): void
+{
+    global $passed, $failed;
+    if ($got === $want) {
+        $passed += 1;
+        echo "  ✓ {$name}\n";
+        return;
+    }
+    $failed += 1;
+    echo "  ✗ {$name}\n";
+    echo '      wanted: ' . var_export($want, true) . "\n";
+    echo '      got:    ' . var_export($got, true) . "\n";
+}
+
+// ── What it needs ────────────────────────────────────────────────────────────
+$dbName = (string) getenv('SELFTEST_DB_NAME');
+if (preg_match('/^selftest_[A-Za-z0-9_]+$/', $dbName) !== 1) {
+    refuse("set SELFTEST_DB_NAME to a database whose name starts with selftest_ (got '{$dbName}'). This test writes rows");
+}
+foreach (['curl_init', 'proc_open'] as $needed) {
+    if (function_exists($needed) === false) {
+        refuse("this test needs {$needed}(), which this PHP does not have");
+    }
+}
+$dbHost = getenv('SELFTEST_DB_HOST') !== false ? (string) getenv('SELFTEST_DB_HOST') : '127.0.0.1';
+$dbUser = getenv('SELFTEST_DB_USER') !== false ? (string) getenv('SELFTEST_DB_USER') : 'root';
+$dbPass = getenv('SELFTEST_DB_PASS') !== false ? (string) getenv('SELFTEST_DB_PASS') : '';
+$dbPort = getenv('SELFTEST_DB_PORT') !== false ? (int) getenv('SELFTEST_DB_PORT') : 3306;
+
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+try {
+    $db = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+} catch (Throwable $e) {
+    refuse("could not reach {$dbName} on {$dbHost}:{$dbPort}");
+}
+$tables = (int) ($db->query(
+    'SELECT COUNT(*) AS `n` FROM `information_schema`.`TABLES` WHERE `TABLE_SCHEMA` = DATABASE()'
+)->fetch_assoc()['n'] ?? 0);
+if ($tables < 100) {
+    refuse("the database holds only {$tables} tables — load web/_sql/full_schema.sql first");
+}
+
+// ── A copy of web/, so a planted fault never touches the repository ─────────
+$child = sys_get_temp_dir() . $sep . 'alret-http-' . bin2hex(random_bytes(6));
+$state['child'] = $child;
+register_shutdown_function(static function () use (&$state): void {
+    if (is_resource($state['proc']) === true) {
+        proc_terminate($state['proc']);
+        proc_close($state['proc']);
+    }
+    if ($state['child'] !== null && is_dir($state['child']) === true) {
+        // A recursive delete of a folder THIS run made, under the system temp
+        // folder, whose name holds random bytes.
+        $it = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($state['child'], FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($it as $entry) {
+            $entry->isDir() === true ? @rmdir($entry->getPathname()) : @unlink($entry->getPathname());
+        }
+        @rmdir($state['child']);
+    }
+});
+mkdir($child, 0700, true);
+$copied = 0;
+$walk = new RecursiveIteratorIterator(
+    new RecursiveDirectoryIterator($repo . $sep . 'web', FilesystemIterator::SKIP_DOTS),
+    RecursiveIteratorIterator::SELF_FIRST
+);
+foreach ($walk as $entry) {
+    $to = $child . $sep . 'web' . substr($entry->getPathname(), strlen($repo . $sep . 'web'));
+    if ($entry->isDir() === true) {
+        @mkdir($to, 0700, true);
+        continue;
+    }
+    copy($entry->getPathname(), $to);
+    $copied++;
+}
+if ($copied < 100) {
+    refuse("the copy of web/ holds only {$copied} files");
+}
+@mkdir($child . $sep . 'web' . $sep . '_auth_keys', 0700);
+mkdir($child . $sep . 'sessions', 0700);
+file_put_contents(
+    $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'auth_creds.php',
+    "<?php\n// Written by tools/activity-log-retention-selftest.php for ONE run.\nreturn "
+    . var_export(['db_host' => $dbHost, 'db_user' => $dbUser, 'db_pass' => $dbPass, 'db_name' => $dbName, 'db_port' => $dbPort], true)
+    . ";\n"
+);
+file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key', bin2hex(random_bytes(32)));
+
+// The router imitates web/public_html/.htaccess, as the other page tests do.
+file_put_contents($child . $sep . 'router.php', <<<'ROUTER'
+<?php
+// Written by tools/activity-log-retention-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+$root = (string) realpath(__DIR__ . '/web/public_html');
+$uri  = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+if (preg_match('#(^|/)\.(?!well-known)#', $uri) === 1) { http_response_code(403); exit('403'); }
+if (preg_match('#\.(php\d?|phtml|phar)$#i', $uri) === 1 && in_array($uri, ['/index.php', '/api-docs/index.php', '/error.php'], true) === false) { http_response_code(404); exit('404'); }
+$target = $root . '/index.php';
+$real   = ($uri === '/' || preg_match('#^/assets/?$#', $uri) === 1) ? false : realpath($root . $uri);
+if ($real !== false && str_starts_with($real, $root . DIRECTORY_SEPARATOR) === true && is_file($real) === true) {
+    if (strtolower(pathinfo($real, PATHINFO_EXTENSION)) === 'php') { $target = $real; } else { readfile($real); return true; }
+}
+$_SERVER['SCRIPT_NAME']     = substr($target, strlen($root));
+$_SERVER['PHP_SELF']        = $_SERVER['SCRIPT_NAME'];
+$_SERVER['SCRIPT_FILENAME'] = $target;
+chdir(dirname($target));
+require $target;
+return true;
+ROUTER);
+
+// SELFTEST_WEB_PORT when the runner or a workflow chooses one (so two tests
+// running side by side never share a port); otherwise one picked at random.
+$port = getenv('SELFTEST_WEB_PORT') !== false ? (int) getenv('SELFTEST_WEB_PORT') : 9940 + random_int(0, 30);
+$jar  = $child . $sep . 'cookies.txt';
+
+$startServer = static function () use (&$state, $child, $sep, $port): void {
+    if (is_resource($state['proc']) === true) {
+        proc_terminate($state['proc']);
+        proc_close($state['proc']);
+        $state['proc'] = null;
+        usleep(400000);
+    }
+    $env = getenv();
+    unset($env['PHP_CLI_SERVER_WORKERS']);
+    $env['PORTAL_ENV'] = 'prod';
+    $state['proc'] = proc_open(
+        [
+            PHP_BINARY,
+            '-d', 'session.save_path=' . $child . $sep . 'sessions',
+            '-d', 'error_log=' . $child . $sep . 'php-errors.log',
+            '-d', 'log_errors=1', '-d', 'display_errors=0',
+            '-d', 'max_execution_time=120',
+            '-d', 'opcache.enable=0', '-d', 'opcache.enable_cli=0',
+            '-S', '127.0.0.1:' . $port,
+            '-t', $child . $sep . 'web' . $sep . 'public_html',
+            $child . $sep . 'router.php',
+        ],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $sep . 'server.log', 'a'], 2 => ['file', $child . $sep . 'server.log', 'a']],
+        $pipes,
+        $child,
+        $env
+    );
+    if (is_resource($state['proc']) === false) {
+        refuse('could not start PHP\'s web server');
+    }
+};
+
+/** One request: status, Location and body. Redirects are NOT followed: they are facts checked here. */
+$http = static function (string $method, string $path, array|string $post = []) use ($port, $jar): array {
+    $handle = curl_init('http://127.0.0.1:' . $port . $path);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT => 90, CURLOPT_CONNECTTIMEOUT => 5, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar,
+    ]);
+    if ($method === 'POST') {
+        curl_setopt($handle, CURLOPT_POST, true);
+        curl_setopt($handle, CURLOPT_POSTFIELDS, is_array($post) === true ? http_build_query($post) : $post);
+    }
+    $raw = curl_exec($handle);
+    if ($raw === false) {
+        return ['status' => 0, 'location' => '', 'body' => 'no answer: ' . curl_error($handle)];
+    }
+    $headSize = (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE);
+    $head     = substr((string) $raw, 0, $headSize);
+
+    return [
+        'status'   => (int) curl_getinfo($handle, CURLINFO_HTTP_CODE),
+        'location' => preg_match('/^Location:\s*(\S+)\s*$/mi', $head, $m) === 1 ? $m[1] : '',
+        'body'     => substr((string) $raw, $headSize),
+    ];
+};
+
+$tokenOn = static function (string $html): string {
+    if (preg_match('/name="csrf_token"\s+value="([^"]+)"/', $html, $m) === 1) {
+        return html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+    }
+    if (preg_match('/<meta\s+name="csrf-token"\s+content="([^"]+)"/i', $html, $m) === 1) {
+        return html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+    }
+    return '';
+};
+
+$waitForServer = static function () use ($http): void {
+    for ($i = 0; $i < 80; $i++) {
+        if ($http('GET', '/login')['status'] > 0) {
+            return;
+        }
+        usleep(250000);
+    }
+    refuse('the test server never answered');
+};
+
+// ── The people ──────────────────────────────────────────────────────────────
+$siteOne = (int) ($db->query('SELECT MIN(`siteID`) AS `s` FROM `tblSites`')->fetch_assoc()['s'] ?? 0);
+if ($siteOne <= 0) {
+    refuse('the database has no organisation');
+}
+
+/** Remove a person and everything naming them, children first (the i18n test's lesson). */
+$removeMember = static function (int $who) use ($db): void {
+    $rs = $db->query(
+        "SELECT `TABLE_NAME` FROM `information_schema`.`KEY_COLUMN_USAGE` WHERE `TABLE_SCHEMA` = DATABASE() "
+        . "AND `REFERENCED_TABLE_NAME` = 'tblUsers' AND `COLUMN_NAME` = 'userID'"
+    );
+    while ($row = $rs->fetch_assoc()) {
+        try {
+            $db->query('DELETE FROM `' . $row['TABLE_NAME'] . "` WHERE `userID` = {$who}");
+        } catch (Throwable $e) {
+            // A table of a different shape; whether the person goes is what matters.
+        }
+    }
+    try {
+        $db->query("DELETE FROM `tblUsers` WHERE `userID` = {$who}");
+    } catch (Throwable $e) {
+        echo "  ! could not remove test person {$who}; remove it by hand.\n";
+    }
+};
+
+$people = [];
+foreach (['orgadmin' => [1, 0], 'globaladmin' => [1, 1], 'member' => [0, 0]] as $role => [$isAdmin, $isRoot]) {
+    $email = "alret.{$role}@selftest.invalid";
+    $old   = $db->prepare('SELECT `userID` FROM `tblUsers` WHERE `emailAddress` = ?');
+    $old->bind_param('s', $email);
+    $old->execute();
+    foreach ($old->get_result()->fetch_all(MYSQLI_ASSOC) as $row) {
+        $removeMember((int) $row['userID']);
+    }
+    $old->close();
+    $ins = $db->prepare(
+        'INSERT INTO `tblUsers` (`fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`, `createdAt`) VALUES (?, ?, 1, ?, ?, NOW())'
+    );
+    $name = 'Selftest ' . $role;
+    $ins->bind_param('ssii', $name, $email, $isAdmin, $isRoot);
+    $ins->execute();
+    $id = (int) $db->insert_id;
+    $ins->close();
+    $db->query("INSERT IGNORE INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES ({$siteOne}, {$id}, 1)");
+    $password = 'Sel' . bin2hex(random_bytes(8)) . '!9x';
+    $hash     = password_hash($password, PASSWORD_DEFAULT);
+    $login    = 'selftest-alret-' . $role;
+    $db->query("DELETE FROM `tblLocalAccounts` WHERE `username` = '{$login}'");
+    $acc = $db->prepare('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)');
+    $acc->bind_param('iss', $id, $login, $hash);
+    $acc->execute();
+    $acc->close();
+    $people[$role] = ['id' => $id, 'login' => $login, 'password' => $password];
+}
+
+// A second organisation, so "an organisation that follows the installation"
+// and "one that chose for itself" can be told apart on real rows.
+$db->query("DELETE FROM `tblSettings` WHERE `siteID` IN (SELECT `siteID` FROM `tblSites` WHERE `siteKey` = 'selftest-alret-two')");
+$db->query("DELETE FROM `tblSites` WHERE `siteKey` = 'selftest-alret-two'");
+$db->query("INSERT INTO `tblSites` (`siteKey`, `siteName`, `timezone`, `isActive`) VALUES ('selftest-alret-two', 'Selftest Alret Two', 'UTC', 1)");
+$siteTwo = (int) $db->insert_id;
+
+$signIn = static function (string $role) use ($http, $tokenOn, $people, $jar): void {
+    @unlink($jar);
+    $page  = $http('GET', '/login');
+    $token = $tokenOn($page['body']);
+    if ($token === '') {
+        refuse('the sign-in page carried no form token');
+    }
+    $in = $http('POST', '/login', ['csrf_token' => $token, 'username' => $people[$role]['login'], 'password' => $people[$role]['password']]);
+    if ($in['status'] !== 302 && $in['status'] !== 303) {
+        refuse("signing in as {$role} did not answer a redirect (HTTP {$in['status']})");
+    }
+};
+
+// ── Database helpers ────────────────────────────────────────────────────────
+const AL_KEY  = 'audit.retentionDays';
+const AL_ERRS = 'errors.retentionDays';
+
+/** A settings row's value, or null when there is none. `$site` null = installation-wide. */
+$setting = static function (string $key, ?int $site) use ($db): ?string {
+    $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` ' . ($site === null ? 'IS NULL' : '= ?'));
+    $site === null ? $stmt->bind_param('s', $key) : $stmt->bind_param('si', $key, $site);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    return $row === null ? null : (string) $row['settingValue'];
+};
+/** Put a row in by SQL — the only way to reach some states. null value = delete it. */
+$put = static function (string $key, ?int $site, ?string $value) use ($db): void {
+    $del = $db->prepare('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` ' . ($site === null ? 'IS NULL' : '= ?'));
+    $site === null ? $del->bind_param('s', $key) : $del->bind_param('si', $key, $site);
+    $del->execute();
+    $del->close();
+    if ($value !== null) {
+        $ins = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (?, ?, ?, '', 0)");
+        $ins->bind_param('iss', $site, $key, $value);
+        $ins->execute();
+        $ins->close();
+    }
+};
+/** The installation's row and both organisations' own rows, set in one go. */
+$world = static function (?string $inst, ?string $orgOne, ?string $orgTwo) use ($put, $siteOne, $siteTwo): void {
+    $put(AL_KEY, null, $inst);
+    $put(AL_KEY, $siteOne, $orgOne);
+    $put(AL_KEY, $siteTwo, $orgTwo);
+};
+$activityCount = static function (string $type) use ($db): int {
+    $stmt = $db->prepare('SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `activityType` = ?');
+    $stmt->bind_param('s', $type);
+    $stmt->execute();
+    $n = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
+    $stmt->close();
+    return $n;
+};
+
+// ── Page helpers ────────────────────────────────────────────────────────────
+const AL_PAGE = '/admin/maintenance/retention';
+$page = static fn (): array => $http('GET', AL_PAGE);
+/** The flash this page prints, as type and text. */
+$flashOf = static function (string $html): array {
+    if (preg_match('#<div class="alert alert-(\w+) alert-dismissible[^"]*">\s*(.*?)\s*<button#s', $html, $m) === 1) {
+        return ['type' => $m[1], 'text' => html_entity_decode(trim($m[2]), ENT_QUOTES, 'UTF-8')];
+    }
+    return ['type' => '', 'text' => ''];
+};
+/** Post one of the page's forms with the page's own token, then read the page it redirects back to. */
+$save = static function (array $fields) use ($http, $tokenOn, $page, $flashOf): array {
+    $token  = $tokenOn($page()['body']);
+    $answer = $http('POST', AL_PAGE, ['csrf_token' => $token] + $fields);
+    $after  = $page();
+    return ['status' => $answer['status'], 'location' => $answer['location'], 'flash' => $flashOf($after['body']), 'page' => $after['body']];
+};
+$install = static fn (array $f): array => $save(['action' => 'activity-retention-installation'] + $f);
+$forOrg  = static fn (array $f): array => $save(['action' => 'activity-retention-organisation'] + $f);
+
+// ── The real clear-out ──────────────────────────────────────────────────────
+$cronToken = bin2hex(random_bytes(16));
+$put('maintenance.cronToken', null, $cronToken);
+/** One activity-log row, so many days old, for one organisation (null = nobody). */
+$logRow = static function (?int $site, int $age) use ($db): int {
+    $stmt = $db->prepare("INSERT INTO `tblActivityLogs` (`siteID`, `activityType`, `timestamp`) VALUES (?, 'SelftestAlret', DATE_SUB(NOW(), INTERVAL ? DAY))");
+    $stmt->bind_param('ii', $site, $age);
+    $stmt->execute();
+    $id = (int) $db->insert_id;
+    $stmt->close();
+    return $id;
+};
+/** Run the job over HTTP; answer which of `$ids` survived (keyed as given), or a failure string. */
+$runJob = static function (array $ids) use ($http, $cronToken, $db): array|string {
+    $ran = $http('GET', '/cron/retention-sweep?token=' . $cronToken);
+    if ($ran['status'] !== 200 || str_contains($ran['body'], '"status":"ok"') === false) {
+        return 'the job did not run: ' . $ran['status'] . ' ' . substr($ran['body'], 0, 160);
+    }
+    $out = [];
+    foreach ($ids as $label => $id) {
+        $out[$label] = (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `logID` = " . (int) $id)->fetch_assoc()['n'] ?? 0) === 1;
+    }
+    return $out;
+};
+/** Under never: what survives the real job, for three owners, plus one organisation at 7 days. */
+$scnNeverKeeps = static function () use ($db, $world, $logRow, $runJob, $siteOne, $siteTwo): array|string {
+    $db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
+    // Organisation one chose never; organisation two follows the installation's never.
+    $world('0', '0', null);
+    return $runJob(['one' => $logRow($siteOne, 4000), 'two' => $logRow($siteTwo, 4000), 'nobody' => $logRow(null, 4000)]);
+};
+
+$startServer();
+$waitForServer();
+
+// ═════════════════════════════════════════════════════════════════════════════
+// The scenarios the plants in section P re-run. Each answers TRUE when the guard
+// it is about did its job, so a plant must make it answer FALSE.
+// ═════════════════════════════════════════════════════════════════════════════
+
+/** Under 30 days, an organisation's never is refused and nothing is stored. */
+$scnRefuseNever = static function () use ($world, $signIn, $forOrg, $setting, $siteOne): bool {
+    $world('30', null, null);
+    $signIn('globaladmin');
+    $r = $forOrg(['choice' => 'never']);
+    return $setting(AL_KEY, $siteOne) === null && $r['flash']['type'] === 'danger';
+};
+/** The installation's never is stored as 0 and read back as never by the page. */
+$scnInstallNever = static function () use ($world, $signIn, $install, $setting): bool {
+    $world('365', null, null);
+    $signIn('globaladmin');
+    $r = $install(['choice' => 'never', 'days' => '365']);
+    // Both the organisation's figure (which reaches the installation's row
+    // through its own fall-back) AND the installation's own figure, which is
+    // what rows owned by nobody follow: a clamp to 3650 shows only in the second.
+    return $setting(AL_KEY, null) === '0' && str_contains($r['page'], 'data-activity-log-in-force="0"')
+        && str_contains($r['page'], '<strong>any number of days, or never deleted</strong>');
+};
+/** The real job keeps every row under never. */
+$scnJobKeeps = static function () use ($scnNeverKeeps): bool {
+    return $scnNeverKeeps() === ['one' => true, 'two' => true, 'nobody' => true];
+};
+/** 0 typed as a NUMBER is refused, never read as never. */
+$scnZeroNumber = static function () use ($world, $signIn, $install, $setting): bool {
+    $world('365', null, null);
+    $signIn('globaladmin');
+    $install(['choice' => 'days', 'days' => '0']);
+    return $setting(AL_KEY, null) === '365';
+};
+/** An unknown action runs nothing: a 400-day-old row under an installation of 30 days survives. */
+$scnUnknownAction = static function () use ($db, $world, $signIn, $http, $tokenOn, $page, $logRow, $setting): bool {
+    $db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
+    $world('30', null, null);
+    $old = $logRow(null, 400);
+    $signIn('globaladmin');
+    $http('POST', AL_PAGE, ['csrf_token' => $tokenOn($page()['body']), 'action' => 'something-else']);
+    return (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `logID` = {$old}")->fetch_assoc()['n'] ?? 0) === 1
+        && $setting(AL_KEY, null) === '30';
+};
+/** The error log's stored 0 still means a year: the page says 365 and the job deletes a 400-day-old error row. */
+$scnErrorsYear = static function () use ($db, $put, $signIn, $page, $http, $cronToken): bool {
+    $put(AL_ERRS, null, '0');
+    $db->query('DELETE FROM `tblErrors`');
+    $db->query("INSERT INTO `tblErrors` (`siteID`, `createdAt`) VALUES (NULL, DATE_SUB(NOW(), INTERVAL 400 DAY))");
+    $old = (int) $db->insert_id;
+    $db->query("INSERT INTO `tblErrors` (`siteID`, `createdAt`) VALUES (NULL, DATE_SUB(NOW(), INTERVAL 300 DAY))");
+    $new = (int) $db->insert_id;
+    $signIn('globaladmin');
+    $body = $page()['body'];
+    $http('GET', '/cron/retention-sweep?token=' . $cronToken);
+    $left = [];
+    $rs = $db->query("SELECT `errorID` FROM `tblErrors` WHERE `errorID` IN ({$old}, {$new})");
+    while ($row = $rs->fetch_assoc()) {
+        $left[] = (int) $row['errorID'];
+    }
+    $put(AL_ERRS, null, '365');
+    return preg_match('#Error Log \(<code>tblErrors</code>\)</h2>\s*<p class="text-muted small mb-2">\s*Kept for <strong>365 days</strong>#', $body) === 1
+        && $left === [$new];
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "A. The page, with the installation at a number of days\n";
+$world('365', null, null);
+$signIn('globaladmin');
+$p = $page();
+check('A1 the page answers 200 to a global administrator', $p['status'], 200);
+check('A2 ...and finished drawing (a page that throws part-way still answers 200)', str_contains($p['body'], '</html>'), true);
+check('A3 the activity-log card is there, with both forms', [
+    str_contains($p['body'], 'data-activity-log-retention-card="1"'),
+    str_contains($p['body'], 'value="activity-retention-installation"'),
+    str_contains($p['body'], 'value="activity-retention-organisation"'),
+], [true, true, true]);
+check('A4 under 365 days the ORGANISATION\'s form does not offer "never" (a choice whose Save always refuses)',
+    str_contains($p['body'], 'id="alrOwnNever"'), false);
+check('A5 ...and says plainly why', str_contains($p['body'], 'is not available</strong>, because this installation'), true);
+check('A6 "never" is explained where it is offered: the log grows without limit, and an erased person\'s number stays',
+    str_contains($p['body'], 'grows without limit') && str_contains($p['body'], 'stays in the descriptions of past records for ever'), true);
+check('A7 the installation\'s box is prefilled with its own 365, inside its own max of 3650',
+    preg_match('#name="days" aria-label="Number of days, for every organisation"\s+value="365"#', $p['body']) === 1
+    && str_contains($p['body'], 'min="1" max="3650"'), true);
+
+echo "B. The installation's \"Never delete\"\n";
+$beforeSaved = $activityCount('ActivityLogRetentionSaved');
+check('B1 (scenario) the installation\'s never is stored as 0 — not 3650 — and the page reads it back as never', $scnInstallNever(), true);
+$p = $page()['body'];
+check('B2 the page then says records are never deleted for this organisation', str_contains($p, '<strong>Never deleted</strong> for your organisation'), true);
+check('B3 ...the organisation\'s form now offers "never"', str_contains($p, 'id="alrOwnNever"'), true);
+check('B4 ...and the installation\'s "Never delete" is the one ticked', preg_match('#value="never" id="alrInstNever"\s+checked#', $p) === 1, true);
+check('B5 the change was recorded', $activityCount('ActivityLogRetentionSaved'), $beforeSaved + 1);
+
+echo "C. An organisation's never under an installation at never\n";
+$r = $forOrg(['choice' => 'never']);
+check('C1 it is stored, as 0', $setting(AL_KEY, $siteOne), '0');
+check('C2 ...and the page says so', $r['flash']['type'] . ' | ' . $r['flash']['text'], 'success | Saved. This organisation\'s activity-log records are now never deleted.');
+$r = $forOrg(['choice' => 'days', 'days' => '45']);
+check('C3 any number of days is allowed under never too', $setting(AL_KEY, $siteOne), '45');
+
+echo "D. The real clear-out under never\n";
+check('D1 (scenario) 4000-day-old rows survive for an organisation that chose never, one that follows the installation\'s never, and rows owned by nobody',
+    $scnNeverKeeps(), ['one' => true, 'two' => true, 'nobody' => true]);
+$db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
+$world('0', '7', null);
+check('D2 ...while an organisation that chose 7 days under that installation has its own old row deleted, and only that',
+    $runJob(['one' => $logRow($siteOne, 400), 'two' => $logRow($siteTwo, 400), 'nobody' => $logRow(null, 400)]),
+    ['one' => false, 'two' => true, 'nobody' => true]);
+$db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
+
+echo "E. Lowering the installation to 30 days\n";
+$world('0', '0', null);
+$signIn('globaladmin');
+$r = $install(['choice' => 'days', 'days' => '30']);
+check('E1 it is stored', $setting(AL_KEY, null), '30');
+check('E2 ...and the message says that 1 organisation is now held to it',
+    [$r['flash']['type'], str_contains($r['flash']['text'], '1 organisation(s) had chosen to keep them longer, or for ever')], ['warning', true]);
+check('E3 the page warns that the stored never is not being obeyed, and says what is in force',
+    [str_contains($r['page'], 'data-activity-log-never-held="1"'), str_contains($r['page'], 'data-activity-log-in-force="30"')], [true, true]);
+
+echo "F. The refusal\n";
+$beforeRefused = $activityCount('ActivityLogRetentionRefused');
+check('F1 (scenario) under 30 days an organisation\'s never is refused and nothing is stored', $scnRefuseNever(), true);
+$r = $forOrg(['choice' => 'never']);
+check('F2 ...the reason is given: "keep for ever" is not allowed, choose 1 to 30, and it never names who set the limit',
+    [str_contains($r['flash']['text'], 'does not allow "keep for ever"'), str_contains($r['flash']['text'], 'between 1 and 30'),
+     str_contains($r['flash']['text'], 'global administrator')], [true, true, false]);
+check('F3 ...and each refusal is recorded', $activityCount('ActivityLogRetentionRefused'), $beforeRefused + 2);
+$r = $forOrg(['choice' => 'days', 'days' => '0']);
+check('F4 0 typed as a NUMBER is refused — never is its own choice — and nothing is stored',
+    [$setting(AL_KEY, $siteOne), str_contains($r['flash']['text'], 'choose "Never delete" instead')], [null, true]);
+$r = $forOrg(['choice' => 'days', 'days' => '31']);
+check('F5 31 days is refused, never clamped to 30', [$setting(AL_KEY, $siteOne), $r['flash']['type']], [null, 'danger']);
+$r = $forOrg(['choice' => 'days', 'days' => '20']);
+check('F6 20 days is stored', $setting(AL_KEY, $siteOne), '20');
+$r = $forOrg(['choice' => 'follow']);
+check('F7 "follow the installation" removes the organisation\'s own row', $setting(AL_KEY, $siteOne), null);
+$r = $forOrg([]);
+check('F8 a post with no choice at all changes nothing (#677) and says so',
+    [$setting(AL_KEY, $siteOne), $r['flash']['type']], [null, 'danger']);
+
+echo "G. The installation's hard maximum\n";
+$r = $install(['choice' => 'days', 'days' => '3651']);
+check('G1 3651 days is refused, not clamped, and the stored 30 is untouched', [$setting(AL_KEY, null), $r['flash']['type']], ['30', 'danger']);
+check('G2 ...and the message points at "Never delete" for longer', str_contains($r['flash']['text'], 'choose "Never delete" instead'), true);
+check('G3 (scenario) 0 typed as a number at the installation is refused, not taken as never', $scnZeroNumber(), true);
+
+echo "H. An untouched Save over a stored never the installation does not allow\n";
+$world('30', '0', null);
+$signIn('globaladmin');
+$r = $forOrg(['choice' => 'never']);
+check('H1 it changes nothing and says so, rather than refusing a figure nobody typed', [$setting(AL_KEY, $siteOne), $r['flash']['type']], ['0', 'info']);
+
+echo "I. Who may use it\n";
+$world('30', null, null);
+foreach (['orgadmin', 'member'] as $role) {
+    $signIn($role);
+    $token = $tokenOn($http('GET', '/')['body']);
+    $ans   = $http('POST', AL_PAGE, ['csrf_token' => $token, 'action' => 'activity-retention-installation', 'choice' => 'never']);
+    $ans2  = $http('POST', AL_PAGE, ['csrf_token' => $token, 'action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '5']);
+    check("I1 {$role}: refused (403) and nothing stored", [$ans['status'], $ans2['status'], $setting(AL_KEY, null), $setting(AL_KEY, $siteOne)], [403, 403, '30', null]);
+}
+
+echo "J. The page's other POST\n";
+check('J1 (scenario) an action the page does not know runs NOTHING — not the sweep, not a save', $scnUnknownAction(), true);
+$db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
+$world('30', null, null);
+$old = $logRow(null, 400);
+$signIn('globaladmin');
+$swept = $http('POST', AL_PAGE, ['csrf_token' => $tokenOn($page()['body'])]);
+check('J2 a post with NO action is still the sweep, as it always was: the 400-day-old row is gone',
+    [$swept['status'], (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `logID` = {$old}")->fetch_assoc()['n'] ?? 0)], [200, 0]);
+
+echo "K. The error log is untouched\n";
+check('K1 (scenario) its stored 0 still reads as a year on the page, and the real job deletes a 400-day-old error row and keeps a 300-day-old one',
+    $scnErrorsYear(), true);
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "P. The plants: each guard taken out of a COPY, and its scenario goes red\n";
+$plant = static function (string $relPath, string $from, string $to, callable $scenario) use ($child, $sep, $startServer, $waitForServer): array {
+    $path   = $child . $sep . 'web' . $sep . str_replace('/', $sep, $relPath);
+    $before = (string) file_get_contents($path);
+    if (substr_count($before, $from) !== 1) {
+        return ['applied' => false, 'result' => null];
+    }
+    file_put_contents($path, str_replace($from, $to, $before));
+    $startServer();
+    $waitForServer();
+    $result = $scenario();
+    file_put_contents($path, $before);
+    $startServer();
+    $waitForServer();
+    return ['applied' => true, 'result' => $result];
+};
+
+$p1 = $plant('_core/ActivityLogRetention.php', '$reason = self::whyNotAllowedForSite($days, $installationStored);',
+    '$reason = $days === self::NEVER ? \'\' : self::whyNotAllowedForSite($days, $installationStored);', $scnRefuseNever);
+check('P1 with an organisation\'s never let through under a number of days, the refusal scenario goes red', [$p1['applied'], $p1['result']], [true, false]);
+$p2 = $plant('_core/ActivityLogRetention.php', "            return self::NEVER;\n        }\n\n        return SettingLimit::installationAllows(",
+    "            return self::HARD_MAX_DAYS;\n        }\n\n        return SettingLimit::installationAllows(", $scnInstallNever);
+check('P2 with never clamped to 3650, the installation\'s never no longer reads as never', [$p2['applied'], $p2['result']], [true, false]);
+$p3 = $plant('_apps/cron/_retention-sweep.php', '$orphanDays === LOG_RETENTION_NEVER ? false : $db->prepare(', '$db->prepare(', $scnJobKeeps);
+check('P3 with the sweep still deleting rows owned by nobody under never, the job scenario goes red', [$p3['applied'], $p3['result']], [true, false]);
+$p4 = $plant('_apps/cron/_retention-sweep.php', "                if (\$days === LOG_RETENTION_NEVER) {\n", "                if (false) {\n", $scnJobKeeps);
+check('P4 with the sweep still deleting an organisation\'s rows under never, the job scenario goes red', [$p4['applied'], $p4['result']], [true, false]);
+$p5 = $plant('_apps/cron/_retention-sweep.php', 'return $ceiling < 1 ? LOG_RETENTION_DEFAULT_DAYS : $ceiling;',
+    'return $ceiling < 1 ? LOG_RETENTION_NEVER : $ceiling;', $scnErrorsYear);
+check('P5 with the error log changed by the same edit (its 0 read as never), the error-log scenario goes red', [$p5['applied'], $p5['result']], [true, false]);
+$p6 = $plant('_apps/admin/maintenance/retention.php', "if (\$_SERVER['REQUEST_METHOD'] === 'POST' && \$postedAction !== 'sweep') {",
+    "if (false) {", $scnUnknownAction);
+check('P6 with an unknown action let fall through to the sweep, the unknown-action scenario goes red', [$p6['applied'], $p6['result']], [true, false]);
+$p7 = $plant('_apps/admin/maintenance/retention.php', "if (preg_match('/^\\d{1,6}\$/', \$alrRaw) !== 1 || (int) \$alrRaw < 1) {",
+    "if (preg_match('/^\\d{1,6}\$/', \$alrRaw) !== 1) {", $scnZeroNumber);
+check('P7 with 0 typed as a number accepted, the installation stores 0 and the zero-number scenario goes red', [$p7['applied'], $p7['result']], [true, false]);
+check('P8 with every plant removed again, the refusal is green once more', $scnRefuseNever(), true);
+
+// 🧾 The server's own error log. A page that throws part-way can still answer
+//    200, so the log is read as well: any fatal error, or anything naming this
+//    package's class, fails the run.
+$serverLog = (string) @file_get_contents($child . $sep . 'php-errors.log');
+$ours      = [];
+foreach (preg_split('/\R/', $serverLog) ?: [] as $line) {
+    if (stripos($line, 'Fatal') !== false || stripos($line, 'ActivityLogRetention') !== false || stripos($line, 'Uncaught') !== false) {
+        $ours[] = $line;
+    }
+}
+check('Z1 the server logged no fatal error and nothing about this package', $ours, []);
+
+// ── Tidy up the rows this test made ─────────────────────────────────────────
+$db->query("DELETE FROM `tblActivityLogs` WHERE `activityType` = 'SelftestAlret'");
+$world('365', null, null);
+$put('maintenance.cronToken', null, '');
+$db->query("DELETE FROM `tblSettings` WHERE `siteID` = {$siteTwo}");
+try {
+    $db->query("DELETE FROM `tblSites` WHERE `siteID` = {$siteTwo}");
+} catch (Throwable $e) {
+    echo "  ! could not remove the second organisation ({$siteTwo}); it is harmless in a selftest database.\n";
+}
+foreach ($people as $person) {
+    $removeMember((int) $person['id']);
+}
+
+$total = $passed + $failed;
+echo "\n{$total} checks: {$passed} passed, {$failed} failed (expected " . AL_EXPECTED_CHECKS . ").\n";
+echo "It drives the REAL page and the REAL clear-out over HTTP and reads every result back from the database.\n";
+echo "It runs one engine, one worker: the lock is not proved here (see the header).\n";
+exit($failed === 0 && $total === AL_EXPECTED_CHECKS ? 0 : 1);

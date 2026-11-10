@@ -57,6 +57,14 @@
  *      kept for ever. Before this both read one pair of settings and deleted
  *      across the whole installation, so one organisation's choice decided
  *      every organisation's history.
+ *      #932 (D-117): for the ACTIVITY log a stored 0 now means "never
+ *      delete", at both levels and in both directions — an installation at
+ *      never lets an organisation choose any number of days or never; one
+ *      with a number of days holds an organisation's never to that number
+ *      (reader) and refuses it (save, `ActivityLogRetention`); never is not
+ *      clamped to 3650; and the sweep counts and deletes nothing under it.
+ *      The ERROR log's 0 still falls back to a year, pinned on its own so the
+ *      shared helpers cannot drift.
  *   G. #810 — the REGISTRATIONS clear-out, driven for real: a registration's
  *      period is measured on its EVENT's own clock, not the database server's.
  *      The old expression is run beside it on the same rows first, to show it
@@ -117,7 +125,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const RC_EXPECTED_CHECKS = 116; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six.
+const RC_EXPECTED_CHECKS = 135; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six; 116 until #932 replaced section F's three 0-means-a-year pins with twenty-two.
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -812,23 +820,145 @@ $mysqli->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'audit.retentionD
 rc_check('an organisation with no figure of its own follows the installation\'s 30, not the built-in 365',
     log_retention_days('audit.retentionDays', 1) === 30, (string) log_retention_days('audit.retentionDays', 1));
 
-// ♾️ ZERO IS NOT "FOR EVER" FOR THESE TWO SETTINGS, unlike every other period
-//    in this file, and that is deliberate: the code this replaced read
-//    `if ($activityDays < 1) { $activityDays = 365; }`, so a stored 0 has
-//    always meant "nothing usable, fall back to a year". Reading it as "for
-//    ever" would stop a log row ever being cleared again; handing it to the
-//    ceiling machinery as a number of days would clear EVERY row.
-rc_world($mysqli, 'audit.retentionDays', '0', null);
-rc_check('an installation storing 0 falls back to a year rather than keeping logs for ever',
-    log_retention_installation_days('audit.retentionDays') === 365,
-    (string) log_retention_installation_days('audit.retentionDays'));
-rc_world($mysqli, 'audit.retentionDays', '30', '0');
-rc_check('…and an organisation storing 0 follows the installation, rather than clearing everything',
-    log_retention_days('audit.retentionDays', 1) === 30, (string) log_retention_days('audit.retentionDays', 1));
-rc_world($mysqli, 'audit.retentionDays', '99999', null);
+// ♾️ #932 (the owner, 10 November 2026 — D-117): FOR THE ACTIVITY LOG A
+//    STORED 0 NOW MEANS "NEVER DELETE". Until then it fell back to a year, and
+//    this block pinned that ("an installation storing 0 falls back to a year
+//    rather than keeping logs for ever"). That was never an owner's decision,
+//    and D-117 reverses it for the activity log ONLY. So 0 is the LARGEST
+//    value, exactly as for the attendance, webhook and transcript periods:
+//      - an installation at never lets an organisation choose any number of
+//        days, or never;
+//      - an installation with a number of days holds every organisation to it,
+//        a stored never included (the READER caps — a save-time refusal is
+//        not a cap, #668);
+//      - never is NOT clamped to the 3650-day hard maximum (D-117 names that).
+//    The error log keeps the old rule; its pins follow this block.
+$AL = 'audit.retentionDays';
+rc_world($mysqli, $AL, '0', null);
+rc_check('#932: an installation storing 0 NEVER deletes its activity log (0), not a year and not 3650 days',
+    log_retention_installation_days($AL) === 0, (string) log_retention_installation_days($AL));
+rc_check('…and an organisation with no figure of its own follows it: never',
+    log_retention_days($AL, 1) === 0, (string) log_retention_days($AL, 1));
+rc_world($mysqli, $AL, '0', '0');
+rc_check('…an organisation that chose never under it keeps never',
+    log_retention_days($AL, 1) === 0, (string) log_retention_days($AL, 1));
+rc_world($mysqli, $AL, '0', '45');
+rc_check('…and one that chose 45 days under it keeps 45 (never above, any number of days below)',
+    log_retention_days($AL, 1) === 45, (string) log_retention_days($AL, 1));
+rc_world($mysqli, $AL, '0', '99999');
+rc_check('…while a NUMBER above the hard maximum is still held to 3650 days — a number is not never',
+    log_retention_days($AL, 1) === 3650, (string) log_retention_days($AL, 1));
+rc_world($mysqli, $AL, '30', '0');
+rc_check('#932, the other direction: an organisation storing never under an installation of 30 days is held to 30',
+    log_retention_days($AL, 1) === 30, (string) log_retention_days($AL, 1));
+rc_world($mysqli, $AL, '99999', null);
 rc_check('a figure above the ten-year hard maximum is held to it',
-    log_retention_installation_days('audit.retentionDays') === 3650,
-    (string) log_retention_installation_days('audit.retentionDays'));
+    log_retention_installation_days($AL) === 3650,
+    (string) log_retention_installation_days($AL));
+
+// 🧹 AND THE SWEEP DELETES NOTHING UNDER NEVER, on real rows. Organisation 1
+//    follows an installation at never, organisation 2 chose never itself, and
+//    rows owned by nobody follow the installation: three ways to reach never,
+//    and none of the 4000-day-old rows may go — counted OR deleted.
+$mysqli->query('DELETE FROM `tblActivityLogs`');
+rc_world($mysqli, $AL, '0', null);
+$rcIns2 = $mysqli->prepare('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (2, \'audit.retentionDays\', \'0\', \'\', 0)');
+$rcIns2->execute();
+$rcIns2->close();
+$rcNever = [];
+foreach ([1, 2, null] as $owner) {
+    $rcNever[] = $rcLogRow('tblActivityLogs', 'timestamp', $owner, 4000);
+}
+sort($rcNever);
+rc_check('#932: under never, the clear-out COUNTS nothing to delete',
+    log_sweep('activity', false) === 0, (string) log_sweep('activity', false));
+rc_check('…and DELETES nothing: all three 4000-day-old rows are still there',
+    log_sweep('activity', true) === 0 && $rcStillThere('tblActivityLogs', 'logID', $rcNever) === $rcNever,
+    json_encode($rcStillThere('tblActivityLogs', 'logID', $rcNever)));
+
+// …but an organisation that chose a number of days under an installation at
+//    never is still cleared by ITS number — never is not a blanket switch.
+rc_world($mysqli, $AL, '0', '7');
+$rcIns2 = $mysqli->prepare('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (2, \'audit.retentionDays\', \'0\', \'\', 0)');
+$rcIns2->execute();
+$rcIns2->close();
+rc_check('…while organisation 1, which chose 7 days under that installation, has exactly its own old row deleted',
+    log_sweep('activity', true) === 1
+    && $rcStillThere('tblActivityLogs', 'logID', $rcNever) === array_values(array_diff($rcNever, [$rcNever[0]])),
+    json_encode($rcStillThere('tblActivityLogs', 'logID', $rcNever)));
+$mysqli->query('DELETE FROM `tblActivityLogs`');
+
+// 💾 THE SAVE PATH (`ActivityLogRetention`, the ONE writer). The rule is
+//    SettingLimit's, asked with the installation's row read LIVE and LOCKED;
+//    each case reads the stored row back rather than believing the answer.
+$rcAlSetting = static function (?int $siteId) use ($mysqli): ?string {
+    $stmt = $mysqli->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = \'audit.retentionDays\' AND `siteID` '
+        . ($siteId === null ? 'IS NULL' : '= ?'));
+    if ($siteId !== null) {
+        $stmt->bind_param('i', $siteId);
+    }
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    return $row === null ? null : (string) $row['settingValue'];
+};
+rc_world($mysqli, $AL, '30', null);
+$rcSave = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 0, true);
+rc_check('#932: under an installation of 30 days an organisation\'s never is REFUSED with the reason, and nothing is stored',
+    $rcSave['outcome'] === 'refused' && $rcSave['refusal'] === 'above-installation' && $rcAlSetting(1) === null
+    && str_contains($rcSave['message'], 'keep for ever') === true && str_contains($rcSave['message'], 'between 1 and 30') === true,
+    json_encode($rcSave) . ' stored: ' . var_export($rcAlSetting(1), true));
+$rcSave = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 31, true);
+rc_check('…and so are 31 days, never clamped to 30',
+    $rcSave['outcome'] === 'refused' && $rcAlSetting(1) === null, json_encode($rcSave));
+$rcSave = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 20, true);
+rc_check('…while 20 days is stored',
+    $rcSave['outcome'] === 'stored' && $rcAlSetting(1) === '20', json_encode($rcSave));
+rc_world($mysqli, $AL, '0', null);
+$rcSave = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 0, true);
+rc_check('under an installation at never, the same organisation\'s never IS stored, as 0',
+    $rcSave['outcome'] === 'stored' && $rcAlSetting(1) === '0', json_encode($rcSave));
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 3651, true);
+rc_check('the installation\'s 3651 days is refused (above the hard maximum), and its stored never is untouched — not clamped to 3650',
+    $rcSave['outcome'] === 'refused' && $rcSave['refusal'] === 'above-hard-max' && $rcAlSetting(null) === '0',
+    json_encode($rcSave) . ' stored: ' . var_export($rcAlSetting(null), true));
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, true);
+rc_check('lowering the installation to 30 days is allowed (D-013), and says that 1 organisation is now held to it',
+    $rcSave['outcome'] === 'stored' && $rcSave['heldDown'] === 1 && $rcAlSetting(null) === '30'
+    && str_contains($rcSave['message'], '1 organisation(s)') === true, json_encode($rcSave));
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 0, true);
+rc_check('and the installation\'s never is stored as 0, never as 3650',
+    $rcSave['outcome'] === 'stored' && $rcAlSetting(null) === '0', json_encode($rcSave));
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 0, false);
+$rcSave2 = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 5, false);
+rc_check('both saves refuse anybody who is not a global administrator',
+    $rcSave['outcome'] === 'refused' && $rcSave2['outcome'] === 'refused' && $rcAlSetting(1) === '0',
+    json_encode([$rcSave, $rcSave2]));
+$mysqli->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'audit.retentionDays' AND `siteID` IS NOT NULL");
+
+// 🚨 THE ERROR LOG DID NOT CHANGE, and these pins are what stop a shared
+//    helper drifting: #932 touches `log_retention_installation_days()` and
+//    `log_retention_days()`, which the error log uses too. For `tblErrors` a
+//    stored 0 STILL falls back to a year — D-117 rules out extending "never"
+//    to it — and the sweep still deletes under it.
+$EK = 'errors.retentionDays';
+rc_world($mysqli, $EK, '0', null);
+rc_check('the ERROR log: an installation storing 0 still falls back to a year (365), not never',
+    log_retention_installation_days($EK) === 365, (string) log_retention_installation_days($EK));
+rc_check('…and an organisation following it gets 365 too, not never',
+    log_retention_days($EK, 1) === 365, (string) log_retention_days($EK, 1));
+rc_world($mysqli, $EK, '30', '0');
+rc_check('…and an organisation storing 0 follows the installation\'s 30, rather than clearing everything or keeping for ever',
+    log_retention_days($EK, 1) === 30, (string) log_retention_days($EK, 1));
+rc_world($mysqli, $EK, '0', null);
+$mysqli->query('DELETE FROM `tblErrors`');
+$rcErrOld = $rcLogRow('tblErrors', 'createdAt', null, 400);
+$rcErrNew = $rcLogRow('tblErrors', 'createdAt', null, 300);
+rc_check('…and on real rows: under a stored 0 the error clear-out deletes a 400-day-old row and keeps a 300-day-old one',
+    log_sweep('errors', true) === 1 && $rcStillThere('tblErrors', 'errorID', [$rcErrOld, $rcErrNew]) === [$rcErrNew],
+    json_encode($rcStillThere('tblErrors', 'errorID', [$rcErrOld, $rcErrNew])));
+$mysqli->query('DELETE FROM `tblErrors`');
 
 // 🚨 THE ERROR LOG IS A SECOND TABLE WITH A SECOND SETTING AND A DIFFERENT
 //    DATE COLUMN, and it is checked on rows too rather than assumed to follow:

@@ -57,8 +57,17 @@
  *                               organisation has its own, held to what the
  *                               installation allows; records belonging to no
  *                               organisation follow the installation's own
- *                               figure (#491).
- *   errors.retentionDays       (default 365) — error logs, the same way
+ *                               figure (#491). 0 means "never delete" since
+ *                               #932 (D-117), and an organisation may hold 0
+ *                               only where the installation holds 0. SET ON
+ *                               THIS PAGE, at both levels, through
+ *                               Portal\Core\ActivityLogRetention — the general
+ *                               settings editor refuses it.
+ *   errors.retentionDays       (default 365) — error logs, the same way,
+ *                               EXCEPT that a stored 0 still falls back to a
+ *                               year: "never delete" is the activity log's
+ *                               alone (D-117 rules out extending it). Still
+ *                               changed in the general settings editor.
  *   attend.detailRetentionDays (default 90) — how long the scrambled sender
  *                               address is kept on an anonymous check-in
  *                               (#530: a browser-description column used to
@@ -89,14 +98,29 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.2.0
+ * THIS PAGE NOW HAS TWO KINDS OF POST (#932), told apart by `action`:
+ *
+ *   - no `action` at all, or `action=sweep`: the sweep, exactly as before.
+ *     "No action" stays the sweep because the sweep form has never carried
+ *     one, and tests that press it post nothing else.
+ *   - `action=activity-retention-installation` / `-organisation`: how long the
+ *     activity log is kept. Saved through ActivityLogRetention and answered
+ *     with a redirect back here, so the figures drawn afterwards are read
+ *     fresh rather than from the request that changed them.
+ *
+ *   Any OTHER action is refused and changes nothing: a value nobody sent on
+ *   purpose must never fall through to the one button that deletes.
+ *
+ * @version   1.3.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/491
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/932
  * -----------------------------------------------------------------------------
  */
 
 declare(strict_types=1);
 
+use Portal\Core\ActivityLogRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
@@ -195,13 +219,119 @@ $errorDays               = log_retention_days('errors.retentionDays', Site::id()
 $activityInstallationDays = log_retention_installation_days('audit.retentionDays');
 $errorInstallationDays    = log_retention_installation_days('errors.retentionDays');
 
-$flashMsg  = '';
-$flashType = '';
+// 💬 A message left by the activity-log forms below, which answer with a
+//    redirect back here (#932). The sweep, further down, sets its own.
+$flashMsg  = (string) ($_SESSION['flash_msg'] ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? '');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+
+// 🧭 Which form was posted. A non-string (`action[]=x`) is "not understood",
+//    never the sweep.
+$postedAction = array_key_exists('action', $_POST) === false
+    ? 'sweep'
+    : (is_string($_POST['action']) === true ? $_POST['action'] : '');
+
+// -----------------------------------------------------------------------------
+// 📜 How long the activity log is kept (#932, D-117)
+// -----------------------------------------------------------------------------
+// ASK WHETHER A FIELD ARRIVED, never only what it contains (#677). `choice`
+// says which of the radio buttons was picked; `days` is read only when the
+// choice is a number of days. REFUSE WITH THE REASON, never clamp (#668), and
+// RECORD every refusal: a request to keep the log longer than the installation
+// allows crosses a line between two parties who may be different people. The
+// record carries the organisation's NUMBER and the figures, nothing else.
+//
+// Both levels are written by a global administrator only (this whole page is
+// theirs; see ActivityLogRetention's header for why an organisation's own
+// administrator is not given this power without a decision). The organisation
+// is the one this page is open in, Site::id().
+$alrBack   = Site::url('admin/maintenance/retention');
+$alrFinish = static function (string $message, string $type) use ($alrBack): never {
+    $_SESSION['flash_msg']  = $message;
+    $_SESSION['flash_type'] = $type;
+    header('Location: ' . $alrBack);
+    exit();
+};
+if ($_SERVER['REQUEST_METHOD'] === 'POST'
+    && ($postedAction === 'activity-retention-installation' || $postedAction === 'activity-retention-organisation')
+) {
+    if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
+        $alrFinish('Invalid or expired form token. Nothing was changed. Please try again.', 'danger');
+    }
+
+    $alrWho       = isset($_SESSION['user_id']) === true ? (int) $_SESSION['user_id'] : null;
+    $alrForSite   = $postedAction === 'activity-retention-organisation';
+    $alrSiteId    = Site::id();
+    $alrLevel     = $alrForSite === true ? 'organisation ' . $alrSiteId : 'the installation';
+    $alrChoice    = array_key_exists('choice', $_POST) === true && is_string($_POST['choice']) === true ? $_POST['choice'] : null;
+    $alrAllowed   = $alrForSite === true ? ['days', 'never', 'follow'] : ['days', 'never'];
+
+    // 🚫 No choice, or one this form does not offer: change nothing.
+    if ($alrChoice === null || in_array($alrChoice, $alrAllowed, true) === false) {
+        Logger::activity(
+            'ActivityLogRetentionRefused',
+            'A change to how long ' . $alrLevel . ' keeps the activity log was refused: no recognised choice was sent. Nothing was saved.',
+            $alrWho
+        );
+        $alrFinish('The form did not say what to keep the activity log for, so nothing was changed.', 'danger');
+    }
+
+    // 🔢 The number of days, read only for that choice.
+    $alrDays = null;
+    if ($alrChoice === 'never') {
+        $alrDays = ActivityLogRetention::NEVER;
+    } elseif ($alrChoice === 'days') {
+        $alrRaw = array_key_exists('days', $_POST) === true && is_string($_POST['days']) === true ? trim($_POST['days']) : '';
+        // ⚠️ 0 typed as a NUMBER is refused, not read as "never": never is its
+        //    own choice (D-117), and a box left at 0 is not a decision to keep
+        //    a record of everybody's actions for ever.
+        if (preg_match('/^\d{1,6}$/', $alrRaw) !== 1 || (int) $alrRaw < 1) {
+            Logger::activity(
+                'ActivityLogRetentionRefused',
+                'A change to how long ' . $alrLevel . ' keeps the activity log was refused: the number of days was not a whole number of 1 or more. Nothing was saved.',
+                $alrWho
+            );
+            $alrFinish('A number of days has to be a whole number from 1 to ' . ActivityLogRetention::HARD_MAX_DAYS
+                . '. To keep the activity log for ever, choose "Never delete" instead. Nothing was saved.', 'danger');
+        }
+        $alrDays = (int) $alrRaw;
+    }
+
+    $alrResult = $alrForSite === true
+        ? ActivityLogRetention::saveForSite($mysqli, $alrSiteId, $alrDays, App::isRootAdmin())
+        : ActivityLogRetention::saveInstallation($mysqli, (int) $alrDays, App::isRootAdmin());
+
+    $alrAsked = $alrDays === null
+        ? 'to follow the installation'
+        : 'for ' . ActivityLogRetention::inWords($alrDays);
+    if ($alrResult['outcome'] === 'refused') {
+        Logger::activity(
+            'ActivityLogRetentionRefused',
+            'A change to how long ' . $alrLevel . ' keeps the activity log (' . $alrAsked . ') was refused'
+            . ($alrResult['refusal'] === '' ? '' : ' (' . $alrResult['refusal'] . ')') . '. Nothing was saved.',
+            $alrWho
+        );
+    } elseif ($alrResult['outcome'] !== 'unchanged') {
+        Logger::activity(
+            'ActivityLogRetentionSaved',
+            'How long ' . $alrLevel . ' keeps the activity log was changed (' . $alrAsked . ')'
+            . (($alrResult['heldDown'] ?? 0) > 0 ? '; ' . (int) $alrResult['heldDown'] . ' organisation(s) are now held to it' : '')
+            . '.',
+            $alrWho
+        );
+    }
+
+    $alrFinish($alrResult['message'], $alrResult['type']);
+}
 
 // -----------------------------------------------------------------------------
 // 🚀 Execute on POST (with CSRF)
 // -----------------------------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $postedAction !== 'sweep') {
+    // 🚫 An action this page does not know. Never the sweep, never a save.
+    $flashMsg  = 'That request was not understood, so nothing was changed.';
+    $flashType = 'danger';
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
         $flashMsg  = 'Invalid or expired form token. Please try again.';
         $flashType = 'danger';
@@ -311,12 +441,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card shadow-sm">
             <div class="card-body">
                 <h2 class="h6"><i class="fa-solid fa-list-check me-1"></i>Activity Logs (<code>tblActivityLogs</code>)</h2>
-                <p class="text-muted small mb-2">
-                    Kept for <strong><?php echo $activityDays; ?> days</strong> for your organisation
-                    (setting: <code>audit.retentionDays</code>).
-                    Each organisation uses its own figure, held to the
-                    <strong><?php echo $activityInstallationDays; ?> days</strong> this installation
-                    allows. Records that belong to no organisation &mdash; written before the
+                <?php /* 📜 #932: either figure may be "never" (0). Said in words, never as
+                         "0 days", which would read as "deleted at once" — the opposite. */ ?>
+                <p class="text-muted small mb-2" data-activity-log-in-force="<?php echo (int) $activityDays; ?>">
+                    <?php if ($activityDays === ActivityLogRetention::NEVER): ?>
+                        <strong>Never deleted</strong> for your organisation
+                    <?php else: ?>
+                        Kept for <strong><?php echo (int) $activityDays; ?> days</strong> for your organisation
+                    <?php endif; ?>
+                    (setting: <code>audit.retentionDays</code>, set
+                    <a href="#activity-log-retention">below</a>).
+                    Each organisation uses its own figure, held to what this installation allows:
+                    <?php if ($activityInstallationDays === ActivityLogRetention::NEVER): ?>
+                        <strong>any number of days, or never deleted</strong>.
+                    <?php else: ?>
+                        <strong>at most <?php echo (int) $activityInstallationDays; ?> days</strong>.
+                    <?php endif; ?>
+                    Records that belong to no organisation &mdash; written before the
                     organisation was decided, or by a scheduled job &mdash; follow the
                     installation's figure.
                 </p>
@@ -336,6 +477,125 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     allows. Faults recorded with no organisation follow the installation's figure.
                 </p>
                 <p class="mb-0">Rows that would be deleted now, across every organisation: <strong><?php echo number_format($preview['errors']); ?></strong></p>
+            </div>
+        </div>
+    </div>
+    <?php
+    // 📜 #932 (D-117) — HOW LONG THE ACTIVITY LOG IS KEPT, at both levels.
+    //
+    //    PREFILLED FROM THE RIGHT LAYER (#674, #677). The installation's choice
+    //    comes from start-up's installation-wide layer, through the same reader
+    //    the clear-out uses; it is fresh because a save answers with a
+    //    redirect. The organisation's choice is ITS OWN row only, never the
+    //    merged settings, which fall back to the installation's row and would
+    //    make one untouched Save turn the installation's figure into the
+    //    organisation's own.
+    //
+    //    NO BOX IS PREFILLED ABOVE ITS OWN `max` (#668). The installation's
+    //    figure is already held to the ten-year maximum by its reader. An
+    //    organisation's own figure above it can only come from SQL or a
+    //    restore; `max` is widened to it rather than the figure altered, so an
+    //    untouched Save matches what is stored and changes nothing (#687). The
+    //    HANDLER is the boundary, not the box.
+    //
+    //    "NEVER" IS OFFERED TO THE ORGANISATION ONLY WHERE IT CAN BE SAVED: where
+    //    the installation itself never deletes, or where the organisation
+    //    already holds never (so the page shows what is stored and an untouched
+    //    Save passes). Offering it otherwise would be a choice whose own Save
+    //    always refuses (#675).
+    $alrOwn       = ActivityLogRetention::ownDays($mysqli, Site::id());
+    $alrInstNever = $activityInstallationDays === ActivityLogRetention::NEVER;
+    $alrOwnMax    = max(ActivityLogRetention::HARD_MAX_DAYS, $alrOwn ?? 0);
+    $alrSiteName  = (string) (Site::current()['siteName'] ?? '');
+    $alrNeverCost = 'The log then grows without limit, and the account number of somebody who has asked to be '
+        . 'erased stays in the descriptions of past records for ever.';
+    ?>
+    <div class="col-12" id="activity-log-retention">
+        <div class="card shadow-sm border-primary" data-activity-log-retention-card="1">
+            <div class="card-body">
+                <h2 class="h6"><i class="fa-solid fa-list-check me-1"></i>How long the activity log is kept</h2>
+                <p class="small text-muted">
+                    The activity log records who did what, and when. The nightly clear-out deletes records
+                    older than the figure below. <strong>&ldquo;Never delete&rdquo;</strong> keeps every
+                    record for ever. <?php echo htmlspecialchars($alrNeverCost, ENT_QUOTES, 'UTF-8'); ?>
+                </p>
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <h3 class="h6">For every organisation on this installation</h3>
+                        <p class="small text-muted">
+                            Records that belong to no organisation follow this figure, and it is the most any
+                            organisation may choose. An organisation may choose &ldquo;Never delete&rdquo; only
+                            when this is &ldquo;Never delete&rdquo; too. Lowering it holds every organisation that
+                            chose longer to the new figure, and the next clear-out deletes their older records.
+                        </p>
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="activity-retention-installation">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="choice" value="days" id="alrInstDays"
+                                       <?php echo $alrInstNever === false ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="alrInstDays">Delete records older than</label>
+                                <input type="number" min="1" max="<?php echo ActivityLogRetention::HARD_MAX_DAYS; ?>"
+                                       class="form-control form-control-sm d-inline-block ms-1" style="width: 7rem;"
+                                       name="days" aria-label="Number of days, for every organisation"
+                                       value="<?php echo $alrInstNever === true ? '' : (int) $activityInstallationDays; ?>">
+                                <span class="small">days (1 to <?php echo ActivityLogRetention::HARD_MAX_DAYS; ?>)</span>
+                            </div>
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="choice" value="never" id="alrInstNever"
+                                       <?php echo $alrInstNever === true ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="alrInstNever"><strong>Never delete</strong></label>
+                            </div>
+                            <button type="submit" class="btn btn-outline-primary btn-sm">Save for every organisation</button>
+                        </form>
+                    </div>
+                    <div class="col-lg-6">
+                        <h3 class="h6">For this organisation<?php echo $alrSiteName !== '' ? ' (' . htmlspecialchars($alrSiteName, ENT_QUOTES, 'UTF-8') . ')' : ''; ?></h3>
+                        <p class="small text-muted">
+                            Its own figure may be shorter than the installation's, never longer.
+                            <?php if ($alrInstNever === false): ?>
+                                <strong>&ldquo;Never delete&rdquo; is not available</strong>, because this installation
+                                deletes records after <?php echo (int) $activityInstallationDays; ?> days.
+                            <?php endif; ?>
+                        </p>
+                        <?php if ($alrOwn === ActivityLogRetention::NEVER && $alrInstNever === false): ?>
+                            <p class="small text-warning-emphasis" data-activity-log-never-held="1">
+                                <i class="fa-solid fa-triangle-exclamation me-1" aria-hidden="true"></i>
+                                This organisation has &ldquo;Never delete&rdquo; stored, but this installation does not
+                                allow it, so its records are deleted after <?php echo (int) $activityInstallationDays; ?> days
+                                like any longer figure.
+                            </p>
+                        <?php endif; ?>
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="action" value="activity-retention-organisation">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="choice" value="follow" id="alrOwnFollow"
+                                       <?php echo $alrOwn === null ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="alrOwnFollow">Follow the installation
+                                    (<?php echo htmlspecialchars(ActivityLogRetention::inWords($activityInstallationDays), ENT_QUOTES, 'UTF-8'); ?>)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="choice" value="days" id="alrOwnDays"
+                                       <?php echo $alrOwn !== null && $alrOwn !== ActivityLogRetention::NEVER ? 'checked' : ''; ?>>
+                                <label class="form-check-label" for="alrOwnDays">Delete records older than</label>
+                                <input type="number" min="1" max="<?php echo (int) $alrOwnMax; ?>"
+                                       class="form-control form-control-sm d-inline-block ms-1" style="width: 7rem;"
+                                       name="days" aria-label="Number of days, for this organisation"
+                                       value="<?php echo $alrOwn !== null && $alrOwn !== ActivityLogRetention::NEVER ? (int) $alrOwn : ''; ?>">
+                                <span class="small">days</span>
+                            </div>
+                            <?php if ($alrInstNever === true || $alrOwn === ActivityLogRetention::NEVER): ?>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="choice" value="never" id="alrOwnNever"
+                                           <?php echo $alrOwn === ActivityLogRetention::NEVER ? 'checked' : ''; ?>>
+                                    <label class="form-check-label" for="alrOwnNever"><strong>Never delete</strong></label>
+                                </div>
+                            <?php endif; ?>
+                            <button type="submit" class="btn btn-outline-primary btn-sm mt-2">Save for this organisation</button>
+                        </form>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

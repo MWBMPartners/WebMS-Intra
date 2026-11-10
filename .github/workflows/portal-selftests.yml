@@ -1284,6 +1284,28 @@ jobs:
           SELFTEST_WEB_PORT: '9816'
         run: php tools/registration-retention-selftest.php
 
+      # 📜 #932 (D-117): "never delete" for the activity log. Drives Admin,
+      #    Maintenance, Retention — both of its activity-log forms and the
+      #    sweep's own POST — and the real clear-out at /cron/retention-sweep
+      #    over real HTTP, reading every result back from the database: an
+      #    installation's never stored as 0 (never clamped to 3650), an
+      #    organisation's never refused under a number of days and recorded,
+      #    nothing deleted under never, and the error log's 0 still a year.
+      #    Each guard is planted out of a COPY and its scenario must turn red
+      #    (count the plants from the test's `$plant(` calls, not from here).
+      #    It builds its OWN database here, so the shared list above is not
+      #    changed by this package. REFUSES rather than skipping.
+      - name: "Activity log kept for ever, by choice (#932)"
+        if: ${{ !cancelled() && steps.databases.outcome == 'success' }}
+        env:
+          MYSQL_CID: ${{ job.services.mysql.id }}
+          SELFTEST_DB_NAME: selftest_alret
+          SELFTEST_WEB_PORT: '9932'
+        run: |
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP -e "CREATE DATABASE selftest_alret"
+          docker exec -i -e MYSQL_PWD="$SELFTEST_DB_PASS" "$MYSQL_CID" mysql -uroot -h 127.0.0.1 --protocol=TCP selftest_alret < web/_sql/full_schema.sql > /dev/null
+          php tools/activity-log-retention-selftest.php
+
       # 🌐 #493 P1 (D-057, D-077, D-078, D-080, D-081): "Show on the public
       #    website" for events. Drives the Manage Events form, the events API
       #    (a key and a session), the public submission form, the countdown

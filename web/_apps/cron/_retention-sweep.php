@@ -59,6 +59,12 @@ declare(strict_types=1);
 //   installation's own period, #491; `tools/retention-caps-selftest.php`
 //   section F requires this file with exactly those three loaded and nothing
 //   else, because it calls only the log functions),
+//   ActivityLogRetention (#932 — the activity log's own period, where 0 means
+//   "never delete"). THIS ONE IS LOADED BY THIS FILE ITSELF, just below, so no
+//   caller's hand-picked list has to name it: the four self-tests that require
+//   this file each keep their own list, and one of them belongs to a package
+//   that must not be edited alongside this one. It needs only the three above,
+//   and loads those itself if nothing has.
 //   InstallationSettings -> SettingLimit -> WebhookRetention (#713),
 //   InstallationSettings -> SettingLimit -> TranscriptRetention (#714),
 //   Pdf (#721 — it has no dependencies of its own; dompdf is only loaded by
@@ -78,6 +84,7 @@ declare(strict_types=1);
 // list is written down rather than remembered.
 // -----------------------------------------------------------------------------
 
+use Portal\Core\ActivityLogRetention;
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Events;
@@ -89,6 +96,13 @@ use Portal\Core\RegistrationRetention;
 use Portal\Core\SettingLimit;
 use Portal\Core\TranscriptRetention;
 use Portal\Core\WebhookRetention;
+
+// 📜 #932: see the list above. Loaded without asking the autoloader first
+//    (`class_exists(..., false)`), because a caller with no autoloader would
+//    otherwise stop at the first line naming the class.
+if (class_exists(ActivityLogRetention::class, false) === false) {
+    require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ActivityLogRetention.php';
+}
 
 /**
  * 🗒️ The two log clear-outs, each with the column that dates a row and the
@@ -118,6 +132,13 @@ function log_sweep_tables(): array
 const LOG_RETENTION_DEFAULT_DAYS = 365;
 
 /**
+ * "Never delete" (#932, D-117). Only the activity log can ever answer it —
+ * `ActivityLogRetention` decides that — and `log_sweep()` deletes nothing for a
+ * figure equal to it. The error log's figure is never 0: see below.
+ */
+const LOG_RETENTION_NEVER = 0;
+
+/**
  * The most either of these may ever be, whatever is in the database. Ten
  * years, the same ceiling the other retention periods use (#713, #714), so a
  * figure typed in by hand cannot mean "keep for ever by accident".
@@ -125,22 +146,32 @@ const LOG_RETENTION_DEFAULT_DAYS = 365;
 const LOG_RETENTION_HARD_MAX_DAYS = 3650;
 
 /**
- * 🏛️ The number of days the INSTALLATION keeps these logs for.
+ * 🏛️ The number of days the INSTALLATION keeps these logs for — or, for the
+ *    activity log only, 0 for "never delete".
  *
  * This is both the period for rows that belong to no organisation, and the
  * ceiling every organisation is held to — "for a setting that is a LIMIT the
  * installation's value takes precedence; an organisation may hold itself to a
  * lower limit and may never raise its own above it".
  *
- * ZERO IS NOT A MEANING FOR THESE TWO SETTINGS, and that is why the answer is
- * not simply `SettingLimit::installationAllows()`. For the attendance, webhook
- * and transcript periods 0 means "keep for ever", so it is the LARGEST value
- * and `$zeroIsLargest` is passed. Here 0 has always been read as "nothing
- * usable, fall back to a year" — the code this replaced did exactly that with
- * `if ($activityDays < 1) { $activityDays = 365; }` — and reading it as "for
- * ever" would turn an installation storing 0 into one that never clears a log
- * row again. Handing 0 to the ceiling machinery would be worse still: a
- * ceiling of 0 compared as days would clear EVERY row on every run.
+ * WHAT A STORED 0 MEANS DIFFERS BETWEEN THE TWO SETTINGS, ON PURPOSE.
+ *
+ *   - `audit.retentionDays` (the activity log): "never delete", since #932
+ *     (the owner, 10 November 2026 — D-117). 0 is the LARGEST value, as it is
+ *     for the attendance, webhook and transcript periods. The answer comes
+ *     from `ActivityLogRetention`, the ONE place it is decided, and it is NOT
+ *     clamped to the ten-year maximum: D-117 rules that out by name.
+ *   - `errors.retentionDays` (the error log): still "nothing usable, fall back
+ *     to a year", as the code this replaced did with
+ *     `if ($activityDays < 1) { $activityDays = 365; }`. The owner named the
+ *     activity log only, and D-117 rules out extending the choice to
+ *     `tblErrors`. Handing that 0 to the ceiling machinery as a number of days
+ *     would be worse still: a ceiling of 0 compared as days would clear EVERY
+ *     row on every run.
+ *
+ * Before #932 the first rule was the second one too, and this comment said
+ * "ZERO IS NOT A MEANING FOR THESE TWO SETTINGS". That is no longer true of
+ * the activity log, and was never an owner's decision.
  *
  * WHAT THIS CANNOT DO. When start-up has not handed over the installation-wide
  * layer at all (a file arriving late on shared hosting), the layer is empty and
@@ -151,6 +182,11 @@ const LOG_RETENTION_HARD_MAX_DAYS = 3650;
  */
 function log_retention_installation_days(string $key): int
 {
+    // 📜 The activity log: its own rule, in its own class (#932).
+    if ($key === ActivityLogRetention::KEY) {
+        return ActivityLogRetention::installationDays();
+    }
+
     $ceiling = SettingLimit::installationAllows(
         $key,
         LOG_RETENTION_DEFAULT_DAYS,
@@ -162,7 +198,8 @@ function log_retention_installation_days(string $key): int
 
 /**
  * 📄 The number of days ONE organisation keeps these logs for, held to what the
- *    installation allows.
+ *    installation allows — or, for the activity log only, 0 for "never delete",
+ *    which survives only where the installation ALSO says never (#932).
  *
  * Read one organisation at a time, by number, and never from the merged
  * settings array. `App::settings()` answers the CURRENT organisation's value,
@@ -173,21 +210,31 @@ function log_retention_installation_days(string $key): int
  * `App::settingForSite()` falls back to the installation-wide row by itself, so
  * an organisation that has chosen nothing is already following the
  * installation; the cap below then compares that figure with itself and changes
- * nothing. An unusable figure — empty, not a number, zero or negative — is read
- * as "nothing chosen" for the reason given above
- * `log_retention_installation_days()`, which is the OPPOSITE of what
- * `AnonymousCheckins::readRetentionDays()` does with the same shape, because
- * for that setting 0 is a real answer. The two differ on purpose.
+ * nothing. For the ERROR log an unusable figure — empty, not a number, zero or
+ * negative — is read as "nothing chosen" for the reason given above
+ * `log_retention_installation_days()`. For the ACTIVITY log, 0 is a real answer
+ * since #932 ("never delete"), so it is handed to
+ * `ActivityLogRetention::daysForSite()`, which holds it to the installation's
+ * figure — the same shape as `AnonymousCheckins::readRetentionDays()`.
  *
- * A SAVE-TIME CAP WOULD NOT BE A CAP (#668). No page can even create a
- * per-organisation row for either of these keys today — `_apps/settings/save.php`
- * counts the installation's own row as a clash and refuses — so a row can only
- * be here because somebody wrote it with SQL or because a whole-database
- * restore brought it back. Those are precisely the rows a save-time refusal
- * never sees, which is why the cap is in the reader the clear-out uses.
+ * A SAVE-TIME CAP WOULD NOT BE A CAP (#668). For the ERROR log no page can
+ * create a per-organisation row at all — `_apps/settings/save.php` counts the
+ * installation's own row as a clash and refuses — so such a row can only be
+ * here because somebody wrote it with SQL or because a whole-database restore
+ * brought it back. Since #932 the ACTIVITY log's per-organisation row IS
+ * written by a page (Admin, Maintenance, Retention, through
+ * `ActivityLogRetention`, which refuses a figure above the installation's);
+ * its reader caps as well, because a row from SQL, a restore, or a later
+ * lowering of the installation's figure is precisely what a save-time refusal
+ * never sees.
  */
 function log_retention_days(string $key, int $siteId): int
 {
+    // 📜 The activity log: its own rule, in its own class (#932).
+    if ($key === ActivityLogRetention::KEY) {
+        return ActivityLogRetention::daysForSite($siteId);
+    }
+
     $ceiling = log_retention_installation_days($key);
 
     $own  = App::settingForSite($key, $siteId);
@@ -229,6 +276,12 @@ function log_retention_days(string $key, int $siteId): int
  * to the installation, not to any customer, so the installation's administrator
  * is the right party to decide how long they are kept.
  *
+ * "NEVER DELETE" DELETES NOTHING, AND COUNTS NOTHING (#932). Where the figure
+ * is `LOG_RETENTION_NEVER` the statement is not run at all for that
+ * organisation (or for the rows nobody owns), so the count an administrator is
+ * shown and the delete agree on it. Only the activity log's figure can be 0;
+ * the error log's helpers never answer it.
+ *
  * @param string $which One of the keys of `log_sweep_tables()`.
  *
  * @return int Rows counted, or rows really deleted.
@@ -255,6 +308,10 @@ function log_sweep(string $which, bool $reallyDelete): int
             while ($one = $sites->fetch_assoc()) {
                 $siteId = (int) $one['siteID'];
                 $days   = log_retention_days($spec['key'], $siteId);
+                if ($days === LOG_RETENTION_NEVER) {
+                    // ♾️ This organisation keeps its log for ever (#932).
+                    continue;
+                }
                 $perSite->bind_param('ii', $siteId, $days);
                 $perSite->execute();
                 $total += $reallyDelete === true
@@ -267,9 +324,11 @@ function log_sweep(string $which, bool $reallyDelete): int
     }
 
     // 🏛️ And the rows no organisation owns, by the installation's own figure.
-    $orphans = $db->prepare($sql . '`siteID` IS NULL AND ' . $byDate);
+    // ♾️ Not even prepared when the installation keeps them for ever (#932).
+    $orphanDays = log_retention_installation_days($spec['key']);
+    $orphans    = $orphanDays === LOG_RETENTION_NEVER ? false : $db->prepare($sql . '`siteID` IS NULL AND ' . $byDate);
     if ($orphans !== false) {
-        $days = log_retention_installation_days($spec['key']);
+        $days = $orphanDays;
         $orphans->bind_param('i', $days);
         $orphans->execute();
         $total += $reallyDelete === true
