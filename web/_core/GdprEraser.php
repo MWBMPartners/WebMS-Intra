@@ -1275,7 +1275,8 @@ class GdprEraser
                  . 'checks, your tax declarations, an approval step given to you by name and the record of each giving '
                  . 'statement issued to you. Some keep your name as well: gifts kept for tax (or every gift, where an '
                  . 'organisation keeps them all), offering envelopes that will become such gifts, your tax declarations and '
-                 . 'a giving statement\'s file where every gift on it is kept - with any home address held for you, until the '
+                 . 'a giving statement\'s file where every gift on it is kept, or whose period cannot be told from it - with any '
+                 . 'home address held for you, until the '
                  . 'organisation\'s keep-until date if it has confirmed one, or longer while a hold is on (what is shown for '
                  . 'your gifts says which of yours, and until when) - and any pastoral visits, care cases, DBS checks or '
                  . 'children\'s check-ins you made (D-016, '
@@ -5002,8 +5003,11 @@ class GdprEraser
      * Round 10: the states are kept ORGANISATION BY ORGANISATION, with each
      * organisation's name, and a hold says whose it is (the organisation's
      * own, the whole installation's, or both), because inventory() covers
-     * every organisation a person belongs to and a merged list of states read
-     * as though every one applied "at this organisation".
+     * every organisation that holds any of the person's giving - whether or
+     * not they are a member there - and a merged list of states read as
+     * though every one applied "at this organisation". Round 11: the
+     * organisations where gifts or envelopes LOSE the name by the rule are
+     * named too (`ruleAt`).
      *
      * So the outlook asks, organisation by organisation, the keep step's own
      * reading and rules - sortingScope(), givingFactsAt(), keepsNothing(),
@@ -5026,12 +5030,12 @@ class GdprEraser
      *
      * @return array<string, array{keep: int, loseRule: int, loseDue: int,
      *               kept: list<array{site: string, siteId: int, n: int, scope: string, state: string}>,
-     *               dueAt: list<string>}> Keyed 'gifts', 'envelopes', 'declarations'.
+     *               dueAt: list<string>, ruleAt: list<string>}> Keyed 'gifts', 'envelopes', 'declarations'.
      */
     public static function givingOutlook(int $userId): array
     {
         $db    = App::db();
-        $empty = ['keep' => 0, 'loseRule' => 0, 'loseDue' => 0, 'kept' => [], 'dueAt' => []];
+        $empty = ['keep' => 0, 'loseRule' => 0, 'loseDue' => 0, 'kept' => [], 'dueAt' => [], 'ruleAt' => []];
         $out   = ['gifts' => $empty, 'envelopes' => $empty, 'declarations' => $empty];
         $count = static function (string $sql) use ($db, $userId): int {
             $stmt = $db->prepare($sql);
@@ -5116,6 +5120,29 @@ class GdprEraser
                 $state = $own === true && $wide === true ? 'on-hold-both' : ($wide === true ? 'on-hold-installation' : 'on-hold');
             }
 
+            // Which organisations will take the name off some of this
+            // person's gifts or envelopes BY THE RULE (round 11): the lost-by-
+            // rule row names them, as the kept rows do.
+            $stmt = $db->prepare(
+                'SELECT COUNT(*) FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+                . 'WHERE cs.siteID = ? AND ce.giverID = ?'
+            );
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('ii', $siteId, $userId);
+            $stmt->execute();
+            $envelopesHere = 0;
+            $stmt->bind_result($envelopesHere);
+            $stmt->fetch();
+            $stmt->close();
+            if ((int) ($facts['gifts']['total'] ?? 0) - (int) ($facts['gifts']['kept'] ?? 0) > 0) {
+                $out['gifts']['ruleAt'][] = $siteName;
+            }
+            if ((int) $envelopesHere - (int) ($facts['envelopes']['n'] ?? 0) > 0) {
+                $out['envelopes']['ruleAt'][] = $siteName;
+            }
+
             foreach ([
                 'gifts'        => (int) ($facts['gifts']['kept'] ?? 0),
                 'envelopes'    => (int) ($facts['envelopes']['n'] ?? 0),
@@ -5157,7 +5184,7 @@ class GdprEraser
      * and no part says "this organisation": the rows cover every organisation
      * the person belongs to, and are read from any one of them.
      *
-     * @param array{keep: int, loseRule: int, loseDue: int, kept: list<array<string, mixed>>, dueAt: list<string>} $outlook
+     * @param array{keep: int, loseRule: int, loseDue: int, kept: list<array<string, mixed>>, dueAt: list<string>, ruleAt: list<string>} $outlook
      * @param int $otherKeep How many of the OTHER kind will keep the name (gifts and envelopes speak for each other:
      *                       an envelope that will keep the name becomes a gift that does).
      * @return list<array{table: string, rows: int, action: string, reason: string}>
@@ -5177,9 +5204,16 @@ class GdprEraser
         $until = static fn (string $state): string => match ($state) {
             'not-due'              => 'until the organisation\'s keep-until date',
             'not-confirmed'        => 'with no end date yet: the organisation has not confirmed how many years it keeps such records, and nothing is cleared until it does',
-            'on-hold'              => 'for as long as the organisation\'s hold is on: nothing is cleared until it is lifted',
-            'on-hold-installation' => 'for as long as the hold on the whole installation is on: nothing is cleared until whoever runs it lifts it',
-            'on-hold-both'         => 'for as long as the organisation\'s hold and the hold on the whole installation are on: nothing is cleared until both are lifted',
+            // Round 11: a hold is not an upper limit. Once it is lifted a
+            // confirmed, not-yet-due record is still kept until its date.
+            'on-hold'              => 'for as long as the organisation\'s hold is on, and once it is lifted, until the organisation\'s '
+                . 'keep-until date if it has confirmed one (or with no end date if it has not): nothing is cleared while the hold is on',
+            'on-hold-installation' => 'for as long as the hold on the whole installation is on, and once whoever runs it lifts it, until the '
+                . 'organisation\'s keep-until date if it has confirmed one (or with no end date if it has not): nothing is cleared while '
+                . 'that hold is on',
+            'on-hold-both'         => 'for as long as the organisation\'s hold or the hold on the whole installation is on, and once both are '
+                . 'lifted, until the organisation\'s keep-until date if it has confirmed one (or with no end date if it has not): nothing '
+                . 'is cleared while either hold is on',
             default                => 'with no date it could be cleared on worked out, so nothing is cleared',
         };
         $noun  = static fn (int $n): string => $n . ' ' . $kind . ($n === 1 ? '' : 's');
@@ -5210,10 +5244,10 @@ class GdprEraser
             $causes = [];
             if ($outlook['loseRule'] > 0) {
                 $causes[] = ($outlook['loseDue'] > 0 ? $outlook['loseRule'] . ' ' : '') . match ($kind) {
-                    'gift'     => 'because no tax declaration or giving statement of yours covers their date, and the organisation holding '
-                        . 'them keeps the giver\'s name only on gifts one covers',
-                    'envelope' => 'because the count it was in is closed (its gift is among your gifts), or the gift it will become will not '
-                        . 'keep your name',
+                    'gift'     => 'because no tax declaration or giving statement of yours covers their date, and '
+                        . $names($outlook['ruleAt']) . ' keep' . (count($outlook['ruleAt']) === 1 ? 's' : '') . ' the giver\'s name only on gifts one covers',
+                    'envelope' => 'because at ' . $names($outlook['ruleAt']) . ' the count it was in is closed (its gift is among your '
+                        . 'gifts), or the gift it will become will not keep your name',
                     default    => 'because no organisation is keeping your giving records',
                 };
             }

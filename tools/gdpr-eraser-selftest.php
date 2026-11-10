@@ -226,7 +226,7 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 275; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 276; // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
@@ -3813,6 +3813,11 @@ $ownAllKeptH      = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statemen
 //    that really has kept records, so the branch is live here.
 $ownPartH         = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(120) . '_' . $ago(90) . '.pdf' . Pdf::PART_MARK . 'a1b2c3d4e5f6', 'half a made-up statement');
 $ownMixedH        = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(510) . '_' . $ago(290) . '.pdf', 'made-up statement, mixed');
+// 🧾 #703 round 11: a statement file whose NAME GIVES NO PERIOD. Three sentences
+//    members read promise it is KEPT at an organisation keeping the donor's name
+//    (keeping is the mistake that can be put right) and deleted where nothing is
+//    kept. Reversing statementFileIsKept()'s fallback failed nothing until this.
+$noPeriodH        = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-copy.pdf', 'made-up statement, period not in its name');
 $h['envelope']    = ge_linked('tblCountEnvelopes', ['giverID' => P_H], ['giverName' => null, 'amount' => '12.50']);
 $h['giftAllOne']  = ge_gift(SITE_G2, P_H, $ago(900), 700, $catG2);
 $h['giftAllTwo']  = ge_gift(SITE_G2, P_H, $ago(50), 800, $catG2);
@@ -3822,6 +3827,7 @@ $i = [];
 $i['giftOne'] = ge_gift(SITE_G1, P_I, $ago(200), 1500, $catG1);
 $i['giftTwo'] = ge_gift(SITE_G1, P_I, $ago(20), 1600, $catG1);
 $ownFileI     = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_I . '-' . $ago(365) . '_' . $ago(1) . '.pdf', 'made-up statement');
+$noPeriodI    = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_I . '-copy.pdf', 'made-up statement, period not in its name');
 
 $k = [];
 $k['declaration'] = ge_declaration(SITE_G1, P_K, $ago(400), '9 Control Close', 'CT9 9ZZ');
@@ -3909,7 +3915,8 @@ ge_ok('A STATEMENT THE DONOR MADE FOR THEMSELVES IS KEPT when every gift on it i
     is_file($ownAllKeptH) === true && file_get_contents($ownAllKeptH) === 'made-up statement, all kept'
     && is_file($ownMixedH) === false && is_file($ownFileH) === false
     && count($fileLine) === 1 && $fileLine[0]['action'] === 'delete' && $fileLine[0]['recordKey'] === '3 file(s)'
-    && str_contains((string) $fileLine[0]['details'], '3 rendered statement PDF(s) kept with the donor\'s giving records as tax evidence'),
+    // 4 since #703 round 11, which added a kept file whose name gives no period ($noPeriodH).
+    && str_contains((string) $fileLine[0]['details'], '4 rendered statement PDF(s) kept with the donor\'s giving records as tax evidence'),
     json_encode([is_file($ownAllKeptH), is_file($ownMixedH), is_file($ownFileH), $fileLine]));
 // 🧹 THE DECISIVE #721 CHECK, and it is decisive because the KEPT branch is
 //    live in this world. A half-written statement is a write that never
@@ -3922,7 +3929,9 @@ ge_ok('A STATEMENT THE DONOR MADE FOR THEMSELVES IS KEPT when every gift on it i
 //    this, and the plant reported it as tax evidence.
 ge_ok('A PART-WRITTEN statement is DELETED even where the donor\'s records are kept, and is never counted as tax evidence (#721)',
     is_file($ownPartH) === false
-    && str_contains((string) $fileLine[0]['details'], '4 rendered statement PDF(s) kept') === false,
+    // The honest count is 4 since #703 round 11 ($noPeriodH is kept); a part
+    // file wrongly counted would make it 5. (It read 4 before that file.)
+    && str_contains((string) $fileLine[0]['details'], '5 rendered statement PDF(s) kept') === false,
     json_encode(['part file still there' => is_file($ownPartH), 'line' => $fileLine]));
 
 $keptG2 = ge_one('SELECT * FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?', 'ii', [SITE_G2, P_H]);
@@ -4004,6 +4013,11 @@ ge_ok('A DONOR WITHOUT A TAX DECLARATION: both gifts keep their amount, date and
     && count($lineI) === 1 && $lineI[0]['action'] === 'anonymise'
     && str_contains((string) $lineI[0]['details'], 'nothing has to be kept with the donor\'s name. 2 gifts keep the amount, date and method and no longer name the donor'),
     $resultI instanceof Throwable ? $resultI->getMessage() : json_encode([$iNow, $lineI]));
+
+ge_ok('A STATEMENT FILE WHOSE NAME GIVES NO PERIOD is KEPT at an organisation keeping the donor\'s name (Hana, after her erasure) and DELETED at one keeping nothing of the donor\'s (Ian) - as the written list, the account statement and Delete my account all say (#703 round 11)',
+    is_file($noPeriodH) === true && file_get_contents($noPeriodH) === 'made-up statement, period not in its name'
+    && is_file($noPeriodI) === false,
+    json_encode([is_file($noPeriodH), is_file($noPeriodI)]));
 
 // IF THE NAME CANNOT BE KEPT, THE RUN STOPS before the account is emptied.
 $mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
@@ -4187,7 +4201,8 @@ ge_ok('THE NAME, THE ADDRESS AND THE LINK GO TOGETHER: the kept row is emptied a
     && $hBeforeClear['declaration']['acceptedIP'] !== null && $hCleared['declaration']['validFrom'] === '2001-01-01',
     json_encode([$keptNow, $hCleared['giftTwo'], $hCleared['declaration']]));
 ge_ok('...and THE KEPT STATEMENT FILES go with them, the one the donor made for themselves included: deleted from disk, and the record no longer points at a file; the record itself, its totals and its period stay',
-    is_file($issuedH['file']) === false && is_file($ownAllKeptH) === false && ge_same($hBeforeClear['statement'], $hCleared['statement'], ['pdfPath']) === true
+    is_file($issuedH['file']) === false && is_file($ownAllKeptH) === false && is_file($noPeriodH) === false
+    && ge_same($hBeforeClear['statement'], $hCleared['statement'], ['pdfPath']) === true
     && $hCleared['statement']['pdfPath'] === null && $hCleared['statement']['totalPence'] === $hBeforeClear['statement']['totalPence'],
     json_encode([is_file($issuedH['file']), $hCleared['statement']]));
 $trail     = ge_audit(REQ_H);
@@ -4196,7 +4211,8 @@ ge_ok('WITH AN AUDIT LINE, on the ORIGINAL erasure request\'s trail: it says the
     count($trail) === $trailBefore + 1 && $clearLine['action'] === 'anonymise' && $clearLine['tableName'] === 'GivingRecords'
     && $clearLine['recordKey'] === 'organisation #' . SITE_G1
     && str_contains((string) $clearLine['details'], 'was ' . GivingRetention::dateInWords($stateH['keepUntil']) . ' and has passed')
-    && str_contains((string) $clearLine['details'], 'removed from 2 gifts, 1 tax declaration and the record that held them, and 2 kept statement files were deleted')
+    // 3 since #703 round 11: the kept file whose name gives no period goes too.
+    && str_contains((string) $clearLine['details'], 'removed from 2 gifts, 1 tax declaration and the record that held them, and 3 kept statement files were deleted')
     && str_contains((string) $clearLine['details'], 'no record was deleted')
     && str_contains((string) $clearLine['details'], '1 year, confirmed on ' . GivingRetention::dateInWords($todayG1))
     && preg_match('/Hana|Kept Lane/', (string) $clearLine['details']) !== 1 && GdprEraser::verifyAuditChain(REQ_H) === true,

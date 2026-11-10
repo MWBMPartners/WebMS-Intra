@@ -181,7 +181,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 100; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 102; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -205,6 +205,8 @@ const EXPECTED_CHECKS = 100; // 80 until #703 (D-016) added two: the two writers
                             // Round 10 added K9-K11: a hold at the organisation,
                             // one on the whole installation, and a giver in two
                             // organisations. 100.
+                            // Round 11 added K11e (an organisation's name is
+                            // text, never markup) and K12 (both holds). 102.
 
 function refuse(string $why): never
 {
@@ -2465,6 +2467,8 @@ $says = static fn (array $seen, string $who, string $words): bool
 ok('K5 PAST ITS DATE: Pat\'s two gifts and his declaration are all shown as losing his name - one gift because no declaration covers it, the other because its keep-until date has already passed - and nothing says any of his will keep it; Eve, whose only gift loses her name but whose envelope in an open count will become a gift that keeps it, is told so and is NOT told that none of her gifts will; Dora\'s kept gift says it is kept until the keep-until date (#703 round 9)',
     $late['pat']['tblGivingEntry'] === ['anonymise:2'] && $late['pat']['tblGiftAidDeclaration'] === ['anonymise:1']
     && $says($late, 'pat', 'because at Selftest erasure A the keep-until date for them has already passed and no hold is on, so the erasure takes your name off as it runs') === true
+    // #703 round 11: the organisation whose rule takes the name off is NAMED.
+    && $says($late, 'pat', '1 because no tax declaration or giving statement of yours covers their date, and Selftest erasure A keeps the giver\'s name only on gifts one covers') === true
     && $says($late, 'pat', 'these gifts will keep your name') === false
     && $late['eve']['tblGivingEntry'] === ['anonymise:1'] && $late['eve']['tblCountEnvelopes'] === ['retain:1'] && $late['eve']['tblGiftAidDeclaration'] === ['retain:1']
     && $says($late, 'eve', 'each becomes a gift that keeps your name') === true && $says($late, 'eve', 'None of your') === false
@@ -2575,23 +2579,75 @@ siteSetting(ORG_B, 'giving.retention.confirmed', 'true');
 siteSetting(ORG_B, 'giving.retention.years', '6');
 siteSetting(ORG_B, 'giving.retention.hold', 'false');
 siteSetting(ORG_A, 'giving.retention.hold', 'true');
-$fromA = $givingShown((string) req($jar['quin'], 'GET', '/account/my-data')['body']);
+// #703 round 11: organisation B's name, typed by ITS administrator, carries
+// markup, an ampersand and a quote. Round 10 put organisation names into these
+// member-facing sentences, and the two administrator levels can be different
+// people, so the name must reach every member as text, never as markup.
+$oddName = 'Selftest <b>B</b> & "Co"';
+q('UPDATE tblSites SET siteName = ? WHERE siteID = ?', 'si', [$oddName, ORG_B]);
+$quinDataHtml = (string) req($jar['quin'], 'GET', '/account/my-data')['body'];
+$quinAskHtml  = (string) req($jar['quin'], 'GET', '/account/erasure-request')['body'];
+$fromA = $givingShown($quinDataHtml);
 $fromB = $givingShown((string) req($jar['quin'], 'GET', '/account/my-data', null, ADDR_B)['body']);
+q("UPDATE tblSites SET siteName = 'Selftest erasure B' WHERE siteID = ?", 'i', [ORG_B]);
 siteSetting(ORG_A, 'giving.retention.hold', 'false');
 q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%'", 'i', [ORG_B]);
 foreach ($givingBeforeB10 as $row) {
     q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss',
         [ORG_B, $row['settingKey'], $row['settingValue'], $row['defaultValue']]);
 }
+// In the fixed order, by name: '<' sorts before 'e', so B's odd name comes first.
 $quinGifts = 'tblGivingEntry retain: these gifts will keep your name, and any home address held for you is kept with them. '
+    . 'At ' . $oddName . ': 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, '
+    . 'until the organisation\'s keep-until date. '
     . 'At Selftest erasure A: 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, '
-    . 'for as long as the organisation\'s hold is on: nothing is cleared until it is lifted. '
-    . 'At Selftest erasure B: 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, '
-    . 'until the organisation\'s keep-until date.';
+    . 'for as long as the organisation\'s hold is on, and once it is lifted, until the organisation\'s keep-until date if it has '
+    . 'confirmed one (or with no end date if it has not): nothing is cleared while the hold is on.';
 ok('K11 A GIVER IN TWO ORGANISATIONS: Quin\'s kept gifts are worded organisation by organisation, each NAMED, in a fixed order - on hold at A, until the keep-until date at B - and nothing says "this organisation"; the words are the same whether he looks from A or from B (#703 round 10)',
     $fromA['tblGivingEntry'] === ['retain:2'] && in_array($quinGifts, $fromA['reasons'], true) === true
     && $fromA === $fromB && str_contains(json_encode($fromA), 'this organisation') === false,
     json_encode($fromA) . ' | B: ' . json_encode($fromB));
+
+/** Whether a page has any <b> element inside the given parts, and whether their TEXT holds the odd name. */
+$asTextOnly = static function (string $html, string $selector) use ($oddName): array {
+    $doc    = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $markup = 0;
+    $text   = false;
+    foreach ($doc->querySelectorAll($selector) as $part) {
+        $markup += count($part->querySelectorAll('b'));
+        $text    = $text || str_contains((string) $part->textContent, $oddName);
+    }
+
+    return ['markup' => $markup, 'nameAsText' => $text];
+};
+$dataEscaped = $asTextOnly($quinDataHtml, '.portal-data-list > .row');
+$askEscaped  = $asTextOnly($quinAskHtml, 'li');
+ok('K11e AN ORGANISATION\'S NAME IS TEXT, NEVER MARKUP: with B named `Selftest <b>B</b> & "Co"`, My data and Request erasure show that name, quote and ampersand included, as text, and no <b> element appears in either list (#703 round 11)',
+    $dataEscaped === ['markup' => 0, 'nameAsText' => true] && $askEscaped === ['markup' => 0, 'nameAsText' => true],
+    json_encode(['my data' => $dataEscaped, 'request erasure' => $askEscaped]));
+
+// BOTH holds at once: the organisation's and the installation's. The words
+// must name both - collapsing them to the organisation's alone tells a member
+// its lifting would free the record, when the installation's still holds it.
+siteSetting(ORG_A, 'giving.retention.hold', 'true');
+q("UPDATE tblSettings SET settingValue = 'true' WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'");
+$bothHold     = $giversSee(['pat']);
+$bothHoldAsks = $patLines();
+$bothHoldDel  = $deleteSeen();
+q("UPDATE tblSettings SET settingValue = 'false' WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'");
+siteSetting(ORG_A, 'giving.retention.hold', 'false');
+$bothHoldPinned = renderedPin('delete what is kept', $bothHoldDel);
+$bothWords = 'for as long as the organisation\'s hold or the hold on the whole installation is on, and once both are lifted, until the '
+    . 'organisation\'s keep-until date if it has confirmed one (or with no end date if it has not): nothing is cleared while either hold is on.';
+ok('K12 BOTH HOLDS AT ONCE: Pat\'s gift and declaration are shown as kept for as long as EITHER hold is on, word for word; Request erasure says the same; Delete my account is the same pinned section (#703 round 11)',
+    $bothHold['pat']['tblGivingEntry'] === ['retain:1', 'anonymise:1'] && $bothHold['pat']['tblGiftAidDeclaration'] === ['retain:1']
+    && in_array('tblGivingEntry retain: these gifts will keep your name, and any home address held for you is kept with them. At Selftest '
+        . 'erasure A: 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, ' . $bothWords, $bothHold['pat']['reasons'], true) === true
+    && in_array('tblGiftAidDeclaration retain: your tax declarations stay unchanged, with your name kept beside them. At Selftest erasure A: '
+        . '1 declaration, as the evidence for tax relief claimed on your gifts, ' . $bothWords, $bothHold['pat']['reasons'], true) === true
+    && $bothHoldAsks === $heldLines
+    && $bothHoldPinned === true,
+    json_encode([$bothHold, $bothHoldAsks]));
 
 $seed(REQ_PAT, ORG_A, PAT, 'pending_review', null);
 $seed(REQ_EVE, ORG_A, EVE, 'pending_review', null);
