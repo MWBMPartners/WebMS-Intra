@@ -331,12 +331,14 @@ $alrInstNever = $activityInstallationDays === ActivityLogRetention::NEVER;
 $alrOwnMax    = max(ActivityLogRetention::HARD_MAX_DAYS, $alrOwn ?? 0);
 $alrSiteName  = (string) (Site::current()['siteName'] ?? '');
 // What "never" costs, in words no stronger than is true: an erasure unlinks a
-// person's records but does not rewrite descriptions. Most name a person by
-// account number; many name them by full name or e-mail address — for example
-// UserCreated, the password-reset records, EventInviteSent, EventSubmitted and
-// the children's-profile records. That list is NOT complete: #933 holds the
-// full count, and ActivityLogRetention's header gives the examples with their
-// files. Not every description names anybody, so the sentence is general.
+// person's records but does not rewrite descriptions. Most descriptions name
+// nobody; of those that name somebody, most do so by account number, and some
+// by full name or e-mail address — for example UserCreated, six of the
+// password-reset records, EventInviteSent, EventSubmitted and the
+// children's-profile records. That list is NOT complete: #933 holds the full
+// count, and ActivityLogRetention's header gives the same examples (with the
+// file for two of them). Because not every description names anybody, the
+// sentence the page shows is general.
 $alrNeverCost = 'The log then grows without limit. Some records describe a person — usually by account number, '
     . 'and for some kinds of record by name or e-mail address — and those descriptions stay for ever, even after '
     . 'that person has asked to be erased.';

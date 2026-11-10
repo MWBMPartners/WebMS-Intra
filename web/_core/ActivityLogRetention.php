@@ -36,13 +36,15 @@
  * The log grows without limit. And an erasure UNLINKS a person's activity
  * records (the catalogue's decision for `tblActivityLogs`): it empties the
  * columns that point at them and keeps the record of what happened, so a
- * DESCRIPTION that names somebody is not rewritten. Most name a person by
- * account number; many name them by full name or e-mail address. FOR EXAMPLE —
- * this list is not complete, and #933 is the record of the full count (there
- * are about seven hundred `Logger::activity(` calls under `web/`):
+ * DESCRIPTION that names somebody is not rewritten. Most descriptions name
+ * nobody at all (check round 3 of #932 measured well under a third of the
+ * several hundred `Logger::activity(` calls naming a person). Of those that
+ * do name somebody, most do so by account number; some by full name or e-mail
+ * address. FOR EXAMPLE — this list is not complete, and #933 is the record of
+ * the full count:
  * `UserCreated` (admin/users/save.php: full name and own e-mail address), the
  * password-reset records (auth/forgot-password/save.php: the e-mail address,
- * in about seven of them), `EventInviteSent` (the invitee's e-mail address),
+ * in six of them), `EventInviteSent` (the invitee's e-mail address),
  * `EventSubmitted` (an anonymous submitter's e-mail address),
  * `KidProfileAdded`/`KidProfileEdited` (a child's name), an event registration
  * received, and an account linked or unlinked (a sign-in provider's e-mail

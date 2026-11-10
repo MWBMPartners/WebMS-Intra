@@ -97,7 +97,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const AL_EXPECTED_CHECKS = 72;
+const AL_EXPECTED_CHECKS = 73;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -155,6 +155,93 @@ $tables = (int) ($db->query(
 if ($tables < 100) {
     refuse("the database holds only {$tables} tables — load web/_sql/full_schema.sql first");
 }
+
+// ── The two settings section M changes, put back on EVERY way out ───────────
+// Section M switches several organisations on. Check round 3 found that it put
+// the two rows back only on the normal path, so a failure inside M left
+// `multisite.enabled = true` in the database — and the NEXT run then read that
+// leftover as "the original" and put it back, so the database stayed poisoned.
+//
+// So: the original rows are captured ONCE, WHOLE (value, default, sensitivity,
+// or "no row"), into a file named for this database, BEFORE anything is
+// changed. If that file is already there, a previous run did not finish, and
+// ITS capture is the original — the rows in the database now may be that
+// run's leftovers, and are never trusted. They are put back by a shutdown
+// function, which runs on a normal exit, on `exit()` from a refusal and on an
+// uncaught error, and only then is the file removed. Only `kill -9` skips the
+// shutdown function, and the file covers that: the next run restores from it.
+const AL_SITE_KEYS = ['multisite.enabled', 'multisite.detectionMode'];
+$alMultiFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'alret-original-multisite-' . $dbName . '.json';
+$alRowsNow = static function () use ($db): array {
+    $out = [];
+    foreach (AL_SITE_KEYS as $key) {
+        $stmt = $db->prepare('SELECT `settingValue`, `defaultValue`, `isSensitive` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
+        $stmt->bind_param('s', $key);
+        $stmt->execute();
+        $out[$key] = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+    }
+    return $out;
+};
+$alOriginal = null;
+if (is_file($alMultiFile) === true) {
+    $alOriginal = json_decode((string) file_get_contents($alMultiFile), true);
+    echo "  ! an earlier run did not finish; its record of the original multi-organisation settings is used\n";
+}
+if (is_array($alOriginal) === false) {
+    $alOriginal = $alRowsNow();
+    file_put_contents($alMultiFile, json_encode($alOriginal));
+}
+/** Put the two rows back EXACTLY as captured: the same value, default and sensitivity, or no row. */
+$alRestoreMulti = static function () use ($db, $alOriginal, $alMultiFile, $alRowsNow): void {
+    // Already as found: touch nothing, so the rows keep their own numbers.
+    if ($alRowsNow() === $alOriginal) {
+        @unlink($alMultiFile);
+        return;
+    }
+    // An existing row is UPDATED in place, so it keeps its own number; a row
+    // that was not there originally is deleted; a missing one is re-inserted.
+    foreach (AL_SITE_KEYS as $key) {
+        $row = $alOriginal[$key] ?? null;
+        if (is_array($row) === false) {
+            $del = $db->prepare('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
+            $del->bind_param('s', $key);
+            $del->execute();
+            $del->close();
+            continue;
+        }
+        $value     = $row['settingValue'];
+        $default   = $row['defaultValue'];
+        $sensitive = (int) $row['isSensitive'];
+        $up = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ?, `defaultValue` = ?, `isSensitive` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+        $up->bind_param('ssis', $value, $default, $sensitive, $key);
+        $up->execute();
+        $up->close();
+        $have = $db->prepare('SELECT COUNT(*) AS `n` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
+        $have->bind_param('s', $key);
+        $have->execute();
+        $exists = (int) ($have->get_result()->fetch_assoc()['n'] ?? 0) > 0;
+        $have->close();
+        if ($exists === false) {
+            $ins = $db->prepare('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, ?, ?)');
+            $ins->bind_param('sssi', $key, $value, $default, $sensitive);
+            $ins->execute();
+            $ins->close();
+        }
+    }
+    @unlink($alMultiFile);
+};
+// A run that did not finish: put its original back straight away, so every
+// section before M runs in the world it expects.
+$alRestoreMulti();
+file_put_contents($alMultiFile, json_encode($alOriginal));
+register_shutdown_function(static function () use ($alRestoreMulti): void {
+    try {
+        $alRestoreMulti();
+    } catch (Throwable $e) {
+        echo "  ! could not put the multi-organisation settings back; the file under the system temp folder still holds them.\n";
+    }
+});
 
 // ── A copy of web/, so a planted fault never touches the repository ─────────
 $child = sys_get_temp_dir() . $sep . 'alret-http-' . bin2hex(random_bytes(6));
@@ -894,11 +981,30 @@ check('P8 with every plant removed again, the refusal is green once more', $scnR
 echo "M. D-118 with several organisations and a TRUE organisation administrator\n";
 // ═════════════════════════════════════════════════════════════════════════════
 // Several organisations ON, decided by the SESSION (the person chooses at
-// /site/choose), so `Site::id()` really can be organisation two. Put back below.
-$origMulti = $setting('multisite.enabled', null);
-$origMode  = $setting('multisite.detectionMode', null);
-$put('multisite.enabled', null, 'true');
-$put('multisite.detectionMode', null, 'session');
+// /site/choose), so `Site::id()` really can be organisation two. Only the
+// VALUE is changed — the row's default and sensitivity are left as they are —
+// and the original rows are put back whole, on every way out (see the top of
+// this file), as well as straight after this section.
+$alSetValueOnly = static function (string $key, string $value) use ($db): void {
+    $up = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+    $up->bind_param('ss', $value, $key);
+    $up->execute();
+    $changed = $up->affected_rows;
+    $up->close();
+    $have = $db->prepare('SELECT COUNT(*) AS `n` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
+    $have->bind_param('s', $key);
+    $have->execute();
+    $exists = (int) ($have->get_result()->fetch_assoc()['n'] ?? 0) > 0;
+    $have->close();
+    if ($changed === 0 && $exists === false) {
+        $ins = $db->prepare("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, '', 0)");
+        $ins->bind_param('ss', $key, $value);
+        $ins->execute();
+        $ins->close();
+    }
+};
+$alSetValueOnly('multisite.enabled', 'true');
+$alSetValueOnly('multisite.detectionMode', 'session');
 $sa = (int) $people['siteadmin']['id'];
 $ga = (int) $people['globaladmin']['id'];
 $db->query("UPDATE `tblUserSites` SET `isSiteAdmin` = 1 WHERE `userID` = {$sa} AND `siteID` = {$siteOne}");
@@ -938,13 +1044,14 @@ foreach ([
     'no action'    => [],
     'action=sweep' => ['action' => 'sweep'],
     'unknown'      => ['action' => 'something-else'],
+    'capitals'     => ['action' => 'Activity-Retention-Organisation', 'choice' => 'days', 'days' => '5'],
     'action[]'     => ['action' => ['activity-retention-organisation'], 'choice' => 'days', 'days' => '5'],
 ] as $label => $fields) {
     $refusedHere[$label] = $postHere($fields)['status'];
 }
-check('M3 ...and on organisation one the installation\'s form, the sweep (no action, and action=sweep), an unknown action and action[] are each refused (403), changing nothing',
+check('M3 ...and on organisation one the installation\'s form, the sweep (no action, and action=sweep), an unknown action, a differently capitalised action and action[] are each refused (403), changing nothing',
     [$refusedHere, $setting(AL_KEY, null), $setting(AL_KEY, $siteOne)],
-    [['installation' => 403, 'no action' => 403, 'action=sweep' => 403, 'unknown' => 403, 'action[]' => 403], '30', '20']);
+    [['installation' => 403, 'no action' => 403, 'action=sweep' => 403, 'unknown' => 403, 'capitals' => 403, 'action[]' => 403], '30', '20']);
 $http('POST', AL_PAGE, ['action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '5']);
 check('M4 ...a post with NO form token changes nothing, for the organisation administrator too', $setting(AL_KEY, $siteOne), '20');
 $signInAt('siteadmin', $siteTwo);
@@ -960,8 +1067,10 @@ $p15 = $plant('_apps/admin/maintenance/retention.php', '$alrSiteId    = Site::id
     '$alrSiteId    = isset($_POST[\'siteID\']) === true ? (int) $_POST[\'siteID\'] : Site::id();', $scnOwnOrganisationOnly);
 check('P15 with the organisation taken from the post, an organisation administrator writes ANOTHER organisation\'s figure', [$p15['applied'], $p15['result']], [true, false]);
 check('M7 with that plant removed again, only their own organisation changes once more', $scnOwnOrganisationOnly(), true);
-$put('multisite.enabled', null, $origMulti);
-$put('multisite.detectionMode', null, $origMode);
+$alRestoreMulti();
+check('M8 the multi-organisation settings are back EXACTLY as they were found (value, default and sensitivity)',
+    $alRowsNow(), $alOriginal);
+file_put_contents($alMultiFile, json_encode($alOriginal));
 
 // 🧾 The server's own error log. A page that throws part-way can still answer
 //    200, so the log is read as well: any fatal error, or anything naming this
