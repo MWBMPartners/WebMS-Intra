@@ -7,14 +7,14 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 `claude/alpha-wip`, pushed after every commit (D-088). Latest pushed: e9ebf2a1. Landed since 9 November, all
 pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912,
-#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-108.
+#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-109.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #598 — ten sign-in findings (D-104, D-105; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 34829fa1 | Round 1 NOT CLEAN: a sign-in under way while the password changes survives (race, measured) — fix by a version counter read with the password; settings-secrets red (per-person reset cap); Integrations page a second key-file judge; untrue comments; D-108 (admin sets a password → sign out) to build |
-| #529 — attendance totals gate (D-106; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 727a68ec | Built; round 1 check next. Raised #917 (owner question), #918 |
+| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 1's findings fixed (the race closed with `tblUsers.signInVersion` read in the same SELECT as the password; D-108 built); round 2 check running |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 727a68ec | Round 1 NOT CLEAN (one untrue Roles sentence; header comparison and membership fixture missing); fixing, and building D-109 (#917) |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529). Next free: 272.
@@ -42,7 +42,6 @@ leak (403 vs 404) on one endpoint of a class — enumerate the class.
 
 | What | Why |
 |---|---|
-| #917 | Whether ordinary members still see each attendance session's own headcount (raised by #529) |
 | SIGNula.id | Five local commits waiting for the owner's push approval |
 
 ## Six standing facts a reader needs
