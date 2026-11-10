@@ -13,8 +13,8 @@ Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 7726c55f | Check round 7 NOT CLEAN (closer): My data / Request erasure call gifts 'kept' that will lose the name (inventory counts all rows; needs the eraser's own rule); statements grouped with number-only records; 'how each is cleared' vs D-116; two pin boundary gaps (help list end, any-heading end). Round 8 building |
-| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 6cad0316 | Check round 2 NOT CLEAN, tests/comments only (code correct everywhere driven): installation 'never' with organisations present unpinned; D-118 own-organisation gate never driven with a true organisation admin; a comment narrows what 'never' keeps — builder fixing. Member wording after #703 |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 87d01592 | Round 8 built (gifts/envelopes: GdprEraser::givingOutlook() asks the keep step's own rules, which were refactored into shared helpers; statements their own item; pin boundaries by heading level). Check round 8 running (incl. old-vs-new diff of the keep step on real data) |
+| #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, 154be792 | Round 2's findings fixed (installation 'never' with organisations present pinned; D-118 driven with a true organisation admin, section M; comments say 'for example'). Check round 3 running. Member wording after #703 |
 | #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | `agent-aacc4726f08c2aabc` / `p782-build`, e1677ec6 | Round 2 built (held texts judged on their own organisation's clock, with a second fault behind it fixed; stored zone pinned; gate catches GB / case / spaces; missing Sabbath zone field leaves it alone; e2e passed). Check round 2 running. Raised #935-#937 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
@@ -23,7 +23,7 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 ## Next, in this order
 
 1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
-2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#937. #931 closed by D-116.
+2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#939. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
