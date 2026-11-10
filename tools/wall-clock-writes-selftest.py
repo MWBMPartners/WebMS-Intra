@@ -485,6 +485,16 @@ record("E08 the same variable and column, built somewhere else in the file, is N
        code == 1 and found == {(rel, "$startSql", "tblEvents.startDateTime")} and other == [],
        f"exit {code}; {found}; {other}")
 
+#  E09 an exemption may carry SEVERAL pins (the import's step (d) has two);
+#  every one must be there, so a present first pin cannot carry a missing
+#  second one.
+code, found, other = run({rel: guarded}, {key: ("fixture", (GUARD, "if ($neverWritten === true) {"))})
+#  (E04 proves GUARD alone passes in this very file, so exactly one guard
+#  complaint here can only be the second pin's.)
+record("E09 with two pins, the second one missing makes the exemption FAIL",
+       code == 1 and len([o for o in other if "that guard is in" in o]) == 1,
+       f"exit {code}; {other}")
+
 failed = [r for r in results if r[1] is False]
 plants = len(PLANTS)
 greens = len(GREEN)

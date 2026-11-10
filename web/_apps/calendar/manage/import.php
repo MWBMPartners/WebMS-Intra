@@ -641,11 +641,11 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        only have covered this one. Measured: `0500-01-01 10:00` returns
     //        from step 2 and a test placed here never saw it.
 
-    // (d) 🕐 THE HOUR THAT DOES NOT EXIST (#785). This step builds a MOMENT
-    //        with `strtotime()` and formats it back, and on the morning the
-    //        clocks go forward the time a cell names may not exist in this
-    //        zone, so PHP MOVES it. Measured on this closure before this test
-    //        existed:
+    // (d) 🕐 THE HOUR THAT DOES NOT EXIST (#785): STORE WHAT THE CELL WROTE.
+    //        This step builds a MOMENT with `strtotime()` and formats it back,
+    //        and on the morning the clocks go forward the time a cell names
+    //        does not exist in this zone, so PHP MOVES it. Measured on this
+    //        closure before this step existed:
     //
     //          Europe/London     Sun, 29 Mar 2026 01:30   ->  02:30 stored
     //          Europe/London     03/29/2026 01:30         ->  02:30 stored
@@ -654,40 +654,81 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //
     //        -- the last one a whole DAY late -- while the SAME reading
     //        written `2026-03-29 01:30` goes through step 2 and is stored as
-    //        typed. So the stored hour depended on how the spreadsheet
-    //        happened to spell the date, and the comment at the INSERT below
-    //        ("puts the text into the column's shape without resolving
-    //        anything") was untrue of this step. Found by
+    //        typed. Found by
     //        `tools/audit-checks/check_wall_clock_writes_not_moments.py`, the
     //        first run it ever had.
     //
-    //        The test asks whether the round trip CHANGED the clock time the
-    //        cell wrote. `date_parse()` reads the parts as written and resolves
-    //        nothing, so where it reports no zone and no relative hours or
-    //        minutes, a difference can only be the move. A cell naming a ZONE
-    //        (`... GMT`) is converted on purpose and is not asked; nor is a
-    //        relative one (`... +1 hour`), whose difference is arithmetic, not
-    //        a move -- each is left exactly as it was.
+    //        ⚠️ IT STORES THE WRITTEN READING, AND THE FIRST VERSION REFUSED IT.
+    //           Refusing was a refusal by SPELLING -- `Sun, 29 Mar 2026 01:30`
+    //           turned away while `2026-03-29 01:30`, the same reading, was
+    //           stored -- and round 14 of #777 already settled that nothing
+    //           here may refuse a value for the shape it is written in. Its
+    //           stated reason, that no written value was safe to assemble
+    //           because the DATE had moved in Nuuk, was also wrong: it is
+    //           `strtotime()` that moves the date. `date_parse()` keeps the
+    //           written year, month, day, hour and minute (measured: hour 1 for
+    //           `01:30`, day 28 for the Nuuk cell).
     //
-    //        It REFUSES rather than storing the time as written, deliberately:
-    //        a refused row is visible on the preview and can be corrected,
-    //        while a guessed one is stored for ever. (Storing the written time
-    //        would match step 2, but this step's date can itself have moved,
-    //        as the Nuuk line shows, so there is no written value here that is
-    //        safe to assemble.) Driven by section K of
-    //        tools/clock-change-selftest.php.
+    //        So the reading is built from `date_parse()`'s own fields, through
+    //        the rules every other path uses and no copy of them:
+    //          * the date's relative days, months and years (an ISO ordinal or
+    //            week date arrives as day 1 plus N days) are added in UTC, which
+    //            has no transitions, so nothing can move;
+    //          * `I18n::wallClockFromInput()` judges the result's shape and
+    //            range and asks `checkdate()` -- the one place that is done;
+    //          * `EventRecurrence::readingIsReal()` -- the one test of whether
+    //            a reading exists in a zone (#777 round 12) -- decides that the
+    //            written reading is in the skipped hour, in the zone
+    //            `strtotime()` itself used, so this changes nothing on any
+    //            other hour of the year;
+    //          * the `$fmtStore` wrapper still applies the year floor and the
+    //            DATETIME ceiling, and the #797 two-reference rule above has
+    //            already refused a cell with no date or no year.
+    //
+    //        A cell naming a ZONE (`... GMT`) or an offset is an INSTANT,
+    //        converted on purpose, and is not asked; nor is a relative TIME
+    //        (`... +1 hour`), whose difference is arithmetic, not a move. A
+    //        named weekday (`Sun,`, Excel's long date) is fine when it is the
+    //        date's own; one that DISAGREES (`Mon, 29 Mar 2026`, a Sunday) is
+    //        left to the line below, where PHP moves to the next such weekday
+    //        exactly as it does on every other day of the year -- measured,
+    //        without this the gap night alone would have kept the 29th. This
+    //        step only stores a reading the cell wrote unambiguously.
+    //        Driven by K07 in section K of tools/clock-change-selftest.php.
     $relative = $parsed['relative'] ?? [];
     if ($parsed['is_localtime'] === false
+        && is_int($parsed['year']) === true
+        && is_int($parsed['month']) === true
+        && is_int($parsed['day']) === true
         && is_int($parsed['hour']) === true
         && is_int($parsed['minute']) === true
         && (int) ($relative['hour'] ?? 0) === 0
         && (int) ($relative['minute'] ?? 0) === 0
-        && (int) ($relative['second'] ?? 0) === 0
-        && date('G:i', $moment) !== sprintf('%d:%02d', $parsed['hour'], $parsed['minute'])) {
-        $why = 'names a time that does not exist on that day in this time zone, because '
-            . 'the clocks go forward then. It was refused rather than stored at a time '
-            . 'nobody typed';
-        return null;
+        && (int) ($relative['second'] ?? 0) === 0) {
+        $writtenUtc = gmmktime(
+            0,
+            0,
+            0,
+            $parsed['month'] + (int) ($relative['month'] ?? 0),
+            $parsed['day'] + (int) ($relative['day'] ?? 0),
+            $parsed['year'] + (int) ($relative['year'] ?? 0)
+        );
+        $writtenDay = gmdate('Y-m-d', $writtenUtc);
+        $written = I18n::wallClockFromInput(sprintf(
+            '%s %02d:%02d:%02d',
+            $writtenDay,
+            $parsed['hour'],
+            $parsed['minute'],
+            is_int($parsed['second']) === true ? $parsed['second'] : 0
+        ));
+        $weekdayAgrees = isset($relative['weekday']) === false
+            || (int) gmdate('w', $writtenUtc) === (int) $relative['weekday'];
+        if ($written !== null
+            && $weekdayAgrees === true
+            && \Portal\Core\EventRecurrence::readingIsReal($written, date_default_timezone_get()) === false) {
+            $why = '';
+            return $written;
+        }
     }
 
     $why = '';
@@ -1234,12 +1275,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             //    a moment was never needed. `$fmtStore()` puts the
                             //    text into the column's shape; its strict steps
                             //    resolve nothing, and its loose spreadsheet step,
-                            //    which does build a moment, REFUSES a cell whose
-                            //    time that moment moved (#785 -- until then this
-                            //    sentence said "without resolving anything" and a
-                            //    loose cell in the skipped hour was stored an hour
-                            //    out). A row whose value cannot be read at all was
-                            //    already refused upstream.
+                            //    which does build a moment, stores the reading
+                            //    the cell WROTE whenever that moment moved it out
+                            //    of the hour that does not exist (#785 -- until
+                            //    then this sentence said "without resolving
+                            //    anything" and a loose cell in the skipped hour
+                            //    was stored an hour out). A row whose value
+                            //    cannot be read at all was already refused
+                            //    upstream.
                             // 📌 `$fmtStore` is defined ONCE near the top of this file, so
                             //    the row CHECK and the row STORE cannot disagree (#777 round 9).
 

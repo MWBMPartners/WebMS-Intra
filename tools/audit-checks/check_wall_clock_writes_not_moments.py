@@ -208,27 +208,51 @@ CLASSIFIED: dict[str, object] = {
 #    The WHOLE condition, because `&& false` defeats a substring pin -- the
 #    one-edit bypass this repository has recorded five times.
 #
-#    What the pin cannot see: whether the guarded code is REACHED. That is
-#    behavioural, and K07 drives it (D-065).
+#    An entry may need MORE THAN ONE pin, so the guard is a tuple of whole
+#    conditions, each required exactly once. The import's step (d) has two that
+#    matter: the outer one decides a cell is a plain reading (no zone, no
+#    relative time), and the inner one decides it is in the skipped hour and
+#    returns what the cell WROTE.
+#
+#    What the pins cannot see: whether the guarded code is REACHED, or what the
+#    lines BETWEEN them do (the date built in UTC). That is behavioural, and
+#    K07, K07b, K07c and K07d drive it (D-065).
+#
+# ⚠️ THE FIRST VERSION OF STEP (d) REFUSED such a cell, and this pin pinned
+#    the refusal. The coordinator overturned it: refusing `Sun, 29 Mar 2026
+#    01:30` while storing `2026-03-29 01:30`, the same reading, was a refusal by
+#    SPELLING, which round 14 of #777 had already ruled out, and the stated
+#    reason for it (no safe written value) was untrue because `date_parse()`
+#    keeps the written fields. The refusing version, planted back, fails K07b
+#    -- and K07c too, because it also refused `2026-03-29 24:00`.
 IMPORT_STEP3_GUARD = (
     "if ($parsed['is_localtime'] === false "
+    "&& is_int($parsed['year']) === true "
+    "&& is_int($parsed['month']) === true "
+    "&& is_int($parsed['day']) === true "
     "&& is_int($parsed['hour']) === true "
     "&& is_int($parsed['minute']) === true "
     "&& (int) ($relative['hour'] ?? 0) === 0 "
     "&& (int) ($relative['minute'] ?? 0) === 0 "
-    "&& (int) ($relative['second'] ?? 0) === 0 "
-    "&& date('G:i', $moment) !== sprintf('%d:%02d', $parsed['hour'], $parsed['minute'])) { "
-    "$why = 'names a time that does not exist on that day in this time zone, because ' "
+    "&& (int) ($relative['second'] ?? 0) === 0) {",
+    "if ($written !== null "
+    "&& $weekdayAgrees === true "
+    "&& \\Portal\\Core\\EventRecurrence::readingIsReal($written, date_default_timezone_get()) === false) { "
+    "$why = ''; "
+    "return $written; "
+    "}",
 )
 _IMPORT_REASON = (
     "The CSV import's loose-spreadsheet step (`$fmtClockRaw` step 3) builds a "
     "moment with strtotime() ON PURPOSE: it is the only reader of Excel's long "
     "date, US slash dates and the rest, and the strict steps before it store "
-    "the text without one. Since #785 it REFUSES a cell whose clock time that "
-    "moment moved (step (d)), so what it stores is the time the cell wrote. "
-    "Driven by K07 of tools/clock-change-selftest.php."
+    "the text without one. Since #785, when that moment moved a plain reading "
+    "out of the hour that does not exist, step (d) returns the reading the cell "
+    "WROTE instead, built from date_parse()'s fields and judged by "
+    "I18n::wallClockFromInput(), so what reaches this column is the time the "
+    "cell wrote. Driven by K07-K07d of tools/clock-change-selftest.php."
 )
-ALLOWED: dict[str, tuple[str, str]] = {
+ALLOWED: dict[str, tuple[str, str | tuple[str, ...]]] = {
     "web/_apps/calendar/manage/import.php::$startSql::tblEvents.startDateTime::$fmtclockraw":
         (_IMPORT_REASON, IMPORT_STEP3_GUARD),
     "web/_apps/calendar/manage/import.php::$endSql::tblEvents.endDateTime::$fmtclockraw":
@@ -445,11 +469,15 @@ def main(argv: list[str], allowed: dict[str, tuple[str, str]] | None = None) -> 
                 f"the shape were still there."
             )
             continue
-        guard = allowed[key][1]
+        guards = allowed[key][1]
+        if isinstance(guards, str) is True:
+            guards = (guards,)
         with open(full, "r", encoding="utf-8", errors="replace") as handle:
             live = " ".join(reader_check.blank_comments(handle.read()).split())
-        times = live.count(" ".join(guard.split()))
-        if times != 1:
+        for guard in guards:
+            times = live.count(" ".join(guard.split()))
+            if times == 1:
+                continue
             problems.append(
                 f"ALLOWED forgives `{key}` because a guard makes it safe, and "
                 f"that guard is in {path}'s live code {times} time(s), not "

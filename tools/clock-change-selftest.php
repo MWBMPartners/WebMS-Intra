@@ -588,6 +588,14 @@ if ($foundBoth === false) {
     if (class_exists('Site', false) === false) {
         eval('class Site { public static function timezone(): string { return "Europe/London"; } }');
     }
+    // ⚠️ STEP (d) OF THE READER CALLS `\Portal\Core\EventRecurrence::
+    //    readingIsReal()` -- the one test of whether a reading exists in a
+    //    zone (#785) -- and it is reached by ordinary matrix cells, not only
+    //    by K07's, so the class is loaded BEFORE the closure runs at all. The
+    //    portal itself autoloads it; an eval here does not. Loaded first in an
+    //    earlier draft of this, the whole test stopped with "class not found"
+    //    at the first ordinary cell.
+    require_once PORTAL_CORE . $sep . 'EventRecurrence.php';
     // The reader is defined FIRST: the wrapper binds it with `use (&...)`.
     eval($grabRaw[0]);
     eval($grabStore[0]);
@@ -997,17 +1005,24 @@ if ($foundBoth === false) {
     // `check_wall_clock_writes_not_moments.py` on its first run; nothing in
     // section K had a cell in the skipped hour, so nothing here could see it.
     //
+    // Step (d) now stores the reading the cell WROTE, built from
+    // `date_parse()`'s fields. Its first version REFUSED such a cell, which
+    // was a refusal by spelling (round 14's rule) -- so K07b asserts the
+    // STORED VALUE, and a refusal fails it exactly as a moved hour does.
+    //
     // PREMISE FIRST, as section I does: each cell must really name a time PHP
-    // moves in that zone, or the refusal checks below prove nothing.
+    // moves in that zone, or the checks below prove nothing.
     $gapCells = [
-        ['Europe/London',    'Sun, 29 Mar 2026 01:30', '2026-03-29 02:30'],
-        ['Europe/London',    '03/29/2026 01:30',       '2026-03-29 02:30'],
-        ['America/New_York', 'Sun, 8 Mar 2026 2:30am', '2026-03-08 03:30'],
-        ['America/Nuuk',     '28 March 2026 11:30pm',  '2026-03-29 00:30'],
+        ['Europe/London',    'Sun, 29 Mar 2026 01:30', '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Europe/London',    '03/29/2026 01:30',       '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Europe/London',    '2026-088 01:30',         '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Europe/London',    '2026-W13-7 01:30',       '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['America/New_York', 'Sun, 8 Mar 2026 2:30am', '2026-03-08 03:30', '2026-03-08 02:30:00'],
+        ['America/Nuuk',     '28 March 2026 11:30pm',  '2026-03-29 00:30', '2026-03-28 23:30:00'],
     ];
     $premiseWrong = [];
     $gapWrong     = [];
-    foreach ($gapCells as [$gapZone, $gapCell, $movedTo]) {
+    foreach ($gapCells as [$gapZone, $gapCell, $movedTo, $written]) {
         date_default_timezone_set($gapZone);
         $moment = strtotime($gapCell);
         if ($moment === false || date('Y-m-d H:i', $moment) !== $movedTo) {
@@ -1015,23 +1030,28 @@ if ($foundBoth === false) {
         }
         $gapWhy = null;
         $gapOut = $fmtStore($gapCell, $gapWhy);
-        if ($gapOut !== null || strpos((string) $gapWhy, 'does not exist on that day') === false) {
-            $gapWrong[] = $gapZone . ' ' . $gapCell . ' gave ' . ($gapOut ?? ('"' . (string) $gapWhy . '"'));
+        if ($gapOut !== $written) {
+            $gapWrong[] = $gapZone . ' ' . $gapCell . ' gave '
+                . ($gapOut ?? ('REFUSED "' . (string) $gapWhy . '"')) . ', wanted ' . $written;
         }
     }
     date_default_timezone_set('Europe/London');
     check('K07 premise: PHP really moves each of these cells in its zone',
         $premiseWrong === [] ? 'all moved' : implode(' | ', $premiseWrong), 'all moved');
-    check('K07b each is REFUSED, with the reason that is true of it, not stored moved',
-        $gapWrong === [] ? 'all refused' : implode(' | ', $gapWrong), 'all refused');
+    check('K07b each STORES the reading it wrote -- not moved, and not refused',
+        $gapWrong === [] ? 'all as written' : implode(' | ', $gapWrong), 'all as written');
     // Over-reach, the other direction: a time just after the gap, the hour
-    // that happens TWICE, the ISO spelling of the gap reading, and a cell that
-    // names its own zone must all still store exactly as before.
+    // that happens TWICE, the ISO spelling of the gap reading, a cell whose
+    // named weekday DISAGREES with its date (PHP moves it to the next Monday on
+    // every day of the year, and step (d) must not make the gap night the one
+    // exception), and `24:00` -- each stores exactly what it did before #785.
     $keepWrong = [];
     foreach ([
         ['Sun, 29 Mar 2026 02:30',        '2026-03-29 02:30:00'],
         ['Sun, 25 Oct 2026 01:30',        '2026-10-25 01:30:00'],
         ['2026-03-29 01:30',              '2026-03-29 01:30:00'],
+        ['Mon, 29 Mar 2026 01:30',        '2026-03-30 01:30:00'],
+        ['2026-03-29 24:00',              '2026-03-30 00:00:00'],
         ['Mon, 01 Jun 2026 10:00:00 GMT', '2026-06-01 11:00:00'],
     ] as [$keepCell, $keepWant]) {
         $keepGot = $fmtStore($keepCell);
@@ -1039,8 +1059,24 @@ if ($foundBoth === false) {
             $keepWrong[] = $keepCell . ' gave ' . ($keepGot ?? 'REFUSED');
         }
     }
-    check('K07c and nothing outside the skipped hour is refused by it',
+    check('K07c and nothing outside the skipped hour changes',
         $keepWrong === [] ? 'all stored' : implode(' | ', $keepWrong), 'all stored');
+    // A cell IN the skipped hour that names its own zone or offset is an
+    // INSTANT, and must still be converted onto the organisation's clock --
+    // step (d) is for readings, never for instants.
+    $instantWrong = [];
+    foreach ([
+        ['29 March 2026 1:30am +01:00',   '2026-03-29 00:30:00'],
+        ['Sun, 29 Mar 2026 01:30:00 GMT', '2026-03-29 02:30:00'],
+        ['2026-03-29T01:30:00Z',          '2026-03-29 02:30:00'],
+    ] as [$instantCell, $instantWant]) {
+        $instantGot = $fmtStore($instantCell);
+        if ($instantGot !== $instantWant) {
+            $instantWrong[] = $instantCell . ' gave ' . ($instantGot ?? 'REFUSED');
+        }
+    }
+    check('K07d a cell in the skipped hour WITH a zone or offset is still converted as an instant',
+        $instantWrong === [] ? 'all converted' : implode(' | ', $instantWrong), 'all converted');
 
     // K03 — THE PREMISE, so K02 cannot pass by refusing everything. If the
     //       closure simply returned null the checks above would both be
