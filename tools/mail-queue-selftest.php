@@ -498,6 +498,8 @@ function removeMail(): void
     for ($last = 1; $last <= 254; $last++) {
         q('DELETE FROM tblApiRateLimits WHERE bucket IN (?, ?)', 'ss', [bucket('ask', ip($last)), bucket('use', ip($last))]);
     }
+    // #598: the per-person reset counts (the bucket holds an account number, not an address).
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
 }
 
 function removeWorld(): void
@@ -747,6 +749,11 @@ function settle(): void
 /** Ask for a reset link through the real page, on the built-in server (which answers first). */
 function askForLink(string $ip, string $email): array
 {
+    // 🧹 #598: one PERSON gets at most three reset e-mails an hour. This test asks for
+    //    one person's link many times because it is about something else, so the
+    //    per-person count is forgotten first (sign-in-limits-selftest.php part W is
+    //    the test of that cap).
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
     $jar  = newJar();
     $form = req($jar, 'GET', '/forgot-password', null, $ip);
     $sent = req($jar, 'POST', '/forgot-password/save', ['csrf_token' => token($form['body']), 'email' => $email], $ip);
@@ -2748,6 +2755,11 @@ if (part('X3', '"Forgot password" on a web server that cannot answer before it s
     // a web server through CGI does. The mail server is UP throughout: if the
     // page sent in the request, the message would be there when it ends.
     $ask = static function (int $last, string $email): array {
+        // 🧹 #598: one PERSON gets at most three reset e-mails an hour. This test asks for
+        //    one person's link many times because it is about something else, so the
+        //    per-person count is forgotten first (sign-in-limits-selftest.php part W is
+        //    the test of that cap).
+        q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
         $form   = cgi('GET', '/forgot-password', [], '', ip($last));
         $answer = cgi('POST', '/forgot-password/save', ['csrf_token' => token($form['body']), 'email' => $email], $form['cookie'], ip($last));
 
@@ -2865,6 +2877,11 @@ if (part('F1', 'With NO scheduled job the portal does as it did before the queue
     // "Forgot password" through `php-cgi`, as X3 asks it: PHP as Apache runs it,
     // where the whole answer is held back until the script has ended.
     $ask = static function (int $last, string $email): array {
+        // 🧹 #598: one PERSON gets at most three reset e-mails an hour. This test asks for
+        //    one person's link many times because it is about something else, so the
+        //    per-person count is forgotten first (sign-in-limits-selftest.php part W is
+        //    the test of that cap).
+        q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
         $form   = cgi('GET', '/forgot-password', [], '', ip($last));
         $answer = cgi('POST', '/forgot-password/save', ['csrf_token' => token($form['body']), 'email' => $email], $form['cookie'], ip($last));
 

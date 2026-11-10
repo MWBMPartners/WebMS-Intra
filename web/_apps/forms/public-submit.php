@@ -22,9 +22,9 @@
  *      an automated submitter, no row written.
  *   5. CSRF.
  *   6. Captcha (gracefully passes through when unconfigured).
- *   7. Rate limits — `RateLimiter::isBlocked()` (fake-success on trip,
- *      prayer-requests precedent — never tell an abuser), then a per-IP
- *      sliding-window bucket (5 / 15 min).
+ *   7. Rate limit — a per-address sliding-window bucket (5 / 15 min),
+ *      refused with a true message. (It used to ask the SIGN-IN limiter
+ *      first and answer "success" while dropping the submission: #598.)
  *   8. Field validation — errors flash back to `/f/{token}` with old values.
  *   9. IP capture (CF-Connecting-IP → X-Forwarded-For first hop →
  *      REMOTE_ADDR), capped to 45 chars.
@@ -132,12 +132,17 @@ if (Captcha::verify($_POST, 'public-form') === false) {
     $bounce('Verification failed — please try again.');
 }
 
-// 🚦 7. Rate limits. isBlocked() trip → FAKE SUCCESS (never tell an
-// abuser); then a per-IP sliding-window bucket, 5 submissions / 15 min.
-if (RateLimiter::isBlocked() === true) {
-    Logger::activity('FormPublicBlocked', 'Rate-limited (isBlocked) public-submit for form #' . $formId);
-    $successRedirect();
-}
+// 🚦 7. Rate limit: this page's OWN per-address bucket, 5 submissions in 15
+// minutes, refused with a true message.
+//
+// WHAT WAS WRONG (#598 item 4). This used to ask RateLimiter::isBlocked()
+// first — the SIGN-IN tally, five failed sign-ins from this address — and on
+// a trip it answered "success" and threw the submission away. So behind a
+// shared address (a church hall, a school, a mobile network) one person
+// mistyping a password five times made every visitor's form silently vanish,
+// with no sign to them or to anybody. A failed sign-in says nothing about a
+// form, and the form's own limit below already stops a flood, honestly.
+//
 // 🔒 SALTED (#712). This was a plain `hash('sha256', …)` of the address.
 //    An address is 32 bits and this machine does 4.87 million SHA-256 a
 //    second, so the whole IPv4 space takes about fifteen minutes - an

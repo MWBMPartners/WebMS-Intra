@@ -19,7 +19,11 @@
  *     used to say "a DB breach never exposes valid tokens". That was untrue:
  *     the activity log kept whole links, in the address the browser said it
  *     came from. Logger::redactSensitiveHeaders() now cuts that off, #580.)
- *   - Existing unused tokens for the same user are invalidated.
+ *   - Existing unused tokens for the same user are invalidated, in the same
+ *     transaction that stores the new one, after locking the person's own
+ *     account row, so requests at one moment leave one working link (#598).
+ *   - One PERSON gets at most three reset e-mails an hour, whoever asks and
+ *     from wherever (#598); the visitor's answer does not change.
  *   - A limit of its own: 5 requests from one address in 15 minutes (#580).
  *     It is separate from the sign-in limit on purpose, so that somebody
  *     blocked from signing in can still ask for a link. See section 2.
@@ -255,49 +259,108 @@ try {
     // -------------------------------------------------------------------------
     $userId = (int) $user['userID'];
 
-    // 🧹 Invalidate any existing unused tokens for this user
-    $invalidateStmt = $mysqli->prepare(
-        'UPDATE tblPasswordResets SET usedAt = NOW() WHERE userID = ? AND usedAt IS NULL'
-    );
-    $invalidateStmt->bind_param('i', $userId);
-    $invalidateStmt->execute();
-    $invalidateStmt->close();
+    // 🔒 ONE TRANSACTION, AFTER LOCKING THIS PERSON'S OWN ACCOUNT ROW
+    //    (#598 items 3 and 8). Everything from here to the commit — the
+    //    per-person limit, cancelling the older links and storing the new
+    //    one — is done by one request for this person at a time.
+    //
+    //    WHAT WAS WRONG (item 8). Cancelling the older links and storing the
+    //    new one were two separate writes with nothing holding them together,
+    //    so three requests for one person at the same moment could each
+    //    cancel what was there and then each store their own: measured, FOUR
+    //    links left usable from one run of three. Now a second request waits
+    //    at the lock until the first has committed, and then cancels the
+    //    first one's link.
+    //
+    //    WHY THE tblUsers ROW. It is the PARENT, the row every one of these
+    //    requests is about, and it exists before any of them starts; the
+    //    #728 pattern (Auth::setPassword() locks the same row for the same
+    //    reason). A lock outside a transaction is decoration (#697), so the
+    //    transaction begins first.
+    //
+    //    WHAT WAS WRONG (item 3). The only limit was per ADDRESS (five in 15
+    //    minutes, section 2), so forty requests from forty addresses sent the
+    //    same person forty e-mails, each cancelling the link before it. Now
+    //    one person gets at most THREE reset e-mails an hour, whoever asks and
+    //    from wherever. A request over that makes no link and sends nothing.
+    //    The visitor cannot tell: their answer went in section 3, before the
+    //    address was even looked up, and it is the same for every address
+    //    (#521). Counted only when a link is really made, inside the lock, so
+    //    simultaneous requests cannot all slip under it.
+    $personFamily = 'pwreset:person:';
+    $personMax    = 3;
+    $personWindow = 3600; // one hour, in seconds
 
-    // 🧹 And take this person's OLDER reset e-mails out of the mail queue, if
-    //    any are still waiting (#592). The statement above has just made
-    //    their links stop working. Three resets asked for while the mail
-    //    server was down used to arrive together, two of them with dead
-    //    links. A failure here (a database not yet upgraded to hold the
-    //    queue) must not stop the new link being made, so it has a catch of
-    //    its own; an older message that stays is still stopped by its own
-    //    use-by moment at the latest.
+    $mysqli->begin_transaction();
     try {
-        MailQueue::removeWaitingFrom($mysqli, 'reset:' . $userId);
-    } catch (\Throwable $ex) {
-        error_log('Forgot password: older waiting reset e-mails could not be looked for: ' . get_class($ex));
+        $lockStmt = $mysqli->prepare('SELECT `userID` FROM `tblUsers` WHERE `userID` = ? FOR UPDATE');
+        $lockStmt->bind_param('i', $userId);
+        $lockStmt->execute();
+        $lockStmt->get_result()->free();
+        $lockStmt->close();
+
+        if (RateLimiter::tooMany($personFamily . $userId, $personMax, $personWindow) === true) {
+            $mysqli->rollback();
+            Logger::activity(
+                'PasswordResetBlocked',
+                'Too many reset e-mails asked for one account in an hour; no link was made and nothing was sent',
+                $userId
+            );
+            exit();
+        }
+        RateLimiter::recordHit($personFamily . $userId, $personWindow, $personFamily);
+
+        // 🧹 Invalidate any existing unused tokens for this user
+        $invalidateStmt = $mysqli->prepare(
+            'UPDATE tblPasswordResets SET usedAt = NOW() WHERE userID = ? AND usedAt IS NULL'
+        );
+        $invalidateStmt->bind_param('i', $userId);
+        $invalidateStmt->execute();
+        $invalidateStmt->close();
+
+        // 🧹 And take this person's OLDER reset e-mails out of the mail queue, if
+        //    any are still waiting (#592). The statement above has just made
+        //    their links stop working. Three resets asked for while the mail
+        //    server was down used to arrive together, two of them with dead
+        //    links. A failure here (a database not yet upgraded to hold the
+        //    queue) must not stop the new link being made, so it has a catch of
+        //    its own; an older message that stays is still stopped by its own
+        //    use-by moment at the latest.
+        try {
+            MailQueue::removeWaitingFrom($mysqli, 'reset:' . $userId);
+        } catch (\Throwable $ex) {
+            error_log('Forgot password: older waiting reset e-mails could not be looked for: ' . get_class($ex));
+        }
+
+        // 🔐 Generate a cryptographically secure plaintext token (64-char hex)
+        $plaintextToken = bin2hex(random_bytes(32));
+
+        // 🕐 How long the link is good for (a setting; 60 minutes unless changed).
+        //    The expiry itself is worked out by the database, in UTC: see
+        //    Auth::storeResetLink() for why it is no longer worked out here.
+        $expiryMinutes = (int) (App::settings('auth.passwordReset.tokenExpiry') ?? '60');
+
+        // 🌐 The requester's address, for the audit record.
+        // 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly and
+        //    believe them. Anybody can send those headers, so anybody could claim any
+        //    address they liked. RateLimiter::clientIp() is now the ONE place in the
+        //    portal that decides which address to believe: it trusts those headers only
+        //    when the request really arrived through a proxy listed in the
+        //    portal.trustedProxies setting, and otherwise uses the address the
+        //    connection actually came from. Delegating means a fix to that rule reaches
+        //    this code too, instead of this copy quietly drifting out of step - which is
+        //    exactly how it went wrong. Here the address is written into the
+        //    password-reset request's audit record, a record that is only worth keeping
+        //    if it is true.
+        Auth::storeResetLink($mysqli, $userId, $plaintextToken, $expiryMinutes, RateLimiter::clientIp());
+
+        $mysqli->commit();
+    } catch (\Throwable $inLock) {
+        // Nothing half-done survives: the count, the cancelled links and the
+        // new one go back together. The outer catch records the error.
+        $mysqli->rollback();
+        throw $inLock;
     }
-
-    // 🔐 Generate a cryptographically secure plaintext token (64-char hex)
-    $plaintextToken = bin2hex(random_bytes(32));
-
-    // 🕐 How long the link is good for (a setting; 60 minutes unless changed).
-    //    The expiry itself is worked out by the database, in UTC: see
-    //    Auth::storeResetLink() for why it is no longer worked out here.
-    $expiryMinutes = (int) (App::settings('auth.passwordReset.tokenExpiry') ?? '60');
-
-    // 🌐 The requester's address, for the audit record.
-    // 🛑 This used to read the Cloudflare and X-Forwarded-For headers directly and
-    //    believe them. Anybody can send those headers, so anybody could claim any
-    //    address they liked. RateLimiter::clientIp() is now the ONE place in the
-    //    portal that decides which address to believe: it trusts those headers only
-    //    when the request really arrived through a proxy listed in the
-    //    portal.trustedProxies setting, and otherwise uses the address the
-    //    connection actually came from. Delegating means a fix to that rule reaches
-    //    this code too, instead of this copy quietly drifting out of step - which is
-    //    exactly how it went wrong. Here the address is written into the
-    //    password-reset request's audit record, a record that is only worth keeping
-    //    if it is true.
-    Auth::storeResetLink($mysqli, $userId, $plaintextToken, $expiryMinutes, RateLimiter::clientIp());
 
     Logger::activity('PasswordResetRequested', 'Password reset token created for: ' . $email);
 } catch (\Throwable $ex) {

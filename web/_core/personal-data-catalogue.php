@@ -2583,8 +2583,10 @@ return [
         'period'   => 'twice the limit\'s own window, tidied opportunistically (about one request in 64, up '
                     . 'to 500 rows at a time) and BY FAMILY, so a bucket never used a second time is still '
                     . 'reached — which is the normal case for a one-off code check, a single push sign-up or '
-                    . 'one form submission (#712). Every one of the eleven places that records a hit passes '
-                    . 'a family; eight did not until #712, including the per-user second tier of the '
+                    . 'one form submission (#712). Every place that records a hit passes a family (count them '
+                    . 'with `grep -rn "RateLimiter::recordHit(" web`; the "eleven" this said was stale before '
+                    . '#598 added three more, a per-person reset cap, a per-account password-check limit and '
+                    . 'the anonymous prayer form, each with a family). Eight did not until #712, including the per-user second tier of the '
                     . 'two-factor limit, which an earlier version of this entry wrongly described as '
                     . 'covered. A row older than the period can change no answer the limiter gives.',
         'columns'  => ['bucket'],

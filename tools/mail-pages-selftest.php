@@ -351,6 +351,8 @@ function removeWorld(): void
     for ($last = 1; $last <= 254; $last++) {
         q('DELETE FROM tblApiRateLimits WHERE bucket IN (?, ?)', 'ss', [bucket('ask', ip($last)), bucket('use', ip($last))]);
     }
+    // #598: the per-person reset counts (the bucket holds an account number, not an address).
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
     q('DELETE FROM tblEventBroadcasts WHERE eventID = ?', 'i', [EVENT_ID]);
     q('DELETE FROM tblEventRSVPs WHERE eventID = ?', 'i', [EVENT_ID]);
     q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [EVENT_ID]);
@@ -614,6 +616,11 @@ function settle(): void
 /** Ask for a reset link through the real page. `ms` is how long the ANSWER took; the e-mail is sent after it, and this waits for that too. */
 function askForLink(string $ip, string $email): array
 {
+    // 🧹 #598: one PERSON gets at most three reset e-mails an hour. This test asks for
+    //    one person's link many times because it is about something else, so the
+    //    per-person count is forgotten first (sign-in-limits-selftest.php part W is
+    //    the test of that cap).
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
     $jar  = newJar();
     $form = req($jar, 'GET', '/forgot-password', null, $ip);
     $sent = req($jar, 'POST', '/forgot-password/save', ['csrf_token' => token($form['body']), 'email' => $email], $ip);

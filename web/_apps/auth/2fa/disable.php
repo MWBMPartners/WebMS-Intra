@@ -73,7 +73,19 @@ if ($pwRow === null || ($pwRow['passwordHash'] ?? '') === '') {
     exit();
 }
 
+// 🚦 Five wrong current passwords per ACCOUNT in 15 minutes, SHARED with the
+//    "change password" card (#598 item 5), so guessing cannot be split
+//    between the two pages for ten tries. Asked BEFORE password_verify(), so
+//    a refused try checks nothing. This page used to allow unlimited guesses
+//    from a borrowed session. See Auth::PASSWORD_CHECK_FAMILY.
+if (Auth::currentPasswordTriesUsedUp($userId) === true) {
+    Logger::activity('TotpDisableBlocked', 'Too many wrong current passwords; nothing was checked or changed', $userId);
+    header('Location: ' . Site::url('account') . '?error=pw_wait');
+    exit();
+}
+
 if ($currentPassword === '' || password_verify($currentPassword, $pwRow['passwordHash']) === false) {
+    Auth::recordWrongCurrentPassword($userId);
     Logger::activity('TotpDisableFailed', 'Incorrect password on 2FA disable attempt', $userId);
     header('Location: ' . Site::url('account') . '?error=pw_current');
     exit();

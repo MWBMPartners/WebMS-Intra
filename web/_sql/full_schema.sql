@@ -336,6 +336,12 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `visibilityBio`     ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityPhoto`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    -- 🔐 Since migration 270 (#598, D-104): a password reset or change signs
+    -- the person out of every OTHER browser. Each session remembers when its
+    -- sign-in began; Auth::endSessionOfInactiveAccount() ends one older than
+    -- this. NULL ends nothing. DATETIME(6) so a session begun in the same
+    -- second as the change is still told apart from it.
+    `signInsValidFrom` DATETIME(6) DEFAULT NULL COMMENT 'A moment in UTC. Every browser session of this person that began its sign-in before it is ended on its next request (#598, D-104). Set by Auth::endOtherSessionsOf() when the password is reset or changed. NULL ends nothing.',
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`),
     KEY `idx_user_calendar_token` (`calendarToken`)
@@ -1532,6 +1538,10 @@ CREATE TABLE IF NOT EXISTS `tblActivityLogs` (
     CONSTRAINT `tblActivityLogs_ibfk_2` FOREIGN KEY (`claimID`)
         REFERENCES `tblExpenseClaims` (`claimID`),
     KEY `idx_logs_site` (`siteID`),
+    -- 📇 Since migration 270 (#598 item 11): the sign-in failure counts in
+    -- RateLimiter read this log on every sign-in try, and had no index.
+    KEY `idx_logs_type_ip_time` (`activityType`, `visitorIP`, `timestamp`),
+    KEY `idx_logs_type_time` (`activityType`, `timestamp`),
     CONSTRAINT `fk_logs_site` FOREIGN KEY (`siteID`)
         REFERENCES `tblSites` (`siteID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
@@ -7427,7 +7437,7 @@ COMMENT='Noticeboard (pinboard) posters';
 CREATE TABLE IF NOT EXISTS `tblApiRateLimits` (
     `hitID`   BIGINT       NOT NULL AUTO_INCREMENT,
     `bucket`  VARCHAR(120) NOT NULL COMMENT 'Limiter bucket key, e.g. apikey:42',
-    `hitAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `hitAt`   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'A moment in UTC. Written by RateLimiter::recordHit() as UTC_TIMESTAMP() and compared only with UTC_TIMESTAMP() (#598, migration 270), so a server clock change cannot stretch or shorten a window. The default is never used by the portal.',
     PRIMARY KEY (`hitID`),
     KEY `idx_ratelimit_bucket` (`bucket`, `hitAt`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
@@ -11523,6 +11533,12 @@ UPDATE `tblRoles`
    AND `description` = 'Approves or rejects expense claims';
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('269_expense_approver_role_description.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 270_sign_ins_valid_from.sql (#598) ──────────────────────────────────
+-- The column (tblUsers.signInsValidFrom) and the two tblActivityLogs indexes
+-- are written into their CREATE TABLE statements above; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('270_sign_ins_valid_from.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

@@ -284,14 +284,15 @@ class Mailer
         }
 
         if (self::route() === self::ROUTE_GOOGLE) {
-            $keyFile = trim((string) ($SETTINGS['mail']['google']['serviceAccountKeyFile'] ?? ''));
-            if ($keyFile === '') {
-                $missing[] = 'the name of the Google service account key file';
-            } elseif (is_readable(PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $keyFile) === false) {
-                // The name is set but the file is not where MailerGoogle
-                // looks for it. Without this, a half-finished set-up read
-                // as ready and every send failed.
-                $missing[] = 'the Google key file itself: "' . $keyFile . '" is not in the portal\'s _auth_keys folder, or cannot be read';
+            // 🔑 MailerGoogle::keyFileProblem() is the ONE judge of the key
+            //    file, and MailerGoogle asks it too before it signs in, so the
+            //    two cannot disagree (#598 item 9). It used to be "is a file
+            //    of this name readable" here, which said ready for a name
+            //    climbing out of the key folder ("../…") and for a file that
+            //    was not a key at all.
+            $keyProblem = MailerGoogle::keyFileProblem((string) ($SETTINGS['mail']['google']['serviceAccountKeyFile'] ?? ''));
+            if ($keyProblem !== null) {
+                $missing[] = $keyProblem;
             }
             if (trim((string) ($SETTINGS['mail']['google']['delegateUser'] ?? '')) === '') {
                 $missing[] = 'the Google address to send from (the delegate user)';
@@ -312,8 +313,14 @@ class Mailer
         // The same rule send() uses for the sender, asked quietly: this runs on
         // the health page, which monitors load every few minutes, and must not
         // write an error record each time.
-        if (self::effectiveSender(true) === null) {
+        $sender = self::effectiveSender(true);
+        if ($sender === null) {
             $missing[] = 'an address to send from (the "from" address, or a shared mailbox)';
+        } elseif (filter_var($sender['address'], FILTER_VALIDATE_EMAIL) === false) {
+            // ✉️ #598 item 9: the "from" address was taken as typed, so
+            //    "not an address" read as set up and every send then failed.
+            //    (A shared mailbox is already checked inside effectiveSender().)
+            $missing[] = 'a "from" address that is an e-mail address: "' . $sender['address'] . '" is not one';
         }
 
         return ['route' => self::ROUTE_MS365, 'label' => 'Microsoft 365', 'missing' => $missing];

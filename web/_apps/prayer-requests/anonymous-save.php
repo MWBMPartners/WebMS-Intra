@@ -9,7 +9,9 @@
  * Hardening:
  *   • Session + CSRF (token issued by anonymous.php)
  *   • Captcha::verify() (Turnstile / reCAPTCHA)
- *   • RateLimiter::isBlocked() — same IP-based limiter used by login
+ *   • Its own per-address limit (5 in 15 minutes), refused with a true
+ *     message and the typing kept (#598; it used to borrow the SIGN-IN
+ *     limiter and answer "success" while dropping the request)
  *   • Always pending + leadership + isAnonymous=1 (no congregation broadcast)
  *   • Always redirects to a generic success page (no enumeration / abuse signal)
  *   • Opt-in round-robin auto-assign to a prayer partner (#311, migration 148)
@@ -26,6 +28,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'bootstrap.php';
 
+use Portal\Core\AddressFingerprint;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
@@ -64,19 +67,50 @@ if (Captcha::verify($_POST, 'prayer-request') === false) {
     exit();
 }
 
-// 🚦 Rate-limit (per IP); behave silently like the forgot-password flow
-if (RateLimiter::isBlocked() === true) {
-    Logger::activity('PrayerRequestAnonBlocked', 'Rate-limited anonymous prayer-request submission');
-    // Show success page anyway — don't tell automated abusers they're blocked
-    header('Location: ' . Site::url('prayer-requests/anonymous') . '?submitted=1', true, 302);
+// 📥 Input. A field is text or it is nothing (#580): a hand-written request
+//    can send a LIST, and `(string)` of an array is the word "Array" and a
+//    warning.
+$text    = static fn (mixed $value): string => is_string($value) === true ? $value : '';
+$name    = trim($text($_POST['name'] ?? ''));
+$email   = trim($text($_POST['email'] ?? ''));
+$subject = trim($text($_POST['subject'] ?? ''));
+$body    = trim($text($_POST['body'] ?? ''));
+
+// 🚦 This form's OWN limit: five requests from one address in 15 minutes,
+//    refused with a TRUE message (#598 item 4).
+//
+//    WHAT WAS WRONG. This asked RateLimiter::isBlocked() — the SIGN-IN tally,
+//    five failed sign-ins from this address — and on a trip answered "thank
+//    you, our leadership team will be praying for you" and threw the request
+//    away. Behind a shared address (a church hall, a school, a mobile network)
+//    one person mistyping a password made every visitor's prayer request
+//    vanish, with no sign to them or to anybody. A failed sign-in says nothing
+//    about a prayer request, and the form had no limit of its own at all.
+//
+//    NOW: its own count, of requests actually saved, by a salted fingerprint
+//    of the address (#712). Over it, the visitor is told the request has NOT
+//    been sent and how long to wait, and what they typed is kept for the form
+//    (anonymous.php puts it back) so a refusal does not also cost their words.
+//    Telling a flood-sender it is limited costs nothing: the limit stops them
+//    whether they know it or not.
+$anonFamily = 'prayer:anon:';
+$anonBucket = $anonFamily . AddressFingerprint::of(RateLimiter::clientIp());
+$anonMax    = 5;
+$anonWindow = 900; // 15 minutes, in seconds
+if (RateLimiter::tooMany($anonBucket, $anonMax, $anonWindow) === true) {
+    Logger::activity('PrayerRequestAnonBlocked', 'Too many anonymous prayer requests from this connection; this one was NOT saved, and the visitor was told so');
+    $_SESSION['pr_anon_kept'] = ['name' => $name, 'email' => $email, 'subject' => $subject, 'body' => $body];
+    $waitMinutes = max(1, (int) ceil(RateLimiter::retryAfter($anonBucket, $anonMax, $anonWindow) / 60));
+    header(
+        'Location: ' . Site::url('prayer-requests/anonymous') . '?err=' . urlencode(
+            'Your prayer request has NOT been sent: too many have been sent from this connection in the last 15 minutes. '
+            . 'What you typed is still below. Please try again in ' . $waitMinutes . ' minute' . ($waitMinutes === 1 ? '' : 's') . '.'
+        ),
+        true,
+        302
+    );
     exit();
 }
-
-// 📥 Input
-$name    = trim((string) ($_POST['name'] ?? ''));
-$email   = trim((string) ($_POST['email'] ?? ''));
-$subject = trim((string) ($_POST['subject'] ?? ''));
-$body    = trim((string) ($_POST['body'] ?? ''));
 
 // 🛡️ Validate
 if ($subject === '' || $body === '') {
@@ -107,6 +141,11 @@ $siteId = Site::id();
 //    moderators rely on to spot one person flooding the form.
 $ip = RateLimiter::clientIp();
 $ip = mb_substr((string) $ip, 0, 45);
+
+// 🚦 Counted only now, once the request has passed every check above and is
+//    about to be saved, so a typing mistake does not use up the allowance.
+//    The family prefix lets a later hit tidy stale buckets (#712).
+RateLimiter::recordHit($anonBucket, $anonWindow, $anonFamily);
 
 // 💾 Insert — always pending, leadership-only, anonymous
 $visibility  = 'leadership';

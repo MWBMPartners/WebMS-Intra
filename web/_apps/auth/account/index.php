@@ -218,8 +218,14 @@ $errorMsg   = '';
 if (isset($_GET['success']) === true && $_GET['success'] === '1') {
     $successMsg = 'Your profile has been updated.';
 }
+// #598 (D-104): changing the password signs the person out of every other
+// browser. `2` is the honest answer while the database upgrade that does it
+// (migration 270) is still waiting.
 if (isset($_GET['pwchanged']) === true && $_GET['pwchanged'] === '1') {
-    $successMsg = 'Your password has been changed.';
+    $successMsg = 'Your password has been changed, and you have been signed out on every other browser and device. You are still signed in here.';
+}
+if (isset($_GET['pwchanged']) === true && $_GET['pwchanged'] === '2') {
+    $successMsg = 'Your password has been changed. Other browsers where you are signed in could not be signed out, so sign out of them yourself.';
 }
 if (isset($_GET['unlinked']) === true && $_GET['unlinked'] === '1') {
     $successMsg = 'Account has been unlinked successfully.';
@@ -249,6 +255,9 @@ if (isset($_GET['error']) === true) {
         'email'        => 'A valid email address is required.',
         'email_taken'  => 'That email address is already in use by another account.',
         'pw_current'   => 'Current password is incorrect.',
+        // #598 item 5: five wrong current passwords in 15 minutes, counted
+        // for the account across this card and "switch off 2FA".
+        'pw_wait'      => 'Too many wrong passwords. Nothing was checked or changed. Please wait up to 15 minutes, then try again.',
         'pw_match'     => 'New passwords do not match.',
         'pw_policy'    => 'New password does not meet the requirements.',
         'pw_empty'     => 'All password fields are required.',

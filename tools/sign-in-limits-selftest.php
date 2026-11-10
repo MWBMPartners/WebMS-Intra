@@ -182,7 +182,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 124; // seven added by #887 (sections 0 and 0b)
+const EXPECTED_CHECKS = 162; // seven added by #887 (sections 0 and 0b); 38 by #598 (one in H, and parts T to Z2)
 
 function refuse(string $why): never
 {
@@ -319,6 +319,13 @@ const PEOPLE = [
     'papa'    => 919026, // N: forty tries at one moment
     'quebec'  => 919027, // M: how long a refusal takes
     'romeo'   => 919028, // N: forty tries at one moment, a second time
+    // #598 — parts T to Z.
+    'sierra'  => 919029, // W: one person, many addresses: three reset e-mails an hour
+    'tango'   => 919030, // X: reset requests for one person at the same moment
+    'uniform' => 919031, // T: a reset signs the person out of every other browser
+    'victor'  => 919032, // T and U: a password CHANGE signs out the others; this browser stays
+    'whiskey' => 919033, // V: wrong current passwords, one limit for two pages
+    'xray'    => 919034, // H: an administrator of ONE organisation (not global)
 ];
 /** How this test names itself to the portal, so the records it causes can be found and removed whatever address they carry. */
 const AGENT = 'sign-in-limits-selftest';
@@ -386,6 +393,11 @@ function removeWorld(): void
     //    namespace: the only two places that write it are the forgot-password
     //    and reset-password handlers, which is what this test drives.
     q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:%'");
+    // #598: the per-account password-check limit (`pwcheck:<account>`, only
+    // this file's accounts), the anonymous prayer form's limit and its rows
+    // (only this file's made-up addresses).
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwcheck:9190%' OR bucket LIKE 'prayer:anon:%' OR bucket LIKE 'selftest598:%'");
+    q("DELETE FROM tblPrayerRequests WHERE submitterIP LIKE '203.0.113.%'");
     q('DELETE FROM tblLocalAccounts WHERE userID BETWEEN 919000 AND 919999');
     q('DELETE FROM tblUserSites WHERE userID BETWEEN 919000 AND 919999');
     q('DELETE FROM tblUsers WHERE userID BETWEEN 919000 AND 919999');
@@ -453,6 +465,11 @@ function cleanup(): void
         stopServer($state['extra'][$n]);
     }
     try {
+        // The database server's own clock, put back as it was (part Z sets it
+        // five hours ahead of UTC). Done first: everything below writes times.
+        if (isset($state['globalZone']) === true) {
+            q('SET GLOBAL time_zone = ?', 's', [$state['globalZone']]);
+        }
         // The organisation's zone, put back as it was (see organisationZone()).
         if (isset($state['siteZone']) === true) {
             q('UPDATE tblSites SET timezone = ? WHERE siteID = 1', 's', [$state['siteZone']]);
@@ -660,9 +677,21 @@ function settle(): void
     req('', 'GET', '/.selftest-settle');
 }
 
-/** Ask for a reset link through the real page. `ms` is how long the ANSWER took; the e-mail is sent after it, and this waits for that too. */
-function askForLink(string $ip, string $email, string $jar = ''): array
+/**
+ * Ask for a reset link through the real page. `ms` is how long the ANSWER took; the e-mail is sent after it, and this waits for that too.
+ *
+ * 🧹 `$freshPerson` (the default) first forgets every person's count of reset
+ *    e-mails. Since #598 one PERSON gets at most three an hour whoever asks,
+ *    and the parts written before that ask for one person's link many times
+ *    over (part E five times in a row) because they are about something else:
+ *    the limit per ADDRESS, the route, the answer's shape. Part W is about the
+ *    per-person limit and passes false.
+ */
+function askForLink(string $ip, string $email, string $jar = '', bool $freshPerson = true): array
 {
+    if ($freshPerson === true) {
+        q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
+    }
     $jar  = $jar === '' ? newJar() : $jar;
     $form = req($jar, 'GET', '/forgot-password', null, $ip);
     $sent = req($jar, 'POST', '/forgot-password/save', ['csrf_token' => token($form['body']), 'email' => $email], $ip);
@@ -872,6 +901,9 @@ foreach (PEOPLE as $who => $id) {
 }
 // One account is switched OFF. It must be answered exactly like no account at all.
 q('UPDATE tblUsers SET isActive = 0 WHERE userID = ?', 'i', [PEOPLE['kilo']]);
+// #598 item 2: an administrator of organisation 1 ONLY — a site administrator,
+// neither a global administrator nor the old portal-wide admin flag.
+q('UPDATE tblUserSites SET isSiteAdmin = 1 WHERE userID = ?', 'i', [PEOPLE['xray']]);
 // The limits this file's numbers are written for, set rather than assumed.
 setting('auth.rateLimit.maxAttempts', '5');
 setting('auth.rateLimit.windowMinutes', '15');
@@ -1428,7 +1460,7 @@ ok('it is recorded as refused, for the administrator', records($at, 'PasswordRes
 askForLink($at, mailOf('echo'));
 $hits = (int) one('SELECT COUNT(*) AS n FROM tblApiRateLimits WHERE bucket = ?', 's', [bucket('ask', $at)])['n'];
 ok('asking again while refused is not counted, so the wait does not get longer (still five on the count)', $hits === 5, 'on the count: ' . $hits);
-q('UPDATE tblApiRateLimits SET hitAt = NOW() - INTERVAL 16 MINUTE WHERE bucket = ?', 's', [bucket('ask', $at)]);
+q('UPDATE tblApiRateLimits SET hitAt = UTC_TIMESTAMP() - INTERVAL 16 MINUTE WHERE bucket = ?', 's', [bucket('ask', $at)]);
 mailSince();
 askForLink($at, mailOf('echo'));
 $mail = mailSince();
@@ -1446,7 +1478,7 @@ for ($i = 1; $i <= 10; $i++) {
 ok('ten tries to use a made-up link are each answered as a link that is not valid', array_unique($statuses) === ['/reset-password?token=' . $madeUp], implode(' | ', array_unique($statuses)));
 $echoPassword = bin2hex(random_bytes(12)) . 'Dd4!';
 // The ten tries put at one moment, five minutes ago by the database's clock, so the wait is a known number: ten minutes.
-q('UPDATE tblApiRateLimits SET hitAt = NOW() - INTERVAL 5 MINUTE WHERE bucket = ?', 's', [bucket('use', $at)]);
+q('UPDATE tblApiRateLimits SET hitAt = UTC_TIMESTAMP() - INTERVAL 5 MINUTE WHERE bucket = ?', 's', [bucket('use', $at)]);
 $answer = useLink($at, $link, $echoPassword);
 ok('the ELEVENTH try is refused, even with a REAL link: the password is not changed and the link is not used up', $answer['location'] === '/reset-password?token=' . $link . '&wait=10' && passwordIs('echo', $echoPassword) === false && ($realLink = one('SELECT usedAt FROM tblPasswordResets WHERE tokenHash = ?', 's', [\Portal\Core\Auth::resetLinkFingerprint($link)])) !== null && $realLink['usedAt'] === null, describe($answer) . '; the stored link was ' . ($realLink === null ? 'NOT FOUND' : 'found, usedAt ' . var_export($realLink['usedAt'], true)));
 $page = req(newJar(), 'GET', $answer['location'], null, $at);
@@ -1455,7 +1487,7 @@ $other = useLink($at, $madeUp, $newPassword);
 ok('a made-up link is refused the same way, so the refusal says nothing about whether a link is real', $other['location'] === '/reset-password?token=' . $madeUp . '&wait=10', describe($other));
 $hits = (int) one('SELECT COUNT(*) AS n FROM tblApiRateLimits WHERE bucket = ?', 's', [bucket('use', $at)])['n'];
 ok('tries made while refused are not counted (still ten on the count)', $hits === 10, 'on the count: ' . $hits);
-q('UPDATE tblApiRateLimits SET hitAt = NOW() - INTERVAL 16 MINUTE WHERE bucket = ?', 's', [bucket('use', $at)]);
+q('UPDATE tblApiRateLimits SET hitAt = UTC_TIMESTAMP() - INTERVAL 16 MINUTE WHERE bucket = ?', 's', [bucket('use', $at)]);
 $answer = useLink($at, $link, $echoPassword);
 ok('sixteen minutes on, the same link works and the password is changed', $answer['location'] === '/login?reset=1' && passwordIs('echo', $echoPassword) === true, describe($answer));
 
@@ -1546,7 +1578,14 @@ $notice = static function (array $page): string {
 };
 
 mailSetup('none');
-$unsent = (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = 'PasswordResetNoMailer' AND timestamp > NOW() - INTERVAL 7 DAY")['n'];
+// 🏢 #598 item 2 (D-105): one record that is NOT organisation 1's — written with
+//    no organisation at all, as a record from before start-up chose one is —
+//    so a count limited to organisation 1 and the installation's count differ
+//    by exactly one. Without it the two are the same number and the check
+//    below could not tell them apart.
+q("INSERT INTO tblActivityLogs (siteID, activityType, activityDescription, visitorIP, userAgent) VALUES (NULL, 'PasswordResetNoMailer', 'selftest: a reset asked for outside organisation 1', ?, ?)", 'ss', [ip(199), AGENT]);
+$unsent     = (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = 'PasswordResetNoMailer' AND timestamp > NOW() - INTERVAL 7 DAY")['n'];
+$unsentHere = (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE activityType = 'PasswordResetNoMailer' AND timestamp > NOW() - INTERVAL 7 DAY AND siteID = 1")['n'];
 $seen   = $look();
 $text   = $notice($seen['email']);
 ok('nothing set up — the e-mail page says so in plain words, and that reset links are not being sent', $seen['email']['status'] === 200 && str_starts_with($text, 'not-ready: This portal cannot send e-mail yet') === true && str_contains($text, 'Password-reset links are not being sent') === true, 'HTTP ' . $seen['email']['status'] . '; ' . $text);
@@ -1556,7 +1595,22 @@ ok(
         && str_contains($text, 'Fill these in on the Settings page.') === true && str_contains($seen['email']['body'], '<a href="/admin/settings" class="alert-link">Settings page</a>') === true,
     $text
 );
-ok('nothing set up — the health page shows a warning, says reset e-mails cannot be sent, counts the people who asked and got nothing, and names the Settings page', str_starts_with($seen['health'], 'warning | Not set up | Password-reset e-mails cannot be sent.') === true && str_contains($seen['health'], 'not sent in the last 7 days: ' . $unsent . '.') === true && $unsent >= 4 && str_contains($seen['health'], 'Fill these in at Admin → Settings') === true, $seen['health'] . ' (expected the count ' . $unsent . ')');
+ok('nothing set up — the health page shows a warning, says reset e-mails cannot be sent, counts the people who asked and got nothing, and names the Settings page', str_starts_with($seen['health'], 'warning | Not set up | Password-reset e-mails cannot be sent.') === true && str_contains($seen['health'], 'not sent in the last 7 days, across every organisation: ' . $unsent . '.') === true && $unsent >= 4 && str_contains($seen['health'], 'Fill these in at Admin → Settings') === true, $seen['health'] . ' (expected the count ' . $unsent . ')');
+// 🏢 D-105: an administrator of ONE organisation still sees the line, counted
+//    for their own organisation only. Before #598 they saw the installation's
+//    count (`$unsent`), which is one more than this.
+$xrayJar = newJar();
+if (signedIn(tryPassword(ip(82), login('xray'), $password, $xrayJar)) === false) {
+    refuse('the administrator of one organisation could not sign in');
+}
+$xrayHealth = healthCard(req($xrayJar, 'GET', '/admin/maintenance/health', null, ip(82))['body'], 'Email');
+ok(
+    'an administrator of ONE organisation still sees the e-mail warning, but the count is their own organisation\'s only, never the installation\'s (D-105)',
+    str_starts_with($xrayHealth, 'warning | Not set up | Password-reset e-mails cannot be sent.') === true
+        && str_contains($xrayHealth, 'Asked for at this organisation and not sent in the last 7 days: ' . $unsentHere . '.') === true
+        && $unsentHere === $unsent - 1 && str_contains($xrayHealth, 'across every organisation') === false,
+    $xrayHealth . ' (expected ' . $unsentHere . ' for this organisation; the installation has ' . $unsent . ')'
+);
 ok('nothing set up — the monitor\'s address reports the same warning', ($seen['monitor']['state'] ?? '') === 'warn' && ($seen['monitor']['label'] ?? '') === 'Not set up', (string) json_encode($seen['monitor']));
 
 foreach (['ms365' => 'Microsoft 365', 'google' => 'Google'] as $kind => $name) {
@@ -2010,6 +2064,343 @@ ok(
     $answer['status'] === 200 && str_contains($answer['body'], 'name="password"') === true,
     describe($answer)
 );
+
+// =============================================================================
+// #598 — parts T to Z. Each check below was run against the code from before
+// #598 (the base commit, f8b6cecf) and the ones marked "red on the old code"
+// in the package's evidence failed there.
+// =============================================================================
+
+/** The account page, which answers 200 to a signed-in person and sends anybody else to sign in. */
+function accountPage(string $jar, string $ip): array
+{
+    return req($jar, 'GET', '/account', null, $ip);
+}
+
+/** Is this browser still signed in? */
+function stillSignedIn(string $jar, string $ip): bool
+{
+    return accountPage($jar, $ip)['status'] === 200;
+}
+
+/** Was this browser sent to sign in? */
+function sentToSignIn(string $jar, string $ip): bool
+{
+    $page = accountPage($jar, $ip);
+
+    return $page['status'] === 302 && str_starts_with($page['location'], '/login') === true;
+}
+
+/** A browser signed in as one of the people, or the run refuses. */
+function signedInJar(string $who, string $ip, string $withPassword): string
+{
+    $jar = newJar();
+    if (signedIn(tryPassword($ip, login($who), $withPassword, $jar)) === false) {
+        refuse($who . ' could not sign in for part T-Z');
+    }
+
+    return $jar;
+}
+
+/** A reset link for one person, stored exactly as the portal stores one (its own fingerprint, a UTC expiry an hour away). */
+function storedLink(string $who): string
+{
+    $token = bin2hex(random_bytes(32));
+    q(
+        'INSERT INTO tblPasswordResets (userID, tokenHash, expiresAt, createdIP) VALUES (?, ?, UTC_TIMESTAMP() + INTERVAL 60 MINUTE, ?)',
+        'iss',
+        [PEOPLE[$who], \Portal\Core\Auth::resetLinkFingerprint($token), ip(160)]
+    );
+
+    return $token;
+}
+
+/** The reset form sent from a browser that is SIGNED IN (the reset page itself sends such a browser away, so the token comes from the account page). */
+function resetFromSignedIn(string $jar, string $ip, string $link, string $newPassword): array
+{
+    $csrf = token(accountPage($jar, $ip)['body']);
+
+    return req($jar, 'POST', '/reset-password/save', ['csrf_token' => $csrf, 'token' => $link, 'password' => $newPassword, 'password_confirm' => $newPassword], $ip);
+}
+
+/** "Change password" on the account page, from a signed-in browser. */
+function changePassword(string $jar, string $ip, string $current, string $new): array
+{
+    $csrf = token(accountPage($jar, $ip)['body']);
+
+    return req($jar, 'POST', '/account/change-password', ['csrf_token' => $csrf, 'current_password' => $current, 'new_password' => $new, 'new_password_confirm' => $new], $ip);
+}
+
+/** "Switch off two-factor sign-in" on the account page, which asks for the current password. */
+function disableTwoStep(string $jar, string $ip, string $current): array
+{
+    $csrf = token(accountPage($jar, $ip)['body']);
+
+    return req($jar, 'POST', '/auth/2fa/disable', ['csrf_token' => $csrf, 'current_password' => $current], $ip);
+}
+
+/** How many sessions of one person were ended because their password changed. */
+function endedForPassword(string $who): int
+{
+    return (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'SessionEndedPasswordChanged'", 'i', [PEOPLE[$who]])['n'];
+}
+
+// =============================================================================
+head('T. A password reset signs the person out of every OTHER browser (#598 item 1, D-104)');
+// =============================================================================
+$at      = ip(161);
+$jarA    = signedInJar('uniform', $at, $password);
+$jarB    = signedInJar('uniform', $at, $password);
+$victorE = signedInJar('victor', $at, $password);
+ok('set-up: two browsers are signed in as the same person, and a third as somebody else', stillSignedIn($jarA, $at) === true && stillSignedIn($jarB, $at) === true && stillSignedIn($victorE, $at) === true);
+
+$uniformPassword = bin2hex(random_bytes(12)) . 'Gg7!';
+$answer          = useLink($at, storedLink('uniform'), $uniformPassword);
+ok('the reset is made from a browser that is not signed in, and the password is changed', $answer['location'] === '/login?reset=1' && passwordIs('uniform', $uniformPassword) === true, describe($answer));
+ok('BOTH browsers signed in before the reset are sent to sign in on their next request (red on the old code: both stayed in)', sentToSignIn($jarA, $at) === true && sentToSignIn($jarB, $at) === true);
+ok('each ending is recorded against the person, once per browser', endedForPassword('uniform') === 2, 'records: ' . endedForPassword('uniform'));
+ok('somebody ELSE signed in on another browser is untouched', stillSignedIn($victorE, $at) === true);
+
+// The reset made from a browser signed in as the SAME person: that browser stays.
+$jarC = signedInJar('uniform', $at, $uniformPassword);
+$jarD = signedInJar('uniform', $at, $uniformPassword);
+$uniformPassword2 = bin2hex(random_bytes(12)) . 'Hh8!';
+$answer = resetFromSignedIn($jarD, $at, storedLink('uniform'), $uniformPassword2);
+ok('a reset sent from a browser signed in as that same person changes the password', $answer['location'] === '/login?reset=1' && passwordIs('uniform', $uniformPassword2) === true, describe($answer));
+ok('and THAT browser stays signed in, while the other one is sent to sign in', stillSignedIn($jarD, $at) === true && sentToSignIn($jarC, $at) === true);
+
+// The reset made from a browser signed in as somebody ELSE: that person stays.
+$uniformPassword3 = bin2hex(random_bytes(12)) . 'Ii9!';
+$answer = resetFromSignedIn($victorE, $at, storedLink('uniform'), $uniformPassword3);
+ok('a reset for one person sent from a browser where somebody ELSE is signed in leaves that somebody signed in', passwordIs('uniform', $uniformPassword3) === true && stillSignedIn($victorE, $at) === true && sentToSignIn($jarD, $at) === true, describe($answer));
+ok('a browser signed in AFTER the reset is not affected by it', stillSignedIn(signedInJar('uniform', $at, $uniformPassword3), $at) === true);
+
+// =============================================================================
+head('U. Changing the password while signed in signs out the others; this browser stays (D-104)');
+// =============================================================================
+$at      = ip(162);
+$victorA = signedInJar('victor', $at, $password);
+$victorB = signedInJar('victor', $at, $password);
+$victorPassword = bin2hex(random_bytes(12)) . 'Jj1!';
+$answer = changePassword($victorB, $at, $password, $victorPassword);
+ok('the change is accepted and the account page is told the others were signed out', $answer['location'] === '/account?pwchanged=1' && passwordIs('victor', $victorPassword) === true, describe($answer));
+$page = req($victorB, 'GET', '/account?pwchanged=1', null, $at);
+ok('the browser that made the change is STILL signed in, and the page says so in plain words', $page['status'] === 200 && str_contains($page['body'], 'you have been signed out on every other browser and device') === true, describe($page));
+ok('the OTHER browser is sent to sign in on its next request (red on the old code: it stayed in)', sentToSignIn($victorA, $at) === true);
+ok('and the one that made the change is still in after that (it was not caught by the same rule)', stillSignedIn($victorB, $at) === true);
+ok('the ending is recorded once, for the other browser only', endedForPassword('victor') === 1, 'records: ' . endedForPassword('victor'));
+
+// =============================================================================
+head('V. Wrong CURRENT passwords: five in 15 minutes for one account, shared by two pages (#598 item 5)');
+// =============================================================================
+$at       = ip(163);
+$whiskey  = signedInJar('whiskey', $at, $password);
+$wrongs   = [];
+for ($i = 1; $i <= 3; $i++) {
+    $wrongs[] = changePassword($whiskey, $at, 'wrong-' . $i, 'Never-Used-' . $i . 'Kk2!')['location'];
+}
+for ($i = 4; $i <= 5; $i++) {
+    $wrongs[] = disableTwoStep($whiskey, $at, 'wrong-' . $i)['location'];
+}
+ok('five wrong current passwords, three on "change password" and two on "switch off 2FA", are each answered "incorrect"', array_unique($wrongs) === ['/account?error=pw_current'], implode(' | ', array_unique($wrongs)));
+$answer = changePassword($whiskey, $at, $password, 'Never-Used-6Kk2!');
+ok('the SIXTH try, with the RIGHT password, is refused without being checked, and the password is NOT changed (red on the old code: it was changed)', $answer['location'] === '/account?error=pw_wait' && passwordIs('whiskey', $password) === true, describe($answer));
+$answer = disableTwoStep($whiskey, $at, $password);
+ok('the other page shares the limit: "switch off 2FA" with the right password is refused too, and nothing is switched off', $answer['location'] === '/account?error=pw_wait' && (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'TotpDisabled'", 'i', [PEOPLE['whiskey']])['n'] === 0, describe($answer));
+$page = req($whiskey, 'GET', '/account?error=pw_wait', null, $at);
+ok('the account page says in plain words that nothing was changed and how long to wait', str_contains($page['body'], 'Too many wrong passwords. Nothing was checked or changed. Please wait up to 15 minutes') === true);
+q("UPDATE tblApiRateLimits SET hitAt = UTC_TIMESTAMP() - INTERVAL 16 MINUTE WHERE bucket = 'pwcheck:" . PEOPLE['whiskey'] . "'");
+$whiskeyPassword = bin2hex(random_bytes(12)) . 'Ll3!';
+$answer = changePassword($whiskey, $at, $password, $whiskeyPassword);
+ok('sixteen minutes on, the right password works again', $answer['location'] === '/account?pwchanged=1' && passwordIs('whiskey', $whiskeyPassword) === true, describe($answer));
+
+// =============================================================================
+head('W. One person gets at most three reset e-mails an hour, from however many addresses (#598 item 3)');
+// =============================================================================
+mailSetup('google');
+q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
+mailSince();
+$asks = [];
+foreach ([171, 172, 173, 174] as $last) {
+    $asks[] = askForLink(ip($last), mailOf('sierra'), '', false);
+}
+$mail  = mailSince();
+$sends = array_values(array_filter($mail, static fn (array $m): bool => str_starts_with($m['path'], '/gmail/')));
+ok('four requests for one person from four addresses: THREE e-mails go (red on the old code: four)', count($sends) === 3, 'sent: ' . count($sends));
+ok('the fourth makes no link: only three were ever stored, and only the newest still works', (int) one('SELECT COUNT(*) AS n FROM tblPasswordResets WHERE userID = ?', 'i', [PEOPLE['sierra']])['n'] === 3 && (int) one('SELECT COUNT(*) AS n FROM tblPasswordResets WHERE userID = ? AND usedAt IS NULL', 'i', [PEOPLE['sierra']])['n'] === 1);
+ok('and the fourth visitor is answered exactly as the first: nothing says the person has had enough (#521)', shape($asks[3]) === shape($asks[0]) && landing($asks[3], ip(174)) === landing($asks[0], ip(171)), "fourth:\n" . shape($asks[3]));
+ok('the refusal is recorded against the person, for the administrator', (int) one("SELECT COUNT(*) AS n FROM tblActivityLogs WHERE userID = ? AND activityType = 'PasswordResetBlocked'", 'i', [PEOPLE['sierra']])['n'] === 1);
+
+// =============================================================================
+head('X. FIVE reset requests for one person at the same moment: three links made, exactly ONE still working (#598 items 8 and 3)');
+// =============================================================================
+mailSetup('none');
+foreach ($extraPorts as $onePort) {
+    $state['extra'][] = $startPortal($onePort);
+}
+$deadline = microtime(true) + 15;
+while (count(array_filter($extraPorts, 'portAnswers')) !== count($extraPorts) && microtime(true) < $deadline) {
+    usleep(100000);
+}
+$rounds = [];
+for ($round = 0; $round < 4; $round++) {
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
+    q('DELETE FROM tblPasswordResets WHERE userID = ?', 'i', [PEOPLE['tango']]);
+    $forms = [];
+    for ($i = 0; $i < 5; $i++) {
+        $jar     = newJar();
+        $forms[] = [$jar, token(req($jar, 'GET', '/forgot-password', null, ip(175 + $i))['body']), ip(175 + $i)];
+    }
+    $multi   = curl_multi_init();
+    $handles = [];
+    foreach ($forms as $i => [$jar, $csrf, $from]) {
+        $handle = curl_init('http://127.0.0.1:' . $extraPorts[$i] . '/forgot-password/save');
+        curl_setopt_array($handle, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+            CURLOPT_HTTPHEADER => ['Expect:', 'User-Agent: ' . AGENT, 'X-Forwarded-For: ' . $from], CURLOPT_COOKIEFILE => $jar, CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $csrf, 'email' => mailOf('tango')]),
+        ]);
+        curl_multi_add_handle($multi, $handle);
+        $handles[] = $handle;
+    }
+    do {
+        $status = curl_multi_exec($multi, $running);
+        if ($running > 0) {
+            curl_multi_select($multi, 1.0);
+        }
+    } while ($running > 0 && $status === CURLM_OK);
+    foreach ($handles as $handle) {
+        curl_multi_remove_handle($multi, $handle);
+    }
+    curl_multi_close($multi);
+    // Each extra server is ONE process, so a second request to it waits until the first script, work after the answer included, has ended.
+    foreach (array_slice($extraPorts, 0, 5) as $onePort) {
+        $settle = curl_init('http://127.0.0.1:' . $onePort . '/.selftest-settle');
+        curl_setopt_array($settle, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*']);
+        curl_exec($settle);
+    }
+    $rounds[] = (int) one('SELECT COUNT(*) AS n FROM tblPasswordResets WHERE userID = ? AND usedAt IS NULL AND expiresAt > UTC_TIMESTAMP()', 'i', [PEOPLE['tango']])['n']
+        . '/' . (int) one('SELECT COUNT(*) AS n FROM tblPasswordResets WHERE userID = ?', 'i', [PEOPLE['tango']])['n'];
+}
+foreach (array_keys($state['extra']) as $n) {
+    stopServer($state['extra'][$n]);
+}
+$state['extra'] = [];
+note('working links / links stored, after five requests at one moment, four rounds: ' . implode(', ', $rounds));
+// 🔒 Two things in one line, both decided by the lock on the person's row:
+//    the THREE-an-hour cap must hold when five arrive together (without the
+//    lock each reads the count before any other has added to it, so all five
+//    get through: planted, measured), and of the links made only the newest
+//    may still work. The second half is also held by the cancelling UPDATE's
+//    own row locks, so it is the cap that this check is really for.
+ok('in every round exactly THREE links are made and exactly ONE still works, whatever order the five requests ran in', array_unique($rounds) === ['1/3'], implode(', ', $rounds));
+
+// =============================================================================
+head('Y. The anonymous prayer form: a sign-in block never eats a request, and its own limit says so (#598 item 4)');
+// =============================================================================
+$at = ip(181);
+for ($i = 1; $i <= 5; $i++) {
+    tryPassword($at, 'nobody-598-' . $i, 'wrong');
+}
+ok('set-up: the address is blocked from signing in', str_starts_with(said(tryPassword($at, login('alpha'), $password)), 'danger: Too many failed attempts') === true);
+/** One anonymous prayer request through the real pages. */
+$pray = static function (string $jar, string $ip, string $subject, string $body): array {
+    $form = req($jar, 'GET', '/prayer-requests/anonymous', null, $ip);
+
+    // The prayer form writes its token over two lines, which token() does not read.
+    $csrf = preg_match('/name="csrf_token"\s+value="([0-9a-f]{64})"/', $form['body'], $m) === 1 ? $m[1] : '';
+
+    return req($jar, 'POST', '/prayer-requests/anonymous/save', ['csrf_token' => $csrf, 'subject' => $subject, 'body' => $body], $ip);
+};
+$saved = static fn (string $ip): int => (int) one('SELECT COUNT(*) AS n FROM tblPrayerRequests WHERE submitterIP = ?', 's', [$ip])['n'];
+$prayJar = newJar();
+$answer  = $pray($prayJar, $at, 'Selftest 598 one', 'For my neighbour, from a blocked address');
+ok('a prayer request from an address blocked from signing in is SAVED, and the visitor is thanked (red on the old code: thanked and thrown away)', $answer['location'] === '/prayer-requests/anonymous?submitted=1' && $saved($at) === 1, describe($answer) . '; saved: ' . $saved($at));
+for ($i = 2; $i <= 5; $i++) {
+    $pray($prayJar, $at, 'Selftest 598 ' . $i, 'Request ' . $i);
+}
+ok('five from one address in 15 minutes are all saved', $saved($at) === 5, 'saved: ' . $saved($at));
+$typed  = 'Selftest 598 the sixth, which must come back to the form';
+$answer = $pray($prayJar, $at, 'Selftest 598 six', $typed);
+$back   = urldecode((string) (parse_url($answer['location'], PHP_URL_QUERY) ?? ''));
+ok('the SIXTH is not saved, and the visitor is told plainly it has NOT been sent, never "thank you"', $saved($at) === 5 && str_contains($back, 'Your prayer request has NOT been sent') === true && str_contains($answer['location'], 'submitted=1') === false, describe($answer) . '; ' . $back);
+$form = req($prayJar, 'GET', $answer['location'], null, $at);
+ok('and the form they are sent back to still holds what they typed', str_contains($form['body'], $typed) === true && str_contains($form['body'], 'has NOT been sent') === true);
+
+// =============================================================================
+head('Z. The general limiter counts in UTC, never in the database server\'s own clock (#598 items 7 and 10)');
+// =============================================================================
+// The database server's clock is set FIVE HOURS ahead of UTC for this part
+// (`+05:00`, an offset, so no time-zone tables are needed), and put back by
+// the clean-up. A server whose clock changes for summer is the real case; no
+// test can make a clock change happen, so this checks the property that
+// makes it harmless: a hit is written, and the window measured, in UTC.
+$state['globalZone'] ??= (string) one('SELECT @@GLOBAL.time_zone AS z')['z'];
+q("SET GLOBAL time_zone = '+05:00'");
+$at = ip(191);
+askForLink($at, mailOf('alpha'));
+$drift = one('SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), hitAt) AS d FROM tblApiRateLimits WHERE bucket = ? ORDER BY hitID DESC LIMIT 1', 's', [bucket('ask', $at)]);
+ok('a hit is stamped in UTC even when the server\'s clock is five hours ahead (red on the old code: five hours out)', $drift !== null && abs((int) $drift['d']) <= 120, 'seconds from UTC: ' . var_export($drift['d'] ?? null, true));
+
+$at = ip(192);
+for ($i = 0; $i < 10; $i++) {
+    q('INSERT INTO tblApiRateLimits (bucket, hitAt) VALUES (?, UTC_TIMESTAMP() + INTERVAL 5 HOUR)', 's', [bucket('use', $at)]);
+}
+$madeUp = bin2hex(random_bytes(32));
+$answer = useLink($at, $madeUp, 'Never-Used-Mm4!');
+ok('ten hits written BEFORE the upgrade in a clock ahead of UTC do not block anybody: a count starts again rather than stretching for hours', $answer['location'] === '/reset-password?token=' . $madeUp, describe($answer));
+
+$at = ip(193);
+for ($i = 0; $i < 10; $i++) {
+    q('INSERT INTO tblApiRateLimits (bucket, hitAt) VALUES (?, UTC_TIMESTAMP() - INTERVAL 10 MINUTE)', 's', [bucket('use', $at)]);
+}
+$answer = useLink($at, $madeUp, 'Never-Used-Mm4!');
+ok('ten hits ten minutes old by UTC DO block, and the page waits five minutes, not five hours (red on the old code: not blocked at all)', $answer['location'] === '/reset-password?token=' . $madeUp . '&wait=5', describe($answer));
+q('SET GLOBAL time_zone = ?', 's', [$state['globalZone']]);
+
+// 🔟 retryAfter() never answers 0 while tooMany() says "over" (item 10). The
+//    test's own connection is pinned to one second with SET TIMESTAMP, so the
+//    oldest hit is EXACTLY a window old: the one moment the two used to
+//    disagree (tooMany counts it, the seconds left round to 0), which a
+//    request over HTTP could only hit by luck.
+$GLOBALS['mysqli'] = $db;
+require_once $child . $sep . 'web' . $sep . '_core' . $sep . 'App.php';
+require_once $child . $sep . 'web' . $sep . '_core' . $sep . 'RateLimiter.php';
+$edge = 'selftest598:edge:' . bin2hex(random_bytes(4));
+q('SET TIMESTAMP = UNIX_TIMESTAMP()');
+for ($i = 0; $i < 5; $i++) {
+    q('INSERT INTO tblApiRateLimits (bucket, hitAt) VALUES (?, UTC_TIMESTAMP() - INTERVAL 300 SECOND)', 's', [$edge]);
+}
+$edgeOver  = \Portal\Core\RateLimiter::tooMany($edge, 5, 300);
+$edgeAfter = \Portal\Core\RateLimiter::retryAfter($edge, 5, 300);
+q('SET TIMESTAMP = DEFAULT');
+q('DELETE FROM tblApiRateLimits WHERE bucket = ?', 's', [$edge]);
+ok('at the very edge of a window, "too many" is answered with at least 1 second to wait, never 0 (red on the old code: 0, which let the asset kiosk take one more PIN try)', $edgeOver === true && $edgeAfter >= 1, 'tooMany: ' . var_export($edgeOver, true) . ', retryAfter: ' . $edgeAfter);
+
+// =============================================================================
+head('Z2. "Can the portal send?" refuses a key file that is not a key, a name climbing out of its folder, and a "from" that is not an address (#598 item 9)');
+// =============================================================================
+$at       = ip(194);
+$adminJar = signedInJar('admin', $at, $password);
+$mailNote = static function () use ($adminJar, $at, $notice): string {
+    return $notice(req($adminJar, 'GET', '/admin/integrations/email', null, $at));
+};
+copy($child . $sep . 'web' . $sep . '_auth_keys' . $sep . GOOGLE_KEY_FILE, $child . $sep . 'web' . $sep . 'selftest-598-outside-key.json');
+mailSetup('google');
+setting('mail.google.serviceAccountKeyFile', '../selftest-598-outside-key.json');
+$text = $mailNote();
+ok('a Google key file NAME that climbs out of the key folder is "not set up", and says why (red on the old code: ready, and the file outside was read)', str_starts_with($text, 'not-ready:') === true && str_contains($text, 'no folder in it') === true, $text);
+file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'selftest-598-not-a-key.json', '{"hello": "this is not a key"}');
+setting('mail.google.serviceAccountKeyFile', 'selftest-598-not-a-key.json');
+$text = $mailNote();
+ok('a key file that is not a service account key is "not set up" (red on the old code: ready, and every send failed)', str_starts_with($text, 'not-ready:') === true && str_contains($text, 'is not JSON holding a private_key and a client_email') === true, $text);
+mailSetup('ms365');
+setting('mail.defaultFromAddress', 'not-an-address');
+$text = $mailNote();
+ok('a Microsoft 365 "from" address that is not an e-mail address is "not set up" (red on the old code: ready)', str_starts_with($text, 'not-ready:') === true && str_contains($text, '"not-an-address" is not one') === true, $text);
+mailSetup('google');
+$text = $mailNote();
+ok('and the real key file, by a plain name, is still ready (the rule did not shut out a good set-up)', str_starts_with($text, 'not-ready:') === false, $text);
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

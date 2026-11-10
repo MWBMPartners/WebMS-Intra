@@ -234,21 +234,15 @@ class MailerGoogle
             throw new RuntimeException('Google service account key file or delegate user not configured.');
         }
 
-        // 📂 Load the service account JSON key from _auth_keys/
-        $keyPath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $keyFile;
-        if (is_readable($keyPath) === false) {
-            throw new RuntimeException('Service account key file not found: ' . $keyFile);
+        // 📂 Load the service account JSON key from _auth_keys/, through the
+        //    ONE place that decides whether a key file name and its contents
+        //    can be used (#598 item 9), so this and Mailer::canSend() can
+        //    never disagree.
+        $problem = self::keyFileProblem((string) $keyFile);
+        if ($problem !== null) {
+            throw new RuntimeException($problem);
         }
-
-        $keyJson = file_get_contents($keyPath);
-        if ($keyJson === false) {
-            throw new RuntimeException('Failed to read service account key file.');
-        }
-
-        $keyData = json_decode($keyJson, true);
-        if ($keyData === null || isset($keyData['private_key']) === false || isset($keyData['client_email']) === false) {
-            throw new RuntimeException('Invalid service account key file format.');
-        }
+        $keyData = self::readKeyFile((string) $keyFile);
 
         // 🔐 Build the JWT assertion
         $now    = time();
@@ -333,6 +327,78 @@ class MailerGoogle
     private static function base64urlEncode(string $data): string
     {
         return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+    }
+
+    /**
+     * 🔑 Is this a key file the portal can use? Null when it is, otherwise a
+     * sentence saying what is wrong (#598 item 9). The ONE place this is
+     * decided: Mailer::routeAndItsNeeds() (and so canSend() and the health
+     * page) and accessToken() above both ask here.
+     *
+     * WHAT WAS WRONG. canSend() asked only "is a file of this name readable".
+     * So it said "set up" for a NAME CLIMBING OUT of the key folder
+     * (`../something`), which also meant the portal would read whatever file
+     * that named, and for a file that was not a key at all, so every send
+     * then failed while the health page said all was well.
+     *
+     * THE RULES
+     *   - The name is a plain file name: no `/` or `\`, no `..`, no NUL byte.
+     *     The file must sit IN `_auth_keys`, never anywhere a name can reach.
+     *   - The file can be read and decodes as a JSON object.
+     *   - It holds `private_key` and `client_email`, each non-empty text: the
+     *     two things the sign-in to Google needs.
+     *
+     * WHAT IT CANNOT KNOW: whether Google will accept the key. Only sending
+     * shows that; use Send test on the e-mail page.
+     *
+     * @param string $name The setting `mail.google.serviceAccountKeyFile`.
+     */
+    public static function keyFileProblem(string $name): ?string
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return 'the name of the Google service account key file';
+        }
+        if (str_contains($name, '/') === true || str_contains($name, '\\') === true
+            || str_contains($name, '..') === true || str_contains($name, "\0") === true
+        ) {
+            return 'a Google key file NAME with no folder in it: "' . $name . '" contains a / or \\ or "..", '
+                . 'and the file must be in the portal\'s _auth_keys folder itself';
+        }
+        $path = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $name;
+        if (is_file($path) === false || is_readable($path) === false) {
+            return 'the Google key file itself: "' . $name . '" is not in the portal\'s _auth_keys folder, or cannot be read';
+        }
+        if (self::readKeyFile($name) === null) {
+            return 'a Google key file that is a real service account key: "' . $name . '" is not JSON holding '
+                . 'a private_key and a client_email';
+        }
+
+        return null;
+    }
+
+    /**
+     * The decoded key file, or null when it does not hold what a key must.
+     * Only ever called with a name keyFileProblem() has passed (or by it,
+     * after its own checks on the name).
+     *
+     * @return array{private_key: string, client_email: string}|null
+     */
+    private static function readKeyFile(string $name): ?array
+    {
+        $json = @file_get_contents(PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . trim($name));
+        if ($json === false) {
+            return null;
+        }
+        $data = json_decode($json, true);
+        if (is_array($data) === false
+            || is_string($data['private_key'] ?? null) === false || trim($data['private_key']) === ''
+            || is_string($data['client_email'] ?? null) === false || trim($data['client_email']) === ''
+        ) {
+            return null;
+        }
+
+        return $data;
     }
 
     /**

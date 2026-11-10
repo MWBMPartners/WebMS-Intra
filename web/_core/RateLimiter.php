@@ -497,6 +497,40 @@ class RateLimiter
     /* Generic sliding-window limiter — tblApiRateLimits (#323 Phase 2)        */
     /* ---------------------------------------------------------------------- */
 
+    /*
+     * 🕐 EVERY TIME IN tblApiRateLimits IS UTC, WRITTEN AND COMPARED BY THE
+     *    DATABASE (#598 item 7).
+     *
+     * WHAT WAS WRONG. A hit was stamped with the column's default
+     * (CURRENT_TIMESTAMP) and compared with NOW(): both readings of the
+     * database server's own clock. On a server whose clock changes twice a
+     * year, the night it goes back a block made at 01:50 lasted 76 real
+     * minutes and the reset page said "wait 59"; the night it goes forward the
+     * block was gone after 3 minutes and ten reset tries got through in four.
+     * Measured on MySQL 8.4.11 with the server on America/Los_Angeles. UTC
+     * never jumps, so a window measured in it is always the window asked for.
+     *
+     * LIMITER ONLY. The connection's own time zone is NOT changed: every other
+     * query in the portal that uses NOW() goes on meaning what it meant
+     * (#783 is the wider question).
+     *
+     * THE UPPER BOUND (`hitAt <= UTC_TIMESTAMP()`) is for the upgrade. Rows
+     * written before this change hold the server's local time. On a server
+     * ahead of UTC they would look like hits in the FUTURE and, without the
+     * bound, count for hours (a server on New Zealand time: thirteen); with it
+     * they count for nothing. On a server behind UTC they look old and fall
+     * out of the window on their own. Either way the one cost is that each
+     * count starts again from nothing at the upgrade — the recoverable
+     * direction — and never a block longer than its window.
+     *
+     * WHAT THIS DOES NOT COVER. The SIGN-IN counts above (isBlocked(),
+     * lockoutRemaining(), the per-name count) read tblActivityLogs, whose
+     * times are written by Logger, not by this class, on the server's clock.
+     * Changing those means changing what every activity record's time means,
+     * which is not the limiter's to decide; they keep the clock-change
+     * behaviour described at lockoutRemaining(). Recorded as its own issue.
+     */
+
     /**
      * Generic sliding-window rate-limit check against tblApiRateLimits.
      * Does NOT record a hit itself — call recordHit() separately once the
@@ -518,7 +552,8 @@ class RateLimiter
             'SELECT COUNT(*) AS hitCount '
             . 'FROM tblApiRateLimits '
             . 'WHERE bucket = ? '
-            . 'AND hitAt >= NOW() - INTERVAL ? SECOND'
+            . 'AND `hitAt` >= UTC_TIMESTAMP() - INTERVAL ? SECOND '
+            . 'AND `hitAt` <= UTC_TIMESTAMP()'
         );
         if ($stmt === false) {
             // 🛡️ Fail open on DB error — never lock out every API caller
@@ -588,7 +623,7 @@ class RateLimiter
     {
         $db = App::db();
 
-        $stmt = $db->prepare('INSERT INTO tblApiRateLimits (bucket) VALUES (?)');
+        $stmt = $db->prepare('INSERT INTO `tblApiRateLimits` (`bucket`, `hitAt`) VALUES (?, UTC_TIMESTAMP())');
         if ($stmt === false) {
             // 🛡️ Fail open — a logging failure must never block the request.
             return;
@@ -606,7 +641,7 @@ class RateLimiter
                 $pruneStmt = $db->prepare(
                     'DELETE FROM tblApiRateLimits '
                     . 'WHERE bucket = ? '
-                    . 'AND hitAt < NOW() - INTERVAL ? SECOND '
+                    . 'AND `hitAt` < UTC_TIMESTAMP() - INTERVAL ? SECOND '
                     . 'LIMIT 500'
                 );
                 if ($pruneStmt !== false) {
@@ -625,7 +660,7 @@ class RateLimiter
                 $pruneStmt = $db->prepare(
                     'DELETE FROM tblApiRateLimits '
                     . 'WHERE bucket LIKE ? '
-                    . 'AND hitAt < NOW() - INTERVAL ? SECOND '
+                    . 'AND `hitAt` < UTC_TIMESTAMP() - INTERVAL ? SECOND '
                     . 'LIMIT 500'
                 );
                 if ($pruneStmt !== false) {
@@ -661,10 +696,11 @@ class RateLimiter
 
         $db = App::db();
         $stmt = $db->prepare(
-            'SELECT TIMESTAMPDIFF(SECOND, NOW(), DATE_ADD(MIN(hitAt), INTERVAL ? SECOND)) AS secondsLeft '
+            'SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), DATE_ADD(MIN(`hitAt`), INTERVAL ? SECOND)) AS `secondsLeft` '
             . 'FROM tblApiRateLimits '
             . 'WHERE bucket = ? '
-            . 'AND hitAt >= NOW() - INTERVAL ? SECOND'
+            . 'AND `hitAt` >= UTC_TIMESTAMP() - INTERVAL ? SECOND '
+            . 'AND `hitAt` <= UTC_TIMESTAMP()'
         );
         if ($stmt === false) {
             return $windowSeconds; // Assume the full window on DB error
@@ -674,11 +710,18 @@ class RateLimiter
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();
 
+        // ⏱️ NEVER 0 ONCE OVER THE LIMIT (#598 item 10). In the last second
+        //    of a window the time left rounds to 0, and the oldest hit can age
+        //    out between the count above and this query. A caller that used
+        //    "0" to mean "not blocked" then let one more try through — the
+        //    asset kiosk did, for a PIN. The count above said "over", so the
+        //    answer is at least 1. Callers should still decide with tooMany()
+        //    and use this only for the number they show.
         if ($row === null || $row['secondsLeft'] === null) {
-            return 0;
+            return 1;
         }
 
-        return max(0, (int) $row['secondsLeft']);
+        return max(1, (int) $row['secondsLeft']);
     }
 
     /**

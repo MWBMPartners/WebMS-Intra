@@ -42,6 +42,17 @@ $anonymousEnabled = (App::settings('prayer-requests.allowAnonymous') ?? 'true') 
 $siteName  = (string) (App::settings('site.name') ?? 'Portal');
 $submitted = isset($_GET['submitted']) === true && $_GET['submitted'] === '1';
 $flashErr  = (string) ($_GET['err'] ?? '');
+
+// ✍️ What the visitor typed, kept by the save handler when it REFUSED the
+//    request because too many came from this connection (#598 item 4), so a
+//    refusal does not also cost them their words. Taken once and removed. Each
+//    value is text or it is nothing (a session is ours, but a value of the
+//    wrong type must never reach htmlspecialchars()).
+$kept = $_SESSION['pr_anon_kept'] ?? [];
+unset($_SESSION['pr_anon_kept']);
+$keptText = static fn (string $field): string => (is_array($kept) === true && is_string($kept[$field] ?? null) === true)
+    ? $kept[$field]
+    : '';
 ?>
 <!doctype html>
 <html lang="en" data-bs-theme="light">
@@ -126,13 +137,15 @@ $flashErr  = (string) ($_GET['err'] ?? '');
             <div class="mb-3">
                 <label for="name" class="form-label small">Your Name <span class="text-muted">(optional)</span></label>
                 <input type="text" class="form-control form-control-sm" id="name" name="name"
-                       maxlength="100" autocomplete="name">
+                       maxlength="100" autocomplete="name"
+                       value="<?php echo htmlspecialchars($keptText('name'), ENT_QUOTES, 'UTF-8'); ?>">
             </div>
 
             <div class="mb-3">
                 <label for="email" class="form-label small">Your Email <span class="text-muted">(optional, for follow-up)</span></label>
                 <input type="email" class="form-control form-control-sm" id="email" name="email"
-                       maxlength="255" autocomplete="email">
+                       maxlength="255" autocomplete="email"
+                       value="<?php echo htmlspecialchars($keptText('email'), ENT_QUOTES, 'UTF-8'); ?>">
             </div>
 
             <div class="mb-3">
@@ -141,7 +154,8 @@ $flashErr  = (string) ($_GET['err'] ?? '');
                 </label>
                 <input type="text" class="form-control" id="subject" name="subject"
                        maxlength="255" required
-                       placeholder="A short title">
+                       placeholder="A short title"
+                       value="<?php echo htmlspecialchars($keptText('subject'), ENT_QUOTES, 'UTF-8'); ?>">
             </div>
 
             <div class="mb-3">
@@ -150,7 +164,7 @@ $flashErr  = (string) ($_GET['err'] ?? '');
                 </label>
                 <textarea class="form-control" id="body" name="body" rows="5"
                           maxlength="4000" required
-                          placeholder="Share what you'd like prayer for…"></textarea>
+                          placeholder="Share what you'd like prayer for…"><?php echo htmlspecialchars($keptText('body'), ENT_QUOTES, 'UTF-8'); ?></textarea>
             </div>
 
             <?php echo Captcha::widget(); ?>

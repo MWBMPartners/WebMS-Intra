@@ -180,13 +180,22 @@ switch ($action) {
             $buckets[] = ['astkiosk_pin_idday:' . $siteId . ':' . $idHash, 30, 86400];
         }
 
+        // 🚦 REFUSED WHENEVER ANY TIER SAYS "TOO MANY" (#598 item 10).
+        //    WHAT WAS WRONG: the refusal was decided by the NUMBER of seconds
+        //    left being above 0. In the last second of a window tooMany() said
+        //    "over" while the time left rounded to 0 (measured: five hits, the
+        //    oldest exactly 300 seconds old: tooMany 1, retryAfter 0), so one
+        //    more PIN try went through. Now tooMany() alone decides, and the
+        //    seconds are only the number shown, never less than 1.
+        $blocked    = false;
         $retryAfter = 0;
         foreach ($buckets as [$bucketKey, $bucketMax, $bucketWindow]) {
             if (RateLimiter::tooMany($bucketKey, $bucketMax, $bucketWindow) === true) {
-                $retryAfter = max($retryAfter, RateLimiter::retryAfter($bucketKey, $bucketMax, $bucketWindow));
+                $blocked    = true;
+                $retryAfter = max($retryAfter, 1, RateLimiter::retryAfter($bucketKey, $bucketMax, $bucketWindow));
             }
         }
-        if ($retryAfter > 0) {
+        if ($blocked === true) {
             // 🚫 Refuse WITHOUT ever checking the PIN.
             $bounce('Too many attempts — please try again in ' . $retryAfter . ' second(s).', 'warning');
         }

@@ -247,10 +247,29 @@ try {
     // either commits or rolls back together with the hash update above.
     Auth::revokeAllTrustedDevices($userId);
 
+    // 🚪 AND SIGN THE PERSON OUT OF EVERY OTHER BROWSER (#598 item 1, D-104).
+    //    WHAT WAS WRONG: this page cancelled remembered devices and nothing
+    //    else, so somebody already signed in as this person — the very worry
+    //    that sends people here — stayed signed in after the reset. Now every
+    //    session whose sign-in began before this moment is ended on its next
+    //    request. If THIS browser is signed in as the same person, it stays.
+    //    Inside the transaction, so it stands or falls with the password. It
+    //    answers false only on a database still waiting for migration 270, and
+    //    the reset is then still made: refusing the one way back in without an
+    //    administrator would be worse. The error is recorded for the
+    //    administrator by Auth::endOtherSessionsOf() itself.
+    $othersSignedOut = Auth::endOtherSessionsOf($mysqli, $userId);
+
     $mysqli->commit();
 
     // 📝 Log the successful password reset
-    Logger::activity('PasswordResetCompleted', 'Password reset completed for userID: ' . $userId);
+    Logger::activity(
+        'PasswordResetCompleted',
+        'Password reset completed for userID: ' . $userId
+            . ($othersSignedOut === true
+                ? '; their other browsers are signed out'
+                : '; their other browsers could NOT be signed out (database upgrade waiting)')
+    );
 
     // 🧹 Stop counting the failed sign-ins recorded so far against this
     //    account's NAME (#580; owner, Salem874, 12 October 2026).

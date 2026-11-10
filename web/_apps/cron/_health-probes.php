@@ -269,19 +269,39 @@ function maintenance_health_probes(\mysqli $db): array
             // People who asked for a reset link in the last 7 days and were
             // sent nothing. Only counted on this branch, so a healthy portal
             // never pays for the query.
-            $rs = $db->query(
-                "SELECT COUNT(*) AS c FROM tblActivityLogs WHERE activityType = 'PasswordResetNoMailer' "
-                . 'AND timestamp > DATE_SUB(NOW(), INTERVAL 7 DAY)'
+            //
+            // 🏢 WHOSE PEOPLE (#598 item 2, D-105). One mail account serves
+            //    every organisation, so this line used to show any
+            //    organisation's administrator a count across EVERY
+            //    organisation. The owner's decision: an organisation's
+            //    administrator still sees the line, but the count covers only
+            //    requests made at their own organisation (the record's
+            //    `siteID`, which is the organisation whose address the request
+            //    came in at) — exactly as the e-mail page (#592) already limits
+            //    its list of recent sends. A GLOBAL administrator sees the
+            //    installation's count. So does the monitor's address
+            //    (/cron/health): it has nobody signed in, and its token is the
+            //    installation's own.
+            $wholeInstallation = App::isRootAdmin() === true || App::user() === null;
+            $countStmt = $db->prepare(
+                "SELECT COUNT(*) AS `c` FROM `tblActivityLogs` WHERE `activityType` = 'PasswordResetNoMailer' "
+                . 'AND `timestamp` > DATE_SUB(NOW(), INTERVAL 7 DAY)'
+                . ($wholeInstallation === true ? '' : ' AND `siteID` = ?')
             );
-            $unsent = $rs !== false ? (int) ($rs->fetch_assoc()['c'] ?? 0) : 0;
-            if ($rs !== false) {
-                $rs->free();
+            if ($wholeInstallation === false) {
+                $ownSite = \Portal\Core\Site::id();
+                $countStmt->bind_param('i', $ownSite);
             }
+            $countStmt->execute();
+            $unsent = (int) ($countStmt->get_result()->fetch_assoc()['c'] ?? 0);
+            $countStmt->close();
             $probes['Email'] = [
                 'state'  => 'warn',
                 'label'  => 'Not set up',
                 'detail' => 'Password-reset e-mails cannot be sent. A person who asks for one is still told it was sent. '
-                    . sprintf('Asked for and not sent in the last 7 days: %d. ', $unsent)
+                    . ($wholeInstallation === true
+                        ? sprintf('Asked for and not sent in the last 7 days, across every organisation: %d. ', $unsent)
+                        : sprintf('Asked for at this organisation and not sent in the last 7 days: %d. ', $unsent))
                     . 'Still needed for ' . $mailRoute['label'] . ': ' . implode('; ', $mailRoute['missing'])
                     // Admin → Settings is where these are typed. This used to
                     // say Admin → Integrations, which only shows them (#580).

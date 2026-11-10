@@ -196,7 +196,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 149;
+const EXPECTED_CHECKS = 152; // three added by #598 (part L)
 
 function refuse(string $why): never
 {
@@ -322,6 +322,7 @@ const PEOPLE = [
     'tia'   => 922030, // K: "B", who signs in next on A's browser
     'uma'   => 922031, // K: "C", with two-step sign-in on
     'vic'   => 922032, // K (#903): a GLOBAL administrator, who sets the passkey address on the Settings page
+    'wes'   => 922033, // L (#598): half-way through signing in when the password is changed elsewhere
 ];
 /** Part K's invitation: the account it makes is a NEW person, numbered by the database, so it is found by these. */
 const INVITEE_EMAIL = 'invitee.twostep@selftest.invalid';
@@ -1534,7 +1535,7 @@ ok('E2 the sixth try, with a RIGHT backup code, is refused: the page says there 
     $blocked['status'] === 302 && $blocked['location'] === '/auth/2fa/verify' && str_starts_with(said($told), 'danger: Too many attempts') === true && signedIn($jar, ip(52)) === false, describe($blocked) . '; the page then said: ' . said($told));
 ok('E3 and that right code was NOT used up while he was stopped', counts('finn') === '2 stored, 2 unused', counts('finn'));
 // Sixteen minutes later by the DATABASE's clock (the one the limit reads): the rows are moved, nothing waits.
-q('UPDATE tblApiRateLimits SET hitAt = NOW() - INTERVAL 16 MINUTE WHERE bucket LIKE ?', 's', ['totp\\_verify:' . PEOPLE['finn'] . ':%']);
+q('UPDATE tblApiRateLimits SET hitAt = UTC_TIMESTAMP() - INTERVAL 16 MINUTE WHERE bucket LIKE ?', 's', ['totp\\_verify:' . PEOPLE['finn'] . ':%']);
 $later = codeStep($jar, ip(52), ['code' => $finnCode, 'use_backup' => '1']);
 ok('E4 once those tries are 16 minutes old, the same code signs him in', $later['status'] === 302 && str_contains($later['location'], '2fa') === false && signedIn($jar, ip(52)) === true && counts('finn') === '2 stored, 1 unused', describe($later) . '; ' . counts('finn'));
 
@@ -1622,7 +1623,7 @@ $pg      = req($hugo['jar'], 'GET', $stopped['location'] === '' ? '/account' : $
 ok('G2 the sixth try, with the RIGHT code, is refused, shows no code and changes nothing; the Account page says to wait',
     $stopped['status'] === 302 && $stopped['location'] === '/account?error=totp_wait' && codesOn($stopped['body']) === [] && stored('hugo') === $hugoStore && str_starts_with(said($pg), 'danger: Too many wrong codes') === true, describe($stopped) . '; Account then said: ' . said($pg));
 ok('G3 those wrong codes do not stop his next sign-in: the authenticator signs him in from a new browser at the same address', signInWithApp('hugo', $hugo['key'], ip(71)) !== '');
-q('UPDATE tblApiRateLimits SET hitAt = NOW() - INTERVAL 16 MINUTE WHERE bucket = ?', 's', ['totp_newcodes:' . PEOPLE['hugo']]);
+q('UPDATE tblApiRateLimits SET hitAt = UTC_TIMESTAMP() - INTERVAL 16 MINUTE WHERE bucket = ?', 's', ['totp_newcodes:' . PEOPLE['hugo']]);
 $later = askNewCodes($hugo['jar'], ip(71), ['code' => appCode($hugo['key'])]);
 ok('G4 once those tries are 16 minutes old, the right code makes a new set', $later['status'] === 200 && count(codesOn($later['body'])) === 8 && stored('hugo') !== $hugoStore, describe($later));
 
@@ -1946,8 +1947,12 @@ function theirs(): array
         'p900_kept_typing' => 'typed by the previous person ' . bin2hex(random_bytes(4)),
     ];
 }
-/** What a session may hold straight after a different person's password sign-in, and nothing else. */
-const AFTER_A_FRESH_SIGN_IN = ['portal_locale', 'user_id', 'user_name', 'user_email', 'active_site_id', 'reauth_proof'];
+/**
+ * What a session may hold straight after a different person's password sign-in, and nothing else.
+ * `signed_in_at_utc` (#598, D-104) is the moment this sign-in began, written by
+ * Auth::beginSessionFor() itself, so a later password reset or change can end it.
+ */
+const AFTER_A_FRESH_SIGN_IN = ['portal_locale', 'user_id', 'user_name', 'user_email', 'active_site_id', 'reauth_proof', 'signed_in_at_utc'];
 
 // --- K1. Nobody signed in, a visitor's entries waiting; B signs in by password.
 $kJar  = newJar();
@@ -2733,6 +2738,32 @@ clearstatcache(true, $scratchAuth);
 if ((string) file_get_contents($scratchAuth) !== $authAsCopied) {
     refuse('the scratch Auth.php could not be put back as copied');
 }
+
+// =============================================================================
+head('L. A sign-in half way through when the password is changed elsewhere is ended once its code is given (#598, D-104)');
+// =============================================================================
+// The sign-in moment a session carries is set at the PASSWORD step and KEPT by
+// the code step (Auth::beginSessionFor(), same person). So somebody who typed
+// the OLD password and is waiting for a code must not come out of the code
+// step with a sign-in that outlives the change. Driven, because "is the moment
+// kept, or written afresh at the second step?" is behaviour, not shape.
+$wesOn = switchOn('wes', ip(170));
+[$waiting, $first] = passwordStep('wes', ip(171));
+ok('L1 set-up: one browser is signed in with two-step sign-in on, a second has given the password and waits for its code',
+    signedIn($wesOn['jar'], ip(170)) === true && $first['location'] === '/auth/2fa/verify' && count($wesOn['codes']) >= 2,
+    describe($first));
+$wesNew      = 'Wes-New-598-' . bin2hex(random_bytes(6)) . 'Aa1!';
+$accountPage = req($wesOn['jar'], 'GET', '/account', null, ip(170));
+$changed = req($wesOn['jar'], 'POST', '/account/change-password', [
+    'csrf_token' => token($accountPage['body']), 'current_password' => $password, 'new_password' => $wesNew, 'new_password_confirm' => $wesNew,
+], ip(170));
+$codeGiven = codeStep($waiting, ip(171), ['code' => nth($wesOn['codes'], 0), 'use_backup' => '1']);
+ok('L2 the password is changed on the first browser, which stays signed in',
+    $changed['location'] === '/account?pwchanged=1' && signedIn($wesOn['jar'], ip(170)) === true,
+    describe($changed));
+ok('L3 the second browser gives a right code after the change, and is NOT left signed in: its sign-in began with the old password (red on the old code: signed in)',
+    $codeGiven['status'] === 302 && signedIn($waiting, ip(171)) === false,
+    describe($codeGiven));
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
