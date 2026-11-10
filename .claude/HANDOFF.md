@@ -13,10 +13,12 @@ Last whole suite (with #932): 104/104 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 0381b94c | Round 10 built (Delete page states every case incl. holds; per-organisation rows 'At <name>'; statement-file reason exact; hold now tested). Check round 10 running. Then #940 (activity-log wording) follows |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 0381b94c | Check round 10: one real problem, a test gap ('both holds' wording unpinned); plus organisation-name escaping unguarded (security), the no-period statement rule untested one way, and three untrue doc sentences. Round 11 building. Then #940 |
 
+| #785 — a guard for write paths that store a wall-clock reading as a moment | worktree agent (p785-build) | Building (tooling only) |
+| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | worktree agent (p935-build) | Building |
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
-**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782). #932 needs none. Next free: 274.
+**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782, landed), 274 (#935). Next free: 275.
 
 ## Next, in this order
 
