@@ -165,7 +165,12 @@ appended with its real date and a note that it was added later.
 | [D-107](107-no-change-to-the-password-minimum-on-running-installations.md) | 2026-11-10 | No change to the minimum password length on running installations: none exists | in force |
 | [D-108](108-an-administrator-setting-a-password-signs-the-person-out.md) | 2026-11-10 | An administrator setting someone's password signs that person out of every browser | in force |
 | [D-109](109-ordinary-members-do-not-see-session-headcounts.md) | 2026-11-10 | Ordinary members do not see attendance sessions' headcounts | in force |
+| [D-110](110-who-opened-a-care-case-is-kept.md) | 2026-11-10 | Who opened a pastoral care case is kept when that worker is erased | in force |
+| [D-111](111-who-checked-a-child-in-or-out-is-kept.md) | 2026-11-10 | Who checked a child in or out is kept when that helper is erased | in force |
+| [D-112](112-a-workers-name-stays-on-their-own-case.md) | 2026-11-10 | A worker's name stays on a visit they made on their own care case | in force |
+| [D-113](113-kept-worker-names-and-numbers-are-said-plainly.md) | 2026-11-10 | A kept worker's name and number both stay, and the portal says so plainly | in force |
+| [D-114](114-who-may-delete-a-past-attendance-session.md) | 2026-11-10 | A past attendance session can be deleted by administrators, the attendance role and its recorder | in force |
 
-*109 decisions. This index is checked against the folder by
+*114 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

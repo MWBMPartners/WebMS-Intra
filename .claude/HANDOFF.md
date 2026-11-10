@@ -7,15 +7,15 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 `claude/alpha-wip`, pushed after every commit (D-088). Latest pushed: e9ebf2a1. Landed since 9 November, all
 pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912,
-#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-109.
+#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-114.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 2 NOT CLEAN: race closed (0 survivors), but a session with a number HIGHER than the account's survives (restore / rolled-back change) — fixing with `!==` and writing the number after commit; test gaps Q3, Q4 |
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, a3f4d93e (rebased on bfa3525d) | Round 1 fixes and D-109 built; round 2 check running. Raised #921 |
-| #703 — keep the worker's name on pastoral/safeguarding records (D-016; code contradicts it; migration 272 if needed) | `agent-afd8a19e73dcfa23c` / `p703-build` | Being built |
+| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 2's fixes in 213fec83 (`!==`, a random step, the number written after commit; Q3/Q4 pinned); round 3 check next |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, a3f4d93e | Round 2 NOT CLEAN (Q20 passes with a count in the delete button; three paths unpinned); fixing, and building D-114 (who may delete a session) |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, a94ec50c | Round 1 NOT CLEAN (three reassuring sentences now untrue — D-113 says correct them; a pin too weak); building D-110 (case opener), D-111 (check-in helpers) |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed). Next free: 273.
