@@ -15,14 +15,14 @@ pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900,
 |---|---|---|
 | #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 1's findings fixed (the race closed with `tblUsers.signInVersion` read in the same SELECT as the password; D-108 built); round 2 check running |
 | #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 727a68ec | Round 1 NOT CLEAN (one untrue Roles sentence; header comparison and membership fixture missing); fixing, and building D-109 (#917) |
+| #703 — keep the worker's name on pastoral/safeguarding records (D-016; code contradicts it; migration 272 if needed) | `agent-afd8a19e73dcfa23c` / `p703-build` | Being built |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
-**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529). Next free: 272.
+**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed). Next free: 273.
 
 ## Next, in this order
 
 1. #598 round 2 → integrate; #529 check rounds → integrate.
-2. #703 (decided by D-016: confirm the code keeps the worker's name, then close).
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
