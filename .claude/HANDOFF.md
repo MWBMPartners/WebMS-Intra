@@ -15,7 +15,7 @@ pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900,
 |---|---|---|
 | #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 3: behaviour CORRECT; fixing wording (restore log reason, a docblock, admin message) and two test gaps (reset/admin pages' after-commit order); raised #922 |
 | #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, 314e9bf0 (rebased on b761ff5a) | Round 2 fixes and D-114 built (#921 fixed too); round 3 check running |
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, a94ec50c | Round 1 NOT CLEAN (three reassuring sentences now untrue — D-113 says correct them; a pin too weak); building D-110 (case opener), D-111 (check-in helpers) |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab (rebased on b761ff5a) | D-110 to D-113 built, round 1 fixed; round 2 check running |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed). Next free: 273.
