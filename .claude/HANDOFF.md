@@ -13,7 +13,7 @@ Last whole suite (with #529): 103/103 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, a77d046c | Round 5 NOT CLEAN: other reasons members read still say the activity log / change history / expense items are untraceable; page pins strip PHP blocks and tag attributes, so an echoed or hidden sentence passes. Round 6: fix the contradicting class, pin the RENDERED pages over HTTP |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, b662a5d1 | Round 6 built (rendered-page pins over HTTP; the whole untraceable-sentence class fixed); check round 6 running |
 | #932 — activity log may be kept for ever (D-117) | worktree agent (p932-build) | Building: code part only (sweep, retention page, retention-caps test); member wording after #703 |
 | #782 — hard-coded Europe/London zones and two zone defaults (migration 273) | worktree agent (p782-build) | Building |
 
@@ -23,7 +23,7 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 ## Next, in this order
 
 1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
-2. Raised this stretch, in the backlog: #919, #920, #922-#930. #931 closed by D-116.
+2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933, #934. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
