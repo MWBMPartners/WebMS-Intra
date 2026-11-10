@@ -501,9 +501,17 @@ const ACCOUNT_AFTER_ERASURE = [
 ];
 // Not about the person: the row's own number and date, and switches that
 // have nothing left to show once the columns above are empty.
+//
+// `signInVersion` (#598, migration 270) joined on 10 November 2026, found by
+// the whole-suite run rather than by #598's own checks. It is a counter raised
+// by a random step whenever a password is reset or changed, so it says nothing
+// about the person. Leaving it is safe because an erasure already switches the
+// account off (`isActive` above), and `Auth::endSessionOfInactiveAccount()`
+// ends any session of an inactive account on its next request, whatever
+// number the session carries.
 const ACCOUNT_COLUMNS_LEFT_AS_THEY_WERE = [
     'userID', 'createdAt', 'sabbathHonour', 'visibilityName', 'visibilityRoles', 'visibilityEmail', 'visibilityPhone',
-    'visibilityAddress', 'visibilityCoords', 'visibilityBio', 'visibilityPhoto',
+    'visibilityAddress', 'visibilityCoords', 'visibilityBio', 'visibilityPhoto', 'signInVersion',
 ];
 
 // Person columns section 4c could not put a made-up row in, so it says nothing

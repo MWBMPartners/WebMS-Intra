@@ -5,16 +5,16 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 
 ## Branch
 
-`claude/alpha-wip`, pushed after every commit (D-088). Latest pushed: e9ebf2a1. Landed since 9 November, all
-pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912,
-#648 (+ #915). Last whole suite: 103/103 green. Decisions taken this stretch: D-102 to D-115.
+`claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
+#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598.
+Last whole suite (with #598): 102/103, the one red being the eraser test's exact column list missing #598's
+`signInVersion` — fixed in the test, re-run green. Decisions taken this stretch: D-102 to D-115.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 4 CLEAN; on the working branch with docs; whole suite running, then push |
-| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, e1f4afed (rebased on 6a5bfd20) | Round 4 CLEAN; integrating after #598's suite run. Raised #925 |
+| #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, e1f4afed (rebased on 6a5bfd20) | Round 4 CLEAN; integrating now (#598 has landed). Raised #925 |
 | #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 9e4256ab | Round 4 (c4542370) NOT CLEAN: the number also survives in the activity log and other records' change history; rate-limit wording untrue; list items checked by words, so a reversed meaning passes. Redesign sent: stop presenting the list as complete, add a plain statement about logs with their real clearing rule, pin whole text in all four places |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
@@ -22,7 +22,8 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 
 ## Next, in this order
 
-1. #598 round 2 → integrate; #529 check rounds → integrate.
+1. Integrate #529 (cherry-pick, docs, whole suite, push); #703 round 5 → check → integrate.
+2. Raised this stretch, in the backlog: #919, #920, #922-#929.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
