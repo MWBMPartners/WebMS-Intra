@@ -36,12 +36,19 @@
  * The log grows without limit. And an erasure UNLINKS a person's activity
  * records (the catalogue's decision for `tblActivityLogs`): it empties the
  * columns that point at them and keeps the record of what happened, so a
- * DESCRIPTION that names somebody is not rewritten — usually by account
- * number, and for some kinds of record by full name or by an e-mail address a
- * sign-in provider gave (#933 lists them: an event registration received, an
- * account linked or unlinked). Until #932 the clear-out was what eventually
- * removed such a line; under "never" it stays for ever. The page says so in
- * words no stronger than that, because not every description names anybody.
+ * DESCRIPTION that names somebody is not rewritten. Most name a person by
+ * account number; many name them by full name or e-mail address. FOR EXAMPLE —
+ * this list is not complete, and #933 is the record of the full count (there
+ * are about seven hundred `Logger::activity(` calls under `web/`):
+ * `UserCreated` (admin/users/save.php: full name and own e-mail address), the
+ * password-reset records (auth/forgot-password/save.php: the e-mail address,
+ * in about seven of them), `EventInviteSent` (the invitee's e-mail address),
+ * `EventSubmitted` (an anonymous submitter's e-mail address),
+ * `KidProfileAdded`/`KidProfileEdited` (a child's name), an event registration
+ * received, and an account linked or unlinked (a sign-in provider's e-mail
+ * address). Until #932 the clear-out was what eventually removed such a line;
+ * under "never" it stays for ever. The page says so in general words that
+ * are true — not every description names anybody — and claims no list.
  *
  * WHO WRITES IT, MEASURED (10 November 2026)
  * -----------------------------------------------------------------------------
@@ -363,6 +370,14 @@ final class ActivityLogRetention
             //    INSIDE this transaction, after the installation's row is locked,
             //    and locked itself; it THROWS rather than answer "none" when it
             //    cannot read, which lands in the catch below as a refusal.
+            //
+            //    KNOWN AND LEFT ALONE: an organisation's own figure ABOVE the
+            //    hard maximum (say 5000, which only SQL or a restore can store)
+            //    blocks lowering the installation from never to 3650, although
+            //    the reader already holds that organisation to 3650 and nothing
+            //    would change for it. Comparing against the figure AS STORED
+            //    keeps this rule the same as the save rule's, it is reachable
+            //    only by SQL, and the way out is plain: lower that figure.
             if ($days !== self::NEVER) {
                 $above = self::organisationsAbove($db, $days);
                 if ($above !== []) {
@@ -410,11 +425,12 @@ final class ActivityLogRetention
             $named[] = $one['name'] . ' (' . self::inWords($one['days']) . ')';
         }
 
-        return 'Keeping activity-log records for ' . self::inWords($days) . ' is shorter than '
-            . (count($above) === 1 ? 'an organisation has' : 'some organisations have')
-            . ' already chosen for itself, so it was not saved: ' . implode(', ', $named) . '. '
-            . 'The portal will not delete an organisation\'s records sooner than it chose behind its back. '
-            . 'Ask them to lower their own figure first, or choose a longer figure. Nothing was saved.';
+        return 'This was not saved. ' . self::inWords($days) . ' is shorter than the period '
+            . (count($above) === 1 ? 'this organisation has' : 'these organisations have')
+            . ' chosen for keeping their own activity-log records: ' . implode(', ', $named) . '. '
+            . 'The portal will not delete an organisation\'s records sooner than that organisation chose. '
+            . 'Ask ' . (count($above) === 1 ? 'it' : 'them') . ' to choose a shorter period first, '
+            . 'or choose a longer period here. Nothing was changed.';
     }
 
     /**

@@ -36,10 +36,20 @@
  *   H  an untouched Save over a stored never the installation does not allow
  *      (SQL-only state) changes nothing (#687), and the page says the reader
  *      holds it to the installation's figure
- *   I  D-118's gate on every action: a member is refused everything; an
- *      organisation's administrator gets a page with their own organisation's
- *      form and nothing installation-wide, and is refused (403) the
- *      installation's form and the old sweep action
+ *   I  with ONE organisation, as `orgadmin` (whose `tblUsers.isAdmin` makes
+ *      them an administrator everywhere): a member is refused the page, both
+ *      forms and the sweep; `orgadmin` gets a page with only the organisation's
+ *      form, and is refused (403) the installation's form and the sweep with
+ *      no action. This does NOT show "only their own organisation" — M does.
+ *   M  D-118 with SEVERAL organisations (session mode) and a TRUE organisation
+ *      administrator (`isSiteAdmin` on organisation one, a plain member of
+ *      two): a posted `siteID`/`site_id`/`siteId` naming organisation two
+ *      changes only organisation one; on organisation one the installation's
+ *      form, the sweep with no action, `action=sweep`, an unknown action and
+ *      `action[]` are each refused (403); a post with no token changes
+ *      nothing; switched to organisation two, the page and the organisation
+ *      form are refused (403) and no row is written; a global administrator
+ *      on organisation two saves organisation two's figure
  *   J  an action the page does not know runs NOTHING — not the sweep — while
  *      a post with no action is still the sweep, as it always was
  *   K  the ERROR log is untouched: its stored 0 still reads as a year on the
@@ -87,7 +97,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const AL_EXPECTED_CHECKS = 64;
+const AL_EXPECTED_CHECKS = 72;
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -332,7 +342,12 @@ $removeMember = static function (int $who) use ($db): void {
 };
 
 $people = [];
-foreach (['orgadmin' => [1, 0], 'globaladmin' => [1, 1], 'member' => [0, 0]] as $role => [$isAdmin, $isRoot]) {
+// 'siteadmin' is a TRUE organisation administrator: no `tblUsers.isAdmin` at
+// all (that flag makes 'orgadmin' an administrator everywhere), and
+// `isSiteAdmin` on organisation one only — set in section M, which is also where
+// several organisations are switched on. Check round 2 found that without it
+// "only their OWN organisation" was driven by nothing.
+foreach (['orgadmin' => [1, 0], 'globaladmin' => [1, 1], 'member' => [0, 0], 'siteadmin' => [0, 0]] as $role => [$isAdmin, $isRoot]) {
     $email = "alret.{$role}@selftest.invalid";
     $old   = $db->prepare('SELECT `userID` FROM `tblUsers` WHERE `emailAddress` = ?');
     $old->bind_param('s', $email);
@@ -874,6 +889,79 @@ $p14 = $plant('_apps/admin/maintenance/retention.php', '$alrOwn       = Activity
     '$alrOwn       = App::settings(\'audit.retentionDays\') === null ? null : (int) App::settings(\'audit.retentionDays\');', $scnPrefillUntouched);
 check('P14 with the organisation\'s form prefilled from the merged settings (#674), one untouched Save pins the installation\'s figure as its own', [$p14['applied'], $p14['result']], [true, false]);
 check('P8 with every plant removed again, the refusal is green once more', $scnRefuseNever(), true);
+
+// ═════════════════════════════════════════════════════════════════════════════
+echo "M. D-118 with several organisations and a TRUE organisation administrator\n";
+// ═════════════════════════════════════════════════════════════════════════════
+// Several organisations ON, decided by the SESSION (the person chooses at
+// /site/choose), so `Site::id()` really can be organisation two. Put back below.
+$origMulti = $setting('multisite.enabled', null);
+$origMode  = $setting('multisite.detectionMode', null);
+$put('multisite.enabled', null, 'true');
+$put('multisite.detectionMode', null, 'session');
+$sa = (int) $people['siteadmin']['id'];
+$ga = (int) $people['globaladmin']['id'];
+$db->query("UPDATE `tblUserSites` SET `isSiteAdmin` = 1 WHERE `userID` = {$sa} AND `siteID` = {$siteOne}");
+$db->query("INSERT IGNORE INTO `tblUserSites` (`siteID`, `userID`, `isActive`, `isSiteAdmin`) VALUES ({$siteTwo}, {$sa}, 1, 0)");
+$db->query("INSERT IGNORE INTO `tblUserSites` (`siteID`, `userID`, `isActive`, `isSiteAdmin`) VALUES ({$siteTwo}, {$ga}, 1, 0)");
+
+/** Sign in, then choose the organisation, as a person does with several. */
+$signInAt = static function (string $role, int $site) use ($signIn, $http, $tokenOn): void {
+    $signIn($role);
+    $chooser = $http('GET', '/site/choose');
+    $http('POST', '/site/switch', ['csrf_token' => $tokenOn($chooser['body']), 'site_id' => (string) $site]);
+};
+/** A post with this session's own token. */
+$postHere = static function (array $fields) use ($http, $tokenOn): array {
+    return $http('POST', AL_PAGE, ['csrf_token' => $tokenOn($http('GET', '/')['body'])] + $fields);
+};
+/** D-118: an organisation's figure can only be its OWN, whatever organisation the post names. */
+$scnOwnOrganisationOnly = static function () use ($world, $signInAt, $postHere, $setting, $siteOne, $siteTwo): bool {
+    $world('30', null, null);
+    $signInAt('siteadmin', $siteOne);
+    $postHere(['action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '20',
+        'siteID' => (string) $siteTwo, 'site_id' => (string) $siteTwo, 'siteId' => (string) $siteTwo]);
+    return $setting(AL_KEY, $siteOne) === '20' && $setting(AL_KEY, $siteTwo) === null;
+};
+
+$world('30', null, null);
+$signInAt('siteadmin', $siteOne);
+$g = $page();
+check('M1 a true organisation administrator, on their own organisation, gets the page with ONLY its form', [
+    $g['status'], str_contains($g['body'], 'value="activity-retention-organisation"'),
+    str_contains($g['body'], 'value="activity-retention-installation"'), str_contains($g['body'], 'Run Sweep Now'),
+], [200, true, false, false]);
+check('M2 (scenario) a post naming organisation two (siteID, site_id and siteId) changes ONLY organisation one', $scnOwnOrganisationOnly(), true);
+$refusedHere = [];
+foreach ([
+    'installation' => ['action' => 'activity-retention-installation', 'choice' => 'never'],
+    'no action'    => [],
+    'action=sweep' => ['action' => 'sweep'],
+    'unknown'      => ['action' => 'something-else'],
+    'action[]'     => ['action' => ['activity-retention-organisation'], 'choice' => 'days', 'days' => '5'],
+] as $label => $fields) {
+    $refusedHere[$label] = $postHere($fields)['status'];
+}
+check('M3 ...and on organisation one the installation\'s form, the sweep (no action, and action=sweep), an unknown action and action[] are each refused (403), changing nothing',
+    [$refusedHere, $setting(AL_KEY, null), $setting(AL_KEY, $siteOne)],
+    [['installation' => 403, 'no action' => 403, 'action=sweep' => 403, 'unknown' => 403, 'action[]' => 403], '30', '20']);
+$http('POST', AL_PAGE, ['action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '5']);
+check('M4 ...a post with NO form token changes nothing, for the organisation administrator too', $setting(AL_KEY, $siteOne), '20');
+$signInAt('siteadmin', $siteTwo);
+$twoGet  = $page()['status'];
+$twoPost = $postHere(['action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '7'])['status'];
+check('M5 switched to organisation two, where they are a plain member: the page and the organisation form are refused (403), and no row is written',
+    [$twoGet, $twoPost, $setting(AL_KEY, $siteTwo), $setting(AL_KEY, $siteOne)], [403, 403, null, '20']);
+$signInAt('globaladmin', $siteTwo);
+$gaSave = $postHere(['action' => 'activity-retention-organisation', 'choice' => 'days', 'days' => '15']);
+check('M6 a global administrator on organisation two saves organisation TWO\'s figure, and organisation one is untouched',
+    [$setting(AL_KEY, $siteTwo), $setting(AL_KEY, $siteOne)], ['15', '20']);
+$p15 = $plant('_apps/admin/maintenance/retention.php', '$alrSiteId    = Site::id();',
+    '$alrSiteId    = isset($_POST[\'siteID\']) === true ? (int) $_POST[\'siteID\'] : Site::id();', $scnOwnOrganisationOnly);
+check('P15 with the organisation taken from the post, an organisation administrator writes ANOTHER organisation\'s figure', [$p15['applied'], $p15['result']], [true, false]);
+check('M7 with that plant removed again, only their own organisation changes once more', $scnOwnOrganisationOnly(), true);
+$put('multisite.enabled', null, $origMulti);
+$put('multisite.detectionMode', null, $origMode);
 
 // 🧾 The server's own error log. A page that throws part-way can still answer
 //    200, so the log is read as well: any fatal error, or anything naming this

@@ -89,6 +89,14 @@
  *   - Nothing here runs over HTTP, so it says nothing about what the page looks
  *     like, whether its gate refuses a non-administrator, or whether the form
  *     token is checked. Section E reads those as text, which is weaker.
+ *   - #932's two race checks (section F) cannot catch ONE fault: the D-119
+ *     read of the organisations moved to BEFORE the installation's row is
+ *     locked. Both orders then answer the same in every timing these checks
+ *     can arrange without a hook inside the method; the order is held by the
+ *     method's own comment and by review, not by a test. The holder processes
+ *     are given time (a sleep) rather than asserted to hold their lock; if one
+ *     never took it, the saver does not wait and the "it waited" half of the
+ *     check fails, so this fails closed.
  *   - Section D proves the lock SERIALISES two savers and that the second sees
  *     the first's ceiling. It does not run many simultaneous pairs; #687's
  *     116-pair measurement is the precedent for that and was done by hand.
@@ -128,7 +136,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const RC_EXPECTED_CHECKS = 142; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six; 116 until #932 replaced section F's three 0-means-a-year pins with twenty-two; 135 until D-118/D-119 (#932 round 2) added six, including the race and the unreadable case; 141 until check round 1 added the race the other way.
+const RC_EXPECTED_CHECKS = 143; // 64 until #491 added section F's sixteen; 80 until #810 added section G's thirty-six; 116 until #932 replaced section F's three 0-means-a-year pins with twenty-two; 135 until D-118/D-119 (#932 round 2) added six, including the race and the unreadable case; 141 until check round 1 added the race the other way; 142 until check round 2 added never saved over organisations' days.
 
 $dbName = (string) getenv('SELFTEST_DB_NAME');
 if (str_starts_with($dbName, 'selftest_') === false) {
@@ -997,6 +1005,22 @@ rc_check('once the organisation follows the installation again, lowering to 30 d
 $rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 0, true);
 rc_check('and the installation\'s never is stored as 0, never as 3650 — never shortens nobody, so it is never refused',
     $rcSave['outcome'] === 'stored' && $rcAlSetting(null) === '0', json_encode($rcSave));
+// 🪤 "CHOOSING NEVER IS NEVER REFUSED" — with organisations HOLDING numbers of
+//    days, because that is the only state in which a wrong refusal could happen
+//    (check round 2, plant K: judging never like any other figure left every
+//    earlier check green, since each installation-never save ran with no
+//    organisation rows at all). Never is longer than any number of days, so it
+//    can shorten nobody, and both organisations keep their own figures.
+rc_world($mysqli, $AL, '30', '20');
+$rcIns15 = $mysqli->prepare('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (2, \'audit.retentionDays\', \'15\', \'\', 0)');
+$rcIns15->execute();
+$rcIns15->close();
+$rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 0, true);
+rc_check('the installation\'s NEVER is stored while organisations hold 20 and 15 days, refusing nothing and leaving both figures alone',
+    $rcSave['outcome'] === 'stored' && $rcSave['blockedOrganisations'] === 0 && $rcAlSetting(null) === '0'
+    && $rcAlSetting(1) === '20' && $rcAlSetting(2) === '15',
+    json_encode($rcSave) . ' stored: ' . var_export([$rcAlSetting(null), $rcAlSetting(1), $rcAlSetting(2)], true));
+rc_world($mysqli, $AL, '0', null);
 $rcSave = \Portal\Core\ActivityLogRetention::saveInstallation($mysqli, 30, false);
 $rcSave2 = \Portal\Core\ActivityLogRetention::saveForSite($mysqli, 1, 5, false);
 rc_check('the installation\'s save refuses anybody not a global administrator, and an organisation\'s refuses anybody not its administrator (D-118)',
