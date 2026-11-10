@@ -1552,9 +1552,17 @@ return [
         // and nothing acted on it. The instruction is now hand-written in
         // GdprEraser::catalogue(), and three checks in
         // tools/gdpr-coverage-selftest.php fail if it is taken away or hidden.
-        'reason'   => 'Kept for running and repairing the portal. The record stays;'
-                    . ' the link to the person is cut, so it can no longer be traced'
-                    . ' back to them',
+        // 🗣️ #703 round 6: "the link to the person is cut, so it can no longer be
+        //    traced back to them" was untrue - what a record SAYS is kept, and it
+        //    can name the person, give their account number or quote a sign-in
+        //    provider's e-mail address. Said as it is now.
+        'reason'   => 'Kept for running and repairing the portal, until the nightly clear-out deletes it after'
+                    . ' audit.retentionDays (365 days unless changed), if that scheduled job has been set up. On'
+                    . ' the person\'s own records the account number, the address, the browser, the headers and'
+                    . ' the session details are removed, but what each record SAYS is kept as written: it can'
+                    . ' still name them or give their account number, and a record of linking or unlinking a'
+                    . ' sign-in provider gives that provider\'s e-mail address. Records other people made can'
+                    . ' mention them too',
         'columns'  => ['userID', 'requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
     ],
     'tblAnnouncements' => [
@@ -1610,9 +1618,17 @@ return [
     ],
     'tblAuditTrail' => [
         'decision' => 'unlink',
-        'reason'   => 'Kept for running and repairing the portal. The record stays;'
-                    . ' the link to the person is cut, so it can no longer be traced'
-                    . ' back to them. Since #707 the recorded VALUES are emptied too, for a row'
+        // 🗣️ #703 round 6: it said "the link to the person is cut, so it can no
+        //    longer be traced back to them". Untrue: a row ABOUT the account keeps
+        //    the account's number as its `recordID`, and the stored copies of OTHER
+        //    records (an expense claim's userID, a loan's counterpartyUserID) keep
+        //    it too. The change history is kept for ever (the owner's decision
+        //    D-116), so this says so.
+        'reason'   => 'The change history: a copy of what a record held each time it was created, changed or'
+                    . ' deleted. Kept for ever (the owner\'s decision D-116). Who made a change is detached, but the'
+                    . ' history still says WHICH record changed, so an entry about the person\'s own account keeps'
+                    . ' its account number, and the stored copies of other records (an expense claim, a loan) can'
+                    . ' hold it too. Since #707 the recorded VALUES are emptied too, for a row'
                     . ' about this person: the convention is that a creation records the whole'
                     . ' new row, so a change to somebody\'s own account wrote their NAME AND'
                     . ' E-MAIL ADDRESS in here — measured, and not the telephone or postal address'
@@ -1648,9 +1664,14 @@ return [
     ],
     'tblErrors' => [
         'decision' => 'unlink',
-        'reason'   => 'Kept for running and repairing the portal. The record stays;'
-                    . ' the link to the person is cut, so it can no longer be traced'
-                    . ' back to them',
+        // 🗣️ #703 round 6: the same untrue "can no longer be traced back to them"
+        //    as the two above. `errorDetail` and `requestURL` are kept and can
+        //    name somebody (said in notEmptiedHere below); they expire on this
+        //    table's own timer, errors.retentionDays.
+        'reason'   => 'Kept for running and repairing the portal, until the nightly clear-out deletes it after'
+                    . ' errors.retentionDays (365 days unless changed), if that scheduled job has been set up. The'
+                    . ' account link, address and browser are removed; the fault\'s own detail and the address that'
+                    . ' was asked for are kept until then and can still name the person',
         'columns'  => ['userID', 'visitorIP', 'userAgent', 'requestHeaders', 'resolvedByID', 'errorDetail', 'requestURL'],
             'notEmptiedHere' => [
             'errorDetail' => 'The full detail of a fault, including the trace through the code. A trace can quote a '
@@ -2574,10 +2595,13 @@ return [
         // it to an account — the claimant is named on the claim above it — so
         // there is no person to find here, and "unlink" would be a promise the
         // code cannot keep. The claim itself is kept six years for HMRC and has
-        // its account link cut, which is what detaches these lines from anybody.
+        // the claimant's account number KEPT on purpose (#703, D-113), so these
+        // lines are NOT detached from anybody: they hang off a claim that names
+        // the claimant. (This said "has its account link cut, which is what
+        // detaches these lines from anybody", which was untrue.)
         'decision' => 'retain',
         'period'   => 'as long as the claim, which HMRC requires for six years',
-        'reason'   => 'What a person is claiming for, line by line, with the supplier and the amount. The claim itself names the claimant, and the organisation must keep what it paid out and why; so the line stays and the link to the person is cut on the claim. Note that the supplier may be a sole trader trading under their own name.',
+        'reason'   => 'What a person is claiming for, line by line, with the supplier and the amount. The claim itself names the claimant, and the organisation must keep what it paid out and why; so the line stays, and the claim above it keeps the claimant\'s account number on purpose (D-113). Note that the supplier may be a sole trader trading under their own name.',
         'columns'  => ['itemName', 'description', 'supplier'],
     ],
 
@@ -2827,8 +2851,8 @@ return [
                     . 'installation that had already received uploads those filenames would need '
                     . 'dealing with by hand. There is no live installation of this portal, so there '
                     . 'are none. That matters here more than elsewhere, because an erasure request '
-                    . 'could not have reached one: the claim is kept for six years for HMRC and only has '
-                    . 'the account number detached, so the row is never deleted, the cascade never fires, '
+                    . 'could not have reached one: the claim is kept for six years for HMRC, with the '
+                    . 'claimant\'s account number kept on purpose, so the row is never deleted, the cascade never fires, '
                     . 'and matching through the parent cannot help because the parent is retained on '
                     . 'purpose. The receipt FILE itself is evidence and is kept with the claim.',
         'period'   => 'as long as the claim, which HMRC requires for six years. Nothing in the names '

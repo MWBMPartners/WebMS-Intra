@@ -1210,9 +1210,26 @@ class GdprEraser
             //    list and still left alone for months.
             ['table' => 'tblActivityLogs', 'userCol' => 'userID', 'action' => 'anonymise',
              'nullCols' => ['requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
-             'reason' => 'the record of what happened is kept for running and repairing the portal; everything that could '
-                 . 'point it back at the person is removed: the account number, the address the request came from, the '
-                 . 'browser\'s name, the request\'s headers, the session\'s fingerprint and the facts about the session'],
+             // 🗣️ #703 round 6: this said "everything that could point it back at
+             //    the person is removed". Untrue, read from the code that writes the
+             //    log (not measured on an erased account): a record's description is
+             //    kept as written, and some descriptions name the person - an event
+             //    registration records "(<their full name>)"
+             //    (calendar/event-register-save.php, `EventRegistrationReceived`), a
+             //    record of linking or unlinking a sign-in provider gives that
+             //    provider's e-mail address (Auth.php, `AccountLink` /
+             //    `AccountUnlink`), and records other people made give their number
+             //    ("Added user #N to site #M", admin/sites/users.php). So the
+             //    sentence says what is removed AND what stays, and how the log is
+             //    cleared (the nightly clear-out, `log_sweep_tables()`).
+             'reason' => 'the record of what happened is kept for running and repairing the portal, until the activity log '
+                 . 'is cleared: the nightly clear-out deletes it after the number of days the organisation sets (a year '
+                 . 'unless changed), if that scheduled job has been set up. Removed from your own records: your account '
+                 . 'number, the address the request came from, the browser\'s name, the request\'s headers, the '
+                 . 'session\'s fingerprint and the facts about the session. What each record says is kept as it was '
+                 . 'written, so it can still name you or give your account number, and a record of linking or unlinking '
+                 . 'a sign-in provider gives that provider\'s e-mail address. Records other people made can also mention '
+                 . 'you'],
 
             // 📅 `calendarToken` and `notifyPrefs` are cleared since the same
             //    day. The token is the key inside the person's private

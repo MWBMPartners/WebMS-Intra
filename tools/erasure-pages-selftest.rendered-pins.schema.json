@@ -1,0 +1,22 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "erasure-pages-selftest.rendered-pins.schema.json",
+    "title": "Rendered pins for the erasure pages self-test (#703)",
+    "description": "What tools/erasure-pages-selftest.php expects a member or an administrator to receive, for the parts of three pages that tell an erased person what stays (the owner's decisions D-016, D-110 to D-113). Each value is the rendered HTML of one region of a page, attributes included, with every run of white space made one space. The test compares the page it is served with these, and refuses a region that is missing, different, or hidden by a `hidden` attribute, a `d-none` class or an inline `display:none`. Changing what one of these regions says means changing its pin here, on purpose: set SELFTEST_WRITE_RENDERED_PINS to a file path to have a run write what it saw, read it, then copy it in.",
+    "$comment": "Pinned as RENDERED rather than read from source (#703 round 6): reading the source missed text PHP prints into the region, text an attribute hides, and anything added just outside the cut. The test checks each value is a string by comparing it; a missing key fails its check.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "my-data tblUsers", "my-data tblCareVisit", "my-data tblCareCase", "my-data tblKidCheckins",
+        "my-data tblDbsChecks", "privacy retention", "help kept list"
+    ],
+    "properties": {
+        "my-data tblUsers": {"type": "string", "description": "The My data row for the person's own account: what is emptied, which records keep the number on purpose, and which are kept for security and as a history of changes."},
+        "my-data tblCareVisit": {"type": "string", "description": "The My data row for pastoral visits the person made (D-016)."},
+        "my-data tblCareCase": {"type": "string", "description": "The My data row for care cases the person opened (D-110)."},
+        "my-data tblKidCheckins": {"type": "string", "description": "The My data row for children the person checked in (D-111)."},
+        "my-data tblDbsChecks": {"type": "string", "description": "The My data row for DBS checks the person recorded (D-016)."},
+        "privacy retention": {"type": "string", "description": "The privacy notice's whole 'Retention policy' section, from its heading to the next heading."},
+        "help kept list": {"type": "string", "description": "The administrators' help page list 'What an erasure keeps, and what it does not reach', with the worker-records paragraph and its D-112 qualifier."}
+    }
+}

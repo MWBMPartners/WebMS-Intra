@@ -181,7 +181,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 87; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 88; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -190,6 +190,9 @@ const EXPECTED_CHECKS = 87; // 80 until #703 (D-016) added two: the two writers
                             // and the privacy page says what keeping the number
                             // costs (D-113). 82 + 4 = 86. Round 3 added one: My
                             // data tells a worker what is kept (D-113). 87.
+                            // Round 6 added one: the help page's list, pinned as
+                            // rendered (My data and the privacy notice became
+                            // rendered pins in place). 88.
 
 function refuse(string $why): never
 {
@@ -544,6 +547,64 @@ function req(string $jar, string $method, string $path, ?array $post = null, str
 function token(string $html): string
 {
     return preg_match('/name="csrf_token" value="([0-9a-f]{64})"/', $html, $m) === 1 ? $m[1] : '';
+}
+
+/**
+ * 🧾 #703 round 6: a part of a page AS THE BROWSER RECEIVES IT, for the pins on
+ * what an erased person is told (D-113). Reading the source missed what PHP
+ * prints into a span (an echoed reassurance passed), what an attribute hides
+ * (`hidden`, `d-none`) and anything just outside the cut; so each pin is the
+ * rendered HTML of an element - attributes included, runs of spaces made one -
+ * taken from the PARSED document (`Dom\HTMLDocument`), never a search of the
+ * markup. `$pick` returns the nodes that make up the region (a whole list, or a
+ * heading with every sibling up to the next heading). Answers the HTML, and
+ * whether any node or ancestor is hidden by a `hidden` attribute, a `d-none`
+ * class or an inline `display:none`. An empty HTML means the region was not
+ * found, which fails the pin.
+ *
+ * @return array{html: string, hidden: string}
+ */
+function renderedRegion(string $html, callable $pick): array
+{
+    $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $nodes = $pick($doc);
+    $out   = '';
+    $hidden = '';
+    foreach ($nodes as $node) {
+        $out .= $doc->saveHtml($node);
+        for ($at = $node; $at instanceof \Dom\Element; $at = $at->parentElement) {
+            $style = strtolower(str_replace(' ', '', (string) $at->getAttribute('style')));
+            if ($at->hasAttribute('hidden') === true || $at->classList->contains('d-none') === true
+                || str_contains($style, 'display:none') === true) {
+                $hidden = $at->tagName . ' ' . (string) $at->getAttribute('class');
+            }
+        }
+    }
+
+    return ['html' => trim((string) preg_replace('/\s+/', ' ', $out)), 'hidden' => $hidden];
+}
+
+/**
+ * The pinned rendered HTML of each region, kept beside this file in
+ * `erasure-pages-selftest.rendered-pins.json`. Changing what one of these says
+ * means changing its pin, on purpose. To see what a run rendered, set
+ * SELFTEST_WRITE_RENDERED_PINS to a file path: the run writes what it saw
+ * there (and still fails if it differs), so a re-pin is a deliberate act.
+ */
+function renderedPin(string $key, array $region): bool
+{
+    static $pins = null;
+    static $seen = [];
+    if ($pins === null) {
+        $pins = json_decode((string) @file_get_contents(__DIR__ . '/erasure-pages-selftest.rendered-pins.json'), true) ?: [];
+    }
+    $seen[$key] = $region['html'];
+    $dump = getenv('SELFTEST_WRITE_RENDERED_PINS');
+    if (is_string($dump) && $dump !== '') {
+        file_put_contents($dump, json_encode($seen, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
+    return $region['html'] !== '' && $region['hidden'] === '' && $region['html'] === ($pins[$key] ?? null);
 }
 
 /** A page's text, with the tags taken out and the spaces tidied. */
@@ -986,25 +1047,31 @@ ok('the DBS page records who recorded a check by NAME as well as number, read fr
 //    and number stay and can be matched back to her; and her account's own line
 //    must say that SOME records keep the number. These are GdprEraser's own
 //    reasons (inventory() shows those), which the round-2 check never read.
-$myData = text(req($jar['mel'], 'GET', '/account/my-data')['body']);
-$myDataSays = [
-    'visits'  => 'pastoral visits you made keep your name and your account number as the person who made them',
-    'case'    => 'pastoral care cases you opened keep your name and your account number as the person who opened them',
-    'checkin' => 'children you checked in keep your name and your account number as the helper who checked them in',
-    'dbs'     => 'DBS checks you recorded keep your name and your account number as the person who recorded them',
-    'match'   => 'Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
-    'account' => 'Most records lose your account number. Some keep it on purpose:',
-    // #703 round 5: the separate statement about records kept for security and
-    // as a history of changes, which a member must also be shown.
-    'history' => 'Separately, records kept for security and as a history of changes can mention your account number',
-];
-$myDataMissing = array_keys(array_filter($myDataSays, static fn (string $words): bool => str_contains($myData, $words) === false));
-ok('MY DATA tells a worker, before they ask to be erased, that the visits, case, check-in and DBS check they made keep their name and number, that through that number their other kept records can be matched back to them, and that SOME records keep their account number (#703, D-113)',
-    // EXACTLY four: one per kept record Mel made (visits, case, check-in, DBS
-    // check). Counting only "back to you (D-113)" let the independent check's
-    // plant PF through, because her account's own line ends the same way.
-    $myDataMissing === [] && substr_count($myData, 'match your other kept records - an expense claim, for instance - back to you (D-113)') === 4,
-    'missing: ' . implode(', ', $myDataMissing) . ' | ' . mb_substr($myData, (int) strpos($myData, 'tblCareVisit'), 700));
+//    #703 round 6: pinned AS RENDERED, each row whole. Round 5 searched the
+//    page's text for phrases, so a sentence the page appended to a row (M5), or
+//    a row hidden by an attribute, left it green. The row is the element My data
+//    draws for one kind of record (`.row` holding the table's name in <code>).
+$myDataHtml = (string) req($jar['mel'], 'GET', '/account/my-data')['body'];
+$myDataRow  = static fn (string $table): array => renderedRegion($myDataHtml, static function (\Dom\HTMLDocument $doc) use ($table): array {
+    $rows = [];
+    foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
+        $code = $row->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === $table) {
+            $rows[] = $row;
+        }
+    }
+
+    return count($rows) === 1 ? $rows : [];
+});
+$myDataWrong = [];
+foreach (['tblUsers', 'tblCareVisit', 'tblCareCase', 'tblKidCheckins', 'tblDbsChecks'] as $table) {
+    $region = $myDataRow($table);
+    if (renderedPin('my-data ' . $table, $region) === false) {
+        $myDataWrong[] = $table . ($region['html'] === '' ? ' (no single row)' : ($region['hidden'] !== '' ? ' (hidden by ' . $region['hidden'] . ')' : ': ' . mb_substr($region['html'], 0, 160)));
+    }
+}
+ok('MY DATA shows a worker, before they ask to be erased, exactly the pinned rows for their account and the visits, case, check-in and DBS check they made - each saying their name and number stay and can be matched back to them - and none of them hidden (#703, D-113)',
+    $myDataWrong === [], implode(' | ', $myDataWrong));
 
 $was = $pages();
 // 🧾 #703: the name written on a visit is the name THEN. While the account is
@@ -1108,12 +1175,44 @@ ok('the booking is still in the administrator\'s approvals queue, waiting for a 
     && str_contains($now['bookings'], 'Welcome team supper') === false
     && str_contains($now['bookings'], 'Purpose:') === false, mb_substr($now['bookings'], 0, 500));
 // 🗣️ D-113: the page every member can open says what keeping the number costs.
-$privacyNow = text(req($jar['cal'], 'GET', '/privacy/policy')['body']);
-ok('the PRIVACY page tells a worker plainly that their name and number stay on the records they made, and that through them their other kept records can be matched back to them (#703, D-113)',
-    str_contains($privacyNow, 'keep your name and account number as the person who did it, even after you are erased')
-    && str_contains($privacyNow, 'could use them to tell which of your other kept records')
-    && str_contains($privacyNow, 'your name and the link to you are removed, and the amounts and dates stay') === false,
-    mb_substr($privacyNow, (int) strpos($privacyNow, 'Retention policy'), 900));
+//    #703 round 6: pinned AS RENDERED - the whole "Retention policy" section,
+//    from its heading to the next heading, so a sentence PHP prints, an
+//    attribute that hides one, and a paragraph added after the list are all
+//    inside the pin.
+$sectionAfter = static fn (string $heading): \Closure => static function (\Dom\HTMLDocument $doc) use ($heading): array {
+    foreach ($doc->querySelectorAll('h2, h3') as $h) {
+        if (trim((string) $h->textContent) === $heading) {
+            $nodes = [$h];
+            for ($n = $h->nextElementSibling; $n !== null && in_array($n->tagName, ['H2', 'H3'], true) === false; $n = $n->nextElementSibling) {
+                $nodes[] = $n;
+            }
+
+            return $nodes;
+        }
+    }
+
+    return [];
+};
+$privacyRegion = renderedRegion((string) req($jar['cal'], 'GET', '/privacy/policy')['body'], $sectionAfter('Retention policy'));
+ok('the PRIVACY page\'s "Retention policy" section is exactly the pinned text as a member receives it - what is kept on purpose, what the worker records keep, what is kept for security and history and how each is cleared - with nothing hidden and nothing added (#703, D-113)',
+    renderedPin('privacy retention', $privacyRegion),
+    $privacyRegion['hidden'] !== '' ? 'hidden by ' . $privacyRegion['hidden'] : mb_substr($privacyRegion['html'], 0, 600));
+// 🗣️ The administrators' help: the whole list "What an erasure keeps, and what
+//    it does not reach", rendered, so the D-112 qualifier and every other item
+//    are inside the pin (a new item is too).
+$helpRegion = renderedRegion((string) req($jar['adm'], 'GET', '/help/admin')['body'], static function (\Dom\HTMLDocument $doc): array {
+    foreach ($doc->querySelectorAll('li') as $li) {
+        if (str_contains((string) $li->textContent, 'Who made a pastoral visit, opened a care case') === true
+            && $li->parentElement !== null) {
+            return [$li->parentElement];
+        }
+    }
+
+    return [];
+});
+ok('the HELP page\'s list of what an erasure keeps is exactly the pinned text as an administrator receives it, the D-112 qualifier included, with nothing hidden and nothing added (#703)',
+    renderedPin('help kept list', $helpRegion),
+    $helpRegion['hidden'] !== '' ? 'hidden by ' . $helpRegion['hidden'] : mb_substr($helpRegion['html'], 0, 600));
 $back = $signIn('mel', 'mel-again');
 ok('Mel cannot sign in again', $back['status'] !== 302 || str_contains($back['location'], 'login') === true, 'HTTP ' . $back['status'] . ' ' . $back['location']);
 $lines = auditLines($melRequest);

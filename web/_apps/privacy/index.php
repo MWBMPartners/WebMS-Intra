@@ -33,7 +33,6 @@ Auth::ensureSession();
 $controllerName  = (string) (App::settings('privacy.controllerName')    ?? '');
 $contactEmail    = (string) (App::settings('privacy.contactEmail')      ?? '');
 $externalURL     = (string) (App::settings('privacy.policyURL')         ?? '');
-$retentionDays   = (int)    (App::settings('privacy.dataRetentionDays') ?? '730');
 $allowDelete     = (App::settings('privacy.allowAccountDelete') ?? 'true') === 'true';
 
 // 🔀 If the admin has set an external policy URL, just redirect.
@@ -91,12 +90,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h2 class="h4 mt-4">Retention</h2>
 <p>
-    Activity logs and error logs are pruned after
-    <strong><?php echo (int) $retentionDays; ?> days</strong>
-    by an automatic sweeper (see <code>audit.retentionDays</code> /
-    <code>errors.retentionDays</code> settings). Account records remain
-    while your account is active. When you delete your account, your name
-    is removed and any logs that referenced you are detached.
+    <?php // 🗣️ #703 round 6: this printed `privacy.dataRetentionDays` as the logs' period, which is a
+          //    different setting from the one the clear-out uses (`audit.retentionDays` /
+          //    `errors.retentionDays`), and it ended "any logs that referenced you are detached",
+          //    which is untrue: what a log record says is kept as written. ?>
+    Activity logs and error logs are deleted by a nightly clear-out after the
+    number of days this organisation sets (a year unless changed;
+    <code>audit.retentionDays</code> / <code>errors.retentionDays</code>), if
+    that scheduled job has been set up. Account records remain while your
+    account is active. When your account is erased your name is removed, but
+    your account number stays on some records, and what a log record says is
+    kept as it was written &mdash; see the privacy notice for what stays.
 </p>
 
 <h2 class="h4 mt-4">Your rights</h2>

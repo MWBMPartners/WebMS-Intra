@@ -707,8 +707,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             not always stop the claim naming the claimant</strong>: if they made pastoral visits,
             opened care cases, recorded DBS checks or checked children in or out, those records keep
             their name beside the same number (see below), so anyone who can read the database or a
-            backup can match the claim back to them. The receipts attached to a claim also keep the filename they were
-            uploaded with, which is often a person's name. The adults authorised to
+            backup can match the claim back to them. The receipts attached to a claim are kept with it;
+            since 3 November 2026 their names are made up by the portal, so they carry nothing typed
+            by whoever uploaded them (a receipt uploaded before then may still carry its original
+            file name on the server). The adults authorised to
             collect a child, because the organisation's duty of care to that child does not end
             because an adult asked to be erased. A Gift Aid declaration, with the network address
             it was made from, because that is part of the evidence it was made.
@@ -742,14 +744,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             account or their memberships now has its before-and-after values emptied too, because a
             change to an account recorded the row as it was &mdash; in practice their name and
             e-mail address. Who made each change, when, and which record it was are kept, so the
-            history still shows the account was changed.
+            history still shows the account was changed &mdash; and that means the entry still holds
+            the account's number. <strong>The change history is kept for ever</strong> (decided on
+            10 November 2026), and the stored copy of some <em>other</em> record &mdash; an expense
+            claim, a loan &mdash; can hold the person's account number too.
             <br>
             It now covers an entry about their account and about every kind of membership &mdash;
             which organisations, departments, groups and roles they belonged to. The last three were
-            added on 2 November 2026; before that they were not reached, which cost nothing at the
-            time because those entries record account numbers and no names, and the account itself
-            is emptied anyway. They are covered so that the day one of them starts recording a name,
-            it is already dealt with.
+            added on 2 November 2026; before that they were not reached. Those entries record account
+            numbers and no names, which does not make them anonymous: the number can be matched back
+            to the person through any record that keeps their name beside it. They are covered so
+            that the day one of them starts recording a name, it is already dealt with.
             <br>
             One limit, so that nothing here is read as more than it is. An entry about some
             <em>other</em> record whose text happens to mention them is <strong>not</strong>
