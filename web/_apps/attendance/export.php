@@ -59,8 +59,12 @@ if (AttendanceAccess::mayViewTotals($mysqli, (int) ($_SESSION['user_id'] ?? 0), 
     exit();
 }
 
-// 🛡️ CSRF verification via GET token
-if (Auth::verifyCsrf($_GET['csrf_token'] ?? '') === false) {
+// 🛡️ CSRF verification via GET token. A request chooses the TYPE of what it
+//    sends as well as the value: `?csrf_token[]=x` is an array, and handing an
+//    array to verifyCsrf(string) is a TypeError and a bare 500. Anything that
+//    is not a string is simply a wrong token.
+$csrfGiven = $_GET['csrf_token'] ?? '';
+if (is_string($csrfGiven) === false || Auth::verifyCsrf($csrfGiven) === false) {
     $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('attendance'));

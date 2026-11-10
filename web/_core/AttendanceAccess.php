@@ -2,7 +2,7 @@
 // Path: _core/AttendanceAccess.php
 /**
  * -----------------------------------------------------------------------------
- * Who may see an organisation's attendance totals 📊 (#529, D-106)
+ * Who may see an organisation's attendance figures 📊 (#529, D-106; #917, D-109)
  * -----------------------------------------------------------------------------
  * THE RULE (the owner, 10 November 2026 — D-106)
  * -------------------------------------------------------------------------
@@ -23,6 +23,30 @@
  * `mayViewTotals()` is the ONE place that decides it. The reports page, the
  * attendance spreadsheet download and the attendance page's own "this month"
  * total and "View Reports" card all ask it, so they cannot disagree.
+ *
+ * AND EACH SESSION'S OWN HEADCOUNT FOLLOWS THE SAME RULE (the owner,
+ * 10 November 2026 — D-109, closing #917). The totals are only sums of the
+ * sessions, so a member who could read every session's count could rebuild
+ * every total by hand; D-109 rules that out. The SAME method therefore decides
+ * who sees a session's count anywhere: the Headcount column of the list on
+ * `/attendance`, and the form that edits an EXISTING session
+ * (`/attendance/record?edit=N` and its `update` action in `record/save.php`).
+ * One rule, not a sibling, because "may see the totals" and "may see the
+ * figures the totals are made of" cannot sensibly differ.
+ *
+ * WHO MAY CORRECT A SESSION, AND WHY IT IS NOT "THE PERSON WHO RECORDED IT".
+ * Correcting a session means seeing its stored counts, so only administrators
+ * and holders of the permission edit an existing session. A member who
+ * records attendance still records a new session, and sees only the counts
+ * they are typing (and the total of what they just saved, in the message
+ * afterwards) — D-109's own words. "The recorder may correct their own
+ * session" was considered and not chosen: D-109 says a member sees the count
+ * of the session being entered and not past sessions' figures, a session
+ * recorded last week is a past session, and its stored figure may have been
+ * corrected since by somebody else, so it would show figures the member did not
+ * type. A member who mistyped can still DELETE the session (any member may, as
+ * before — deleting shows no figure) and record it again, or ask an
+ * administrator.
  *
  * WHAT THIS REPLACED, AND WHY IT IS NOT A SETTING ANY MORE
  * -------------------------------------------------------------------------
@@ -55,16 +79,12 @@
  *
  * WHAT THIS CLASS DELIBERATELY DOES NOT DO
  * -------------------------------------------------------------------------
- * It does not decide who may RECORD, change or delete a head count — any
- * active member may, and an administrator (the owner's decision). Those three
- * pages (`attendance/record.php`, `record/save.php`, `record/delete.php`) call
- * `viewerIsMember()` below only to shut outsiders out.
- *
- * And it does not hide the list of sessions on `/attendance`, each with its
- * own headcount, or the edit form that shows one session's counts: members
- * use both to record and correct a head count. Whether a member who records
- * should still see each session's own figure is a separate question D-106 did
- * not answer, and it is #917 rather than decided here.
+ * It does not decide who may RECORD a new head count or delete a session —
+ * any active member may, and an administrator (the owner's decision). Those
+ * pages (`attendance/record.php`, `record/save.php`, `record/delete.php`)
+ * call `viewerIsMember()` below to shut outsiders out, and ask
+ * `mayViewTotals()` only where an existing session's figures are shown or
+ * overwritten.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -117,8 +137,10 @@ final class AttendanceAccess
     }
 
     /**
-     * May this person see this organisation's attendance totals? The ONE
-     * question every page that shows them asks.
+     * May this person see this organisation's attendance figures — the
+     * totals (D-106) AND any one session's own headcount (D-109)? The ONE
+     * question every page that shows either asks, and the one that decides
+     * who may edit an existing session.
      *
      * Read LIVE from the database, so a role taken away, or the permission
      * re-pointed, takes effect on the very next request.

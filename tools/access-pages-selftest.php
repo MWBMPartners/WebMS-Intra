@@ -276,7 +276,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 408; // 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 416; // 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -3615,8 +3615,18 @@ head('Q. #529 / D-106 — who sees an organisation\'s attendance totals');
 //   ADM   a site administrator of A                           → sees them
 //   GADM  a global administrator, no membership row           → sees them
 //   BMEM  a member of B only                                  → refused in A
+//   LADM  a member of B only, holding the portal-wide `isAdmin`
+//         flag (what Admin, Users sets)                       → refused in A
+//
+// ⚠️ LADM IS THE ONLY PERSON WHO MAKES THE MEMBERSHIP RULE MATTER (#529 round
+//    1). `App::isAdmin()` answers TRUE for that flag on ANY organisation's
+//    address, so for this one account the "must be a member of A" half of
+//    `mayViewTotals()` is all that stands between it and A's figures. Without
+//    LADM, replacing that half with `$userId > 0` left every check green,
+//    because every other outsider is refused by the permission half as well.
 const ACO  = 916051;
 const ACOB = 916052;
+const LADM = 916053;
 /** In the one headcount group and the one note this part records, so "is it in this answer?" is one search. */
 const ATT_Q_MARK = 'ACCESS-Q';
 // ⚠️ NO NAME HERE MAY BEGIN WITH "A": every name is prefixed "Selftest access ",
@@ -3634,11 +3644,14 @@ q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAd
 // from Roles::STANDARD.
 q("INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (916202, ?, 'attendance_coordinator', 'Attendance Coordinator', 1), (916203, ?, 'attendance_coordinator', 'Attendance Coordinator', 1)", 'ii', [ORG_A, ORG_B]);
 q('INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, 916202, ?), (?, 916203, ?)', 'iiii', [ACO, ORG_A, ACOB, ORG_B]);
-foreach (['aco' => ACO, 'acob' => ACOB] as $who => $id) {
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 1, 0)', 'iss', [LADM, 'Selftest access Q flagged administrator of B', 'u' . LADM . '.access@selftest.invalid']);
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [LADM, ORG_B]);
+foreach (['aco' => ACO, 'acob' => ACOB, 'ladm' => LADM] as $who => $id) {
     q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-access-' . $who, $hash]);
 }
 $jar['aco']  = signIn('aco', ADDR_A);
 $jar['acob'] = signIn('acob', ADDR_B);
+$jar['ladm'] = signIn('ladm', ADDR_B);
 // One session of A, today, with one headcount group and a note carrying the mark.
 // Its number is well clear of 916612: part G records sessions through the real
 // page, and those take the NEXT numbers (916613 and on). 916613 was tried first
@@ -3649,9 +3662,22 @@ q('INSERT INTO tblAttendanceCounts (sessionID, groupLabel, headcount, sortOrder)
 $qReport = ADDR_A . '/attendance/report';
 $qExport = ADDR_A . '/attendance/export';
 $qMadeUp = ADDR_A . '/attendance/zz-no-such-page';
-/** The answer with the two parts that are allowed to differ taken out. */
+/**
+ * The WHOLE answer — status line, every header, and the body — with only the
+ * parts allowed to differ taken out: the `Date:` header, the script nonce (in
+ * the page and in the Content-Security-Policy header), and the address itself.
+ *
+ * ⚠️ HEADERS ARE PART OF THE ANSWER (#529 round 1). The first version compared
+ *    the status and the body only, so `header('X-Report: attendance');` put
+ *    above the gate — a page announcing itself before refusing — left every
+ *    check green.
+ */
 $qPlain = static function (array $answer, string $path): string {
-    return $answer['status'] . ' ' . str_replace($path, '{ADDRESS}', ap_replace('/ nonce="[0-9a-f]+"/', ' nonce=""', $answer['body']));
+    $head = ap_replace('/^Date:[^\r\n]*\r?\n/mi', '', $answer['head']);
+    $head = ap_replace("/'nonce-[^']+'/", "'nonce-'", $head);
+    $body = ap_replace('/ nonce="[0-9a-f]+"/', ' nonce=""', $answer['body']);
+
+    return str_replace($path, '{ADDRESS}', $head . "\n" . $body);
 };
 /** Is `$asked` (for `$path`) the same answer as a made-up address in the same folder, with the same query? Returns '' or why not. */
 $qLikeMadeUp = static function (string $jarFile, string $path, string $query) use ($qPlain, $qMadeUp): string {
@@ -3701,6 +3727,50 @@ ok(
 );
 ok('Q5b. …while still showing the member the page itself (recording is not affected)', str_contains($page['body'], ADDR_A . '/attendance/record"') === true);
 
+// --- D-109 (#917): no session's own headcount for an ordinary member ----------
+ok(
+    'Q20. D-109: the session list shows a member no headcount column, no session\'s figure and no Edit button',
+    str_contains($page['body'], '4,321') === false && str_contains($page['body'], '>Headcount</div>') === false
+        && str_contains($page['body'], '?edit=') === false && str_contains($page['body'], 'ACCESS service') === true,
+    'HTTP ' . $page['status']
+);
+$qRecord = ADDR_A . '/attendance/record';
+$why     = $qLikeMadeUp($jar['mem'], $qRecord, '?edit=916690');
+ok(
+    'Q21. D-109: a member opening the form for an EXISTING session gets the same answer as a made-up address (404)',
+    $why === '' && req($jar['mem'], 'GET', $qRecord . '?edit=916690')['status'] === 404,
+    $why
+);
+$qStored = static fn (): int => (int) (one('SELECT COALESCE(SUM(headcount), -1) AS n FROM tblAttendanceCounts WHERE sessionID = 916690')['n'] ?? -1);
+$qUpdate = static fn (string $who, int $session, int $count): array => post($jar[$who], $qRecord, $qRecord . '/save', [
+    'action' => 'update', 'sessionID' => $session, 'serviceTypeID' => 916601, 'sessionDate' => $today,
+    'groups' => [ATT_Q_MARK . ' group'], 'counts' => [$count], 'notes' => ATT_Q_MARK . ' note', // the note too: an update writes every field, and an absent note is stored as none
+]);
+// The message is read on the RECORD page, not /attendance where the handler
+// sends the person: /attendance prints no waiting message at all (a fault older
+// than this work), so the message waits until the record page is next opened.
+// Read it before the next post(), whose own visit to that page would take it.
+$real    = $qUpdate('mem', 916690, 1);
+$realMsg = req($jar['mem'], 'GET', $qRecord)['body'];
+$fake    = $qUpdate('mem', 916699, 1);
+$fakeMsg = req($jar['mem'], 'GET', $qRecord)['body'];
+ok(
+    'Q22. D-109: a member posting new counts over an EXISTING session is answered as for a session that does not exist, and nothing is written',
+    $real['status'] === 302 && $real['location'] === $fake['location'] && str_contains($realMsg, 'Attendance session not found.') === true
+        && str_contains($fakeMsg, 'Attendance session not found.') === true && $qStored() === 4321,
+    'HTTP ' . $real['status'] . ' ' . $real['location'] . ' against ' . $fake['location'] . '; stored ' . $qStored()
+);
+$page = req($jar['aco'], 'GET', ADDR_A . '/attendance');
+$form = req($jar['aco'], 'GET', $qRecord . '?edit=916690');
+ok(
+    'Q23. D-109: the holder of the permission sees each session\'s headcount and Edit button, and the edit form shows the stored count',
+    str_contains($page['body'], '4,321') === true && str_contains($page['body'], '?edit=916690') === true
+        && $form['status'] === 200 && str_contains($form['body'], 'value="4321"') === true,
+    'list HTTP ' . $page['status'] . ', form HTTP ' . $form['status']
+);
+$answer = $qUpdate('aco', 916690, 4322);
+ok('Q24. D-109: …and can correct it', $answer['status'] === 302 && $qStored() === 4322, 'HTTP ' . $answer['status'] . '; stored ' . $qStored());
+
 // --- another organisation's accounts ------------------------------------------
 // At the door: SiteGate refuses a non-member on EVERY address, so the report is
 // the same refusal as a made-up address.
@@ -3715,7 +3785,7 @@ foreach (['bmem' => 'a member of B', 'acob' => 'a member of B holding the shippe
 // With the gate stood down, the PAGE's own rule answers — so the rule is proved
 // to hold by itself, and a role held in B never opens A's totals.
 membersGate(false);
-foreach (['bmem' => 'a member of B', 'acob' => 'a member of B holding the shipped role in B', 'nomem' => 'an account in no organisation'] as $who => $what) {
+foreach (['bmem' => 'a member of B', 'acob' => 'a member of B holding the shipped role in B', 'nomem' => 'an account in no organisation', 'ladm' => 'a member of B holding the portal-wide administrator flag'] as $who => $what) {
     $answer = req($jar[$who], 'GET', $qReport);
     ok('Q8. without the door, ' . $what . ': the reports page itself answers 404, nothing of A\'s in it', $answer['status'] === 404 && str_contains($answer['body'], ATT_Q_MARK) === false, 'HTTP ' . $answer['status']);
     $why = $qLikeMadeUp($jar[$who], $qReport, '');

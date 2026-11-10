@@ -425,9 +425,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <!-- #529 / D-106 (the owner, 10 November 2026). This replaced a three-way setting at
          /admin/settings/attendance; migration 271 deleted it. -->
     <p>
-        Your organisation's attendance totals &mdash; the attendance reports page (headcounts by month,
-        by service type and by headcount group), the &ldquo;Total Headcount This Month&rdquo; figure on
-        the attendance page, and the attendance spreadsheet download
+        Your organisation's attendance figures &mdash; the attendance reports page (headcounts by month,
+        by service type and by headcount group), each recorded session's own headcount and the
+        &ldquo;Total Headcount This Month&rdquo; figure on the attendance page, the form for correcting a
+        session already recorded, and the attendance spreadsheet download
         (<code>/attendance/export</code>) &mdash; can be seen by:
     </p>
     <ul>
@@ -445,10 +446,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         exist. None of these figures names a person; they are totals.
     </p>
     <p>
-        <strong>What this does not change.</strong> Any member of your organisation can still record a
-        head count, and the list of recorded sessions on the attendance page still shows each session's
-        own headcount to the people who record them.
+        <strong>What a member who records attendance sees.</strong> Any member of your organisation can
+        still record a new session, and sees the counts they are typing (and the total of what they just
+        saved). They see the list of recorded sessions &mdash; date, service, event and who recorded it
+        &mdash; but not any session's headcount, and they cannot open a session already recorded to
+        correct it, because that would show its figures. A member who made a mistake can delete the
+        session and record it again, or ask an administrator to correct it.
     </p>
+    <!-- #917 / D-109 (the owner, 10 November 2026). Until then this paragraph said the list "still
+         shows each session's own headcount to the people who record them", which was untrue in the
+         reassuring direction: it showed every session's figure to EVERY member, recording or not. -->
     <p>
         The attendance spreadsheet includes the <em>notes</em> typed when each session was recorded, so
         whoever you give the permission can read those too.

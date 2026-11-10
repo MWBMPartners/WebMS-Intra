@@ -55,10 +55,12 @@ $siteId = Site::id();
 //    So no card is a promise the target then breaks, and no total is shown
 //    here that the reports page would refuse.
 //
-//    ⚠️ The list of sessions below, each with its own headcount, is NOT
-//    gated by this: members record and correct head counts from it, and
-//    D-106 did not decide whether they should still see each session's own
-//    figure. That is #917.
+//    D-109 (#917) takes the same rule down to each SESSION: the list below
+//    shows its Headcount column, and each row's Edit button (the edit form
+//    shows the stored counts), only to the same people. Everybody else still
+//    sees the list — date, service, event, who recorded it — and can record a
+//    new session or delete one, as before. (The figures are still READ by the
+//    queries below, which also count sessions; they are only never drawn.)
 $viewerId       = (int) ($_SESSION['user_id'] ?? 0);
 $mayViewReports = AttendanceAccess::mayViewTotals($mysqli, $viewerId, $siteId, App::isAdmin(), App::isRootAdmin());
 
@@ -314,7 +316,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php endif; ?>
 </form>
 
-<!-- 📋 Session list -->
+<!-- 📋 Session list. The Headcount column and the Edit button are drawn only
+     for $mayViewReports (D-109); without the column the Event column takes its
+     width, so the row still fills the line. -->
 <?php if (count($sessions) === 0): ?>
     <div class="alert alert-info">
         <i class="fa-solid fa-circle-info me-1"></i>
@@ -325,8 +329,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="portal-data-row portal-data-header d-none d-md-flex">
             <div class="col-md-2">Date</div>
             <div class="col-md-3">Service Type</div>
-            <div class="col-md-2">Event</div>
+            <div class="col-md-<?php echo $mayViewReports === true ? 2 : 4; ?>">Event</div>
+            <?php if ($mayViewReports === true): ?>
             <div class="col-md-2 text-center">Headcount</div>
+            <?php endif; ?>
             <div class="col-md-1">Recorder</div>
             <div class="col-md-2 text-end">Actions</div>
         </div>
@@ -359,23 +365,27 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="d-md-none fw-semibold">Service: </span>
                     <span class="badge bg-secondary"><?php echo htmlspecialchars($sess['serviceTypeName'], ENT_QUOTES, 'UTF-8'); ?></span>
                 </div>
-                <div class="col-12 col-md-2">
+                <div class="col-12 col-md-<?php echo $mayViewReports === true ? 2 : 4; ?>">
                     <span class="d-md-none fw-semibold">Event: </span>
                     <small><?php echo htmlspecialchars($sess['eventName'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></small>
                 </div>
+                <?php if ($mayViewReports === true): ?>
                 <div class="col-12 col-md-2 text-md-center">
                     <span class="d-md-none fw-semibold">Headcount: </span>
                     <span class="badge bg-primary fs-6"><?php echo number_format((int) $sess['totalCount']); ?></span>
                 </div>
+                <?php endif; ?>
                 <div class="col-12 col-md-1">
                     <span class="d-md-none fw-semibold">Recorder: </span>
                     <small><?php echo htmlspecialchars($sess['recorderName'] ?? '—', ENT_QUOTES, 'UTF-8'); ?></small>
                 </div>
                 <div class="col-12 col-md-2 text-md-end mt-2 mt-md-0">
+                    <?php if ($mayViewReports === true): ?>
                     <a href="<?php echo htmlspecialchars(Site::url('attendance/record'), ENT_QUOTES, 'UTF-8'); ?>?edit=<?php echo (int) $sess['sessionID']; ?>"
                        class="btn btn-sm btn-outline-primary me-1" title="Edit">
                         <i class="fa-solid fa-pen"></i>
                     </a>
+                    <?php endif; ?>
                     <form method="post" action="<?php echo htmlspecialchars(Site::url('attendance/record/delete'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                         <input type="hidden" name="sessionID" value="<?php echo (int) $sess['sessionID']; ?>">

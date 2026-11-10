@@ -138,6 +138,15 @@ $pages = [
         '_apps/attendance/index.php',
         "\$mayViewReports = AttendanceAccess::mayViewTotals(\$mysqli, \$viewerId, \$siteId, App::isAdmin(), App::isRootAdmin());",
     ],
+    // D-109 (#917): the form for an EXISTING session, and its update action.
+    'the form for an existing session' => [
+        '_apps/attendance/record.php',
+        "if (\$editId > 0\n    && AttendanceAccess::mayViewTotals(\$mysqli, (int) (\$_SESSION['user_id'] ?? 0), Site::id(), App::isAdmin(), App::isRootAdmin()) === false) {\n    Router::renderError(404);\n    return;\n}",
+    ],
+    'the update action' => [
+        '_apps/attendance/record/save.php',
+        "    if (AttendanceAccess::mayViewTotals(\$mysqli, (int) (\$_SESSION['user_id'] ?? 0), \$siteId, App::isAdmin(), App::isRootAdmin()) === false) {\n        \$_SESSION['flash_msg']  = 'Attendance session not found.';\n        \$_SESSION['flash_type'] = 'danger';\n        header('Location: ' . Site::url('attendance'));\n        exit();\n    }",
+    ],
 ];
 foreach ($pages as $what => [$file, $pinned]) {
     $code = codeOnly($web . '/' . $file);
@@ -145,13 +154,22 @@ foreach ($pages as $what => [$file, $pinned]) {
     check($what . ' asks it exactly once', substr_count($code, $asked) === 1, 'found ' . substr_count($code, $asked));
 }
 $export = codeOnly($web . '/_apps/attendance/export.php');
+$save     = codeOnly($web . '/_apps/attendance/record/save.php');
+$update   = strpos($save, "if (\$action === 'update')");
+$askedAt  = $update === false ? false : strpos($save, $asked, $update);
+$lookedUp = $update === false ? false : strpos($save, 'SELECT 1 FROM tblAttendanceSessions WHERE sessionID = ?', $update);
+check(
+    'the update action refuses BEFORE it looks the session up, so a refusal writes nothing',
+    $askedAt !== false && $lookedUp !== false && $askedAt < $lookedUp
+);
 check(
     'the download refuses BEFORE it looks at the form token, so a refused member is never told the download exists',
     strpos($export, $asked) !== false && strpos($export, 'Auth::verifyCsrf(') !== false
         && strpos($export, $asked) < strpos($export, 'Auth::verifyCsrf(')
 );
 $index = codeOnly($web . '/_apps/attendance/index.php');
-foreach (['Total Headcount This Month', "Site::url('attendance/export')", "Site::url('attendance/report')"] as $shown) {
+// D-109 (#917): each row's headcount and each row's Edit button too.
+foreach (['Total Headcount This Month', "Site::url('attendance/export')", "Site::url('attendance/report')", "\$sess['totalCount']", "?edit=<?php echo (int) \$sess['sessionID']"] as $shown) {
     $at    = strpos($index, $shown);
     $guard = $at === false ? false : strrpos(substr($index, 0, $at), '<?php if (');
     check(

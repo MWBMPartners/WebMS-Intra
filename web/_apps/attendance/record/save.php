@@ -38,11 +38,12 @@ if (Auth::check() === false) {
 //    address, could add, change and delete its head counts.
 //
 //    Now: an administrator, or an active member of this organisation.
-//    AttendanceAccess::viewerIsMember() is the same membership test the
-//    attendance report page uses; do not write a second copy of it here.
-//    WHICH members may record is not narrowed: any active member still may
-//    (the owner's decision). The same test is in record.php, record/save.php
-//    and record/delete.php; change all three together.
+//    AttendanceAccess::viewerIsMember() is the ONE membership test; the
+//    attendance report page asks it too, inside mayViewTotals(). Do not write
+//    a second copy of it here. WHICH members may record a NEW session is not
+//    narrowed: any active member still may (the owner's decision). The same
+//    test is in record.php, record/save.php and record/delete.php; change all
+//    three together.
 if (App::isAdmin() === false
     && AttendanceAccess::viewerIsMember($mysqli, (int) ($_SESSION['user_id'] ?? 0), Site::id()) === false) {
     Router::renderError(403);
@@ -214,6 +215,18 @@ if ($action === 'update') {
     $sessionID = (int) ($_POST['sessionID'] ?? 0);
     if ($sessionID <= 0) {
         $_SESSION['flash_msg']  = 'Invalid session ID.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('attendance'));
+        exit();
+    }
+
+    // 🔒 D-109 (#917): overwriting an EXISTING session's counts is for the
+    //    people who may see them — AttendanceAccess::mayViewTotals(), the same
+    //    rule as the edit form in record.php. Anybody else is answered exactly
+    //    as for a session that does not exist, so the refusal says nothing a
+    //    made-up number would not.
+    if (AttendanceAccess::mayViewTotals($mysqli, (int) ($_SESSION['user_id'] ?? 0), $siteId, App::isAdmin(), App::isRootAdmin()) === false) {
+        $_SESSION['flash_msg']  = 'Attendance session not found.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('attendance'));
         exit();
