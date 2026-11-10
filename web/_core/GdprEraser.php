@@ -1272,10 +1272,13 @@ class GdprEraser
                  . 'your name becomes "[Deleted User]", and your e-mail address, telephone, address, biography, map '
                  . 'position, language, sign-in secrets, calendar link and notification choices are emptied. Most '
                  . 'records lose your account number. Some keep it on purpose: your expense claims, your own DBS '
-                 . 'checks, your tax declarations and giving statements, gifts kept for tax and offering envelopes that '
-                 . 'will become such gifts (which also keep your name until the organisation\'s keep-until date), an '
-                 . 'approval step given to you by name, and any pastoral visits, care cases, DBS checks or children\'s '
-                 . 'check-ins you made (which keep your name too: D-016, D-110, D-111). Separately, records kept for '
+                 . 'checks, an approval step given to you by name and the record of each giving statement issued to you. '
+                 . 'Some keep your name as well: gifts kept for tax (or every gift, where an organisation keeps them all), '
+                 . 'offering envelopes that will become such gifts, your tax declarations and a giving statement\'s file '
+                 . 'where every gift on it is kept - with any home address held for you, until the organisation\'s '
+                 . 'keep-until date if it has confirmed one (what is shown for your gifts says which of yours, and until '
+                 . 'when) - and any pastoral visits, care cases, DBS checks or children\'s check-ins you made (D-016, '
+                 . 'D-110, D-111). Separately, records kept for '
                  . 'security and as a history of changes can mention your account number, in what they describe or in '
                  . 'a stored copy of a record that was changed: the activity log, deleted by the nightly clear-out after '
                  . 'the number of days set for the organisation (a year unless changed), if that scheduled job has been set '
@@ -3334,10 +3337,13 @@ class GdprEraser
         foreach (self::catalogue() as $entry) {
             $table = (string) $entry['table'];
             $col   = (string) $entry['userCol'];
-            if (($table === 'tblGivingEntry' && $col === 'donorID') || ($table === 'tblCountEnvelopes' && $col === 'giverID')) {
+            $giving = ['tblGivingEntry' => ['donorID', 'gifts', 'envelopes'], 'tblCountEnvelopes' => ['giverID', 'envelopes', 'gifts'],
+                'tblGiftAidDeclaration' => ['donorID', 'declarations', null]];
+            if (isset($giving[$table]) === true && $giving[$table][0] === $col) {
                 try {
                     $outlook ??= self::givingOutlook($userId);
-                    foreach (self::givingRows($table, $outlook[$table === 'tblGivingEntry' ? 'gifts' : 'envelopes']) as $row) {
+                    [, $mine, $other] = $giving[$table];
+                    foreach (self::givingRows($table, $outlook[$mine], $other === null ? 0 : $outlook[$other]['keep']) as $row) {
                         $out[] = $row;
                     }
                 } catch (\Throwable $ignored) {
@@ -4871,6 +4877,102 @@ class GdprEraser
     }
 
     /**
+     * 🎁 What one organisation holds of a donor's giving, sorted by `$scope`:
+     * their gifts (all, the kept ones, the last kept), tax declarations and
+     * statement records (how many, the newest), and the named envelopes in
+     * counts not closed yet that will become kept gifts (how many, the
+     * newest service date). The keep step reads these once and decides from
+     * them; givingOutlook() asks the same function, so what a member is told
+     * and what the erasure does are worked out from one reading (#703 round
+     * 9). FIXED SQL; the numbers are bound.
+     *
+     * @return array{gifts: array<string, mixed>, declarations: array<string, mixed>,
+     *               statements: array<string, mixed>, envelopes: array<string, mixed>}
+     */
+    private static function givingFactsAt(\mysqli $db, int $siteId, int $userId, string $scope): array
+    {
+        $one = static function (string $sql) use ($db, $siteId, $userId): array {
+            $stmt = $db->prepare($sql);
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('ii', $siteId, $userId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            return is_array($row) === true ? $row : [];
+        };
+        $kept = GivingRetention::keptGiftSql($scope, 'e');
+
+        return [
+            'gifts' => $one(
+                'SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN ' . $kept . ' THEN 1 ELSE 0 END), 0) AS kept, '
+                . 'MAX(CASE WHEN ' . $kept . ' THEN e.donatedAt END) AS lastKept '
+                . 'FROM tblGivingEntry e WHERE e.siteID = ? AND e.donorID = ?'
+            ),
+            'declarations' => $one('SELECT COUNT(*) AS n, MAX(validFrom) AS newest FROM tblGiftAidDeclaration WHERE siteID = ? AND donorID = ?'),
+            'statements'   => $one('SELECT COUNT(*) AS n, MAX(toDate) AS newest FROM tblGivingStatementLog WHERE siteID = ? AND donorID = ?'),
+            // Named envelopes in a count that is not closed yet, whose gift
+            // will be a kept gift when it is (see unnameCountEnvelopes()).
+            'envelopes' => $one(
+                'SELECT COUNT(*) AS n, MAX(cs.serviceDate) AS newest FROM tblCountEnvelopes ce '
+                . 'INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+                . 'WHERE cs.siteID = ? AND ce.giverID = ? AND ' . self::keptEnvelopeWhere($scope)
+            ),
+        ];
+    }
+
+    /**
+     * Whether an organisation keeps NOTHING of a donor's under the rule the
+     * facts were sorted by: no kept gift, no declaration, no statement, no
+     * envelope that will become a kept gift - and no earlier run's kept row
+     * beside an emptied account (keepGivingRecordsAtSite(), 1b). One test, for
+     * the keep step and givingOutlook() (#703 round 9).
+     *
+     * @param array{gifts: array<string, mixed>, declarations: array<string, mixed>,
+     *              statements: array<string, mixed>, envelopes: array<string, mixed>} $facts
+     */
+    private static function keepsNothing(array $facts, bool $keptAlready): bool
+    {
+        return $keptAlready === false && (int) ($facts['gifts']['kept'] ?? 0) === 0 && (int) ($facts['declarations']['n'] ?? 0) === 0
+            && (int) ($facts['statements']['n'] ?? 0) === 0 && (int) ($facts['envelopes']['n'] ?? 0) === 0;
+    }
+
+    /**
+     * The date a donor's kept records at one organisation are counted from,
+     * and how it was worked out, in words: the last kept gift (or the
+     * service date of a kept envelope in an open count, if later); with
+     * neither, the newest statement or declaration; and never EARLIER than a
+     * date an earlier run recorded (`$earlierRow`, that run's kept row, or
+     * null). One place, for the keep step and givingOutlook(), which then
+     * both ask GivingRetention::stateFor() whether that date has passed
+     * (#703 round 9).
+     *
+     * @param array{gifts: array<string, mixed>, declarations: array<string, mixed>,
+     *              statements: array<string, mixed>, envelopes: array<string, mixed>} $facts
+     * @param array<string, mixed>|null $earlierRow
+     * @return array{date: string, from: string}
+     */
+    private static function keptCountedFrom(array $facts, ?array $earlierRow): array
+    {
+        $gifts        = $facts['gifts'];
+        $envelopes    = $facts['envelopes'];
+        $lastGift = max(($gifts['lastKept'] ?? null) !== null ? (string) $gifts['lastKept'] : '', ($envelopes['newest'] ?? null) !== null ? (string) $envelopes['newest'] : '');
+        $from     = 'last such gift ' . GivingRetention::dateInWords($lastGift);
+        if ($lastGift === '') {
+            $lastGift = max((string) ($facts['statements']['newest'] ?? ''), (string) ($facts['declarations']['newest'] ?? ''));
+            $from     = 'no gift is kept, so it is counted from the newest statement or declaration, ' . GivingRetention::dateInWords($lastGift);
+        }
+        if ($earlierRow !== null && (string) $earlierRow['lastGiftDate'] > $lastGift) {
+            $lastGift = (string) $earlierRow['lastGiftDate'];
+            $from     = 'the date recorded by the earlier run, ' . GivingRetention::dateInWords($lastGift);
+        }
+
+        return ['date' => $lastGift, 'from' => $from];
+    }
+
+    /**
      * The test for "this named envelope will keep its giver", as SQL for a
      * query that calls tblCountEnvelopes `ce` and tblCountSessions `cs`: its
      * count is not closed yet, and the gift it becomes when the count is
@@ -4885,42 +4987,51 @@ class GdprEraser
     }
 
     /**
-     * 🎁 What an erasure WOULD do with a person's own gifts and offering
-     * envelopes, counted before it runs: how many keep the name and how many
-     * lose it, and under which rule the kept ones are kept. This is what My
+     * 🎁 What an erasure WOULD do with a person's own gifts, offering
+     * envelopes and tax declarations, counted before it runs. This is what My
      * data and Request erasure show (inventory()).
      *
      * #703 round 8: those pages used to count every gift WHERE donorID = ?
      * and call the lot "kept", with a reason saying every other gift had
-     * "already lost" the name - untrue before any erasure has run, and untrue
-     * for a gift no tax declaration or statement covers, which the keep step
-     * takes the name off. The counts here ask the keep step's own rules
-     * (sortingScope(), GivingRetention::keptGiftSql(), keptEnvelopeWhere()),
-     * organisation by organisation, so the two cannot disagree. A gift or
-     * envelope not counted as kept is counted as losing the name, because
-     * that is what the keep step and unnameCountEnvelopes() do with it.
+     * "already lost" the name. Round 9: they then said a gift "will keep your
+     * name" where the SAME run takes it off - an organisation that has
+     * confirmed its years, with no hold, where the keep-until date has
+     * already passed: the keep step answers "due" and
+     * clearGivingRecordDueAtErasure() clears the name before the run ends.
      *
-     * WHAT IT CANNOT PREDICT, said plainly: an organisation where an earlier
-     * run's kept row has already been CLEARED - the keep step then changes
-     * nothing there. That needs an emptied account, which cannot sign in to
-     * read this, so it is counted by today's rule like any other.
+     * So the outlook asks, organisation by organisation, the keep step's own
+     * reading and rules - sortingScope(), givingFactsAt(), keepsNothing(),
+     * keptCountedFrom() and GivingRetention::stateFor() - and sorts every
+     * record into one of: KEPT (with the state that says until when: not-due,
+     * not-confirmed, on-hold, unreadable), LOST BECAUSE THE RULE DOES NOT KEEP
+     * IT, or LOST BECAUSE IT IS ALREADY DUE.
      *
-     * @return array{gifts: array{keep: int, lose: int, keptUnder: list<string>},
-     *               envelopes: array{keep: int, lose: int, keptUnder: list<string>}}
+     * WHAT IT CANNOT PREDICT, said plainly (measured against the real erasure
+     * in round 8's check, and these are the only disagreements found there
+     * once "due" is counted):
+     *   - an organisation where an earlier run's kept row has already been
+     *     CLEARED: the keep step changes nothing there. That needs an emptied
+     *     account, which cannot sign in to read this; it is counted by today's
+     *     rule like any other;
+     *   - a clearing that FAILS at the end of the run (a file that cannot be
+     *     deleted, say): the name then stays until the request is run again.
+     *     "Due" is counted as lost, which is what a run that succeeds does.
+     *
+     * @return array{gifts: array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>},
+     *               envelopes: array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>},
+     *               declarations: array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>}}
      */
     public static function givingOutlook(int $userId): array
     {
-        $db  = App::db();
-        $out = [
-            'gifts'     => ['keep' => 0, 'lose' => 0, 'keptUnder' => []],
-            'envelopes' => ['keep' => 0, 'lose' => 0, 'keptUnder' => []],
-        ];
-        $count = static function (string $sql, string $types, array $values) use ($db): int {
+        $db    = App::db();
+        $empty = ['keep' => 0, 'loseRule' => 0, 'loseDue' => 0, 'keptUnder' => [], 'keptStates' => []];
+        $out   = ['gifts' => $empty, 'envelopes' => $empty, 'declarations' => $empty];
+        $count = static function (string $sql) use ($db, $userId): int {
             $stmt = $db->prepare($sql);
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
             }
-            $stmt->bind_param($types, ...$values);
+            $stmt->bind_param('i', $userId);
             $stmt->execute();
             $n = 0;
             $stmt->bind_result($n);
@@ -4930,9 +5041,12 @@ class GdprEraser
             return (int) $n;
         };
 
-        $giftTotal     = $count('SELECT COUNT(*) FROM tblGivingEntry WHERE donorID = ?', 'i', [$userId]);
-        $envelopeTotal = $count('SELECT COUNT(*) FROM tblCountEnvelopes WHERE giverID = ?', 'i', [$userId]);
-        if ($giftTotal === 0 && $envelopeTotal === 0) {
+        $totals = [
+            'gifts'        => $count('SELECT COUNT(*) FROM tblGivingEntry WHERE donorID = ?'),
+            'envelopes'    => $count('SELECT COUNT(*) FROM tblCountEnvelopes WHERE giverID = ?'),
+            'declarations' => $count('SELECT COUNT(*) FROM tblGiftAidDeclaration WHERE donorID = ?'),
+        ];
+        if (array_sum($totals) === 0) {
             return $out;
         }
 
@@ -4949,12 +5063,13 @@ class GdprEraser
         $sites = [];
         $stmt  = $db->prepare(
             'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
+            . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
             . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID WHERE ce.giverID = ?'
         );
         if ($stmt === false) {
             throw new \RuntimeException((string) $db->error);
         }
-        $stmt->bind_param('ii', $userId, $userId);
+        $stmt->bind_param('iii', $userId, $userId, $userId);
         $stmt->execute();
         $result = $stmt->get_result();
         while ($row = $result->fetch_row()) {
@@ -4963,7 +5078,7 @@ class GdprEraser
         $stmt->close();
 
         foreach ($sites as $siteId) {
-            $stmt = $db->prepare('SELECT scope, clearedAt FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?');
+            $stmt = $db->prepare('SELECT scope, lastGiftDate, clearedAt FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?');
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
             }
@@ -4971,97 +5086,136 @@ class GdprEraser
             $stmt->execute();
             $keptRow = $stmt->get_result()->fetch_assoc();
             $stmt->close();
-            $scope = self::sortingScope((string) GivingRetention::ruleForSite($siteId)['scope'], is_array($keptRow) === true ? $keptRow : null, $emptied);
+            $keptRow = is_array($keptRow) === true ? $keptRow : null;
+            $live    = $keptRow !== null && $keptRow['clearedAt'] === null;
 
-            $gifts = $count(
-                'SELECT COUNT(*) FROM tblGivingEntry e WHERE e.siteID = ? AND e.donorID = ? AND ' . GivingRetention::keptGiftSql($scope, 'e'),
-                'ii',
-                [$siteId, $userId]
-            );
-            $envelopes = $count(
-                'SELECT COUNT(*) FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
-                . 'WHERE cs.siteID = ? AND ce.giverID = ? AND ' . self::keptEnvelopeWhere($scope),
-                'ii',
-                [$siteId, $userId]
-            );
-            foreach (['gifts' => $gifts, 'envelopes' => $envelopes] as $kind => $kept) {
+            $rule  = GivingRetention::ruleForSite($siteId);
+            $scope = self::sortingScope((string) $rule['scope'], $keptRow, $emptied);
+            $facts = self::givingFactsAt($db, $siteId, $userId, $scope);
+            $state = '';
+            if (self::keepsNothing($facts, $live === true && $emptied === true) === false) {
+                $state = (string) GivingRetention::stateFor($rule, self::keptCountedFrom($facts, $live === true ? $keptRow : null)['date'])['state'];
+            }
+
+            foreach ([
+                'gifts'        => (int) ($facts['gifts']['kept'] ?? 0),
+                'envelopes'    => (int) ($facts['envelopes']['n'] ?? 0),
+                'declarations' => (int) ($facts['declarations']['n'] ?? 0),
+            ] as $kind => $kept) {
+                if ($kept === 0) {
+                    continue;
+                }
+                if ($state === 'due') {
+                    $out[$kind]['loseDue'] += $kept;
+                    continue;
+                }
                 $out[$kind]['keep'] += $kept;
-                if ($kept > 0 && in_array($scope, $out[$kind]['keptUnder'], true) === false) {
-                    $out[$kind]['keptUnder'][] = $scope;
+                foreach (['keptUnder' => $scope, 'keptStates' => $state] as $list => $value) {
+                    if (in_array($value, $out[$kind][$list], true) === false) {
+                        $out[$kind][$list][] = $value;
+                    }
                 }
             }
         }
-        $out['gifts']['lose']     = $giftTotal - $out['gifts']['keep'];
-        $out['envelopes']['lose'] = $envelopeTotal - $out['envelopes']['keep'];
+        foreach ($totals as $kind => $total) {
+            $out[$kind]['loseRule'] = max(0, $total - $out[$kind]['keep'] - $out[$kind]['loseDue']);
+        }
 
         return $out;
     }
 
     /**
-     * The rows inventory() shows for a person's own gifts or envelopes:
-     * one for those that keep the name and one for those that lose it, each
-     * worded for what is true of THAT person (#703 round 8). A row with no
-     * records is left out.
+     * The rows inventory() shows for a person's own gifts, envelopes or tax
+     * declarations: one for those that keep the name and one for those that
+     * lose it, each worded for what is true of THAT person (#703 rounds 8
+     * and 9). A row with no records is left out.
      *
-     * @param array{keep: int, lose: int, keptUnder: list<string>} $outlook
+     * The words follow the facts, not a fixed sentence: "for tax reasons"
+     * only where a declaration or statement is the reason (under "every
+     * gift" it is not); "until the keep-until date" only where the
+     * organisation has confirmed its years and no hold is on; and a record
+     * already past its date is LOST, as the erasure that clears it as it
+     * runs does.
+     *
+     * @param array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>} $outlook
+     * @param int $otherKeep How many of the OTHER kind will keep the name (gifts and envelopes speak for each other:
+     *                       an envelope that will keep the name becomes a gift that does).
      * @return list<array{table: string, rows: int, action: string, reason: string}>
      */
-    private static function givingRows(string $table, array $outlook): array
+    private static function givingRows(string $table, array $outlook, int $otherKeep = 0): array
     {
-        $isGift = $table === 'tblGivingEntry';
-        $why    = match (true) {
-            $outlook['keptUnder'] === [GivingRetention::SCOPE_ALL] => 'this organisation keeps the giver\'s name on every gift',
-            in_array(GivingRetention::SCOPE_ALL, $outlook['keptUnder'], true) === true
-                => 'a tax declaration or giving statement of yours covers its date, or the organisation keeps the giver\'s name on every gift',
-            default => 'a tax declaration or giving statement of yours covers its date',
+        $kind = match ($table) {
+            'tblGivingEntry'        => 'gift',
+            'tblCountEnvelopes'     => 'envelope',
+            default                 => 'declaration',
         };
+        $why = match (true) {
+            $outlook['keptUnder'] === [GivingRetention::SCOPE_ALL] => 'because this organisation keeps the giver\'s name on every gift',
+            in_array(GivingRetention::SCOPE_ALL, $outlook['keptUnder'], true) === true
+                => 'because a tax declaration or giving statement of yours covers its date, or because the organisation keeps the giver\'s name on every gift',
+            default => 'for tax reasons, because a tax declaration or giving statement of yours covers its date',
+        };
+        $periods = [];
+        foreach ($outlook['keptStates'] as $state) {
+            $periods[] = match ($state) {
+                'not-due'       => 'it is kept until this organisation\'s keep-until date',
+                'not-confirmed' => 'this organisation has not yet confirmed how many years it keeps such records, so there is no end date: nothing is cleared until it does',
+                'on-hold'       => 'a hold is on at this organisation, so nothing is cleared until it is lifted',
+                default         => 'the date it would be cleared on cannot be worked out, so nothing is cleared',
+            };
+        }
+        $until = implode('; or, at another organisation, ', $periods);
+
         $rows = [];
         if ($outlook['keep'] > 0) {
             $rows[] = [
                 'table'  => $table,
                 'rows'   => $outlook['keep'],
                 'action' => 'retain',
-                'reason' => $isGift
-                    ? 'these gifts will keep your name, and any home address held for you is kept with them, for tax reasons until this '
-                        . 'organisation\'s keep-until date, because ' . $why
-                    : 'offering envelopes in a count that is not closed yet: each will become a gift that keeps your name, and '
-                        . 'any home address held for you is kept with it, for tax reasons until this organisation\'s keep-until date, because ' . $why,
+                'reason' => match ($kind) {
+                    'gift'     => 'these gifts will keep your name, and any home address held for you is kept with them, ' . $why . '. ' . ucfirst($until),
+                    'envelope' => 'offering envelopes in a count that is not closed yet: when it is closed each becomes a gift that keeps your name, '
+                        . 'and any home address held for you is kept with it, ' . $why . '. ' . ucfirst($until),
+                    default    => 'your tax declarations stay unchanged, with your name kept beside them, as the evidence for tax relief claimed on '
+                        . 'your gifts. ' . ucfirst($until),
+                },
             ];
         }
-        if ($outlook['lose'] > 0) {
+        $lost = $outlook['loseRule'] + $outlook['loseDue'];
+        if ($lost > 0) {
+            $causes = [];
+            if ($outlook['loseRule'] > 0) {
+                $causes[] = ($outlook['loseDue'] > 0 ? $outlook['loseRule'] . ' ' : '') . match ($kind) {
+                    'gift'     => 'because no tax declaration or giving statement of yours covers their date, and this organisation keeps the '
+                        . 'giver\'s name only on gifts one covers',
+                    'envelope' => 'because the count it was in is closed (its gift is among your gifts), or the gift it will become will not '
+                        . 'keep your name',
+                    default    => 'because no organisation is keeping your giving records',
+                };
+            }
+            if ($outlook['loseDue'] > 0) {
+                $causes[] = ($outlook['loseRule'] > 0 ? $outlook['loseDue'] . ' ' : '') . 'because this organisation\'s keep-until date for '
+                    . 'them has already passed, so the erasure takes your name off as it runs';
+            }
             $rows[] = [
                 'table'  => $table,
-                'rows'   => $outlook['lose'],
+                'rows'   => $lost,
                 'action' => 'anonymise',
-                'reason' => ($isGift
-                    ? 'these gifts keep their amount, date and method and will lose your name, because no tax declaration or '
-                        . 'giving statement of yours covers their date, and this organisation keeps the giver\'s name only on '
-                        . 'gifts one covers'
-                    : 'offering envelopes that will lose your name: the count they were in is closed (its gift is among your '
-                        . 'gifts), or the gift they will become will not keep your name')
-                    . ($outlook['keep'] === 0 ? '. None of your ' . ($isGift ? 'gifts' : 'envelopes') . ' will keep your name' : ''),
+                'reason' => match ($kind) {
+                    'gift'     => 'these gifts keep their amount, date and method and will lose your name, ',
+                    'envelope' => 'offering envelopes that will lose your name, ',
+                    default    => 'your tax declarations stay, with their dates and your account number, but your name and the address, the '
+                        . 'network address it was made from, the signature and any notes on them are removed, ',
+                } . implode('; ', $causes)
+                    . ($kind !== 'declaration' && $outlook['keep'] === 0 && $otherKeep === 0
+                        ? '. None of your gifts' . ($kind === 'envelope' ? ' or envelopes' : '') . ' will keep your name'
+                        : ''),
             ];
         }
 
         return $rows;
     }
 
-    /**
-     * 🏢 The giving-records step for ONE organisation. Runs inside the
-     *    transaction keepGivingRecords() opened, and writes exactly one audit
-     *    line. Anything it throws undoes what it did here and stops the run.
-     *
-     * It does the same work whether or not an earlier run has been here:
-     * count what is kept, write or bring up to date the kept row, take the
-     * donor off every gift that is not kept. See keepGivingRecords() for what
-     * differs on a later run, and why.
-     *
-     * No line it writes holds the donor's name.
-     *
-     * @return array{changed: bool, due: ?int} `due`: the kept row's number
-     *   when its keep-until date has already passed and nothing but the
-     *   account not being emptied yet holds the clearing back; otherwise null.
-     */
     private static function keepGivingRecordsAtSite(\mysqli $db, int $requestId, int $userId, int $siteId): array
     {
         $rule  = GivingRetention::ruleForSite($siteId);
@@ -5157,24 +5311,13 @@ class GdprEraser
             self::$everyGiftSites[] = $siteId;
         }
         $kept  = GivingRetention::keptGiftSql($scope, 'e');
-        $gifts = $one(
-            'SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN ' . $kept . ' THEN 1 ELSE 0 END), 0) AS kept, '
-            . 'MAX(CASE WHEN ' . $kept . ' THEN e.donatedAt END) AS lastKept '
-            . 'FROM tblGivingEntry e WHERE e.siteID = ? AND e.donorID = ?',
-            'ii',
-            [$siteId, $userId]
-        );
-        $declarations = $one('SELECT COUNT(*) AS n, MAX(validFrom) AS newest FROM tblGiftAidDeclaration WHERE siteID = ? AND donorID = ?', 'ii', [$siteId, $userId]);
-        $statements   = $one('SELECT COUNT(*) AS n, MAX(toDate) AS newest FROM tblGivingStatementLog WHERE siteID = ? AND donorID = ?', 'ii', [$siteId, $userId]);
-        // Named envelopes in a count that is not closed yet, whose gift will
-        // be a kept gift when it is (see unnameCountEnvelopes()).
-        $envelopes = $one(
-            'SELECT COUNT(*) AS n, MAX(cs.serviceDate) AS newest FROM tblCountEnvelopes ce '
-            . 'INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
-            . 'WHERE cs.siteID = ? AND ce.giverID = ? AND ' . self::keptEnvelopeWhere($scope),
-            'ii',
-            [$siteId, $userId]
-        );
+        // #703 round 9: the facts are read by givingFactsAt(), which
+        // givingOutlook() (what My data shows) asks too - one reading, not two.
+        $facts        = self::givingFactsAt($db, $siteId, $userId, $scope);
+        $gifts        = $facts['gifts'];
+        $declarations = $facts['declarations'];
+        $statements   = $facts['statements'];
+        $envelopes    = $facts['envelopes'];
 
         $keptGifts        = (int) $gifts['kept'];
         $otherGifts       = (int) $gifts['total'] - $keptGifts;
@@ -5233,7 +5376,7 @@ class GdprEraser
 
         // 4. Nothing to keep. (Never for a record already kept beside an
         //    emptied account: see 1b.)
-        if ($keptAlready === false && $keptGifts === 0 && $declarationCount === 0 && $statementCount === 0 && $envelopeCount === 0) {
+        if (self::keepsNothing($facts, $keptAlready) === true) {
             if ($earlierRun === true) {
                 // An earlier run kept a name here and nothing needs it any
                 // more. The name and address go; the row stays as the record.
@@ -5268,19 +5411,8 @@ class GdprEraser
         //    service date of a kept envelope in an open count, if later), or,
         //    with neither, the newest statement or declaration. On a later
         //    run it is never moved EARLIER than the date already recorded.
-        $lastGift = max($gifts['lastKept'] !== null ? (string) $gifts['lastKept'] : '', $envelopes['newest'] !== null ? (string) $envelopes['newest'] : '');
-        $from     = 'last such gift ' . GivingRetention::dateInWords($lastGift);
-        if ($lastGift === '') {
-            $lastGift = max((string) ($statements['newest'] ?? ''), (string) ($declarations['newest'] ?? ''));
-            $from     = 'no gift is kept, so it is counted from the newest statement or declaration, ' . GivingRetention::dateInWords($lastGift);
-        }
-        if ($earlierRun === true && (string) $existing['lastGiftDate'] > $lastGift) {
-            $lastGift = (string) $existing['lastGiftDate'];
-            $from     = 'the date recorded by the earlier run, ' . GivingRetention::dateInWords($lastGift);
-        }
+        ['date' => $lastGift, 'from' => $from] = self::keptCountedFrom($facts, $earlierRun === true ? $existing : null);
 
-        // 6. The name and home address, as they are now (the account was
-        //    read at 1b).
         $name     = $emptiedAlready === true ? null : (string) $account['fullName'];
         $declared = $one(
             "SELECT address, postcode FROM tblGiftAidDeclaration WHERE siteID = ? AND donorID = ? AND address IS NOT NULL AND address <> '' "

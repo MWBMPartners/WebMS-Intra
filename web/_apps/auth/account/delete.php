@@ -122,10 +122,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <li>If you worked or volunteered here, the pastoral visits you made (with their notes, except on a
                 case about you, where the notes are emptied), the care cases you opened, the DBS (safeguarding) checks you recorded and the children you checked in
                 or out keep your name and account number as the person who did it.</li>
-            <li>Gifts kept for tax, and your tax declarations, stay with your name and any home address held
-                for you kept beside them until this organisation's keep-until date. Your other gifts lose your
-                name.</li>
-            <li>A giving statement's file holds your name, your home address and every gift on it. Where every
+            <li>Gifts kept for tax (or every gift, where this organisation keeps them all), and your tax
+                declarations, stay with your name and any home address held for you kept beside them. That lasts
+                until this organisation's keep-until date, once it has confirmed how many years it keeps them;
+                if the date has already passed, the erasure removes your name from them as it runs. Your other
+                gifts lose your name. <a href="<?php echo htmlspecialchars(Router::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">My data</a>
+                shows which of your gifts are which.</li>
+            <li>A giving statement's file holds your name, any home address held for you and every gift on it. Where every
                 gift on it is one kept for tax, the file is kept until the same date; otherwise it is deleted.
                 The record that a statement was issued, with its period and totals, keeps your account
                 number.</li>

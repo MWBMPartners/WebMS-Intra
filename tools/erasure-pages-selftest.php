@@ -181,7 +181,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 93; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 97; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -199,6 +199,9 @@ const EXPECTED_CHECKS = 93; // 80 until #703 (D-016) added two: the two writers
                             // Round 8 added section K: what a giver is told
                             // will happen to their own gifts, under both
                             // rules, then checked against a real erasure. 93.
+                            // Round 9 added K5-K8: a record past its date, an
+                            // envelope-only giver, words that follow the
+                            // organisation's state, and both erased. 97.
 
 function refuse(string $why): never
 {
@@ -371,6 +374,11 @@ const GWEN   = 917041; // one gift, no tax declaration or statement: it will los
 const DORA   = 917042; // one gift inside her tax declaration: it will keep her name
 const BO     = 917043; // one of each, plus an envelope in an open count and one in a closed count
 const REQ_BO = 917960; // Bo's request, carried out at the end of section K
+// #703 round 9: the two cases round 8's outlook got wrong.
+const PAT     = 917044; // gave under a declaration long ago and not since: his kept gift is already past its date
+const EVE     = 917045; // no kept gift - only one from before her declaration - and an envelope in an open count the declaration covers
+const REQ_PAT = 917961; // Pat's request, carried out in section K
+const REQ_EVE = 917962; // Eve's request, carried out in section K
 const REQ_PIP_B = 917911; // Pip's request, filed in B
 
 /** Every request this run's organisations hold for one account. */
@@ -2310,7 +2318,17 @@ head('K. What a giver is told will happen to their own gifts (#703 round 8)');
 // rules. Three givers, under both rules, and then one of them is really
 // erased, to show the page said what the erasure then did.
 $givingBefore8 = q("SELECT settingKey, settingValue, defaultValue FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%' ORDER BY settingKey", 'i', [ORG_A]);
-foreach (['gwen' => [GWEN, 'Gwen Giver'], 'dora' => [DORA, 'Dora Declared'], 'bo' => [BO, 'Bo Both']] as $who => [$id, $name]) {
+// #703 round 9: a known state for the whole section - the years confirmed (six),
+// and no hold at either level - so a record past its date really is "due". The
+// installation's own hold is put back at the end of the section.
+$holdEverybody8 = one("SELECT settingValue FROM tblSettings WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'");
+if ($holdEverybody8 !== null) {
+    q("UPDATE tblSettings SET settingValue = 'false' WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'");
+}
+siteSetting(ORG_A, 'giving.retention.hold', 'false');
+siteSetting(ORG_A, 'giving.retention.confirmed', 'true');
+siteSetting(ORG_A, 'giving.retention.years', '6');
+foreach (['gwen' => [GWEN, 'Gwen Giver'], 'dora' => [DORA, 'Dora Declared'], 'bo' => [BO, 'Bo Both'], 'pat' => [PAT, 'Pat Past'], 'eve' => [EVE, 'Eve Envelope']] as $who => [$id, $name]) {
     q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, $name, 'u' . $id . '.erasure@selftest.invalid']);
     q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
     q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-erasure-' . $who, $hash]);
@@ -2334,11 +2352,23 @@ $session  = static function (string $status) use ($category, $recent): int {
 foreach (['open', 'closed'] as $status) {
     q("INSERT INTO tblCountEnvelopes (countSessionID, giverID, giverName, amount, method) VALUES (?, ?, 'Bo Both', 5.00, 'cash')", 'ii', [$session($status), BO]);
 }
+// Pat: a declaration from 2008 to 2010, a gift inside it (2009) and one after
+// it (2012). Six years from the 2009 gift is long past.
+q("INSERT INTO tblGiftAidDeclaration (siteID, donorID, address, postcode, validFrom, validTo) VALUES (?, ?, '4 Made-up Road', 'ZZ4 4ZZ', '2008-01-01', '2010-12-31')", 'ii', [ORG_A, PAT]);
+$patKept   = $gift(ORG_A, PAT, '2009-06-01', 6000);
+$patUnkept = $gift(ORG_A, PAT, '2012-06-01', 7000);
+// Eve: a declaration, ONE envelope in an open count it covers, and one gift
+// from BEFORE it, which loses her name. So her page has a gift row that loses
+// the name beside an envelope that keeps it - the case where "None of your
+// gifts will keep your name" was untrue (round 8's check, giver 950004).
+q("INSERT INTO tblGiftAidDeclaration (siteID, donorID, address, postcode, validFrom) VALUES (?, ?, '5 Made-up Road', 'ZZ5 5ZZ', '2020-01-01')", 'ii', [ORG_A, EVE]);
+$eveUnkept = $gift(ORG_A, EVE, '2019-06-01', 800);
+q("INSERT INTO tblCountEnvelopes (countSessionID, giverID, giverName, amount, method) VALUES (?, ?, 'Eve Envelope', 6.00, 'cash')", 'ii', [$session('open'), EVE]);
 
 /** A giver's own My data rows for gifts and envelopes, as "action:count" in page order, and their reasons. */
 $givingShown = static function (string $html): array {
     $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
-    $shown = ['tblGivingEntry' => [], 'tblCountEnvelopes' => [], 'reasons' => []];
+    $shown = ['tblGivingEntry' => [], 'tblCountEnvelopes' => [], 'tblGiftAidDeclaration' => [], 'reasons' => []];
     foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
         $cells = [];
         foreach ($row->children as $cell) {
@@ -2352,9 +2382,9 @@ $givingShown = static function (string $html): array {
 
     return $shown;
 };
-$giversSee = static function () use ($givingShown, &$jar): array {
+$giversSee = static function (array $who3 = ['gwen', 'dora', 'bo']) use ($givingShown, &$jar): array {
     $seen = [];
-    foreach (['gwen', 'dora', 'bo'] as $who) {
+    foreach ($who3 as $who) {
         $seen[$who] = $givingShown((string) req($jar[$who], 'GET', '/account/my-data')['body']);
     }
 
@@ -2414,6 +2444,62 @@ ok('K4 BO IS ERASED: afterwards the gifts and envelopes that still name him are 
     && $boEnvelopes === 1,
     $boRun . ' | ' . json_encode([request(REQ_BO)['status'], $boGifts, $boEnvelopes]));
 
+// ── #703 round 9: a record already past its date, an envelope-only giver,
+//    and words that follow the organisation's state ──
+siteSetting(ORG_A, 'giving.retention.scope', 'receipted');
+$late = $giversSee(['pat', 'eve', 'dora']);
+$says = static fn (array $seen, string $who, string $words): bool
+    => array_filter($seen[$who]['reasons'], static fn (string $r): bool => str_contains($r, $words)) !== [];
+ok('K5 PAST ITS DATE: Pat\'s two gifts and his declaration are all shown as losing his name - one gift because no declaration covers it, the other because its keep-until date has already passed - and nothing says any of his will keep it; Eve, whose only gift loses her name but whose envelope in an open count will become a gift that keeps it, is told so and is NOT told that none of her gifts will; Dora\'s kept gift says it is kept until the keep-until date (#703 round 9)',
+    $late['pat']['tblGivingEntry'] === ['anonymise:2'] && $late['pat']['tblGiftAidDeclaration'] === ['anonymise:1']
+    && $says($late, 'pat', 'keep-until date for them has already passed, so the erasure takes your name off as it runs') === true
+    && $says($late, 'pat', 'these gifts will keep your name') === false
+    && $late['eve']['tblGivingEntry'] === ['anonymise:1'] && $late['eve']['tblCountEnvelopes'] === ['retain:1'] && $late['eve']['tblGiftAidDeclaration'] === ['retain:1']
+    && $says($late, 'eve', 'each becomes a gift that keeps your name') === true && $says($late, 'eve', 'None of your') === false
+    && $says($late, 'dora', 'It is kept until this organisation\'s keep-until date') === true,
+    json_encode($late));
+
+siteSetting(ORG_A, 'giving.retention.confirmed', 'false');
+$unconfirmed = $giversSee(['dora']);
+siteSetting(ORG_A, 'giving.retention.scope', 'all');
+$everyGift   = $giversSee(['gwen']);
+siteSetting(ORG_A, 'giving.retention.scope', 'receipted');
+siteSetting(ORG_A, 'giving.retention.confirmed', 'true');
+ok('K6 THE WORDS FOLLOW THE STATE: with the years not confirmed, Dora is told there is no end date and nothing is cleared until it is confirmed, and is NOT promised a keep-until date; under "every gift", Gwen\'s kept gift is NOT said to be kept "for tax reasons" (#703 round 9)',
+    $says($unconfirmed, 'dora', 'has not yet confirmed how many years it keeps such records, so there is no end date') === true
+    && $says($unconfirmed, 'dora', 'kept until this organisation\'s keep-until date') === false
+    && $says($everyGift, 'gwen', 'because this organisation keeps the giver\'s name on every gift') === true
+    && $says($everyGift, 'gwen', 'for tax reasons') === false,
+    json_encode([$unconfirmed, $everyGift]));
+
+$patAsks = \Dom\HTMLDocument::createFromString((string) req($jar['pat'], 'GET', '/account/erasure-request')['body'], LIBXML_NOERROR);
+$patSaid = [];
+foreach ($patAsks->querySelectorAll('li') as $li) {
+    $code = $li->querySelector('code');
+    if ($code !== null && in_array(trim((string) $code->textContent), ['tblGivingEntry', 'tblGiftAidDeclaration'], true) === true) {
+        $strong    = $li->querySelectorAll('strong');
+        $patSaid[] = trim((string) $code->textContent) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
+    }
+}
+ok('K7 REQUEST ERASURE says the same to Pat: his two gifts and his declaration are "kept, with some details about you removed", none simply "kept" (#703 round 9)',
+    $patSaid === ['tblGivingEntry 2 kept, with some details about you removed', 'tblGiftAidDeclaration 1 kept, with some details about you removed'],
+    json_encode($patSaid));
+
+$seed(REQ_PAT, ORG_A, PAT, 'pending_review', null);
+$seed(REQ_EVE, ORG_A, EVE, 'pending_review', null);
+$patRun = act($jar['adm'], REQ_PAT, 'execute');
+$eveRun = act($jar['adm'], REQ_EVE, 'execute');
+$patDeclaration = one('SELECT address, postcode FROM tblGiftAidDeclaration WHERE donorID = ?', 'i', [PAT]);
+ok('K8 PAT AND EVE ARE ERASED: no gift names Pat afterwards - the one past its date lost him in the same run, as his page said - and his declaration\'s address is gone; Eve\'s envelope still names her and her earlier gift does not, as hers said (#703 round 9)',
+    request(REQ_PAT)['status'] === 'completed' && request(REQ_EVE)['status'] === 'completed'
+    && $donorOf($patKept) === null && $donorOf($patUnkept) === null
+    && $patDeclaration !== null && $patDeclaration['address'] === null && $patDeclaration['postcode'] === null
+    && (int) one('SELECT COUNT(*) AS n FROM tblCountEnvelopes WHERE giverID = ?', 'i', [EVE])['n'] === 1 && $donorOf($eveUnkept) === null,
+    $patRun . ' | ' . $eveRun . ' | ' . json_encode([request(REQ_PAT)['status'], request(REQ_EVE)['status'], $donorOf($patKept), $donorOf($patUnkept), $patDeclaration]));
+
+if ($holdEverybody8 !== null) {
+    q("UPDATE tblSettings SET settingValue = ? WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'", 's', [(string) $holdEverybody8['settingValue']]);
+}
 // Put ORG_A's giving settings back exactly.
 q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%'", 'i', [ORG_A]);
 foreach ($givingBefore8 as $row) {
