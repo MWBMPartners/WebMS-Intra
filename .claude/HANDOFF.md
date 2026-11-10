@@ -15,8 +15,8 @@ Last whole suite (with #703): 104/104 green; e2e harness all phases. Decisions t
 |---|---|---|
 | #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, b82a4c00 | Round 3 built (step (d) decides by comparing the cell's UTC reading with a canonical cell from date_parse's written fields: 0 wrong of 255,094 swept cells; one generated self-test case per list entry, 38/38). Check round 3 running. Raised #946 |
 | #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 3b971faf | Round 2 built (place() reads the given organisation; an older day-late sunset fault fixed; plain-decimal coordinates; preview and other-org paths pinned; audit check no longer cries wolf). Check round 2 running. Raised #942, #943, #945 |
-
 | #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | worktree agent (p940-build) | Building |
+
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782, landed), 274 (#935). Next free: 275.
 
