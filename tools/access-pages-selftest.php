@@ -483,10 +483,10 @@ const TF2 = 916035; // the same, but switched off while waiting at the second st
 const PY  = 916036; // switched off; its first requests afterwards are a POST, and a GET with an "Authorization" header
 /**
  * The statement Auth::ensureSession() makes for a signed-in request, as the database's query log shows it.
- * Since #598 (D-104) it also reads `signInsValidFrom`, in the SAME statement, so the count of look-ups
+ * Since #598 (D-104) it also reads `signInVersion`, in the SAME statement, so the count of look-ups
  * per request is unchanged: still exactly one.
  */
-const LOOKUP_LIKE = 'SELECT `isActive`, `signInsValidFrom` FROM `tblUsers` WHERE `userID` = %';
+const LOOKUP_LIKE = 'SELECT `isActive`, `signInVersion` FROM `tblUsers` WHERE `userID` = %';
 const EV_INT   = 916401; // A: internal, published
 const EV_PUB   = 916402; // A: public, published
 const EV_DRAFT = 916403; // A: a draft, marked public on purpose so only the draft rule refuses it

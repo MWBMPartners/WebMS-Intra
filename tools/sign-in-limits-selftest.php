@@ -182,7 +182,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 162; // seven added by #887 (sections 0 and 0b); 38 by #598 (one in H, and parts T to Z2)
+const EXPECTED_CHECKS = 168; // seven added by #887 (sections 0 and 0b); 44 by #598 (one in H, and parts T to Z2)
 
 function refuse(string $why): never
 {
@@ -326,6 +326,7 @@ const PEOPLE = [
     'victor'  => 919032, // T and U: a password CHANGE signs out the others; this browser stays
     'whiskey' => 919033, // V: wrong current passwords, one limit for two pages
     'xray'    => 919034, // H: an administrator of ONE organisation (not global)
+    'yankee'  => 919035, // T2: an old-password sign-in held at a barrier while the password changes
 ];
 /** How this test names itself to the portal, so the records it causes can be found and removed whatever address they carry. */
 const AGENT = 'sign-in-limits-selftest';
@@ -2176,6 +2177,109 @@ ok('a reset for one person sent from a browser where somebody ELSE is signed in 
 ok('a browser signed in AFTER the reset is not affected by it', stillSignedIn(signedInJar('uniform', $at, $uniformPassword3), $at) === true);
 
 // =============================================================================
+head('T2. A sign-in with the OLD password, still being checked when the password changes, is ended (#598, round 1)');
+// =============================================================================
+// THE RACE THE FIRST VERSION LOST, made DETERMINISTIC. A sign-in reads the
+// stored password, then spends ~175 ms checking it, then marks its session.
+// The independent check showed, over real HTTP with timed delays, that a
+// change committing inside that gap left the old-password session signed in
+// for good when the mark was a TIME taken at the end. Here a BARRIER is put
+// into the SCRATCH copy's Auth.php straight after the password is read: while
+// a file says "armed", the sign-in stops there until a "go" file appears. So
+// the change is made at exactly the worst moment every run, not by luck.
+// The barrier is in the scratch copy only, inert unless armed, and the file is
+// put back byte for byte afterwards.
+$authFile   = $child . $sep . 'web' . $sep . '_core' . $sep . 'Auth.php';
+$authAsWas  = (string) file_get_contents($authFile);
+$anchor     = '        $countedAs = $row !== null ? strtolower(trim((string) $row';
+$barrierDir = var_export($child . $sep, true);
+$barrier    = '        if (is_file(' . $barrierDir . " . 'p598-armed') === true) { @file_put_contents(" . $barrierDir . " . 'p598-reached', '1'); "
+    . '$p598Until = microtime(true) + 30; while (is_file(' . $barrierDir . " . 'p598-go') === false && microtime(true) < \$p598Until) { usleep(20000); } }\n";
+if (substr_count($authAsWas, $anchor) !== 1) {
+    refuse('part T2: the place to put the barrier is not in Auth.php exactly once');
+}
+file_put_contents($authFile, str_replace($anchor, $barrier . $anchor, $authAsWas));
+$state['extra'][] = $startPortal($extraPorts[0]);
+$deadline = microtime(true) + 15;
+while (portAnswers($extraPorts[0]) === false && microtime(true) < $deadline) {
+    usleep(100000);
+}
+
+/**
+ * One old-password sign-in held at the barrier while `$change` runs, then let go.
+ * Answers [whether the sign-in really waited at the barrier, what `$change`
+ * answered, the sign-in's own answer, its jar].
+ *
+ * @param callable(): array $change
+ */
+$heldSignIn = static function (string $who, string $oldPassword, string $ip, callable $change) use ($child, $sep, $extraPorts): array {
+    foreach (['p598-armed', 'p598-reached', 'p598-go'] as $flag) {
+        @unlink($child . $sep . $flag);
+    }
+    $jar  = newJar();
+    $csrf = token(req($jar, 'GET', '/login', null, $ip)['body']);
+    touch($child . $sep . 'p598-armed');
+    $multi  = curl_multi_init();
+    $handle = curl_init('http://127.0.0.1:' . $extraPorts[0] . '/login');
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*',
+        CURLOPT_HTTPHEADER => ['Expect:', 'User-Agent: ' . AGENT, 'X-Forwarded-For: ' . $ip], CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar,
+        CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $csrf, 'username' => login($who), 'password' => $oldPassword]),
+    ]);
+    curl_multi_add_handle($multi, $handle);
+    $until = microtime(true) + 20;
+    do {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.05);
+    } while (is_file($child . $sep . 'p598-reached') === false && microtime(true) < $until);
+    $waited = is_file($child . $sep . 'p598-reached');
+    @unlink($child . $sep . 'p598-armed');   // nothing else stops at the barrier
+    $changed = $change();
+    touch($child . $sep . 'p598-go');
+    do {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.05);
+    } while ($running > 0);
+    $raw = (string) curl_multi_getcontent($handle);
+    $head = substr($raw, 0, (int) curl_getinfo($handle, CURLINFO_HEADER_SIZE));
+    $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
+    curl_multi_remove_handle($multi, $handle);
+    curl_multi_close($multi);
+    // The cookie jar is written when the handle is destroyed, so it goes now:
+    // the checks below read that browser's session through the jar.
+    unset($handle);
+    $location = preg_match('/^Location:\s*(\S+)/mi', $head, $l) === 1 ? $l[1] : '';
+
+    return [$waited, $changed, ['status' => $status, 'location' => $location], $jar];
+};
+
+$at        = ip(164);
+$yankeeOld = $password;
+$yankeeA   = signedInJar('yankee', $at, $yankeeOld);
+$yankeeNew = bin2hex(random_bytes(12)) . 'Nn5!';
+[$waited, $changed, $held, $heldJar] = $heldSignIn('yankee', $yankeeOld, $at, static fn (): array => changePassword($yankeeA, $at, $yankeeOld, $yankeeNew));
+ok('T2a the old-password sign-in really stopped AFTER reading the password, and the change completed while it was stopped',
+    $waited === true && $changed['location'] === '/account?pwchanged=1' && passwordIs('yankee', $yankeeNew) === true,
+    'waited: ' . var_export($waited, true) . '; change: ' . describe($changed));
+ok('T2b the held sign-in, let go after the change, is ENDED on its next request although it was let in (red on round 1, which marked the session with a time)',
+    $held['status'] === 302 && $held['location'] === '/' && sentToSignIn($heldJar, $at) === true && stillSignedIn($yankeeA, $at) === true,
+    'sign-in answered ' . $held['status'] . ' to ' . $held['location']);
+
+// The same window on the RESET page.
+$yankeeNewer = bin2hex(random_bytes(12)) . 'Oo6!';
+[$waited, $changed, $held, $heldJar] = $heldSignIn('yankee', $yankeeNew, $at, static fn (): array => useLink($at, storedLink('yankee'), $yankeeNewer));
+ok('T2c and the same for a password RESET made while an old-password sign-in is being checked: that sign-in is ended',
+    $waited === true && $changed['location'] === '/login?reset=1' && $held['location'] === '/' && sentToSignIn($heldJar, $at) === true,
+    'waited: ' . var_export($waited, true) . '; reset: ' . describe($changed) . '; sign-in answered ' . $held['status'] . ' to ' . $held['location']);
+
+foreach (array_keys($state['extra']) as $n) {
+    stopServer($state['extra'][$n]);
+}
+$state['extra'] = [];
+file_put_contents($authFile, $authAsWas);
+ok('T2d the barrier is gone: the scratch Auth.php is back byte for byte', (string) file_get_contents($authFile) === $authAsWas);
+
+// =============================================================================
 head('U. Changing the password while signed in signs out the others; this browser stays (D-104)');
 // =============================================================================
 $at      = ip(162);
@@ -2390,6 +2494,18 @@ mailSetup('google');
 setting('mail.google.serviceAccountKeyFile', '../selftest-598-outside-key.json');
 $text = $mailNote();
 ok('a Google key file NAME that climbs out of the key folder is "not set up", and says why (red on the old code: ready, and the file outside was read)', str_starts_with($text, 'not-ready:') === true && str_contains($text, 'no folder in it') === true, $text);
+$integrations = req($adminJar, 'GET', '/admin/integrations', null, $at);
+ok('and the Integrations page agrees: the key file "cannot be used", never "Found" (round 1: it asked is_readable() itself and said Found)',
+    $integrations['status'] === 200 && str_contains($integrations['body'], 'data-key-file="unusable"') === true && str_contains($integrations['body'], 'data-key-file="usable"') === false,
+    'HTTP ' . $integrations['status']);
+// A name with a folder in it but NO "..": only the "/ or \" half of the rule
+// can refuse it, so this is the case that rule exists for (round 1 found no
+// check could tell it was gone).
+@mkdir($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'sub598');
+copy($child . $sep . 'web' . $sep . '_auth_keys' . $sep . GOOGLE_KEY_FILE, $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'sub598' . $sep . GOOGLE_KEY_FILE);
+setting('mail.google.serviceAccountKeyFile', 'sub598/' . GOOGLE_KEY_FILE);
+$text = $mailNote();
+ok('a key file name with a folder in it, and no "..", is "not set up" too: the file must sit in the key folder itself', str_starts_with($text, 'not-ready:') === true && str_contains($text, 'no folder in it') === true, $text);
 file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'selftest-598-not-a-key.json', '{"hello": "this is not a key"}');
 setting('mail.google.serviceAccountKeyFile', 'selftest-598-not-a-key.json');
 $text = $mailNote();

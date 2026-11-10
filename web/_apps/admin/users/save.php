@@ -618,6 +618,8 @@ if ($action === 'update') {
         //    `strict_types` is a warning on a page that has already begun
         //    printing — the shape that answers HTTP 200 with half a page.
         $signInWasCreated = false;
+        // 🚪 D-108: null = no password was set, so nobody was signed out.
+        $othersSignedOut  = null;
 
         if ($password !== '') {
             // 🔑 ONE PLACE STORES A PASSWORD (#728). This branch used to
@@ -668,6 +670,18 @@ if ($action === 'update') {
             //    in to before, which may be false.
             $signInWasCreated = $stored['created'];
 
+            // 🚪 D-108 (the owner, 10 November 2026; extends D-104): an
+            //    administrator setting somebody's password signs that person
+            //    out of EVERY browser, so anybody using the old password is put
+            //    out at once. Inside this transaction, with the password, so
+            //    the two stand or fall together. The administrator's own
+            //    session is a different person and is not touched; if they are
+            //    setting their OWN password here, their browser keeps going and
+            //    their other browsers are signed out, exactly as D-104 does.
+            //    It answers false only on a database still waiting for
+            //    migration 270, and then the message below says so.
+            $othersSignedOut = Auth::endOtherSessionsOf($mysqli, (int) $userID);
+
             // 🧾 #586's read-back now lives in `Auth::setPassword()`, where
             //    every caller gets it. It asks a STRICTLY STRONGER question
             //    than the code that was here: this page read
@@ -696,7 +710,9 @@ if ($action === 'update') {
     Logger::activity(
         'UserUpdated',
         'Updated user #' . $userID . ': ' . $fullName
-            . ($signInWasCreated === true ? ' (a password sign-in was created for this account)' : ''),
+            . ($signInWasCreated === true ? ' (a password sign-in was created for this account)' : '')
+            . ($othersSignedOut === true ? ' (the password was set, and the person was signed out of every browser)' : '')
+            . ($othersSignedOut === false ? ' (the password was set, but the person could NOT be signed out: database upgrade waiting)' : ''),
         $_SESSION['user_id'] ?? null
     );
 
@@ -704,6 +720,14 @@ if ($action === 'update') {
         . ($signInWasCreated === true
             ? ' A password sign-in was created for this account, under the sign-in name "' . $signInName . '"; '
               . 'the person can sign in with that or with their e-mail address.'
+            : '')
+        // D-108: say what really happened, never more.
+        . ($othersSignedOut === true
+            ? ' The new password is set, and the person has been signed out of every browser where they were signed in.'
+            : '')
+        . ($othersSignedOut === false
+            ? ' The new password is set, but the person could NOT be signed out of the browsers where they are signed in: '
+              . 'a database upgrade is waiting (Admin, Upgrade).'
             : '');
     $_SESSION['flash_type'] = 'success';
     header('Location: ' . Site::url('admin/users'));

@@ -242,7 +242,13 @@ class MailerGoogle
         if ($problem !== null) {
             throw new RuntimeException($problem);
         }
+        // Read again for the values themselves. The file can change between
+        // the check above and this read (it is on disk), so a null here is
+        // refused just as cleanly rather than used.
         $keyData = self::readKeyFile((string) $keyFile);
+        if ($keyData === null) {
+            throw new RuntimeException('Invalid service account key file format.');
+        }
 
         // 🔐 Build the JWT assertion
         $now    = time();

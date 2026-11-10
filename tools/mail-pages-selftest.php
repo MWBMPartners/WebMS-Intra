@@ -1678,7 +1678,11 @@ $madeUp = ['auth.ms365.tenantID' => 'selftest-made-up', 'auth.ms365.appwide.clie
 foreach ($madeUp as $key => $value) {
     setting($key, $value);
 }
-file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'selftest-made-up-key.json', '{}');
+// #598: the page now asks MailerGoogle::keyFileProblem(), which wants a file
+// SHAPED like a service account key (JSON holding a private_key and a
+// client_email), as sending does. '{}' was enough only while the page asked
+// is_readable(). The values are made up; nothing signs anything with them.
+file_put_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'selftest-made-up-key.json', '{"private_key": "selftest-made-up", "client_email": "made-up@selftest.invalid"}');
 $rootSees = req($rootJar, 'GET', $integrations, null, ip(1))['body'];
 $orgSees  = req($orgJar, 'GET', $integrations, null, ip(2))['body'];
 foreach (array_keys($madeUp) as $key) {

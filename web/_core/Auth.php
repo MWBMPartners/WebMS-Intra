@@ -109,11 +109,11 @@ class Auth
      * alongside `user_id` or `2fa_user_id`, neither of which is on this list
      * either, so such a page was never kept offline anyway.
      *
-     * `signed_in_at_utc` (#598, SIGNED_IN_AT_KEY) is left off for the same
+     * `sign_in_version` (#598, SIGN_IN_VERSION_KEY) is left off for the same
      * reason and with the same "changes nothing in practice": it is written
-     * only by a sign-in, beside `user_id`. Where it outlives one (a two-factor
-     * step abandoned part-way), a page is not kept offline, which is the safe
-     * direction.
+     * only by a sign-in, beside `user_id` or `2fa_user_id`. Where it outlives
+     * one (a two-factor step abandoned part-way), a page is not kept offline,
+     * which is the safe direction.
      *
      * @var list<string>
      */
@@ -789,12 +789,13 @@ class Auth
      * stored data. The rest of the request carries on with a new, empty
      * session, as for a visitor who never signed in.
      *
-     * A SECOND REASON, since #598 (D-104): the same row's `signInsValidFrom`.
-     * When the person has reset or changed their password, every session
-     * whose sign-in began before that moment is ended the same way, and the
-     * browser that made the change (given the account's own moment by
+     * A SECOND REASON, since #598 (D-104, D-108): the same row's
+     * `signInVersion`. Every password reset or change (and an administrator
+     * setting the password) adds one to it. A session carries the number it
+     * was signed in under; one carrying an OLDER number is ended the same way,
+     * and the browser that made the change (given the new number by
      * endOtherSessionsOf()) is not. Read in the same query, so it costs
-     * nothing extra; see sessionBeganBefore() for how the two are compared.
+     * nothing extra. See SIGN_IN_VERSION_KEY for why a number and not a time.
      *
      * TRIED AND REJECTED
      *   - Answering "no" from check() and leaving the session alone. Every
@@ -873,7 +874,7 @@ class Auth
         // ⚠️ THIS RUNS ON THE DATABASE UPGRADE PAGE TOO (admin/upgrade), on a
         //    database that is still part way through upgrading. `userID` and
         //    `isActive` have been in tblUsers since the first install script.
-        //    `signInsValidFrom` arrived with migration 270 (#598, D-104), so on
+        //    `signInVersion` arrived with migration 270 (#598, D-104), so on
         //    a database that has not run it yet this query fails with error
         //    1054 ("unknown column") — and failing here would lock the
         //    administrator out of the very page that adds the column. So that
@@ -886,14 +887,14 @@ class Auth
         //    password change can end other sessions at no extra cost. The
         //    fallback costs one failed prepare, and only between files reaching
         //    a server and somebody pressing "Run migrations".
-        $readsValidFrom = true;
+        $readsVersion = true;
         try {
-            $stmt = $db->prepare('SELECT `isActive`, `signInsValidFrom` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+            $stmt = $db->prepare('SELECT `isActive`, `signInVersion` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
         } catch (\mysqli_sql_exception $unknownColumn) {
             if ($unknownColumn->getCode() !== 1054) {
                 throw $unknownColumn;
             }
-            $readsValidFrom = false;
+            $readsVersion = false;
             $stmt = $db->prepare('SELECT `isActive` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
         }
         if ($stmt === false) {
@@ -913,13 +914,14 @@ class Auth
         //    as the whole number 1, not the text '1'; `=== '1'` here would
         //    sign every active person out on every request.
         if ($row !== null && (int) $row['isActive'] === 1) {
-            // 🔐 Still allowed in. Now: did this session's sign-in begin
-            //    BEFORE the person last reset or changed their password
-            //    (#598, D-104)? A NULL moment ends nothing, which is every
-            //    account until its owner first does one of those things.
-            $validFrom = $readsValidFrom === true ? ($row['signInsValidFrom'] ?? null) : null;
-            if ($validFrom === null
-                || self::sessionBeganBefore($_SESSION[self::SIGNED_IN_AT_KEY] ?? null, (string) $validFrom) === false
+            // 🔐 Still allowed in. Now: was this session signed in under an
+            //    OLDER number than the account's (#598, D-104, D-108)? Every
+            //    account starts at 0, and a session with no number (signed in
+            //    before this existed) counts as 0, so nothing changes for
+            //    anybody until their password is first reset or changed.
+            //    EQUAL is not older: that is the browser that made the change.
+            if ($readsVersion === false
+                || self::sessionVersion() >= (int) ($row['signInVersion'] ?? 0)
             ) {
                 return;
             }
@@ -927,7 +929,7 @@ class Auth
             self::endThisSession();
             Logger::activity(
                 'SessionEndedPasswordChanged',
-                'A signed-in session was ended because the password was reset or changed after it began.',
+                'A signed-in session was ended because the password was reset or changed since it signed in.',
                 $userId
             );
 
@@ -970,112 +972,135 @@ class Auth
     }
 
     /**
-     * The session entry holding the moment, in UTC, at which this session's
-     * sign-in began (#598, D-104). Written by beginSessionFor() and, for the
-     * browser that changes a password, by endOtherSessionsOf(). Text in the
-     * form `Y-m-d H:i:s.u`, never a number: it is compared with a
-     * `DATETIME(6)` read back from the database as text.
+     * 🔢 The session entry holding the SIGN-IN VERSION this session was signed
+     * in under (#598, D-104, D-108): a whole number, compared with the
+     * account's `tblUsers.signInVersion` by endSessionOfInactiveAccount().
+     *
+     * WHY A NUMBER AND NOT A TIME (round 1 of the independent check, measured
+     * over real HTTP). The first version stamped each session with the MOMENT
+     * its sign-in began and gave the account a "sign-ins valid from" moment.
+     * That has a hole: a sign-in with the OLD password reads the stored
+     * password, spends about 175 ms checking it, and only then stamps the
+     * session — so if a password change commits inside those 175 ms, the
+     * stamp comes out AFTER the change's moment and the session is never
+     * ended, while the change page says "signed out on every other browser".
+     * Delays of 200-350 ms got in and stayed in. A time is taken when the
+     * stamp is WRITTEN; what matters is which password was READ.
+     *
+     * A version number closes it because it is read in the SAME statement as
+     * the password hash (loginLocalOneAtATime()), and a change writes the hash
+     * and the number in one transaction. So a sign-in that read the old hash
+     * read the old number too, whenever it gets round to stamping the session,
+     * and that session is ended on its next request. Measured with a barrier
+     * between the read and the stamp: part T2 of
+     * tools/sign-in-limits-selftest.php.
      */
-    private const SIGNED_IN_AT_KEY = 'signed_in_at_utc';
+    private const SIGN_IN_VERSION_KEY = 'sign_in_version';
 
     /**
-     * 🕐 Now, in UTC, to the microsecond, as `Y-m-d H:i:s.u`.
-     *
-     * The ONE clock for both halves of D-104: the moment written into the
-     * account AND the moment written into a session both come from here, so
-     * a web server and a database server whose clocks differ cannot sign out
-     * the browser that made the change. It builds a MOMENT on purpose: this
-     * is "when did this happen", not a reading on anybody's clock (#777).
+     * The account whose TWO-FACTOR CODE step is about to call
+     * beginSessionFor(), or null. Set only by codeStepCompletesSignInOf(),
+     * from `_apps/auth/2fa/verify.php`, and used up by the next
+     * beginSessionFor() call. See there for why only that step keeps the
+     * session's number.
      */
-    private static function utcMomentNow(): string
+    private static ?int $codeStepFor = null;
+
+    /** This session's sign-in version; none (signed in before #598) counts as 0. */
+    private static function sessionVersion(): int
     {
-        return (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d H:i:s.u');
+        $value = $_SESSION[self::SIGN_IN_VERSION_KEY] ?? 0;
+
+        return is_int($value) === true ? $value : 0;
     }
 
     /**
-     * A stored moment in exactly the shape utcMomentNow() writes, or null when
-     * it is not one. The database answers a `DATETIME(6)` with six digits of
-     * fraction; anything with fewer is padded, so two moments always compare
-     * correctly as text.
+     * The account's sign-in version now, or null when it cannot be read
+     * (no such account, or a database still waiting for migration 270:
+     * error 1054, and only that, is treated as "no number").
      */
-    private static function normalisedMoment(mixed $value): ?string
+    private static function accountVersion(\mysqli $db, int $userId): ?int
     {
-        if (is_string($value) === false
-            || preg_match('/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.(\d{1,6}))?\z/', $value, $m) !== 1
-        ) {
+        try {
+            $stmt = $db->prepare('SELECT `signInVersion` FROM `tblUsers` WHERE `userID` = ? LIMIT 1');
+        } catch (\mysqli_sql_exception $unknownColumn) {
+            if ($unknownColumn->getCode() !== 1054) {
+                throw $unknownColumn;
+            }
+
             return null;
         }
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
 
-        return $m[1] . '.' . str_pad($m[2] ?? '', 6, '0');
+        return $row === null ? null : (int) $row['signInVersion'];
     }
 
     /**
-     * Did this session's sign-in begin BEFORE the account's "sign-ins valid
-     * from" moment (#598, D-104)?
+     * 🔢 Say that the NEXT beginSessionFor() call completes the two-factor
+     * code step for this account, so the session KEEPS the sign-in version
+     * the password step gave it (#598 round 1, item 6). Called by
+     * `_apps/auth/2fa/verify.php` alone, on the line before its grant.
      *
-     *   - The account's moment cannot be read: NO. Never sign anybody out on
-     *     a value nobody can judge (the same rule as "WHEN IT CANNOT ASK"
-     *     above); the reason is written down instead.
-     *   - The session carries no moment, or one that is not a moment: YES. A
-     *     session with no moment began before this feature existed, which is
-     *     before any moment the account can hold.
-     *   - Otherwise the two compare as text, which is exact because both have
-     *     the same shape. EQUAL is not before: that is the browser that made
-     *     the change, given the account's own moment.
+     * WHY ONLY THAT STEP. The code step finishes a sign-in that began at the
+     * password step; the password was READ there, so the number read with it
+     * is the one that must stand — a reset between the two steps must still
+     * end this session. Every other sign-in (a password, Microsoft, Google, a
+     * passkey, an invitation) is a fresh proof of who somebody is and takes
+     * the number as it is NOW, even when the same person was already waiting
+     * at the code step: the first version kept the old moment for any
+     * same-person sign-in, so somebody who typed their password again after
+     * a change was bounced once afterwards.
      */
-    private static function sessionBeganBefore(mixed $sessionMoment, string $validFrom): bool
+    public static function codeStepCompletesSignInOf(int $userId): void
     {
-        $from = self::normalisedMoment($validFrom);
-        if ($from === null) {
-            error_log('Auth: an account\'s "sign-ins valid from" moment could not be read; its session was left as it was.');
-
-            return false;
-        }
-        $began = self::normalisedMoment($sessionMoment);
-        if ($began === null) {
-            return true;
-        }
-
-        return strcmp($began, $from) < 0;
+        self::$codeStepFor = $userId;
     }
 
     /**
-     * 🔐 SIGN THIS PERSON OUT OF EVERY OTHER BROWSER (#598, D-104). The ONE
-     * place it is done.
+     * 🔐 SIGN THIS PERSON OUT OF EVERY OTHER BROWSER (#598, D-104, D-108).
+     * The ONE place it is done.
      *
-     * The owner's decision: a forgotten-password reset AND a signed-in
-     * password change sign the person out everywhere else, and the browser
-     * making the change stays signed in. So it is called by exactly two
-     * pages, `auth/reset-password/save.php` and
-     * `auth/account/change-password.php`.
+     * The owner's decisions: a forgotten-password reset and a signed-in
+     * password change (D-104), and an administrator setting the password
+     * (D-108), sign the person out everywhere else. So it is called by
+     * exactly three pages: `auth/reset-password/save.php`,
+     * `auth/account/change-password.php` and `admin/users/save.php`.
      *
      * HOW. A session is a PHP file and the portal keeps no list of whose files
-     * are whose, so nothing is found and deleted. The account is given a
-     * "sign-ins valid from" moment, now, and endSessionOfInactiveAccount()
-     * ends any session of this person whose sign-in began before it, on that
+     * are whose, so nothing is found and deleted. The account's
+     * `signInVersion` goes up by one, and endSessionOfInactiveAccount() ends
+     * every session of this person carrying an older number, on that
      * session's next request. If THIS browser's session is this person's, it
-     * is given the same moment, so it is the one that stays.
+     * is given the new number, so it is the one that stays; the browser of an
+     * administrator setting somebody else's password is a different person
+     * and is not touched.
+     *
+     * CALL IT IN THE SAME TRANSACTION AS THE PASSWORD WRITE. That is what
+     * makes a concurrent sign-in safe: it reads the hash and the number in one
+     * statement, so it sees either both old (and its session is ended) or both
+     * new (and the old password does not match).
      *
      * WHY IT IS NOT INSIDE setPassword(). That method stores a password and
      * deliberately does not own WHO may set one or WHEN; this is a rule about
      * an event, not about storing. And setPassword()'s other callers must not
-     * sign anybody out under D-104: the installer, an invitation and an
-     * administrator's NEW account have no sessions to end, and adding a
-     * password to an account that had none (#731) is an addition, not a
-     * change — the person's Microsoft, Google and passkey sign-ins stay, and
-     * so do the browsers they signed in with. An administrator setting
-     * somebody ELSE's password (`admin/users/save.php`, editing an account)
-     * is not one of D-104's two cases and does not call this; whether it
-     * should is a question for the owner, not one to settle by putting the
-     * rule where every caller gets it.
+     * sign anybody out: the installer, an invitation and an administrator's
+     * NEW account have no sessions to end, and adding a password to an account
+     * that had none (#731) is an addition, not a change — the person's
+     * Microsoft, Google and passkey sign-ins stay, and so do the browsers they
+     * signed in with.
      *
      * WHAT IT DOES NOT DO
-     *   - It does not touch remembered devices (two-factor trust). Both
-     *     callers already revoke those, and still do.
+     *   - It does not touch remembered devices (two-factor trust). The reset
+     *     and change pages already revoke those, and still do.
      *   - It acts on each other browser's NEXT request. A page already open
      *     stays on screen until it is reloaded or used.
-     *   - It does not open a transaction. Both callers call it inside their
-     *     own, so the password and the sign-out stand or fall together.
+     *   - It does not open a transaction; see above.
      *
      * ON A DATABASE NOT YET UPGRADED (no column, error 1054) it records an
      * error and answers false, and the caller carries on: refusing a password
@@ -1084,7 +1109,7 @@ class Auth
      * thrown, under the portal's strict reporting.
      *
      * @param \mysqli $db     The connection to write through.
-     * @param int     $userId The account whose password was reset or changed.
+     * @param int     $userId The account whose password was reset, changed or set.
      *
      * @return bool True when every other session of this person will be ended;
      *              false when the database could not record it.
@@ -1094,9 +1119,8 @@ class Auth
         if ($userId <= 0) {
             return false;
         }
-        $moment = self::utcMomentNow();
         try {
-            $stmt = $db->prepare('UPDATE `tblUsers` SET `signInsValidFrom` = ? WHERE `userID` = ?');
+            $stmt = $db->prepare('UPDATE `tblUsers` SET `signInVersion` = `signInVersion` + 1 WHERE `userID` = ?');
         } catch (\mysqli_sql_exception $unknownColumn) {
             if ($unknownColumn->getCode() !== 1054) {
                 throw $unknownColumn;
@@ -1105,7 +1129,7 @@ class Auth
                 'Auth',
                 'Error',
                 'SIGN_OUT_OTHERS_NO_COLUMN',
-                'A password was reset or changed, but the person could not be signed out of their other browsers: '
+                'A password was reset, changed or set, but the person could not be signed out of their other browsers: '
                     . 'the database upgrade that adds this (migration 270) has not been run. Run it at Admin, Upgrade.',
                 ''
             );
@@ -1115,16 +1139,23 @@ class Auth
         if ($stmt === false) {
             return false;
         }
-        $stmt->bind_param('si', $moment, $userId);
+        $stmt->bind_param('i', $userId);
         $stmt->execute();
         $stmt->close();
 
-        // 🖥️ This browser stays signed in: it is given the account's own
-        //    moment, which is not "before" it. Only when it is THIS person's
-        //    session — a reset made on a browser where somebody else is signed
-        //    in leaves that other person alone.
+        // 🖥️ This browser stays signed in: it is given the account's new
+        //    number, which is not older than itself. Only when it is THIS
+        //    person's session — a reset made on a browser where somebody else
+        //    is signed in, or an administrator setting somebody else's
+        //    password, leaves that other person alone. Read back on the same
+        //    connection, so inside the caller's transaction it sees its own
+        //    increase.
+        $now = self::accountVersion($db, $userId);
+        if ($now === null) {
+            return false;
+        }
         if (session_status() === PHP_SESSION_ACTIVE && (int) ($_SESSION['user_id'] ?? 0) === $userId) {
-            $_SESSION[self::SIGNED_IN_AT_KEY] = $moment;
+            $_SESSION[self::SIGN_IN_VERSION_KEY] = $now;
         }
 
         return true;
@@ -1297,6 +1328,11 @@ class Auth
      *
      * @param int $userId The account about to be signed in (for the second
      *                    step, about to be promoted from waiting-for-a-code).
+     * @param int|null $versionReadWithPassword The account's sign-in version
+     *                    as read in the SAME statement as the password hash
+     *                    (#598). Only the password sign-in has one; every
+     *                    other grant passes nothing and the number is read
+     *                    here.
      *
      * @return void
      *
@@ -1304,11 +1340,17 @@ class Auth
      *                         one first; a grant into no session would be
      *                         silently lost, so it is refused loudly.
      */
-    public static function beginSessionFor(int $userId): void
+    public static function beginSessionFor(int $userId, ?int $versionReadWithPassword = null): void
     {
         if (session_status() !== PHP_SESSION_ACTIVE) {
             throw new \LogicException('A sign-in was granted with no session active.');
         }
+
+        // 🔢 Decided BEFORE anything is removed: is this the two-factor code
+        //    step completing the SAME person's sign-in? Used up either way, so
+        //    it can never carry over to a later grant in the same request.
+        $completesCodeStep = self::$codeStepFor === $userId && self::sessionPerson() === $userId;
+        self::$codeStepFor = null;
 
         if (self::sessionPerson() !== $userId) {
             // 🧹 Keep only what is on the list, by name. array_intersect_key()
@@ -1319,18 +1361,28 @@ class Auth
             );
         }
 
-        // 🕐 When this session's sign-in began (#598, D-104), so that a later
-        //    password reset or change can end it. For a DIFFERENT person the
-        //    session was just emptied, so this is always now. For the SAME
-        //    person an existing moment is KEPT: the two-factor step completes
-        //    a sign-in that began at the password step, and a reset made
-        //    between the two must still end it — a fresh moment here would let
-        //    somebody holding the OLD password and a code outlive the reset.
-        //    (A re-authentication on the "Add a password" page keeps its
-        //    moment too; it was still valid, or the session would already
-        //    have been ended.)
-        if (self::normalisedMoment($_SESSION[self::SIGNED_IN_AT_KEY] ?? null) === null) {
-            $_SESSION[self::SIGNED_IN_AT_KEY] = self::utcMomentNow();
+        // 🔢 The sign-in version this session is signed in under (#598,
+        //    D-104), so that a later password reset or change ends it. See
+        //    SIGN_IN_VERSION_KEY for why a number and not a time.
+        //      - The two-factor CODE step keeps the number its password step
+        //        stored: a reset between the two must still end this session.
+        //      - A PASSWORD sign-in passes the number it read in the same
+        //        statement as the hash, so a change committing while the
+        //        password is being checked still ends it.
+        //      - Every other grant (Microsoft, Google, a passkey, an
+        //        invitation) takes the account's number as it is now: none of
+        //        them used the password, so no password change can be "missed".
+        //    A database still waiting for migration 270 has no number; the
+        //    session then carries none, which counts as 0.
+        if ($completesCodeStep === true && is_int($_SESSION[self::SIGN_IN_VERSION_KEY] ?? null) === true) {
+            // kept as it is
+        } else {
+            $version = $versionReadWithPassword ?? self::accountVersion(App::db(), $userId);
+            if ($version === null) {
+                unset($_SESSION[self::SIGN_IN_VERSION_KEY]);
+            } else {
+                $_SESSION[self::SIGN_IN_VERSION_KEY] = $version;
+            }
         }
 
         // 🔄 A new identifier; `true` deletes the old one's stored data.
@@ -2793,14 +2845,44 @@ class Auth
         // 🔍 Look up the user via tblLocalAccounts joined with tblUsers
         // Accepts either a username (tblLocalAccounts.username) or an email
         // (tblUsers.emailAddress) so users can sign in with either one.
-        $stmt = $mysqli->prepare(
-            'SELECT LA.localID, LA.username, LA.passwordHash, '
-            . 'U.userID, U.fullName, U.emailAddress, U.isActive '
-            . 'FROM tblLocalAccounts LA '
-            . 'JOIN tblUsers U ON U.userID = LA.userID '
-            . 'WHERE LA.username = ? OR U.emailAddress = ? '
-            . 'LIMIT 1'
-        );
+        //
+        // 🔢 AND THE ACCOUNT'S SIGN-IN VERSION, IN THE SAME STATEMENT AS THE
+        //    HASH (#598, D-104). A password change writes both in one
+        //    transaction, so this one read sees either the old hash with the
+        //    old number or the new hash with the new number — never the old
+        //    hash with the new number. The session is stamped with what was
+        //    read here, however long the password check takes, so a sign-in
+        //    with the old password is ended by the change even when it was
+        //    still being checked as the change committed. (A separate read
+        //    after the check, or a time taken at the stamp, both left that
+        //    window open: measured by the independent check.)
+        //    On a database still waiting for migration 270 the column is not
+        //    there: error 1054, and only that, falls back to the query without
+        //    it, so an administrator can still sign in to run the upgrade.
+        $readsVersion = true;
+        try {
+            $stmt = $mysqli->prepare(
+                'SELECT LA.localID, LA.username, LA.passwordHash, '
+                . 'U.userID, U.fullName, U.emailAddress, U.isActive, U.`signInVersion` '
+                . 'FROM tblLocalAccounts LA '
+                . 'JOIN tblUsers U ON U.userID = LA.userID '
+                . 'WHERE LA.username = ? OR U.emailAddress = ? '
+                . 'LIMIT 1'
+            );
+        } catch (\mysqli_sql_exception $unknownColumn) {
+            if ($unknownColumn->getCode() !== 1054) {
+                throw $unknownColumn;
+            }
+            $readsVersion = false;
+            $stmt = $mysqli->prepare(
+                'SELECT LA.localID, LA.username, LA.passwordHash, '
+                . 'U.userID, U.fullName, U.emailAddress, U.isActive '
+                . 'FROM tblLocalAccounts LA '
+                . 'JOIN tblUsers U ON U.userID = LA.userID '
+                . 'WHERE LA.username = ? OR U.emailAddress = ? '
+                . 'LIMIT 1'
+            );
+        }
 
         if ($stmt === false) {
             Logger::errorPlatform('Auth', 'Error', 'DB_PREPARE', 'Failed to prepare login query: ' . $mysqli->error, '');
@@ -2860,7 +2942,10 @@ class Auth
         //    one part-way through somebody else's two-factor step, nor a
         //    visitor's session holding a message or typing; this used to be a
         //    bare `session_regenerate_id(true)`, which kept all of it.
-        self::beginSessionFor((int) $row['userID']);
+        self::beginSessionFor(
+            (int) $row['userID'],
+            $readsVersion === true ? (int) $row['signInVersion'] : null
+        );
 
         // ✅ Create the user session using data from tblUsers
         $_SESSION['user_id']    = (int) $row['userID'];

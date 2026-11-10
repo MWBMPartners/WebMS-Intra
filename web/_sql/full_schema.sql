@@ -336,12 +336,12 @@ CREATE TABLE IF NOT EXISTS `tblUsers` (
     `visibilityBio`     ENUM('private','team','members','public') NOT NULL DEFAULT 'members',
     `visibilityPhoto`   ENUM('private','team','members','public') NOT NULL DEFAULT 'private',
     `createdAt`    DATETIME     DEFAULT CURRENT_TIMESTAMP,
-    -- 🔐 Since migration 270 (#598, D-104): a password reset or change signs
-    -- the person out of every OTHER browser. Each session remembers when its
-    -- sign-in began; Auth::endSessionOfInactiveAccount() ends one older than
-    -- this. NULL ends nothing. DATETIME(6) so a session begun in the same
-    -- second as the change is still told apart from it.
-    `signInsValidFrom` DATETIME(6) DEFAULT NULL COMMENT 'A moment in UTC. Every browser session of this person that began its sign-in before it is ended on its next request (#598, D-104). Set by Auth::endOtherSessionsOf() when the password is reset or changed. NULL ends nothing.',
+    -- 🔐 Since migration 270 (#598, D-104, D-108): a password reset, change or
+    -- administrator's new password signs the person out of every OTHER
+    -- browser. Each session carries the number it signed in under, read in
+    -- the same statement as the password; Auth::endSessionOfInactiveAccount()
+    -- ends one carrying a lower number. A number, not a time: see the migration.
+    `signInVersion` INT NOT NULL DEFAULT 0 COMMENT 'Goes up by one every time the password is reset, changed or set by an administrator (#598, D-104, D-108). A browser session signed in under a lower number is ended on its next request. Written only by Auth::endOtherSessionsOf().',
     PRIMARY KEY (`userID`),
     UNIQUE KEY `emailAddress` (`emailAddress`),
     KEY `idx_user_calendar_token` (`calendarToken`)
@@ -11535,10 +11535,10 @@ UPDATE `tblRoles`
 INSERT INTO `tblMigrations` (`filename`) VALUES ('269_expense_approver_role_description.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
--- ── from 270_sign_ins_valid_from.sql (#598) ──────────────────────────────────
--- The column (tblUsers.signInsValidFrom) and the two tblActivityLogs indexes
+-- ── from 270_sign_in_version.sql (#598) ──────────────────────────────────────
+-- The column (tblUsers.signInVersion) and the two tblActivityLogs indexes
 -- are written into their CREATE TABLE statements above; this is the record.
-INSERT INTO `tblMigrations` (`filename`) VALUES ('270_sign_ins_valid_from.sql')
+INSERT INTO `tblMigrations` (`filename`) VALUES ('270_sign_in_version.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

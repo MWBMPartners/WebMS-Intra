@@ -102,7 +102,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED = 45;
+const EXPECTED = 50; // five added by #598 (part G, D-108)
 
 // 👥 The made-up people. Every one of these numbers is this test's own.
 const ADMIN    = 927001; // a global administrator, who does the editing
@@ -915,6 +915,43 @@ if ($createdId > 0) {
 ok('F06 and this section left no account of its own behind',
     $accountsAt($addrCreated) === 0 && $accountsAt($addrSwallow) === 0,
     (string) $accountsAt($addrCreated) . ' + ' . (string) $accountsAt($addrSwallow));
+
+// =============================================================================
+// G. D-108: AN ADMINISTRATOR SETTING A PASSWORD SIGNS THAT PERSON OUT EVERYWHERE
+// =============================================================================
+head('G. D-108: an administrator setting a password signs that person out of every browser (#598)');
+/**
+ * A NEW browser signed in as somebody, with a cookie jar of its own. Not
+ * trySignIn(): that names its jar after the name and password, so a second
+ * browser for the same person would overwrite the first.
+ */
+$browserOf = static function (string $identifier, string $password): string {
+    global $child, $sep;
+    $file   = $child . $sep . 'jar-g-' . bin2hex(random_bytes(5)) . '.txt';
+    $tok    = token(req($file, 'GET', '/login')['body']);
+    $answer = req($file, 'POST', '/login', ['csrf_token' => $tok, 'username' => $identifier, 'password' => $password]);
+
+    return ($answer['status'] === 302 && str_contains($answer['location'], '/login') === false) ? $file : '';
+};
+/** What the account page answers this browser: 200 signed in, 302 sent to sign in. */
+$accountStatus = static fn (string $jar): int => req($jar, 'GET', '/account')['status'];
+
+$memberA = $browserOf($address(WITHPWD), $newPassword);
+$memberB = $browserOf($address(WITHPWD), $newPassword);
+ok('G01 set-up: the member is signed in on two browsers',
+    $memberA !== '' && $memberB !== '' && $accountStatus($memberA) === 200 && $accountStatus($memberB) === 200);
+$d108Password = $newPassword . 'Gd8!';
+$saved        = pressSave(WITHPWD, $d108Password);
+ok('G02 the administrator sets a new password, and the page says plainly that the person was signed out of every browser',
+    $saved['type'] === 'success' && str_contains($saved['flash'], 'signed out of every browser') === true && storedPasswordIs(WITHPWD, $d108Password) === true,
+    $saved['type'] . ': ' . $saved['flash']);
+ok('G03 BOTH of the member\'s browsers are sent to sign in on their next request (red before D-108: both stayed in)',
+    $accountStatus($memberA) === 302 && $accountStatus($memberB) === 302);
+ok('G04 the administrator who set it is a different person and is still signed in',
+    req($adminJar, 'GET', '/admin/users')['status'] === 200);
+$memberC = $browserOf($address(WITHPWD), $d108Password);
+ok('G05 the member signs in with the new password, and that browser stays signed in',
+    $memberC !== '' && $accountStatus($memberC) === 200 && $accountStatus($memberC) === 200);
 
 // =============================================================================
 // 🧾 The count, the clean-up, and the verdict

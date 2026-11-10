@@ -1,44 +1,45 @@
 -- =============================================================================
--- Migration 270: a password reset or change signs the person out everywhere
---                else (#598 item 1, D-104), and the sign-in failure count
---                gets the indexes it reads (#598 item 11)
+-- Migration 270: a password reset, change or administrator's new password
+--                signs the person out everywhere else (#598 item 1, D-104,
+--                D-108), and the sign-in failure count gets the indexes it
+--                reads (#598 item 11)
 -- =============================================================================
 -- What this adds:
 --
---   tblUsers.signInsValidFrom   a MOMENT IN UTC. Every browser session that
---                               began BEFORE it is ended on its next request.
---                               NULL means "never set", which ends nothing,
---                               so every existing account behaves exactly as
---                               it did before this migration until its owner
---                               next resets or changes their password.
+--   tblUsers.signInVersion      a whole number, 0 to begin with. Every
+--                               password reset, change, or new password set by
+--                               an administrator adds one. Each browser
+--                               session carries the number it signed in under,
+--                               and one carrying an OLDER number is ended on
+--                               its next request. Every existing account
+--                               starts at 0 and every existing session counts
+--                               as 0, so nobody notices anything until their
+--                               password next changes.
 --
 --   tblActivityLogs indexes     `idx_logs_type_ip_time` (activityType,
 --                               visitorIP, timestamp) and `idx_logs_type_time`
 --                               (activityType, timestamp).
 --
 -- -----------------------------------------------------------------------------
--- WHY A MOMENT ON THE ACCOUNT, AND NOT "DELETE THE OTHER SESSIONS"
+-- WHY A NUMBER ON THE ACCOUNT, AND NOT "DELETE THE OTHER SESSIONS"
 -- -----------------------------------------------------------------------------
 -- A browser session is a PHP session FILE on the web server, and the portal
 -- keeps no list of which files belong to which person, so there is nothing to
--- find and delete. Instead each session remembers the moment its sign-in
--- began (`Auth::beginSessionFor()` writes it), and `Auth::
--- endSessionOfInactiveAccount()`, which already reads this account's row once
--- for every signed-in request, ends a session whose moment is older than this
--- one. No extra query per request. The browser that MADE the change is given
--- the same moment as the account, so it is the one that stays signed in.
+-- find and delete. Instead each session remembers the number it signed in
+-- under, and `Auth::endSessionOfInactiveAccount()`, which already reads this
+-- account's row once for every signed-in request, ends a session carrying an
+-- older one. No extra query per request. The browser that MADE the change is
+-- given the new number, so it is the one that stays signed in.
 --
--- WHY DATETIME(6). Two sign-ins in the same second as a password change must
--- still be told apart from it: the browser that made the change keeps
--- exactly the stored moment, and a session begun a few microseconds earlier
--- on another browser must not survive by sharing the second. Both MySQL 8.0
--- and MariaDB store six digits of fraction.
---
--- WHY THE MOMENT IS WRITTEN BY PHP, NOT UTC_TIMESTAMP(). The same value is
--- written into the account AND into the browser's own session, and a session
--- is compared with it later. Taking both from one clock (PHP's, in UTC) means
--- a web server and a database server whose clocks differ by a second cannot
--- sign out the browser that made the change.
+-- WHY A NUMBER AND NOT A TIME. The first version of this migration added a
+-- "sign-ins valid from" moment instead. The independent check broke it over
+-- real HTTP: a sign-in with the OLD password reads the stored password, spends
+-- about 175 ms checking it, and only then marks its session — so if the change
+-- committed inside those 175 ms the mark came out AFTER the moment and the
+-- session was never ended. The sign-in reads this number in the SAME statement
+-- as the password, and a change writes both in one transaction, so a sign-in
+-- that read the old password always carries the old number. (No installation
+-- had the earlier column: this migration had not been released.)
 --
 -- -----------------------------------------------------------------------------
 -- THE INDEXES (#598 item 11)
@@ -69,21 +70,21 @@
 -- =============================================================================
 
 -- #############################################################################
--- 🔐 A. tblUsers.signInsValidFrom
+-- 🔐 A. tblUsers.signInVersion
 -- #############################################################################
 
 SET @hasCol := (
     SELECT COUNT(*) FROM `information_schema`.`COLUMNS`
     WHERE `TABLE_SCHEMA` = DATABASE()
       AND `TABLE_NAME`   = 'tblUsers'
-      AND `COLUMN_NAME`  = 'signInsValidFrom'
+      AND `COLUMN_NAME`  = 'signInVersion'
 );
 -- ⚠️ NO APOSTROPHES IN THE COLUMN COMMENT BELOW, for the reason migration 250
 --    gives: it sits inside a quoted string inside another quoted string that
 --    PREPARE reads. It must also be word for word the comment on the column
 --    in `full_schema.sql`, or an upgraded database and a fresh install differ.
 SET @sql := IF(@hasCol = 0,
-    'ALTER TABLE `tblUsers` ADD COLUMN `signInsValidFrom` DATETIME(6) DEFAULT NULL COMMENT ''A moment in UTC. Every browser session of this person that began its sign-in before it is ended on its next request (#598, D-104). Set by Auth::endOtherSessionsOf() when the password is reset or changed. NULL ends nothing.'' AFTER `createdAt`',
+    'ALTER TABLE `tblUsers` ADD COLUMN `signInVersion` INT NOT NULL DEFAULT 0 COMMENT ''Goes up by one every time the password is reset, changed or set by an administrator (#598, D-104, D-108). A browser session signed in under a lower number is ended on its next request. Written only by Auth::endOtherSessionsOf().'' AFTER `createdAt`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -124,9 +125,13 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 -- longer stretch a 15-minute block to 76 minutes or shrink it to 3. Only the
 -- COMMENT changes here (#777: a time column says which kind of time it holds);
 -- the type and default are as before. MODIFY is safe to run twice.
--- Rows written before the upgrade hold local time; RateLimiter ignores any
--- that look like the future, so the worst an upgrade does is start each count
--- again from nothing.
+-- Rows written before the upgrade hold the server's LOCAL time. On a server
+-- BEHIND UTC they look old and fall out of every window at once. On a server
+-- AHEAD of UTC they look like the future, and RateLimiter ignores a hit in the
+-- future, so they count for nothing until UTC catches up with them — and then
+-- they count again, for one window, before they age out. So an upgrade can
+-- revive an old count for one window; it can never make a block longer than
+-- that window.
 
 ALTER TABLE `tblApiRateLimits` MODIFY COLUMN `hitAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'A moment in UTC. Written by RateLimiter::recordHit() as UTC_TIMESTAMP() and compared only with UTC_TIMESTAMP() (#598, migration 270), so a server clock change cannot stretch or shorten a window. The default is never used by the portal.';
 
@@ -134,5 +139,5 @@ ALTER TABLE `tblApiRateLimits` MODIFY COLUMN `hitAt` DATETIME NOT NULL DEFAULT C
 -- 📋 D. Self-record (safe to run a second time)
 -- #############################################################################
 
-INSERT INTO `tblMigrations` (`filename`) VALUES ('270_sign_ins_valid_from.sql')
+INSERT INTO `tblMigrations` (`filename`) VALUES ('270_sign_in_version.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;

@@ -196,7 +196,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 152; // three added by #598 (part L)
+const EXPECTED_CHECKS = 153; // four added by #598 (part L)
 
 function refuse(string $why): never
 {
@@ -1949,10 +1949,10 @@ function theirs(): array
 }
 /**
  * What a session may hold straight after a different person's password sign-in, and nothing else.
- * `signed_in_at_utc` (#598, D-104) is the moment this sign-in began, written by
+ * `sign_in_version` (#598, D-104) is the account's sign-in version this session signed in under, written by
  * Auth::beginSessionFor() itself, so a later password reset or change can end it.
  */
-const AFTER_A_FRESH_SIGN_IN = ['portal_locale', 'user_id', 'user_name', 'user_email', 'active_site_id', 'reauth_proof', 'signed_in_at_utc'];
+const AFTER_A_FRESH_SIGN_IN = ['portal_locale', 'user_id', 'user_name', 'user_email', 'active_site_id', 'reauth_proof', 'sign_in_version'];
 
 // --- K1. Nobody signed in, a visitor's entries waiting; B signs in by password.
 $kJar  = newJar();
@@ -2764,6 +2764,26 @@ ok('L2 the password is changed on the first browser, which stays signed in',
 ok('L3 the second browser gives a right code after the change, and is NOT left signed in: its sign-in began with the old password (red on the old code: signed in)',
     $codeGiven['status'] === 302 && signedIn($waiting, ip(171)) === false,
     describe($codeGiven));
+
+// L4 (#598 round 1, item 6): a FRESH password step always takes the number
+// as it is now — only the code step keeps the one its password step read.
+// The first version kept the old one for ANY same-person sign-in, so somebody
+// waiting at the code step after a change, who typed their NEW password
+// again, was let in and then bounced on the next page.
+$third = newJar();
+$form  = req($third, 'GET', '/login', null, ip(172));
+req($third, 'POST', '/login', ['csrf_token' => token($form['body']), 'username' => login('wes'), 'password' => $wesNew], ip(172));
+$wesNewer    = 'Wes-Newer-598-' . bin2hex(random_bytes(6)) . 'Bb2!';
+$accountPage = req($wesOn['jar'], 'GET', '/account', null, ip(170));
+req($wesOn['jar'], 'POST', '/account/change-password', [
+    'csrf_token' => token($accountPage['body']), 'current_password' => $wesNew, 'new_password' => $wesNewer, 'new_password_confirm' => $wesNewer,
+], ip(170));
+$form  = req($third, 'GET', '/login', null, ip(172));
+$again = req($third, 'POST', '/login', ['csrf_token' => token($form['body']), 'username' => login('wes'), 'password' => $wesNewer], ip(172));
+$coded = codeStep($third, ip(172), ['code' => nth($wesOn['codes'], 1), 'use_backup' => '1']);
+ok('L4 waiting at the code step when the password changed, the person types the NEW password again and then a code: they are signed in and STAY signed in (red on round 1: bounced)',
+    $again['location'] === '/auth/2fa/verify' && $coded['status'] === 302 && signedIn($third, ip(172)) === true && signedIn($third, ip(172)) === true,
+    describe($again) . ' then ' . describe($coded));
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

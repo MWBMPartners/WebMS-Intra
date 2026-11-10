@@ -246,6 +246,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    inherited the first step's rotation and made none of its own, so the
     //    identifier used while the code was being typed became the signed-in
     //    one.
+    //
+    // 🔢 AND IT KEEPS THE SIGN-IN VERSION THE FIRST STEP STORED (#598, D-104):
+    //    that step read the password, so a password reset or change made while
+    //    this code was being typed must still end this session. This is the
+    //    only grant that keeps it; every other sign-in takes the number as it
+    //    is now. See Auth::codeStepCompletesSignInOf().
+    Auth::codeStepCompletesSignInOf($pendingUserId);
     Auth::beginSessionFor($pendingUserId);
     $_SESSION['user_id']    = $pendingUserId;
     $_SESSION['2fa_passed'] = true;

@@ -298,13 +298,16 @@ foreach ($googleMailSettings as $key => $label) {
     }
 }
 
-// 🔍 Check if the key file actually exists on disk
-$keyFileExists = false;
-$keyFileName   = App::settings('mail.google.serviceAccountKeyFile') ?? '';
-if ($keyFileName !== '') {
-    $keyFilePath = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_auth_keys' . DIRECTORY_SEPARATOR . $keyFileName;
-    $keyFileExists = is_readable($keyFilePath);
-}
+// 🔍 Is the key file one the portal can use? MailerGoogle::keyFileProblem() is
+//    the ONE judge (#598 item 9), asked by Mailer::canSend() and by the Google
+//    sender too, so this page cannot say "Found" and "Configured" while sending
+//    refuses. It used to ask is_readable() here itself, which said "Found" for
+//    a name climbing out of the key folder ("../…") and for a file that is not
+//    a key at all. The sentence says what is wrong; it is shown to the
+//    administrator under the file name.
+$keyFileName    = (string) (App::settings('mail.google.serviceAccountKeyFile') ?? '');
+$keyFileProblem = $keyFileName !== '' ? MailerGoogle::keyFileProblem($keyFileName) : null;
+$keyFileExists  = $keyFileName !== '' && $keyFileProblem === null;
 
 // -- Webhooks (#324) — count configured for the Webhooks card badge --
 $webhookCount = 0;
@@ -685,9 +688,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-12 col-md-4 text-muted small font-monospace">_auth_keys/<?php echo htmlspecialchars($keyFileName, ENT_QUOTES, 'UTF-8'); ?></div>
                     <div class="col-12 col-md-5">
                         <?php if ($keyFileExists === true): ?>
-                            <span class="badge bg-success"><i class="fa-solid fa-check me-1" aria-hidden="true"></i>Found</span>
+                            <span class="badge bg-success" data-key-file="usable"><i class="fa-solid fa-check me-1" aria-hidden="true"></i>Found</span>
                         <?php else: ?>
-                            <span class="badge bg-danger"><i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>Not Found</span>
+                            <span class="badge bg-danger" data-key-file="unusable"><i class="fa-solid fa-xmark me-1" aria-hidden="true"></i>Cannot be used</span>
+                            <div class="small text-danger mt-1">Still needed: <?php echo htmlspecialchars((string) $keyFileProblem, ENT_QUOTES, 'UTF-8'); ?></div>
                         <?php endif; ?>
                     </div>
                 </div>

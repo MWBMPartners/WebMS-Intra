@@ -402,6 +402,8 @@ function removeWorld(): void
     for ($last = 1; $last <= 254; $last++) {
         q('DELETE FROM tblApiRateLimits WHERE bucket IN (?, ?)', 'ss', ['pwreset:ask:' . hash('sha256', ip($last)), 'pwreset:use:' . hash('sha256', ip($last))]);
     }
+    // #598: the per-person reset counts (the bucket holds an account number, not an address).
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
     q('DELETE FROM tblSettings WHERE settingKey LIKE ?', 's', [str_replace('_', '\\_', OWN_PREFIX) . '%']);
     // Part J's "cannot be read" record and its prayer requests; part K's trigger and migration record.
     q("DELETE FROM tblErrors WHERE errorCode = 'SECRET_SETTING_UNREADABLE'");
@@ -755,6 +757,11 @@ function mailSince(): array
 function forgot(string $ip = '', array $more = []): array
 {
     global $state;
+    // 🧹 #598: one PERSON gets at most three reset e-mails an hour. This test
+    //    asks for the same person's link many times because it is about
+    //    something else, so the per-person count is forgotten first
+    //    (sign-in-limits-selftest.php part W is the test of that cap).
+    q("DELETE FROM tblApiRateLimits WHERE bucket LIKE 'pwreset:person:%'");
     mailSince();
     $jar     = newJar();
     $address = $ip === '' ? ip($state['nextIp']++) : $ip;

@@ -516,19 +516,21 @@ class RateLimiter
      *
      * THE UPPER BOUND (`hitAt <= UTC_TIMESTAMP()`) is for the upgrade. Rows
      * written before this change hold the server's local time. On a server
-     * ahead of UTC they would look like hits in the FUTURE and, without the
-     * bound, count for hours (a server on New Zealand time: thirteen); with it
-     * they count for nothing. On a server behind UTC they look old and fall
-     * out of the window on their own. Either way the one cost is that each
-     * count starts again from nothing at the upgrade — the recoverable
-     * direction — and never a block longer than its window.
+     * ahead of UTC they look like hits in the FUTURE and, without the bound,
+     * would count for the whole of those hours (a server on New Zealand time:
+     * thirteen). With it they count for nothing WHILE they are in the future —
+     * and then, once UTC catches up with them, they count again for one
+     * window before they age out. So an upgrade can bring an old count back
+     * for one window, once, hours later; it can never make a block longer
+     * than its window. On a server behind UTC they look old and fall out of
+     * the window at once.
      *
      * WHAT THIS DOES NOT COVER. The SIGN-IN counts above (isBlocked(),
      * lockoutRemaining(), the per-name count) read tblActivityLogs, whose
      * times are written by Logger, not by this class, on the server's clock.
      * Changing those means changing what every activity record's time means,
      * which is not the limiter's to decide; they keep the clock-change
-     * behaviour described at lockoutRemaining(). Recorded as its own issue.
+     * behaviour described at lockoutRemaining(). That is #920.
      */
 
     /**
