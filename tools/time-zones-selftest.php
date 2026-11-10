@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 186;  // 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 202;  // + sixteen in part N (#782: N00-N15) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -192,6 +192,14 @@ if (($argv[1] ?? '') === '--child') {
                 $cover        = \Portal\Core\Venues::classifyEventCoverage((array) $event, (int) $job['venueId']);
                 $out['class'] = (string) $cover['classification'];
                 $out['days']  = array_map(static fn (array $d): string => (string) $d['date'], $cover['perDay']);
+                break;
+            case 'livestreamNext': // #782: the next slot of organisation 1, after a given moment
+                $next          = \Portal\Core\Livestream::nextScheduled(1, new DateTimeImmutable((string) $job['after'], new DateTimeZone('UTC')));
+                $out['nextAt'] = $next === null ? null : (string) $next['nextAt'];
+                break;
+            case 'sabbath': // #782: the quiet window at a given moment, shown on a given clock
+                [$winStart]    = \Portal\Core\Sabbath::computeWindow((int) $job['at']);
+                $out['start']  = (new DateTimeImmutable('@' . $winStart))->setTimezone(new DateTimeZone((string) $job['showIn']))->format('D Y-m-d H:i');
                 break;
             default:
                 $out['threw'] = 'the child was given a task it does not know';
@@ -3313,6 +3321,178 @@ $withoutConsumingIds(static function () use ($adminJar, $xMemberJar, $creds): vo
     q('DELETE FROM tblResource WHERE resourceID = ?', 'i', [$room]);
 });
 orgZone(1, $xOrgZoneWas === null ? null : (string) $xOrgZoneWas);
+
+// =============================================================================
+// N. NO ZONE IS BUILT IN (#782)
+// =============================================================================
+// "Never hard-code a zone." Until #782 the livestream schedule, venues, the
+// venue check API and the Sabbath quiet window all answered "Europe/London"
+// when nobody had chosen, so an organisation anywhere else had its times told
+// on London's clock. Each check below is run in an organisation on
+// Australia/Sydney, where London's answer and the organisation's differ by
+// nine to eleven hours, and each says what the OLD code gave. The premise is
+// asserted first (N00), because in an organisation on London's own zone every
+// check here would pass on the old code.
+head('N. #782: no zone is built in — livestream, venues and the Sabbath window follow the organisation');
+$nOrgZoneWas  = one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? null;
+$nSabbathWas  = q("SELECT settingKey, settingValue FROM tblSettings WHERE settingKey LIKE 'portal.sabbath.%' AND siteID IS NULL");
+$nLiveWas     = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'livestream.enabled' AND siteID IS NULL")['settingValue'] ?? null;
+const N_ZONE    = 'Australia/Sydney';
+const N_CHANNEL = 960781;
+$withoutConsumingIds(static function () use ($adminJar): void {
+    orgZone(1, N_ZONE);
+    setting('livestream.enabled', '1');
+    $facts = child(['task' => 'facts', 'sites' => [1]]);
+    ok(
+        'N00 premise: the organisation\'s zone is ' . N_ZONE . ' by Site::timezone(), so London\'s answer and the organisation\'s differ',
+        $facts['threw'] === '' && ($facts['zone']['1'] ?? '') === N_ZONE,
+        json_encode($facts)
+    );
+
+    // ---- the livestream schedule -------------------------------------------
+    q("INSERT INTO tblLivestreamChannel (channelID, siteID, name, platform) VALUES (?, 1, 'Selftest zones channel 782', 'youtube')", 'i', [N_CHANNEL]);
+    $slots = static fn (): array => q('SELECT timezone FROM tblLivestreamSchedule WHERE channelID = ? ORDER BY scheduleID', 'i', [N_CHANNEL]);
+    $page  = req($adminJar, 'GET', '/admin/livestream/channels');
+    // The box's OWN value is read: the page also carries a list of every zone
+    // name for the box to suggest from, London among them, so "the page does
+    // not contain Europe/London" would be untrue of a correct page.
+    $slotBox = tz_find('#name="timezone"\s+list="ls-zone-names"[^>]*\svalue="([^"]*)"#', $page['body'], $box) === 1 ? $box[1] : '(no slot box found)';
+    ok(
+        'N01 the livestream page\'s new-slot box starts on the organisation\'s zone, ' . N_ZONE . ' (it started on "Europe/London" for everybody)',
+        $page['status'] === 200 && $slotBox === N_ZONE,
+        said($page) . '; the box holds ' . json_encode($slotBox)
+    );
+    $slotFields = ['action' => 'add_schedule', 'channelID' => N_CHANNEL, 'dayOfWeek' => 6, 'startTime' => '10:00', 'endTime' => '12:00'];
+    post($adminJar, '/admin/livestream/channels', '/admin/livestream/channels', $slotFields + ['timezone' => '']);
+    ok(
+        'N02 a slot added with the zone box left EMPTY is stored on the organisation\'s zone, ' . N_ZONE . ' (it was stored as "Europe/London")',
+        array_column($slots(), 'timezone') === [N_ZONE],
+        json_encode($slots())
+    );
+    post($adminJar, '/admin/livestream/channels', '/admin/livestream/channels', $slotFields + ['timezone' => 'Austrlia/Sydney']);
+    $said = flashAfter($adminJar, '/admin/livestream/channels');
+    ok(
+        'N03 a slot whose zone is not one PHP knows ("Austrlia/Sydney") is REFUSED, said, and nothing is stored (any text used to be stored)',
+        array_column($slots(), 'timezone') === [N_ZONE] && str_contains($said, 'not one this portal knows') === true,
+        'rows ' . json_encode($slots()) . '; said: ' . $said
+    );
+    // A slot an older version stored with text PHP cannot open (it accepted any text).
+    q('DELETE FROM tblLivestreamSchedule WHERE channelID = ?', 'i', [N_CHANNEL]);
+    q("INSERT INTO tblLivestreamSchedule (channelID, dayOfWeek, startTime, endTime, timezone, isActive) VALUES (?, 6, '10:00:00', '12:00:00', 'Atlantis/Nowhere', 1)", 'i', [N_CHANNEL]);
+    $next = child(['task' => 'livestreamNext', 'after' => '2028-06-14 00:00:00']);
+    ok(
+        'N04 a slot whose stored zone cannot be read is counted down on the organisation\'s clock: Saturday 10:00 in ' . N_ZONE . ' (the old reader used UTC, ten hours out)',
+        $next['threw'] === '' && ($next['nextAt'] ?? '') === '2028-06-17T10:00:00+10:00',
+        json_encode($next)
+    );
+    q('DELETE FROM tblLivestreamChannel WHERE channelID = ?', 'i', [N_CHANNEL]);
+
+    // ---- venues -------------------------------------------------------------
+    $manage = req($adminJar, 'GET', '/venues/manage');
+    ok(
+        'N05 the new-venue form\'s zone box starts on the organisation\'s zone, ' . N_ZONE . ' (it started on "Europe/London")',
+        $manage['status'] === 200
+            && tz_find('#id="timezone" name="timezone"[^>]*value="' . preg_quote(N_ZONE, '#') . '"#s', $manage['body']) === 1,
+        said($manage) . '; ' . (tz_find('#id="timezone" name="timezone"[^>]*>#s', $manage['body'], $box) === 1 ? $box[0] : 'no zone box found')
+    );
+    $venueZone = static fn (string $name): ?string => one('SELECT timezone FROM tblVenues WHERE venueName = ? AND siteID = 1', 's', [$name])['timezone'] ?? null;
+    $venueSave = ['action' => 'save', 'venueID' => 0, 'countryCode' => 'AU'];
+    post($adminJar, '/venues/manage', '/venues/venue-save', $venueSave + ['venueName' => 'Selftest zones hall 782 empty', 'timezone' => '']);
+    ok(
+        'N06 a venue saved with the zone box left EMPTY is stored on the organisation\'s zone, ' . N_ZONE . ' (it was stored as "Europe/London")',
+        $venueZone('Selftest zones hall 782 empty') === N_ZONE,
+        json_encode($venueZone('Selftest zones hall 782 empty'))
+    );
+    post($adminJar, '/venues/manage', '/venues/venue-save', $venueSave + ['venueName' => 'Selftest zones hall 782 typo', 'timezone' => 'Austrlia/Sydney']);
+    $said = flashAfter($adminJar, '/venues/manage');
+    ok(
+        'N07 a venue whose zone is not one PHP knows is REFUSED and said, and NO venue is made (it used to be saved as "Europe/London" without a word)',
+        $venueZone('Selftest zones hall 782 typo') === null && str_contains($said, 'not one this portal knows') === true,
+        'stored ' . json_encode($venueZone('Selftest zones hall 782 typo')) . '; said: ' . $said
+    );
+    // Over-refusal guard: a venue saved long ago with an old zone name must still
+    // save when its zone is left as it is. This passes on the old code too, on
+    // purpose: it is here so the new refusal cannot grow into refusing this.
+    q("INSERT INTO tblVenues (venueID, siteID, venueName, timezone) VALUES (960782, 1, 'Selftest zones hall 782 legacy', 'US/Eastern')");
+    post($adminJar, '/venues/manage?edit=960782', '/venues/venue-save', ['venueID' => 960782] + $venueSave + ['venueName' => 'Selftest zones hall 782 legacy renamed', 'timezone' => 'US/Eastern']);
+    ok(
+        'N08 a venue still holding an OLD zone name ("US/Eastern") saves when that zone is left unchanged (asks whether the field CHANGED, #667)',
+        $venueZone('Selftest zones hall 782 legacy renamed') === 'US/Eastern',
+        json_encode(one('SELECT venueName, timezone FROM tblVenues WHERE venueID = 960782'))
+    );
+    // The venue code's reading: a venue whose stored zone cannot be read, and an
+    // event at 08:00 in Sydney. On Sydney's clock that is 15 June; on London's
+    // (the old fallback) it is 23:00 on 14 June.
+    q("INSERT INTO tblVenues (venueID, siteID, venueName, timezone) VALUES (960783, 1, 'Selftest zones hall 782 unreadable', 'Atlantis/Nowhere')");
+    q("INSERT INTO tblEvents (eventID, siteID, eventSlug, eventName, startDateTime, endDateTime, timezone, status, isPublic, isDeleted) VALUES (960781, 1, 'selftest-zones-782', 'Selftest zones 782', '2028-06-15 08:00:00', '2028-06-15 09:00:00', ?, 'published', 1, 0)", 's', [N_ZONE]);
+    $hall = child(['task' => 'venue', 'eventId' => 960781, 'venueId' => 960783]);
+    ok(
+        'N09 a venue whose stored zone cannot be read is read on the organisation\'s clock: an 08:00 Sydney event falls on 2028-06-15 there (the old London fallback said 2028-06-14)',
+        $hall['threw'] === '' && ($hall['days'][0] ?? '') === '2028-06-15',
+        json_encode($hall)
+    );
+    // The check API with no `tz`: a Sydney venue, a 20:00 reading. On the
+    // organisation's clock it is 15 June; read as London (the old default) it is
+    // 05:00 on 16 June in Sydney.
+    q("INSERT INTO tblVenues (venueID, siteID, venueName, timezone) VALUES (960784, 1, 'Selftest zones hall 782 sydney', ?)", 's', [N_ZONE]);
+    $check = req($adminJar, 'GET', '/api/venues/check?start=2028-06-15T20:00&venueID=960784');
+    $answer = json_decode($check['body'], true);
+    $day    = (string) ($answer['data']['perDay'][0]['date'] ?? $answer['perDay'][0]['date'] ?? '');
+    ok(
+        'N10 /api/venues/check with NO zone reads the times on the organisation\'s clock: 20:00 on 2028-06-15 stays 2028-06-15 (the old London default made it 2028-06-16)',
+        $check['status'] === 200 && $day === '2028-06-15',
+        said($check) . '; ' . substr($check['body'], 0, 300)
+    );
+    q('DELETE FROM tblEvents WHERE eventID = 960781');
+    q("DELETE FROM tblVenueUsageTypes WHERE venueID IN (SELECT venueID FROM tblVenues WHERE venueName LIKE 'Selftest zones hall 782%')");
+    q("DELETE FROM tblVenues WHERE venueName LIKE 'Selftest zones hall 782%'");
+
+    // ---- the Sabbath quiet window -------------------------------------------
+    $sabbathZone = static fn (): ?string => one("SELECT settingValue FROM tblSettings WHERE settingKey = 'portal.sabbath.timezone' AND siteID IS NULL")['settingValue'] ?? null;
+    ok(
+        'N11 a new installation ships portal.sabbath.timezone EMPTY, meaning each organisation\'s own zone (it shipped as "Europe/London")',
+        $sabbathZone() === '',
+        json_encode($sabbathZone())
+    );
+    setting('portal.sabbath.method', 'fixed');
+    // Saturday 17 June 2028, 12:00 in Sydney: the window began the evening before.
+    $at   = (new DateTimeImmutable('2028-06-17 12:00:00', new DateTimeZone(N_ZONE)))->getTimestamp();
+    $win  = child(['task' => 'sabbath', 'at' => $at, 'showIn' => N_ZONE]);
+    ok(
+        'N12 with the setting empty, the quiet window begins Friday 18:00 on the organisation\'s clock (the old code read empty as UTC: 04:00 Saturday in Sydney)',
+        $win['threw'] === '' && ($win['start'] ?? '') === 'Fri 2028-06-16 18:00',
+        json_encode($win)
+    );
+    $sabbathPage = req($adminJar, 'GET', '/admin/settings/sabbath');
+    $selected    = tz_findAll('#<option value="([^"]*)"\s+selected\s*>#', $sabbathPage['body'], $sel) > 0 ? $sel[1] : [];
+    ok(
+        'N13 the Sabbath page offers "Each organisation\'s own time zone (here: ' . N_ZONE . ')" and it is the ONE option selected',
+        $sabbathPage['status'] === 200 && $selected === ['']
+            && str_contains(words($sabbathPage['body']), 'Each organisation\'s own time zone (here: ' . N_ZONE . ')') === true,
+        said($sabbathPage) . '; selected ' . json_encode($selected)
+    );
+    $sabbathPost = ['method' => 'fixed', 'location_lat' => '-33.87', 'location_lng' => '151.21', 'start_offset_minutes' => '0', 'end_offset_minutes' => '0'];
+    post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', $sabbathPost + ['timezone' => 'America/New_York']);
+    $chose = $sabbathZone();
+    post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', $sabbathPost + ['timezone' => '']);
+    ok(
+        'N14 the Sabbath page stores a chosen zone, and stores EMPTY when "each organisation\'s own" is chosen again',
+        $chose === 'America/New_York' && $sabbathZone() === '',
+        'after choosing New York ' . json_encode($chose) . ', after choosing own ' . json_encode($sabbathZone())
+    );
+    $refused = post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', $sabbathPost + ['timezone' => 'Austrlia/Sydney', 'location_lat' => '1.5']);
+    $latNow  = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'portal.sabbath.location_lat' AND siteID IS NULL")['settingValue'] ?? null;
+    ok(
+        'N15 a Sabbath zone PHP does not know is REFUSED with a reason and NOTHING on the page is saved (it was silently replaced with "Europe/London")',
+        $sabbathZone() === '' && $latNow === '-33.87' && str_contains(words($refused['body']), 'not one this portal knows') === true,
+        'zone ' . json_encode($sabbathZone()) . ', latitude ' . json_encode($latNow) . '; ' . said($refused)
+    );
+});
+orgZone(1, $nOrgZoneWas === null ? null : (string) $nOrgZoneWas);
+foreach ($nSabbathWas as $row) {
+    setting((string) $row['settingKey'], (string) $row['settingValue']);
+}
+setting('livestream.enabled', $nLiveWas === null ? '0' : (string) $nLiveWas);
 
 // =============================================================================
 // 🏁 The end

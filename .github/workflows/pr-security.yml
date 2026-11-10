@@ -1931,6 +1931,20 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_clock_time_not_a_moment.py
 
+      # 🌍 #782. "Never hard-code a zone": an organisation's zone is
+      #    Site::timezone() (#604). Eighteen places wrote "Europe/London" as
+      #    the answer when nobody had chosen, so a church in Sydney had its
+      #    livestream countdown, its hall's bookings and its quiet hours on
+      #    London's clock. This fails on any zone name written as a quoted
+      #    value in the PHP or JavaScript under web/ that is not on the
+      #    gate's own reasoned list, AND on a listed entry that no longer
+      #    matches what is there. It reads PHP with PHP's tokeniser, so a
+      #    comment recording the old fault is never mistaken for it.
+      - name: 'No time zone is built in (hard gate, #782)'
+        id: no_built_in_time_zone
+        if: always()
+        run: python3 -I tools/audit-checks/check_no_built_in_time_zone.py
+
 
       # 🔑 ONE PLACE HASHES AND STORES A PASSWORD (#728).
       #

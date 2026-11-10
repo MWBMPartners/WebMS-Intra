@@ -42,6 +42,7 @@
  * @version   1.1.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/251
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/782
  * -----------------------------------------------------------------------------
  */
 
@@ -118,37 +119,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $values = [
             'portal.sabbath.enabled'              => isset($_POST['enabled']) ? '1' : '0',
             'portal.sabbath.method'               => in_array($_POST['method'] ?? 'fixed', ['fixed','sunset_calc'], true) ? (string) $_POST['method'] : 'fixed',
-            'portal.sabbath.timezone'             => trim((string) ($_POST['timezone'] ?? 'Europe/London')),
+            'portal.sabbath.timezone'             => is_string($_POST['timezone'] ?? null) === true ? trim((string) $_POST['timezone']) : '',
             'portal.sabbath.location_lat'         => (string) ((float) ($_POST['location_lat'] ?? 0)),
             'portal.sabbath.location_lng'         => (string) ((float) ($_POST['location_lng'] ?? 0)),
             'portal.sabbath.start_offset_minutes' => (string) ((int) ($_POST['start_offset_minutes'] ?? 0)),
             'portal.sabbath.end_offset_minutes'   => (string) ((int) ($_POST['end_offset_minutes'] ?? 0)),
             'portal.sabbath.bypass_critical'      => isset($_POST['bypass_critical']) ? '1' : '0',
         ];
-        // Validate timezone string against known list
-        try {
-            new \DateTimeZone($values['portal.sabbath.timezone']);
-        } catch (\Throwable $e) {
-            $values['portal.sabbath.timezone'] = 'Europe/London';
-        }
-        try {
-            foreach ($values as $key => $val) {
-                $stmt = $db->prepare(
-                    "INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) "
-                    . "VALUES (NULL, ?, ?, ?, 0) "
-                    . "ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)"
-                );
-                if ($stmt !== false) {
-                    $stmt->bind_param('sss', $key, $val, $val);
-                    $stmt->execute();
-                    $stmt->close();
-                }
-            }
-            $flash = 'Sabbath settings saved.';
-            $flashType = 'success';
-        } catch (\Throwable $e) {
-            $flash = 'Save failed: ' . $e->getMessage();
+        // 🕰️ THE ZONE (#782). EMPTY is a real answer here, not a missing one: it means
+        //    "each organisation's own time zone" (Sabbath::zone() then asks Site::zoneFor(),
+        //    which falls back to Site::timezone(), #604), and it is what a new installation
+        //    ships with. Anything else must be a zone name PHP's main list knows
+        //    (Site::isZoneName()) — or be exactly what is stored already, so a plain Save over
+        //    a value this page itself drew is never refused (ask whether the field CHANGED,
+        //    #667, #677). Otherwise NOTHING is saved and the reason is shown.
+        //    WHAT WAS WRONG: an unknown zone was silently replaced with "Europe/London", for
+        //    every customer anywhere, and the page offered London pre-selected. A posted LIST
+        //    is not text and counts as empty, which is the organisation's own zone.
+        $zoneNow    = (string) (App::settings()['portal']['sabbath']['timezone'] ?? '');
+        $zoneWanted = $values['portal.sabbath.timezone'];
+        $zoneOk     = $zoneWanted === '' || Site::isZoneName($zoneWanted) === true || $zoneWanted === $zoneNow;
+        if ($zoneOk === false) {
+            // 🕰️ Refused BEFORE the first row is written, so nothing on this page has changed.
+            $flash = 'That time zone is not one this portal knows, so nothing has been changed. '
+                . 'Choose one from the list, or choose "Each organisation\'s own time zone".';
             $flashType = 'danger';
+        } else {
+            try {
+                foreach ($values as $key => $val) {
+                    $stmt = $db->prepare(
+                        "INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) "
+                        . "VALUES (NULL, ?, ?, ?, 0) "
+                        . "ON DUPLICATE KEY UPDATE settingValue = VALUES(settingValue)"
+                    );
+                    if ($stmt !== false) {
+                        $stmt->bind_param('sss', $key, $val, $val);
+                        $stmt->execute();
+                        $stmt->close();
+                    }
+                }
+                $flash = 'Sabbath settings saved.';
+                $flashType = 'success';
+            } catch (\Throwable $e) {
+                $flash = 'Save failed: ' . $e->getMessage();
+                $flashType = 'danger';
+            }
         }
     }
 }
@@ -156,7 +171,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $settings = App::settings();
 $enabled       = (string) ($settings['portal']['sabbath']['enabled']              ?? '0') === '1';
 $method        = (string) ($settings['portal']['sabbath']['method']               ?? 'fixed');
-$timezone      = (string) ($settings['portal']['sabbath']['timezone']             ?? 'Europe/London');
+// 🕰️ What is STORED ('' means each organisation's own zone, #782), and the clock that
+//    really applies to THIS organisation, from Sabbath::zone() — the one answer.
+$timezone      = (string) ($settings['portal']['sabbath']['timezone']             ?? '');
+$zoneInUse     = Sabbath::zone();
 $lat           = (float)  ($settings['portal']['sabbath']['location_lat']         ?? 52.205);
 $lng           = (float)  ($settings['portal']['sabbath']['location_lng']         ?? 0.119);
 $startOffset   = (int)    ($settings['portal']['sabbath']['start_offset_minutes'] ?? 0);
@@ -172,8 +190,12 @@ $breadcrumbs = ['Dashboard' => Site::url(''), 'Admin' => Site::url('admin'), 'Se
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 $csrf = Auth::csrfToken();
 
-// All IANA timezones the system knows about
-$allTimezones = \DateTimeZone::listIdentifiers();
+// All zone names the portal knows: the SAME list Site::isZoneName() tests (#782).
+$allTimezones = Site::zoneNames();
+// ⚠️ A stored value that is not on that list (an old "US/Eastern", say) is still OFFERED, and
+//    selected, because a <select> with nothing selected is a vote for its FIRST option — which is
+//    now "each organisation's own" — so the next Save would quietly change it (#763's lesson).
+$storedOffList = $timezone !== '' && in_array($timezone, $allTimezones, true) === false;
 ?>
 
 <h1 class="mb-3"><i class="fa-solid fa-moon me-2"></i>Sabbath quiet hours</h1>
@@ -205,9 +227,12 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
 <?php if ($enabled === true): ?>
     <div class="alert alert-info">
         <strong>Current window (your settings):</strong>
-        <?php echo htmlspecialchars(date('D j M H:i', $winStart), ENT_QUOTES, 'UTF-8'); ?>
-        → <?php echo htmlspecialchars(date('D j M H:i', $winEnd), ENT_QUOTES, 'UTF-8'); ?>
-        (<?php echo htmlspecialchars($timezone, ENT_QUOTES, 'UTF-8'); ?>)
+        <?php // 🕰️ Shown on the clock the window is worked out on (#782). It used to be printed on
+              //    PHP's clock, which is the ORGANISATION's, beside the name of the setting's zone —
+              //    two different clocks in one line whenever they differed. ?>
+        <?php echo htmlspecialchars((new \DateTimeImmutable('@' . $winStart))->setTimezone($zoneInUse)->format('D j M H:i'), ENT_QUOTES, 'UTF-8'); ?>
+        → <?php echo htmlspecialchars((new \DateTimeImmutable('@' . $winEnd))->setTimezone($zoneInUse)->format('D j M H:i'), ENT_QUOTES, 'UTF-8'); ?>
+        (<?php echo htmlspecialchars($zoneInUse->getName(), ENT_QUOTES, 'UTF-8'); ?>)
     </div>
 <?php endif; ?>
 
@@ -238,8 +263,19 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
 
             <div class="row g-2 mt-3">
                 <div class="col-md-6">
-                    <label class="form-label small">Timezone</label>
-                    <select name="timezone" class="form-select form-select-sm"<?php echo $readOnlyAttr; ?>>
+                    <label class="form-label small" for="sabbath-zone">Time zone</label>
+                    <select id="sabbath-zone" name="timezone" class="form-select form-select-sm"<?php echo $readOnlyAttr; ?>>
+                        <?php // 🕰️ FIRST, and what a new installation ships with (#782): each organisation's
+                              //    own zone, as chosen at Admin, Organisations. The name in brackets is the
+                              //    organisation you are in now, so it is clear what "own" means here. ?>
+                        <option value="" <?php echo $timezone === '' ? 'selected' : ''; ?>>
+                            Each organisation's own time zone (here: <?php echo htmlspecialchars(Site::timezone(), ENT_QUOTES, 'UTF-8'); ?>)
+                        </option>
+                        <?php if ($storedOffList === true): ?>
+                            <option value="<?php echo htmlspecialchars($timezone, ENT_QUOTES, 'UTF-8'); ?>" selected>
+                                <?php echo htmlspecialchars($timezone, ENT_QUOTES, 'UTF-8'); ?> (saved earlier; not on the current list)
+                            </option>
+                        <?php endif; ?>
                         <?php foreach ($allTimezones as $tz): ?>
                             <option value="<?php echo htmlspecialchars($tz, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $tz === $timezone ? 'selected' : ''; ?>>
                                 <?php echo htmlspecialchars($tz, ENT_QUOTES, 'UTF-8'); ?>

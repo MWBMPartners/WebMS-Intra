@@ -28,6 +28,7 @@
  * @license   All Rights Reserved
  * @version   1.0.0
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/231
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/782
  * -----------------------------------------------------------------------------
  */
 
@@ -65,6 +66,33 @@ class Sabbath
     }
 
     /**
+     * 🕰️ THE ONE ANSWER to "on which clock is the quiet window worked out?" (#782).
+     *
+     * The `portal.sabbath.timezone` setting when it names a zone PHP can open;
+     * otherwise — and EMPTY is the ordinary case, the value a new installation
+     * ships with — the current organisation's own zone, through
+     * `Site::zoneFor()`, the portal's one rule for a stored zone (#604).
+     *
+     * WHAT WAS WRONG. The setting shipped holding "Europe/London" for every
+     * installation, the settings page offered London pre-selected, and a zone
+     * PHP could not open fell back to UTC. So quiet hours for a church in
+     * Sydney began at 18:00 on London's Friday — between 03:00 and 05:00 on
+     * Saturday morning in Sydney — unless somebody had found this page and
+     * changed it.
+     *
+     * WHAT THIS CANNOT DO: tell a "Europe/London" somebody chose from one the
+     * install script put there. An installation upgraded from before #782
+     * keeps the London it holds, because nothing can show it was not chosen;
+     * an installation made after #782 starts empty.
+     */
+    public static function zone(): \DateTimeZone
+    {
+        $settings = App::settings();
+
+        return Site::zoneFor((string) ($settings['portal']['sabbath']['timezone'] ?? ''));
+    }
+
+    /**
      * Compute the Sabbath window containing or surrounding the given time.
      *
      * @return array{0:int, 1:int}  [start_ts, end_ts]
@@ -73,15 +101,10 @@ class Sabbath
     {
         $settings = App::settings();
         $method = (string) ($settings['portal']['sabbath']['method'] ?? 'fixed');
-        $tz     = (string) ($settings['portal']['sabbath']['timezone'] ?? 'Europe/London');
         $startOffsetMin = (int) ($settings['portal']['sabbath']['start_offset_minutes'] ?? 0);
         $endOffsetMin   = (int) ($settings['portal']['sabbath']['end_offset_minutes'] ?? 0);
 
-        try {
-            $tzObj = new \DateTimeZone($tz);
-        } catch (\Throwable $e) {
-            $tzObj = new \DateTimeZone('UTC');
-        }
+        $tzObj = self::zone();
 
         $ref = (new \DateTimeImmutable('@' . $referenceTs))->setTimezone($tzObj);
 

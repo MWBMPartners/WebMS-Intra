@@ -923,7 +923,8 @@ function brs_addByteRows(): void
 function brs_addSelfPointingRows(): void
 {
     brs_sql(
-        "INSERT INTO tblVenues (venueID, venueName) VALUES (" . BRS_VENUE . ", 'Self-test hall')",
+        // 🕰️ The zone is named because tblVenues.timezone has no default since #782 (migration 273).
+        "INSERT INTO tblVenues (venueID, venueName, timezone) VALUES (" . BRS_VENUE . ", 'Self-test hall', 'Europe/London')",
         "INSERT INTO tblVenueAgreements (agreementID, siteID, venueID, title, status) VALUES (970001, 1, " . BRS_VENUE . ", 'Hall hire 2025', 'active'), (970002, 1, " . BRS_VENUE . ", 'Hall hire 2026', 'active')",
         "UPDATE tblVenueAgreements SET status = 'superseded', supersededByID = 970002 WHERE agreementID = 970001",
         "INSERT INTO tblTasks (taskID, siteID, title) VALUES (970001, 1, 'Older task'), (970002, 1, 'Newer task'), (970003, 1, 'Ring A'), (970004, 1, 'Ring B'), (970005, 1, 'Points at itself')",

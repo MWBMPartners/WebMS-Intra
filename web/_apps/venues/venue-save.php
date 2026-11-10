@@ -116,7 +116,9 @@ if ($action === 'save') {
         'region'         => (string) ($_POST['region'] ?? ''),
         'postcode'       => (string) ($_POST['postcode'] ?? ''),
         'countryCode'    => (string) ($_POST['countryCode'] ?? 'GB'),
-        'timezone'       => (string) ($_POST['timezone'] ?? 'Europe/London'),
+        // 🕰️ Passed as posted (#782): Venues::zoneToStore() decides, and an empty box means the
+        //    organisation's own zone. It used to become "Europe/London" here.
+        'timezone'       => $_POST['timezone'] ?? '',
         'caretakerName'  => (string) ($_POST['caretakerName'] ?? ''),
         'caretakerPhone' => (string) ($_POST['caretakerPhone'] ?? ''),
         'notes'          => (string) ($_POST['notes'] ?? ''),
@@ -124,6 +126,22 @@ if ($action === 'save') {
         'longitude'      => $_POST['longitude'] ?? null,
         'what3words'     => $w3wPosted,
     ];
+
+    // 🕰️ A zone that is not one this portal knows is REFUSED with its own reason (#782), asked
+    //    of the same rule saveVenue() applies (Venues::zoneToStore()). Without this the refusal
+    //    would reach the "a venue name is required" message below, which would be untrue.
+    $storedZone = null;
+    if ($isCreate === false) {
+        $existing   = Venues::getVenue($venueId, $siteId);
+        $storedZone = $existing !== null ? (string) ($existing['timezone'] ?? '') : null;
+    }
+    if (Venues::zoneToStore($data['timezone'], $siteId, $storedZone) === null) {
+        $_SESSION['flash_msg']  = 'That time zone is not one this portal knows, so the venue was not saved. '
+            . 'Choose one from the list, or leave the box empty to use this organisation\'s own time zone.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('venues/manage') . ($isCreate ? '' : '?edit=' . $venueId));
+        exit();
+    }
 
     $savedId = Venues::saveVenue($siteId, $venueId, $data, $userId);
     if ($savedId === 0) {

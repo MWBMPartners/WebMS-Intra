@@ -470,6 +470,49 @@ class Venues
     }
 
     /**
+     * 🕰️ THE ONE RULE for which zone a venue save stores (#782), asked by the
+     * save handler (`venues/venue-save.php`, so a refusal can be worded) and
+     * again by saveVenue(), so no caller can store what it refuses.
+     *
+     *   - Empty (or not text at all): the ORGANISATION's own zone,
+     *     `Site::timezone()` — the one answer to that question (#604).
+     *   - A zone name PHP's main list knows (`Site::isZoneName()`, the test the
+     *     event form and the organisation form use): that zone.
+     *   - The venue's OWN stored text, unchanged, even if it fails that test:
+     *     a venue saved long ago as, say, "US/Eastern" must still be savable
+     *     when somebody only corrects its caretaker's number. Ask whether the
+     *     field CHANGED, not only what it holds (#667, #677).
+     *   - Anything else: null, meaning REFUSE. Nothing is stored.
+     *
+     * WHAT WAS WRONG. Empty became "Europe/London", and text PHP could not
+     * open was silently REPLACED by "Europe/London", for every customer
+     * anywhere; the form also arrived with "Europe/London" typed in. A
+     * booking's dates and times are a reading on the venue's clock, so a hall
+     * in Sydney saved that way had every event compared with its bookings on
+     * London's clock. Refused rather than replaced, because a zone nobody
+     * chose is the fault.
+     *
+     * @param mixed       $posted The posted zone (anything; only text counts).
+     * @param int         $siteId The organisation the venue belongs to.
+     * @param string|null $stored The venue's stored zone when editing; null when creating.
+     */
+    public static function zoneToStore(mixed $posted, int $siteId, ?string $stored): ?string
+    {
+        $zone = is_string($posted) === true ? trim($posted) : '';
+        if ($zone === '') {
+            return Site::timezone($siteId);
+        }
+        if (Site::isZoneName($zone) === true) {
+            return $zone;
+        }
+        if ($stored !== null && $zone === trim($stored)) {
+            return $zone;
+        }
+
+        return null;
+    }
+
+    /**
      * $venueId = 0 creates; a positive id updates that row (site-scoped).
      * On create, seeds the six default usage types. Returns the id, or 0 on
      * validation failure (blank name / invalid landlord / etc).
@@ -556,13 +599,6 @@ class Venues
         $latVal = $coords['lat'] ?? null;
         $lngVal = $coords['lng'] ?? null;
 
-        $timezone = trim((string) ($data['timezone'] ?? 'Europe/London'));
-        try {
-            new \DateTimeZone($timezone);
-        } catch (\Throwable $e) {
-            $timezone = 'Europe/London';
-        }
-
         $caretakerName = self::nullableTrim($data['caretakerName'] ?? null, 150);
         $caretakerPhone = self::nullableTrim($data['caretakerPhone'] ?? null, 50);
         $notes = self::nullableTrim($data['notes'] ?? null, 65000);
@@ -573,6 +609,15 @@ class Venues
             if ($old === null) {
                 return 0;
             }
+        }
+
+        // 🕰️ The venue's clock (#782): asked of zoneToStore(), the one rule, which the save
+        //    handler asks FIRST so it can word a refusal. Asked again here so that no other
+        //    caller can store a zone the rule refuses. It used to become "Europe/London" when
+        //    empty or unreadable, for every customer anywhere.
+        $timezone = self::zoneToStore($data['timezone'] ?? '', $siteId, $old !== null ? (string) ($old['timezone'] ?? '') : null);
+        if ($timezone === null) {
+            return 0;
         }
 
         try {
@@ -4051,15 +4096,25 @@ class Venues
         return ($result >= '2000-01-01' && $result <= '2100-12-31') ? $result : null;
     }
 
-    /** Guarded DateTimeZone construction — fallback Europe/London on any invalid stored value. */
+    /**
+     * 🕰️ The clock a venue's bookings are read on (#782): its stored zone when
+     * PHP can open it, and the venue's ORGANISATION's own zone when it cannot,
+     * through `Site::zoneFor()` — the portal's one rule for a stored zone,
+     * which the event's side of classifyEventCoverage() already asks.
+     *
+     * WHAT WAS WRONG. Empty or unreadable text fell back to "Europe/London",
+     * typed in here, while the EVENT beside it fell back to the organisation's
+     * own zone. So for a hall in Sydney whose zone could not be read, an event
+     * at 08:00 Sydney was converted to London's clock and compared with the
+     * PREVIOUS day's bookings.
+     *
+     * @param array<string, mixed> $venue A venue row (needs `timezone` and `siteID`).
+     */
     private static function venueTimezone(array $venue): \DateTimeZone
     {
-        try {
-            $tz = (string) ($venue['timezone'] ?? '');
-            return new \DateTimeZone($tz !== '' ? $tz : 'Europe/London');
-        } catch (\Throwable $e) {
-            return new \DateTimeZone('Europe/London');
-        }
+        $siteId = isset($venue['siteID']) === true ? (int) $venue['siteID'] : null;
+
+        return Site::zoneFor((string) ($venue['timezone'] ?? ''), $siteId);
     }
 
     /* -- Cross-tenant validation probes (security item 2) -- one prepared SELECT each -- */

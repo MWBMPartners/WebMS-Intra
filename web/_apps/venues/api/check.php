@@ -56,6 +56,7 @@ declare(strict_types=1);
 
 use Portal\Core\ApiResponse;
 use Portal\Core\Settings;
+use Portal\Core\Site;
 use Portal\Core\Venues;
 
 // 🔐 A signed-in session — read-only, no CSRF surface (02 §12 item 6).
@@ -89,9 +90,13 @@ $isValidLocalDateTime = static function (string $s): bool {
 
 $startRaw = trim((string) ($_GET['start'] ?? ''));
 $endRaw   = trim((string) ($_GET['end'] ?? ''));
-$tzRaw    = trim((string) ($_GET['tz'] ?? ''));
+// 🕰️ No `tz` means the ORGANISATION's own zone (#782), answered by Site::timezone() (#604).
+//    It used to mean "Europe/London" for every customer, and the API description said so out
+//    loud — so a check sent without a zone from a church in Sydney compared an 08:00 start with
+//    the PREVIOUS day's bookings. A `tz` sent as a list is not text and counts as absent.
+$tzRaw    = is_string($_GET['tz'] ?? null) === true ? trim((string) $_GET['tz']) : '';
 if ($tzRaw === '') {
-    $tzRaw = 'Europe/London';
+    $tzRaw = Site::timezone();
 }
 
 if ($isValidLocalDateTime($startRaw) === false) {

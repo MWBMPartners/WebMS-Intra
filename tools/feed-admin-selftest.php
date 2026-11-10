@@ -6414,7 +6414,9 @@ function pw_run(): void
         //    tools/access-pages-selftest.php (part H) tests that rule on all
         //    six venue addresses; here it is one row.
         pa_q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'venues.enabled', '1', '0', 0)", 'i', [ORG_A]);
-        pa_q("INSERT INTO tblVenues (venueID, siteID, venueName, isActive) VALUES (919101, ?, 'W59 hall', 1)", 'i', [ORG_A]);
+        // 🕰️ The zone is named because tblVenues.timezone has no default since #782 (migration 273); London is
+        //    the value this row always got from the old default, so nothing this test sees changes.
+        pa_q("INSERT INTO tblVenues (venueID, siteID, venueName, timezone, isActive) VALUES (919101, ?, 'W59 hall', 'Europe/London', 1)", 'i', [ORG_A]);
         pa_q("INSERT INTO tblVenueUsageTypes (usageTypeID, siteID, venueID, typeName) VALUES (919111, ?, 919101, 'W59 use')", 'i', [ORG_A]);
         pa_q("INSERT INTO tblVenueStatuses (statusID, siteID, statusName) VALUES (919121, ?, 'W59 status')", 'i', [ORG_A]);
         foreach ([919131 => 'public', 919132 => 'internal', 919133 => 'draft'] as $booking59 => $kind59) {

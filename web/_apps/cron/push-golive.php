@@ -131,14 +131,21 @@ function claimPushGolive(\mysqli $db, int $siteId, string $refType, int $refId, 
     }
 }
 
-/** "Today" in the schedule's own timezone, matching Livestream::currentlyLive()'s own tz resolution. */
-function todayInTz(string $tz): string
+/**
+ * "Today" on the schedule slot's own clock, as `Livestream::zoneOf()` answers
+ * it — the SAME function currentlyLive() and nextScheduled() ask, so "today"
+ * here is the day those two meant (#782).
+ *
+ * WHAT WAS WRONG. This took the zone as text with `?? 'Europe/London'` in
+ * front of it (never reached: the column is NOT NULL) and, for a zone PHP
+ * could not open, fell back to `date()` — PHP's own zone, which a scheduled
+ * job does not reset per organisation (`Site::forceContext()` leaves it
+ * alone). So the day this job used to stop a second push could differ from
+ * the day currentlyLive() had just used, for the same slot.
+ */
+function todayOnClock(\DateTimeZone $zone): string
 {
-    try {
-        return (new \DateTimeImmutable('now', new \DateTimeZone($tz)))->format('Y-m-d');
-    } catch (\Throwable $e) {
-        return date('Y-m-d');
-    }
+    return (new \DateTimeImmutable('now', $zone))->format('Y-m-d');
 }
 
 // -----------------------------------------------------------------------------
@@ -178,7 +185,7 @@ foreach ($siteIds as $siteId) {
         $live = Livestream::currentlyLive($siteId);
         if ($live !== null) {
             $channelId = (int) $live['channelID'];
-            $dueDate   = todayInTz((string) ($live['timezone'] ?? 'Europe/London'));
+            $dueDate   = todayOnClock(Livestream::zoneOf($live, $siteId));
             if (pushGoliveAlreadySent($db, 'push-golive', $channelId, $dueDate) === false) {
                 $ttl = (int) (App::settingForSite('push.ttl.golive', $siteId) ?? '900');
                 $stats = WebPush::sendToChannel(
@@ -215,7 +222,7 @@ foreach ($siteIds as $siteId) {
                 $minutesUntil = (int) floor(($nextAt - time()) / 60);
                 if ($minutesUntil >= 0 && $minutesUntil <= 60) {
                     $channelId = (int) $next['channelID'];
-                    $dueDate   = todayInTz((string) ($next['timezone'] ?? 'Europe/London'));
+                    $dueDate   = todayOnClock(Livestream::zoneOf($next, $siteId));
                     if (pushGoliveAlreadySent($db, 'push-service-1h', $channelId, $dueDate) === false) {
                         $ttl = (int) (App::settingForSite('push.ttl.reminder', $siteId) ?? '3600');
                         $stats = WebPush::sendToChannel(

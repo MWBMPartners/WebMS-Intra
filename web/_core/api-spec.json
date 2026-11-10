@@ -11544,10 +11544,9 @@
             "name": "tz",
             "in": "query",
             "required": false,
-            "description": "The time zone `start` and `end` are readings in, as a zone name such as `Europe/London` or `America/New_York`. **Defaults to `Europe/London`, not to the organisation's own zone.**",
+            "description": "The time zone `start` and `end` are readings in, as a zone name such as `Pacific/Auckland` or `America/New_York`. **When left out or empty, the organisation's own time zone is used** (the one chosen at Admin, Organisations). Until #782 it defaulted to `Europe/London` for every organisation.",
             "schema": {
-              "type": "string",
-              "default": "Europe/London"
+              "type": "string"
             }
           },
           {

@@ -8,6 +8,7 @@
  *
  * @package   Portal\Core
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/273
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/782
  * -----------------------------------------------------------------------------
  */
 
@@ -17,6 +18,39 @@ namespace Portal\Core;
 
 class Livestream
 {
+    /**
+     * 🕰️ THE ONE ANSWER to "which clock is this schedule slot on?" (#782).
+     *
+     * A slot is a day of the week and two times on a clock
+     * (`tblLivestreamSchedule.timezone` says which clock). This answers that
+     * zone when PHP can open it, and the ORGANISATION's own zone when it
+     * cannot, through `Site::zoneFor()`, which is the portal's one rule for a
+     * stored zone. currentlyLive(), nextScheduled() and the "We're live" job
+     * (`cron/push-golive.php`) all ask this, so the three cannot disagree
+     * about what "today" is for a slot.
+     *
+     * WHAT WAS WRONG. There were THREE different fallbacks for one question,
+     * and none of them was the organisation's zone: `?? 'Europe/London'` in
+     * each reader (which could never fire, because the column is NOT NULL),
+     * then on a zone PHP could not open, PHP's own zone in currentlyLive()
+     * and UTC in nextScheduled(). The old schedule form ALSO accepted any
+     * text at all, so a typo such as "Austrlia/Sydney" was stored, and the
+     * "next: Saturday 11:00" countdown for that slot was then worked out in
+     * UTC — ten or eleven hours out for a church in Sydney — while currentlyLive()
+     * used a third clock.
+     *
+     * WHAT THIS CANNOT DO: tell a zone somebody chose from one the old form
+     * filled in for them. A slot saved before #782 holding "Europe/London"
+     * is read as London, because nothing can show it was not chosen.
+     *
+     * @param array<string, mixed> $slot   A schedule row (needs `timezone`).
+     * @param int                  $siteId The organisation the slot's channel belongs to.
+     */
+    public static function zoneOf(array $slot, int $siteId): \DateTimeZone
+    {
+        return Site::zoneFor((string) ($slot['timezone'] ?? ''), $siteId);
+    }
+
     /**
      * Is a channel currently scheduled to be live? Returns the channel row
      * (with embed-ready URL), or null. Site-scoped via tblLivestreamChannel.
@@ -40,12 +74,7 @@ class Livestream
                 return null;
             }
             while ($r = $rs->fetch_assoc()) {
-                $tz = (string) ($r['timezone'] ?? 'Europe/London');
-                try {
-                    $now = new \DateTimeImmutable('now', new \DateTimeZone($tz));
-                } catch (\Throwable $e) {
-                    $now = new \DateTimeImmutable('now');
-                }
+                $now = new \DateTimeImmutable('now', self::zoneOf($r, $siteId));
                 $today = (int) $now->format('w'); // 0=Sun
                 if ((int) $r['dayOfWeek'] !== $today) {
                     continue;
@@ -85,12 +114,7 @@ class Livestream
                 return null;
             }
             while ($r = $rs->fetch_assoc()) {
-                $tz = (string) ($r['timezone'] ?? 'Europe/London');
-                try {
-                    $tzObj = new \DateTimeZone($tz);
-                } catch (\Throwable $e) {
-                    $tzObj = new \DateTimeZone('UTC');
-                }
+                $tzObj = self::zoneOf($r, $siteId);
                 // Find next occurrence of dayOfWeek + startTime.
                 $today = (int) $after->setTimezone($tzObj)->format('w');
                 $target = (int) $r['dayOfWeek'];

@@ -3567,10 +3567,15 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'portal.i18n.minimum_coverage_for_switcher', '0', '0', 0)
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
+-- 🕰️ portal.sabbath.timezone ships EMPTY (#782): empty means each
+--    organisation's own time zone (Sabbath::zone(), through Site::zoneFor()).
+--    It used to ship as "Europe/London" for every installation. Migration 273
+--    changes only the default value of an existing row, never the value in
+--    force, because a London already stored may be somebody's choice.
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'portal.sabbath.enabled',              '0',              '0',              0),
     (NULL, 'portal.sabbath.method',               'fixed',          'fixed',          0),
-    (NULL, 'portal.sabbath.timezone',             'Europe/London',  'Europe/London',  0),
+    (NULL, 'portal.sabbath.timezone',             '',               '',               0),
     (NULL, 'portal.sabbath.location_lat',         '52.205',         '52.205',         0),
     (NULL, 'portal.sabbath.location_lng',         '0.119',          '0.119',          0),
     (NULL, 'portal.sabbath.start_offset_minutes', '0',              '0',              0),
@@ -4451,7 +4456,13 @@ CREATE TABLE IF NOT EXISTS `tblLivestreamSchedule` (
     `dayOfWeek`  TINYINT      NOT NULL COMMENT '0=Sun, 6=Sat',
     `startTime`  TIME         NOT NULL,
     `endTime`    TIME         NOT NULL,
-    `timezone`   VARCHAR(50)  NOT NULL DEFAULT 'Europe/London',
+    -- 🕰️ NO DEFAULT, on purpose (#782, migration 273). It used to default to
+    -- "Europe/London", the schedule form arrived with London typed in, and an
+    -- empty box became London too — so a slot for a church anywhere else was
+    -- read on London's clock unless somebody noticed, and a London stored that
+    -- way cannot be told from a London somebody chose. Now the database refuses
+    -- a writer that names no zone, as it does for tblEvents.timezone (#604).
+    `timezone`   VARCHAR(50)  NOT NULL COMMENT 'The clock dayOfWeek, startTime and endTime are read on: an IANA zone name such as Pacific/Auckland. No default, on purpose (#782): every writer names the zone, and the schedule form takes the zone of the organisation when none is given. Read only through Livestream::zoneOf().',
     `isActive`   TINYINT(1)   NOT NULL DEFAULT 1,
     PRIMARY KEY (`scheduleID`),
     KEY `idx_lss_channel_dow` (`channelID`, `dayOfWeek`),
@@ -8377,7 +8388,15 @@ CREATE TABLE IF NOT EXISTS `tblVenues` (
     `what3words`     VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
     `geocodedAt`     DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180)',
     `geocodeSource`  VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
-    `timezone`       VARCHAR(64)  NOT NULL DEFAULT 'Europe/London' COMMENT 'IANA timezone — booking dates/times are wall-clock LOCAL to the venue (§8.4); the same idea as tblEvents.timezone',
+    -- 🕰️ NO DEFAULT, on purpose (#782, migration 273): it used to default to
+    -- "Europe/London" for every customer. Venues::zoneToStore() names the zone
+    -- on every save — the organisation's own when the box is left empty — and
+    -- Venues::venueTimezone() reads it. The COMMENT below is word for word the
+    -- one migration 217 writes, DELIBERATELY: 217 re-writes this column (with
+    -- its old London default) whenever the comment differs from its own, and
+    -- the installer replays every migration, so a new comment here would make
+    -- 217 put the default back on every replay until 273 took it off again.
+    `timezone`       VARCHAR(64)  NOT NULL COMMENT 'IANA timezone — booking dates/times are wall-clock LOCAL to the venue (§8.4); the same idea as tblEvents.timezone',
     `caretakerName`  VARCHAR(150) DEFAULT NULL COMMENT 'On-site contact for access/keys, when different from the landlord org contact',
     `caretakerPhone` VARCHAR(50)  DEFAULT NULL,
     `notes`          TEXT         DEFAULT NULL COMMENT 'Access arrangements, parking, alarm codes go in a vault doc NOT here — free operational notes only',
@@ -11565,6 +11584,12 @@ UPDATE `tblRoles` r
 DELETE FROM `tblSettings` WHERE `settingKey` = 'attend.reports.visibleTo';
 
 INSERT INTO `tblMigrations` (`filename`) VALUES ('271_attendance_reports_permission.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 273_no_built_in_time_zone.sql (#782) ───────────────────────────────
+-- tblLivestreamSchedule.timezone and tblVenues.timezone are written above with
+-- no default, and portal.sabbath.timezone is seeded empty; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('273_no_built_in_time_zone.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

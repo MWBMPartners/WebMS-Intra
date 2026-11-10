@@ -139,7 +139,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-md-3">
                 <label class="form-label small" for="timezone">Timezone</label>
                 <input type="text" class="form-control form-control-sm" id="timezone" name="timezone" list="venueTzList" maxlength="64"
-                       value="<?php echo htmlspecialchars($editVenue !== null ? (string) $editVenue['timezone'] : 'Europe/London', ENT_QUOTES, 'UTF-8'); ?>">
+                       value="<?php
+                       // 🕰️ A new venue starts on THIS organisation's own zone (#782); it used to start on
+                       //    "Europe/London" for every customer. Left empty, the save uses the organisation's too.
+                       echo htmlspecialchars($editVenue !== null ? (string) $editVenue['timezone'] : Site::timezone($siteId), ENT_QUOTES, 'UTF-8'); ?>">
                 <datalist id="venueTzList">
                     <?php foreach ($allTimezones as $tz): ?>
                         <option value="<?php echo htmlspecialchars($tz, ENT_QUOTES, 'UTF-8'); ?>">

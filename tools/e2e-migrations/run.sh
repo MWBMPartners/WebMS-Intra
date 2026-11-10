@@ -863,12 +863,28 @@ compare_replay_with_install_script_alone() {
 #   KNOWN_P5_VALUE_DIFFERENCES, on purpose: a database built from main will
 #   then hold 12, the difference will not be seen, and the failure message
 #   says to delete the line. Delete it then, and not before.
+#   portal.sabbath.timezone is EMPTY on a fresh install and "Europe/London"
+#   on BOTH upgraded databases (#782, migration 273). Empty means "each
+#   organisation's own time zone"; the install script used to seed London
+#   for every customer. Migration 273 deliberately leaves the value IN FORCE
+#   alone, because the Sabbath settings page has always written it, so a
+#   London already there may be somebody's choice and nothing can show it is
+#   not — the same reasoning, and the same treatment, as the password length
+#   above. Whether an upgraded installation should be moved to empty is a
+#   decision for the owner, not a migration; there is no customer
+#   installation yet (the owner, 2 November 2026). The value before the arrow
+#   is empty, which is why the line has two spaces before it.
+#   ⚠ THE DAY THIS WORK REACHES main, phase 5 will FAIL on this line, on
+#   purpose, exactly as for the password length: delete it from the p5 list
+#   then, and not before.
 KNOWN_P5_VALUE_DIFFERENCES=(
     "auth.password.minLength | every organisation | 12 → 8"
+    "portal.sabbath.timezone | every organisation |  → Europe/London"
 )
 KNOWN_P5_LEFTOVER_SETTINGS=()
 KNOWN_P6_VALUE_DIFFERENCES=(
     "auth.password.minLength | every organisation | 12 → 8"
+    "portal.sabbath.timezone | every organisation |  → Europe/London"
 )
 #   The one setting found only on a database upgraded from March's install
 #   script (see the rule above for why it is named and not removed).

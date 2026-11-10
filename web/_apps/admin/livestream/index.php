@@ -123,9 +123,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dow       = (int) ($_POST['dayOfWeek'] ?? -1);
         $start     = (string) ($_POST['startTime'] ?? '');
         $end       = (string) ($_POST['endTime'] ?? '');
-        $tz        = trim((string) ($_POST['timezone'] ?? 'Europe/London'));
-        if ($tz === '') { $tz = 'Europe/London'; }
-        if ($channelId > 0 && $dow >= 0 && $dow <= 6 && $start !== '' && $end !== '') {
+        // 🕰️ THE SLOT'S CLOCK (#782). Left empty, it is the ORGANISATION's own zone
+        //    (Site::timezone(), the one answer to that question, #604); anything else must be a
+        //    zone name PHP's main list knows (Site::isZoneName(), the same test the event form
+        //    and the organisation form use), or the slot is refused and nothing is stored.
+        //    WHAT WAS WRONG: an empty box became "Europe/London", the form arrived with
+        //    "Europe/London" already typed in, and ANY text was accepted — so a church in Sydney
+        //    that pressed Add without noticing the box had its Saturday 10:00 worked out on
+        //    London's clock, and a typo was stored and later read as UTC. A refusal is said out
+        //    loud rather than quietly replaced, because a zone nobody chose is how a stream comes
+        //    to be announced ten hours early. A posted LIST is not text and counts as empty.
+        $tz = is_string($_POST['timezone'] ?? null) === true ? trim((string) $_POST['timezone']) : '';
+        if ($tz === '') {
+            $tz = Site::timezone();
+        }
+        if (Site::isZoneName($tz) === false) {
+            $_SESSION['flash_msg']  = 'That time zone is not one this portal knows, so the slot was not added. '
+                . 'Choose one from the list, or leave the box empty to use this organisation\'s own time zone.';
+            $_SESSION['flash_type'] = 'danger';
+        } elseif ($channelId > 0 && $dow >= 0 && $dow <= 6 && $start !== '' && $end !== '') {
             // Verify channel belongs to current site before touching schedules.
             $check = $db->prepare('SELECT 1 FROM tblLivestreamChannel WHERE channelID = ? AND siteID = ?');
             $ok = false;
@@ -338,6 +354,9 @@ if (count($channels) > 0) {
 
 $dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 $csrf     = Auth::csrfToken();
+// 🕰️ The organisation's own zone (#782): what a new slot's box starts on, and the clock a slot
+//    with an unreadable zone is read on. Asked once, from the one place that answers it (#604).
+$orgZone  = Site::timezone($siteId);
 
 // 🔔 "We're live now" push (#322) — only offered when Web Push is
 // configured AND a channel is currently in its scheduled window.
@@ -453,7 +472,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                 –
                                 <?php echo htmlspecialchars(substr((string) $s['endTime'], 0, 5), ENT_QUOTES, 'UTF-8'); ?>
                             </div>
-                            <div class="col-md-3 small text-muted"><?php echo htmlspecialchars((string) $s['timezone'], ENT_QUOTES, 'UTF-8'); ?></div>
+                            <div class="col-md-3 small text-muted">
+                                <?php echo htmlspecialchars((string) $s['timezone'], ENT_QUOTES, 'UTF-8'); ?>
+                                <?php if (Site::phpCanOpenZone((string) $s['timezone']) === false): ?>
+                                    <?php // ⚠️ Said, not hidden (#782): such a slot is read on the organisation's
+                                          //    clock (Livestream::zoneOf()), which may not be what was meant. ?>
+                                    <br><span class="text-warning">Not a time zone this portal knows, so it is read as <?php echo htmlspecialchars($orgZone, ENT_QUOTES, 'UTF-8'); ?>. Delete it and add it again to choose.</span>
+                                <?php endif; ?>
+                            </div>
                             <div class="col-md-2">
                                 <?php if ((int) $s['isActive'] === 1): ?>
                                     <span class="badge bg-success">Active</span>
@@ -506,8 +532,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <input type="time" class="form-control form-control-sm" name="endTime" value="12:00" required>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label small">Timezone</label>
-                    <input type="text" class="form-control form-control-sm" name="timezone" value="Europe/London" maxlength="50" required>
+                    <?php // 🕰️ Starts on THIS organisation's own zone (#782); it used to start on
+                          //    "Europe/London" for every customer. Empty also means the organisation's. ?>
+                    <label class="form-label small" for="ls-tz-<?php echo (int) $c['channelID']; ?>">Time zone</label>
+                    <input type="text" class="form-control form-control-sm" id="ls-tz-<?php echo (int) $c['channelID']; ?>" name="timezone"
+                           list="ls-zone-names" maxlength="50"
+                           value="<?php echo htmlspecialchars($orgZone, ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="col-md-2">
                     <button class="btn btn-outline-primary btn-sm w-100" type="submit"><i class="fa-solid fa-plus me-1"></i>Add</button>
@@ -516,6 +546,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 <?php endforeach; endif; ?>
+
+<?php // 🕰️ One list of zone names for every slot form above (#782), the same list Site::isZoneName() tests. ?>
+<datalist id="ls-zone-names">
+    <?php foreach (Site::zoneNames() as $zoneName): ?>
+        <option value="<?php echo htmlspecialchars($zoneName, ENT_QUOTES, 'UTF-8'); ?>">
+    <?php endforeach; ?>
+</datalist>
 
 <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // 🛑 Switch the "We're live" button off the moment its form is sent (#612). A double-click sent the form
