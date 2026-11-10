@@ -4,6 +4,29 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### No new way of signing in can skip what #900 fixed; the passkey sign-in tested for real (#902)
+
+- **A new hard gate, `tools/audit-checks/check_sign_in_begins_session.py`,** reads every PHP file under `web/`
+  with PHP's own tokeniser and fails when a write of `$_SESSION['user_id']` or `$_SESSION['2fa_user_id']` has
+  no call to `Auth::beginSessionFor()` before it in the same function, and fails both ways on the list of ten
+  grants and six call sites. It checks that the call is there and comes first, not that it runs; the HTTP
+  tests drive that. It runs in `pr-security.yml` with its own self-test.
+- **The passkey sign-in is now tested for real.** `tools/two-step-selftest.php` makes a real P-256 key,
+  registers it as the portal stores a passkey and signs the portal's own challenge; a tampered signature is
+  refused. Before, putting the passkey path back to a bare `session_regenerate_id()` left the test green.
+  **A kiosk browser** is tested too: a real sign-in on a browser holding the asset kiosk's hand-over starts
+  clean.
+- **Fixed: the invitation page's message after a failed sign-in.** When signing the new person in failed
+  after their account had been made — reachable on a database failure, because outside multi-site session
+  mode `Auth::initSessionSite()` runs queries that throw under the portal's strict database reporting — the
+  page said "That username or email is already in use." for an invitation that was now spent, with the person
+  half signed in. It now takes the half-made sign-in back, records `INVITE_SIGNIN_FAIL`, and says the account
+  was created and to sign in.
+- **Tests:** part K of `tools/two-step-selftest.php` and the check's own self-test (both totals pinned in
+  their files). Three check rounds by fresh Claude agents (protected arm: sign-in); every finding in rounds 2
+  and 3 was in the static check, so review closed at the three-round cap (D-064), with the four small holes
+  round 3 found recorded on #904. Raised from it: #903, #904. Codex has not reviewed it.
+
 ### The public door, part two: the script a website pastes in, and the old countdown widget removed (#493 P4b, migration 264)
 
 - **Added: a one-line script an organisation pastes into its own website** (D-056). Once its door is on,

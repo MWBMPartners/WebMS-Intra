@@ -754,7 +754,12 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `session_regenerate_id(true)` (since #900 every one goes through
     `Auth::beginSessionFor()`, which calls it and also decides what of
     the session survives -- a DIFFERENT person starts with only the
-    browser's chosen language; the two-step code step now rotates too),
+    browser's chosen language; the two-step code step now rotates too;
+    `tools/audit-checks/check_sign_in_begins_session.py` (#902) fails
+    when a grant has no `Auth::beginSessionFor()` before it in the same
+    function -- presence and order only; part K of
+    `two-step-selftest.php` drives all six sign-ins, the passkey
+    included),
     so the id somebody is signed in UNDER
     was always one PHP minted. **THEREFORE THIS SETTING DOES NOT MAKE
     THOSE ROTATIONS REDUNDANT:** strict mode refuses an unknown id, it

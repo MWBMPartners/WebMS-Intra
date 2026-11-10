@@ -21913,10 +21913,25 @@ the rule is decided by WHO signs in rather than by refusing.
 their two-step code is kept when they finish the code, because both steps are the same person. It needs a
 second person to use the browser in that window.
 
-Tests: part K of `tools/two-step-selftest.php`; the passkey path and a kiosk browser are driven by nothing,
-recorded on #902 along with a static guard against a seventh sign-in path skipping the method.
-`check_session_id_not_stored.py` allows three whole-session uses in `Auth.php` (was one) — the one-line
-rewrite is two of them, and there is no slack: a fourth fails.
+Tests: part K of `tools/two-step-selftest.php` (count from the file). Since #902 it drives the PASSKEY
+sign-in with no stub — PHP's openssl makes a P-256 key pair as an authenticator does, the public half is stored
+as a COSE key, and the portal's own challenge is signed; K25 sends a tampered signature and requires a refusal,
+which is what proves the other passkey checks are genuine. It drives a KIOSK browser with the kiosk member
+signing in THEMSELVES — with two different people, "a kiosk counts as nobody" and "a kiosk counts as its member"
+both start clean, so the check could not fail. And K33 makes `initSessionSite()` throw AFTER `user_id` is
+written, the realistic failure on the invitation page; its first version threw in `beginSessionFor()`, before
+`user_id` existed, so deleting the page's `unset()` left it green. `check_session_id_not_stored.py` allows three
+whole-session uses in `Auth.php` (was one) — the one-line rewrite is two of them, and there is no slack.
+
+**The static guard, and why it is only half a guard (#902, D-065).** `check_sign_in_begins_session.py` (probe
+`sign-in-session-structure.php`) checks PRESENCE AND ORDER only. Its first version also judged whether the call
+was a statement of its own, whether its block enclosed the write, and whether it named the same value; each of
+those is really "does it RUN, for this person", each cried wolf on correct code (a named argument, a cast, a
+`do { } while (false)`, a label, a chained `= null` sign-out), and each could still be walked past by a spelling
+nobody had listed. So they were dropped and the HTTP tests carry that question — the same end #763 and #775
+reached after many more rounds. The header splits what it cannot see into MEASURED blind spots (each a self-test
+case that must stay green, so the day it starts seeing one it says so) and DECLARED, NOT MEASURED; round 3's four
+remaining holes are on #904.
 
 ### The public door's script (#493, package P4b)
 

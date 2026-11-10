@@ -1119,6 +1119,17 @@ jobs:
         if: always()
         run: python3 tools/audit-checks/check_2fa_gate_order.py
 
+      # #900/#902. Every grant of a signed-in identity has Auth::beginSessionFor()
+      # before it in the same function. Presence and order only; part K of
+      # tools/two-step-selftest.php drives whether each one runs. Reads PHP with
+      # PHP's own tokeniser and REFUSES when there is no php.
+      - name: 'Every sign-in begins its session through Auth::beginSessionFor() (hard gate, #902)'
+        id: sign_in_begins_session
+        if: always()
+        run: |
+          python3 tools/audit-checks/check_sign_in_begins_session.py
+          python3 tools/audit-checks/check_sign_in_begins_session.py --self-test
+
       # A page that writes more than once must hand back the replacement
       # anti-forgery token, because accepting one replaces it (#634).
       - name: 'A page that writes twice hands back the replacement form token (hard gate, #646)'
