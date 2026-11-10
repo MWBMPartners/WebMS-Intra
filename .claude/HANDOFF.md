@@ -13,7 +13,7 @@ pushed and closed: #887, #493 (P4a-P4d, the whole public door), #869-#871, #900,
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 1's findings fixed (the race closed with `tblUsers.signInVersion` read in the same SELECT as the password; D-108 built); round 2 check running |
+| #598 — ten sign-in findings (D-104, D-105, D-108; migration 270) | `agent-a9c6fba3004212d62` / `p598-build`, 48576c19 (rebased on a4ecb524) | Round 2 NOT CLEAN: race closed (0 survivors), but a session with a number HIGHER than the account's survives (restore / rolled-back change) — fixing with `!==` and writing the number after commit; test gaps Q3, Q4 |
 | #529 — attendance totals gate (D-106, D-109; migration 271) | `agent-aa17c8a36222084b5` / `p529-build`, a3f4d93e (rebased on bfa3525d) | Round 1 fixes and D-109 built; round 2 check running. Raised #921 |
 | #703 — keep the worker's name on pastoral/safeguarding records (D-016; code contradicts it; migration 272 if needed) | `agent-afd8a19e73dcfa23c` / `p703-build` | Being built |
 
