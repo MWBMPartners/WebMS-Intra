@@ -91,9 +91,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // What each instruction will do, in words. The page used to print the
 // instruction's own name followed by a "d", which reads well for "delete" and
 // gave "anonymised" and "retaind" for the other two.
+// #703 round 7: "kept, with your details removed" was untrue of an expense claim,
+// which is "anonymised" and still keeps the claimant's account number on purpose
+// (D-113). What is removed differs by record, so the reason beside it says which.
 $inWords = [
     'delete'    => 'deleted',
-    'anonymise' => 'kept, with your details removed',
+    'anonymise' => 'kept, with some details about you removed',
     'retain'    => 'kept',
 ];
 
@@ -108,8 +111,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
 <h1 class="mb-3"><i class="fa-solid fa-trash me-2"></i>Request data erasure</h1>
 
+<?php // 🗣️ #703 round 7: this said "Records below will be deleted or anonymised", above rows marked
+      //    "kept" that keep your name and account number on purpose (the worker records, D-016,
+      //    D-110, D-111; gifts kept for tax) and an expense claim that keeps your number (D-113). ?>
 <div class="alert alert-warning">
-    <strong>This action cannot be undone.</strong> Records below will be deleted or anonymised within one month (UK GDPR SLA).
+    <strong>Once it is carried out, this cannot be undone.</strong> The request is carried out within one month,
+    as data protection law requires. Each kind of record below is then deleted, or kept with some details
+    about you removed, or kept as it is. <strong>Some kept records keep your name or your account number on
+    purpose</strong>, and the reason beside each one says which and why.
 </div>
 
 <div class="card mb-3"><div class="card-body">

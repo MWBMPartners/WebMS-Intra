@@ -929,13 +929,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>If the case is about somebody else</strong>, the notes stay exactly as they are
             &mdash; even on a visit the erased person made themselves, and even on a case they opened.
             Those notes are the other person's record, and that person has not asked for anything.
-            Only the erased person's own name comes off the visit.
+            The erased person's name and account number stay on a visit they made, as the person who
+            made it (see <em>What an erasure keeps</em>, above).
         </li>
     </ul>
     <p>
-        The same goes for the case itself: it is kept, and the name of whoever it is about, or who
-        opened it, is removed.
+        The case itself is kept. If it is about the person being erased, their name and what the case
+        says about them are emptied. If they opened it, their name and account number stay on it as the
+        person who opened it.
     </p>
+    <?php // 🗣️ #703 round 7: this said "Only the erased person's own name comes off the visit" and
+          //    that the name of whoever "opened it, is removed". Both untrue since the owner's
+          //    decisions D-016 (who made a visit is kept, by name) and D-110 (who opened a case is
+          //    kept): GdprEraser's tblCareVisit.visitedByID and tblCareCase.openedByID are `retain`. ?>
 
     <h3 class="h6 mt-3">If an erasure stops part way</h3>
     <p>

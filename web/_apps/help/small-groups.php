@@ -148,10 +148,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p>
         Your group memberships, meeting attendance, and any group you created appear in your
         <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">data export</a>. If your account is erased, your membership rows are removed,
-        your attendance/authorship rows are anonymised (the group's own history is retained, but your name is
-        detached from it), and any group leadership you held is ended as part of
+        including any group you led. The record that you attended a meeting, and the groups, meetings and
+        registers you created or kept, stay for the group's own history with your account number taken off
+        them. A meeting's topic and notes are kept as they were written, so they can still mention you, and
+        the change history and the activity log can still hold your account number (the
+        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('privacy/policy'), ENT_QUOTES, 'UTF-8'); ?>">privacy notice</a>
+        says how each is cleared). Separately, when somebody leaves a role here, any group leadership they
+        held is ended as part of
         <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">offboarding</a>.
     </p>
+    <?php // 🗣️ #703 round 7: this said attendance and authorship rows are "anonymised (... your name is
+          //    detached from it)". Checked against GdprEraser::catalogue(): those rows only ever held an
+          //    account number, which is nulled; but a meeting's `topic` and `notes` are free text kept as
+          //    written, and the change history and activity log are not reached, so "anonymised" claimed
+          //    more than is done. Membership rows (which carry the leader role) are deleted by the
+          //    erasure itself; offboarding ending them is a separate, earlier step. ?>
 </section>
 
 <?php

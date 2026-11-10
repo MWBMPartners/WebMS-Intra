@@ -93,14 +93,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <?php // 🗣️ #703 round 6: this printed `privacy.dataRetentionDays` as the logs' period, which is a
           //    different setting from the one the clear-out uses (`audit.retentionDays` /
           //    `errors.retentionDays`), and it ended "any logs that referenced you are detached",
-          //    which is untrue: what a log record says is kept as written. ?>
+          //    which is untrue: what a log record says is kept as written. Round 7: "your name is
+          //    removed" was untrue too - worker records (D-016, D-110, D-111) and gifts kept for tax
+          //    keep the name. ?>
     Activity logs and error logs are deleted by a nightly clear-out after the
-    number of days this organisation sets (a year unless changed;
+    number of days set for this organisation (a year unless changed;
     <code>audit.retentionDays</code> / <code>errors.retentionDays</code>), if
     that scheduled job has been set up. Account records remain while your
-    account is active. When your account is erased your name is removed, but
-    your account number stays on some records, and what a log record says is
-    kept as it was written &mdash; see the privacy notice for what stays.
+    account is active. When your account is erased it is emptied, but some
+    records keep your account number on purpose, and some keep your name as
+    well (records you made as a worker or volunteer, and gifts kept for tax);
+    what a log record says is also kept as it was written &mdash; see the
+    privacy notice for what stays.
 </p>
 
 <h2 class="h4 mt-4">Your rights</h2>

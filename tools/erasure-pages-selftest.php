@@ -181,7 +181,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 88; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 89; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -193,6 +193,9 @@ const EXPECTED_CHECKS = 88; // 80 until #703 (D-016) added two: the two writers
                             // Round 6 added one: the help page's list, pinned as
                             // rendered (My data and the privacy notice became
                             // rendered pins in place). 88.
+                            // Round 7 added one: the pin file holds exactly the
+                            // pins compared, each once (the JSON's schema was run
+                            // by nothing). 89.
 
 function refuse(string $why): never
 {
@@ -550,61 +553,164 @@ function token(string $html): string
 }
 
 /**
- * 🧾 #703 round 6: a part of a page AS THE BROWSER RECEIVES IT, for the pins on
- * what an erased person is told (D-113). Reading the source missed what PHP
- * prints into a span (an echoed reassurance passed), what an attribute hides
- * (`hidden`, `d-none`) and anything just outside the cut; so each pin is the
- * rendered HTML of an element - attributes included, runs of spaces made one -
+ * 🧾 #703 rounds 6-7: a part of a page AS THE BROWSER RECEIVES IT, for the pins
+ * on what an erased person is told (D-113). Reading the source missed what PHP
+ * prints into a region and anything just outside the cut, so each region is
  * taken from the PARSED document (`Dom\HTMLDocument`), never a search of the
- * markup. `$pick` returns the nodes that make up the region (a whole list, or a
- * heading with every sibling up to the next heading). Answers the HTML, and
- * whether any node or ancestor is hidden by a `hidden` attribute, a `d-none`
- * class or an inline `display:none`. An empty HTML means the region was not
- * found, which fails the pin.
+ * markup.
  *
- * @return array{html: string, hidden: string}
+ * WHAT IS COMPARED, exactly (runs of white space made one, nothing else
+ * changed): the region's own markup - each of its nodes' rendered HTML,
+ * attributes included - AND the tag and attributes of every ANCESTOR of the
+ * region up to and including `<body>`. Pinning the ancestor chain is what
+ * catches a wrapper that hides the region, whatever the method (`hidden`,
+ * `d-none`, `d-md-none`, `invisible`, `collapse`, `visually-hidden`, an inline
+ * `display`, `visibility` or `opacity` style, `<noscript>`, `<template>`),
+ * without a list of hiding methods to keep complete. (Round 6 checked three
+ * such methods by name; a list like that reads as complete and is not, so it
+ * was removed.)
+ *
+ * ONE EXCEPTION: `<body data-print-date>` holds today's date, so its value is
+ * written as "(today)" when it is shaped like a date; see below.
+ *
+ * WHAT STAYS OUTSIDE, said plainly: a `<style>` rule or a script ELSEWHERE on
+ * the page that hides or rewrites the region. Whether text is visible is a
+ * question only a real browser can answer, and none runs here.
+ *
+ * EXACTLY ONE: `$pick` must answer the region's nodes only when there is
+ * exactly ONE such region on the page, and [] otherwise. Taking the FIRST match
+ * let a correct copy placed higher up pass while the real one was changed - a
+ * lesson this repository has paid for twice (#485, #763). An empty answer
+ * fails the pin.
+ *
+ * @param callable(\Dom\HTMLDocument): list<\Dom\Element> $pick
  */
-function renderedRegion(string $html, callable $pick): array
+function renderedRegion(string $html, callable $pick): string
 {
     $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
     $nodes = $pick($doc);
-    $out   = '';
-    $hidden = '';
-    foreach ($nodes as $node) {
-        $out .= $doc->saveHtml($node);
-        for ($at = $node; $at instanceof \Dom\Element; $at = $at->parentElement) {
-            $style = strtolower(str_replace(' ', '', (string) $at->getAttribute('style')));
-            if ($at->hasAttribute('hidden') === true || $at->classList->contains('d-none') === true
-                || str_contains($style, 'display:none') === true) {
-                $hidden = $at->tagName . ' ' . (string) $at->getAttribute('class');
-            }
+    if ($nodes === []) {
+        return '';
+    }
+    $chain = [];
+    for ($at = $nodes[0]->parentElement; $at !== null; $at = $at->parentElement) {
+        $attrs = '';
+        foreach ($at->attributes as $attr) {
+            // The ONE value that is allowed to differ: `<body data-print-date>`
+            // is today's date (for a printed page's footer), so pinned as it
+            // is it would fail every day after the pin was taken. Only that
+            // attribute, and only a value shaped like a date; anything else in
+            // it, and every other attribute, is compared exactly.
+            $value  = ($attr->name === 'data-print-date' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $attr->value) === 1) ? '(today)' : $attr->value;
+            $attrs .= ' ' . $attr->name . '="' . $value . '"';
+        }
+        $chain[] = '<' . strtolower($at->tagName) . $attrs . '>';
+        if (strtolower($at->tagName) === 'body') {
+            break;
         }
     }
+    $out = 'ANCESTORS: ' . implode(' ', array_reverse($chain)) . ' REGION: ';
+    foreach ($nodes as $node) {
+        $out .= $doc->saveHtml($node);
+    }
 
-    return ['html' => trim((string) preg_replace('/\s+/', ' ', $out)), 'hidden' => $hidden];
+    return trim((string) preg_replace('/\s+/', ' ', $out));
+}
+
+/** Where the pins are kept: a plain-text sidecar beside this file. */
+const RENDERED_PINS = __DIR__ . '/erasure-pages-selftest.rendered-pins.txt';
+
+/**
+ * The pins, read from the sidecar: lines starting with `#` are notes, a line
+ * `== <name>` starts a pin, and the next line is its value. Answers the pins,
+ * and every problem with the FILE itself (a name given twice, a line that is
+ * none of those) - checked once at the end by `pinFileProblems()`, together
+ * with any pin the file holds that no check compared.
+ *
+ * #703 round 7: the pins used to be JSON with a schema beside it, and nothing
+ * ran the schema - an extra key it forbade passed 88 of 88. The repository's
+ * own schema validator is Python and this test is PHP, and all the schema
+ * asked was "exactly these names, each once", which `pinFileProblems()` checks
+ * directly; so the pins became a plain-text sidecar, as
+ * tools/audit-checks/member-language.pinned.txt is, and the schema was deleted.
+ *
+ * @return array{pins: array<string, string>, problems: list<string>}
+ */
+function readRenderedPins(): array
+{
+    static $read = null;
+    if ($read !== null) {
+        return $read;
+    }
+    $pins     = [];
+    $problems = [];
+    $name     = null;
+    $lines    = preg_split('/\R/', (string) @file_get_contents(RENDERED_PINS)) ?: [];
+    foreach ($lines as $number => $line) {
+        if ($name !== null) {
+            if (isset($pins[$name]) === true) {
+                $problems[] = 'the pin "' . $name . '" is given twice';
+            }
+            $pins[$name] = $line;
+            $name        = null;
+        } elseif (str_starts_with($line, '== ') === true) {
+            $name = substr($line, 3);
+        } elseif ($line !== '' && str_starts_with($line, '#') === false) {
+            $problems[] = 'line ' . ($number + 1) . ' is neither a note, a pin\'s name nor its value';
+        }
+    }
+    if ($name !== null) {
+        $problems[] = 'the pin "' . $name . '" has no value';
+    }
+
+    return $read = ['pins' => $pins, 'problems' => $problems];
+}
+
+/** @var array<string, string> What each rendered pin received on this run. */
+$renderedSeen = [];
+
+/**
+ * Compares one region with its pin. Changing what one of these says means
+ * changing its pin, on purpose. To see what a run rendered, set
+ * SELFTEST_WRITE_RENDERED_PINS to a file path: the run writes what it saw
+ * there in the sidecar's own form (and still fails if it differs), so a
+ * re-pin is a deliberate act of copying that file over the sidecar.
+ */
+function renderedPin(string $key, string $region): bool
+{
+    global $renderedSeen;
+    $renderedSeen[$key] = $region;
+    $dump = getenv('SELFTEST_WRITE_RENDERED_PINS');
+    if (is_string($dump) && $dump !== '') {
+        $out = "# Rendered pins for tools/erasure-pages-selftest.php (#703). See that file's renderedRegion().\n";
+        foreach ($renderedSeen as $name => $value) {
+            $out .= "\n== " . $name . "\n" . $value . "\n";
+        }
+        file_put_contents($dump, $out);
+    }
+
+    return $region !== '' && $region === (readRenderedPins()['pins'][$key] ?? null);
 }
 
 /**
- * The pinned rendered HTML of each region, kept beside this file in
- * `erasure-pages-selftest.rendered-pins.json`. Changing what one of these says
- * means changing its pin, on purpose. To see what a run rendered, set
- * SELFTEST_WRITE_RENDERED_PINS to a file path: the run writes what it saw
- * there (and still fails if it differs), so a re-pin is a deliberate act.
+ * Everything wrong with the sidecar as a whole: a problem reading it, and any
+ * pin it holds that no check compared on this run (an extra pin is a pin
+ * guarding nothing, which reads as cover). Asked once, after the last pin.
+ *
+ * @return list<string>
  */
-function renderedPin(string $key, array $region): bool
+function pinFileProblems(): array
 {
-    static $pins = null;
-    static $seen = [];
-    if ($pins === null) {
-        $pins = json_decode((string) @file_get_contents(__DIR__ . '/erasure-pages-selftest.rendered-pins.json'), true) ?: [];
-    }
-    $seen[$key] = $region['html'];
-    $dump = getenv('SELFTEST_WRITE_RENDERED_PINS');
-    if (is_string($dump) && $dump !== '') {
-        file_put_contents($dump, json_encode($seen, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    global $renderedSeen;
+    $read     = readRenderedPins();
+    $problems = $read['problems'];
+    foreach (array_keys($read['pins']) as $name) {
+        if (array_key_exists($name, $renderedSeen) === false) {
+            $problems[] = 'the pin "' . $name . '" is compared by no check';
+        }
     }
 
-    return $region['html'] !== '' && $region['hidden'] === '' && $region['html'] === ($pins[$key] ?? null);
+    return $problems;
 }
 
 /** A page's text, with the tags taken out and the spaces tidied. */
@@ -1052,7 +1158,7 @@ ok('the DBS page records who recorded a check by NAME as well as number, read fr
 //    a row hidden by an attribute, left it green. The row is the element My data
 //    draws for one kind of record (`.row` holding the table's name in <code>).
 $myDataHtml = (string) req($jar['mel'], 'GET', '/account/my-data')['body'];
-$myDataRow  = static fn (string $table): array => renderedRegion($myDataHtml, static function (\Dom\HTMLDocument $doc) use ($table): array {
+$myDataRow  = static fn (string $table): string => renderedRegion($myDataHtml, static function (\Dom\HTMLDocument $doc) use ($table): array {
     $rows = [];
     foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
         $code = $row->querySelector('code');
@@ -1067,10 +1173,10 @@ $myDataWrong = [];
 foreach (['tblUsers', 'tblCareVisit', 'tblCareCase', 'tblKidCheckins', 'tblDbsChecks'] as $table) {
     $region = $myDataRow($table);
     if (renderedPin('my-data ' . $table, $region) === false) {
-        $myDataWrong[] = $table . ($region['html'] === '' ? ' (no single row)' : ($region['hidden'] !== '' ? ' (hidden by ' . $region['hidden'] . ')' : ': ' . mb_substr($region['html'], 0, 160)));
+        $myDataWrong[] = $table . ($region === '' ? ' (not exactly one such row)' : ': ' . mb_substr($region, 0, 300));
     }
 }
-ok('MY DATA shows a worker, before they ask to be erased, exactly the pinned rows for their account and the visits, case, check-in and DBS check they made - each saying their name and number stay and can be matched back to them - and none of them hidden (#703, D-113)',
+ok('MY DATA shows a worker, before they ask to be erased, exactly the pinned rows for their account and the visits, case, check-in and DBS check they made - each saying their name and number stay and can be matched back to them - each row found exactly once, its markup and every wrapper around it as pinned (#703, D-113)',
     $myDataWrong === [], implode(' | ', $myDataWrong));
 
 $was = $pages();
@@ -1176,43 +1282,92 @@ ok('the booking is still in the administrator\'s approvals queue, waiting for a 
     && str_contains($now['bookings'], 'Purpose:') === false, mb_substr($now['bookings'], 0, 500));
 // 🗣️ D-113: the page every member can open says what keeping the number costs.
 //    #703 round 6: pinned AS RENDERED - the whole "Retention policy" section,
-//    from its heading to the next heading, so a sentence PHP prints, an
-//    attribute that hides one, and a paragraph added after the list are all
-//    inside the pin.
+//    from its heading to the next heading, so a sentence PHP prints and a
+//    paragraph added after the list are inside the pin.
+//    #703 round 7: the heading must appear EXACTLY ONCE, and the section is
+//    drawn in EVERY branch the page has. Its giving sentence has two (the
+//    organisation has confirmed how many years, or not), each with a "for this
+//    organisation, every gift" choice inside, and the confirmed one says "year"
+//    or "years"; round 6 drew only the unconfirmed one, so a reassurance added
+//    to the confirmed branch was pinned by nothing.
 $sectionAfter = static fn (string $heading): \Closure => static function (\Dom\HTMLDocument $doc) use ($heading): array {
-    foreach ($doc->querySelectorAll('h2, h3') as $h) {
+    $found = [];
+    foreach ($doc->querySelectorAll('h1, h2, h3, h4, h5, h6') as $h) {
         if (trim((string) $h->textContent) === $heading) {
-            $nodes = [$h];
-            for ($n = $h->nextElementSibling; $n !== null && in_array($n->tagName, ['H2', 'H3'], true) === false; $n = $n->nextElementSibling) {
-                $nodes[] = $n;
-            }
-
-            return $nodes;
+            $found[] = $h;
         }
     }
+    if (count($found) !== 1) {
+        return [];
+    }
+    $nodes = [$found[0]];
+    for ($n = $found[0]->nextElementSibling; $n !== null && preg_match('/^H[1-6]$/', $n->tagName) !== 1; $n = $n->nextElementSibling) {
+        $nodes[] = $n;
+    }
 
-    return [];
+    return $nodes;
 };
-$privacyRegion = renderedRegion((string) req($jar['cal'], 'GET', '/privacy/policy')['body'], $sectionAfter('Retention policy'));
-ok('the PRIVACY page\'s "Retention policy" section is exactly the pinned text as a member receives it - what is kept on purpose, what the worker records keep, what is kept for security and history and how each is cleared - with nothing hidden and nothing added (#703, D-113)',
-    renderedPin('privacy retention', $privacyRegion),
-    $privacyRegion['hidden'] !== '' ? 'hidden by ' . $privacyRegion['hidden'] : mb_substr($privacyRegion['html'], 0, 600));
+$givingRowsNow = static fn (): array => q("SELECT settingKey, settingValue, defaultValue FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%' ORDER BY settingKey", 'i', [ORG_A]);
+$givingBefore  = $givingRowsNow();
+$privacyStates = [
+    'privacy retention, not confirmed'                   => [],
+    'privacy retention, not confirmed, every gift'       => ['giving.retention.confirmed' => 'false', 'giving.retention.scope' => 'all'],
+    'privacy retention, confirmed, 7 years'              => ['giving.retention.confirmed' => 'true', 'giving.retention.years' => '7'],
+    'privacy retention, confirmed, every gift, 1 year'   => ['giving.retention.confirmed' => 'true', 'giving.retention.years' => '1', 'giving.retention.scope' => 'all'],
+];
+$privacyWrong = [];
+$privacySeen  = [];
+try {
+    foreach ($privacyStates as $key => $values) {
+        q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%'", 'i', [ORG_A]);
+        foreach ($values as $setting => $value) {
+            siteSetting(ORG_A, $setting, $value);
+        }
+        $region            = renderedRegion((string) req($jar['cal'], 'GET', '/privacy/policy')['body'], $sectionAfter('Retention policy'));
+        $privacySeen[$key] = $region;
+        if (renderedPin($key, $region) === false) {
+            $privacyWrong[] = $key . ($region === '' ? ' (not exactly one such section)' : ': ' . mb_substr($region, 0, 400));
+        }
+    }
+} finally {
+    // Put the organisation's giving settings back EXACTLY: a later section
+    // counts them.
+    q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%'", 'i', [ORG_A]);
+    foreach ($givingBefore as $row) {
+        q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss',
+            [ORG_A, $row['settingKey'], $row['settingValue'], $row['defaultValue']]);
+    }
+}
+// The premise, first: four DIFFERENT sections, or the states were not drawn
+// and every pin would be the same text pinned four times.
+if (count(array_unique($privacySeen)) !== 4) {
+    $privacyWrong[] = 'the four giving states drew ' . count(array_unique($privacySeen)) . ' different section(s), not four';
+}
+if ($givingRowsNow() !== $givingBefore) {
+    $privacyWrong[] = 'the organisation\'s giving settings were not put back as they were';
+}
+ok('the PRIVACY page\'s "Retention policy" section, drawn in all four states of its giving sentence, is each time exactly the pinned markup a member receives, found once, inside exactly the pinned wrappers - what is kept on purpose, what the worker records keep, what is kept for security and history and how each is cleared (#703, D-113)',
+    $privacyWrong === [], implode(' | ', $privacyWrong));
 // 🗣️ The administrators' help: the whole list "What an erasure keeps, and what
 //    it does not reach", rendered, so the D-112 qualifier and every other item
-//    are inside the pin (a new item is too).
+//    are inside the pin (a new item is too). EXACTLY ONE item may carry its
+//    marker sentence (#703 round 7).
 $helpRegion = renderedRegion((string) req($jar['adm'], 'GET', '/help/admin')['body'], static function (\Dom\HTMLDocument $doc): array {
+    $found = [];
     foreach ($doc->querySelectorAll('li') as $li) {
         if (str_contains((string) $li->textContent, 'Who made a pastoral visit, opened a care case') === true
             && $li->parentElement !== null) {
-            return [$li->parentElement];
+            $found[] = $li->parentElement;
         }
     }
 
-    return [];
+    return count($found) === 1 ? $found : [];
 });
-ok('the HELP page\'s list of what an erasure keeps is exactly the pinned text as an administrator receives it, the D-112 qualifier included, with nothing hidden and nothing added (#703)',
+ok('the HELP page\'s list of what an erasure keeps is exactly the pinned markup an administrator receives, the D-112 qualifier included, found once, inside exactly the pinned wrappers (#703)',
     renderedPin('help kept list', $helpRegion),
-    $helpRegion['hidden'] !== '' ? 'hidden by ' . $helpRegion['hidden'] : mb_substr($helpRegion['html'], 0, 600));
+    $helpRegion === '' ? 'not exactly one such list' : mb_substr($helpRegion, 0, 600));
+ok('the rendered-pin file holds exactly the pins this test compares, each once, and nothing it does not understand (#703 round 7)',
+    pinFileProblems() === [], implode(' | ', pinFileProblems()));
 $back = $signIn('mel', 'mel-again');
 ok('Mel cannot sign in again', $back['status'] !== 302 || str_contains($back['location'], 'login') === true, 'HTTP ' . $back['status'] . ' ' . $back['location']);
 $lines = auditLines($melRequest);

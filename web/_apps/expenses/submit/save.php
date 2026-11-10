@@ -307,8 +307,10 @@ try {
     // 📝 THE UPLOADER'S OWN FILENAME IS NEVER STORED (#714). It used to be,
     //    `basename()`'d and nothing else, so "Jane Smith receipt.pdf" was kept
     //    exactly as given and shown back on the claim. A claim is kept for six
-    //    years for HMRC and only has the account number detached, so the row is
-    //    never deleted, the cascade never fires, and an erasure request could
+    //    years for HMRC and is never deleted on erasure (it keeps the claimant's
+    //    account number on purpose, D-113; this comment used to say the number
+    //    was detached, which was untrue), so the cascade never fires, and an
+    //    erasure request could
     //    not reach that name — it would have sat there for six years after
     //    somebody asked to be forgotten.
     //

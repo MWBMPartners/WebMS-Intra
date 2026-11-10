@@ -1223,7 +1223,7 @@ class GdprEraser
              //    sentence says what is removed AND what stays, and how the log is
              //    cleared (the nightly clear-out, `log_sweep_tables()`).
              'reason' => 'the record of what happened is kept for running and repairing the portal, until the activity log '
-                 . 'is cleared: the nightly clear-out deletes it after the number of days the organisation sets (a year '
+                 . 'is cleared: the nightly clear-out deletes it after the number of days set for the organisation (a year '
                  . 'unless changed), if that scheduled job has been set up. Removed from your own records: your account '
                  . 'number, the address the request came from, the browser\'s name, the request\'s headers, the '
                  . 'session\'s fingerprint and the facts about the session. What each record says is kept as it was '
@@ -1273,7 +1273,7 @@ class GdprEraser
                  . 'check-ins you made (which keep your name too: D-016, D-110, D-111). Separately, records kept for '
                  . 'security and as a history of changes can mention your account number, in what they describe or in '
                  . 'a stored copy of a record that was changed: the activity log, deleted by the nightly clear-out after '
-                 . 'the number of days the organisation sets (a year unless changed), if that scheduled job has been set '
+                 . 'the number of days set for the organisation (a year unless changed), if that scheduled job has been set '
                  . 'up; the change history of records, which nothing clears; and rate-limit records, tidied away only '
                  . 'when a later request of the same kind happens to trigger it, so one can stay for a long time. '
                  . 'Neither list is every place your number may be written: anything typed about you can mention it '

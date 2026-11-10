@@ -97,12 +97,36 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <li>Records that are about you, such as your group memberships and saved payment methods.</li>
         </ul>
 
-        <h2 class="h5 mt-4">What is kept, without your name</h2>
+        <?php // 🗣️ #703 round 7: this said everything kept was kept "without your name", listing "notes
+              //    you wrote about somebody else" and "gifts and expense claims" among them. Untrue: a
+              //    pastoral visit keeps who made it, by name (D-016), and so do care cases opened
+              //    (D-110) and children checked in or out (D-111); gifts kept for tax keep the donor's
+              //    name until the keep-until date; an expense claim keeps the claimant's account
+              //    number (D-113). Each kind below is checked against GdprEraser::catalogue(). ?>
+        <h2 class="h5 mt-4">What is kept</h2>
         <p class="small">
-            Records that other people rely on stay, with your name taken off them: events you created,
-            attendance you took, tasks you were given, notes you wrote about somebody else.
-            Some records, such as gifts and expense claims, are kept without your name where the law
-            or the organisation's own duties require it.
+            Records that other people rely on stay, with your name and account number taken off them:
+            events you created, attendance you marked and tasks you were given.
+        </p>
+        <p class="small">
+            Some records keep your account number, and some keep your name as well, where the law or the
+            organisation's own duties require it:
+        </p>
+        <ul class="small">
+            <li>If you worked or volunteered here, the pastoral visits you made (with their notes), the care
+                cases you opened, the DBS (safeguarding) checks you recorded and the children you checked in
+                or out keep your name and account number as the person who did it.</li>
+            <li>Gifts kept for tax, and your tax declarations, stay with your name and home address kept beside
+                them until this organisation's keep-until date. Your other gifts lose your name.</li>
+            <li>Your expense claims, your own DBS checks, your giving statements and an approval step given to
+                you by name keep your account number.</li>
+        </ul>
+        <p class="small">
+            Your account itself is emptied, but through that number, and the names kept beside it, anyone who
+            can read the database or a backup can match these records back to you. Records kept for security
+            and as a history of changes can mention your account number too; the
+            <a href="<?php echo htmlspecialchars(Router::url('privacy/policy'), ENT_QUOTES, 'UTF-8'); ?>">privacy notice</a>
+            says what they are and how each is cleared.
             <a href="<?php echo htmlspecialchars(Router::url('account/erasure-request'), ENT_QUOTES, 'UTF-8'); ?>">Request data erasure</a> lists exactly what we hold about you
             and what would happen to each kind of record.
         </p>

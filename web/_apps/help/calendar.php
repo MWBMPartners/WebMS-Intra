@@ -309,9 +309,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p>
         Somebody can check in to an event without signing in. They scan a QR code with their own
         phone, or somebody presses a button on a kiosk by the door. They say how many of them there
-        are, and that is all that is recorded &mdash; no name, no email address, nothing that could be
-        traced back to a person.
+        are. No name, no email address and no link to anybody's account is recorded. The one other
+        thing kept is a scrambled form of the network address the check-in came from, used to count
+        how many different phones or kiosks sent check-ins; it is cleared after a while (see below).
     </p>
+    <?php // 🗣️ #703 round 7: this said the headcount "is all that is recorded &mdash; ... nothing that
+          //    could be traced back to a person". Untrue: `tblAnonymousCheckins.ipHash` is
+          //    hash('sha256', <network address> . '|' . <event>) (calendar/anon-checkin-save.php), with
+          //    no secret in it, so anybody holding a candidate address can work it out again - and the
+          //    paragraph below already calls it personal information. ?>
     <p>
         The figures appear in four places: on an event's attendance page, as a small line on the event
         hub, on the attendance reports page as totals for the whole organisation, and in a spreadsheet

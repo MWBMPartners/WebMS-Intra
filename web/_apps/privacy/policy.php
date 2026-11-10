@@ -47,7 +47,10 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
 
 <h3>Your rights</h3>
 <ul>
-    <li><strong>Article 15 — Right of access</strong>: download everything we hold about you from <a href="<?php echo htmlspecialchars(Site::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">/account/my-data</a>.</li>
+    <?php // 🗣️ #703 round 7: this said you could "download everything we hold about you" from My data.
+          //    Untrue: My data's download holds only its inventory (each kind of record, how many, and what
+          //    an erasure would do with it). The copy of the data itself is Data Export. ?>
+    <li><strong>Article 15 — Right of access</strong>: download a copy of your data from <a href="<?php echo htmlspecialchars(Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">/account/data-export</a>; <a href="<?php echo htmlspecialchars(Site::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">/account/my-data</a> lists each kind of record we hold about you and what an erasure would do with it.</li>
     <li><strong>Article 17 — Right to erasure</strong>: file a request at <a href="<?php echo htmlspecialchars(Site::url('account/erasure-request'), ENT_QUOTES, 'UTF-8'); ?>">/account/erasure-request</a>. We respond within one month.</li>
     <li><strong>Article 16 — Right to rectification</strong>: edit your profile via <a href="<?php echo htmlspecialchars(Site::url('account'), ENT_QUOTES, 'UTF-8'); ?>">/account</a>.</li>
     <li><strong>Article 21 — Right to object</strong>: unsubscribe from any newsletter via the link in its footer.</li>
@@ -77,7 +80,7 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
     <?php // 🧾 #703 round 5: the records kept for security and as a history of changes. Each
           //    clearing rule is read from the code (see GdprEraser's tblUsers reason), and the
           //    sentence does not claim to be every place a number can be written. ?>
-    <li><strong>Records kept for security and as a history of changes</strong> can mention your account number, in what they describe or in a stored copy of a record that was changed: the activity log, deleted after the number of days this organisation sets (a year unless changed) by a nightly clear-out, if that scheduled job has been set up; the change history of records, which nothing clears; and rate-limit records, tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither of these lists is every place your number may be written: anything typed about you can mention it too.</li>
+    <li><strong>Records kept for security and as a history of changes</strong> can mention your account number, in what they describe or in a stored copy of a record that was changed: the activity log, deleted after the number of days set for this organisation (a year unless changed) by a nightly clear-out, if that scheduled job has been set up; the change history of records, which nothing clears; and rate-limit records, tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither of these lists is every place your number may be written: anything typed about you can mention it too.</li>
 </ul>
 
 <h3>Contact</h3>
