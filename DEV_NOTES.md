@@ -22286,3 +22286,52 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
 - Migration 269 rewrites the approver role's description where it is still migration 202's
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
+
+### Signing the other browsers out (#598, D-104, D-108)
+
+- **Sessions are PHP files and nothing lists whose are whose.** `Auth::endOtherSessionsOf()` is
+  the ONE writer (it raises `signInVersion` by a random amount); `Auth::passwordChangeCommitted()` gives the
+  calling browser the new number after the commit, only when it is the same person; and
+  `Auth::endSessionOfInactiveAccount()` ends a session whose number DIFFERS, in the query it already ran,
+  recording `SessionEndedSignInNotCurrent` (worded true of a restore as well as a change).
+- **WHY A NUMBER AND NOT A TIME — round 1's design was broken, measured over real HTTP.** A
+  sign-in reads the hash, spends ~175 ms checking it, then marks its session. With a TIME taken
+  at the mark, a change committing in that gap left the old-password session signed in for good
+  (delays of 200-350 ms got in), while the page said "signed out on every other browser". The
+  number is read in the same SELECT as the hash, and the change writes both in one transaction,
+  so the read sees both old or both new. Part T2 of `sign-in-limits-selftest.php` pins it with a
+  BARRIER in the scratch copy between the read and the mark, so the worst moment happens every run.
+- **Only the two-factor CODE step keeps the number** (`Auth::codeStepCompletesSignInOf()`, called
+  by `2fa/verify.php` alone). Every other grant takes the number afresh: round 1 kept the old
+  moment for any same-person sign-in, so somebody who typed their NEW password at the code step
+  was bounced afterwards (part L4 of `two-step-selftest.php`).
+- **ANY difference ends a session, a higher number included, and the number goes up by a
+  RANDOM amount (check round 2).** A whole-database restore puts the account's number back while
+  session files stay, and a rolled-back change had already given its browser the new number;
+  with "end only a lower number" and "+1" such a session outlived the member's next reset
+  (restored to 0, reset back to 1, a session carrying 1 matches again). Now `!==`, a random step
+  (1 to 2,147,483,647, `BIGINT`), and the changing browser takes the new number only AFTER the
+  commit (`Auth::passwordChangeCommitted()`, and only when it is the same person — an
+  administrator's browser setting somebody else's password keeps its own number).
+- **A sign-in waiting for its code after a reset gets no "trust this device" cookie**
+  (`Auth::signInStillCurrentFor()` in `2fa/verify.php`).
+- **Known window, not fixed (check round 2's note):** during the upgrade itself, a password typed
+  BEFORE migration 270 runs gives a waiting-for-code session with no number (counts as 0); if a
+  change happens after the migration and before the code is given, the account's number is no
+  longer 0 and the session is ended — but a change made BEFORE the migration ran signs nobody
+  out at all (no column to raise; the page says so). That window is the minutes between files
+  reaching the server and "Run migrations".
+- **Un-upgraded database**: error 1054 alone falls back in the session check and the password
+  sign-in (so an administrator can sign in to run the upgrade); `endOtherSessionsOf()` answers
+  false and the pages say plainly that other browsers could not be signed out.
+- **Not in `Auth::setPassword()`**: the installer, invitations, new accounts and #731's
+  "add a password" sign nobody out.
+- **What a restore does now (#922):** everybody whose number changed since the snapshot — the administrator who ran the restore included — is sent to sign in on their next request, and the restore's result message is lost with the session. Right for security; the warning beforehand is #922.
+
+### The limiter's own table is UTC; the sign-in counts are not (#598 item 7, #920)
+
+- `tblApiRateLimits.hitAt` is written as `UTC_TIMESTAMP()` and compared only with it, with
+  `hitAt <= UTC_TIMESTAMP()`: on a server AHEAD of UTC, rows from before the upgrade count for
+  nothing while they are in the future, then count again for one window once UTC catches up —
+  never a block longer than its window.
+- The sign-in counts read `tblActivityLogs.timestamp` (Logger, server clock): #920.

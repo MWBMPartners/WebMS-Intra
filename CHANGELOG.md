@@ -4,6 +4,39 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Sign-in and password reset: ten fixes (#598, D-104, D-105, D-108, migration 270)
+
+- **A password reset, a password change while signed in, and an administrator setting the password now sign
+  the person out of every other browser** (D-104, D-108). The browser making the change stays signed in; an
+  administrator's own session is untouched. The account holds a sign-in version (`tblUsers.signInVersion`,
+  migration 270) that each of those raises by a random amount; every session carries the number it signed in
+  under, read in the SAME statement as the password, and a session whose number differs from the account's —
+  after a password change, or after a whole-database restore — is ended on its next request, recorded as
+  `SessionEndedSignInNotCurrent`. No extra query per request. Remembered devices are still revoked by the reset
+  and change pages, and a sign-in waiting for its two-factor code when a reset happens is no longer given a
+  "trust this device" cookie.
+- **The health page's mail line counts only the viewer's own organisation** for an
+  organisation's administrator; a global administrator, and the monitor's address, see the
+  installation's count (D-105).
+- **One person gets at most three password-reset e-mails an hour**, whoever asks; the visitor's
+  answer is unchanged.
+- **Requests for one person at the same moment leave exactly one working reset link**: the
+  per-person count, cancelling the old links and storing the new one are one transaction after
+  locking the person's account row.
+- **The anonymous prayer form and public forms no longer throw a submission away** because
+  somebody at the same address mistyped a password. The prayer form has its own limit (five in
+  15 minutes per address), says plainly that a refused request was NOT sent, and keeps the typing.
+- **Changing your password and switching two-factor sign-in off share a limit of five wrong
+  current passwords in 15 minutes** for the account; before, there was no limit.
+- **The general rate limiter counts in UTC.** The sign-in counts still use the database
+  server's clock: #920.
+- **"Can the portal send mail?" no longer says yes** for a Google key file name with a folder in
+  it, a key file that is not a key, or a Microsoft "from" address that is not an e-mail address;
+  the Google sender and the Integrations page ask the same one judge.
+- **The asset kiosk refuses a PIN try whenever a limit is reached**, including the last second.
+- **The failed sign-in counts got their indexes** (50,000 rows: full scan → range of 2).
+- **Tests:** `tools/sign-in-limits-selftest.php`, `tools/two-step-selftest.php` and `tools/admin-password-selftest.php` over real HTTP (each total pinned in its file), including a deterministic race between a sign-in and a password change, a database restore, and forced failures at each page's commit. Four check rounds by fresh Claude agents (protected arm: sign-in, stored data); round 1 measured a sign-in with the OLD password surviving a change (closed by reading the version with the password), round 2 a higher number surviving a restore (closed by ending any difference and a random step), round 4 was clean. The migration harness passed on MySQL 8.4.11 and MariaDB 11.4.13. Raised from it: #920, #922, #924. Codex has not reviewed it.
+
 ### Expense claims: the Approver role sees only its own departments, and no claim number can be confirmed by guessing (#648, #915, D-103, D-040, migration 269)
 
 - **Expenses: nobody can find out which claim numbers are real (#648 round 1, #915, #541 item 5).**
