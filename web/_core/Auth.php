@@ -1402,6 +1402,22 @@ class Auth
      *    and a person who belongs to both would be working in the wrong one
      *    straight after signing in, with nothing on the page to say so.
      *
+     * ONE RULE WAS ADDED BY #620, and every older rule is still here.
+     *
+     * 3. NO "." OR ".." PART, in any installation, as sent or once decoded
+     *    ("%2e%2e" is ".." to a browser). A browser works those out before
+     *    it asks, so "/north/assets/../../outside" arrives as "/outside". The
+     *    link sweep refused them only where organisations are told apart by
+     *    the first part of the address, because only there do they leave an
+     *    organisation; with one organisation, or the other two ways of
+     *    telling them apart, such an address was ACCEPTED. That was right
+     *    about where it leads and wrong as a rule: an address that says one
+     *    place and goes to another is never one this portal writes, and the
+     *    pages that once judged come-back addresses for themselves (#620)
+     *    each needed the same refusal. Nothing the portal builds holds such a
+     *    part (Site::url() never writes one), and only the PATH is read:
+     *    "?a=../b" after the "?" is not a path part and is not refused.
+     *
      * THE FALLBACK IS THE ORGANISATION'S OWN FRONT PAGE. It used to be the
      * bare "/", which under "the first part of the address" is the DEFAULT
      * organisation's front page. Callers that have no address to come back
@@ -1496,6 +1512,14 @@ class Auth
             return $fallback;
         }
 
+        // 🚫 Reject a "." or ".." part, in every set-up (rule 3 above)
+        foreach ([$url, $decoded] as $form) {
+            $parts = explode('/', substr($form, 0, strcspn($form, '?#')));
+            if (in_array('.', $parts, true) === true || in_array('..', $parts, true) === true) {
+                return $fallback;
+            }
+        }
+
         // 🏢 Reject an address that leaves this organisation (rule 2 above)
         if (self::staysInThisOrganisation($url, $decoded) === false) {
             return $fallback;
@@ -1580,8 +1604,14 @@ class Auth
      * and BOTH must pass. The browser is handed the first; a server in
      * between may see the second.
      *
-     *   - A "." or ".." part is refused. A browser works those out before it
-     *     asks, so "/north/../south/x" arrives as "/south/x".
+     * A "." or ".." part never reaches here: safeRedirectUrl() refuses it
+     * first, in every set-up (rule 3 there, #620). It used to be refused
+     * HERE, which is why it held only where organisations are told apart by
+     * the first part of the address. The test below stays as a second line,
+     * because without it "/north/../south/x" would be judged by its first
+     * part, "north", and pass.
+     *
+     *   - A "." or ".." part is refused (see above).
      *   - The request is under an organisation's part ("/north/login"): the
      *     address must start with that same part, spelt the same way.
      *     Anything else is refused, another organisation's part and an

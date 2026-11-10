@@ -234,6 +234,7 @@ site-modes|tools/site-modes-selftest.php|selftest_sitemodes|web:site-modes SELFT
 channel|tools/channel-selftest.php|selftest_channel|web:channel SELFTEST_WEB_PORT=9590
 portal-address|tools/portal-address-selftest.php|selftest_portaladdress|web:portal-address SELFTEST_WEB_PORT=9660
 site-addresses|tools/site-addresses-selftest.php|selftest_siteaddresses|web:site-addresses SELFTEST_WEB_PORT=9650
+come-back-addresses|tools/come-back-addresses-selftest.php|selftest_comeback|web:come-back SELFTEST_WEB_PORT=11320
 page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scripts SELFTEST_WEB_PORT=9651
 help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFTEST_WEB_PORT=9663
 outside-services|tools/outside-services-selftest.php|selftest_outside|SELFTEST_WEB_PORT=9778

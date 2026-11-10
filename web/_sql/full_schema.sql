@@ -11490,6 +11490,28 @@ WHERE `routeKey` = 'widget'
 INSERT INTO `tblMigrations` (`filename`) VALUES ('264_old_widget_removed.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 268_newsletter_links.sql (#620) ────────────────────────────────────
+-- The links each newsletter contains. The click counter's link carries a
+-- random token for one of these rows and forwards ONLY to the address stored
+-- there, never to an address the request names. See the migration for why a
+-- stored list and not a signature, and what happens to links already sent.
+CREATE TABLE IF NOT EXISTS `tblNewsletterLink` (
+    `linkID`       INT           NOT NULL AUTO_INCREMENT,
+    `newsletterID` INT           NOT NULL COMMENT 'The newsletter this link is in. A token is honoured only together with this number.',
+    `linkToken`    CHAR(32)      NOT NULL COMMENT 'Random, 32 lower-case hex characters from random_bytes(16), made by Newsletter::linkToken(). The counted link in the e-mail carries this, never the address.',
+    `targetUrl`    VARCHAR(2048) NOT NULL COMMENT 'The http or https address the newsletter links to, exactly as it was in the newsletter (HTML entities decoded). Checked again by Newsletter::isForwardable() whenever it is read.',
+    `targetHash`   CHAR(64)      NOT NULL COMMENT 'SHA-256 of targetUrl, in hex: what the unique key compares, because a 2048-character column is too long to index.',
+    `createdAt`    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'When the link was first recorded, by the server clock. Nothing compares it.',
+    PRIMARY KEY (`linkID`),
+    UNIQUE KEY `uq_nll_token` (`linkToken`),
+    UNIQUE KEY `uq_nll_newsletter_target` (`newsletterID`, `targetHash`),
+    CONSTRAINT `fk_nll_newsletter` FOREIGN KEY (`newsletterID`) REFERENCES `tblNewsletter` (`newsletterID`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+COMMENT='The links each newsletter contains; the click counter forwards only to these (#620)';
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('268_newsletter_links.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
 -- WHY THESE ARE HERE AND NOT BESIDE tblEvents. `tblEvents` is declared near the
 -- top of this file; `tblVenues` and `tblVenueRooms` are declared about seven

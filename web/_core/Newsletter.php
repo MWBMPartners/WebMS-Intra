@@ -429,15 +429,35 @@ class Newsletter
         $html = str_replace('{{UNSUB_URL}}', htmlspecialchars($unsub, ENT_QUOTES, 'UTF-8'), $html);
 
         if ((string) ($settings['trackClicks'] ?? '0') === '1') {
+            // 🔗 Each counted link carries a TOKEN for an address recorded
+            //    with this newsletter, never the address itself (#620). See
+            //    linkToken(). A link that cannot be recorded is left exactly
+            //    as written: the person still reaches it, it is only not
+            //    counted.
+            //
+            //    WHAT WAS WRONG. The counted link used to carry the address
+            //    (`&u=https://…`) and the counter forwarded to whatever
+            //    address a request named, so anybody could write a link that
+            //    wore the portal's address and landed on a site of their
+            //    choosing. It also carried the address as it is written in
+            //    the HTML, with `&` as `&amp;`, so a link whose own address
+            //    had two query parts reached the wrong page; the address is
+            //    now decoded before it is recorded.
             $html = preg_replace_callback(
                 '/href="(https?:[^"]+)"/i',
                 static function (array $m) use ($siteId, $newsletterId, $recipientId): string {
-                    $target = $m[1];
-                    if (strpos($target, '/unsubscribe') !== false) {
+                    if (strpos($m[1], '/unsubscribe') !== false) {
+                        return $m[0];
+                    }
+                    $token = self::linkToken($newsletterId, html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                    if ($token === '') {
                         return $m[0];
                     }
                     $wrapped = PortalAddress::absolute('newsletter/track/click?n=' . $newsletterId
-                        . '&r=' . $recipientId . '&u=' . urlencode($target), $siteId);
+                        . '&r=' . $recipientId . '&l=' . $token, $siteId);
+                    if ($wrapped === '') {
+                        return $m[0];
+                    }
                     return 'href="' . htmlspecialchars($wrapped, ENT_QUOTES, 'UTF-8') . '"';
                 },
                 $html
@@ -454,6 +474,134 @@ class Newsletter
             . '<a href="' . htmlspecialchars($unsub, ENT_QUOTES, 'UTF-8') . '" style="color:#888;">Unsubscribe</a>.</p>';
 
         return $html;
+    }
+
+    /** 🔗 The longest address a counted link may stand for (the column's width). */
+    public const LINK_MAX_LENGTH = 2048;
+
+    /**
+     * Tokens already worked out in this request, keyed "newsletterID|address",
+     * so a pass that personalises a hundred copies asks the database once per
+     * distinct link, not once per link per copy.
+     *
+     * @var array<string, string>
+     */
+    private static array $linkTokens = [];
+
+    /**
+     * 🔗 Can the click counter forward to this address? The ONE test, asked
+     * when a link is recorded AND again whenever one is read back, so a row
+     * written some other way (by hand, or by a restore) is still judged.
+     *
+     * An http or https address with a host, no longer than LINK_MAX_LENGTH,
+     * that PHP's own URL test accepts, holding no space or control character
+     * (a tab or line break inside an address is how a browser is made to read
+     * one address as another, #536). Anything else is never forwarded to; a
+     * link that fails it in a newsletter is simply left uncounted.
+     */
+    public static function isForwardable(string $address): bool
+    {
+        if ($address === '' || strlen($address) > self::LINK_MAX_LENGTH) {
+            return false;
+        }
+        if (preg_match('/[\x00-\x20\x7F]/', $address) === 1 || preg_match('#^https?://#i', $address) !== 1) {
+            return false;
+        }
+        if (filter_var($address, FILTER_VALIDATE_URL) === false) {
+            return false;
+        }
+
+        return (string) parse_url($address, PHP_URL_HOST) !== '';
+    }
+
+    /**
+     * 🔗 The token a counted link carries for one address in one newsletter,
+     * recording the address the first time (#620). The ONE writer of
+     * `tblNewsletterLink`.
+     *
+     * WHY A STORED LIST AND NOT A SIGNATURE. A signed address needs a key, a
+     * new secret to keep; losing or replacing it would break every link in
+     * every newsletter ever sent. A stored list needs no key, the link then
+     * says nothing about where it goes, and the list is the record of what
+     * the newsletter linked to. The token is random so one newsletter's links
+     * cannot be listed by counting.
+     *
+     * Answers '' when the address is not one isForwardable() accepts, or when
+     * it cannot be recorded (the table is missing because the upgrade has not
+     * been run yet — files reach a server before anybody presses "Run
+     * migrations" — or the database refused). The caller then leaves the link
+     * as written. That direction is deliberate: a newsletter that has to go
+     * out with some links uncounted is better than one that does not go out.
+     * The fault is said once in PHP's error log, by its kind and number only:
+     * a database's own message can quote the value it was given.
+     */
+    public static function linkToken(int $newsletterId, string $address): string
+    {
+        $key = $newsletterId . '|' . $address;
+        if (isset(self::$linkTokens[$key]) === true) {
+            return self::$linkTokens[$key];
+        }
+        if ($newsletterId <= 0 || self::isForwardable($address) === false) {
+            return '';
+        }
+        $hash  = hash('sha256', $address);
+        $token = bin2hex(random_bytes(16));
+        try {
+            $db = App::db();
+            // ON DUPLICATE KEY, never INSERT IGNORE: IGNORE also turns "too
+            // long" into a silent cut, and a cut address is a different one.
+            $ins = $db->prepare(
+                'INSERT INTO `tblNewsletterLink` (`newsletterID`, `linkToken`, `targetUrl`, `targetHash`) VALUES (?, ?, ?, ?) '
+                . 'ON DUPLICATE KEY UPDATE `linkID` = `linkID`'
+            );
+            $ins->bind_param('isss', $newsletterId, $token, $address, $hash);
+            $ins->execute();
+            $ins->close();
+            $sel = $db->prepare('SELECT `linkToken`, `targetUrl` FROM `tblNewsletterLink` WHERE `newsletterID` = ? AND `targetHash` = ? LIMIT 1');
+            $sel->bind_param('is', $newsletterId, $hash);
+            $sel->execute();
+            $row = $sel->get_result()->fetch_assoc();
+            $sel->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] Newsletter ' . $newsletterId . ': a link could not be recorded for click counting, so it was sent uncounted (' . $e::class . ' ' . $e->getCode() . ').');
+
+            return '';
+        }
+        // The stored address must be THIS address: two addresses sharing a
+        // hash must never send a person to the other one.
+        if (is_array($row) === false || (string) $row['targetUrl'] !== $address) {
+            return '';
+        }
+        self::$linkTokens[$key] = (string) $row['linkToken'];
+
+        return self::$linkTokens[$key];
+    }
+
+    /**
+     * 🔗 Where a counted link goes: the address recorded for this token IN
+     * THIS NEWSLETTER, or null. The ONE reader of `tblNewsletterLink`, and
+     * the only place the click counter may take an address from (#620).
+     *
+     * Null for anything but 32 lower-case hex characters (a list sent as
+     * `l[]=x` included), for a token recorded with a DIFFERENT newsletter,
+     * and for a stored address isForwardable() now refuses. It does not catch
+     * a database fault: a fault is a fault, and the portal's error page and
+     * error log are the right answer to it, not "this link is no longer
+     * valid".
+     */
+    public static function linkTarget(int $newsletterId, mixed $token): ?string
+    {
+        if ($newsletterId <= 0 || is_string($token) === false || preg_match('/^[0-9a-f]{32}$/', $token) !== 1) {
+            return null;
+        }
+        $stmt = App::db()->prepare('SELECT `targetUrl` FROM `tblNewsletterLink` WHERE `linkToken` = ? AND `newsletterID` = ? LIMIT 1');
+        $stmt->bind_param('si', $token, $newsletterId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $address = is_array($row) === true ? (string) $row['targetUrl'] : '';
+
+        return self::isForwardable($address) === true ? $address : null;
     }
 
     /**

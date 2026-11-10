@@ -19,7 +19,7 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.2
+ * @version   1.0.3
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/268
  */
 
@@ -31,29 +31,26 @@ use Portal\Core\Payments;
 use Portal\Core\Site;
 
 /**
- * 🛡️ Open-redirect guard for the POST-supplied `return_to` value. Mirrors
- * assets/event-assign.php's safe-redirect rule: reject protocol-relative
- * (`//`), absolute-URL (`://`), backslash (`/\` — browsers normalise `\`
- * to `/`, so `/\evil.com` resolves as protocol-relative `//evil.com`), or
- * non-rooted values; fall back to `/`.
+ * 🔙 Where to send the person back to when the checkout cannot start: the
+ * posted `return_to`, judged by Auth::safeRedirectUrl() — the ONE judge of a
+ * "come back to" address, the same one every sign-in page uses — and the
+ * organisation's own front page when it is refused or missing.
  *
- * @param mixed $raw Raw POST value.
+ * WHAT WAS WRONG (#620). This page had a judge of its own,
+ * `sanitizeReturnTo()`, which refused "//", "://", a backslash and anything
+ * not starting with "/". It accepted "/<tab>/outside.example", which a
+ * browser reads as "//outside.example" — another site — because a browser
+ * takes tabs out of an address before reading it; and it accepted any path
+ * at all, including another organisation's ("/other-organisation/…") and a
+ * ".." part that leaves this one. It sat behind the form token, so a
+ * stranger's link could not reach it, but a page of the portal tricked into
+ * posting to it could. It is deleted rather than mended: a second judge is a
+ * second place to get the rule wrong, and this one had.
  *
- * @return string A same-origin, root-relative path.
+ * Who posts `return_to` today: giving/give.php and projects/my-pledges.php,
+ * each with Site::url() of its own page, which the judge accepts.
  */
-function sanitizeReturnTo(mixed $raw): string
-{
-    $value = (string) $raw;
-    if ($value === ''
-        || str_starts_with($value, '//') === true
-        || str_contains($value, '://') === true
-        || str_contains($value, '\\') === true
-        || str_starts_with($value, '/') === false
-    ) {
-        return Site::url('');
-    }
-    return $value;
-}
+$backTo = static fn (): string => Auth::safeRedirectUrl($_POST['return_to'] ?? null);
 
 // 💷 Fat-finger/fraud ceiling on self-service online GIVING only (S10) —
 // large legitimate gifts should go through the office rather than this
@@ -85,7 +82,7 @@ $amountPence = (int) round(((float) $clean) * 100);
 if ($amountPence < 100) {
     $_SESSION['flash_msg']  = 'Minimum amount is 1.00.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
+    header('Location: ' . $backTo());
     exit();
 }
 
@@ -125,7 +122,7 @@ if ($purpose === 'pledge') {
     if ($pledge === null || $userId <= 0 || (int) ($pledge['donorID'] ?? 0) !== $userId) {
         $_SESSION['flash_msg']  = "That pledge can't be paid.";
         $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
+        header('Location: ' . $backTo());
         exit();
     }
     // Force the amount + currency to the pledge's own record — never trust
@@ -153,7 +150,7 @@ if ($purpose === 'pledge') {
     if ($category === null) {
         $_SESSION['flash_msg']  = "That giving category can't be used.";
         $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
+        header('Location: ' . $backTo());
         exit();
     }
     // 💷 Fat-finger/fraud ceiling (S10) — large legitimate gifts should go
@@ -161,7 +158,7 @@ if ($purpose === 'pledge') {
     if ($amountPence > GIVING_MAX_AMOUNT_PENCE) {
         $_SESSION['flash_msg']  = 'For large gifts please contact the office.';
         $_SESSION['flash_type'] = 'danger';
-        header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
+        header('Location: ' . $backTo());
         exit();
     }
     // The donation amount is the donor's own choice (subject to the
@@ -181,7 +178,7 @@ $redirect = Payments::startCheckout($siteId, $userId, $amountPence, $currency, $
 if ($redirect === null || $redirect === '') {
     $_SESSION['flash_msg']  = 'Could not start checkout — provider may not be configured.';
     $_SESSION['flash_type'] = 'danger';
-    header('Location: ' . sanitizeReturnTo($_POST['return_to'] ?? Site::url('')));
+    header('Location: ' . $backTo());
     exit();
 }
 

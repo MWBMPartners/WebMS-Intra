@@ -2506,6 +2506,15 @@ return [
         'reason'   => 'The blocks a newsletter is built from, in order, with the text or settings of each. The organisation\'s own words, written to be published. Where a block names somebody it does so deliberately, as published content.',
         'columns'  => ['payload'],
     ],
+    'tblNewsletterLink' => [
+        // #620. One row per web address a newsletter links to, so the click
+        // counter forwards only to an address the newsletter really holds.
+        // It does NOT record who clicked what: that is still only
+        // tblNewsletterRecipient.clickedAt, catalogued above.
+        'decision' => 'not-personal',
+        'reason'   => 'The web addresses one newsletter links to, each with a random token the click-counting link carries instead of the address. Copied from the newsletter\'s own published content when it is sent, the same for everybody it went to; nothing here says who received or clicked a link. Removed with the newsletter.',
+        'columns'  => ['targetUrl'],
+    ],
     'tblVenueInvoiceLines' => [
         'decision' => 'not-personal',
         'reason'   => 'The lines of a venue invoice, as amounts against bookings. Who the invoice is to is on the invoice, which is catalogued separately.',

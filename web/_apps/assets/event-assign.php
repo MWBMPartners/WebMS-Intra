@@ -42,10 +42,11 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   2.0.0
+ * @version   2.0.1
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/393
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/404
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/409
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/620
  * -----------------------------------------------------------------------------
  */
 
@@ -145,43 +146,33 @@ switch ($action) {
 }
 
 // 🔙 Return to wherever the form was rendered from — item.php's Assigned-
-// events panel (default) or the calendar event page's own section, via a
-// posted `returnTo` value. NEVER trusted as a raw redirect target: only a
-// value that is EXACTLY one of this portal's own known bases, or that base
-// followed by `/` or `?`, is honoured — everything else falls back to the
-// safe default. This is what keeps `returnTo` from ever becoming an open
-// redirect, per the file header's DOUBLE IDOR + safe-redirect note.
+// events panel (the default, which posts no `returnTo`, or posts "item") or
+// the calendar event page's own section, which posts
+// `Site::url('calendar/event') . '?slug=…'`.
 //
-// #512 — WHAT WAS WRONG. The bases used to be hard-coded ('/assets',
-// '/calendar'), which meant two separate faults at once. First, in path
-// mode, event.php's own "Assigned assets" section posts back
-// `Site::url('calendar/event') . '?slug=…'`, which in path mode is
-// PREFIXED with the organisation's address — so that legitimate value
-// never matched the bare hard-coded base and silently fell through to the
-// safe default instead of the calendar page it was meant to return to.
-// Second, `str_starts_with($returnTo, '/assets')` also matches
-// `/assetsfoo` — a base compared as a plain string prefix, not as a whole
-// path segment, is not actually checking what it looks like it is
-// checking. Using Site::url() for the bases fixes the first fault (the
-// base itself now carries the same prefix a legitimate posted value
-// would); checking for the base ALONE, or the base immediately followed
-// by `/` or `?`, fixes the second.
-$returnTo = (string) ($_POST['returnTo'] ?? 'item');
-$redirect = Site::url('assets/item') . '?id=' . $assetId; // 🛟 safe default, prefixed in path mode
-if ($returnTo !== '' && $returnTo !== 'item'
-    && str_starts_with($returnTo, '//') === false
-    && str_contains($returnTo, '://') === false
-) {
-    foreach ([Site::url('assets'), Site::url('calendar')] as $base) {
-        if ($returnTo === $base
-            || str_starts_with($returnTo, $base . '/') === true
-            || str_starts_with($returnTo, $base . '?') === true
-        ) {
-            $redirect = $returnTo;
-            break;
-        }
-    }
-}
+// The posted value is judged by Auth::safeRedirectUrl(), the ONE judge of a
+// "come back to" address (the one every sign-in page uses). Refused, it falls
+// back to this asset's own page, not the organisation's front page, because
+// that is where the message about what just happened is printed: the assign
+// or unassign above HAS happened, and the front page (dashboard/index.php)
+// prints no such message.
+//
+// WHAT WAS WRONG (#620). This page had a judge of its own: the value had to
+// begin with Site::url('assets') or Site::url('calendar') followed by "/",
+// "?" or nothing, and must not hold "//" or "://". It accepted
+// "/north/assets/../../outside", which a browser works out to "/outside" —
+// still this site, but outside the organisation the person was working in
+// (#536). The one judge refuses a "." or ".." part in every set-up, so the
+// page's own judge is deleted rather than mended: two judges are two places
+// to get one rule wrong, and this one had.
+//
+// It is also WIDER than the old judge in one way, said plainly: any address
+// inside this organisation is now honoured, not only the asset and calendar
+// pages. No such address leaves the organisation, and the one judge is what
+// every sign-in page already trusts with the same question.
+$returnTo = $_POST['returnTo'] ?? 'item';
+$itemPage = Site::url('assets/item') . '?id=' . $assetId; // 🛟 the default, prefixed in path mode
+$redirect = $returnTo === 'item' ? $itemPage : Auth::safeRedirectUrl($returnTo, $itemPage);
 
 header('Location: ' . $redirect);
 exit();
