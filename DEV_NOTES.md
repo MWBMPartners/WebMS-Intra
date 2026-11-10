@@ -22174,3 +22174,22 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   and the judge's colon rule). Version 2 does not see either (both use
   variables), so they are no longer exemptions.
 - What round 3 (the last) found the check still cannot see — named arguments and spreads inside the judge or a wrapper, two own-function spellings, a bare constant `$_SERVER` key — is on #913.
+
+### A comparison that fails only when the run is slow (#912)
+
+- **A comparison of "every value" is only decisive for a clock column if the run
+  crosses a second (#912).** Proof 27 now waits for the DATABASE's clock to move on a
+  second after taking its "before" picture (`brs_waitForTheNextSecond()`), so a restore
+  or put-back that let `DEFAULT CURRENT_TIMESTAMP` re-stamp a column fails EVERY run
+  rather than about half of them. Measured: with a put-back planted to leave
+  `createdAt` out, the old proof caught it 5 times in 8; with the wait, 4 in 4.
+- **A failure now names the column and the row.** `brs_differences()` follows each
+  differing table with the columns whose values changed and the rows by primary key
+  (changed / gone / added), from per-column and per-row checksums `brs_fingerprint()`
+  records in `Brs::$detail`. It never decides a verdict, and it prints no value — only
+  column names and key values. Rows are named for tables of up to 5,000 rows.
+- **The trap, written once more:** a test that deletes a row and inserts it again "by
+  id" changes every column the database stamps for itself. `backup-page-selftest.php`
+  had already met this in its section P and copied the whole row; proof 27 had not.
+  Copy the row from the table as it stands AFTER the restore, never from before it, or
+  a restore fault on that row is papered over.

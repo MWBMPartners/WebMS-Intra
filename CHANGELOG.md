@@ -4,6 +4,20 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The backup self-test no longer fails on a slow run (#912)
+
+- **Backup self-test, proof 27, no longer fails on the timing of the run (#912).** Its
+  final "every value of every table is exactly as it was" comparison failed in three
+  consecutive whole-suite runs and passed when run alone. The cause was the TEST, not
+  the restore: section C deletes made-up account 970941 and later put it back by id and
+  e-mail address only, so `tblUsers.createdAt` (`DEFAULT CURRENT_TIMESTAMP`) took a new
+  value whenever the run crossed a second between the first insert and the re-insert —
+  which a slow, loaded run always does. The account is now kept whole and put back
+  column by column. The restore and the put-back were exact throughout. The proof now also waits for the database's clock to move on a second after its "before" picture, so a
+  restore that lets a self-stamped column be stamped again fails every run, and a failure names the column and the
+  row (by key, never a value). Two check rounds (protected arm: backups), round 2 clean. Raised from it: #914.
+  Codex has not reviewed it.
+
 ### A "come back to" address is always judged, and the newsletter click counter is no longer an open redirect (#620, migration 268)
 
 - **Three older pages no longer send people to addresses they were handed
