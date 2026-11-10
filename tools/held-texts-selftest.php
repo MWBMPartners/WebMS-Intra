@@ -175,7 +175,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 117;
+const EXPECTED_CHECKS = 121; // 117 + four in part N (#782)
 
 /** What a child process prints before its findings, so they can be found in whatever else it printed. */
 const RESULT_MARK = '@@held-texts-selftest@@';
@@ -709,7 +709,7 @@ function onClock(int $epoch, string $zone): string
  * The settings a request finds. No provider account is named anywhere, so
  * the real class cannot contact anybody.
  *
- * @param array{quiet?:string, zone?:string, endOffset?:int, sms?:string, cap?:int, multi?:string} $o
+ * @param array{quiet?:string, zone?:string, endOffset?:int, sms?:string, cap?:int, multi?:string, zoneInRow?:bool} $o
  *        `multi` 'true' is an installation with SEVERAL organisations; the
  *        default is one, where nobody needs a membership row.
  *
@@ -728,7 +728,9 @@ function settingsFor(array $o = []): array
         ]],
         'maintenance' => ['cronToken' => JOB_TOKEN],
         'multisite'   => ['enabled' => $o['multi'] ?? 'false', 'detectionMode' => 'path'],
-        'site'        => ['timezoneKeptAt' => ''],
+        // `zoneInRow` true: each organisation's zone is its own row (migration 217's mark), as on every
+        // installation today. Part N needs that, because it gives two organisations different zones.
+        'site'        => ['timezoneKeptAt' => ($o['zoneInRow'] ?? false) === true ? Site::ZONE_MARK_VALUE : ''],
     ];
 }
 
@@ -2578,6 +2580,77 @@ ok(
         && (string) rowOf($M10)['recipientNumber'] === $keptNumber,
     json_encode([$crashedM10, $wentM10, $outM10, story(rowOf($M10)), rowOf($M10)['recipientUserID'] ?? 'null'])
 );
+
+// =============================================================================
+head('N. Each organisation\'s own clock (#782)');
+// =============================================================================
+// Since #782 the quiet-hours zone setting may be EMPTY, meaning each
+// organisation's own zone, and a new installation ships that way. The job that
+// sends held texts works through EVERY organisation's texts in one run without
+// switching organisation, so it must judge each text on the clock of the
+// organisation it belongs to. The first version of #782 did not pass the
+// organisation, so every text was judged on the clock of whichever
+// organisation the run resolved to (here organisation 1). Two organisations,
+// one in Sydney and one in London, and ONE person with a number in both, in
+// June 2027 (no clock change near either):
+//   S  Friday 18 June 20:00 in Sydney  = 11:00 in London: Sydney quiet, London not.
+//   H  Friday 18 June 20:00 in London  = Saturday 05:00 in Sydney: both quiet.
+//   R  Saturday 19 June 10:00 in London = 19:00 in Sydney: Sydney over, London not.
+//   E  Saturday 19 June 18:00:01 in London: London over too.
+// The premise check comes first: it shows organisation 1's clock gives the
+// OTHER answer at S and at R, so N1 and N2 can only pass if each text is
+// judged on its own organisation's clock.
+$nSyd = static fn (string $at): int => (new DateTimeImmutable($at, new DateTimeZone('Australia/Sydney')))->getTimestamp();
+$nLon = static fn (string $at): int => (new DateTimeImmutable($at, new DateTimeZone('Europe/London')))->getTimestamp();
+$S = $nSyd('2027-06-18 20:00:00');
+$H = $nLon('2027-06-18 20:00:00');
+$R = $nLon('2027-06-19 10:00:00');
+$E = $nLon('2027-06-19 18:00:01');
+fresh(['zone' => '', 'zoneInRow' => true]);
+q('UPDATE tblSites SET timezone = ? WHERE siteID = ?', 'si', ['Australia/Sydney', ORG]);
+q('UPDATE tblSites SET timezone = ? WHERE siteID = ?', 'si', ['Europe/London', ORG2]);
+q('INSERT INTO tblUserSmsPreference (siteID, userID, phoneNumber, isVerified, categories) VALUES (?, ?, ?, 1, ?)', 'iiss', [ORG2, WHO['follow'], numberOf(WHO['follow']), EVERY_KIND]);
+newProcess();
+$zones = [Site::timezone(ORG), Site::timezone(ORG2), Site::timezone(ORG_ONE)];
+ok(
+    'N0 premise: the quiet-hours zone is EMPTY ("each organisation\'s own"), the two organisations are on Australia/Sydney and Europe/London, and organisation 1\'s clock (' . $zones[2] . ') gives the OTHER answer at both test moments: not quiet at S, quiet at R',
+    $zones[0] === 'Australia/Sydney' && $zones[1] === 'Europe/London' && in_array($zones[2], ['Australia/Sydney', 'Europe/London'], true) === false
+        && Sabbath::isQuietNow(WHO['follow'], $S, ORG_ONE) === false && Sabbath::isQuietNow(WHO['follow'], $R, ORG_ONE) === true,
+    json_encode($zones) . '; organisation 1 quiet at S ' . json_encode(Sabbath::isQuietNow(WHO['follow'], $S, ORG_ONE)) . ', at R ' . json_encode(Sabbath::isQuietNow(WHO['follow'], $R, ORG_ONE))
+);
+at($S);
+$N1a = 'ZQXT N1 Sydney, at once';
+$N1b = 'ZQXT N1 London, at once';
+$sydNow = text('follow', 'prayer_assignment', $N1a, null, ORG);
+$lonNow = text('follow', 'prayer_assignment', $N1b, null, ORG2);
+ok(
+    'N1 a text SENT AT ONCE is judged on its own organisation\'s clock: at Friday 20:00 in Sydney the Sydney text is HELD and, for the same person, the London text (11:00 there) GOES',
+    $sydNow === [false, 'held'] && $lonNow === [true, 'sent'] && handed($N1a) === 0 && handed($N1b) === 1,
+    json_encode([$sydNow, $lonNow, handed($N1a), handed($N1b)])
+);
+fresh(['zone' => '', 'zoneInRow' => true]);
+at($H);
+$N2a = 'ZQXT N2 Sydney, held';
+$N2b = 'ZQXT N2 London, held';
+$heldBoth = [text('follow', 'prayer_assignment', $N2a, null, ORG), text('follow', 'prayer_assignment', $N2b, null, ORG2)];
+at($R);
+$atR = run();
+ok(
+    'N2 ONE run of the job, at Saturday 10:00 in London: the Sydney text (19:00 there, its quiet hours over) is sent, and the London text for the SAME person (inside London\'s) is still held — each judged on its own organisation\'s clock, and the answer for one is not reused for the other',
+    $heldBoth === [[false, 'held'], [false, 'held']] && $atR['sent'] === 1 && $atR['left'] === 1 && handed($N2a) === 1 && handed($N2b) === 0
+        && (rowOf($N2b)['status'] ?? '') === 'queued',
+    json_encode([$heldBoth, $atR, handed($N2a), handed($N2b), story(rowOf($N2b))])
+);
+at($E);
+$atE = run();
+ok(
+    'N3 the next run after London\'s quiet hours end sends the London text, once',
+    $atE['sent'] === 1 && $atE['left'] === 0 && handed($N2a) === 1 && handed($N2b) === 1,
+    json_encode([$atE, handed($N2a), handed($N2b)])
+);
+q('DELETE FROM tblUserSmsPreference WHERE siteID = ? AND userID = ?', 'ii', [ORG2, WHO['follow']]);
+q('UPDATE tblSites SET timezone = ? WHERE siteID IN (?, ?)', 'sii', [QUIET_ZONE, ORG, ORG2]);
+fresh();
 
 // =============================================================================
 head('Everything is put back');

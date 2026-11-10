@@ -88,10 +88,10 @@ SET @needs := (
       AND `TABLE_NAME`   = 'tblLivestreamSchedule'
       AND `COLUMN_NAME`  = 'timezone'
       AND (`COLUMN_DEFAULT` IS NOT NULL
-           OR `COLUMN_COMMENT` <> 'The clock dayOfWeek, startTime and endTime are read on: an IANA zone name such as Pacific/Auckland. No default, on purpose (#782): every writer names the zone, and the schedule form takes the zone of the organisation when none is given. Read only through Livestream::zoneOf().')
+           OR `COLUMN_COMMENT` <> 'The clock dayOfWeek, startTime and endTime are read on: an IANA zone name such as Pacific/Auckland. No default, on purpose (#782): every writer names the zone, and the schedule form takes the zone of the organisation when none is given. Turned into a clock only by Livestream::zoneOf(); the admin page also shows the stored text as it is.')
 );
 SET @sql := IF(@needs = 1,
-    'ALTER TABLE `tblLivestreamSchedule` MODIFY COLUMN `timezone` VARCHAR(50) NOT NULL COMMENT ''The clock dayOfWeek, startTime and endTime are read on: an IANA zone name such as Pacific/Auckland. No default, on purpose (#782): every writer names the zone, and the schedule form takes the zone of the organisation when none is given. Read only through Livestream::zoneOf().''',
+    'ALTER TABLE `tblLivestreamSchedule` MODIFY COLUMN `timezone` VARCHAR(50) NOT NULL COMMENT ''The clock dayOfWeek, startTime and endTime are read on: an IANA zone name such as Pacific/Auckland. No default, on purpose (#782): every writer names the zone, and the schedule form takes the zone of the organisation when none is given. Turned into a clock only by Livestream::zoneOf(); the admin page also shows the stored text as it is.''',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

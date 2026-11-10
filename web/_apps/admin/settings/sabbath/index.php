@@ -136,9 +136,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    WHAT WAS WRONG: an unknown zone was silently replaced with "Europe/London", for
         //    every customer anywhere, and the page offered London pre-selected. A posted LIST
         //    is not text and counts as empty, which is the organisation's own zone.
+        //    AND ASK WHETHER THE FIELD ARRIVED (#677). Empty is an instruction here ("each
+        //    organisation's own"), so a form that did not send the field at all must not be read
+        //    as that instruction: the zone is then left exactly as it is and not written. The
+        //    first version of #782 stored '' for a missing field, which would have moved a chosen
+        //    zone to the organisation's without anybody choosing it (found by the independent check).
+        $zoneArrived = array_key_exists('timezone', $_POST) === true;
+        if ($zoneArrived === false) {
+            unset($values['portal.sabbath.timezone']);
+        }
         $zoneNow    = (string) (App::settings()['portal']['sabbath']['timezone'] ?? '');
-        $zoneWanted = $values['portal.sabbath.timezone'];
-        $zoneOk     = $zoneWanted === '' || Site::isZoneName($zoneWanted) === true || $zoneWanted === $zoneNow;
+        $zoneWanted = (string) ($values['portal.sabbath.timezone'] ?? $zoneNow);
+        $zoneOk     = $zoneArrived === false || $zoneWanted === '' || Site::isZoneName($zoneWanted) === true || $zoneWanted === $zoneNow;
         if ($zoneOk === false) {
             // 🕰️ Refused BEFORE the first row is written, so nothing on this page has changed.
             $flash = 'That time zone is not one this portal knows, so nothing has been changed. '

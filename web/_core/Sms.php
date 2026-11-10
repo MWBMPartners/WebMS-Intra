@@ -314,7 +314,7 @@ class Sms
         //    quiet hours off for themselves is never "inside" (Sabbath
         //    decides). The moment asked about comes from the database's
         //    clock: see nowOnDatabaseClock().
-        if (in_array($category, self::NEVER_HELD, true) === false && $userId !== null && Sabbath::isQuietNow($userId, self::nowOnDatabaseClock(App::db())) === true) {
+        if (in_array($category, self::NEVER_HELD, true) === false && $userId !== null && Sabbath::isQuietNow($userId, self::nowOnDatabaseClock(App::db()), $siteId) === true) {
             self::$lastOutcome = self::hold($siteId, $userId, $number, $body, $category, $useBy) === true ? 'held' : 'not-sent';
 
             return false;
@@ -1040,7 +1040,12 @@ class Sms
         $provider = (string) ($settings['provider'] ?? 'twilio');
         $held     = self::HELD_REASON;
         $after    = 0;
-        /** @var array<int, bool> $quiet Whether each person is still in their quiet hours: asked once a run. */
+        /**
+         * @var array<string, bool> $quiet Whether each person is still in their quiet hours, asked once a run
+         *      PER ORGANISATION (#782): keyed "organisation:person", because the quiet window is worked out on
+         *      the text's own organisation's clock, so one person can be inside it for one organisation's text
+         *      and outside it for another's. Keyed by person alone, the first answer was reused for the second.
+         */
         $quiet = [];
         /** @var array<int, bool> $full The organisations whose limit for today this run found reached. */
         $full = [];
@@ -1080,10 +1085,15 @@ class Sms
                 // 2. Still in their quiet hours? The same question, of the
                 //    same code, that held it. A person who has since
                 //    switched quiet hours off is no longer "inside".
-                if (isset($quiet[$userId]) === false) {
-                    $quiet[$userId] = Sabbath::isQuietNow($userId, self::nowOnDatabaseClock($db));
+                //    ON THE TEXT'S OWN ORGANISATION'S CLOCK (#782): this run
+                //    works through every organisation's texts without
+                //    switching organisation, so the organisation is passed,
+                //    never left to whichever one the job resolved to.
+                $quietKey = $siteId . ':' . $userId;
+                if (isset($quiet[$quietKey]) === false) {
+                    $quiet[$quietKey] = Sabbath::isQuietNow($userId, self::nowOnDatabaseClock($db), $siteId);
                 }
-                if ($quiet[$userId] === true) {
+                if ($quiet[$quietKey] === true) {
                     continue;
                 }
 

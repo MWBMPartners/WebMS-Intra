@@ -114,7 +114,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 202;  // + sixteen in part N (#782: N00-N15) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 204;  // + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -3463,6 +3463,19 @@ $withoutConsumingIds(static function () use ($adminJar): void {
         $win['threw'] === '' && ($win['start'] ?? '') === 'Fri 2028-06-16 18:00',
         json_encode($win)
     );
+    // A zone CHOSEN on the page wins over the organisation's: an installation
+    // upgraded from before #782 keeps the London it holds, and that is only
+    // true if a stored zone is really read. N12 drives only an EMPTY setting,
+    // so without this a Sabbath::zone() that ignored the setting altogether
+    // passed every check here (the independent check planted exactly that).
+    setting('portal.sabbath.timezone', 'Europe/London');
+    $chosen = child(['task' => 'sabbath', 'at' => $at, 'showIn' => 'Europe/London']);
+    setting('portal.sabbath.timezone', '');
+    ok(
+        'N16 a zone CHOSEN for quiet hours wins over the organisation\'s: set to Europe/London while the organisation is on ' . N_ZONE . ', the window begins Friday 18:00 on LONDON\'s clock',
+        $chosen['threw'] === '' && ($chosen['start'] ?? '') === 'Fri 2028-06-16 18:00',
+        json_encode($chosen)
+    );
     $sabbathPage = req($adminJar, 'GET', '/admin/settings/sabbath');
     $selected    = tz_findAll('#<option value="([^"]*)"\s+selected\s*>#', $sabbathPage['body'], $sel) > 0 ? $sel[1] : [];
     ok(
@@ -3486,6 +3499,17 @@ $withoutConsumingIds(static function () use ($adminJar): void {
         'N15 a Sabbath zone PHP does not know is REFUSED with a reason and NOTHING on the page is saved (it was silently replaced with "Europe/London")',
         $sabbathZone() === '' && $latNow === '-33.87' && str_contains(words($refused['body']), 'not one this portal knows') === true,
         'zone ' . json_encode($sabbathZone()) . ', latitude ' . json_encode($latNow) . '; ' . said($refused)
+    );
+    // #677's shape: empty is an instruction on this page ("each organisation's
+    // own"), so a save that does not SEND the field must leave the zone alone.
+    setting('portal.sabbath.timezone', 'Europe/London');
+    $noField = post($adminJar, '/admin/settings/sabbath', '/admin/settings/sabbath', $sabbathPost);
+    $kept    = $sabbathZone();
+    setting('portal.sabbath.timezone', '');
+    ok(
+        'N17 a Sabbath save that does not SEND the zone field leaves a chosen zone (Europe/London) exactly as it is, and the rest of the save still happens',
+        $kept === 'Europe/London' && str_contains(words($noField['body']), 'Sabbath settings saved.') === true,
+        'zone after ' . json_encode($kept) . '; ' . said($noField)
     );
 });
 orgZone(1, $nOrgZoneWas === null ? null : (string) $nOrgZoneWas);

@@ -4462,7 +4462,7 @@ CREATE TABLE IF NOT EXISTS `tblLivestreamSchedule` (
     -- read on London's clock unless somebody noticed, and a London stored that
     -- way cannot be told from a London somebody chose. Now the database refuses
     -- a writer that names no zone, as it does for tblEvents.timezone (#604).
-    `timezone`   VARCHAR(50)  NOT NULL COMMENT 'The clock dayOfWeek, startTime and endTime are read on: an IANA zone name such as Pacific/Auckland. No default, on purpose (#782): every writer names the zone, and the schedule form takes the zone of the organisation when none is given. Read only through Livestream::zoneOf().',
+    `timezone`   VARCHAR(50)  NOT NULL COMMENT 'The clock dayOfWeek, startTime and endTime are read on: an IANA zone name such as Pacific/Auckland. No default, on purpose (#782): every writer names the zone, and the schedule form takes the zone of the organisation when none is given. Turned into a clock only by Livestream::zoneOf(); the admin page also shows the stored text as it is.',
     `isActive`   TINYINT(1)   NOT NULL DEFAULT 1,
     PRIMARY KEY (`scheduleID`),
     KEY `idx_lss_channel_dow` (`channelID`, `dayOfWeek`),

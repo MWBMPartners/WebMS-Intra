@@ -34,8 +34,16 @@ WHY IT IS NARROW, ON PURPOSE (#483: a check that cries wolf gets switched off).
     reports those comments as the very fault they record. The PHP half uses
     PHP's own tokeniser; the JavaScript half steps over // and /* */ comments.
   - ONLY REAL ZONE NAMES COUNT, from PHP's own list (legacy names included),
-    so a file path or a sentence never does. Names without a "/" ("UTC") are
-    not counted: UTC is the portal's deliberate "nothing is known" answer.
+    so a file path or a sentence never does. A name WITH a "/" counts in any
+    capitalisation and with spaces round it, because PHP opens
+    'europe/london' and ' Europe/London' as London (measured on 8.5). A name
+    WITHOUT a "/" ("GB", "Turkey", "EST") counts ONLY when passed straight to
+    `new DateTimeZone(`, `timezone_open(` or `date_default_timezone_set(`,
+    and never when PHP shows it IS UTC ("UTC", "Universal", "Zulu", "GMT"):
+    UTC is the portal's deliberate "nothing is known" answer. Why only there:
+    every such name is also a country, a country code or an abbreviation, and
+    measured on 10 November 2026 the literal "GB" appears 13 times under web/
+    as a country code. zone-literals.php says this in full.
   - SQL FILES ARE NOT READ. Old migrations (070, 090, 170, 217) wrote the
     London defaults, and a migration is history: it cannot be edited, and the
     install script and migration 273 are what remove the defaults. JSON is not
@@ -44,8 +52,12 @@ WHY IT IS NARROW, ON PURPOSE (#483: a check that cries wolf gets switched off).
   - Third-party JavaScript under web/public_html/assets/vendor/ is not read:
     it is not this portal's code.
 
-WHAT IT CANNOT SEE: a zone built from pieces ('Europe/' . 'London'), one that
-is not in quotes, and one in a SQL file. And it cannot tell whether a fallback
+WHAT IT CANNOT SEE: a zone name without a "/" anywhere but directly inside
+those three calls (so `?? 'GB'`, or `$z = 'GB'; new DateTimeZone($z)`, passes),
+a zone built from pieces ('Europe/' . 'London'), one that is not in quotes, one
+passed through a constant or variable, and one in a SQL file. In JavaScript only
+names WITH a "/" are looked for (rule 2 is a PHP-call rule). And it cannot tell
+whether a fallback
 that names NO zone is the right one — `Site::zoneFor()` is the answer, and a
 reviewer has to look for it. A green run means no new zone name is written
 into the code, NOT that every time is told on the right clock.
@@ -189,7 +201,7 @@ def main() -> int:
         refuse(f"its PHP half could not read the code: {done.stderr.strip() or 'no reason given'}")
     try:
         found = json.loads(done.stdout)
-        zones = set(found["zones"])
+        zones = dict(found["zones"])  # lower-cased name -> proper spelling
         hits = list(found["hits"])
     except (ValueError, KeyError, TypeError):
         refuse("its PHP half answered something that is not the expected JSON")
@@ -204,8 +216,9 @@ def main() -> int:
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         for line, contents in js_string_literals(text):
-            if contents in zones:
-                hits.append({"file": rel, "line": line, "zone": contents})
+            key = contents.strip().lower()
+            if key in zones:
+                hits.append({"file": rel, "line": line, "zone": zones[key], "written": contents})
 
     counted: dict[tuple[str, str], list[int]] = collections.defaultdict(list)
     whole_file = {f for (f, z) in ON_PURPOSE if z == "*"}
@@ -214,12 +227,16 @@ def main() -> int:
         counted[key].append(int(h["line"]))
 
     problems: list[str] = []
+    written: dict[tuple[str, str], set[str]] = collections.defaultdict(set)
+    for h in hits:
+        written[(h["file"], h["zone"])].add(str(h.get("written", h["zone"])))
     for key, lines in sorted(counted.items()):
         if key not in ON_PURPOSE:
             file, zone = key
             where = ", ".join(str(n) for n in sorted(lines))
+            spelt = ", ".join(json.dumps(w) for w in sorted(written[key]))
             problems.append(
-                f"  • {file} (line {where}): the zone \"{zone}\" is written into the code. "
+                f"  • {file} (line {where}): the zone \"{zone}\" is written into the code (as {spelt}). "
                 "WebMS-Intra is a product: an organisation's zone is Site::timezone(), and a stored "
                 "zone that cannot be opened falls back through Site::zoneFor(). If this one really "
                 "is data or deliberate, add it to ON_PURPOSE in this file with the reason (#782)."

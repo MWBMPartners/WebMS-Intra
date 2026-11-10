@@ -41,9 +41,21 @@ class Sabbath
     /**
      * Is "now" within the Sabbath quiet window?
      *
+     * WHOSE window (#782). The window is worked out on ONE organisation's
+     * clock when the zone setting is empty ("each organisation's own", which
+     * a new installation ships with), so the caller must say which
+     * organisation the message belongs to. A scheduled job that works through
+     * several organisations' messages in one run MUST pass each message's own
+     * organisation: Sms::send() and Sms::sendDue() do. Null means the
+     * organisation the current request resolved to, which is right only for
+     * something that belongs to no organisation in particular (the
+     * installation-wide error alert in Logger) or to the request itself.
+     *
      * @param int|null $userId  if provided, honours per-user override.
+     * @param int|null $now     the moment to ask about; null means now.
+     * @param int|null $siteId  the organisation whose clock decides; see above.
      */
-    public static function isQuietNow(?int $userId = null, ?int $now = null): bool
+    public static function isQuietNow(?int $userId = null, ?int $now = null, ?int $siteId = null): bool
     {
         $settings = App::settings();
         if ((string) ($settings['portal']['sabbath']['enabled'] ?? '0') !== '1') {
@@ -60,7 +72,7 @@ class Sabbath
         }
 
         $now ??= time();
-        [$startTs, $endTs] = self::computeWindow($now);
+        [$startTs, $endTs] = self::computeWindow($now, $siteId);
 
         return $now >= $startTs && $now <= $endTs;
     }
@@ -70,8 +82,22 @@ class Sabbath
      *
      * The `portal.sabbath.timezone` setting when it names a zone PHP can open;
      * otherwise — and EMPTY is the ordinary case, the value a new installation
-     * ships with — the current organisation's own zone, through
-     * `Site::zoneFor()`, the portal's one rule for a stored zone (#604).
+     * ships with — the zone of the organisation given (or, given none, of the
+     * organisation the current request resolved to), through `Site::zoneFor()`,
+     * the portal's one rule for a stored zone (#604).
+     *
+     * THE ORGANISATION MUST BE GIVEN WHEREVER MORE THAN ONE IS IN PLAY. The
+     * first version of this took none, and the scheduled job that sends held
+     * texts works through EVERY organisation's texts in one run without
+     * switching organisation, so a Sydney member's text was judged on whichever
+     * organisation the job happened to resolve to. Before #782 there was one
+     * zone for everybody, so that could not happen; "each organisation's own"
+     * is what made it possible. Found by the independent check.
+     *
+     * The OTHER Sabbath settings (on or off, the method, the offsets, the
+     * place for sunset) are read as the current request has them. The settings
+     * page saves them installation-wide only, so in practice they are the same
+     * for every organisation; only the clock is per organisation.
      *
      * WHAT WAS WRONG. The setting shipped holding "Europe/London" for every
      * installation, the settings page offered London pre-selected, and a zone
@@ -85,26 +111,30 @@ class Sabbath
      * keeps the London it holds, because nothing can show it was not chosen;
      * an installation made after #782 starts empty.
      */
-    public static function zone(): \DateTimeZone
+    public static function zone(?int $siteId = null): \DateTimeZone
     {
         $settings = App::settings();
 
-        return Site::zoneFor((string) ($settings['portal']['sabbath']['timezone'] ?? ''));
+        return Site::zoneFor((string) ($settings['portal']['sabbath']['timezone'] ?? ''), $siteId);
     }
 
     /**
-     * Compute the Sabbath window containing or surrounding the given time.
+     * Compute the Sabbath window containing or surrounding the given time,
+     * on the clock of the organisation given (see isQuietNow() for why it
+     * must be given wherever more than one organisation is in play).
+     *
+     * @param int|null $siteId The organisation whose clock decides; null for the current one.
      *
      * @return array{0:int, 1:int}  [start_ts, end_ts]
      */
-    public static function computeWindow(int $referenceTs): array
+    public static function computeWindow(int $referenceTs, ?int $siteId = null): array
     {
         $settings = App::settings();
         $method = (string) ($settings['portal']['sabbath']['method'] ?? 'fixed');
         $startOffsetMin = (int) ($settings['portal']['sabbath']['start_offset_minutes'] ?? 0);
         $endOffsetMin   = (int) ($settings['portal']['sabbath']['end_offset_minutes'] ?? 0);
 
-        $tzObj = self::zone();
+        $tzObj = self::zone($siteId);
 
         $ref = (new \DateTimeImmutable('@' . $referenceTs))->setTimezone($tzObj);
 
