@@ -108,7 +108,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
               //    the keep-until date (GdprEraser::eraseGivingStatementFiles() and
               //    statementFileIsKept()); a visit's notes are EMPTIED when the case is about the
               //    person themselves; and "how each is cleared" implied the change history is cleared,
-              //    which the owner's decision D-116 rules out. ?>
+              //    which the owner's decision D-116 rules out.
+              //    Round 10: the gift line asserted removal "if the date has already passed", which is
+              //    untrue under a hold (the organisation's or the installation's): nothing is removed then.
+              //    This page is the same for everybody, so it now states every case and sends the person to
+              //    My data for their own. The statement file's line missed the file whose period cannot be
+              //    read, which is kept at an organisation keeping the name (eraseGivingStatementFiles()). ?>
         <h2 class="h5 mt-4">What is kept</h2>
         <p class="small">
             Records that other people rely on stay, with your name and account number taken off them:
@@ -122,16 +127,20 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <li>If you worked or volunteered here, the pastoral visits you made (with their notes, except on a
                 case about you, where the notes are emptied), the care cases you opened, the DBS (safeguarding) checks you recorded and the children you checked in
                 or out keep your name and account number as the person who did it.</li>
-            <li>Gifts kept for tax (or every gift, where this organisation keeps them all), and your tax
-                declarations, stay with your name and any home address held for you kept beside them. That lasts
-                until this organisation's keep-until date, once it has confirmed how many years it keeps them;
-                if the date has already passed, the erasure removes your name from them as it runs. Your other
-                gifts lose your name. <a href="<?php echo htmlspecialchars(Router::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">My data</a>
-                shows which of your gifts are which.</li>
-            <li>A giving statement's file holds your name, any home address held for you and every gift on it. Where every
-                gift on it is one kept for tax, the file is kept until the same date; otherwise it is deleted.
-                The record that a statement was issued, with its period and totals, keeps your account
-                number.</li>
+            <li>Gifts kept for tax (or every gift, where an organisation keeps them all), and your tax
+                declarations, stay with your name and any home address held for you kept beside them. How long
+                depends on each organisation you give to: until its keep-until date, once it has confirmed how many
+                years it keeps them; with no end date while it has not; and for as long as a hold is on, which an
+                organisation, or whoever runs this installation, can switch on during an audit or a tax enquiry.
+                Only where the date has already passed and no hold is on does the erasure remove your name from
+                them as it runs. Your other gifts lose your name.
+                <a href="<?php echo htmlspecialchars(Router::url('account/my-data'), ENT_QUOTES, 'UTF-8'); ?>">My data</a>
+                shows which of your gifts are which, and what will happen to each today.</li>
+            <li>A giving statement's file holds your name, any home address held for you and every gift on it.
+                At an organisation keeping your name, the file is kept for as long as those gifts are, where every
+                gift on it is one of them, or where the portal cannot tell which period the file covers; every
+                other statement file is deleted when the erasure runs. The record that a statement was issued,
+                with its period and totals, keeps your account number.</li>
             <li>Your expense claims, your own DBS checks and an approval step given to you by name keep your
                 account number.</li>
         </ul>

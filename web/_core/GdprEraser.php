@@ -1272,12 +1272,13 @@ class GdprEraser
                  . 'your name becomes "[Deleted User]", and your e-mail address, telephone, address, biography, map '
                  . 'position, language, sign-in secrets, calendar link and notification choices are emptied. Most '
                  . 'records lose your account number. Some keep it on purpose: your expense claims, your own DBS '
-                 . 'checks, an approval step given to you by name and the record of each giving statement issued to you. '
-                 . 'Some keep your name as well: gifts kept for tax (or every gift, where an organisation keeps them all), '
-                 . 'offering envelopes that will become such gifts, your tax declarations and a giving statement\'s file '
-                 . 'where every gift on it is kept - with any home address held for you, until the organisation\'s '
-                 . 'keep-until date if it has confirmed one (what is shown for your gifts says which of yours, and until '
-                 . 'when) - and any pastoral visits, care cases, DBS checks or children\'s check-ins you made (D-016, '
+                 . 'checks, your tax declarations, an approval step given to you by name and the record of each giving '
+                 . 'statement issued to you. Some keep your name as well: gifts kept for tax (or every gift, where an '
+                 . 'organisation keeps them all), offering envelopes that will become such gifts, your tax declarations and '
+                 . 'a giving statement\'s file where every gift on it is kept - with any home address held for you, until the '
+                 . 'organisation\'s keep-until date if it has confirmed one, or longer while a hold is on (what is shown for '
+                 . 'your gifts says which of yours, and until when) - and any pastoral visits, care cases, DBS checks or '
+                 . 'children\'s check-ins you made (D-016, '
                  . 'D-110, D-111). Separately, records kept for '
                  . 'security and as a history of changes can mention your account number, in what they describe or in '
                  . 'a stored copy of a record that was changed: the activity log, deleted by the nightly clear-out after '
@@ -4998,33 +4999,39 @@ class GdprEraser
      * confirmed its years, with no hold, where the keep-until date has
      * already passed: the keep step answers "due" and
      * clearGivingRecordDueAtErasure() clears the name before the run ends.
+     * Round 10: the states are kept ORGANISATION BY ORGANISATION, with each
+     * organisation's name, and a hold says whose it is (the organisation's
+     * own, the whole installation's, or both), because inventory() covers
+     * every organisation a person belongs to and a merged list of states read
+     * as though every one applied "at this organisation".
      *
      * So the outlook asks, organisation by organisation, the keep step's own
      * reading and rules - sortingScope(), givingFactsAt(), keepsNothing(),
      * keptCountedFrom() and GivingRetention::stateFor() - and sorts every
-     * record into one of: KEPT (with the state that says until when: not-due,
-     * not-confirmed, on-hold, unreadable), LOST BECAUSE THE RULE DOES NOT KEEP
-     * IT, or LOST BECAUSE IT IS ALREADY DUE.
+     * record into one of: KEPT (with the state that says until when),
+     * LOST BECAUSE THE RULE DOES NOT KEEP IT, or LOST BECAUSE IT IS ALREADY
+     * DUE.
      *
      * WHAT IT CANNOT PREDICT, said plainly (measured against the real erasure
-     * in round 8's check, and these are the only disagreements found there
+     * in the checks of rounds 8 and 9; these are the only disagreements found
      * once "due" is counted):
      *   - an organisation where an earlier run's kept row has already been
-     *     CLEARED: the keep step changes nothing there. That needs an emptied
-     *     account, which cannot sign in to read this; it is counted by today's
-     *     rule like any other;
+     *     CLEARED: the keep step returns early there and changes nothing,
+     *     while this counts by today's rule. Round 9's check reached that
+     *     state beside a LIVE account (it is not only an emptied account's),
+     *     so a member can see a count the run will not match there;
      *   - a clearing that FAILS at the end of the run (a file that cannot be
      *     deleted, say): the name then stays until the request is run again.
      *     "Due" is counted as lost, which is what a run that succeeds does.
      *
-     * @return array{gifts: array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>},
-     *               envelopes: array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>},
-     *               declarations: array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>}}
+     * @return array<string, array{keep: int, loseRule: int, loseDue: int,
+     *               kept: list<array{site: string, siteId: int, n: int, scope: string, state: string}>,
+     *               dueAt: list<string>}> Keyed 'gifts', 'envelopes', 'declarations'.
      */
     public static function givingOutlook(int $userId): array
     {
         $db    = App::db();
-        $empty = ['keep' => 0, 'loseRule' => 0, 'loseDue' => 0, 'keptUnder' => [], 'keptStates' => []];
+        $empty = ['keep' => 0, 'loseRule' => 0, 'loseDue' => 0, 'kept' => [], 'dueAt' => []];
         $out   = ['gifts' => $empty, 'envelopes' => $empty, 'declarations' => $empty];
         $count = static function (string $sql) use ($db, $userId): int {
             $stmt = $db->prepare($sql);
@@ -5060,11 +5067,16 @@ class GdprEraser
         $stmt->close();
         $emptied = self::accountEmptiedForGiving(is_array($account) === true ? $account : null);
 
+        // The organisations holding something of theirs, in a FIXED order
+        // (by name, then number), so the words come out the same from
+        // whichever organisation the person is looking from.
         $sites = [];
         $stmt  = $db->prepare(
-            'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
+            'SELECT x.siteID, COALESCE(s.siteName, \'\') AS siteName FROM ('
+            . 'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
             . 'UNION SELECT siteID FROM tblGiftAidDeclaration WHERE donorID = ? '
             . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID WHERE ce.giverID = ?'
+            . ') x LEFT JOIN tblSites s ON s.siteID = x.siteID ORDER BY siteName, x.siteID'
         );
         if ($stmt === false) {
             throw new \RuntimeException((string) $db->error);
@@ -5073,11 +5085,11 @@ class GdprEraser
         $stmt->execute();
         $result = $stmt->get_result();
         while ($row = $result->fetch_row()) {
-            $sites[] = (int) $row[0];
+            $sites[] = [(int) $row[0], (string) $row[1] !== '' ? (string) $row[1] : 'organisation #' . (int) $row[0]];
         }
         $stmt->close();
 
-        foreach ($sites as $siteId) {
+        foreach ($sites as [$siteId, $siteName]) {
             $stmt = $db->prepare('SELECT scope, lastGiftDate, clearedAt FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?');
             if ($stmt === false) {
                 throw new \RuntimeException((string) $db->error);
@@ -5096,6 +5108,13 @@ class GdprEraser
             if (self::keepsNothing($facts, $live === true && $emptied === true) === false) {
                 $state = (string) GivingRetention::stateFor($rule, self::keptCountedFrom($facts, $live === true ? $keptRow : null)['date'])['state'];
             }
+            // Whose hold: the words differ, and an installation-wide hold is
+            // not this organisation's to lift.
+            if ($state === 'on-hold') {
+                $own   = ($rule['holdOwn'] ?? false) === true;
+                $wide  = ($rule['holdEverybody'] ?? false) === true;
+                $state = $own === true && $wide === true ? 'on-hold-both' : ($wide === true ? 'on-hold-installation' : 'on-hold');
+            }
 
             foreach ([
                 'gifts'        => (int) ($facts['gifts']['kept'] ?? 0),
@@ -5107,14 +5126,11 @@ class GdprEraser
                 }
                 if ($state === 'due') {
                     $out[$kind]['loseDue'] += $kept;
+                    $out[$kind]['dueAt'][]  = $siteName;
                     continue;
                 }
-                $out[$kind]['keep'] += $kept;
-                foreach (['keptUnder' => $scope, 'keptStates' => $state] as $list => $value) {
-                    if (in_array($value, $out[$kind][$list], true) === false) {
-                        $out[$kind][$list][] = $value;
-                    }
-                }
+                $out[$kind]['keep']  += $kept;
+                $out[$kind]['kept'][] = ['site' => $siteName, 'siteId' => $siteId, 'n' => $kept, 'scope' => $scope, 'state' => $state];
             }
         }
         foreach ($totals as $kind => $total) {
@@ -5127,17 +5143,21 @@ class GdprEraser
     /**
      * The rows inventory() shows for a person's own gifts, envelopes or tax
      * declarations: one for those that keep the name and one for those that
-     * lose it, each worded for what is true of THAT person (#703 rounds 8
-     * and 9). A row with no records is left out.
+     * lose it, each worded for what is true of THAT person (#703 rounds 8 to
+     * 10). A row with no records is left out.
      *
      * The words follow the facts, not a fixed sentence: "for tax reasons"
      * only where a declaration or statement is the reason (under "every
      * gift" it is not); "until the keep-until date" only where the
-     * organisation has confirmed its years and no hold is on; and a record
-     * already past its date is LOST, as the erasure that clears it as it
-     * runs does.
+     * organisation has confirmed its years and no hold is on; a hold says
+     * whose it is; and a record already past its date is LOST, as the
+     * erasure that clears it as it runs does.
      *
-     * @param array{keep: int, loseRule: int, loseDue: int, keptUnder: list<string>, keptStates: list<string>} $outlook
+     * EVERY ORGANISATION IS NAMED (round 10), in the outlook's fixed order,
+     * and no part says "this organisation": the rows cover every organisation
+     * the person belongs to, and are read from any one of them.
+     *
+     * @param array{keep: int, loseRule: int, loseDue: int, kept: list<array<string, mixed>>, dueAt: list<string>} $outlook
      * @param int $otherKeep How many of the OTHER kind will keep the name (gifts and envelopes speak for each other:
      *                       an envelope that will keep the name becomes a gift that does).
      * @return list<array{table: string, rows: int, action: string, reason: string}>
@@ -5145,40 +5165,44 @@ class GdprEraser
     private static function givingRows(string $table, array $outlook, int $otherKeep = 0): array
     {
         $kind = match ($table) {
-            'tblGivingEntry'        => 'gift',
-            'tblCountEnvelopes'     => 'envelope',
-            default                 => 'declaration',
+            'tblGivingEntry'    => 'gift',
+            'tblCountEnvelopes' => 'envelope',
+            default             => 'declaration',
         };
-        $why = match (true) {
-            $outlook['keptUnder'] === [GivingRetention::SCOPE_ALL] => 'because this organisation keeps the giver\'s name on every gift',
-            in_array(GivingRetention::SCOPE_ALL, $outlook['keptUnder'], true) === true
-                => 'because a tax declaration or giving statement of yours covers its date, or because the organisation keeps the giver\'s name on every gift',
-            default => 'for tax reasons, because a tax declaration or giving statement of yours covers its date',
+        $why = static fn (string $scope): string => match (true) {
+            $kind === 'declaration'                 => 'as the evidence for tax relief claimed on your gifts',
+            $scope === GivingRetention::SCOPE_ALL   => 'because the organisation keeps the giver\'s name on every gift',
+            default                                 => 'for tax reasons, because a tax declaration or giving statement of yours covers its date',
         };
-        $periods = [];
-        foreach ($outlook['keptStates'] as $state) {
-            $periods[] = match ($state) {
-                'not-due'       => 'it is kept until this organisation\'s keep-until date',
-                'not-confirmed' => 'this organisation has not yet confirmed how many years it keeps such records, so there is no end date: nothing is cleared until it does',
-                'on-hold'       => 'a hold is on at this organisation, so nothing is cleared until it is lifted',
-                default         => 'the date it would be cleared on cannot be worked out, so nothing is cleared',
-            };
-        }
-        $until = implode('; or, at another organisation, ', $periods);
+        $until = static fn (string $state): string => match ($state) {
+            'not-due'              => 'until the organisation\'s keep-until date',
+            'not-confirmed'        => 'with no end date yet: the organisation has not confirmed how many years it keeps such records, and nothing is cleared until it does',
+            'on-hold'              => 'for as long as the organisation\'s hold is on: nothing is cleared until it is lifted',
+            'on-hold-installation' => 'for as long as the hold on the whole installation is on: nothing is cleared until whoever runs it lifts it',
+            'on-hold-both'         => 'for as long as the organisation\'s hold and the hold on the whole installation are on: nothing is cleared until both are lifted',
+            default                => 'with no date it could be cleared on worked out, so nothing is cleared',
+        };
+        $noun  = static fn (int $n): string => $n . ' ' . $kind . ($n === 1 ? '' : 's');
+        $names = static fn (array $list): string => count($list) <= 1
+            ? (string) ($list[0] ?? '')
+            : implode(', ', array_slice($list, 0, -1)) . ' and ' . $list[count($list) - 1];
 
         $rows = [];
         if ($outlook['keep'] > 0) {
+            $parts = [];
+            foreach ($outlook['kept'] as $at) {
+                $parts[] = 'At ' . $at['site'] . ': ' . $noun((int) $at['n']) . ', ' . $why((string) $at['scope']) . ', ' . $until((string) $at['state']) . '.';
+            }
             $rows[] = [
                 'table'  => $table,
                 'rows'   => $outlook['keep'],
                 'action' => 'retain',
                 'reason' => match ($kind) {
-                    'gift'     => 'these gifts will keep your name, and any home address held for you is kept with them, ' . $why . '. ' . ucfirst($until),
-                    'envelope' => 'offering envelopes in a count that is not closed yet: when it is closed each becomes a gift that keeps your name, '
-                        . 'and any home address held for you is kept with it, ' . $why . '. ' . ucfirst($until),
-                    default    => 'your tax declarations stay unchanged, with your name kept beside them, as the evidence for tax relief claimed on '
-                        . 'your gifts. ' . ucfirst($until),
-                },
+                    'gift'     => 'these gifts will keep your name, and any home address held for you is kept with them. ',
+                    'envelope' => 'offering envelopes in a count that is not closed yet: when it is closed each becomes a gift that keeps '
+                        . 'your name, and any home address held for you is kept with it. ',
+                    default    => 'your tax declarations stay unchanged, with your name kept beside them. ',
+                } . implode(' ', $parts),
             ];
         }
         $lost = $outlook['loseRule'] + $outlook['loseDue'];
@@ -5186,16 +5210,17 @@ class GdprEraser
             $causes = [];
             if ($outlook['loseRule'] > 0) {
                 $causes[] = ($outlook['loseDue'] > 0 ? $outlook['loseRule'] . ' ' : '') . match ($kind) {
-                    'gift'     => 'because no tax declaration or giving statement of yours covers their date, and this organisation keeps the '
-                        . 'giver\'s name only on gifts one covers',
+                    'gift'     => 'because no tax declaration or giving statement of yours covers their date, and the organisation holding '
+                        . 'them keeps the giver\'s name only on gifts one covers',
                     'envelope' => 'because the count it was in is closed (its gift is among your gifts), or the gift it will become will not '
                         . 'keep your name',
                     default    => 'because no organisation is keeping your giving records',
                 };
             }
             if ($outlook['loseDue'] > 0) {
-                $causes[] = ($outlook['loseRule'] > 0 ? $outlook['loseDue'] . ' ' : '') . 'because this organisation\'s keep-until date for '
-                    . 'them has already passed, so the erasure takes your name off as it runs';
+                $causes[] = ($outlook['loseRule'] > 0 ? $outlook['loseDue'] . ' ' : '') . 'because at '
+                    . $names(array_values(array_unique($outlook['dueAt']))) . ' the keep-until date for them has already passed and no '
+                    . 'hold is on, so the erasure takes your name off as it runs';
             }
             $rows[] = [
                 'table'  => $table,
@@ -5204,8 +5229,12 @@ class GdprEraser
                 'reason' => match ($kind) {
                     'gift'     => 'these gifts keep their amount, date and method and will lose your name, ',
                     'envelope' => 'offering envelopes that will lose your name, ',
-                    default    => 'your tax declarations stay, with their dates and your account number, but your name and the address, the '
-                        . 'network address it was made from, the signature and any notes on them are removed, ',
+                    // A declaration has no name column: the name is kept on
+                    // the kept-donor row beside it (tblGivingKeptDonors), and
+                    // clearKeptGivingIdentity() empties both.
+                    default    => 'your tax declarations stay, with their dates and your account number, but the name kept beside them is '
+                        . 'removed and the address, the network address each was made from, the signature and any notes on them are '
+                        . 'emptied, ',
                 } . implode('; ', $causes)
                     . ($kind !== 'declaration' && $outlook['keep'] === 0 && $otherKeep === 0
                         ? '. None of your gifts' . ($kind === 'envelope' ? ' or envelopes' : '') . ' will keep your name'
@@ -5216,6 +5245,26 @@ class GdprEraser
         return $rows;
     }
 
+    /**
+     * 🏢 The giving-records step for ONE organisation. Runs inside the
+     *    transaction keepGivingRecords() opened, and writes exactly one audit
+     *    line. Anything it throws undoes what it did here and stops the run.
+     *
+     * It does the same work whether or not an earlier run has been here:
+     * count what is kept, write or bring up to date the kept row, take the
+     * donor off every gift that is not kept. See keepGivingRecords() for what
+     * differs on a later run, and why.
+     *
+     * No line it writes holds the donor's name.
+     *
+     * (This docblock was lost in #703 round 9, when the helpers above were
+     * added by cutting up to this function's signature; restored in round 10
+     * from 87d01592. A docblock must sit directly above its function.)
+     *
+     * @return array{changed: bool, due: ?int} `due`: the kept row's number
+     *   when its keep-until date has already passed and nothing but the
+     *   account not being emptied yet holds the clearing back; otherwise null.
+     */
     private static function keepGivingRecordsAtSite(\mysqli $db, int $requestId, int $userId, int $siteId): array
     {
         $rule  = GivingRetention::ruleForSite($siteId);
@@ -5413,6 +5462,8 @@ class GdprEraser
         //    run it is never moved EARLIER than the date already recorded.
         ['date' => $lastGift, 'from' => $from] = self::keptCountedFrom($facts, $earlierRun === true ? $existing : null);
 
+        // 6. The name and home address, as they are now (the account was
+        //    read at 1b).
         $name     = $emptiedAlready === true ? null : (string) $account['fullName'];
         $declared = $one(
             "SELECT address, postcode FROM tblGiftAidDeclaration WHERE siteID = ? AND donorID = ? AND address IS NOT NULL AND address <> '' "

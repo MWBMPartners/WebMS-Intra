@@ -181,7 +181,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 97; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 100; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -202,6 +202,9 @@ const EXPECTED_CHECKS = 97; // 80 until #703 (D-016) added two: the two writers
                             // Round 9 added K5-K8: a record past its date, an
                             // envelope-only giver, words that follow the
                             // organisation's state, and both erased. 97.
+                            // Round 10 added K9-K11: a hold at the organisation,
+                            // one on the whole installation, and a giver in two
+                            // organisations. 100.
 
 function refuse(string $why): never
 {
@@ -379,6 +382,7 @@ const PAT     = 917044; // gave under a declaration long ago and not since: his 
 const EVE     = 917045; // no kept gift - only one from before her declaration - and an envelope in an open count the declaration covers
 const REQ_PAT = 917961; // Pat's request, carried out in section K
 const REQ_EVE = 917962; // Eve's request, carried out in section K
+const QUIN    = 917046; // a member of BOTH organisations, a declared gift at each (round 10)
 const REQ_PIP_B = 917911; // Pip's request, filed in B
 
 /** Every request this run's organisations hold for one account. */
@@ -1386,8 +1390,6 @@ $helpRegion = renderedRegion((string) req($jar['adm'], 'GET', '/help/admin')['bo
 ok('the HELP page\'s section on what an erasure keeps, heading to next heading of its level, is exactly the pinned markup an administrator receives, the D-112 qualifier included, found once, inside exactly the pinned wrappers (#703)',
     renderedPin('help kept list', $helpRegion),
     $helpRegion === '' ? 'not exactly one such section' : mb_substr($helpRegion, 0, 600));
-ok('the rendered-pin file holds exactly the pins this test compares, each once, and nothing it does not understand (#703 round 7)',
-    pinFileProblems() === [], implode(' | ', pinFileProblems()));
 $back = $signIn('mel', 'mel-again');
 ok('Mel cannot sign in again', $back['status'] !== 302 || str_contains($back['location'], 'login') === true, 'HTTP ' . $back['status'] . ' ' . $back['location']);
 $lines = auditLines($melRequest);
@@ -1399,6 +1401,14 @@ ok('a completed request cannot be cancelled, run again or put back: it stays "co
 // =============================================================================
 head('G. The giving-records settings page (roll-out package A2b)');
 // =============================================================================
+// #703 round 10: this section and the sweep below assume NO installation-wide
+// hold - four of their checks failed when one was already on at the start. So
+// the state is set here rather than assumed, recorded first so the clean-up
+// puts it back (and recorded only ONCE: section H records the same row again).
+if (array_key_exists('giving.retention.hold', $state['settings']) === false) {
+    $state['settings']['giving.retention.hold'] = one("SELECT settingID, settingValue FROM tblSettings WHERE settingKey = 'giving.retention.hold' AND siteID IS NULL");
+}
+q("UPDATE tblSettings SET settingValue = 'false' WHERE settingKey = 'giving.retention.hold' AND siteID IS NULL");
 // Each organisation's rule for how long giving records keep a donor's name
 // after the donor has asked to be erased. It decides when personal records are
 // cleared, so who may change it, and whose, is what matters most here.
@@ -1739,7 +1749,9 @@ ok('...and the list offers no Edit or Delete button for those rows, only a link 
 // THE ONE ROW LEFT OPEN: the installation-wide hold, for a global
 // administrator. Switching it on holds every organisation. Recorded first, so
 // that the clean-up puts it back even if this run stops here.
-$state['settings']['giving.retention.hold'] = one("SELECT settingID, settingValue FROM tblSettings WHERE settingKey = 'giving.retention.hold' AND siteID IS NULL");
+if (array_key_exists('giving.retention.hold', $state['settings']) === false) {
+    $state['settings']['giving.retention.hold'] = one("SELECT settingID, settingValue FROM tblSettings WHERE settingKey = 'giving.retention.hold' AND siteID IS NULL");
+}
 siteSetting(ORG_A, 'giving.retention.hold', 'false');
 $saidWide  = $settingsPress($jar['root'], '/settings/save', ['settingID' => $idOf(null, 'giving.retention.hold'), 'settingKey' => 'giving.retention.hold', 'settingValue' => 'true']);
 $wideHold  = (string) one("SELECT settingValue FROM tblSettings WHERE settingKey = 'giving.retention.hold' AND siteID IS NULL")['settingValue'];
@@ -2411,7 +2423,7 @@ $every = $giversSee();
 ok('K2 MY DATA, where every gift keeps the giver\'s name: every gift of all three is shown as kept, saying the organisation keeps the name on every gift; Bo\'s envelope in the closed count still loses his name, because its gift is already among his gifts (#703 round 8)',
     $every['gwen']['tblGivingEntry'] === ['retain:1'] && $every['dora']['tblGivingEntry'] === ['retain:1']
     && $every['bo']['tblGivingEntry'] === ['retain:2'] && $every['bo']['tblCountEnvelopes'] === ['retain:1', 'anonymise:1']
-    && $reasonsSay($every, 'gwen', 'because this organisation keeps the giver\'s name on every gift') === true
+    && $reasonsSay($every, 'gwen', 'because the organisation keeps the giver\'s name on every gift') === true
     && $reasonsSay($every, 'gwen', 'None of your gifts') === false
     && $noAlreadyLost($every) === true,
     json_encode($every));
@@ -2452,11 +2464,11 @@ $says = static fn (array $seen, string $who, string $words): bool
     => array_filter($seen[$who]['reasons'], static fn (string $r): bool => str_contains($r, $words)) !== [];
 ok('K5 PAST ITS DATE: Pat\'s two gifts and his declaration are all shown as losing his name - one gift because no declaration covers it, the other because its keep-until date has already passed - and nothing says any of his will keep it; Eve, whose only gift loses her name but whose envelope in an open count will become a gift that keeps it, is told so and is NOT told that none of her gifts will; Dora\'s kept gift says it is kept until the keep-until date (#703 round 9)',
     $late['pat']['tblGivingEntry'] === ['anonymise:2'] && $late['pat']['tblGiftAidDeclaration'] === ['anonymise:1']
-    && $says($late, 'pat', 'keep-until date for them has already passed, so the erasure takes your name off as it runs') === true
+    && $says($late, 'pat', 'because at Selftest erasure A the keep-until date for them has already passed and no hold is on, so the erasure takes your name off as it runs') === true
     && $says($late, 'pat', 'these gifts will keep your name') === false
     && $late['eve']['tblGivingEntry'] === ['anonymise:1'] && $late['eve']['tblCountEnvelopes'] === ['retain:1'] && $late['eve']['tblGiftAidDeclaration'] === ['retain:1']
     && $says($late, 'eve', 'each becomes a gift that keeps your name') === true && $says($late, 'eve', 'None of your') === false
-    && $says($late, 'dora', 'It is kept until this organisation\'s keep-until date') === true,
+    && $says($late, 'dora', 'At Selftest erasure A: 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, until the organisation\'s keep-until date.') === true,
     json_encode($late));
 
 siteSetting(ORG_A, 'giving.retention.confirmed', 'false');
@@ -2466,9 +2478,9 @@ $everyGift   = $giversSee(['gwen']);
 siteSetting(ORG_A, 'giving.retention.scope', 'receipted');
 siteSetting(ORG_A, 'giving.retention.confirmed', 'true');
 ok('K6 THE WORDS FOLLOW THE STATE: with the years not confirmed, Dora is told there is no end date and nothing is cleared until it is confirmed, and is NOT promised a keep-until date; under "every gift", Gwen\'s kept gift is NOT said to be kept "for tax reasons" (#703 round 9)',
-    $says($unconfirmed, 'dora', 'has not yet confirmed how many years it keeps such records, so there is no end date') === true
-    && $says($unconfirmed, 'dora', 'kept until this organisation\'s keep-until date') === false
-    && $says($everyGift, 'gwen', 'because this organisation keeps the giver\'s name on every gift') === true
+    $says($unconfirmed, 'dora', 'with no end date yet: the organisation has not confirmed how many years it keeps such records') === true
+    && $says($unconfirmed, 'dora', 'until the organisation\'s keep-until date') === false
+    && $says($everyGift, 'gwen', 'because the organisation keeps the giver\'s name on every gift') === true
     && $says($everyGift, 'gwen', 'for tax reasons') === false,
     json_encode([$unconfirmed, $everyGift]));
 
@@ -2484,6 +2496,102 @@ foreach ($patAsks->querySelectorAll('li') as $li) {
 ok('K7 REQUEST ERASURE says the same to Pat: his two gifts and his declaration are "kept, with some details about you removed", none simply "kept" (#703 round 9)',
     $patSaid === ['tblGivingEntry 2 kept, with some details about you removed', 'tblGiftAidDeclaration 1 kept, with some details about you removed'],
     json_encode($patSaid));
+
+// ── #703 round 10: under a HOLD nothing is cleared, and the pages must say so.
+//    A hold at the organisation, then one on the whole installation, then a
+//    giver in two organisations whose states differ. ──
+$sectionAfterDelete = $sectionAfter('What is kept');
+$deleteSeen = static function () use (&$jar, $sectionAfterDelete): string {
+    return renderedRegion((string) req($jar['gwen'], 'GET', '/account/delete')['body'], $sectionAfterDelete);
+};
+$patLines = static function () use (&$jar): array {
+    $doc  = \Dom\HTMLDocument::createFromString((string) req($jar['pat'], 'GET', '/account/erasure-request')['body'], LIBXML_NOERROR);
+    $said = [];
+    foreach ($doc->querySelectorAll('li') as $li) {
+        $code = $li->querySelector('code');
+        if ($code !== null && in_array(trim((string) $code->textContent), ['tblGivingEntry', 'tblGiftAidDeclaration'], true) === true) {
+            $strong = $li->querySelectorAll('strong');
+            $said[] = trim((string) $code->textContent) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
+        }
+    }
+
+    return $said;
+};
+$heldLines = ['tblGivingEntry 1 kept', 'tblGivingEntry 1 kept, with some details about you removed', 'tblGiftAidDeclaration 1 kept'];
+
+siteSetting(ORG_A, 'giving.retention.hold', 'true');
+$orgHold     = $giversSee(['pat']);
+$orgHoldAsks = $patLines();
+$orgHoldDel  = $deleteSeen();
+siteSetting(ORG_A, 'giving.retention.hold', 'false');
+// Compared HERE, not at the end of the check's && chain, so it is always
+// compared (an && that stops early left the pin "compared by no check").
+$orgHoldPinned = renderedPin('delete what is kept', $orgHoldDel);
+ok('K9 A HOLD AT THE ORGANISATION: Pat\'s gift past its date is shown as KEPT, for as long as the organisation\'s hold is on, and so is his declaration; Request erasure says the same; and Delete my account - the same page for everybody - says a hold keeps the name and never asserts removal, found once and as pinned (#703 round 10)',
+    $orgHold['pat']['tblGivingEntry'] === ['retain:1', 'anonymise:1'] && $orgHold['pat']['tblGiftAidDeclaration'] === ['retain:1']
+    && $says($orgHold, 'pat', 'At Selftest erasure A: 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, for as long as the organisation\'s hold is on') === true
+    && $says($orgHold, 'pat', 'has already passed') === false
+    && $orgHoldAsks === $heldLines
+    && $orgHoldPinned === true
+    && str_contains($orgHoldDel, 'for as long as a hold is on') === true && str_contains($orgHoldDel, 'Only where the date has already passed and no hold is on') === true,
+    json_encode([$orgHold, $orgHoldAsks]) . ' | ' . mb_substr($orgHoldDel, 0, 300));
+
+$holdEverybodyNow = one("SELECT settingID FROM tblSettings WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'");
+if ($holdEverybodyNow === null) {
+    q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (NULL, 'giving.retention.hold', 'true', 'false', 0)");
+} else {
+    q("UPDATE tblSettings SET settingValue = 'true' WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'");
+}
+$wideHold     = $giversSee(['pat']);
+$wideHoldAsks = $patLines();
+$wideHoldDel  = $deleteSeen();
+q("UPDATE tblSettings SET settingValue = 'false' WHERE siteID IS NULL AND settingKey = 'giving.retention.hold'");
+$wideHoldPinned = renderedPin('delete what is kept', $wideHoldDel);
+ok('K10 A HOLD ON THE WHOLE INSTALLATION: Pat\'s gift is shown as kept for as long as the hold on the whole installation is on - said as the installation\'s, not the organisation\'s; Request erasure says the same; Delete my account is the same pinned section (#703 round 10)',
+    $wideHold['pat']['tblGivingEntry'] === ['retain:1', 'anonymise:1'] && $wideHold['pat']['tblGiftAidDeclaration'] === ['retain:1']
+    && $says($wideHold, 'pat', 'for as long as the hold on the whole installation is on') === true
+    && $says($wideHold, 'pat', 'the organisation\'s hold') === false && $says($wideHold, 'pat', 'has already passed') === false
+    && $wideHoldAsks === $heldLines
+    && $wideHoldPinned === true,
+    json_encode([$wideHold, $wideHoldAsks]));
+
+// Quin gives at both organisations. A is on hold; B has confirmed six years
+// and no hold. His rows must name each, in a fixed order, and read the same
+// from either organisation.
+$givingBeforeB10 = q("SELECT settingKey, settingValue, defaultValue FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%' ORDER BY settingKey", 'i', [ORG_B]);
+q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [QUIN, 'Quin Two', 'u' . QUIN . '.erasure@selftest.invalid']);
+foreach ([ORG_A, ORG_B] as $site) {
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [QUIN, $site]);
+    q("INSERT INTO tblGiftAidDeclaration (siteID, donorID, address, postcode, validFrom) VALUES (?, ?, '6 Made-up Road', 'ZZ6 6ZZ', '2020-01-01')", 'ii', [$site, QUIN]);
+    $gift($site, QUIN, $recent, 900);
+}
+q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [QUIN, 'selftest-erasure-quin', $hash]);
+$in = $signIn('quin');
+if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
+    refuse("signing in as selftest-erasure-quin did not work (HTTP {$in['status']} {$in['location']})");
+}
+q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%'", 'i', [ORG_B]);
+siteSetting(ORG_B, 'giving.retention.confirmed', 'true');
+siteSetting(ORG_B, 'giving.retention.years', '6');
+siteSetting(ORG_B, 'giving.retention.hold', 'false');
+siteSetting(ORG_A, 'giving.retention.hold', 'true');
+$fromA = $givingShown((string) req($jar['quin'], 'GET', '/account/my-data')['body']);
+$fromB = $givingShown((string) req($jar['quin'], 'GET', '/account/my-data', null, ADDR_B)['body']);
+siteSetting(ORG_A, 'giving.retention.hold', 'false');
+q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%'", 'i', [ORG_B]);
+foreach ($givingBeforeB10 as $row) {
+    q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss',
+        [ORG_B, $row['settingKey'], $row['settingValue'], $row['defaultValue']]);
+}
+$quinGifts = 'tblGivingEntry retain: these gifts will keep your name, and any home address held for you is kept with them. '
+    . 'At Selftest erasure A: 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, '
+    . 'for as long as the organisation\'s hold is on: nothing is cleared until it is lifted. '
+    . 'At Selftest erasure B: 1 gift, for tax reasons, because a tax declaration or giving statement of yours covers its date, '
+    . 'until the organisation\'s keep-until date.';
+ok('K11 A GIVER IN TWO ORGANISATIONS: Quin\'s kept gifts are worded organisation by organisation, each NAMED, in a fixed order - on hold at A, until the keep-until date at B - and nothing says "this organisation"; the words are the same whether he looks from A or from B (#703 round 10)',
+    $fromA['tblGivingEntry'] === ['retain:2'] && in_array($quinGifts, $fromA['reasons'], true) === true
+    && $fromA === $fromB && str_contains(json_encode($fromA), 'this organisation') === false,
+    json_encode($fromA) . ' | B: ' . json_encode($fromB));
 
 $seed(REQ_PAT, ORG_A, PAT, 'pending_review', null);
 $seed(REQ_EVE, ORG_A, EVE, 'pending_review', null);
@@ -2506,6 +2614,12 @@ foreach ($givingBefore8 as $row) {
     q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss',
         [ORG_A, $row['settingKey'], $row['settingValue'], $row['defaultValue']]);
 }
+
+// The pin file as a whole, asked AFTER every rendered pin has been compared
+// (#703 round 10: it sat after the help page's pin, before section K's, and so
+// reported section K's pin as "compared by no check").
+ok('the rendered-pin file holds exactly the pins this test compares, each once, and nothing it does not understand (#703 round 7)',
+    pinFileProblems() === [], implode(' | ', pinFileProblems()));
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
