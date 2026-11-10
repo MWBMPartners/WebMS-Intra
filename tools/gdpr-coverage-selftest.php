@@ -3043,6 +3043,10 @@ check(
 //    a record naming anybody is gone, and the plain sentence is there instead,
 //    in the places a member or an administrator reads it. Both directions,
 //    because a check made only of absences passes on a page that says nothing.
+//    (The four statements about the ACCOUNT, and the worker rows of the help
+//    page and the policy, are pinned WHOLE further down instead - #703 round 5
+//    took their substring guards out of this check, because two guards over one
+//    fact drift apart.)
 $reasonOf = static fn (string $table): string => (string) ($catalogue[$table]['reason'] ?? '');
 // HTML tags only are taken out (strip_tags() would also swallow the PHP
 // blocks, and with them every sentence after the first `<?php`), then every
@@ -3053,24 +3057,16 @@ $privacy   = $pageWords('_apps/privacy/policy.php');
 $policyDoc = (string) gc_replace('/\s+/', ' ', (string) @file_get_contents(__DIR__ . '/../docs/gdpr-erasure-policy.md'));
 $saysTheOpposite = [];
 foreach ([
-    'tblUsers reason'         => [$reasonOf('tblUsers'), 'a tombstone that names nobody'],
     'tblExpenseClaims reason' => [$reasonOf('tblExpenseClaims'), 'What stops the claim naming anybody'],
     'tblApiRateLimits reason' => [$reasonOf('tblApiRateLimits'), 'no longer identifies anybody'],
     'help/admin.php'          => [$helpAdmin, 'What stops the claim naming anybody'],
     'privacy/policy.php'      => [$privacy, 'your name and the link to you are removed, and the amounts and dates stay'],
-    // #703 round 3: said flatly, and untrue - most records DO lose the number.
-    'privacy/policy.php (2)'  => [$privacy, 'Your account number is not removed from the records that point at it'],
-    'tblUsers reason (2)'     => [$reasonOf('tblUsers'), 'Its NUMBER is not removed from the records that point at it'],
-    'gdpr-erasure-policy.md'  => [$policyDoc, 'The account NUMBER is not removed from those records'],
-    // #703 round 3: the claim applied only to pastoral visits.
-    'help/admin.php (2)'      => [$helpAdmin, 'so those older records still show'],
 ] as $where => [$text, $old]) {
     if (str_contains($text, $old) === true) {
         $saysTheOpposite[] = $where . ' still says "' . $old . '"';
     }
 }
 $saysItPlainly = [
-    'tblUsers reason'         => str_contains($reasonOf('tblUsers'), 'can match their other kept records back to them (D-113)'),
     'tblExpenseClaims reason' => str_contains($reasonOf('tblExpenseClaims'), 'can match the claim back to them (D-113)'),
     'tblApiRateLimits reason' => str_contains($reasonOf('tblApiRateLimits'), 'can still be matched back to them by anyone who can read the database or a backup (D-113)'),
     'tblCareVisit reason'     => str_contains($reasonOf('tblCareVisit'), '(D-113)'),
@@ -3079,13 +3075,7 @@ $saysItPlainly = [
     'tblKidCheckins reason'   => str_contains($reasonOf('tblKidCheckins'), '(D-113)'),
     'help/admin.php'          => str_contains($helpAdmin, 'that does not always stop the claim naming the claimant')
         && str_contains($helpAdmin, 'which of the erased person\'s other kept records were theirs'),
-    'privacy/policy.php'      => str_contains($privacy, 'keep your name and account number as the person who did it, even after you are erased')
-        && str_contains($privacy, 'could use them to tell which of your other kept records'),
-    'gdpr-erasure-policy.md'  => str_contains($policyDoc, 'can use these records to re-identify the erased person on every other record that kept their number')
-        && str_contains($policyDoc, 'Most of those records lose the account NUMBER, but SOME keep it'),
-    'privacy/policy.php (2)'  => str_contains($privacy, 'Most records that point at it lose your account number, but some keep it')
-        && str_contains($privacy, 'gifts kept for tax keep your name with your number until this organisation\'s keep-until date'),
-    'help/admin.php (2)'      => str_contains($helpAdmin, 'their older pastoral visits still show'),
+    'privacy/policy.php'      => str_contains($privacy, 'gifts kept for tax keep your name with your number until this organisation\'s keep-until date'),
 ];
 check(
     'D-113: no page or reason a member reads still says an emptied account stops a record naming them, and each says plainly that an erased worker can be re-identified through the records they made (#703)',
@@ -3133,13 +3123,6 @@ foreach ($keptLines as $key => $expected) {
         $shownWrong[] = $key . ': "' . mb_substr($line, 0, 160) . '…"';
     }
 }
-$usersLine = $shown['tblUsers.userID'] ?? '';
-if (str_contains($usersLine, 'Most records lose your account number. SOME keep it:') === false
-    || str_contains($usersLine, 'can match those records back to you (D-113)') === false
-    || str_contains($usersLine, 'historical FK integrity') === true
-) {
-    $shownWrong[] = 'tblUsers.userID: "' . mb_substr($usersLine, 0, 120) . '…"';
-}
 if (str_contains($shown['tblExpenseClaims.userID'] ?? '', 'the number on the claim can still be matched back to you through any record that keeps your name beside it') === false) {
     $shownWrong[] = 'tblExpenseClaims.userID';
 }
@@ -3154,60 +3137,94 @@ if (str_contains($eraserCodeNow, 'points at names nobody') === true
 ) {
     $shownWrong[] = 'the erasure report\'s giving clearing line';
 }
-// 🧾 THE LIST OF RECORDS THAT KEEP THE NUMBER, in every place it is told
-//    (#703 round 4). Round 3's list left out three kinds and nothing pinned it:
-//    deleting "your expense claims, " left every suite green. The list was then
-//    MEASURED - every column of the eraser self-test's loaded schema still
-//    holding the erased person's number after a real erasure, in any column
-//    type - and widened by the shapes that world does not build (an open
-//    count's envelopes, the change history about the account, a rate-limit
-//    record). Each ITEM is pinned in each of the four places, inside that
-//    place's own list, so a harmless rewording around them stays green and a
-//    dropped item goes red.
-$keepsTheNumber = [
-    'expense claims', 'own DBS checks', 'tax declarations', 'giving statements',
-    'gifts kept for tax', 'offering envelopes', 'change history', 'rate-limit records',
-    'approval step', "pastoral visits, care cases, DBS checks or children's check-ins",
-];
-$listIn = static function (string $text, string $start, string $end): string {
-    $from = stripos($text, $start);
+// 🧾 WHAT AN ERASED PERSON'S ACCOUNT NUMBER STAYS ON, said WHOLE in four places
+//    (#703 rounds 4 and 5). Round 4 pinned each ITEM of the list as a word and
+//    promised that "harmless rewording stays green"; the independent check then
+//    reversed its meaning five ways with every item still present ("not your
+//    expense claims (those lose it)", "(all of which are anonymous once your
+//    account is emptied)", "None of these can be traced back to you.") and
+//    raised false alarms the other way. So there is ONE rule now: each place's
+//    WHOLE statement is compared, with only runs of spaces made one - the way
+//    the five worker reasons above are. Changing a sentence means changing its
+//    pin, on purpose. The item check is DELETED rather than kept beside this,
+//    because two guards over one fact drift apart.
+//
+//    The statement is TWO lists and says neither is complete: what is kept ON
+//    PURPOSE (measured in round 4), and the records kept for SECURITY and as a
+//    HISTORY OF CHANGES, with each one's real clearing rule read from the code
+//    (`log_sweep_tables()` sweeps tblActivityLogs alone; nothing deletes from
+//    tblAuditTrail or tblAssetAudit; `RateLimiter::recordHit()` tidies about
+//    one call in 64, only when a later request of the same kind arrives).
+//
+//    Also pinned whole: the help page's and the policy's paragraph about the
+//    worker records, so that the D-112 qualifier ("unless the record is also
+//    about them") cannot be dropped from either with everything green.
+//
+//    HOW EACH IS READ: the two reasons from the real instructions and the
+//    written list; a page with its PHP blocks and then its HTML tags taken out
+//    (a PHP comment must not be part of a pin); a policy row as its own line.
+// A page's text with its PHP blocks taken out but its HTML still in, so a
+// statement can be cut at the END OF ITS OWN LIST ITEM (`</li>`). Cutting at its
+// last words let a sentence added after them go unseen - plant C3 of round 5.
+$pinRaw = static fn (string $page): string => (string) gc_replace('/<\?php.*?\?>/s', '', (string) @file_get_contents(__DIR__ . '/../web/' . $page));
+$pinWords = static fn (string $html): string => trim((string) gc_replace('/\s+/', ' ', gc_replace('#</?[a-z][^>]*>#i', '', $html)));
+$pinBetween = static function (string $text, string $start, string $endInclusive): string {
+    $from = strpos($text, $start);
     if ($from === false) {
         return '';
     }
-    $to = stripos($text, $end, $from);
+    $to = strpos($text, $endInclusive, $from);
 
-    return $to === false ? '' : (string) substr($text, $from, $to - $from);
+    return $to === false ? '' : (string) substr($text, $from, $to + strlen($endInclusive) - $from);
 };
-$catalogueUsersReason = (string) gc_replace('/\s+/', ' ', $reasonOf('tblUsers'));
-$listPlaces = [
-    'what a member is shown (GdprEraser)' => $listIn((string) gc_replace('/\s+/', ' ', $shown['tblUsers.userID'] ?? ''), 'SOME keep it:', 'Through that number and those names'),
-    'the written list (personal-data-catalogue.php)' => $listIn($catalogueUsersReason, 'SOME keep it:', 'Through that number, anyone'),
-    // `$privacy` has its tags taken out, so the list ends at its own last words.
-    'the privacy notice (privacy/policy.php)' => $listIn($privacy, 'but some keep it:', '(see the next point)'),
-    'the policy (docs/gdpr-erasure-policy.md)' => $listIn($policyDoc, 'but SOME keep it', ' - so an emptied account'),
-];
-$listMissing = [];
-foreach ($listPlaces as $place => $list) {
-    if ($list === '') {
-        $listMissing[] = $place . ': the list itself could not be found';
-        continue;
-    }
-    foreach ($keepsTheNumber as $item) {
-        if (stripos($list, $item) === false) {
-            $listMissing[] = $place . ': "' . $item . '"';
+$pinPolicyLine = static function (string $start) use ($wholeKept): string {
+    foreach (explode("\n", (string) @file_get_contents(__DIR__ . '/../docs/gdpr-erasure-policy.md')) as $line) {
+        if (str_starts_with($line, $start) === true) {
+            return $wholeKept($line);
         }
     }
+
+    return '';
+};
+$catalogueNow = require $catalogueFile;
+$statementsNow = [
+    'what a member is shown about their account (GdprEraser, tblUsers)' => $wholeKept($shown['tblUsers.userID'] ?? ''),
+    'the written list (personal-data-catalogue.php, tblUsers)'         => $wholeKept((string) ($catalogueNow['tblUsers']['reason'] ?? '')),
+    'the privacy notice (privacy/policy.php)'                           => $pinWords($pinBetween($pinRaw('_apps/privacy/policy.php'), 'Your user row', '</li>' . "\n" . '</ul>')),
+    'the policy, the account row (docs/gdpr-erasure-policy.md)'         => $pinPolicyLine('| **The account itself**'),
+    'the policy, the worker records row (docs/gdpr-erasure-policy.md)'  => $pinPolicyLine('| **Pastoral and safeguarding records the person made'),
+    'the help page, the worker records paragraph (help/admin.php)'      => $pinWords($pinBetween($pinRaw('_apps/help/admin.php'), 'Who made a pastoral visit, opened a care case', '</li>')),
+];
+$statementsPinned = [
+    'what a member is shown about their account (GdprEraser, tblUsers)' => 'your account is kept as an empty shell so that the records pointing at it do not break: your name becomes "[Deleted User]", and your e-mail address, telephone, address, biography, map position, language, sign-in secrets, calendar link and notification choices are emptied. Most records lose your account number. Some keep it on purpose: your expense claims, your own DBS checks, your tax declarations and giving statements, gifts kept for tax and offering envelopes that will become such gifts (which also keep your name until the organisation\'s keep-until date), an approval step given to you by name, and any pastoral visits, care cases, DBS checks or children\'s check-ins you made (which keep your name too: D-016, D-110, D-111). Separately, records kept for security and as a history of changes can mention your account number, in what they describe or in a stored copy of a record that was changed: the activity log, deleted by the nightly clear-out after the number of days the organisation sets (a year unless changed), if that scheduled job has been set up; the change history of records, which nothing clears; and rate-limit records, tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither list is every place your number may be written: anything typed about you can mention it too. Through that number and the names kept beside it, anyone who can read the database or a backup can match these records back to you (D-113)',
+    'the written list (personal-data-catalogue.php, tblUsers)'         => 'The account itself. It is emptied rather than deleted: hundreds of records point at it, and deleting the row would drag them all down with it. Name, email, telephone, address, coordinates, biography and photo are all cleared, a photo file held in the portal\'s uploads folder is deleted, and the account is left as a tombstone with no name on it. Most records that point at it lose the account NUMBER. SOME keep it on purpose: the person\'s expense claims, their own DBS checks, their tax declarations and giving statements, gifts kept for tax and offering envelopes that will become such gifts (with their name kept in tblGivingKeptDonors until the organisation\'s keep-until date), an approval step given to them by name, and the pastoral visits, care cases, DBS checks or children\'s check-ins they made, which keep their name beside the number (the owner\'s decisions D-016, D-110, D-111). Separately, records kept for security and as a history of changes can mention the number, in what they describe or in a stored copy of a changed record: the activity log (tblActivityLogs), deleted by the nightly clear-out after audit.retentionDays (365 days unless changed) if that scheduled job has been set up; the change history of records (tblAuditTrail, tblAssetAudit), which nothing clears; and rate-limit records (tblApiRateLimits), tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither list is every place the number may be written: free text typed about the person can mention it too. Through that number, anyone who can read the database or a backup can match their other kept records back to them (D-113).',
+    'the privacy notice (privacy/policy.php)'                           => 'Your user row is anonymised with the tombstone [Deleted User] rather than deleted, so historical foreign-key links don\'t cascade-blow attribution we want to keep. Most records that point at it lose your account number, but some keep it on purpose: your expense claims, your own DBS checks, your tax declarations and giving statements, gifts kept for tax and offering envelopes that will become such gifts, an approval step given to you by name, and the pastoral visits, care cases, DBS checks or children\'s check-ins you made (see the next point). If you worked or volunteered here, the pastoral visits you made, the care cases you opened, the DBS (safeguarding) checks you recorded and the children you checked in or out keep your name and account number as the person who did it, even after you are erased. A safeguarding record must still say who carried it out. Because your account number stays on them, anyone who can read the database or a backup could use them to tell which of your other kept records (an expense claim, for instance) were yours. Records kept for security and as a history of changes can mention your account number, in what they describe or in a stored copy of a record that was changed: the activity log, deleted after the number of days this organisation sets (a year unless changed) by a nightly clear-out, if that scheduled job has been set up; the change history of records, which nothing clears; and rate-limit records, tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither of these lists is every place your number may be written: anything typed about you can mention it too.',
+    'the policy, the account row (docs/gdpr-erasure-policy.md)'         => '| **The account itself** | `tblUsers` | **Emptied, not deleted.** The name becomes `[Deleted User]`; email address, telephone, address, biography, map position, language, two-factor secret, calendar address and notification choices are cleared; the account is switched off and loses any administrator rights | Hundreds of records point at the account. Deleting the row would break or delete them. Most of those records lose the account NUMBER, but SOME keep it on purpose - expense claims, the person\'s own DBS checks, tax declarations and giving statements, gifts kept for tax and offering envelopes that will become such gifts, an approval step given to the person by name, and the pastoral visits, care cases, DBS checks or children\'s check-ins the person made (`tblCareVisit`, `tblCareCase`, `tblDbsChecks`, `tblKidCheckins`). Separately, records kept for security and as a history of changes can mention the number, in what they describe or in a stored copy of a changed record: the activity log (`tblActivityLogs`), deleted by the nightly clear-out after `audit.retentionDays` (365 days unless changed) if that scheduled job has been set up; the change history of records (`tblAuditTrail`, `tblAssetAudit`), which nothing clears; and rate-limit records (`tblApiRateLimits`), tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither list is every place the number may be written: free text typed about the person can mention it too. So an emptied account does not by itself make these records anonymous: the pastoral visits, care cases, DBS checks and children\'s check-ins keep the name beside the same number (D-113), and a kept giving record keeps it until the keep-until date |',
+    'the policy, the worker records row (docs/gdpr-erasure-policy.md)'  => '| **Pastoral and safeguarding records the person made, and children they checked in or out** | `tblCareVisit` (`visitedByID`, `visitedByName`), `tblCareCase` (`openedByID`, `openedByName`), `tblDbsChecks` (`recordedByID`, `recordedByName`), `tblKidCheckins` (`checkedInByID`, `checkedInByName`, `checkedOutByID`, `checkedOutByName`) | **Kept, with their name AND account number** as the person who made the visit, opened the case, recorded the check or checked the child in or out - including a visit they made on a case about themselves. Their account itself is still emptied, so the name is the one written on the record when it was made. Their name and number are the only things about them left on these records, unless the record is also about them (a visit on a case about them, or their own DBS check) | The owner\'s decisions D-016 (3 November 2026), D-110, D-111 and D-112 (10 November 2026), #703: a safeguarding record that cannot say who carried it out is worse for the people it protects. **A person asking to be erased cannot expect their name to come off these records.** **And because the number stays beside the name (D-113), anyone who can read the database or a backup can use these records to re-identify the erased person on every other record that kept their number** - an expense claim, a rate-limit record. The owner chose to keep both and say so. Until #703 the account number was removed and no name was kept; a worker erased before #703 cannot be given their name back. What a visit says about the person **cared for** is still emptied when that person asks (#709) |',
+    'the help page, the worker records paragraph (help/admin.php)'      => 'Who made a pastoral visit, opened a care case, recorded a DBS (safeguarding) check, or checked a child in or out. When a member of staff or a volunteer asks to be erased, those records keep their name and account number as the person who did it &mdash; including a visit they made on a case about themselves. That was decided deliberately (3 and 10 November 2026): a safeguarding record that cannot say who carried it out is worse for the people it exists to protect. Their account itself is still emptied &mdash; contact details, sign-in, everything else &mdash; and their name and account number are the only things about them left on those records, unless the record is also about them (a visit on a case about them, or their own DBS check). Be clear about what that costs: because the number stays beside the name, anyone who can read the database or a backup can use those records to work out which of the erased person\'s other kept records were theirs &mdash; an expense claim, for instance, which also keeps the number. Somebody asking to be erased cannot expect their name to come off these records. The name is the one their account had when the record was made. Two limits, said plainly: a worker erased before this change cannot be given their name back, so their older pastoral visits still show &ldquo;Somebody no longer recorded&rdquo; on the case page (no page shows who opened a case, who recorded a DBS check or who checked a child in or out); and what a visit says about the person being cared for is still emptied when they ask to be erased.',
+];
+$statementsWrong = [];
+foreach ($statementsPinned as $place => $expected) {
+    $now = $statementsNow[$place] ?? '';
+    if ($now !== $wholeKept($expected)) {
+        // Say WHERE they part, so a deliberate rewording is quick to re-pin and
+        // an accidental one is easy to see.
+        $at = 0;
+        while ($at < strlen($now) && $at < strlen($expected) && $now[$at] === $expected[$at]) {
+            $at++;
+        }
+        $statementsWrong[] = $place . ($now === '' ? ': not found at all' : ': differs from the pinned text at "…' . substr($now, max(0, $at - 30), 90) . '…"');
+    }
 }
-// The policy doc used to say "the pastoral, safeguarding and check-in records
-// in the row above" when the row above is the activity log: a direction is a
-// line number with the digits filed off. It names the records now.
+// A direction is a line number with the digits filed off (round 4): the policy
+// names the records it means.
 if (str_contains($policyDoc, 'in the row above') === true) {
-    $listMissing[] = 'the policy still points at "the row above"';
+    $statementsWrong[] = 'the policy points at "the row above" again';
 }
 check(
-    'D-113: every place that lists the records keeping an erased person\'s account number lists ALL of them - expense claims, own DBS checks, tax declarations, giving statements, gifts kept for tax, offering envelopes, the change history, rate-limit records, an approval step, and the worker records (#703 round 4)',
-    $listMissing === [],
-    implode(' | ', $listMissing)
+    'D-113: what an erased person\'s account number stays on - kept on purpose, and kept for security and as a history of changes, neither list claimed complete - is said WHOLE and unchanged in all four places, and the worker-records paragraphs keep the D-112 qualifier (#703 round 5)',
+    $statementsWrong === [],
+    implode(' | ', $statementsWrong)
 );
 
 check(

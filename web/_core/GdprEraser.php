@@ -1231,26 +1231,37 @@ class GdprEraser
              //    written out here). It said "user row retained for historical FK
              //    integrity; PII removed", which told a worker nothing about the
              //    number that stays, or what it can still be matched to.
+             // 🧾 #703 round 5: TWO statements, and neither is presented as the
+             //    whole set. The first lists what is KEPT ON PURPOSE (measured in
+             //    round 4). The second is about records kept for SECURITY and as a
+             //    HISTORY OF CHANGES, which can mention the number in what they
+             //    describe or in a stored copy of a changed row - the independent
+             //    check found it in the activity log, in other records' change
+             //    history and in rate-limit buckets, and no list of tables can name
+             //    every such place, so the sentence says so. Each clearing rule is
+             //    READ FROM THE CODE: `audit.retentionDays` sweeps tblActivityLogs
+             //    only (`log_sweep_tables()` in `_apps/cron/_retention-sweep.php`);
+             //    nothing deletes from tblAuditTrail or tblAssetAudit; and
+             //    `RateLimiter::recordHit()` tidies about one call in 64, and only
+             //    when a later request of the same kind arrives. The same content
+             //    is in the catalogue, privacy/policy.php and the policy doc, and
+             //    section 23 of the coverage test pins each place WHOLE.
              'reason' => 'your account is kept as an empty shell so that the records pointing at it do not break: '
                  . 'your name becomes "[Deleted User]", and your e-mail address, telephone, address, biography, map '
                  . 'position, language, sign-in secrets, calendar link and notification choices are emptied. Most '
-                 // 🧾 #703 round 4: this list is MEASURED, not remembered - every
-                 //    column still holding the number after a real erasure in the
-                 //    eraser self-test's loaded schema (any column type), plus the
-                 //    shapes that world does not build (an open count's envelopes,
-                 //    the change history about the account, a rate-limit record).
-                 //    The same items are said in privacy/policy.php, the catalogue
-                 //    and docs/gdpr-erasure-policy.md, and section 23 of the coverage
-                 //    test pins each item in all four. Add a kind of record here and
-                 //    there together.
-                 . 'records lose your account number. SOME keep it: your expense claims, your own DBS checks, your '
-                 . 'tax declarations and giving statements, gifts kept for tax and offering envelopes that will become '
-                 . 'such gifts (which also keep your name until the organisation\'s keep-until date), the change history '
-                 . 'about your account, rate-limit records (for a short while, until they are tidied away), an approval '
-                 . 'step given to you by name, and any pastoral visits, care cases, DBS checks or children\'s '
-                 . 'check-ins you made (which keep your name too, on purpose: D-016, D-110, D-111). Through that number '
-                 . 'and those names, anyone who can read the database or a backup can match those records back to you '
-                 . '(D-113)'],
+                 . 'records lose your account number. Some keep it on purpose: your expense claims, your own DBS '
+                 . 'checks, your tax declarations and giving statements, gifts kept for tax and offering envelopes that '
+                 . 'will become such gifts (which also keep your name until the organisation\'s keep-until date), an '
+                 . 'approval step given to you by name, and any pastoral visits, care cases, DBS checks or children\'s '
+                 . 'check-ins you made (which keep your name too: D-016, D-110, D-111). Separately, records kept for '
+                 . 'security and as a history of changes can mention your account number, in what they describe or in '
+                 . 'a stored copy of a record that was changed: the activity log, deleted by the nightly clear-out after '
+                 . 'the number of days the organisation sets (a year unless changed), if that scheduled job has been set '
+                 . 'up; the change history of records, which nothing clears; and rate-limit records, tidied away only '
+                 . 'when a later request of the same kind happens to trigger it, so one can stay for a long time. '
+                 . 'Neither list is every place your number may be written: anything typed about you can mention it '
+                 . 'too. Through that number and the names kept beside it, anyone who can read the database or a backup '
+                 . 'can match these records back to you (D-113)'],
         ];
 
         // 📚 Everything else comes from the one written list of where

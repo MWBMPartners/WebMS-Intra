@@ -993,7 +993,10 @@ $myDataSays = [
     'checkin' => 'children you checked in keep your name and your account number as the helper who checked them in',
     'dbs'     => 'DBS checks you recorded keep your name and your account number as the person who recorded them',
     'match'   => 'Through that number, anyone who can read the database or a backup can match your other kept records - an expense claim, for instance - back to you (D-113)',
-    'account' => 'Most records lose your account number. SOME keep it:',
+    'account' => 'Most records lose your account number. Some keep it on purpose:',
+    // #703 round 5: the separate statement about records kept for security and
+    // as a history of changes, which a member must also be shown.
+    'history' => 'Separately, records kept for security and as a history of changes can mention your account number',
 ];
 $myDataMissing = array_keys(array_filter($myDataSays, static fn (string $words): bool => str_contains($myData, $words) === false));
 ok('MY DATA tells a worker, before they ask to be erased, that the visits, case, check-in and DBS check they made keep their name and number, that through that number their other kept records can be matched back to them, and that SOME records keep their account number (#703, D-113)',
