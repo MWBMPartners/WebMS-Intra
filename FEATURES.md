@@ -247,7 +247,9 @@ screens and didn't say what it meant.
   `/widget/countdown` and the old `/widget` page); the script's countdown mode replaces it. **A page for a
   frame (#493 P4c):** `page.html` — events, posters or both, drawn on the server with no script; framable
   only by the websites the organisation lists, and by none while the installation forbids framing (D-094);
-  the card prints the frame to paste.
+  the card prints the frame to paste. **Test copies and the set-up check (#493 P4d):** on a test copy, who the
+  door answers is a tiered setting (D-087: the installation's limit, the organisation's choice within it; testers
+  only by default); "Check my set-up" confirms an approved public address really reaches this door.
 - **Admin → Server Information** (`/admin/system-info`, any
   administrator): PHP version, the database verdict, connection facts
   asked of the live connection itself rather than read from the

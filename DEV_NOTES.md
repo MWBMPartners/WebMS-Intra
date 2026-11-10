@@ -22193,3 +22193,65 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   had already met this in its section P and copied the whole row; proof 27 had not.
   Copy the row from the table as it stands AFTER the restore, never from before it, or
   a restore fault on that row is papered over.
+
+### The public door, package P4d (#493)
+
+- **ONE answer for D-087: `PublicWebsiteSetup::testCopyDoorRule()`** — live / ungated /
+  testers / anybody. The door, the card and the set-up check all ask it. Before P4d
+  the door and the card each worked it out (the door with `Gatekeeper::shouldEnforce()`
+  first, the card with the channel first), so the two could have disagreed. Where the
+  setting lived before: the two keys (`public.door.testCopies.permitted`, installation
+  row, seeded `testers` by migration 263; `public.door.testCopies.open`, organisation
+  row, not seeded) were already read by `testCopyDoorOpenToAnybody()` and already locked
+  out of the general settings editor (`PublicWebsite::LOCKED_KEYS`); nothing wrote them.
+  Now the only writers are `saveTestCopyLimit()` and `saveTestCopyChoice()`.
+- **A behaviour change, stated:** the rule asks the channel FIRST, so
+  `Gatekeeper::shouldEnforce()` is no longer asked on the live portal for a door request.
+  On a live portal whose channel was only ASSUMED, that call wrote one line to PHP's error
+  log per request; door requests (which anybody can send) no longer write it. The
+  members' pages still do, from index.php.
+- **Lowering the ceiling needs no clearing up:** the stricter wins at READ time, so an
+  organisation's stored "anybody" is kept and simply does nothing while the ceiling is
+  "testers". The save's message counts how many organisations that touches.
+- **The organisation's choice is its GLOBAL administrator's (D-087), not the "Set up the
+  public website" holder's** — `isGlobalAdministratorOf()`, read live. The holder sees the
+  card and the state, not the form; posted directly, it is refused and recorded.
+- **The reach check's proof.** `door-check.txt` exists ONLY on an organisation's own public
+  address (on /w/ it is the identical 404), takes `?n=` and exactly 64 lower-case hex
+  characters, and answers `webms-public-door-check 1 <HMAC-SHA256>` where the HMAC covers
+  the organisation's number, the public address and the value, keyed by the door's random
+  name. A replay never matches (the value is new each run); another portal or another
+  organisation's door answers in the same FORM and never matches, which is how the check
+  can say "a door answered, but not yours"; the address is in what is hashed, so two
+  addresses cannot be matched up as one organisation's. It cannot tell a proxy in front of
+  the portal from the portal itself — and a proxy that passes the request on really does
+  reach the door. The answer is `no-store`, `noindex, nofollow, noarchive` everywhere, and
+  carries no CORS header. The fetch follows NO redirects (the door never sends one).
+- **Not built, and why:** the proof is keyed by the door NAME rather than a separate
+  secret. The name is visible to anyone with a /w/ copy, but knowing it gives nothing to a
+  party who would also have to control the address being checked, because such a party
+  can already pass the request on to the real door. No migration and no new table.
+- **Trap met while building, FOUR times:** a new line copied from an existing one in a planted
+  file repeats that plant's text, so the plant finds it twice and reports "NOT APPLIED" — and
+  its check fails. `$host = PublicWebsiteSetup::publicHostInEffect(...)` in the door broke P63 of
+  the door test; the reach check's copies of the main website's deadline line, its "no curl"
+  test and its "last answer was HTTP …" clause broke P95, P99 and P96 of the tick test. Each was
+  re-spelt (same meaning, different text). Run EVERY test that plants into a file you edit,
+  not just the one you are extending.
+- **Trap: "Check my set-up" is rate-limited to six runs in ten minutes per person.** A test
+  that runs it more often must clear `tblApiRateLimits` (`pwsetup:check:%`) between runs,
+  or later runs silently show the previous page with no results block.
+- **The sentences, and why they ended up in ONE place (rounds 1-4).** Every round found a sentence about who the
+  door answers that was untrue in ONE combination of states — "open it in this browser" on a public address that
+  answers nobody; a save message from before the save; a "never" the browser does not keep; a frame promise the
+  default framing list refuses. After the same item failed twice, every such sentence moved into
+  `PublicWebsiteSetup::doorReachWords()` (facts from `doorReachFacts()`), spelled out whole per state — the
+  `DbBackup::cascadeWarning()` precedent (#694) — and printed for every combination before being judged. Frames
+  were then REMOVED from these sentences rather than refined: whether a frame shows anything depends on the framing
+  list, which is the framing card's business. **Measured in a real browser (round 3):** the portal's sign-in cookie
+  (host-only, SameSite=Lax) IS sent with a frame or script request from a website on the same site (www.church.org
+  beside portal.church.org), and not with the script's own `credentials: 'omit'` feed fetch, and not cross-site.
+- **What the tests cannot see:** U26's frame guard matches only words containing "fram" (a claim spelt "embedded in
+  any website" passes, measured in round 5); U27 compares each page with the method, so it cannot see a wrong
+  method — U26's independent rules carry that.
+

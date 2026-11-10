@@ -4,6 +4,31 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The public door, part four: test copies, and a set-up check that the public address reaches the door (#493 P4d)
+
+- **Added: who a test copy's public door answers is a tiered setting** (D-087). On a test copy only (alpha, beta
+  or dev), Admin → Public website shows a card: the installation's global administrator chooses whether
+  organisations may open their door there to anybody, and an organisation's global administrator chooses within
+  that. "Signed-in testers only" is the default and the stricter answer; "open to anybody" posted while the
+  installation forbids it is refused with the reason; every save and every refusal is recorded; both settings are
+  refused on the live portal and by the general settings editor. Every answer from a test copy's door tells search
+  engines not to list it, whichever is chosen. `PublicWebsiteSetup::testCopyDoorRule()` is the one answer.
+- **Added: "Check my set-up" confirms an approved public address really reaches your door.** It fetches a one-off
+  proof from the address (through the safe fetcher; https only; no redirects followed) and says whether it came
+  back from a door holding your door's current name, from a door that is not yours, or not at all (with the last
+  status), or why it was not checked. It names no cause it cannot know.
+- **Changed: every sentence about who the door answers comes from one place** (`doorReachWords()`), spelled out
+  whole for each state — the door on, off, spoiled or unreadable; a public address in effect or not; a `/w/`
+  address or not; Calendar and the Noticeboard on or off; live, gate off, testers only, or open to anybody. On a
+  testers-only copy it says the public sees nothing, a tester opens the door directly at its `/w/` addresses, a
+  pasted script and a website's own server get nothing, and a public address answers nobody; whether a FRAME shows
+  anything is left to the framing card.
+- **Tests:** section U of `tools/public-door-selftest.php` — a truth table over every combination of the facts,
+  every page state over real HTTP, every change of choice posted and its message and colour compared (its total
+  pinned in the file). Five check rounds by fresh Claude agents (protected arm): the code and the tiered rule were
+  sound from round 1; the sentences were simplified into one place after failing two rounds running; round 5's
+  findings were all in test labels and comments, fixed, and review closed there (D-064). Codex has not reviewed it.
+
 ### The backup self-test no longer fails on a slow run (#912)
 
 - **Backup self-test, proof 27, no longer fails on the timing of the run (#912).** Its
