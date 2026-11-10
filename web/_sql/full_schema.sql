@@ -11541,6 +11541,32 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('269_expense_approver_role_desc
 INSERT INTO `tblMigrations` (`filename`) VALUES ('270_sign_in_version.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 271_attendance_reports_permission.sql (#529; D-106) ─────────────────
+-- Who sees an organisation's attendance totals is a PERMISSION now
+-- (`attendance.reports`), shipped pointing at this new standard role, which
+-- nobody holds until an organisation grants it. The three-choice setting it
+-- replaces is deleted here, after the "from 200" block above seeded it, so a
+-- fresh install ends exactly where an upgraded one does. See the migration.
+INSERT INTO `tblRoles` (`siteID`, `roleKey`, `roleName`, `description`, `isStandard`)
+SELECT s.`siteID`, 'attendance_coordinator', 'Attendance Coordinator',
+       'Holds "See the attendance totals": opens the attendance reports page and the attendance spreadsheet download',
+       1
+FROM `tblSites` s
+WHERE NOT EXISTS (
+    SELECT 1 FROM `tblRoles` r
+    WHERE r.`siteID` = s.`siteID` AND r.`roleKey` = 'attendance_coordinator'
+);
+
+UPDATE `tblRoles` r
+   SET r.`isStandard` = 1
+ WHERE r.`roleKey` = 'attendance_coordinator' AND r.`isStandard` <> 1
+   AND NOT EXISTS (SELECT 1 FROM `tblUserRoles` ur WHERE ur.`roleID` = r.`roleID`);
+
+DELETE FROM `tblSettings` WHERE `settingKey` = 'attend.reports.visibleTo';
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('271_attendance_reports_permission.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────
 -- WHY THESE ARE HERE AND NOT BESIDE tblEvents. `tblEvents` is declared near the
 -- top of this file; `tblVenues` and `tblVenueRooms` are declared about seven

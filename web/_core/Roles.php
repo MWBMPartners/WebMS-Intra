@@ -241,6 +241,27 @@ final class Roles
             'description' => 'Holds "Set up the public website": records the main website and public address, and '
                 . 'chooses which outside websites may show the public pages in a frame',
         ],
+        // 📊 ADDED 10 November 2026 (#529, D-106), by migration 271. The role
+        //    the permission `attendance.reports` ships pointing at: who, beside
+        //    the organisation's administrators, sees its attendance totals.
+        //    Granted to NOBODY, so out of the box only administrators see them
+        //    — what they saw before, since the old setting this replaces was
+        //    seeded "administrators only". An organisation gives the job to
+        //    somebody by granting this role, or points the permission at a
+        //    role of its own on the Roles page (D-017).
+        //
+        //    ⚠️ NOT `event_coordinator`, although the name is close. That role
+        //       is an audience for newsletters, workflows and reminders, held
+        //       by people who run events; D-106 did not give every one of them
+        //       the organisation's attendance totals, and shipping the
+        //       permission at it would have done exactly that on upgrade.
+        //       LAST on purpose — `check_role_keys.py` and
+        //       `tools/roles-selftest.php` compare the order.
+        'attendance_coordinator' => [
+            'label'       => 'Attendance Coordinator',
+            'description' => 'Holds "See the attendance totals": opens the attendance reports page and the '
+                . 'attendance spreadsheet download',
+        ],
     ];
 
     // =========================================================================

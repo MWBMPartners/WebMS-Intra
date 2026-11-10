@@ -2,10 +2,9 @@
 // Path: _apps/admin/settings/attendance/index.php
 /**
  * -----------------------------------------------------------------------------
- * Admin — Who may see the anonymous check-in counts, and the reports page ⚙️
- * (#525, plus #529 added 20 September 2026)
+ * Admin — Who may see the anonymous check-in counts ⚙️ (#525)
  * -----------------------------------------------------------------------------
- * Three settings on one small page:
+ * Two settings on one small page:
  *
  *   attend.anonCounts.visibleTo   who may see the door figures
  *   attend.detailRetentionDays    how long the scrambled sender address is
@@ -13,13 +12,12 @@
  *                                 used to be kept on the same timer; it was
  *                                 dropped by migration 201, since nothing
  *                                 ever read it)
- *   attend.reports.visibleTo      who may open the attendance reports page
- *                                 at all (#529) — a SEPARATE question from
- *                                 the door figures above: a member can be
- *                                 let onto the page without being shown the
- *                                 anonymous section, and the anonymous
- *                                 section's own setting can never widen who
- *                                 may open the page in the first place.
+ *
+ * WHO MAY OPEN THE ATTENDANCE REPORTS PAGE IS NOT SET HERE ANY MORE (#529,
+ * D-106, 10 November 2026). It was a third setting on this page,
+ * `attend.reports.visibleTo`; it is now the permission "See the attendance
+ * totals" on Admin, Roles, and migration 271 deleted the setting. The page
+ * says so and links there, so nobody goes looking for the old choice.
  *
  * WHY THIS PAGE EXISTS AT ALL
  * ---------------------------
@@ -68,7 +66,7 @@ declare(strict_types=1);
 use Portal\Core\AnonymousCheckins;
 use Portal\Core\App;
 use Portal\Core\Auth;
-use Portal\Core\AttendanceAccess;
+use Portal\Core\Capabilities;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\SettingLimit;
@@ -135,10 +133,6 @@ $globalVisibility = attendance_settings_read_level($mysqli, AnonymousCheckins::V
 $ownRetention     = attendance_settings_read_level($mysqli, AnonymousCheckins::RETENTION_KEY, $siteId);
 $globalRetention  = attendance_settings_read_level($mysqli, AnonymousCheckins::RETENTION_KEY, null);
 
-// 🔒 #529 — the SEPARATE "who may open the reports page at all" setting.
-$ownReportsVisibility    = attendance_settings_read_level($mysqli, AttendanceAccess::VISIBILITY_KEY, $siteId);
-$globalReportsVisibility = attendance_settings_read_level($mysqli, AttendanceAccess::VISIBILITY_KEY, null);
-
 // What is actually in force for this organisation right now, and where it came
 // from. Both are shown, because "it says administrators only" and "it says
 // administrators only because nobody here has chosen anything" are different
@@ -171,9 +165,6 @@ $ownRetentionDays   = AnonymousCheckins::ownRetentionDays($mysqli, $siteId);
 $ownRetentionMeant  = $ownRetentionDays === null ? null : max(0, $ownRetentionDays);
 $retentionHeldDown  = $ownRetentionMeant !== null && $ownRetentionMeant !== (int) $effectiveRetention;
 
-$effectiveReportsVisibility = AttendanceAccess::readChoice($siteId);
-$reportsVisibilityIsOwn     = ($ownReportsVisibility !== null);
-
 // A short sentence under each choice. Kept here beside the choices themselves
 // so a future fourth choice cannot be added without somebody having to write
 // what it means.
@@ -188,20 +179,6 @@ $choiceExplanations = [
     AnonymousCheckins::VISIBLE_PAGE =>
         'Whoever can already open the page sees the figures on it. The figures never widen who can '
         . 'open a page — they only follow the rule that page already has.',
-];
-
-// 🔒 #529 — explanations for the SEPARATE "who may open the reports page"
-// choices. Kept beside the choices themselves for the same reason as above.
-$reportsChoiceExplanations = [
-    AttendanceAccess::VISIBLE_ADMINS =>
-        'Nobody but an administrator can open the attendance reports page at all. This is the '
-        . 'narrowest choice, and the one a new installation starts with.',
-    AttendanceAccess::VISIBLE_ADMINS_COORDINATORS =>
-        'Administrators, plus anyone who currently coordinates one of your organisation\'s events. '
-        . 'This cannot tell a coordinator of an event happening next week from one that ended two '
-        . 'years ago — any event they coordinate that has not been deleted counts.',
-    AttendanceAccess::VISIBLE_MEMBERS =>
-        'Any member of your organisation can open the reports page.',
 ];
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -279,16 +256,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </p>
         <?php endif; ?>
         <p class="mb-0">
-            Who may open the reports page at all:
-            <strong><?php echo htmlspecialchars(
-                AttendanceAccess::VISIBILITY_CHOICES[$effectiveReportsVisibility] ?? $effectiveReportsVisibility,
-                ENT_QUOTES,
-                'UTF-8'
-            ); ?></strong>
-            &mdash;
-            <?php echo $reportsVisibilityIsOwn === true
-                ? 'your organisation\'s own choice.'
-                : 'inherited from the installation-wide default, because your organisation has not chosen anything.'; ?>
+            Who may open the attendance reports page:
+            <strong>administrators, and whoever holds
+            &ldquo;<?php echo htmlspecialchars(Capabilities::definition(Capabilities::ATTENDANCE_REPORTS)['label'], ENT_QUOTES, 'UTF-8'); ?>&rdquo;</strong>
+            &mdash; a permission you point at a role on
+            <a href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Roles</a>.
+            It is no longer a setting on this page.
         </p>
     </div>
 </div>
@@ -394,31 +367,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             </div>
 
-            <fieldset class="mb-4">
-                <legend class="h6">Who can see the attendance reports page (#529)</legend>
-                <p class="small text-muted">
-                    A SEPARATE question from the door figures above: this decides who may open the
-                    reports page at all. Somebody refused by this choice never sees the door figures
-                    setting either, whatever it says.
-                </p>
-                <?php foreach (AttendanceAccess::VISIBILITY_CHOICES as $value => $label): ?>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio"
-                               name="reportsVisibleTo"
-                               id="reportsVisibleTo_<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"
-                               value="<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"
-                               <?php echo $effectiveReportsVisibility === $value ? 'checked' : ''; ?>>
-                        <label class="form-check-label"
-                               for="reportsVisibleTo_<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>">
-                            <strong><?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?></strong>
-                            <span class="d-block small text-muted">
-                                <?php echo htmlspecialchars($reportsChoiceExplanations[$value] ?? '', ENT_QUOTES, 'UTF-8'); ?>
-                            </span>
-                        </label>
-                    </div>
-                <?php endforeach; ?>
-            </fieldset>
-
             <button type="submit" class="btn btn-primary btn-sm">
                 <i class="fa-solid fa-check me-1"></i>Save for my organisation
             </button>
@@ -474,23 +422,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                            value="<?php echo $globalRetention !== null ? (int) $globalRetention : AnonymousCheckins::DEFAULT_RETENTION_DAYS; ?>">
                 </div>
 
-                <fieldset class="mb-3">
-                    <legend class="h6">Who can see the attendance reports page (#529)</legend>
-                    <?php foreach (AttendanceAccess::VISIBILITY_CHOICES as $value => $label): ?>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio"
-                                   name="reportsVisibleTo"
-                                   id="globalReportsVisibleTo_<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"
-                                   value="<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>"
-                                   <?php echo AttendanceAccess::choice($globalReportsVisibility) === $value ? 'checked' : ''; ?>>
-                            <label class="form-check-label"
-                                   for="globalReportsVisibleTo_<?php echo htmlspecialchars($value, ENT_QUOTES, 'UTF-8'); ?>">
-                                <?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>
-                            </label>
-                        </div>
-                    <?php endforeach; ?>
-                </fieldset>
-
                 <button type="submit" class="btn btn-outline-warning btn-sm">
                     <i class="fa-solid fa-globe me-1"></i>Save the installation-wide default
                 </button>
@@ -516,14 +447,6 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         : AnonymousCheckins::DEFAULT_RETENTION_DAYS;
                     echo $globalDaysShown <= 0 ? 'for ever' : $globalDaysShown . ' days';
                 ?></strong>
-            </p>
-            <p class="mb-2">
-                Who can see the attendance reports page:
-                <strong><?php echo htmlspecialchars(
-                    AttendanceAccess::VISIBILITY_CHOICES[AttendanceAccess::choice($globalReportsVisibility)],
-                    ENT_QUOTES,
-                    'UTF-8'
-                ); ?></strong>
             </p>
             <div class="alert alert-info small mb-0">
                 <i class="fa-solid fa-circle-info me-2"></i>
@@ -553,21 +476,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             it names the events.
         </p>
 
-        <!-- Wording corrected again on 20 September 2026, now that #529 has shipped: the reports
-             page's own gate NOW checks membership of this organisation (plus its OWN "who may open
-             the reports page" setting, above), so "anyone who can already open the page" is narrower
-             than it used to be. It is still not automatically the same group as "members of your
-             organisation" — the reports page's own setting can narrow it further, to administrators
-             only or to administrators-and-coordinators — so the wording below still has to say what
-             it actually means rather than assume the two settings are always in step. -->
+        <!-- Rewritten 10 November 2026 (#529, D-106): who may open the reports page is no
+             longer a setting here but the permission "See the attendance totals", so this
+             sentence names that permission rather than a setting that has been deleted. -->
         <p class="small mb-0">
-            <strong>On the attendance reports page, "anyone who can already open the page" means
-            whoever the reports page's OWN "who can see the attendance reports page" setting above
-            currently admits</strong> &mdash; which is always at least a member of your organisation,
-            and may be narrower still (administrators only, for example) depending on that setting.
+            <strong>On the attendance reports page, "anyone who can already open the page" means your
+            administrators and whoever holds the permission
+            &ldquo;<?php echo htmlspecialchars(Capabilities::definition(Capabilities::ATTENDANCE_REPORTS)['label'], ENT_QUOTES, 'UTF-8'); ?>&rdquo;</strong>
+            (set on <a href="<?php echo htmlspecialchars(Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Roles</a>).
             Choosing this door-figures option here then shows your organisation's totals and a line
-            per month to everyone that reaches. It never shows an event name, and the download stays
-            administrators-only.
+            per month to all of them. It never shows an event name, and the download of these door
+            figures stays administrators-only.
         </p>
     </div>
 </div>

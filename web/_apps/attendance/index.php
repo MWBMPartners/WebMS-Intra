@@ -47,21 +47,20 @@ $offset      = ($page - 1) * $perPage;
 // 🌐 Multi-site scope
 $siteId = Site::id();
 
-// 🔒 #529 (20 September 2026) — the "View Reports" card is drawn only when
-//    the SAME test `attendance/report.php` itself applies would answer yes
-//    for this viewer, so the card is never a promise the target page then
-//    breaks. This does NOT gate the sessions list on THIS page — that stays
-//    open to any signed-in account for now; see AttendanceAccess's own
-//    docblock ("WHAT THIS CLASS DELIBERATELY DOES NOT DO") for why that is
-//    a separate, wider piece of work, tracked in the #529 closing comment.
+// 🔒 #529 / D-106 — the attendance TOTALS on this page follow the same rule as
+//    the reports page, asked of the ONE place that decides it: the "View
+//    Reports" card, the "Total Headcount This Month" card (the same figure the
+//    reports page shows for a month) and the spreadsheet download button are
+//    drawn only for administrators and holders of "See the attendance totals".
+//    So no card is a promise the target then breaks, and no total is shown
+//    here that the reports page would refuse.
+//
+//    ⚠️ The list of sessions below, each with its own headcount, is NOT
+//    gated by this: members record and correct head counts from it, and
+//    D-106 did not decide whether they should still see each session's own
+//    figure. That is #917.
 $viewerId       = (int) ($_SESSION['user_id'] ?? 0);
-$reportsIsAdmin = App::isAdmin();
-$reportsIsMember = AttendanceAccess::viewerIsMember($mysqli, $viewerId, $siteId);
-$reportsChoice  = AttendanceAccess::readChoice($siteId);
-$reportsCoord   = ($reportsIsMember === true && $reportsIsAdmin === false && $reportsChoice === AttendanceAccess::VISIBLE_ADMINS_COORDINATORS)
-    ? AttendanceAccess::coordinatesAnyEvent($mysqli, $viewerId, $siteId)
-    : false;
-$mayViewReports = AttendanceAccess::mayView($reportsChoice, $reportsIsMember, $reportsIsAdmin, $reportsCoord);
+$mayViewReports = AttendanceAccess::mayViewTotals($mysqli, $viewerId, $siteId, App::isAdmin(), App::isRootAdmin());
 
 // 📊 Build WHERE clause
 $conditions = ['s.isDeleted = 0', 's.siteID = ?'];
@@ -197,11 +196,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
     <h1 class="mb-0"><i class="fa-solid fa-clipboard-list me-2"></i>Attendance</h1>
     <div class="d-flex flex-wrap gap-2">
-        <?php if (App::isAdmin() === true): ?>
+        <?php if ($mayViewReports === true): ?>
+            <!-- 📄 The attendance spreadsheet (#529, D-106): offered to exactly
+                 the people the download itself admits. -->
             <a href="<?php echo htmlspecialchars(Site::url('attendance/export'), ENT_QUOTES, 'UTF-8'); ?>?csrf_token=<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
                class="btn btn-outline-success" title="Export CSV">
                 <i class="fa-solid fa-file-csv"></i>
             </a>
+        <?php endif; ?>
+        <?php if (App::isAdmin() === true): ?>
             <!-- 📊 The anonymous check-in spreadsheet (#525). A SEPARATE file
                  from the one beside it, because the two have different columns
                  and because "anonymous check-ins are never merged into the
@@ -244,6 +247,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <?php if ($mayViewReports === true): ?>
     <div class="col-6 col-md-3">
         <div class="card text-center shadow-sm">
             <div class="card-body">
@@ -252,6 +256,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </div>
     </div>
+    <?php endif; ?>
     <div class="col-6 col-md-3">
         <div class="card text-center shadow-sm">
             <div class="card-body">

@@ -267,7 +267,10 @@ FILE_ALLOWLIST: dict[str, str] = {
     # is nothing for these two files to count or gate that could ever
     # be an imported event's own content.
     "_core/AnonymousCheckins.php": "every statement joins e.siteID = ? and returns counts, or one event name for a title (#525); shows no imported-event detail",
-    "_core/AttendanceAccess.php": "a coordinator test joined on e.siteID (#529); decides who may see attendance totals, never shows an event",
+    # (`_core/AttendanceAccess.php` was listed here for its "coordinates any
+    #  event" test, joined on e.siteID. #529 / D-106 replaced that test with a
+    #  permission, so the file names no event table and the entry would only
+    #  be a blind spot.)
     # (`_apps/calendar/widget.php` was listed here as unreachable dead code
     #  with two unrestricted event queries, kept unreachable only by having no
     #  address and by the web root's `widget` folder. #493 P4b deleted the

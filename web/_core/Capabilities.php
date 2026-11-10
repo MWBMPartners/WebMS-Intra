@@ -282,6 +282,20 @@ final class Capabilities
     public const WEBSITE_SETUP    = 'website.setup';
 
     /**
+     * #529 (the owner, 10 November 2026 — D-106): who, beside the
+     * organisation's administrators, sees its ATTENDANCE TOTALS — the
+     * attendance reports page, this month's headcount on the attendance page,
+     * and the attendance spreadsheet download. Asked in ONE place,
+     * `AttendanceAccess::mayViewTotals()`. An administrator of the
+     * organisation passes there BEFORE this is asked, and somebody who is not
+     * a member of the organisation is refused before it is asked. It ships
+     * pointing at `attendance_coordinator`, held by nobody (migration 271), so
+     * out of the box only administrators see the totals — what the setting it
+     * replaces was seeded to.
+     */
+    public const ATTENDANCE_REPORTS = 'attendance.reports';
+
+    /**
      * Every field an entry in either list MUST declare, in the order the
      * entries are written.
      *
@@ -996,6 +1010,30 @@ final class Capabilities
                 . 'Nothing already saved there is changed, and a global administrator can point it at a role again.',
             'askedAt' => [
                 'web/_core/PublicWebsiteSetup.php',
+            ],
+        ],
+
+        // 📊 THE ATTENDANCE TOTALS (#529, D-106). Headcounts by month, by
+        //    service type and by headcount group: totals, never a named
+        //    person. Administrators always see them; this decides who ELSE
+        //    does. Members of the organisation are not given them, and
+        //    somebody from another organisation is refused before this is
+        //    asked — each gets the same "page not found" as an address that
+        //    does not exist.
+        self::ATTENDANCE_REPORTS => [
+            'label' => 'See the attendance totals',
+            'opens' => 'The attendance reports page (headcounts by month, by service type and by headcount '
+                . 'group), this month\'s total headcount on the attendance page, and the attendance '
+                . 'spreadsheet download. Totals only: none of it names a person. It does not change who may '
+                . 'record a head count.',
+            'standard' => ['attendance_coordinator'],
+            'globalAdminFallsOpen' => true,
+            'organisationMayRepoint' => true,
+            'emptyMeans' => 'No role will see the attendance totals. Administrators of this organisation still '
+                . 'will, because the reports page lets an administrator in before it asks about any role. '
+                . 'Nothing recorded is changed, and anybody who can record a head count still can.',
+            'askedAt' => [
+                'web/_core/AttendanceAccess.php',
             ],
         ],
     ];

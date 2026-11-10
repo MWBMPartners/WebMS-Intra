@@ -391,22 +391,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         arrived</em>. The figures above it are counted by <em>the date of an attendance session</em>.
         They are not two views of one thing, and one should never be subtracted from the other.
     </p>
-    <!-- Wording corrected again on 20 September 2026, now that #529 has shipped: the reports page's
-         own gate used to be simply "signed in", so a signed-in member of a DIFFERENT organisation on
-         this installation could open it too. Since #529, the page requires membership of THIS
-         organisation, and can be narrowed further still by the organisation's own "who can see the
-         attendance reports page" setting — so this paragraph now points at that setting instead of
-         describing an open gap. -->
+    <!-- Rewritten 10 November 2026 for #529 / D-106: the reports page is open to administrators and to
+         whoever holds the permission "See the attendance totals" — no longer decided by a setting. -->
     <p>
         <strong>One thing to know before you press that button.</strong> The row it writes is labelled
         with the event's name, and once it is part of the attendance record that label appears in the
-        &ldquo;By Headcount Group&rdquo; cards on the attendance reports page &mdash; which is open to
-        at least the members of your organisation the reports page's own setting currently admits (see
-        &ldquo;Who can see the attendance reports&rdquo; below), and never to anybody outside your
-        organisation. That is not the anonymous section leaking anything: the anonymous section never
-        names an event. It is the ordinary consequence of putting something into your organisation's
-        own attendance record. But if the event's name is not something members should see there, do
-        not add it to a session. The warning is repeated on the button itself.
+        &ldquo;By Headcount Group&rdquo; cards on the attendance reports page &mdash; which your
+        administrators can open, and so can anybody your organisation has given the permission
+        &ldquo;See the attendance totals&rdquo; (see &ldquo;Who can see the attendance totals&rdquo;
+        below), and never anybody outside your organisation. That is not the anonymous section leaking
+        anything: the anonymous section never names an event. It is the ordinary consequence of putting
+        something into your organisation's own attendance record. But if the event's name is not
+        something those people should see there, do not add it to a session. The warning is repeated on
+        the button itself.
     </p>
 
     <h3 class="h5 mt-4">Who can see them</h3>
@@ -424,23 +421,37 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <em>narrow</em> who sees them: it never lets somebody onto a page they could not already open.
     </p>
 
-    <h4 class="h6 mt-4">Who can see the attendance reports page (#529)</h4>
+    <h4 class="h6 mt-4" id="attendance-totals">Who can see the attendance totals</h4>
+    <!-- #529 / D-106 (the owner, 10 November 2026). This replaced a three-way setting at
+         /admin/settings/attendance; migration 271 deleted it. -->
     <p>
-        A SEPARATE choice from the one above, also set at
-        <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/settings/attendance'), ENT_QUOTES, 'UTF-8'); ?>">/admin/settings/attendance</a>, that decides who may open
-        the reports page AT ALL — not only who sees the anonymous section on it. Somebody who is not a
-        member of your organisation can never open it, whatever either setting says. Among your
-        organisation's own members, there are three choices:
+        Your organisation's attendance totals &mdash; the attendance reports page (headcounts by month,
+        by service type and by headcount group), the &ldquo;Total Headcount This Month&rdquo; figure on
+        the attendance page, and the attendance spreadsheet download
+        (<code>/attendance/export</code>) &mdash; can be seen by:
     </p>
     <ul>
-        <li><strong>Administrators only</strong> &mdash; the default, and what every installation and upgrade starts with.</li>
-        <li><strong>Administrators, and anyone who coordinates one of this organisation's events</strong> &mdash; a coordinator of any non-deleted event, past or future, is included.</li>
-        <li><strong>Any member of this organisation</strong> &mdash; the widest choice.</li>
+        <li><strong>your organisation's administrators</strong>, always; and</li>
+        <li><strong>anybody holding the permission &ldquo;See the attendance totals&rdquo;</strong>. You
+            choose which role holds it on
+            <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('admin/roles'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Roles</a>.
+            It starts out pointing at the role <em>Attendance Coordinator</em>, which nobody holds until
+            somebody is given it &mdash; so until you give it to somebody, only administrators see the
+            totals.</li>
     </ul>
     <p>
-        Administrators can always open the reports page, whatever is chosen. The download
-        (<code>/attendance/export</code>) stays administrators-only regardless of this setting, for the
-        same reason the anonymous check-ins spreadsheet does: a file leaves the building.
+        Nobody else. An ordinary member of your organisation, and anybody from another organisation on
+        the same installation, gets the same &ldquo;page not found&rdquo; as an address that does not
+        exist. None of these figures names a person; they are totals.
+    </p>
+    <p>
+        <strong>What this does not change.</strong> Any member of your organisation can still record a
+        head count, and the list of recorded sessions on the attendance page still shows each session's
+        own headcount to the people who record them.
+    </p>
+    <p>
+        The attendance spreadsheet includes the <em>notes</em> typed when each session was recorded, so
+        whoever you give the permission can read those too.
     </p>
     <p>
         <strong>Being able to see a figure and being able to download it are two different

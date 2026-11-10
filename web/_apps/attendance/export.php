@@ -2,16 +2,30 @@
 /**
  * 📄 web/public_html/attendance/export.php
  *
- * CSV export endpoint for attendance sessions with counts. Requires Admin role.
+ * CSV export endpoint for attendance sessions with counts.
  *
- * 🔒 #529 (20 September 2026): this file stays ADMINISTRATORS-ONLY whatever
- *    the new `attend.reports.visibleTo` setting says — the same reason the
- *    anonymous check-in spreadsheet (`export-anonymous.php`) does. A file
- *    leaves the building, gets forwarded, and is still sitting in somebody's
- *    downloads folder after a setting has been tightened again; the owner's
- *    18 September 2026 decision that a download stays administrators-only
- *    applies here too. Nothing here reads AttendanceAccess at all — do not
- *    "fix" that omission.
+ * 🔒 #529 / D-106 (the owner, 10 November 2026): this spreadsheet is the
+ *    attendance totals in a file, so it follows the SAME rule as the reports
+ *    page, asked of the ONE place that decides it,
+ *    `AttendanceAccess::mayViewTotals()`: the organisation's administrators,
+ *    plus whoever the organisation points the permission "See the attendance
+ *    totals" at on Admin, Roles. D-106 names "its CSV export" in so many words.
+ *
+ *    UNTIL THEN it was administrators-only, borrowing the owner's
+ *    18 September 2026 reasoning for the ANONYMOUS check-in spreadsheet ("a
+ *    file leaves the building"). That decision was about
+ *    `export-anonymous.php`, which names events, and it still stands there;
+ *    this file follows D-106 instead. Out of the box nothing widens: the role
+ *    the permission ships pointing at is held by nobody.
+ *
+ *    ⚠️ The `notes` column is free text somebody typed when recording a
+ *    session, and it goes into this file. Anybody given the permission reads
+ *    it here.
+ *
+ *    Everybody else gets the ordinary "page not found", the same as an address
+ *    that does not exist — and it is asked BEFORE the form token, so a refused
+ *    member is never sent back to the attendance page with a message that
+ *    tells them the download exists.
  *
  * @package   WebMS Intra
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -28,6 +42,8 @@ require_once dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEP
 
 use Portal\Core\Auth;
 use Portal\Core\App;
+use Portal\Core\AttendanceAccess;
+use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\CsvExporter;
 
@@ -35,10 +51,12 @@ use Portal\Core\CsvExporter;
 Auth::ensureSession();
 Auth::requireLogin();
 
-// 🔑 Admin required — admin gate lives on App, not Auth.
-if (App::isAdmin() === false) {
-    http_response_code(403);
-    exit('Forbidden');
+// 🔑 #529 / D-106: administrators and holders of "See the attendance totals".
+//    Everybody else: the ordinary "page not found", identical to an address
+//    that does not exist.
+if (AttendanceAccess::mayViewTotals($mysqli, (int) ($_SESSION['user_id'] ?? 0), Site::id(), App::isAdmin(), App::isRootAdmin()) === false) {
+    Router::renderError(404);
+    exit();
 }
 
 // 🛡️ CSRF verification via GET token

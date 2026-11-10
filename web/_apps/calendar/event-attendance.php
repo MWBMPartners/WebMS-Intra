@@ -438,27 +438,21 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <!-- ⚠️ Said BEFORE the button, not discovered afterwards.
                              The label carries the event's NAME, and once it is in
                              the attendance record it appears in the "By Headcount
-                             Group" cards on the attendance reports page — which
-                             today any signed-in user on this installation can
-                             open, not only members of this organisation, because
-                             that page asks only that somebody is signed in.
-                             That is not a leak in this feature: it is an
-                             administrator choosing to put the event's name into
-                             the organisation's own attendance record, exactly as
-                             they would by typing any other group label. But it
-                             would be an unpleasant surprise with an internal
-                             event, and it was found by a proof rather than by
-                             thinking about it, so it is written on the screen.
-                             (Narrowing who may open the reports page at all is
-                             issue #529, not this work.) -->
+                             Group" cards on the attendance reports page. Since
+                             #529 (D-106, 10 November 2026) that page is open to
+                             the organisation's administrators and to whoever holds
+                             the permission "See the attendance totals" — no
+                             longer to every signed-in account, which is what this
+                             note said until then. Still worth saying: those
+                             people may not be the ones who should see an internal
+                             event's name. -->
                         <div class="alert alert-warning small py-2">
                             <i class="fa-solid fa-triangle-exclamation me-1"></i>
                             This label includes the event's name, and it will then appear on the
-                            <a href="<?php echo htmlspecialchars(Site::url('attendance/report'), ENT_QUOTES, 'UTF-8'); ?>">attendance reports page</a>, which every
-                            signed-in user on this installation can open at the moment, not only
-                            members of your organisation (a pre-existing gap, tracked as #529). If this
-                            event's name is not something members should see there, do not add it to
-                            a session.
+                            <a href="<?php echo htmlspecialchars(Site::url('attendance/report'), ENT_QUOTES, 'UTF-8'); ?>">attendance reports page</a>, which your
+                            administrators can open, and so can anybody your organisation has given
+                            the permission &ldquo;See the attendance totals&rdquo;. If this event's name
+                            is not something they should see there, do not add it to a session.
                         </div>
                         <?php if (count($anonSessions) === 0): ?>
                             <p class="small text-muted mb-0">

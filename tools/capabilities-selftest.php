@@ -520,6 +520,9 @@ foreach ([
     // #493 P3 (D-085): who may set up the public website. Added HERE in the
     // same change that adds it to the registry (#739's rule).
     Capabilities::WEBSITE_SETUP      => 'Cap Website Setup',
+    // #529 (D-106): who, beside administrators, sees the attendance totals.
+    // Added HERE in the same change that adds it to the registry (#739's rule).
+    Capabilities::ATTENDANCE_REPORTS => 'Cap Attendance',
 ] as $capabilityKey => $personName) {
     $shippedRole = Capabilities::standardRoleKeys($capabilityKey)[0];
     $personId    = $capNewUser($personName, false);
@@ -574,6 +577,8 @@ $OTHERS = [
     Capabilities::WEBSITE_PUBLISH,
     // #493 P3 (D-085): who may set up the public website.
     Capabilities::WEBSITE_SETUP,
+    // #529 (D-106): who, beside administrators, sees the attendance totals.
+    Capabilities::ATTENDANCE_REPORTS,
 ];
 
 // =============================================================================
@@ -593,7 +598,7 @@ cap_section('A — the registry as declared');
 cap_check(
     'every offered capability is declared, in order, and nothing has been added, '
         . 'dropped or swapped: #724\'s, the five the owner named on 3 November 2026, '
-        . 'the six #739 converted, #756\'s, #477\'s and #493\'s two',
+        . 'the six #739 converted, #756\'s, #477\'s, #493\'s two and #529\'s',
     Capabilities::keys() === array_merge([$CAP], $OTHERS),
     implode(',', Capabilities::keys())
 );
@@ -1519,6 +1524,13 @@ $shouldShipWith = [
     // administrator sets up the public website, through the gate in
     // `PublicWebsiteSetup::maySetUp()`, not through this role.
     Capabilities::WEBSITE_SETUP      => 'website_setup',
+    // #529 (D-106): ships pointing at the new Attendance Coordinator role,
+    // which migration 271 seeds and grants to NOBODY — out of the box only
+    // the organisation's administrators see the attendance totals, through
+    // `AttendanceAccess::mayViewTotals()`, which is what the setting it
+    // replaced was seeded to. NOT `event_coordinator`: shipping it there would
+    // hand every event coordinator the totals on upgrade.
+    Capabilities::ATTENDANCE_REPORTS => 'attendance_coordinator',
 ];
 foreach ($shouldShipWith as $capabilityKey => $shippedRole) {
     cap_check(

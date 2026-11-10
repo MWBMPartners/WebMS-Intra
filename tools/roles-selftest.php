@@ -91,7 +91,9 @@ echo "=== STANDARD — the standard roles every organisation starts with ===\n";
 //    `website.publish` ships pointing at, seeded by migration 258.
 // 🔁 SEVENTEEN SINCE 9 November 2026 (#493 P3, D-085): `website_setup`, the
 //    role `website.setup` ships pointing at, seeded by migration 262.
-assertTrue('STANDARD has exactly 17 keys', count(Roles::STANDARD) === 17);
+// 🔁 EIGHTEEN SINCE 10 November 2026 (#529, D-106): `attendance_coordinator`,
+//    the role `attendance.reports` ships pointing at, seeded by migration 271.
+assertTrue('STANDARD has exactly 18 keys', count(Roles::STANDARD) === 18);
 foreach (Roles::STANDARD as $key => $role) {
     assertTrue(
         "key '{$key}' matches ^[a-z][a-z0-9_]{1,49}\$",
@@ -119,9 +121,11 @@ $expectedKeys = [
     'website_editor',
     // #493 P3 / D-085, 9 November 2026, migration 262. Last, for the same reason.
     'website_setup',
+    // #529 / D-106, 10 November 2026, migration 271. Last, for the same reason.
+    'attendance_coordinator',
 ];
 assertTrue(
-    'STANDARD keys are exactly the seventeen expected keys, in order',
+    'STANDARD keys are exactly the eighteen expected keys, in order',
     array_keys(Roles::STANDARD) === $expectedKeys
 );
 

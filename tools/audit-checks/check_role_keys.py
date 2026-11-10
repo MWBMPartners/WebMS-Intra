@@ -241,6 +241,8 @@ LATER_STANDARD_ROLES = {
     "data_controller": "241_data_controller_role.sql",
     "website_editor": "258_events_show_on_website.sql",
     "website_setup": "262_public_website_setup.sql",
+    # #529 / D-106: the role the permission `attendance.reports` ships at.
+    "attendance_coordinator": "271_attendance_reports_permission.sql",
 }
 
 

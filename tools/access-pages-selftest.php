@@ -75,6 +75,15 @@
  *   L. A treasurer is told who pays their own approved claim; and the
  *      Expenses addresses stay inside the organisation's own address.
  *
+ * #529 (10 November 2026, D-106) added part Q: who sees an organisation's
+ * attendance totals — the reports page, its spreadsheet and the cards on
+ * /attendance — for somebody signed out, an ordinary member, a member holding
+ * another role, two accounts of another organisation (at the door and with the
+ * door stood down), an account in no organisation, the holder of the role the
+ * permission ships with, an administrator and a global administrator; every
+ * refusal compared with a made-up address; and the permission re-pointed on
+ * the real Roles page and put back.
+ *
  * Roll-out package H1 (12 October 2026, #587) added part M:
  *  L2. #675 — the Expenses spreadsheet. The Export button on the
  *      approvals page is offered only to people the download serves, and
@@ -267,7 +276,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 369; // 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 408; // 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -3578,6 +3587,195 @@ ok(
     $pErrors === [],
     count($pErrors) . ' row(s): ' . implode(' | ', array_map(static fn (array $r): string => mb_substr((string) $r['errorTitle'], 0, 120), array_slice($pErrors, 0, 3)))
 );
+
+// =============================================================================
+head('Q. #529 / D-106 — who sees an organisation\'s attendance totals');
+// =============================================================================
+// D-106 (the owner, 10 November 2026): administrators, plus whoever the
+// organisation points the permission "See the attendance totals"
+// (`attendance.reports`) at on Admin, Roles — shipped pointing at the role
+// `attendance_coordinator`, which nobody holds until it is granted. An ordinary
+// member, and an account from another organisation, get the SAME answer as an
+// address that does not exist. Three addresses show the totals: the reports
+// page, the spreadsheet download, and the cards on /attendance.
+//
+// "THE SAME ANSWER" IS MEASURED, NOT ASSUMED: every refusal is compared with
+// the answer the SAME account gets for a made-up address in the same folder,
+// with the same query string. Two things are taken out first, and only two:
+// the script nonce, which is fresh on every request (#625), and the address
+// itself, which the language menu writes back into the page. Anything else
+// that differed would be a way to tell the page exists.
+//
+// THE PEOPLE, each holding exactly one ground (#616's lesson: one account
+// holding several cannot tell them apart):
+//   MEM   a member of A, nothing else                         → refused
+//   LEAD  a member of A who holds ANOTHER standard role       → refused
+//   ACO   a member of A holding the shipped role              → sees them
+//   ACOB  a member of B holding the shipped role in B only    → refused in A
+//   ADM   a site administrator of A                           → sees them
+//   GADM  a global administrator, no membership row           → sees them
+//   BMEM  a member of B only                                  → refused in A
+const ACO  = 916051;
+const ACOB = 916052;
+/** In the one headcount group and the one note this part records, so "is it in this answer?" is one search. */
+const ATT_Q_MARK = 'ACCESS-Q';
+// ⚠️ NO NAME HERE MAY BEGIN WITH "A": every name is prefixed "Selftest access ",
+//    and refusedAtTheDoor() looks for "Selftest access A" — organisation A's own
+//    name — in the refusal page, which names the signed-in account. The first
+//    version called these two "Attendance coordinator…" and the door's correct
+//    refusal read as a leak.
+foreach ([ACO => 'Q coordinator', ACOB => 'Q coordinator in B'] as $id => $name) {
+    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, 'Selftest access ' . $name, 'u' . $id . '.access@selftest.invalid']);
+}
+q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0), (?, ?, 1, 0, 0)', 'iiii', [ACO, ORG_A, ACOB, ORG_B]);
+// The shipped role, in each organisation. Inserted by hand because this world's
+// two organisations are made after the install script ran, so migration 271's
+// seed never reached them — a new organisation made through the portal gets it
+// from Roles::STANDARD.
+q("INSERT INTO tblRoles (roleID, siteID, roleKey, roleName, isStandard) VALUES (916202, ?, 'attendance_coordinator', 'Attendance Coordinator', 1), (916203, ?, 'attendance_coordinator', 'Attendance Coordinator', 1)", 'ii', [ORG_A, ORG_B]);
+q('INSERT INTO tblUserRoles (userID, roleID, siteID) VALUES (?, 916202, ?), (?, 916203, ?)', 'iiii', [ACO, ORG_A, ACOB, ORG_B]);
+foreach (['aco' => ACO, 'acob' => ACOB] as $who => $id) {
+    q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-access-' . $who, $hash]);
+}
+$jar['aco']  = signIn('aco', ADDR_A);
+$jar['acob'] = signIn('acob', ADDR_B);
+// One session of A, today, with one headcount group and a note carrying the mark.
+// Its number is well clear of 916612: part G records sessions through the real
+// page, and those take the NEXT numbers (916613 and on). 916613 was tried first
+// and collided.
+q("INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, sessionDate, notes) VALUES (916690, ?, 916601, ?, ?)", 'iss', [ORG_A, $today, ATT_Q_MARK . ' note']);
+q('INSERT INTO tblAttendanceCounts (sessionID, groupLabel, headcount, sortOrder) VALUES (916690, ?, 4321, 0)', 's', [ATT_Q_MARK . ' group']);
+
+$qReport = ADDR_A . '/attendance/report';
+$qExport = ADDR_A . '/attendance/export';
+$qMadeUp = ADDR_A . '/attendance/zz-no-such-page';
+/** The answer with the two parts that are allowed to differ taken out. */
+$qPlain = static function (array $answer, string $path): string {
+    return $answer['status'] . ' ' . str_replace($path, '{ADDRESS}', ap_replace('/ nonce="[0-9a-f]+"/', ' nonce=""', $answer['body']));
+};
+/** Is `$asked` (for `$path`) the same answer as a made-up address in the same folder, with the same query? Returns '' or why not. */
+$qLikeMadeUp = static function (string $jarFile, string $path, string $query) use ($qPlain, $qMadeUp): string {
+    $asked  = req($jarFile, 'GET', $path . $query);
+    $madeUp = req($jarFile, 'GET', $qMadeUp . $query);
+    $a      = $qPlain($asked, $path);
+    $b      = $qPlain($madeUp, $qMadeUp);
+    if ($a === $b) {
+        return '';
+    }
+    $at = 0;
+    while ($at < min(strlen($a), strlen($b)) && $a[$at] === $b[$at]) {
+        $at++;
+    }
+
+    return 'HTTP ' . $asked['status'] . ' against ' . $madeUp['status'] . '; first difference at byte ' . $at
+        . ': "' . substr($a, max(0, $at - 40), 100) . '" against "' . substr($b, max(0, $at - 40), 100) . '"';
+};
+$qToken = static fn (string $who): string => '?csrf_token=' . token(req($jar[$who], 'GET', ADDR_A . '/attendance')['body']);
+
+// --- signed out ---------------------------------------------------------------
+foreach (['the reports page' => $qReport, 'the spreadsheet' => $qExport] as $what => $path) {
+    $answer = req($nobody, 'GET', $path);
+    ok(
+        'Q1. signed out, ' . $what . ' sends the visitor to sign in and shows no figure',
+        $answer['status'] === 302 && str_contains($answer['location'], 'login') === true && str_contains($answer['body'], ATT_Q_MARK) === false,
+        'HTTP ' . $answer['status'] . ' ' . $answer['location']
+    );
+}
+
+// --- a member of A, and a member holding another role: "page not found" -------
+foreach (['mem' => 'an ordinary member of A', 'lead' => 'a member of A holding a different role (treasurer)'] as $who => $what) {
+    $answer = req($jar[$who], 'GET', $qReport);
+    ok('Q2. ' . $what . ': the reports page answers 404 and shows no figure', $answer['status'] === 404 && str_contains($answer['body'], ATT_Q_MARK) === false, 'HTTP ' . $answer['status']);
+    $why = $qLikeMadeUp($jar[$who], $qReport, '');
+    ok('Q3. ' . $what . ': …and that 404 is the same answer as a made-up address', $why === '', $why);
+    $query = $qToken($who);
+    $why   = $qLikeMadeUp($jar[$who], $qExport, $query);
+    ok('Q4. ' . $what . ': the spreadsheet, asked with a GOOD form token, is the same answer as a made-up address', $why === '', $why);
+}
+$page = req($jar['mem'], 'GET', ADDR_A . '/attendance');
+ok(
+    'Q5. the attendance page shows a member no reports card, no "Total Headcount This Month" and no download button',
+    $page['status'] === 200 && str_contains($page['body'], 'Total Headcount This Month') === false
+        && str_contains($page['body'], ADDR_A . '/attendance/report"') === false && str_contains($page['body'], ADDR_A . '/attendance/export?') === false,
+    'HTTP ' . $page['status']
+);
+ok('Q5b. …while still showing the member the page itself (recording is not affected)', str_contains($page['body'], ADDR_A . '/attendance/record"') === true);
+
+// --- another organisation's accounts ------------------------------------------
+// At the door: SiteGate refuses a non-member on EVERY address, so the report is
+// the same refusal as a made-up address.
+foreach (['bmem' => 'a member of B', 'acob' => 'a member of B holding the shipped role in B'] as $who => $what) {
+    $answer = req($jar[$who], 'GET', $qReport);
+    ok('Q6. at the door, ' . $what . ' on A\'s address: refused by the members-only gate, nothing of A\'s in it', refusedAtTheDoor($answer) === true && str_contains($answer['body'], ATT_Q_MARK) === false, 'HTTP ' . $answer['status']);
+    $why = $qLikeMadeUp($jar[$who], $qReport, '');
+    ok('Q7. at the door, ' . $what . ': the reports page is the same answer as a made-up address', $why === '', $why);
+    $why = $qLikeMadeUp($jar[$who], $qExport, '');
+    ok('Q7b. at the door, ' . $what . ': so is the spreadsheet', $why === '', $why);
+}
+// With the gate stood down, the PAGE's own rule answers — so the rule is proved
+// to hold by itself, and a role held in B never opens A's totals.
+membersGate(false);
+foreach (['bmem' => 'a member of B', 'acob' => 'a member of B holding the shipped role in B', 'nomem' => 'an account in no organisation'] as $who => $what) {
+    $answer = req($jar[$who], 'GET', $qReport);
+    ok('Q8. without the door, ' . $what . ': the reports page itself answers 404, nothing of A\'s in it', $answer['status'] === 404 && str_contains($answer['body'], ATT_Q_MARK) === false, 'HTTP ' . $answer['status']);
+    $why = $qLikeMadeUp($jar[$who], $qReport, '');
+    ok('Q9. without the door, ' . $what . ': the same answer as a made-up address', $why === '', $why);
+    $why = $qLikeMadeUp($jar[$who], $qExport, '');
+    ok('Q9b. without the door, ' . $what . ': the spreadsheet too', $why === '', $why);
+}
+membersGate(true);
+
+// --- the people who see them --------------------------------------------------
+foreach (['aco' => 'the holder of the shipped role', 'adm' => 'A\'s administrator', 'gadm' => 'a global administrator with no membership row'] as $who => $what) {
+    $answer = req($jar[$who], 'GET', $qReport);
+    ok('Q10. ' . $what . ' opens the reports page and sees the totals', $answer['status'] === 200 && heading($answer) === 'Attendance Reports' && str_contains($answer['body'], ATT_Q_MARK . ' group') === true, 'HTTP ' . $answer['status'] . ' heading: ' . heading($answer));
+    $answer = req($jar[$who], 'GET', $qExport . $qToken($who));
+    ok(
+        'Q11. ' . $what . ' downloads the spreadsheet, with the session in it',
+        $answer['status'] === 200 && ap_find('/^Content-Type:\s*text\/csv/mi', $answer['head']) === 1 && str_contains($answer['body'], ATT_Q_MARK . ' note') === true,
+        'HTTP ' . $answer['status'] . ' ' . mb_substr($answer['body'], 0, 80)
+    );
+}
+$page = req($jar['aco'], 'GET', ADDR_A . '/attendance');
+ok(
+    'Q12. the attendance page shows the role holder the reports card, "Total Headcount This Month" and the download button',
+    $page['status'] === 200 && str_contains($page['body'], 'Total Headcount This Month') === true
+        && str_contains($page['body'], ADDR_A . '/attendance/report"') === true && str_contains($page['body'], ADDR_A . '/attendance/export?') === true,
+    'HTTP ' . $page['status']
+);
+
+// --- re-pointed on the real Roles page ----------------------------------------
+// The permission follows the ROLE the organisation chooses, read live: pointed
+// at treasurer, the treasurer is let in and the Attendance Coordinator is not.
+$answer = post($jar['adm'], ADDR_A . '/admin/roles', ADDR_A . '/admin/roles/save', ['action' => 'capability', 'capability' => 'attendance.reports', 'roleKeys' => ['treasurer']]);
+ok('Q13. A\'s administrator points "See the attendance totals" at Treasurer on the Roles page', $answer['status'] === 302, 'HTTP ' . $answer['status']);
+$answer = req($jar['lead'], 'GET', $qReport);
+ok('Q14. …and the treasurer now opens the reports page', $answer['status'] === 200 && str_contains($answer['body'], ATT_Q_MARK . ' group') === true, 'HTTP ' . $answer['status']);
+$why = $qLikeMadeUp($jar['aco'], $qReport, '');
+ok('Q15. …while the Attendance Coordinator now gets the made-up-address answer', $why === '' && req($jar['aco'], 'GET', $qReport)['status'] === 404, $why);
+$answer = post($jar['adm'], ADDR_A . '/admin/roles', ADDR_A . '/admin/roles/save', ['action' => 'capability_reset', 'capability' => 'attendance.reports']);
+ok('Q16. put back to the role it came with: the Attendance Coordinator is let in again', $answer['status'] === 302 && req($jar['aco'], 'GET', $qReport)['status'] === 200, 'HTTP ' . $answer['status']);
+
+// --- the settings page that used to hold the old choice -----------------------
+// It used to REFUSE the whole save when `reportsVisibleTo` was missing; the
+// field is gone, so a save without it must work, and one that still carries it
+// (a page left open across the upgrade) must not bring the deleted setting back.
+$oldSettingRows = static fn (): int => (int) one("SELECT COUNT(*) AS n FROM tblSettings WHERE settingKey = 'attend.reports.visibleTo'")['n'];
+$page = req($jar['adm'], 'GET', ADDR_A . '/admin/settings/attendance');
+ok(
+    'Q17. the attendance settings page no longer offers the old choice, and names the permission instead',
+    $page['status'] === 200 && str_contains($page['body'], 'reportsVisibleTo') === false && str_contains($page['body'], 'See the attendance totals') === true,
+    'HTTP ' . $page['status']
+);
+$answer = post($jar['adm'], ADDR_A . '/admin/settings/attendance', ADDR_A . '/admin/settings/attendance/save', ['scope' => 'site', 'visibleTo' => 'admins', 'retentionDays' => '30']);
+$after  = req($jar['adm'], 'GET', ADDR_A . '/admin/settings/attendance');
+ok(
+    'Q18. saving it without the old field works ("Saved for your organisation.") and writes no old-setting row',
+    $answer['status'] === 302 && str_contains($after['body'], 'Saved for your organisation.') === true && $oldSettingRows() === 0,
+    'HTTP ' . $answer['status'] . '; old-setting rows: ' . $oldSettingRows()
+);
+$answer = post($jar['adm'], ADDR_A . '/admin/settings/attendance', ADDR_A . '/admin/settings/attendance/save', ['scope' => 'site', 'visibleTo' => 'admins', 'retentionDays' => '30', 'reportsVisibleTo' => 'members']);
+ok('Q19. …and a save still carrying "reportsVisibleTo=members" is accepted without writing it back', $answer['status'] === 302 && $oldSettingRows() === 0, 'HTTP ' . $answer['status'] . '; old-setting rows: ' . $oldSettingRows());
 
 // =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');

@@ -2,104 +2,75 @@
 // Path: _core/AttendanceAccess.php
 /**
  * -----------------------------------------------------------------------------
- * Who may see the attendance reports page 📊 (#529)
+ * Who may see an organisation's attendance totals 📊 (#529, D-106)
  * -----------------------------------------------------------------------------
- * WHAT WAS WRONG BEFORE
+ * THE RULE (the owner, 10 November 2026 — D-106)
  * -------------------------------------------------------------------------
- * `attendance/report.php` asked only `Auth::check()` — is somebody signed
- * in — before showing the organisation's whole attendance history: monthly
- * headcount totals, year-over-year figures, and (if that setting allowed it)
- * the anonymous check-in totals too. It never asked which organisation that
- * signed-in account belonged to, so ANY signed-in account on the WHOLE
- * installation could read ANY organisation's totals, simply by opening that
- * organisation's site and visiting this address. Confirmed on a real
- * database: a signed-in member of organisation B could read organisation
- * A's attendance figures in full.
+ * An organisation's attendance totals — headcounts by month, by service type
+ * and by headcount group; totals, never a named person — are seen by:
  *
- * THE FIX, AND WHY IT IS A SETTING
+ *   1. the organisation's ADMINISTRATORS, always; and
+ *   2. whoever the organisation points the permission `attendance.reports`
+ *      at on Admin, Roles (`Portal\Core\Capabilities`, D-017). It ships
+ *      pointing at the standard role "Attendance Coordinator", which nobody
+ *      holds until somebody grants it (migration 271).
+ *
+ * Nobody else. An ordinary member of the organisation, and an account that
+ * belongs to ANOTHER organisation, are each shown the portal's ordinary "page
+ * not found" — the same answer as an address that does not exist — because
+ * neither has any business learning the page is there.
+ *
+ * `mayViewTotals()` is the ONE place that decides it. The reports page, the
+ * attendance spreadsheet download and the attendance page's own "this month"
+ * total and "View Reports" card all ask it, so they cannot disagree.
+ *
+ * WHAT THIS REPLACED, AND WHY IT IS NOT A SETTING ANY MORE
  * -------------------------------------------------------------------------
- * The owner decided to restrict the page (20 September 2026), with the same
- * kind of small, plain, per-organisation choice #525 already used for the
- * anonymous check-in counts — a whole-number decision, not a spectrum,
- * seeded once for the installation and overridable per organisation.
- * Organisations differ: some want attendance figures kept to
- * administrators, some want the people who actually run events to see how
- * their own numbers are trending, and a few may be happy for the whole
- * congregation to see them.
+ * Until 10 November 2026 this class read a three-way setting,
+ * `attend.reports.visibleTo` — administrators only (the default),
+ * administrators and anybody coordinating any event, or any member. D-106
+ * rules out "any member", and D-017 says a new gate is a PERMISSION an
+ * organisation points at a role, never a choice hard-wired in code. Migration
+ * 271 deletes the setting; a setting nothing reads would be a lie with a Save
+ * button (#671). The "coordinates any event" test went with it: it was not a
+ * role, so a permission cannot point at it.
  *
- * THREE choices, and only three — the same shape as #525's
- * `attend.anonCounts.visibleTo`, deliberately, so the two sit together in
- * the settings editor and so #526 (a future four-level settings resolver:
- * installation, organisation, venue, event) can extend both through one
- * small change each, rather than inventing a second vocabulary:
- *
- *   admins               Administrators only. The default, and the
- *                         narrowest — see "WHY `admins` IS THE DEFAULT"
- *                         below.
- *   admins_coordinators  Administrators, plus anyone who currently
- *                         coordinates one of this organisation's events.
- *   members              Any member of this organisation.
- *
- * WHY `admins` IS THE DEFAULT
+ * THE DOWNLOAD IS NO LONGER ADMINISTRATORS-ONLY, ON PURPOSE
  * -------------------------------------------------------------------------
- * The owner chose to restrict access, so starting at the narrowest choice is
- * the safe direction — nobody's access is accidentally widened by an
- * upgrade they did not ask for. It also matches #525's own default, and
- * nothing in the existing help pages ever promised ordinary members the
- * attendance totals, so narrowing here breaks no documented promise.
- * Widening it is then a deliberate act by an administrator who knows their
- * own organisation, at `/admin/settings/attendance`.
+ * `attendance/export.php` used to refuse everybody but an administrator,
+ * borrowing the reasoning the owner gave on 18 September 2026 for the
+ * ANONYMOUS check-in spreadsheet. D-106 names "its CSV export" explicitly, so
+ * the attendance spreadsheet follows this rule now. The anonymous check-in
+ * spreadsheet (`export-anonymous.php`) does NOT: it names events, and the
+ * owner's own decision about it stands — administrators only.
  *
- * NOT A MEMBER AT ALL: REFUSED BEFORE THE SETTING IS EVEN READ
+ * NOT A MEMBER AT ALL: REFUSED BEFORE ANY ROLE IS ASKED
  * -------------------------------------------------------------------------
- * Whatever the setting says, somebody who is not a member of this
- * organisation (and not a global administrator) is refused — the setting
- * can only decide who AMONG this organisation's own people sees the
- * figures, never open the page to a stranger. `mayView()`'s very first
- * rule enforces this, and `report.php` refuses that case with a 404
- * ("looks exactly like a page that does not exist", the #503 discipline)
- * rather than 403, because a non-member has no business learning the page
- * exists at all. A refused MEMBER (the setting excludes them) gets 403
- * instead — they may know the page exists, they simply may not open it.
- *
- * THE COORDINATOR TEST DELIBERATELY DOES NOT APPLY THE DBS GATE
- * -------------------------------------------------------------------------
- * `Auth::isCoordinatorOf()` (used elsewhere) decides whether a coordinator
- * may EDIT an event, and that decision is deliberately tied to their
- * safeguarding (DBS) check being current — editing an event is an action
- * that touches the event itself. `coordinatesAnyEvent()` below answers a
- * different question: may this person see the organisation's ATTENDANCE
- * TOTALS. A lapsed DBS check has nothing to say about whether somebody may
- * see a headcount, so this class does NOT apply that gate. WHAT THIS MEANS
- * IN PRACTICE, STATED PLAINLY: this cannot tell a coordinator of an event
- * happening next week from a coordinator of one that happened, and ended,
- * two years ago — any non-deleted event they coordinate counts. That is
- * accepted as the cost of a simple, cheap check; narrowing it further is
- * not something this issue asked for.
+ * On an installation with several organisations `SiteGate` already refuses a
+ * signed-in person who is not a member, on every address, before any page
+ * runs (#511). This class asks again, by itself, because it must not depend
+ * on a gate that does not run on a single-organisation installation, and
+ * because a role held in organisation B must never open organisation A's
+ * totals: `Capabilities::allows()` is asked about THIS organisation only.
  *
  * WHAT THIS CLASS DELIBERATELY DOES NOT DO
  * -------------------------------------------------------------------------
- * It never reads `$_SESSION`, `$_GET`, `$_POST` or the currently open
- * organisation — every input arrives as a parameter, exactly like
- * `AnonymousCheckins`, so `choice()` and `mayView()` can be, and are,
- * proved by `tools/attendance-access-selftest.php` with no database
- * connection at all. It does not decide who may see the SESSIONS list on
- * `/attendance` (that is `attendance/index.php`'s own, narrower change —
- * see that file) or WHICH of an organisation's members may RECORD or DELETE
- * a headcount: any active member may, and an administrator. Until
- * 12 October 2026 those three pages (`attendance/record.php`,
- * `record/save.php`, `record/delete.php`) asked only for a sign-in, so a
- * member of a DIFFERENT organisation could change this one's figures. They
- * now call `viewerIsMember()` below to shut outsiders out. Narrowing it
- * further (administrators only, or a named "recorder" role) is a separate
- * question (see the #529 closing comment, "bigger than it looks", §9.1):
- * who may CHANGE the record, not who may READ a summary of it.
+ * It does not decide who may RECORD, change or delete a head count — any
+ * active member may, and an administrator (the owner's decision). Those three
+ * pages (`attendance/record.php`, `record/save.php`, `record/delete.php`) call
+ * `viewerIsMember()` below only to shut outsiders out.
+ *
+ * And it does not hide the list of sessions on `/attendance`, each with its
+ * own headcount, or the edit form that shows one session's counts: members
+ * use both to record and correct a head count. Whether a member who records
+ * should still see each session's own figure is a separate question D-106 did
+ * not answer, and it is #917 rather than decided here.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   2.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/529
  * -----------------------------------------------------------------------------
  */
@@ -112,168 +83,77 @@ use mysqli;
 
 final class AttendanceAccess
 {
-    /** The setting key — one setting, one reader, shared by the organisation
-     *  form and the installation-wide form at /admin/settings/attendance. */
-    public const VISIBILITY_KEY = 'attend.reports.visibleTo';
-
-    /** The narrowest choice, and the one anything unrecognised falls back to. */
-    public const VISIBLE_ADMINS = 'admins';
-
-    /** Administrators, plus anyone who currently coordinates one of this
-     *  organisation's events (see the class docblock for what that cannot
-     *  tell apart). */
-    public const VISIBLE_ADMINS_COORDINATORS = 'admins_coordinators';
-
-    /** Any member of this organisation — the widest choice. */
-    public const VISIBLE_MEMBERS = 'members';
-
     /**
-     * The three choices, in the order they are offered on the settings screen.
+     * The rule itself, with no database: may somebody with these three facts
+     * see the attendance totals?
      *
-     * @var array<string, string> Stored value => the label a person reads.
+     * Public so `tools/attendance-access-selftest.php` can prove every
+     * combination without a connection. `mayViewTotals()` works the facts out
+     * and asks THIS, so the two cannot disagree.
+     *
+     * Checked in this order, first match wins:
+     *   1. not a member of the organisation (and not a global administrator) →
+     *      false, whatever else is true. A role held elsewhere opens nothing
+     *      here.
+     *   2. an administrator → true.
+     *   3. otherwise → whether they hold the permission `attendance.reports`.
+     *
+     * @param bool $isMember        viewerIsMember() for this organisation.
+     * @param bool $isAdmin         App::isAdmin() for this organisation.
+     * @param bool $holdsPermission Capabilities::allows() for ATTENDANCE_REPORTS.
+     *
+     * @return bool
      */
-    public const VISIBILITY_CHOICES = [
-        self::VISIBLE_ADMINS              => 'Administrators only',
-        self::VISIBLE_ADMINS_COORDINATORS => 'Administrators, and anyone who coordinates one of this organisation\'s events',
-        self::VISIBLE_MEMBERS             => 'Any member of this organisation',
-    ];
-
-    /**
-     * Turn whatever is stored into one of the three choices.
-     *
-     * Anything unrecognised — a typo, an empty value, a missing row, a
-     * hand-edited value that has never been one of the three — comes back
-     * as `admins`, the narrowest. Failing closed matters here: the
-     * alternative is a mistyped setting quietly showing attendance figures
-     * to more people than intended.
-     *
-     * @param string|null $raw Exactly what was stored, or null if nothing was.
-     *
-     * @return string One of the keys of VISIBILITY_CHOICES.
-     */
-    public static function choice(?string $raw): string
+    public static function decide(bool $isMember, bool $isAdmin, bool $holdsPermission): bool
     {
-        if ($raw === null) {
-            return self::VISIBLE_ADMINS;
-        }
-
-        $trimmed = trim($raw);
-        if (array_key_exists($trimmed, self::VISIBILITY_CHOICES) === true) {
-            return $trimmed;
-        }
-
-        return self::VISIBLE_ADMINS;
-    }
-
-    /**
-     * Read the choice for one organisation.
-     *
-     * 📌 THIS IS THE ONE FUNCTION #526 REPLACES (alongside
-     *    `AnonymousCheckins::readVisibilityChoice()`). Issue #526 makes
-     *    this setting settable at four levels — installation, organisation,
-     *    venue and event — with the most specific one winning. When that
-     *    lands, this method grows the extra lookups and every screen
-     *    follows, because every screen reads the choice through here and
-     *    nowhere else.
-     *
-     * Today there are two levels only: this organisation's own row if it
-     * has one, otherwise the installation-wide row — exactly what
-     * `App::settingForSite()` already does.
-     *
-     * @param int $siteId The organisation to read the setting for.
-     *
-     * @return string One of the keys of VISIBILITY_CHOICES.
-     */
-    public static function readChoice(int $siteId): string
-    {
-        return self::choice(App::settingForSite(self::VISIBILITY_KEY, $siteId));
-    }
-
-    /**
-     * The whole decision about whether one person may see the attendance
-     * reports.
-     *
-     * Rules, checked in this order, first match wins:
-     *
-     * 1. Not a member of this organisation at all (and not an
-     *    administrator) → false, WHATEVER the setting says. The setting
-     *    only ever decides who AMONG this organisation's own people sees
-     *    the figures; it can never open the page to a stranger.
-     * 2. An administrator → true, always. The narrowest setting
-     *    (`admins`) still has to mean SOMETHING can see the page.
-     * 3. `members` → true for any member.
-     * 4. `admins_coordinators` → true only if this member currently
-     *    coordinates at least one of this organisation's events.
-     * 5. `admins` and anything unrecognised → false for a non-administrator.
-     *
-     * @param string $choice               One of the keys of VISIBILITY_CHOICES
-     *                                      (or anything — normalised inside).
-     * @param bool   $isMember              Is this person a member of the
-     *                                      organisation being viewed (or a
-     *                                      global administrator)? See
-     *                                      viewerIsMember().
-     * @param bool   $isAdmin               Is this person an administrator
-     *                                      (App::isAdmin())?
-     * @param bool   $coordinatesAnyEvent   Does this person currently
-     *                                      coordinate at least one of this
-     *                                      organisation's events? See
-     *                                      coordinatesAnyEvent(). Pass false
-     *                                      when the choice is not
-     *                                      admins_coordinators — the caller
-     *                                      need not run that query at all in
-     *                                      that case (see report.php).
-     *
-     * @return bool True if the attendance reports may be shown.
-     */
-    public static function mayView(
-        string $choice,
-        bool $isMember,
-        bool $isAdmin,
-        bool $coordinatesAnyEvent
-    ): bool {
-        // Rule 1 — not a member of this organisation at all: refused
-        // whatever the setting says. viewerIsMember() already answers true
-        // for a global administrator, so this does not need a separate
-        // global-administrator branch of its own.
         if ($isMember === false) {
             return false;
         }
-
-        // Rule 2 — administrators always see the figures, whatever the
-        // setting says (the narrowest choice still has to mean something).
         if ($isAdmin === true) {
             return true;
         }
 
-        $normalised = self::choice($choice);
-
-        if ($normalised === self::VISIBLE_MEMBERS) {
-            return true;
-        }
-
-        if ($normalised === self::VISIBLE_ADMINS_COORDINATORS) {
-            return $coordinatesAnyEvent === true;
-        }
-
-        // self::VISIBLE_ADMINS, and anything unrecognised.
-        return false;
+        return $holdsPermission === true;
     }
 
     /**
-     * Is this person a member of the organisation being viewed, for the
-     * purposes of `mayView()`'s first rule?
+     * May this person see this organisation's attendance totals? The ONE
+     * question every page that shows them asks.
      *
-     * True for an active account holding the portal-wide `isRootAdmin`
-     * flag (a global administrator may always open any organisation's
-     * reports), or for an active account with an ACTIVE `tblUserSites` row
-     * for this organisation. The same predicate `event-register.php` and
-     * `anon-checkin.php` use for their own "may this viewer see this
-     * organisation's internal event" test — written once here, for this
-     * page's own question, rather than shared, because #514 is where the
-     * portal's several near-identical copies of this predicate are due to
-     * be collapsed into one method; duplicating it here rather than
-     * reaching into a calendar-app file keeps this class's own dependencies
-     * to `_core` only.
+     * Read LIVE from the database, so a role taken away, or the permission
+     * re-pointed, takes effect on the very next request.
+     *
+     * @param mysqli $db            An open connection.
+     * @param int    $userId        The viewer; 0 (nobody signed in) is always false.
+     * @param int    $siteId        The organisation the totals belong to.
+     * @param bool   $isAdmin       App::isAdmin(), asked by the caller because
+     *                              it reads the signed-in account's own flags.
+     * @param bool   $isGlobalAdmin App::isRootAdmin(), handed to
+     *                              Capabilities::allows() exactly as App::can()
+     *                              hands it.
+     *
+     * @return bool
+     */
+    public static function mayViewTotals(mysqli $db, int $userId, int $siteId, bool $isAdmin, bool $isGlobalAdmin): bool
+    {
+        $isMember = self::viewerIsMember($db, $userId, $siteId);
+
+        // The permission is asked only when the answer depends on it: a
+        // non-member is refused and an administrator let in without it.
+        $holds = ($isMember === true && $isAdmin === false)
+            ? Capabilities::allows($db, $userId, $siteId, Capabilities::ATTENDANCE_REPORTS, $isGlobalAdmin)
+            : false;
+
+        return self::decide($isMember, $isAdmin, $holds);
+    }
+
+    /**
+     * Is this person a member of the organisation being viewed?
+     *
+     * True for an active account holding the portal-wide `isRootAdmin` flag
+     * (a global administrator), or for an active account with an ACTIVE
+     * `tblUserSites` row for this organisation. Also used by the three pages
+     * that record a head count, to shut outsiders out.
      *
      * @param mysqli $db     An open connection.
      * @param int    $userId The viewer. 0 (nobody signed in) always returns false.
@@ -288,51 +168,12 @@ final class AttendanceAccess
         }
 
         $stmt = $db->prepare(
-            'SELECT 1 FROM tblUsers u '
-            . 'WHERE u.userID = ? AND u.isActive = 1 '
-            . '  AND ( u.isRootAdmin = 1 '
-            . '        OR EXISTS (SELECT 1 FROM tblUserSites ms '
-            . '                    WHERE ms.userID = u.userID AND ms.siteID = ? AND ms.isActive = 1) '
+            'SELECT 1 FROM `tblUsers` u '
+            . 'WHERE u.`userID` = ? AND u.`isActive` = 1 '
+            . '  AND ( u.`isRootAdmin` = 1 '
+            . '        OR EXISTS (SELECT 1 FROM `tblUserSites` ms '
+            . '                    WHERE ms.`userID` = u.`userID` AND ms.`siteID` = ? AND ms.`isActive` = 1) '
             . '      ) LIMIT 1'
-        );
-        if ($stmt === false) {
-            return false;
-        }
-        $stmt->bind_param('ii', $userId, $siteId);
-        $stmt->execute();
-        $found = $stmt->get_result()->fetch_assoc() !== null;
-        $stmt->close();
-
-        return $found;
-    }
-
-    /**
-     * Does this person currently coordinate at least one of this
-     * organisation's events?
-     *
-     * Deliberately does NOT apply the DBS gate `Auth::isCoordinatorOf()`
-     * applies elsewhere — see the class docblock, "THE COORDINATOR TEST
-     * DELIBERATELY DOES NOT APPLY THE DBS GATE", for why, and for what this
-     * cannot tell apart (a coordinator of an event years in the past counts
-     * the same as one coordinating an event next week, as long as the event
-     * itself has not been deleted).
-     *
-     * @param mysqli $db     An open connection.
-     * @param int    $userId The viewer.
-     * @param int    $siteId The organisation.
-     *
-     * @return bool
-     */
-    public static function coordinatesAnyEvent(mysqli $db, int $userId, int $siteId): bool
-    {
-        if ($userId <= 0 || $siteId <= 0) {
-            return false;
-        }
-
-        $stmt = $db->prepare(
-            'SELECT 1 FROM tblEventCoordinators c '
-            . 'JOIN tblEvents e ON e.eventID = c.eventID '
-            . 'WHERE c.userID = ? AND c.revokedAt IS NULL AND e.siteID = ? AND e.isDeleted = 0 LIMIT 1'
         );
         if ($stmt === false) {
             return false;
