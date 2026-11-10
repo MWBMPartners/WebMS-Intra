@@ -159,7 +159,9 @@ appended with its real date and a note that it was added later.
 | [D-101](101-a-public-address-takes-effect-only-once-approved.md) | 2026-11-09 | An organisation's public address takes effect only once the installation's global administrator approves it | in force |
 | [D-102](102-webhook-ports-are-an-installation-setting.md) | 2026-11-10 | Which port numbers a webhook may use is an installation setting, standard ports by default | in force |
 | [D-103](103-the-approver-role-sees-only-its-own-departments-claims.md) | 2026-11-10 | The organisation-wide Approver role sees only its own departments' expense claims | in force |
+| [D-104](104-changing-or-resetting-a-password-signs-out-other-browsers.md) | 2026-11-10 | Resetting or changing a password signs the person out of every other browser | in force |
+| [D-105](105-the-health-pages-mail-count-covers-the-viewers-own-organisation.md) | 2026-11-10 | The health page's mail status counts only the viewer's own organisation | in force |
 
-*103 decisions. This index is checked against the folder by
+*105 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
