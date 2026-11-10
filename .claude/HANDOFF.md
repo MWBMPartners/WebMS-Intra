@@ -13,7 +13,7 @@ Last whole suite (with #782): 103/103 green. Decisions taken this stretch: D-102
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 87d01592 | Check round 8 NOT CLEAN (narrowing): keep-step refactor measured behaviour-neutral (old vs new byte-identical on 75 givers); outlook wrong for the 'due' case (past keep-until) and 'none of your gifts' ignores envelopes; tblUsers reason still groups statements with number-only records. Round 9 building |
+| #703 — keep the worker's name on care/safeguarding/check-in records (D-016, D-110 to D-113; migration 272) | `agent-afd8a19e73dcfa23c` / `p703-build`, 0b545ae0 | Check round 9 NOT CLEAN (narrow): refactor behaviour-neutral on 1,608 givers and outlook agrees on 1,056; but Delete page asserts removal under a hold, the multi-organisation join says 'this organisation' twice, and the statement-record reason is wrong about period-less files; the hold is tested by nothing. Round 10 building. Raised #941 (pre-existing) |
 | #932 — activity log may be kept for ever (D-117, D-118, D-119) | `agent-a0a937a0283ea6499` / `p932-build`, de3c05c8 | Cherry-picked (4fda0046..4f42bdb9) with docs; whole suite running, then push and close. Member wording is #940, after #703 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
@@ -22,7 +22,7 @@ Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and
 ## Next, in this order
 
 1. #703 round 6 → check → integrate. #932 (activity log "never delete", D-117): code part may build now (sweep, retention page, retention-caps test — none of #703's files); the member-facing wording follows after #703.
-2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#940. #931 closed by D-116.
+2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#941. #931 closed by D-116.
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
