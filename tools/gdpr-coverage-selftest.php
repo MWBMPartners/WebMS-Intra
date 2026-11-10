@@ -2164,8 +2164,13 @@ check(
     // Beside an emptied account the WIDER of the stored rule and today's
     // sorts (third fix round): the stored "every gift" wins over a narrower
     // setting, and today's "every gift" wins over a narrower stored rule.
-    && str_contains($atSite, "if (\$keptAlready === true && (string) \$existing['scope'] === GivingRetention::SCOPE_ALL) {")
-    && str_contains($atSite, "\$scope = (string) \$rule['scope'];")
+    // #703 round 8: the rule moved into sortingScope(), which givingOutlook()
+    // (what My data shows) asks too; so the keep step's CALL is pinned here and
+    // the helper's whole condition below, rather than the inline text it held.
+    && str_contains($atSite, "\$scope = self::sortingScope((string) \$rule['scope'], \$existing, \$emptiedAlready);")
+    && str_contains($method($eraserCode, 'sortingScope'), "if (\$keptRow !== null && (\$keptRow['clearedAt'] ?? null) === null && \$accountEmptied === true\n"
+        . "            && (string) (\$keptRow['scope'] ?? '') === GivingRetention::SCOPE_ALL) {\n            return GivingRetention::SCOPE_ALL;\n        }\n\n        return \$todayScope;")
+    && str_contains($atSite, '$emptiedAlready = self::accountEmptiedForGiving($account);')
     && str_contains($atSite, 'self::$everyGiftSites[] = $siteId;')
     && str_contains($method($eraserCode, 'unnameCountEnvelopes'), "' OR cs.siteID IN (' . implode(', ', array_map('intval', self::\$everyGiftSites)) . ')'")
     && str_contains($atSite, 'if ($keptAlready === false && $keptGifts === 0 && $declarationCount === 0 && $statementCount === 0 && $envelopeCount === 0) {')

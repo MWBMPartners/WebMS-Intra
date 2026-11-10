@@ -102,7 +102,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
               //    pastoral visit keeps who made it, by name (D-016), and so do care cases opened
               //    (D-110) and children checked in or out (D-111); gifts kept for tax keep the donor's
               //    name until the keep-until date; an expense claim keeps the claimant's account
-              //    number (D-113). Each kind below is checked against GdprEraser::catalogue(). ?>
+              //    number (D-113). Each kind below is checked against GdprEraser::catalogue().
+              //    Round 8: "your giving statements" sat among records keeping only the number, but a
+              //    kept statement FILE holds the donor's name, home address and every gift on it until
+              //    the keep-until date (GdprEraser::eraseGivingStatementFiles() and
+              //    statementFileIsKept()); a visit's notes are EMPTIED when the case is about the
+              //    person themselves; and "how each is cleared" implied the change history is cleared,
+              //    which the owner's decision D-116 rules out. ?>
         <h2 class="h5 mt-4">What is kept</h2>
         <p class="small">
             Records that other people rely on stay, with your name and account number taken off them:
@@ -113,20 +119,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             organisation's own duties require it:
         </p>
         <ul class="small">
-            <li>If you worked or volunteered here, the pastoral visits you made (with their notes), the care
-                cases you opened, the DBS (safeguarding) checks you recorded and the children you checked in
+            <li>If you worked or volunteered here, the pastoral visits you made (with their notes, except on a
+                case about you, where the notes are emptied), the care cases you opened, the DBS (safeguarding) checks you recorded and the children you checked in
                 or out keep your name and account number as the person who did it.</li>
-            <li>Gifts kept for tax, and your tax declarations, stay with your name and home address kept beside
-                them until this organisation's keep-until date. Your other gifts lose your name.</li>
-            <li>Your expense claims, your own DBS checks, your giving statements and an approval step given to
-                you by name keep your account number.</li>
+            <li>Gifts kept for tax, and your tax declarations, stay with your name and any home address held
+                for you kept beside them until this organisation's keep-until date. Your other gifts lose your
+                name.</li>
+            <li>A giving statement's file holds your name, your home address and every gift on it. Where every
+                gift on it is one kept for tax, the file is kept until the same date; otherwise it is deleted.
+                The record that a statement was issued, with its period and totals, keeps your account
+                number.</li>
+            <li>Your expense claims, your own DBS checks and an approval step given to you by name keep your
+                account number.</li>
         </ul>
         <p class="small">
             Your account itself is emptied, but through that number, and the names kept beside it, anyone who
             can read the database or a backup can match these records back to you. Records kept for security
             and as a history of changes can mention your account number too; the
             <a href="<?php echo htmlspecialchars(Router::url('privacy/policy'), ENT_QUOTES, 'UTF-8'); ?>">privacy notice</a>
-            says what they are and how each is cleared.
+            says what they are and how long each is kept.
             <a href="<?php echo htmlspecialchars(Router::url('account/erasure-request'), ENT_QUOTES, 'UTF-8'); ?>">Request data erasure</a> lists exactly what we hold about you
             and what would happen to each kind of record.
         </p>

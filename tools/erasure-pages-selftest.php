@@ -181,7 +181,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 89; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 93; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -196,6 +196,9 @@ const EXPECTED_CHECKS = 89; // 80 until #703 (D-016) added two: the two writers
                             // Round 7 added one: the pin file holds exactly the
                             // pins compared, each once (the JSON's schema was run
                             // by nothing). 89.
+                            // Round 8 added section K: what a giver is told
+                            // will happen to their own gifts, under both
+                            // rules, then checked against a real erasure. 93.
 
 function refuse(string $why): never
 {
@@ -362,6 +365,12 @@ const CHILD       = 917214; // a child in A, checked in by Mel and out by Ada th
 const VISIT_ADM   = 917215; // a visit Ada made under the name she had THEN: the page must show her name NOW (#703)
 
 const REQ_PIP_A = 917910; // Pip's request, filed in A (section J)
+// #703 round 8, section K: three givers who sign in, to see on THEIR OWN My data
+// what an erasure will do with their gifts and envelopes.
+const GWEN   = 917041; // one gift, no tax declaration or statement: it will lose her name
+const DORA   = 917042; // one gift inside her tax declaration: it will keep her name
+const BO     = 917043; // one of each, plus an envelope in an open count and one in a closed count
+const REQ_BO = 917960; // Bo's request, carried out at the end of section K
 const REQ_PIP_B = 917911; // Pip's request, filed in B
 
 /** Every request this run's organisations hold for one account. */
@@ -421,6 +430,8 @@ function removeWorld(): void
     q('DELETE FROM tblGiftAidDeclaration WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblGivingKeptDonors WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblGivingEntry WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE ce FROM tblCountEnvelopes ce JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID WHERE cs.siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
+    q('DELETE FROM tblCountSessions WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     q('DELETE FROM tblGivingCategory WHERE siteID IN (?, ?)', 'ii', [ORG_A, ORG_B]);
     // Section H plants this to stop a run. Taken away here too, in case the
     // run was interrupted while it was in place.
@@ -1290,18 +1301,27 @@ ok('the booking is still in the administrator\'s approvals queue, waiting for a 
 //    organisation, every gift" choice inside, and the confirmed one says "year"
 //    or "years"; round 6 drew only the unconfirmed one, so a reassurance added
 //    to the confirmed branch was pinned by nothing.
+//    #703 round 8: a section ends only at a heading of the SAME or a HIGHER
+//    level than its own (an <h3> section at the next <h3>, <h2> or <h1>).
+//    Ending at ANY heading let a new <h4> and a reassurance under it, placed
+//    after the list, sit outside the pin with everything green (plant P3e).
+//    The help page's region is found the same way now (P3f below).
 $sectionAfter = static fn (string $heading): \Closure => static function (\Dom\HTMLDocument $doc) use ($heading): array {
     $found = [];
     foreach ($doc->querySelectorAll('h1, h2, h3, h4, h5, h6') as $h) {
-        if (trim((string) $h->textContent) === $heading) {
+        if (trim((string) preg_replace('/\s+/', ' ', (string) $h->textContent)) === $heading) {
             $found[] = $h;
         }
     }
     if (count($found) !== 1) {
         return [];
     }
+    $level = (int) substr($found[0]->tagName, 1);
     $nodes = [$found[0]];
-    for ($n = $found[0]->nextElementSibling; $n !== null && preg_match('/^H[1-6]$/', $n->tagName) !== 1; $n = $n->nextElementSibling) {
+    for ($n = $found[0]->nextElementSibling; $n !== null; $n = $n->nextElementSibling) {
+        if (preg_match('/^H([1-6])$/', $n->tagName, $m) === 1 && (int) $m[1] <= $level) {
+            break;
+        }
         $nodes[] = $n;
     }
 
@@ -1348,24 +1368,16 @@ if ($givingRowsNow() !== $givingBefore) {
 }
 ok('the PRIVACY page\'s "Retention policy" section, drawn in all four states of its giving sentence, is each time exactly the pinned markup a member receives, found once, inside exactly the pinned wrappers - what is kept on purpose, what the worker records keep, what is kept for security and history and how each is cleared (#703, D-113)',
     $privacyWrong === [], implode(' | ', $privacyWrong));
-// 🗣️ The administrators' help: the whole list "What an erasure keeps, and what
-//    it does not reach", rendered, so the D-112 qualifier and every other item
-//    are inside the pin (a new item is too). EXACTLY ONE item may carry its
-//    marker sentence (#703 round 7).
-$helpRegion = renderedRegion((string) req($jar['adm'], 'GET', '/help/admin')['body'], static function (\Dom\HTMLDocument $doc): array {
-    $found = [];
-    foreach ($doc->querySelectorAll('li') as $li) {
-        if (str_contains((string) $li->textContent, 'Who made a pastoral visit, opened a care case') === true
-            && $li->parentElement !== null) {
-            $found[] = $li->parentElement;
-        }
-    }
-
-    return count($found) === 1 ? $found : [];
-});
-ok('the HELP page\'s list of what an erasure keeps is exactly the pinned markup an administrator receives, the D-112 qualifier included, found once, inside exactly the pinned wrappers (#703)',
+// 🗣️ The administrators' help: the whole section "What an erasure keeps, and
+//    what it does not reach", rendered, from its heading to the next heading
+//    of its level or higher, so the D-112 qualifier, every item AND anything
+//    added after the list under the same heading are inside the pin. #703
+//    round 8: it was the <ul> alone, and a paragraph added straight after it
+//    passed (plant P3f). The heading must appear exactly once (round 7).
+$helpRegion = renderedRegion((string) req($jar['adm'], 'GET', '/help/admin')['body'], $sectionAfter('What an erasure keeps, and what it does not reach'));
+ok('the HELP page\'s section on what an erasure keeps, heading to next heading of its level, is exactly the pinned markup an administrator receives, the D-112 qualifier included, found once, inside exactly the pinned wrappers (#703)',
     renderedPin('help kept list', $helpRegion),
-    $helpRegion === '' ? 'not exactly one such list' : mb_substr($helpRegion, 0, 600));
+    $helpRegion === '' ? 'not exactly one such section' : mb_substr($helpRegion, 0, 600));
 ok('the rendered-pin file holds exactly the pins this test compares, each once, and nothing it does not understand (#703 round 7)',
     pinFileProblems() === [], implode(' | ', pinFileProblems()));
 $back = $signIn('mel', 'mel-again');
@@ -2288,6 +2300,128 @@ ok('J13 "Keep it" on the line that is not tied to one organisation: the note is 
     . '; counts sentence: ' . mb_substr((string) strstr($tKeep, 'line(s) of free text are held'), 0, 160));
 
 // =============================================================================
+head('K. What a giver is told will happen to their own gifts (#703 round 8)');
+// =============================================================================
+// My data and Request erasure used to count every gift WHERE donorID = ? and
+// call the lot "kept", with a reason saying every other gift had "already
+// lost" the name - untrue before an erasure has run, and untrue for a gift no
+// tax declaration or statement covers, which the erasure takes the name off.
+// They now show GdprEraser::givingOutlook(), which asks the keep step's own
+// rules. Three givers, under both rules, and then one of them is really
+// erased, to show the page said what the erasure then did.
+$givingBefore8 = q("SELECT settingKey, settingValue, defaultValue FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%' ORDER BY settingKey", 'i', [ORG_A]);
+foreach (['gwen' => [GWEN, 'Gwen Giver'], 'dora' => [DORA, 'Dora Declared'], 'bo' => [BO, 'Bo Both']] as $who => [$id, $name]) {
+    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, $name, 'u' . $id . '.erasure@selftest.invalid']);
+    q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+    q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-erasure-' . $who, $hash]);
+    $in = $signIn($who);
+    if ($in['status'] !== 302 || str_contains($in['location'], 'login') === true) {
+        refuse("signing in as selftest-erasure-{$who} did not work (HTTP {$in['status']} {$in['location']})");
+    }
+}
+foreach ([DORA, BO] as $donor) {
+    q("INSERT INTO tblGiftAidDeclaration (siteID, donorID, address, postcode, validFrom) VALUES (?, ?, '3 Made-up Road', 'ZZ3 3ZZ', '2020-01-01')", 'ii', [ORG_A, $donor]);
+}
+$gift(ORG_A, GWEN, $recent, 1000);        // no declaration at all: loses the name unless every gift is kept
+$gift(ORG_A, DORA, $recent, 2000);        // inside her declaration: keeps it
+$boKept   = $gift(ORG_A, BO, $recent, 3000);      // inside his declaration: keeps it
+$boUnkept = $gift(ORG_A, BO, '2019-06-01', 4000); // before it: loses it unless every gift is kept
+$session  = static function (string $status) use ($category, $recent): int {
+    q('INSERT INTO tblCountSessions (siteID, serviceDate, categoryID, status) VALUES (?, ?, ?, ?)', 'isis', [ORG_A, $recent, $category[ORG_A], $status]);
+
+    return (int) one('SELECT MAX(countSessionID) AS id FROM tblCountSessions WHERE siteID = ?', 'i', [ORG_A])['id'];
+};
+foreach (['open', 'closed'] as $status) {
+    q("INSERT INTO tblCountEnvelopes (countSessionID, giverID, giverName, amount, method) VALUES (?, ?, 'Bo Both', 5.00, 'cash')", 'ii', [$session($status), BO]);
+}
+
+/** A giver's own My data rows for gifts and envelopes, as "action:count" in page order, and their reasons. */
+$givingShown = static function (string $html): array {
+    $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $shown = ['tblGivingEntry' => [], 'tblCountEnvelopes' => [], 'reasons' => []];
+    foreach ($doc->querySelectorAll('.portal-data-list > .row') as $row) {
+        $cells = [];
+        foreach ($row->children as $cell) {
+            $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
+        }
+        if (isset($shown[$cells[0] ?? '']) === true && $cells[0] !== 'reasons') {
+            $shown[$cells[0]][]  = ($cells[2] ?? '') . ':' . ($cells[1] ?? '');
+            $shown['reasons'][] = $cells[0] . ' ' . ($cells[2] ?? '') . ': ' . ($cells[3] ?? '');
+        }
+    }
+
+    return $shown;
+};
+$giversSee = static function () use ($givingShown, &$jar): array {
+    $seen = [];
+    foreach (['gwen', 'dora', 'bo'] as $who) {
+        $seen[$who] = $givingShown((string) req($jar[$who], 'GET', '/account/my-data')['body']);
+    }
+
+    return $seen;
+};
+$reasonsSay = static fn (array $seen, string $who, string $words): bool
+    => array_filter($seen[$who]['reasons'], static fn (string $r): bool => str_contains($r, $words)) !== [];
+$noAlreadyLost = static fn (array $seen): bool => str_contains(json_encode($seen), 'already lost') === false;
+
+siteSetting(ORG_A, 'giving.retention.scope', 'receipted');
+$receipted = $giversSee();
+ok('K1 MY DATA, where only gifts a tax declaration or statement covers keep the name: Gwen\'s one gift is shown as losing her name and the page says none will keep it; Dora\'s is kept; Bo sees one gift and one envelope that will keep his name and one of each that will lose it; nothing says a gift has "already lost" a name (#703 round 8)',
+    $receipted['gwen']['tblGivingEntry'] === ['anonymise:1'] && $receipted['gwen']['tblCountEnvelopes'] === []
+    && $receipted['dora']['tblGivingEntry'] === ['retain:1']
+    && $receipted['bo']['tblGivingEntry'] === ['retain:1', 'anonymise:1'] && $receipted['bo']['tblCountEnvelopes'] === ['retain:1', 'anonymise:1']
+    && $reasonsSay($receipted, 'gwen', 'None of your gifts will keep your name') === true
+    && $reasonsSay($receipted, 'dora', 'because a tax declaration or giving statement of yours covers its date') === true
+    && $reasonsSay($receipted, 'bo', 'will lose your name, because no tax declaration or giving statement of yours covers their date') === true
+    && $noAlreadyLost($receipted) === true,
+    json_encode($receipted));
+
+siteSetting(ORG_A, 'giving.retention.scope', 'all');
+$every = $giversSee();
+ok('K2 MY DATA, where every gift keeps the giver\'s name: every gift of all three is shown as kept, saying the organisation keeps the name on every gift; Bo\'s envelope in the closed count still loses his name, because its gift is already among his gifts (#703 round 8)',
+    $every['gwen']['tblGivingEntry'] === ['retain:1'] && $every['dora']['tblGivingEntry'] === ['retain:1']
+    && $every['bo']['tblGivingEntry'] === ['retain:2'] && $every['bo']['tblCountEnvelopes'] === ['retain:1', 'anonymise:1']
+    && $reasonsSay($every, 'gwen', 'because this organisation keeps the giver\'s name on every gift') === true
+    && $reasonsSay($every, 'gwen', 'None of your gifts') === false
+    && $noAlreadyLost($every) === true,
+    json_encode($every));
+
+siteSetting(ORG_A, 'giving.retention.scope', 'receipted');
+$boAsks  = (string) req($jar['bo'], 'GET', '/account/erasure-request')['body'];
+$asksDoc = \Dom\HTMLDocument::createFromString($boAsks, LIBXML_NOERROR);
+$asked   = [];
+foreach ($asksDoc->querySelectorAll('li') as $li) {
+    $code = $li->querySelector('code');
+    if ($code !== null && in_array(trim((string) $code->textContent), ['tblGivingEntry', 'tblCountEnvelopes'], true) === true) {
+        $strong  = $li->querySelectorAll('strong');
+        $asked[] = trim((string) $code->textContent) . ' ' . trim((string) $strong->item(0)?->textContent) . ' ' . trim((string) $strong->item(1)?->textContent);
+    }
+}
+ok('K3 REQUEST ERASURE says the same to Bo: one gift and one envelope "kept", one of each "kept, with some details about you removed" (#703 round 8)',
+    $asked === ['tblGivingEntry 1 kept', 'tblGivingEntry 1 kept, with some details about you removed',
+        'tblCountEnvelopes 1 kept', 'tblCountEnvelopes 1 kept, with some details about you removed'],
+    json_encode($asked));
+
+// Bo is really erased, under the same rule: what keeps his name afterwards is
+// exactly what his page said would.
+$seed(REQ_BO, ORG_A, BO, 'pending_review', null);
+$boRun       = act($jar['adm'], REQ_BO, 'execute');
+$boGifts     = q('SELECT entryID FROM tblGivingEntry WHERE donorID = ? ORDER BY entryID', 'i', [BO]);
+$boEnvelopes = (int) one('SELECT COUNT(*) AS n FROM tblCountEnvelopes WHERE giverID = ?', 'i', [BO])['n'];
+ok('K4 BO IS ERASED: afterwards the gifts and envelopes that still name him are exactly the ones his page said would keep his name - the declared gift and the envelope in the open count - and the others have lost it (#703 round 8)',
+    request(REQ_BO)['status'] === 'completed'
+    && array_map(static fn (array $r): int => (int) $r['entryID'], $boGifts) === [$boKept] && $donorOf($boUnkept) === null
+    && $boEnvelopes === 1,
+    $boRun . ' | ' . json_encode([request(REQ_BO)['status'], $boGifts, $boEnvelopes]));
+
+// Put ORG_A's giving settings back exactly.
+q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey LIKE 'giving.retention.%'", 'i', [ORG_A]);
+foreach ($givingBefore8 as $row) {
+    q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss',
+        [ORG_A, $row['settingKey'], $row['settingValue'], $row['defaultValue']]);
+}
+
+// =============================================================================
 head('Nothing went wrong behind the pages, and everything is put back');
 // =============================================================================
 $log = (string) @file_get_contents($child . $sep . 'php-errors.log');
@@ -2301,6 +2435,7 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblErasureRequest WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblSettings WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblGivingEntry WHERE siteID IN (?, ?)) + (SELECT COUNT(*) FROM tblGivingCategory WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblGivingKeptDonors WHERE siteID IN (?, ?)) '
+    . '+ (SELECT COUNT(*) FROM tblCountSessions WHERE siteID IN (?, ?)) '
     . '+ (SELECT COUNT(*) FROM tblDbsChecks WHERE userID BETWEEN 917000 AND 917999 OR recordedByID BETWEEN 917000 AND 917999) '
     . '+ (SELECT COUNT(*) FROM tblKidProfiles WHERE childID = ' . CHILD . ') '
     // 🧑‍⚖️ Section J's own rows (#732). Counted here as well, because the links
@@ -2313,8 +2448,8 @@ $left = (int) (one(
     . '+ (SELECT COUNT(*) FROM tblResourceBooking WHERE bookingID = ?) '
     . '+ (SELECT COUNT(*) FROM tblErasureReviewDecisions WHERE requestID IN (?, ?)) '
     . "+ (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME LIKE 'selftest\\_erasure\\_pages\\_stop\\_%') AS n",
-    'iiiiiiiiiiiiiiiiiiiii',
-    [ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B,
+    'iiiiiiiiiiiiiiiiiiiiiii',
+    [ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B,
         ORG_A, ORG_B, ORG_A, ORG_B, ORG_A, ORG_B, BOOKING_J, REQ_PIP_A, REQ_PIP_B]
 )['n'] ?? -1);
 $settingsBack = true;

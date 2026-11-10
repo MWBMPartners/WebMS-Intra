@@ -311,13 +311,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         phone, or somebody presses a button on a kiosk by the door. They say how many of them there
         are. No name, no email address and no link to anybody's account is recorded. The one other
         thing kept is a scrambled form of the network address the check-in came from, used to count
-        how many different phones or kiosks sent check-ins; it is cleared after a while (see below).
+        roughly how many different internet connections sent check-ins (not people: see below). It is
+        cleared by the nightly clear-out after the period set for your organisation (90 days unless
+        changed, and never if the period is set to keep it for ever), if that scheduled job has been
+        set up.
     </p>
     <?php // 🗣️ #703 round 7: this said the headcount "is all that is recorded &mdash; ... nothing that
           //    could be traced back to a person". Untrue: `tblAnonymousCheckins.ipHash` is
           //    hash('sha256', <network address> . '|' . <event>) (calendar/anon-checkin-save.php), with
           //    no secret in it, so anybody holding a candidate address can work it out again - and the
-          //    paragraph below already calls it personal information. ?>
+          //    paragraph below already calls it personal information. Round 8: "how many different
+          //    phones or kiosks" contradicted this page's own "internet connections, not people", and
+          //    "cleared after a while" left out the two conditions: the nightly clear-out has to be
+          //    set up, and a period of 0 keeps it for ever (AnonymousCheckins::readRetentionDays()). ?>
     <p>
         The figures appear in four places: on an event's attendance page, as a small line on the event
         hub, on the attendance reports page as totals for the whole organisation, and in a spreadsheet

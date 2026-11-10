@@ -148,21 +148,35 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <p>
         Your group memberships, meeting attendance, and any group you created appear in your
         <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('account/data-export'), ENT_QUOTES, 'UTF-8'); ?>">data export</a>. If your account is erased, your membership rows are removed,
-        including any group you led. The record that you attended a meeting, and the groups, meetings and
+        including the record that you led a group (the group itself stays). The record that you attended a meeting, and the groups, meetings and
         registers you created or kept, stay for the group's own history with your account number taken off
         them. A meeting's topic and notes are kept as they were written, so they can still mention you, and
         the change history and the activity log can still hold your account number (the
         <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('privacy/policy'), ENT_QUOTES, 'UTF-8'); ?>">privacy notice</a>
-        says how each is cleared). Separately, when somebody leaves a role here, any group leadership they
+        says how long each is kept). Separately, when somebody leaves a role here, any group leadership they
         held is ended as part of
         <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('offboarding'), ENT_QUOTES, 'UTF-8'); ?>">offboarding</a>.
     </p>
     <?php // 🗣️ #703 round 7: this said attendance and authorship rows are "anonymised (... your name is
           //    detached from it)". Checked against GdprEraser::catalogue(): those rows only ever held an
           //    account number, which is nulled; but a meeting's `topic` and `notes` are free text kept as
-          //    written, and the change history and activity log are not reached, so "anonymised" claimed
-          //    more than is done. Membership rows (which carry the leader role) are deleted by the
-          //    erasure itself; offboarding ending them is a separate, earlier step. ?>
+          //    written, so "anonymised" claimed more than is done. Membership rows (which carry the
+          //    leader role) are deleted by the erasure itself; offboarding ending them is a separate,
+          //    earlier step.
+          //    Round 8, exact about the two logs: both are only PARTLY reached. The change history
+          //    (`tblAuditTrail`) has the before-and-after values emptied on entries about the person's
+          //    own account and their organisation, department, user-group and role memberships (#707,
+          //    eraseAuditTrailAboutPerson()) - NOT their small-group memberships, which that step does
+          //    not name. Who made a change is only detached, an entry keeps WHICH record changed, and
+          //    an entry about a small group, membership or meeting, if one is ever written, keeps its
+          //    values; it is kept for ever (D-116). (No change-history writer naming it was found:
+          //    `grep -rln "'tblSmallGroupMembers'" web/_apps web/_core` - the table name as a quoted
+          //    literal, which is how Logger::audit() is told the table - finds only the eraser and the
+          //    catalogue. A call passing it some other way would not be seen.) The activity log
+          //    (`tblActivityLogs`) has the account number, address and session details removed from
+          //    the person's own records, but what each says is kept as written, until the nightly
+          //    clear-out deletes it. Hence "can still hold your account number". "How each is cleared"
+          //    became "how long each is kept", because the change history is never cleared. ?>
 </section>
 
 <?php

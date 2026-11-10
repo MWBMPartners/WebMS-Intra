@@ -749,8 +749,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             10 November 2026), and the stored copy of some <em>other</em> record &mdash; an expense
             claim, a loan &mdash; can hold the person's account number too.
             <br>
-            It now covers an entry about their account and about every kind of membership &mdash;
-            which organisations, departments, groups and roles they belonged to. The last three were
+            It now covers an entry about their account and about four kinds of membership &mdash;
+            which organisations, departments, user groups and roles they belonged to. The last three were
             added on 2 November 2026; before that they were not reached. Those entries record account
             numbers and no names, which does not make them anonymous: the number can be matched back
             to the person through any record that keeps their name beside it. They are covered so

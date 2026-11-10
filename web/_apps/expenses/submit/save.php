@@ -308,8 +308,9 @@ try {
     //    `basename()`'d and nothing else, so "Jane Smith receipt.pdf" was kept
     //    exactly as given and shown back on the claim. A claim is kept for six
     //    years for HMRC and is never deleted on erasure (it keeps the claimant's
-    //    account number on purpose, D-113; this comment used to say the number
-    //    was detached, which was untrue), so the cascade never fires, and an
+    //    account number on purpose - the owner's decision of 3 November 2026,
+    //    #492 part 4; this comment used to say the number was detached, which
+    //    was untrue), so the cascade never fires, and an
     //    erasure request could
     //    not reach that name — it would have sat there for six years after
     //    somebody asked to be forgotten.

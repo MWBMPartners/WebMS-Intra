@@ -804,7 +804,7 @@ class GdprEraser
             //    writer that filled both would already be reached.
             ['table' => 'tblAssetLoans',                'userCol' => 'counterpartyUserID',   'action' => 'anonymise', 'nullCols' => ['counterpartyName', 'counterpartyContact'], 'reason' => 'the loan is kept so the asset\'s custody chain is intact — which item went out, when, and when it came back; who borrowed or lent it is detached, and so are the contact details typed about them. `counterpartyName` is named here too and CAN NEVER MATCH, because a loan names its counterparty by EITHER an account or that free-text name and never both: the limit is recorded rather than the column dropped, the #708 precedent, so that a row filling both in future is already reached'],
             ['table' => 'tblAssetLicenseAssignments',   'userCol' => 'userID',               'action' => 'anonymise', 'nullCols' => [], 'reason' => 'seat-assignment history retained for licence compliance; assignee identity detached'],
-            ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'audit history retained (mirrors tblAuditTrail — no FK, immutable record); actor identity detached'],
+            ['table' => 'tblAssetAudit',                'userCol' => 'actorUserID',          'action' => 'anonymise', 'nullCols' => [], 'reason' => 'changes you made to equipment records: the equipment\'s change history is kept for ever (the owner\'s decision D-116). Your account number is removed from these entries; a scrambled form of the network address each change came from stays, which this installation can still match against an address it is given, and what each entry recorded is kept as written, so it can still mention you'],
             // #404 Phase 2 Pass 2 (#410). tblAssetScanLog rows are retained
             // for scan-volume analytics (item.php's sparkbar) even after
             // the scanning user is erased — only the actor attribution is
@@ -968,7 +968,12 @@ class GdprEraser
             //    their name, e-mail and address in the trail (#706); and a row
             //    ABOUT them is named by (tableName, recordID), which matches no
             //    column at all (#707).
-            ['table' => 'tblAuditTrail',              'userCol' => 'userID',           'action' => 'anonymise', 'nullCols' => ['ipAddress'], 'reason' => 'the audit trail is kept for running and repairing the portal; the account and the address the change came from both go'],
+            // 🗣️ #703 round 8: this said "the audit trail is kept for running and repairing the portal;
+            //    the account and the address the change came from both go" - true of the two columns,
+            //    but silent that the history is kept for ever (D-116) and that what an entry recorded
+            //    stays. The tblAssetAudit reason said "actor identity detached" while its `ipHash`
+            //    (AssetRegister::ipHash(), salted with this installation's key) is not emptied.
+            ['table' => 'tblAuditTrail',              'userCol' => 'userID',           'action' => 'anonymise', 'nullCols' => ['ipAddress'], 'reason' => 'changes you made to records: the change history is kept for ever (the owner\'s decision D-116). Your account number and the network address each change came from are removed from these entries; which record changed, and what it held before and after, are kept as written, so an entry can still name you or give your account number (an entry about your own account, or your membership of an organisation, department, user group or role, has those values emptied by a separate step)'],
             ['table' => 'tblEventAttendance',         'userCol' => 'markedByID',       'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s attendance record stays; who marked it is detached'],
             ['table' => 'tblGivingEntry',             'userCol' => 'recordedByID',     'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s gift is a financial record and stays, with its donor, amount and date; who entered it is detached'],
             ['table' => 'tblPrayerRequests',          'userCol' => 'moderatorID',      'action' => 'anonymise', 'nullCols' => [], 'reason' => 'somebody else\'s prayer request stays; who moderated it is detached'],
@@ -3321,9 +3326,26 @@ class GdprEraser
     {
         $db = App::db();
         $out = [];
+        // 🎁 #703 round 8: a person's own gifts and envelopes are counted by
+        //    what the erasure WILL do with them - some keep the name, some
+        //    lose it - not by the instruction's single "retain" line, whose
+        //    reason describes the state AFTER the giving step has run.
+        $outlook = null;
         foreach (self::catalogue() as $entry) {
             $table = (string) $entry['table'];
             $col   = (string) $entry['userCol'];
+            if (($table === 'tblGivingEntry' && $col === 'donorID') || ($table === 'tblCountEnvelopes' && $col === 'giverID')) {
+                try {
+                    $outlook ??= self::givingOutlook($userId);
+                    foreach (self::givingRows($table, $outlook[$table === 'tblGivingEntry' ? 'gifts' : 'envelopes']) as $row) {
+                        $out[] = $row;
+                    }
+                } catch (\Throwable $ignored) {
+                    // A giving table missing (the app not installed): nothing
+                    // to show, as for any other table below.
+                }
+                continue;
+            }
             // 🧬 A parent-matched instruction has no column of its own, so it
             //    is counted through its parent (#709). Without this the person
             //    asking what is held about them would be shown everything
@@ -4809,6 +4831,222 @@ class GdprEraser
     private static array $onlyHandWorkLeft = [];
 
     /**
+     * 🎁 The rule that SORTS a donor's gifts at one organisation into "keeps
+     * the name" and "loses it": today's setting, or "every gift" when an
+     * earlier run kept a row on that rule beside an account that has already
+     * been emptied (the reasoning is in keepGivingRecordsAtSite(), 1b).
+     *
+     * ONE place (#703 round 8), asked by the keep step and by givingOutlook(),
+     * so what a member is told will happen to their gifts is worked out by
+     * the rule that will do it. `$keptRow` is that organisation's
+     * tblGivingKeptDonors row for the donor, or null; a row already cleared
+     * is not a reason to widen anything.
+     *
+     * @param array<string, mixed>|null $keptRow
+     */
+    private static function sortingScope(string $todayScope, ?array $keptRow, bool $accountEmptied): string
+    {
+        if ($keptRow !== null && ($keptRow['clearedAt'] ?? null) === null && $accountEmptied === true
+            && (string) ($keptRow['scope'] ?? '') === GivingRetention::SCOPE_ALL) {
+            return GivingRetention::SCOPE_ALL;
+        }
+
+        return $todayScope;
+    }
+
+    /**
+     * Whether an account counts as already emptied, for the giving step: the
+     * made-up name OR the made-up address is enough (WIDER on purpose than
+     * emptiedAccountSql() - keepGivingRecordsAtSite(), 1b, says why). A
+     * missing account counts as emptied. One place, for the keep step and
+     * givingOutlook() (#703 round 8).
+     *
+     * @param array<string, mixed>|null $account
+     */
+    private static function accountEmptiedForGiving(?array $account): bool
+    {
+        return $account === null
+            || (string) ($account['fullName'] ?? '') === self::TOMBSTONE_NAME
+            || self::isTombstoneAddress((string) ($account['emailAddress'] ?? '')) === true;
+    }
+
+    /**
+     * The test for "this named envelope will keep its giver", as SQL for a
+     * query that calls tblCountEnvelopes `ce` and tblCountSessions `cs`: its
+     * count is not closed yet, and the gift it becomes when the count is
+     * closed will keep the donor's name under `$scope`. A closed count's
+     * envelope always loses its giver - its gift is already among the gifts.
+     * FIXED TEXT. One place, for the keep step's count and givingOutlook()
+     * (#703 round 8).
+     */
+    private static function keptEnvelopeWhere(string $scope): string
+    {
+        return "cs.status <> 'closed' AND " . GivingRetention::keptWhenSql($scope, 'cs.siteID', 'ce.giverID', 'cs.serviceDate');
+    }
+
+    /**
+     * 🎁 What an erasure WOULD do with a person's own gifts and offering
+     * envelopes, counted before it runs: how many keep the name and how many
+     * lose it, and under which rule the kept ones are kept. This is what My
+     * data and Request erasure show (inventory()).
+     *
+     * #703 round 8: those pages used to count every gift WHERE donorID = ?
+     * and call the lot "kept", with a reason saying every other gift had
+     * "already lost" the name - untrue before any erasure has run, and untrue
+     * for a gift no tax declaration or statement covers, which the keep step
+     * takes the name off. The counts here ask the keep step's own rules
+     * (sortingScope(), GivingRetention::keptGiftSql(), keptEnvelopeWhere()),
+     * organisation by organisation, so the two cannot disagree. A gift or
+     * envelope not counted as kept is counted as losing the name, because
+     * that is what the keep step and unnameCountEnvelopes() do with it.
+     *
+     * WHAT IT CANNOT PREDICT, said plainly: an organisation where an earlier
+     * run's kept row has already been CLEARED - the keep step then changes
+     * nothing there. That needs an emptied account, which cannot sign in to
+     * read this, so it is counted by today's rule like any other.
+     *
+     * @return array{gifts: array{keep: int, lose: int, keptUnder: list<string>},
+     *               envelopes: array{keep: int, lose: int, keptUnder: list<string>}}
+     */
+    public static function givingOutlook(int $userId): array
+    {
+        $db  = App::db();
+        $out = [
+            'gifts'     => ['keep' => 0, 'lose' => 0, 'keptUnder' => []],
+            'envelopes' => ['keep' => 0, 'lose' => 0, 'keptUnder' => []],
+        ];
+        $count = static function (string $sql, string $types, array $values) use ($db): int {
+            $stmt = $db->prepare($sql);
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param($types, ...$values);
+            $stmt->execute();
+            $n = 0;
+            $stmt->bind_result($n);
+            $stmt->fetch();
+            $stmt->close();
+
+            return (int) $n;
+        };
+
+        $giftTotal     = $count('SELECT COUNT(*) FROM tblGivingEntry WHERE donorID = ?', 'i', [$userId]);
+        $envelopeTotal = $count('SELECT COUNT(*) FROM tblCountEnvelopes WHERE giverID = ?', 'i', [$userId]);
+        if ($giftTotal === 0 && $envelopeTotal === 0) {
+            return $out;
+        }
+
+        $stmt = $db->prepare('SELECT fullName, emailAddress FROM tblUsers WHERE userID = ?');
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('i', $userId);
+        $stmt->execute();
+        $account = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        $emptied = self::accountEmptiedForGiving(is_array($account) === true ? $account : null);
+
+        $sites = [];
+        $stmt  = $db->prepare(
+            'SELECT siteID FROM tblGivingEntry WHERE donorID = ? '
+            . 'UNION SELECT cs.siteID FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID WHERE ce.giverID = ?'
+        );
+        if ($stmt === false) {
+            throw new \RuntimeException((string) $db->error);
+        }
+        $stmt->bind_param('ii', $userId, $userId);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        while ($row = $result->fetch_row()) {
+            $sites[] = (int) $row[0];
+        }
+        $stmt->close();
+
+        foreach ($sites as $siteId) {
+            $stmt = $db->prepare('SELECT scope, clearedAt FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?');
+            if ($stmt === false) {
+                throw new \RuntimeException((string) $db->error);
+            }
+            $stmt->bind_param('ii', $siteId, $userId);
+            $stmt->execute();
+            $keptRow = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            $scope = self::sortingScope((string) GivingRetention::ruleForSite($siteId)['scope'], is_array($keptRow) === true ? $keptRow : null, $emptied);
+
+            $gifts = $count(
+                'SELECT COUNT(*) FROM tblGivingEntry e WHERE e.siteID = ? AND e.donorID = ? AND ' . GivingRetention::keptGiftSql($scope, 'e'),
+                'ii',
+                [$siteId, $userId]
+            );
+            $envelopes = $count(
+                'SELECT COUNT(*) FROM tblCountEnvelopes ce INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
+                . 'WHERE cs.siteID = ? AND ce.giverID = ? AND ' . self::keptEnvelopeWhere($scope),
+                'ii',
+                [$siteId, $userId]
+            );
+            foreach (['gifts' => $gifts, 'envelopes' => $envelopes] as $kind => $kept) {
+                $out[$kind]['keep'] += $kept;
+                if ($kept > 0 && in_array($scope, $out[$kind]['keptUnder'], true) === false) {
+                    $out[$kind]['keptUnder'][] = $scope;
+                }
+            }
+        }
+        $out['gifts']['lose']     = $giftTotal - $out['gifts']['keep'];
+        $out['envelopes']['lose'] = $envelopeTotal - $out['envelopes']['keep'];
+
+        return $out;
+    }
+
+    /**
+     * The rows inventory() shows for a person's own gifts or envelopes:
+     * one for those that keep the name and one for those that lose it, each
+     * worded for what is true of THAT person (#703 round 8). A row with no
+     * records is left out.
+     *
+     * @param array{keep: int, lose: int, keptUnder: list<string>} $outlook
+     * @return list<array{table: string, rows: int, action: string, reason: string}>
+     */
+    private static function givingRows(string $table, array $outlook): array
+    {
+        $isGift = $table === 'tblGivingEntry';
+        $why    = match (true) {
+            $outlook['keptUnder'] === [GivingRetention::SCOPE_ALL] => 'this organisation keeps the giver\'s name on every gift',
+            in_array(GivingRetention::SCOPE_ALL, $outlook['keptUnder'], true) === true
+                => 'a tax declaration or giving statement of yours covers its date, or the organisation keeps the giver\'s name on every gift',
+            default => 'a tax declaration or giving statement of yours covers its date',
+        };
+        $rows = [];
+        if ($outlook['keep'] > 0) {
+            $rows[] = [
+                'table'  => $table,
+                'rows'   => $outlook['keep'],
+                'action' => 'retain',
+                'reason' => $isGift
+                    ? 'these gifts will keep your name, and any home address held for you is kept with them, for tax reasons until this '
+                        . 'organisation\'s keep-until date, because ' . $why
+                    : 'offering envelopes in a count that is not closed yet: each will become a gift that keeps your name, and '
+                        . 'any home address held for you is kept with it, for tax reasons until this organisation\'s keep-until date, because ' . $why,
+            ];
+        }
+        if ($outlook['lose'] > 0) {
+            $rows[] = [
+                'table'  => $table,
+                'rows'   => $outlook['lose'],
+                'action' => 'anonymise',
+                'reason' => ($isGift
+                    ? 'these gifts keep their amount, date and method and will lose your name, because no tax declaration or '
+                        . 'giving statement of yours covers their date, and this organisation keeps the giver\'s name only on '
+                        . 'gifts one covers'
+                    : 'offering envelopes that will lose your name: the count they were in is closed (its gift is among your '
+                        . 'gifts), or the gift they will become will not keep your name')
+                    . ($outlook['keep'] === 0 ? '. None of your ' . ($isGift ? 'gifts' : 'envelopes') . ' will keep your name' : ''),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
      * 🏢 The giving-records step for ONE organisation. Runs inside the
      *    transaction keepGivingRecords() opened, and writes exactly one audit
      *    line. Anything it throws undoes what it did here and stops the run.
@@ -4871,9 +5109,7 @@ class GdprEraser
         //     at this point are writing "[Deleted User]" over a real name and
         //     re-deciding what an already-erased donor's record keeps.
         $account = $one('SELECT fullName, emailAddress, displayAddress FROM tblUsers WHERE userID = ?', 'i', [$userId]);
-        $emptiedAlready = $account === null
-            || (string) $account['fullName'] === self::TOMBSTONE_NAME
-            || self::isTombstoneAddress((string) $account['emailAddress']) === true;
+        $emptiedAlready = self::accountEmptiedForGiving($account);
 
         // 🛑 AN EARLIER RUN KEPT A NAME HERE, AND THE ACCOUNT IS ALREADY
         //    EMPTIED. The walk empties the account about half way through a
@@ -4912,10 +5148,10 @@ class GdprEraser
         //    `$scope` is the rule that SORTS. Beside an emptied account it is
         //    the wider of the two (1b); it is only ever WRITTEN to the row
         //    when the account is not yet emptied, where it is today's.
-        $scope = (string) $rule['scope'];
-        if ($keptAlready === true && (string) $existing['scope'] === GivingRetention::SCOPE_ALL) {
-            $scope = GivingRetention::SCOPE_ALL;
-        }
+        //    #703 round 8: worked out by sortingScope(), which givingOutlook()
+        //    asks too, so what My data says will happen to a member's gifts
+        //    and what this step does cannot disagree.
+        $scope = self::sortingScope((string) $rule['scope'], $existing, $emptiedAlready);
         if ($scope === GivingRetention::SCOPE_ALL) {
             // For the envelope step that follows all the organisations.
             self::$everyGiftSites[] = $siteId;
@@ -4935,8 +5171,7 @@ class GdprEraser
         $envelopes = $one(
             'SELECT COUNT(*) AS n, MAX(cs.serviceDate) AS newest FROM tblCountEnvelopes ce '
             . 'INNER JOIN tblCountSessions cs ON cs.countSessionID = ce.countSessionID '
-            . "WHERE cs.siteID = ? AND ce.giverID = ? AND cs.status <> 'closed' AND "
-            . GivingRetention::keptWhenSql($scope, 'cs.siteID', 'ce.giverID', 'cs.serviceDate'),
+            . 'WHERE cs.siteID = ? AND ce.giverID = ? AND ' . self::keptEnvelopeWhere($scope),
             'ii',
             [$siteId, $userId]
         );
