@@ -157,7 +157,8 @@ appended with its real date and a note that it was added later.
 | [D-099](099-a-calendar-import-saves-every-row-it-can.md) | 2026-11-09 | A calendar import saves every row it can, and lists the ones it could not | in force |
 | [D-100](100-a-reimported-row-already-in-the-calendar-is-skipped.md) | 2026-11-09 | A calendar-import row already in the calendar is skipped unless the manager ticks to import it | in force |
 | [D-101](101-a-public-address-takes-effect-only-once-approved.md) | 2026-11-09 | An organisation's public address takes effect only once the installation's global administrator approves it | in force |
+| [D-102](102-webhook-ports-are-an-installation-setting.md) | 2026-11-10 | Which port numbers a webhook may use is an installation setting, standard ports by default | in force |
 
-*101 decisions. This index is checked against the folder by
+*102 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
