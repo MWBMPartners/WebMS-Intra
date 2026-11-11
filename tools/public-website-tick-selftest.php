@@ -67,7 +67,8 @@
  *      public address refused with nothing written and recorded; the framing
  *      list read from the organisation's own row only, and checked again on
  *      read; one organisation's values never reaching another's; a public
- *      address another organisation holds refused without naming it; the
+ *      address another organisation is APPROVED for refused without naming
+ *      it, and one it has only asked for accepted beside it (D-121); the
  *      installation's framing switch at save AND at read; the general editor's
  *      lock; "Check my set-up" (POST only, the form token, its limit, nothing
  *      ticked when nothing is set, a loopback main website unreachable, the
@@ -2341,9 +2342,13 @@ check('W7 organisation 2\'s main website, framing list and public address never 
     $scnPwOtherOrg(), ['one' => ['', "'none'", ''], 'two' => ['https://two.pwt.example.org', 'https://twoframe.pwt.example.org', 'events.two.pwt.example.org'],
         'one\'s page shows two\'s values' => false]);
 
-// W8: the public address (D-095). Stored lower case; bad values refused; one
-//     held by ANOTHER organisation refused by the unique key without naming
-//     it; the portal's own address refused; empty deletes.
+// W8: the public address (D-095). Stored lower case; bad values refused; the
+//     portal's own address refused; empty deletes. D-121 (#895): a name
+//     another organisation has only ASKED for is accepted beside theirs, and
+//     the card says another organisation asked too; a name another
+//     organisation is APPROVED for is refused as taken, without naming it.
+//     (Until #895 any name another organisation held was refused, approved
+//     or not, by a unique key on the name.)
 /**
  * #493 P4a (D-101): put the installation's `site.url` back exactly as it was —
  * DELETED when there was no row, never left as a new empty-string row (round
@@ -2379,8 +2384,15 @@ $scnPwHost = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, 
     $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteTwo}, 'shared.pwt.example.org', UTC_TIMESTAMP())");
     $pwPost('setup', 'public_host', 'SHARED.pwt.example.org');
     $page = $http('GET', '/admin/public-website')['body'];
-    $out['another organisation\'s refused'] = $pwHost($siteOne);
-    $out['the refusal says so'] = str_contains($page, 'already used by another organisation');
+    $out['another organisation\'s request: accepted beside it'] = $pwHost($siteOne);
+    $out['another organisation\'s request: the clash is said'] = str_contains($page, 'Another organisation on this portal has asked for the same address');
+    $out['another organisation\'s request: named nowhere'] = str_contains($page, 'Selftest PWT Two') === false;
+    $pwPost('setup', 'public_host', 'events.pwt-one.example.org');
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteTwo}");
+    $pwPost('setup', 'public_host', 'SHARED.pwt.example.org');
+    $page = $http('GET', '/admin/public-website')['body'];
+    $out['another organisation\'s approved one refused'] = $pwHost($siteOne);
+    $out['the refusal says so'] = str_contains($page, 'That public address is taken');
     $out['the refusal names nobody'] = str_contains($page, 'Selftest PWT Two') === false;
     $pwPost('setup', 'public_host', 'portal.pwt.example.org');
     $out['the portal\'s own address refused'] = $pwHost($siteOne);
@@ -2395,10 +2407,12 @@ $wHostWant = ['stored' => 'events.pwt-one.example.org'];
 foreach (['a scheme', 'a port', 'a path', 'a user', 'no dot', 'a number', 'a short number', 'a hex number', 'non-ascii'] as $name) {
     $wHostWant['refused: ' . $name] = true;
 }
-$wHostWant += ['another organisation\'s refused' => 'events.pwt-one.example.org', 'the refusal says so' => true, 'the refusal names nobody' => true,
+$wHostWant += ['another organisation\'s request: accepted beside it' => 'shared.pwt.example.org',
+    'another organisation\'s request: the clash is said' => true, 'another organisation\'s request: named nowhere' => true,
+    'another organisation\'s approved one refused' => 'events.pwt-one.example.org', 'the refusal says so' => true, 'the refusal names nobody' => true,
     'the portal\'s own address refused' => 'events.pwt-one.example.org', 'refusals recorded' => true, 'empty deletes' => null,
     'organisation 2 untouched' => 'shared.pwt.example.org'];
-check('W8 the public address: stored lower case; a scheme, port, path, user, single label, number or non-ASCII name refused; another organisation\'s refused without naming it; the portal\'s own address refused; empty deletes',
+check('W8 the public address: stored lower case; a scheme, port, path, user, single label, number or non-ASCII name refused; one another organisation only ASKED for accepted beside it, and one it is APPROVED for refused as taken, neither naming it (D-121); the portal\'s own address refused; empty deletes',
     $scnPwHost(), $wHostWant);
 
 // W9: the installation's switch (D-094), at save AND at read.
@@ -2924,9 +2938,10 @@ check('W18 with a hand-edited framing list holding "*", a ";" line and an http l
         'what the check says about framing' => ['https://ok.pwt.example.org is a valid https website and is allowed.'], 'a spoiled line shown anywhere' => false]);
 
 // W19 (round 1, item 4): the INSERT branch of the public address. An
-//      organisation with NO address choosing a name another organisation holds
-//      is refused, the other's row is untouched, and nothing is stored for
-//      this one. And a row a hand edit SPOILED (unreadable, so the page shows
+//      organisation with NO address choosing a name another organisation is
+//      APPROVED for (D-121, #895: only an approved name is anybody's alone) is
+//      refused, the other's row is untouched, and nothing is stored for this
+//      one. And a row a hand edit SPOILED (unreadable, so the page shows
 //      none) is replaced by an UPDATE, not refused as a clash.
 $scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pwHost, $signIn, $http, $pwClean, $pwPutSiteUrlBack): array {
     $pwClean();
@@ -2935,14 +2950,14 @@ $scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pw
     $siteUrl = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'site.url' AND `siteID` IS NULL")->fetch_assoc();
     $db->query("INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, 'site.url', 'https://portal.pwt.example.org', '', 0) "
         . "ON DUPLICATE KEY UPDATE `settingValue` = 'https://portal.pwt.example.org'");
-    $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`) VALUES ({$siteTwo}, 'shared.pwt.example.org', '2020-01-01 00:00:00')");
+    $db->query("INSERT INTO `tblPublicHosts` (`siteID`, `hostName`, `changedAtUtc`, `approvedAtUtc`) VALUES ({$siteTwo}, 'shared.pwt.example.org', '2020-01-01 00:00:00', UTC_TIMESTAMP())");
     $pwPost('setup', 'public_host', 'shared.pwt.example.org');
     $page  = $http('GET', '/admin/public-website')['body'];
     $two   = $db->query("SELECT `hostName`, `changedAtUtc` FROM `tblPublicHosts` WHERE `siteID` = {$siteTwo}")->fetch_assoc();
     $out = [
         'this organisation' => $pwHost($siteOne),
         'the other organisation\'s row' => $two === null ? null : [(string) $two['hostName'], (string) $two['changedAtUtc']],
-        'said plainly' => str_contains($page, 'already used by another organisation'),
+        'said plainly' => str_contains($page, 'That public address is taken'),
     ];
     // Whatever organisation 1 holds now is replaced by the spoiled row — under
     // plant P91 it already holds a name, and a plain INSERT would stop the run.
@@ -2956,7 +2971,7 @@ $scnPwHostInsert = static function () use ($db, $siteOne, $siteTwo, $pwPost, $pw
     $pwClean();
     return $out;
 };
-check('W19 an organisation with no public address choosing one another organisation holds is refused, leaving the other\'s row untouched and storing nothing; a row a hand edit spoiled is shown as none and replaced',
+check('W19 an organisation with no public address choosing one another organisation is APPROVED for is refused, leaving the other\'s row untouched and storing nothing; a row a hand edit spoiled is shown as none and replaced',
     $scnPwHostInsert(), ['this organisation' => null, 'the other organisation\'s row' => ['shared.pwt.example.org', '2020-01-01 00:00:00'],
         'said plainly' => true, 'a spoiled row is shown as none' => true, 'a spoiled row is replaced' => 'events.fresh.pwt.example.org']);
 
@@ -3427,9 +3442,16 @@ check('P89 with the stored list no longer checked again on read, the page and th
     [$p['applied'], count($p['result']['what the check says about framing'] ?? []) > 1], [true, true]);
 // #493 P4a (D-101) added the two approval columns to this INSERT, so the
 // plant names the statement as it now stands.
-$p = $plant('_core/PublicWebsiteSetup.php', "'VALUES (?, ?, UTC_TIMESTAMP(), NULL, NULL)'",
-    "'VALUES (?, ?, UTC_TIMESTAMP(), NULL, NULL) ON DUPLICATE KEY UPDATE `siteID` = VALUES(`siteID`)'", $scnPwHostInsert);
-check('P91 with the public address INSERTED as an upsert, choosing another organisation\'s name takes it from them', [$p['applied'], $p['result']['this organisation'] ?? null], [true, 'shared.pwt.example.org']);
+// D-121 (#895): P91 used to plant an UPSERT here, which took another
+// organisation's name through the old unique key on the name. Migration 276
+// replaced that key (a name is unique only once APPROVED, and a request is
+// never approved), so an upsert can no longer meet another organisation's row
+// and the plant could not fail; the "never upsert" rule is kept in the code
+// for a database that has not yet run 276, which this test cannot build. The
+// rule that now stops a taken name is the save's own refusal, planted here.
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$others['approvedSiteId'] !== null) {\n                    return self::refusedAndRecorded('public address',",
+    "if (false) {\n                    return self::refusedAndRecorded('public address',", $scnPwHostInsert);
+check('P91 with the save no longer refusing a name another organisation is APPROVED for, choosing it stores a request for it (W19 catches it)', [$p['applied'], $p['result']['this organisation'] ?? null], [true, 'shared.pwt.example.org']);
 $p = $plant('_core/PublicWebsiteSetup.php', "\$stmt = \$was !== '' || self::hasHostRow(\$db, \$siteId) === true", "\$stmt = \$was !== ''", $scnPwHostInsert);
 check('P92 with a spoiled row not looked for, replacing it is refused as a clash and the spoiled row stays', [$p['applied'], $p['result']['a spoiled row is replaced'] ?? null], [true, 'NOT A HOST!']);
 $p = $plant('_core/PublicWebsite.php', "        return ['route' => 'admin/public-website', 'name' => 'Admin, Public website',\n            'who' => 'a global administrator,",

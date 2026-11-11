@@ -35,9 +35,19 @@
  *                                over every organisation's list.
  *        tblPublicHosts          the OPTIONAL public address for the portal's
  *                                own public pages (D-095), for example
- *                                events.ourchurch.org. One per organisation,
- *                                and no two organisations may share one — the
- *                                database's unique key is the real guard.
+ *                                events.ourchurch.org. One per organisation.
+ *                                Any number of organisations may REQUEST one
+ *                                name; only one may be APPROVED for it (D-121,
+ *                                #895). Uniqueness is enforced at approval,
+ *                                so nobody can block another by asking
+ *                                first: `approvePublicHost()` locks every
+ *                                row asking for the name inside a
+ *                                transaction and asks, and the database's
+ *                                unique key on the worked-out column
+ *                                `approvedHost` (migration 276) is the
+ *                                backstop. The requests that lost are KEPT
+ *                                as they are and read as "taken" — see
+ *                                `publicHostStatus()`.
  *   4. THE SET-UP CHECK (`checkSetUp()`): what can be known today, and
  *      nothing more. It says whether the public door is on and gives its
  *      addresses. Since #493 P4d it also FETCHES the organisation's public
@@ -740,6 +750,10 @@ final class PublicWebsiteSetup
     public const HOST_APPROVED = 'approved';
     public const HOST_MEMBERS = 'members';
     public const HOST_UNCHECKED = 'unchecked';
+    /** Not approved, and at least one OTHER organisation has asked for the same name (D-121). */
+    public const HOST_CLASHING = 'clashing';
+    /** Not approved, and ANOTHER organisation has been approved for the same name (D-121). */
+    public const HOST_TAKEN = 'taken';
 
     /**
      * Where the organisation's public address stands — the ONE answer the
@@ -749,7 +763,20 @@ final class PublicWebsiteSetup
      *   HOST_NONE       no address (or a stored one this page would refuse);
      *   HOST_WAITING    not approved by the installation (D-101), or whether
      *                   it is approved could not be read — either way, not
-     *                   the door;
+     *                   the door — and no other organisation has asked for
+     *                   the same name (or whether one has could not be read);
+     *   HOST_CLASHING   not approved, and at least one OTHER organisation has
+     *                   asked for the same name and none is approved for it
+     *                   (D-121): the installation's administrator will
+     *                   approve only one of them. Not the door;
+     *   HOST_TAKEN      not approved, and ANOTHER organisation HAS been
+     *                   approved for the same name (D-121), so this request
+     *                   cannot be approved while that approval stands. Not
+     *                   the door. The losing request is kept, not cleared:
+     *                   the name is the organisation's own typing, and if
+     *                   the other approval is ever withdrawn or changed this
+     *                   one simply reads as waiting again — no stored
+     *                   "refused" mark that could go stale;
      *   HOST_APPROVED   approved, and not an address members sign in at:
      *                   the door answers on it;
      *   HOST_MEMBERS    approved, but it IS an address members sign in at,
@@ -765,7 +792,15 @@ final class PublicWebsiteSetup
             return self::HOST_NONE;
         }
         if (self::publicHostApproved($db, $siteId) === false) {
-            return self::HOST_WAITING;
+            // D-121: who else asked for this name. A failed read answers
+            // WAITING — still "not the door", which is the part that matters;
+            // it can only under-report a clash, never invent an approval.
+            $others = self::otherRequestsFor($db, $siteId, $host);
+            if ($others === null || $others['count'] === 0) {
+                return self::HOST_WAITING;
+            }
+
+            return $others['approvedSiteId'] !== null ? self::HOST_TAKEN : self::HOST_CLASHING;
         }
         try {
             $members = self::hostsMembersUse($db, '');
@@ -790,25 +825,60 @@ final class PublicWebsiteSetup
      * (`membersAddress`: true, false, or null when that could not be read),
      * so the list can say an approved address is "not in use".
      *
-     * @return list<array{siteId:int, siteName:string, host:string, approved:bool, membersAddress:?bool}>|null
+     * D-121 (#895): several organisations may ask for one name, so each row
+     * also names the OTHER organisations that asked for the same name
+     * (`alsoRequestedBy`) and, where one of them is approved for it, which
+     * (`takenBy`, else null). The installation's administrator is the one
+     * person who sees every organisation's name, so naming them here is the
+     * point; an organisation's own card never names another. Names are
+     * grouped the way the database compares them — without regard to
+     * capitals — because that is how the approval key judges a clash; a
+     * stored name is lower case anyway unless a hand edit changed it.
+     *
+     * @return list<array{siteId:int, siteName:string, host:string, approved:bool, membersAddress:?bool, alsoRequestedBy:list<string>, takenBy:?string}>|null
      */
     public static function allPublicHosts(\mysqli $db): ?array
     {
         try {
+            // Waiting first; within that, one name's requests together, so a
+            // clash reads as one block rather than scattered through the list.
             $rs = $db->query(
                 'SELECT h.`siteID`, s.`siteName`, h.`hostName`, h.`approvedAtUtc` FROM `' . self::HOSTS_TABLE . '` h '
-                . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` ORDER BY (h.`approvedAtUtc` IS NOT NULL), s.`siteName`, h.`siteID`'
+                . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` '
+                . 'ORDER BY (h.`approvedAtUtc` IS NOT NULL), h.`hostName`, s.`siteName`, h.`siteID`'
             );
-            $out = [];
+            $rows = [];
             try {
                 $members = self::hostsMembersUse($db, '');
             } catch (\Throwable $e) {
                 $members = null;
             }
             while (is_array($row = $rs->fetch_assoc()) === true) {
+                $rows[] = $row;
+            }
+            // Who asked for each name, and who is approved for it.
+            $byName = [];
+            foreach ($rows as $row) {
+                $key = strtolower((string) $row['hostName']);
+                $byName[$key][] = $row;
+            }
+            $out = [];
+            foreach ($rows as $row) {
+                $also    = [];
+                $takenBy = null;
+                foreach ($byName[strtolower((string) $row['hostName'])] as $other) {
+                    if ((int) $other['siteID'] === (int) $row['siteID']) {
+                        continue;
+                    }
+                    $also[] = (string) $other['siteName'];
+                    if ($other['approvedAtUtc'] !== null) {
+                        $takenBy = (string) $other['siteName'];
+                    }
+                }
                 $out[] = ['siteId' => (int) $row['siteID'], 'siteName' => (string) $row['siteName'],
                     'host' => (string) $row['hostName'], 'approved' => $row['approvedAtUtc'] !== null,
-                    'membersAddress' => $members === null ? null : in_array((string) $row['hostName'], $members, true)];
+                    'membersAddress' => $members === null ? null : in_array((string) $row['hostName'], $members, true),
+                    'alsoRequestedBy' => $also, 'takenBy' => $takenBy];
             }
 
             return $out;
@@ -832,6 +902,23 @@ final class PublicWebsiteSetup
      * own address is not set, as saving is: then nobody can tell whether the
      * address is one members sign in at. Recorded, and so is every refusal.
      *
+     * 🔒 ONLY ONE ORGANISATION MAY BE APPROVED FOR A NAME (D-121, #895), and
+     *    this is where that is enforced — several may have ASKED for it. Two
+     *    administrators approving two clashing requests at the same moment
+     *    must leave exactly one approved, so the ask and the write happen in
+     *    ONE transaction, with every row asking for the name read `FOR
+     *    UPDATE` first (#647, #697: a lock outside a transaction is
+     *    decoration, released the instant its statement ends). The second
+     *    approver then WAITS on the first's rows, wakes after its commit,
+     *    sees the approval and is refused with words. The database's unique
+     *    key on `approvedHost` (migration 276) refuses a second approval by
+     *    itself as well — that is the backstop, caught as error 1062, and it
+     *    is what still holds if this ask is ever wrong; the lock is what turns
+     *    the clash into a sentence rather than an error.
+     *    The approval refusal NAMES the organisation that holds the name: it
+     *    is read only by the installation's global administrator, who sees
+     *    every organisation anyway.
+     *
      * @return array{saved:bool, type:string, message:string}
      */
     public static function approvePublicHost(\mysqli $db, int $siteId, string $host, bool $isRootAdmin, ?int $actorId): array
@@ -853,27 +940,158 @@ final class PublicWebsiteSetup
             return self::refusedAndRecorded('public address approval', $siteId, 'That address is no longer the one waiting '
                 . 'for approval (it was changed, removed or approved already). Nothing was changed; look at the page again.', $actorId);
         }
+        $notWaiting = 'That address is no longer the one waiting for approval (it was changed, removed or approved already). '
+            . 'Nothing was changed; look at the page again.';
+        // 🔒 The transaction starts FIRST, and every read inside it is a
+        //    LOCKING read: a plain read inside it would see the snapshot taken
+        //    when it began, which could be from before the other approver's
+        //    commit (REPEATABLE READ).
+        $takenBy   = null;
+        $changed   = 0;
+        $alsoAsked = 0;
         try {
-            $stmt = $db->prepare('UPDATE `' . self::HOSTS_TABLE . '` SET `approvedAtUtc` = UTC_TIMESTAMP(), `approvedByID` = ? '
-                . 'WHERE `siteID` = ? AND `hostName` = ? AND `approvedAtUtc` IS NULL');
-            $stmt->bind_param('iis', $actorId, $siteId, $stored);
-            $stmt->execute();
-            $changed = $stmt->affected_rows;
-            $stmt->close();
+            $db->begin_transaction();
+            try {
+                $lock = $db->prepare('SELECT `siteID`, `hostName`, `approvedAtUtc` FROM `' . self::HOSTS_TABLE . '` '
+                    . 'WHERE `hostName` = ? FOR UPDATE');
+                $lock->bind_param('s', $stored);
+                $lock->execute();
+                $rs   = $lock->get_result();
+                $mine = null;
+                while (is_array($row = $rs->fetch_assoc()) === true) {
+                    if ((int) $row['siteID'] === $siteId) {
+                        $mine = $row;
+                        continue;
+                    }
+                    $alsoAsked++;
+                    if ($row['approvedAtUtc'] !== null) {
+                        $takenBy = (int) $row['siteID'];
+                    }
+                }
+                $lock->close();
+                if ($mine === null || (string) $mine['hostName'] !== $stored || $mine['approvedAtUtc'] !== null) {
+                    $db->rollback();
+
+                    return self::refusedAndRecorded('public address approval', $siteId, $notWaiting, $actorId);
+                }
+                if ($takenBy === null) {
+                    $stmt = $db->prepare('UPDATE `' . self::HOSTS_TABLE . '` SET `approvedAtUtc` = UTC_TIMESTAMP(), `approvedByID` = ? '
+                        . 'WHERE `siteID` = ? AND `hostName` = ? AND `approvedAtUtc` IS NULL');
+                    $stmt->bind_param('iis', $actorId, $siteId, $stored);
+                    $stmt->execute();
+                    $changed = $stmt->affected_rows;
+                    $stmt->close();
+                }
+                if ($takenBy !== null || $changed < 1) {
+                    $db->rollback();
+                } else {
+                    $db->commit();
+                }
+            } catch (\Throwable $inner) {
+                self::rollbackQuietly($db);
+                throw $inner;
+            }
         } catch (\Throwable $e) {
+            // 1062: the unique key on `approvedHost` refused a SECOND approval
+            // of this name — the backstop, reached only if the ask above was
+            // somehow passed. Said in the same words as the ask's refusal.
+            if ($e instanceof \mysqli_sql_exception && $e->getCode() === 1062) {
+                return self::refusedAndRecorded('public address approval', $siteId, self::takenWords($db, $stored, $siteId, true), $actorId);
+            }
             error_log('[WebMS-Intra] PublicWebsiteSetup: a public address could not be approved: ' . $e->getMessage());
 
             return self::refusedAndRecorded('public address approval', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
         }
+        if ($takenBy !== null) {
+            return self::refusedAndRecorded('public address approval', $siteId, self::takenWords($db, $stored, $siteId), $actorId);
+        }
         if ($changed < 1) {
-            return self::refusedAndRecorded('public address approval', $siteId, 'That address is no longer the one waiting '
-                . 'for approval (it was changed, removed or approved already). Nothing was changed; look at the page again.', $actorId);
+            return self::refusedAndRecorded('public address approval', $siteId, $notWaiting, $actorId);
         }
         Logger::activity('PublicWebsitePublicAddressApproved', 'Organisation #' . $siteId . '\'s public address ' . $stored
-            . ' was approved by the installation\'s global administrator. It answers as the public door from now on.', $actorId);
+            . ' was approved by the installation\'s global administrator. It answers as the public door from now on.'
+            . ($alsoAsked > 0 ? ' ' . $alsoAsked . ' other organisation' . ($alsoAsked === 1 ? '' : 's') . ' had asked for the same '
+                . 'address and ' . ($alsoAsked === 1 ? 'is' : 'are') . ' now shown it as taken.' : ''), $actorId);
 
         return ['saved' => true, 'type' => 'success', 'message' => 'Approved: ' . $stored . ' now answers as that organisation\'s '
-            . 'public door, while its door is on.'];
+            . 'public door, while its door is on.'
+            . ($alsoAsked > 0 ? ' ' . ($alsoAsked === 1 ? 'The other organisation that asked for it is' : 'The ' . $alsoAsked
+                . ' other organisations that asked for it are') . ' now told the address is taken.' : '')];
+    }
+
+    /**
+     * The refusal the installation's global administrator reads when another
+     * organisation is already approved for this name (D-121). It names that
+     * organisation, because this administrator sees every organisation, and
+     * says what to do. Never throws: an unreadable name is left out.
+     *
+     * `$byDatabase` is true when the database's own unique key refused the
+     * second approval (the backstop) rather than the locked ask: the words
+     * say so, so a record shows which guard acted — and the self-test can
+     * tell the two apart, which is the only way to prove the lock is doing
+     * its work while the key is there behind it.
+     */
+    private static function takenWords(\mysqli $db, string $host, int $siteId, bool $byDatabase = false): string
+    {
+        $holder = '';
+        try {
+            $others = self::otherRequestsFor($db, $siteId, $host);
+            if ($others !== null && $others['approvedSiteId'] !== null) {
+                $stmt = $db->prepare('SELECT `siteName` FROM `tblSites` WHERE `siteID` = ?');
+                $id   = $others['approvedSiteId'];
+                $stmt->bind_param('i', $id);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $holder = $row === null ? '' : (string) $row['siteName'];
+            }
+        } catch (\Throwable $e) {
+            $holder = '';
+        }
+
+        return 'That address is already approved for another organisation' . ($holder === '' ? '' : ' (' . $holder . ')')
+            . '. Only one organisation may be approved for a public address, so this request stays as it is and its '
+            . 'organisation is shown the address as taken. To give it to this organisation instead, withdraw the other '
+            . 'approval first. '
+            . 'Nothing was changed.' . ($byDatabase === true ? ' (The database itself refused a second approval of this address.)' : '');
+    }
+
+    /**
+     * D-121: the OTHER organisations whose public-address row holds this
+     * name — how many, and which of them (if any) is APPROVED for it. Names
+     * are compared the way the database compares them (without regard to
+     * capitals), which is how the approval key judges a clash. Null when it
+     * cannot be read. Never throws.
+     *
+     * A plain read, not a locking one: it is for WORDS (a card, a status).
+     * The one place a clash DECIDES anything is `approvePublicHost()`, which
+     * takes its own lock.
+     *
+     * @return array{count:int, approvedSiteId:?int}|null
+     */
+    private static function otherRequestsFor(\mysqli $db, int $siteId, string $host): ?array
+    {
+        try {
+            $stmt = $db->prepare('SELECT `siteID`, `approvedAtUtc` FROM `' . self::HOSTS_TABLE . '` WHERE `hostName` = ? AND `siteID` <> ?');
+            $stmt->bind_param('si', $host, $siteId);
+            $stmt->execute();
+            $rs       = $stmt->get_result();
+            $count    = 0;
+            $approved = null;
+            while (is_array($row = $rs->fetch_assoc()) === true) {
+                $count++;
+                if ($row['approvedAtUtc'] !== null) {
+                    $approved = (int) $row['siteID'];
+                }
+            }
+            $stmt->close();
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: who else asked for a public address could not be read: ' . $e->getMessage());
+
+            return null;
+        }
+
+        return ['count' => $count, 'approvedSiteId' => $approved];
     }
 
     /**
@@ -979,6 +1197,17 @@ final class PublicWebsiteSetup
      * Throws on a database fault, except 1146 (no table yet: nothing can hold
      * a public address, so null is the true answer). See siteForDoorName().
      *
+     * ⚠️ SEVERAL ROWS MAY HOLD ONE NAME (D-121, #895): any number of
+     *    organisations may REQUEST it, and at most one may be APPROVED for
+     *    it (the database's unique key on `approvedHost`). So the APPROVED
+     *    row is read first — `ORDER BY (approvedAtUtc IS NULL)` — and only
+     *    when there is none does an unapproved row come back, which is then
+     *    "approved: false" and is not the door. A plain `LIMIT 1` would hand
+     *    back whichever row the server met first, so an approved address
+     *    could stop being the door the moment another organisation merely
+     *    asked for the same name. The order uses only the columns migrations
+     *    262 and 263 made, so it works before migration 276 has run too.
+     *
      * @return array{siteId:int, active:bool, usable:bool, approved:bool}|null
      */
     public static function publicHostRow(\mysqli $db, string $host): ?array
@@ -989,7 +1218,8 @@ final class PublicWebsiteSetup
         try {
             $stmt = $db->prepare(
                 'SELECT h.`siteID`, h.`hostName`, h.`approvedAtUtc`, s.`isActive` FROM `' . self::HOSTS_TABLE . '` h '
-                . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` WHERE h.`hostName` = ? LIMIT 1'
+                . 'INNER JOIN `tblSites` s ON s.`siteID` = h.`siteID` WHERE h.`hostName` = ? '
+                . 'ORDER BY (h.`approvedAtUtc` IS NULL), h.`siteID` LIMIT 1'
             );
         } catch (\mysqli_sql_exception $e) {
             // 1146: no table yet; 1054 BECAUSE migration 263's approval
@@ -1923,9 +2153,20 @@ final class PublicWebsiteSetup
      * Save the organisation's optional public address (D-095). Empty DELETES
      * its row. Refused when it is the portal's own address, any
      * organisation's own address on this portal, the address this request
-     * arrived at, or another organisation's public address — the last by the
-     * database's unique key, which is the real guard against a race; the
-     * message never names the other organisation.
+     * arrived at, or an address another organisation has been APPROVED for;
+     * the message never names the other organisation.
+     *
+     * D-121 (#895): an address another organisation has only ASKED for is
+     * ACCEPTED, and waits beside theirs — so nobody can block another by
+     * asking first. The installation's global administrator approves one
+     * (`approvePublicHost()`, which is where uniqueness is really enforced).
+     * The refusal of an approved name here is advice, not the guard: a save
+     * racing an approval can still store a request for a name that has just
+     * been approved, and that request simply reads as "taken" — it is never
+     * the door, and it cannot be approved while the other approval stands.
+     * The save deliberately takes NO lock: two saves of one new name by two
+     * organisations would both hold the same gap lock and then deadlock on
+     * their inserts, which is worse than the advice being late.
      *
      * @return array{saved:bool, type:string, message:string}
      */
@@ -1961,12 +2202,27 @@ final class PublicWebsiteSetup
                 if ($host === $was) {
                     return ['saved' => true, 'type' => 'info', 'message' => 'Saved. Nothing was different.'];
                 }
+                // D-121: a name ANOTHER organisation is approved for is refused
+                // (a request for it could never be approved while that stands).
+                // A name another organisation has only asked for is accepted.
+                $others = self::otherRequestsFor($db, $siteId, $host);
+                if ($others === null) {
+                    return self::refusedAndRecorded('public address', $siteId, 'Whether another organisation already has '
+                        . 'that address could not be checked just now. Nothing was saved; try again later.', $actorId);
+                }
+                if ($others['approvedSiteId'] !== null) {
+                    return self::refusedAndRecorded('public address', $siteId, self::TAKEN_FOR_ORGANISATION, $actorId);
+                }
                 // ⚠️ AN UPDATE OR AN INSERT, NEVER `INSERT … ON DUPLICATE KEY
-                //    UPDATE`. This table has TWO unique keys (the organisation and
-                //    the name), and when a new row clashes with both MySQL
-                //    updates whichever clashing row it meets first — which could
-                //    be ANOTHER organisation's row, quietly "saving" a name that
-                //    is theirs. A plain UPDATE or INSERT fails with 1062 instead.
+                //    UPDATE`. Before migration 276 this table had TWO unique
+                //    keys (the organisation and the name), and when a new row
+                //    clashed with both MySQL updated whichever clashing row it
+                //    met first — which could be ANOTHER organisation's row,
+                //    quietly "saving" a name that is theirs. Since 276 the name
+                //    is unique only once approved, and a request is never
+                //    approved, so only the organisation's own key can clash; a
+                //    plain UPDATE or INSERT is still the rule, because files
+                //    reach a server before anybody presses "Run migrations".
                 $stmt = $was !== '' || self::hasHostRow($db, $siteId) === true
                     // D-101: saving or CHANGING the address empties its
                     // approval — a new address waits for the installation's
@@ -1992,23 +2248,25 @@ final class PublicWebsiteSetup
                     $stmt->close();
                     if ($dup->getCode() === 1062) {
                         // WHOSE row clashed — asked, never assumed. Two saves for
-                        // the SAME organisation at once clash too (on the
-                        // organisation's own key, or on the same name), and
-                        // telling that person "another organisation" would be
-                        // untrue.
-                        $owner = self::hostOwner($db, $host);
-                        if ($owner === $siteId) {
+                        // the SAME organisation at once clash on the
+                        // organisation's own key, and telling that person
+                        // "another organisation" would be untrue. Asked of THIS
+                        // organisation's row: several organisations may hold one
+                        // name since D-121, so "who holds this name" has no
+                        // single answer any more.
+                        if (self::publicHostFor($db, $siteId) === $host) {
                             return ['saved' => true, 'type' => 'info', 'message' => 'That is already this organisation\'s public '
                                 . 'address (it was saved at the same moment, probably from another tab). Nothing was different.'];
                         }
-                        if ($owner === null) {
-                            return self::refusedAndRecorded('public address', $siteId, 'Somebody changed this organisation\'s '
-                                . 'public address at the same moment. Nothing was saved; look at the page again and try once more.', $actorId);
+                        // Another organisation's row with this name: only possible
+                        // before migration 276, while the name itself was unique.
+                        $again = self::otherRequestsFor($db, $siteId, $host);
+                        if ($again !== null && $again['count'] > 0) {
+                            return self::refusedAndRecorded('public address', $siteId, self::TAKEN_FOR_ORGANISATION, $actorId);
                         }
 
-                        return self::refusedAndRecorded('public address', $siteId, 'That public address is already used '
-                            . 'by another organisation on this portal. Each public address belongs to one organisation. '
-                            . 'Nothing was saved.', $actorId);
+                        return self::refusedAndRecorded('public address', $siteId, 'Somebody changed this organisation\'s '
+                            . 'public address at the same moment. Nothing was saved; look at the page again and try once more.', $actorId);
                     }
                     throw $dup;
                 }
@@ -2030,8 +2288,26 @@ final class PublicWebsiteSetup
             ? 'Saved: no public address is set, so the public pages will use the portal\'s own address.'
             : 'Saved. It does nothing yet: it waits for the installation\'s global administrator to approve it. Once approved, '
                 . 'the public door answers on it — after whoever looks after your domain points it at this portal, and only '
-                . 'while the public door is on.'];
+                . 'while the public door is on.'
+                . (isset($others) === true && $others['count'] > 0 ? ' ' . self::CLASHING_FOR_ORGANISATION : '')];
     }
+
+    /**
+     * What an organisation is told when ANOTHER organisation is approved for
+     * the address it wants (D-121). Never names the other organisation: an
+     * organisation's administrator may be a different party from the others
+     * on this installation.
+     */
+    public const TAKEN_FOR_ORGANISATION = 'That public address is taken: another organisation on this portal has been '
+        . 'approved for it, and each public address belongs to one organisation. Choose a different name. Nothing was saved.';
+
+    /**
+     * What an organisation is told when another organisation has ALSO asked
+     * for the same address and none is approved yet (D-121). Never names the
+     * other organisation.
+     */
+    public const CLASHING_FOR_ORGANISATION = 'Another organisation on this portal has asked for the same address. The '
+        . 'installation\'s administrator will approve only one of you; if it is the other, this one will be shown as taken.';
 
     /**
      * The host names members sign in at, which a public address must never
@@ -2140,15 +2416,26 @@ final class PublicWebsiteSetup
         if ($public === '') {
             $rows[] = ['label' => 'Public address', 'state' => 'note', 'words' => 'None set. That is fine: the public pages will use the portal\'s own address.'];
         } else {
-            $unique = self::hostOwnerCount($db, $public) === 1;
+            // D-121: other organisations may have ASKED for the same name;
+            // only an approval elsewhere makes it not this organisation's.
+            // Said from the ONE status, so this row and the approval row
+            // below cannot disagree.
+            $status   = self::publicHostStatus($db, $siteId);
             $reserved = in_array($public, self::hostsMembersUse($db), true);
             $resolves = SafeFetch::check('https://' . $public . '/')['ok'] === true;
-            $rows[] = ['label' => 'Public address', 'state' => ($unique === true && $reserved === false) ? 'ok' : 'problem',
-                'words' => $public . ($unique === true ? ' is used by this organisation only' : ' is not this organisation\'s alone')
-                    . ($reserved === true ? ', and it is an address members sign in at' : '') . '.'];
+            $alone    = $status !== self::HOST_TAKEN && $status !== self::HOST_CLASHING;
+            $rows[] = ['label' => 'Public address', 'state' => ($status !== self::HOST_TAKEN && $reserved === false) ? 'ok' : 'problem',
+                'words' => $public . match ($status) {
+                    self::HOST_TAKEN    => ' is taken: another organisation on this portal has been approved for it',
+                    self::HOST_CLASHING => ' has also been asked for by another organisation on this portal; the installation\'s '
+                        . 'administrator will approve only one',
+                    default             => ' is used by this organisation only',
+                } . ($reserved === true ? ($alone === true ? ', and' : '. It is also') . ' an address members sign in at' : '') . '.'];
             $rows[] = ['label' => 'Public address', 'state' => $resolves === true ? 'ok' : 'problem',
                 'words' => $resolves === true ? 'Its name exists on the internet.' : 'Its name could not be found on the internet, or it points at a private network. Ask whoever looks after your domain to point it at this portal.'];
-            $rows[] = match (self::publicHostStatus($db, $siteId)) {
+            $rows[] = match ($status) {
+                self::HOST_TAKEN     => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Taken: it cannot be '
+                    . 'approved for this organisation while another organisation is approved for it. Choose a different name.'],
                 self::HOST_APPROVED  => ['label' => 'Public address', 'state' => 'ok', 'words' => 'Approved by the installation\'s administrator.'],
                 self::HOST_MEMBERS   => ['label' => 'Public address', 'state' => 'problem', 'words' => 'Approved, but it is also an '
                     . 'address members sign in at, so the public door does NOT answer on it.'],
@@ -2255,7 +2542,7 @@ final class PublicWebsiteSetup
     {
         $label  = 'Public address';
         $status = self::publicHostStatus($db, $siteId);
-        if ($status === self::HOST_WAITING) {
+        if ($status === self::HOST_WAITING || $status === self::HOST_CLASHING) {
             return ['label' => $label, 'state' => 'untested', 'words' => 'Whether it reaches this portal\'s public door was not '
                 . 'checked: until the installation\'s administrator approves it, the door does not answer there.'];
         }
@@ -2534,29 +2821,11 @@ final class PublicWebsiteSetup
         return $found !== null;
     }
 
-    /** Which organisation holds this public address, or null when none does. */
-    private static function hostOwner(\mysqli $db, string $host): ?int
-    {
-        $stmt = $db->prepare('SELECT `siteID` FROM `' . self::HOSTS_TABLE . '` WHERE `hostName` = ? LIMIT 1');
-        $stmt->bind_param('s', $host);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-
-        return $row === null ? null : (int) $row['siteID'];
-    }
-
-    /** How many organisations hold this public address (the unique key makes it 0 or 1). */
-    private static function hostOwnerCount(\mysqli $db, string $host): int
-    {
-        $stmt = $db->prepare('SELECT COUNT(*) AS `n` FROM `' . self::HOSTS_TABLE . '` WHERE `hostName` = ?');
-        $stmt->bind_param('s', $host);
-        $stmt->execute();
-        $n = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
-        $stmt->close();
-
-        return $n;
-    }
+    // (`hostOwner()` and `hostOwnerCount()` were removed with D-121, #895:
+    //  both assumed one row per name — "which organisation holds this name"
+    //  and "the unique key makes it 0 or 1" — and since migration 276 several
+    //  organisations may hold one name while it waits. `otherRequestsFor()`
+    //  asks the question that still has one answer.)
 
     /** One organisation's own row for a key, exactly as stored, or null. */
     private static function organisationRow(\mysqli $db, int $siteId, string $key, bool $lock): ?string

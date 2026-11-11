@@ -125,6 +125,16 @@
  *      the REAL check in-process through a real TLS server in front of this
  *      portal: reached ("ok"), another organisation's door, another
  *      installation's, a 404, a plain 200, a redirect, and no curl.
+ *   Q  (#895, D-121) several organisations asking for one public address:
+ *      each is accepted while it waits, the installation's list shows the
+ *      clash, one is approved and the others read "taken" (on their card,
+ *      never naming the winner, and on the list, with no Approve button), a
+ *      later request for an approved name is refused, a losing request is
+ *      kept and can be approved once the winner's approval is withdrawn, the
+ *      door answers only for the approved one, the database's own key
+ *      refuses a second approval, the approval's LOCK is made visible (a
+ *      second approval waits on it and is refused by the ask), and a real
+ *      race on two web servers leaves exactly one approved, five times.
  *   P  the plants: each gate and each header taken out of a COPY of the
  *      portal, and the scenario that should catch it re-run. The expected
  *      value of a plant check is the value UNDER the fault, as
@@ -140,6 +150,10 @@
  *     header to the test server. What browsers do with CORS, CORP and the
  *     sign-in cookie is not tested.
  *   - One web worker, so two administrators pressing the card at once is not
+ *     exercised — EXCEPT approving a public address (section Q), which
+ *     starts a second web server for Q12 and holds a lock on this test's own
+ *     connection for Q11. Q12 does not measure how far the two requests
+ *     really overlapped; Q11 is the deterministic proof of the lock.
  *     exercised; the writers' answers to that race are read, not run.
  *   - Caches in between, and the minute `max-age=60` allows, are not tested.
  *   - With PHP's "files" session store only: the guarantee that a made-up
@@ -168,7 +182,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 309; // 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
+const PDS_EXPECTED_CHECKS = 332; // #895 (D-121) adds Q01-Q12 and PQ1-PQ11 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1198,6 +1212,296 @@ $d16Said = (string) ($db->query("SELECT `activityDescription` FROM `tblActivityL
 check('D16 an approval must name the address exactly as stored (MySQL would match other capitals and trailing spaces): a different spelling changes nothing, and the approval recorded names the STORED address',
     [$d16Waiting, str_contains($d16['page'], 'no longer the one waiting'), $approvedAt($siteA) !== null, str_contains($d16Said, ' ' . $hostA . ' ')],
     [null, true, true, true]);
+
+// =============================================================================
+echo "Q. D-121 (#895): several organisations may ask for one address; only one is approved\n";
+// =============================================================================
+// Until #895 an address was unique the moment it was ASKED for, so one
+// organisation could type another's real website address first and block it.
+// D-121: any number may ask while it waits; the installation's global
+// administrator sees the clash and approves ONE; the others are then shown it
+// as taken. Uniqueness is enforced at approval, by a lock inside a transaction
+// AND by the database's unique key on the worked-out column `approvedHost`
+// (migration 276). Every scenario here puts back what it changed: A's own
+// address approved, B's own address approved.
+//
+// A plays every "other" organisation that asks: it is the one organisation
+// with a "Set up the public website" holder, so it is the one that can ask
+// through the real page. B's request is written straight into the database.
+// "A third organisation asking later" is therefore A asking AFTER B was
+// approved — the property is the same (an organisation that is not the
+// approved one, asking once the name is approved), and it is driven through
+// the real form.
+$qName = 'shared-895.selftest.test';
+$qBName = 'Selftest Door B';
+/** Both organisations asking for the one name, neither approved. B first, so B was "first come". */
+$qBothWaiting = static function () use ($db, $siteA, $siteB, $qName): void {
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$qName}', `approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` IN ({$siteA}, {$siteB})");
+};
+/** Back to how every later section expects it: A on its own address, B on its own, both approved. */
+$qPutBack = static function () use ($db, $siteA, $siteB, $hostA, $hostB): void {
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` IN ({$siteA}, {$siteB})");
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$hostA}', `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$hostB}', `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteB}");
+};
+/** One organisation's row on the installation's list: its state, and whether it offers an Approve button. */
+$qListRow = static function (string $page, int $site): array {
+    if (preg_match('#<li class="mb-2" data-public-host-row="' . $site . '" data-public-host-row-state="([a-z\-]+)">(.*?)</li>#s', $page, $m) !== 1) {
+        return ['missing', false, ''];
+    }
+    return [$m[1], str_contains($m[2], 'value="public_host_approve"'), trim((string) preg_replace('/\s+/', ' ', strip_tags($m[2])))];
+};
+/** The organisation card's own word for its address. */
+$qCardState = static function (string $page): string {
+    return preg_match('/data-public-host-approval="([a-z\-]+)"/', $page, $m) === 1 ? $m[1] : 'missing';
+};
+
+/** Q01-Q06: ask, see the clash, approve one, the other is taken, the door answers for the approved one only. */
+$scnQClash = static function () use ($db, $siteA, $siteB, $qName, $qBName, $hostB, $cardAs, $http, $isDoor, $titles, $approvedAt,
+    $qListRow, $qCardState, $qPutBack, $people): array {
+    $out = [];
+    // B asks first (written straight in), then A asks for the same name through the real form.
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$qName}', `approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` = {$siteB}");
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = 'door-a.selftest.test', `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+    $ask = $cardAs('setup', 'public_host', ['value' => $qName]);
+    $out['asked'] = [$db->query("SELECT `hostName` FROM `tblPublicHosts` WHERE `siteID` = {$siteA}")->fetch_assoc()['hostName'] ?? null,
+        $approvedAt($siteA), $approvedAt($siteB), $qCardState($ask['page']),
+        str_contains($ask['page'], 'Another organisation on this portal has asked for the same address'), str_contains($ask['page'], $qBName)];
+    $list = $http('GET', '/admin/public-website', ['jar' => $people['instroot']['jar']])['body'];
+    $rowA = $qListRow($list, $siteA);
+    $rowB = $qListRow($list, $siteB);
+    $out['list before'] = [$rowA[0], $rowA[1], str_contains($rowA[2], 'Also asked for by ' . $qBName), $rowB[0], $rowB[1]];
+    $out['door before'] = $isDoor($http('GET', '/events.json', ['host' => $qName]));
+    // The installation's global administrator approves B.
+    $ok = $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteB, 'host' => $qName]);
+    $cardA = $http('GET', '/admin/public-website', ['jar' => $people['setup']['jar']])['body'];
+    $list  = $http('GET', '/admin/public-website', ['jar' => $people['instroot']['jar']])['body'];
+    $rowA  = $qListRow($list, $siteA);
+    $rowB  = $qListRow($list, $siteB);
+    $out['approved'] = [$approvedAt($siteA), $approvedAt($siteB) !== null,
+        str_contains($ok['page'], 'The other organisation that asked for it is now told the address is taken')];
+    $out['taken on the card'] = [$qCardState($cardA), str_contains($cardA, 'This address is taken'), str_contains($cardA, $qBName)];
+    $out['taken on the list'] = [$rowA[0], $rowA[1], str_contains($rowA[2], 'Approved for ' . $qBName), $rowB[0]];
+    // The door, on the shared name: B's, not A's (A's own door is on and holds ticked events).
+    $onName = $http('GET', '/events.json', ['host' => $qName]);
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$hostB}' WHERE `siteID` = {$siteB}");
+    $bOwn = $http('GET', '/events.json', ['host' => $hostB]);
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$qName}' WHERE `siteID` = {$siteB}");
+    $out['door after'] = [$onName['status'], $isDoor($onName), $titles($onName, 'events') === $titles($bOwn, 'events'),
+        in_array('PDS A shown', $titles($onName, 'events') ?? [], true)];
+    // Approving A now is refused, by the LOCKED ASK (not the database's backstop), naming B.
+    $again = $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteA, 'host' => $qName]);
+    $out['second approval'] = [$approvedAt($siteA), $approvedAt($siteB) !== null,
+        str_contains($again['page'], 'That address is already approved for another organisation (' . $qBName . ')'),
+        str_contains($again['page'], 'The database itself refused')];
+    $qPutBack();
+    return $out;
+};
+$qClash = $scnQClash();
+check('Q01 a name another organisation has only ASKED for is accepted: stored waiting beside theirs, the card says another organisation asked as well, and never names it',
+    $qClash['asked'], ['shared-895.selftest.test', null, null, 'waiting-clashing', true, false]);
+check('Q02 the installation\'s list shows the clash before anybody approves: both rows "waiting, clashes", each with an Approve button, and A\'s row names B',
+    $qClash['list before'], ['waiting-clashing', true, true, 'waiting-clashing', true]);
+check('Q03 while both only ask, the name is nobody\'s door', $qClash['door before'], false);
+check('Q04 approving B: B approved, A not, and the approver is told the other organisation is now shown it as taken',
+    $qClash['approved'], [null, true, true]);
+check('Q05 A is then shown the address as TAKEN — on its card, without naming B — and on the installation\'s list as taken by B, with NO Approve button',
+    [$qClash['taken on the card'], $qClash['taken on the list']], [['taken', true, false], ['taken', false, true, 'approved']]);
+check('Q06 the door answers on the shared name for B, the approved one, and never shows A\'s events there',
+    $qClash['door after'], [200, true, true, false]);
+check('Q07 approving A once B is approved is refused by the locked ask (not the database\'s backstop), naming B to the installation\'s administrator; nothing changes',
+    $qClash['second approval'], [null, true, true, false]);
+
+/** Q08: asking LATER for a name another organisation is approved for is refused, and the old row stays. */
+$scnQLater = static function () use ($db, $siteA, $siteB, $qName, $qBName, $cardAs, $approvedAt, $logged, $people, $qPutBack): array {
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$qName}', `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteB}");
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = 'elsewhere-895.selftest.test', `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
+    $before = $logged('PublicWebsiteSetupRefused', $people['setup']['id']);
+    $r = $cardAs('setup', 'public_host', ['value' => strtoupper($qName)]);
+    $out = [$db->query("SELECT `hostName` FROM `tblPublicHosts` WHERE `siteID` = {$siteA}")->fetch_assoc()['hostName'] ?? null,
+        $approvedAt($siteB) !== null, str_contains($r['page'], 'That public address is taken'), str_contains($r['page'], $qBName),
+        $logged('PublicWebsiteSetupRefused', $people['setup']['id']) - $before];
+    $qPutBack();
+    return $out;
+};
+check('Q08 an organisation asking for a name ANOTHER organisation is already approved for (in other capitals) is refused as taken, its own address unchanged, without naming the other, and recorded',
+    $scnQLater(), ['elsewhere-895.selftest.test', true, true, false, 1]);
+
+/** Q09: a request that lost is KEPT, not cleared: withdraw the winner and it is waiting again, and can be approved. */
+$scnQKept = static function () use ($db, $siteA, $siteB, $qName, $cardAs, $http, $approvedAt, $qCardState, $people, $qBothWaiting, $qPutBack): array {
+    $qBothWaiting();
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteB}");
+    $taken = $qCardState($http('GET', '/admin/public-website', ['jar' => $people['setup']['jar']])['body']);
+    $cardAs('instroot', 'public_host_withdraw', ['site' => (string) $siteB]);
+    $after = $qCardState($http('GET', '/admin/public-website', ['jar' => $people['setup']['jar']])['body']);
+    $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteA, 'host' => $qName]);
+    $out = [$taken, $after, $approvedAt($siteA) !== null, $approvedAt($siteB)];
+    $qPutBack();
+    return $out;
+};
+check('Q09 the losing request is kept as it was: withdrawing the winner\'s approval makes it read "waiting, clashes" again, and it can then be approved',
+    $scnQKept(), ['taken', 'waiting-clashing', true, null]);
+
+/** Q10: the database's own rule — two requests may share a name, two APPROVALS may not. */
+$scnQKey = static function () use ($db, $siteA, $siteB, $qBothWaiting, $qPutBack): array {
+    $qBothWaiting();
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteA}");
+    try {
+        $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteB}");
+        $code = 0;
+    } catch (mysqli_sql_exception $e) {
+        $code = $e->getCode();
+    }
+    $approved = (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblPublicHosts` WHERE `hostName` = 'shared-895.selftest.test' AND `approvedAtUtc` IS NOT NULL")->fetch_assoc()['n'] ?? 0);
+    $qPutBack();
+    return [$code, $approved];
+};
+check('Q10 the database itself refuses a second APPROVED row for one name (error 1062), whatever the code does', $scnQKey(), [1062, 1]);
+
+/**
+ * Q11: the LOCK, made visible. This connection plays the first approver: it
+ * opens a transaction, locks every row asking for the name exactly as
+ * `approvePublicHost()` does, and approves B — without committing. The real
+ * page is then asked to approve A. It must WAIT (the premise, asserted, not
+ * hoped for: a sleep is a hope, a still-running request is a fact), and once
+ * this connection commits it must be refused by the locked ask. Without the
+ * lock the request does not wait on the ask; with the key there behind it the
+ * database's backstop refuses it instead, and the words say so — which is how
+ * the lock is told apart from the key. With BOTH gone, both are approved.
+ */
+$scnQInterleave = static function () use ($db, $siteA, $siteB, $qName, $port, $people, $tokenOn, $http, $qBothWaiting, $qPutBack): array {
+    $qBothWaiting();
+    $jar   = $people['instroot']['jar'];
+    $token = $tokenOn($http('GET', '/admin/public-website', ['jar' => $jar])['body']);
+    $db->begin_transaction();
+    $hold = $db->prepare('SELECT `siteID` FROM `tblPublicHosts` WHERE `hostName` = ? FOR UPDATE');
+    $hold->bind_param('s', $qName);
+    $hold->execute();
+    $hold->get_result()->fetch_all();
+    $hold->close();
+    $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteB}");
+    $multi = curl_multi_init();
+    $one   = curl_init('http://127.0.0.1:' . $port . '/admin/public-website/save');
+    curl_setopt_array($one, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 90,
+        CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar,
+        CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $token, 'action' => 'public_host_approve', 'site' => (string) $siteA, 'host' => $qName])]);
+    curl_multi_add_handle($multi, $one);
+    $until = microtime(true) + 1.5;
+    $running = 1;
+    while (microtime(true) < $until && $running > 0) {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.1);
+    }
+    $stillWaiting = $running > 0;
+    $db->commit();
+    do {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.2);
+    } while ($running > 0);
+    curl_multi_remove_handle($multi, $one);
+    curl_multi_close($multi);
+    $page = $http('GET', '/admin/public-website', ['jar' => $jar])['body'];
+    $approved = (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblPublicHosts` WHERE `hostName` = '{$qName}' AND `approvedAtUtc` IS NOT NULL")->fetch_assoc()['n'] ?? 0);
+    $out = ['the request waited' => $stillWaiting, 'approved' => $approved,
+        'refused by the ask' => str_contains($page, 'That address is already approved for another organisation')
+            && str_contains($page, 'The database itself refused') === false];
+    $qPutBack();
+    return $out;
+};
+check('Q11 a second approval made while the first is still open WAITS on its lock, and is then refused by the locked ask: exactly one approved',
+    $scnQInterleave(), ['the request waited' => true, 'approved' => 1, 'refused by the ask' => true]);
+
+/**
+ * Q12: a real race. A SECOND web server on the next port serves the same copy,
+ * and the installation's global administrator is signed in twice (two
+ * sessions: one session's file lock would make two requests take turns). Both
+ * approvals are sent at once, A on one server and B on the other, five times,
+ * swapping which server asks for which. Every time exactly one is approved.
+ */
+$scnQRace = static function () use ($db, $siteA, $siteB, $qName, $port, $child, $sep, $sessions, $people, $tokenOn, $qBothWaiting, $qPutBack): array {
+    $port2 = $port + 1;
+    $env   = getenv();
+    unset($env['PHP_CLI_SERVER_WORKERS']);
+    $env['PORTAL_ENV'] = 'prod';
+    $pipes = [];
+    $proc  = proc_open([PHP_BINARY, '-d', 'session.save_path=' . $sessions, '-d', 'session.save_handler=files',
+        '-d', 'error_log=' . $child . $sep . 'php-errors.log', '-d', 'log_errors=1', '-d', 'display_errors=0',
+        '-d', 'opcache.enable=0', '-S', '127.0.0.1:' . $port2, '-t', $child . $sep . 'web' . $sep . 'public_html', $child . $sep . 'router.php'],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['file', $child . $sep . 'server2.log', 'a'], 2 => ['file', $child . $sep . 'server2.log', 'a']],
+        $pipes, $child, $env);
+    $req = static function (int $onPort, string $method, string $path, string $jar, array $post = []): string {
+        $h = curl_init('http://127.0.0.1:' . $onPort . $path);
+        $o = [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 60, CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar, CURLOPT_CUSTOMREQUEST => $method];
+        if ($post !== []) {
+            $o[CURLOPT_POSTFIELDS] = http_build_query($post);
+        }
+        curl_setopt_array($h, $o);
+        return (string) curl_exec($h);
+    };
+    try {
+        $up = false;
+        for ($i = 0; $i < 80 && $up === false; $i++) {
+            $up = @fsockopen('127.0.0.1', $port2) !== false;
+            if ($up === false) {
+                usleep(250000);
+            }
+        }
+        if ($up === false) {
+            return ['the second server started' => false];
+        }
+        // Two sessions of the installation's global administrator, one per server.
+        $jars = [];
+        foreach ([$port, $port2] as $k => $onPort) {
+            $jar = $child . $sep . 'jar-race-' . $k . '.txt';
+            @unlink($jar);
+            $t = $tokenOn($req($onPort, 'GET', '/login', $jar));
+            $req($onPort, 'POST', '/login', $jar, ['csrf_token' => $t, 'username' => $people['instroot']['login'], 'password' => $people['instroot']['password']]);
+            $t = $tokenOn($req($onPort, 'GET', '/site/choose', $jar));
+            $req($onPort, 'POST', '/site/switch', $jar, ['csrf_token' => $t, 'site_id' => '1']);
+            $jars[$k] = $jar;
+        }
+        $rounds = [];
+        for ($round = 0; $round < 5; $round++) {
+            $qBothWaiting();
+            $targets = $round % 2 === 0 ? [$siteA, $siteB] : [$siteB, $siteA];
+            $multi = curl_multi_init();
+            $hs = [];
+            foreach ([$port, $port2] as $k => $onPort) {
+                $t = $tokenOn($req($onPort, 'GET', '/admin/public-website', $jars[$k]));
+                $h = curl_init('http://127.0.0.1:' . $onPort . '/admin/public-website/save');
+                curl_setopt_array($h, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 90,
+                    CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_COOKIEFILE => $jars[$k], CURLOPT_COOKIEJAR => $jars[$k],
+                    CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $t, 'action' => 'public_host_approve',
+                        'site' => (string) $targets[$k], 'host' => $qName])]);
+                curl_multi_add_handle($multi, $h);
+                $hs[] = $h;
+            }
+            do {
+                curl_multi_exec($multi, $running);
+                curl_multi_select($multi, 0.1);
+            } while ($running > 0);
+            $codes = [];
+            foreach ($hs as $h) {
+                $codes[] = (int) curl_getinfo($h, CURLINFO_HTTP_CODE);
+                curl_multi_remove_handle($multi, $h);
+            }
+            curl_multi_close($multi);
+            $rounds[] = [(int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblPublicHosts` WHERE `hostName` = '{$qName}' AND `approvedAtUtc` IS NOT NULL")->fetch_assoc()['n'] ?? 0), $codes];
+        }
+        return ['the second server started' => true, 'rounds' => $rounds];
+    } finally {
+        if (is_resource($proc) === true) {
+            proc_terminate($proc);
+            proc_close($proc);
+        }
+        $qPutBack();
+    }
+};
+$qRaceWant = ['the second server started' => true, 'rounds' => array_fill(0, 5, [1, [302, 302]])];
+$qRace = $scnQRace();
+check('Q12 two administrators approving the two clashing requests at the same moment, on two web servers, five times: exactly one is approved every time',
+    $qRace, $qRaceWant);
 
 // ── Round 8 of P4a's check: two publicHostInEffect() callers were pinned by
 // nothing (reverting either left 164/164). Each is driven in the three states
@@ -4337,6 +4641,60 @@ $p = $plant('_apps/admin/public-website/index.php', "<div class=\"alert alert-wa
     "<div class=\"alert alert-warning\" data-door-testers-only=\"1\">This is a test copy, so open the addresses above in this browser to try them.</div>",
     static fn (): bool => str_contains($http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'], 'open the addresses above in this browser to try them'), 'alpha');
 check('PU23 with the door card writing its OWN warning (round 2\'s plant m1: the removed advice back), it tells testers to open public addresses that answer nobody (U21b and U27 catch it)', [$p['applied'], $p['result']], [true, true]);
+
+// ── D-121 (#895): each of section Q's rules taken out, and its scenario re-run ─
+$p = $plant('_core/PublicWebsiteSetup.php', "if (\$others['approvedSiteId'] !== null) {\n                    return self::refusedAndRecorded('public address', \$siteId, self::TAKEN_FOR_ORGANISATION, \$actorId);",
+    "if (false) {\n                    return self::refusedAndRecorded('public address', \$siteId, self::TAKEN_FOR_ORGANISATION, \$actorId);", $scnQLater);
+check('PQ1 with the save no longer refusing a name another organisation is approved for, a later request for it is stored (Q08 catches it)',
+    [$p['applied'], $p['result'][0] ?? null], [true, 'shared-895.selftest.test']);
+$p = $plant('_core/PublicWebsiteSetup.php', "return \$others['approvedSiteId'] !== null ? self::HOST_TAKEN : self::HOST_CLASHING;", 'return self::HOST_CLASHING;', $scnQClash);
+check('PQ2 with "taken" no longer worked out, the losing organisation\'s card still says it is waiting (Q05 catches it)',
+    [$p['applied'], $p['result']['taken on the card'][0] ?? null], [true, 'waiting-clashing']);
+$p = $plant('_core/PublicWebsiteSetup.php', ". 'ORDER BY (h.`approvedAtUtc` IS NULL), h.`siteID` LIMIT 1'", ". 'LIMIT 1'", $scnQClash);
+check('PQ3 with the door\'s look-up no longer reading the APPROVED row first, the approved organisation\'s door stops answering on a name another organisation merely asked for (Q06 catches it)',
+    [$p['applied'], $p['result']['door after'][1] ?? null], [true, false]);
+$p = $plant('_core/PublicWebsiteSetup.php', ". 'WHERE `hostName` = ? FOR UPDATE');", ". 'WHERE `hostName` = ?');", $scnQInterleave);
+check('PQ4 with the approval\'s lock taken out, the second approval is stopped only by the database\'s backstop, and says so (Q11 catches it)',
+    [$p['applied'], $p['result']['refused by the ask'] ?? null, $p['result']['approved'] ?? null], [true, false, 1]);
+/** The database's unique key on approvedHost removed for one scenario, and put back exactly as migration 276 makes it. */
+$qWithoutKey = static function (callable $scenario) use ($db): array {
+    $db->query('ALTER TABLE `tblPublicHosts` DROP INDEX `uq_public_host_approved`');
+    try {
+        return $scenario();
+    } finally {
+        $db->query('ALTER TABLE `tblPublicHosts` ADD UNIQUE KEY `uq_public_host_approved` (`approvedHost`)');
+    }
+};
+register_shutdown_function(static function () use ($db): void {
+    try {
+        $rs = $db->query("SHOW INDEX FROM `tblPublicHosts` WHERE `Key_name` = 'uq_public_host_approved'");
+        if ($rs !== false && $rs->num_rows === 0) {
+            $db->query('ALTER TABLE `tblPublicHosts` ADD UNIQUE KEY `uq_public_host_approved` (`approvedHost`)');
+        }
+    } catch (Throwable $e) {
+        echo "  ! tblPublicHosts may be missing its key uq_public_host_approved; add it back by hand (migration 276).\n";
+    }
+});
+$pq5 = $qWithoutKey($scnQKey);
+check('PQ5 with the database\'s unique key on approvedHost removed, a second APPROVED row for one name is accepted (Q10 catches it)', $pq5, [0, 2]);
+$pq6 = $qWithoutKey($scnQInterleave);
+check('PQ6 with the key removed but the lock kept, the second approval still waits and is refused by the locked ask: the lock alone holds (Q11 stays green)',
+    $pq6, ['the request waited' => true, 'approved' => 1, 'refused by the ask' => true]);
+$p = $plant('_core/PublicWebsiteSetup.php', ". 'WHERE `hostName` = ? FOR UPDATE');", ". 'WHERE `hostName` = ?');",
+    static fn (): array => $qWithoutKey($scnQInterleave));
+check('PQ7 with BOTH the lock and the key taken out, a second approval made while the first is open is approved too: two organisations approved for one name (Q11 catches it)',
+    [$p['applied'], $p['result']['approved'] ?? null], [true, 2]);
+$p = $plant('_core/PublicWebsiteSetup.php', "\$alsoAsked++;\n                    if (\$row['approvedAtUtc'] !== null) {", "\$alsoAsked++;\n                    if (false) {", $scnQClash);
+check('PQ8 with the approval no longer asking whether another organisation is approved, the second approval reaches the database and only its backstop refuses it (Q07 catches it)',
+    [$p['applied'], $p['result']['second approval'] ?? null], [true, [null, true, true, true]]);
+$p = $plant('_core/PublicWebsiteSetup.php', "\$takenBy = (string) \$other['siteName'];", '$takenBy = null;', $scnQClash);
+check('PQ9 with the list no longer working out who an address is taken by, the losing request is offered for approval as a mere clash (Q05 catches it)',
+    [$p['applied'], array_slice($p['result']['taken on the list'] ?? [], 0, 2)], [true, ['waiting-clashing', true]]);
+$p = $plant('_apps/admin/public-website/index.php', "<?php if (\$rowState !== 'taken'): ?>", '<?php if (true): ?>', $scnQClash);
+check('PQ10 with the list drawing an Approve button on a taken request, the installation\'s administrator is offered one (Q05 catches it)',
+    [$p['applied'], $p['result']['taken on the list'][1] ?? null], [true, true]);
+$qKeyBack = $db->query("SHOW INDEX FROM `tblPublicHosts` WHERE `Key_name` = 'uq_public_host_approved' AND `Non_unique` = 0 AND `Column_name` = 'approvedHost'")->num_rows;
+check('PQ11 after the key plants, the unique key on approvedHost is back exactly as migration 276 makes it', $qKeyBack, 1);
 
 // ── Tidy up ─────────────────────────────────────────────────────────────────
 $db->query("DELETE FROM `tblPublicDoorNames` WHERE `siteID` IN (1, {$siteB}, {$siteC})");

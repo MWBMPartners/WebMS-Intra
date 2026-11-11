@@ -11434,7 +11434,8 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('261_noticeboard_foyer_slidesho
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 262_public_website_setup.sql (#493, P3; D-085, D-093, D-094, D-095) ─
--- The optional public address per organisation (no two may share one), the
+-- The optional public address per organisation (no two may share one; since
+-- migration 276, no two may share an APPROVED one — D-121), the
 -- installation's framing switch ('yes' by default), the Website Set-up role for
 -- every organisation that exists (one more is seeded by
 -- `Roles::seedStandardSet()` whenever an organisation is added; granted to
@@ -11448,12 +11449,20 @@ CREATE TABLE IF NOT EXISTS `tblPublicHosts` (
     -- ALTERs replay as no-ops.
     `approvedAtUtc` DATETIME    NULL DEFAULT NULL COMMENT 'A moment in UTC, written with UTC_TIMESTAMP(): when the installation''s global administrator approved this public address (D-101). NULL = not approved, and then the address does NOTHING: it is not the public door. Saving or changing the address empties it.',
     `approvedByID` INT          NULL DEFAULT NULL COMMENT 'FK to tblUsers: the installation''s global administrator who approved this public address (D-101); NULL when not approved, or when that account is gone. Who approved or withdrew is also in the activity log.',
+    -- #895, D-121 (migration 276): a name is unique only once APPROVED. Any
+    -- number of organisations may REQUEST one name; the installation's global
+    -- administrator approves one, and the database refuses a second approval.
+    -- `approvedHost` is empty for a row only requested, and a unique key
+    -- stands aside for an empty value (#487) — which is exactly the rule
+    -- wanted here. VIRTUAL, not STORED: fk_public_host_site cascades.
+    `approvedHost` VARCHAR(253) AS (IF(`approvedAtUtc` IS NULL, NULL, `hostName`)) VIRTUAL COMMENT 'Worked out by the database (#895, D-121): the host name while the address is APPROVED, and empty while it is only requested. Exists so uq_public_host_approved can make an approved name unique while letting any number of organisations request one. VIRTUAL not STORED: fk_public_host_site cascades.',
     PRIMARY KEY (`siteID`),
-    UNIQUE KEY `uq_public_host_name` (`hostName`),
+    UNIQUE KEY `uq_public_host_approved` (`approvedHost`),
+    KEY `idx_public_host_name` (`hostName`),
     CONSTRAINT `fk_public_host_site` FOREIGN KEY (`siteID`) REFERENCES `tblSites` (`siteID`) ON DELETE CASCADE,
     CONSTRAINT `fk_public_host_approver` FOREIGN KEY (`approvedByID`) REFERENCES `tblUsers` (`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
-COMMENT='Each organisation''s optional public address for its public pages; no two may share one (#493 P3, D-095)';
+COMMENT='Each organisation''s optional public address for its public pages; several may request one name, only one may be approved for it (#493 P3, D-095, D-121)';
 
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'public.frame.permitted', 'yes', 'yes', 0)
@@ -11626,6 +11635,13 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('273_no_built_in_time_zone.sql'
 -- tblVenues.countryCode is written above with no default, and
 -- portal.sabbath.location_lat / location_lng are seeded empty; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('274_no_built_in_place.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 276_public_address_unique_on_approval.sql (#895, D-121) ────────────
+-- tblPublicHosts is written above in its final shape: the worked-out column
+-- `approvedHost`, the unique key on it, and an ordinary key on `hostName` in
+-- place of the old unique one. This is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('276_public_address_unique_on_approval.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

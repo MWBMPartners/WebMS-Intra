@@ -351,7 +351,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card mb-3">
         <div class="card-body">
             <h2 class="h5">Public address for the portal's public pages <span class="badge text-bg-light border">Optional</span></h2>
-            <p class="text-muted">A separate name, such as events.ourchurch.org, that you point at this portal so public visitors never reach the address members sign in at. Without one, the public pages will use the portal's own address. Each public address belongs to one organisation only.</p>
+            <p class="text-muted">A separate name, such as events.ourchurch.org, that you point at this portal so public visitors never reach the address members sign in at. Without one, the public pages will use the portal's own address. Each public address belongs to one organisation only: if another organisation asks for the same name, the installation's administrator approves one of you, and the other is told it is taken.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                 <input type="hidden" name="action" value="public_host">
@@ -365,13 +365,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php // Words for PublicWebsiteSetup::publicHostStatus(), the ONE answer (round 8 of P4a's check). ?>
                 <p class="mt-2 mb-0" data-public-host-approval="<?php echo match ($publicHostStatus) {
                     PublicWebsiteSetup::HOST_APPROVED => 'approved', PublicWebsiteSetup::HOST_MEMBERS => 'approved-members-address',
-                    PublicWebsiteSetup::HOST_UNCHECKED => 'approved-unchecked', default => 'waiting'}; ?>">
+                    PublicWebsiteSetup::HOST_UNCHECKED => 'approved-unchecked', PublicWebsiteSetup::HOST_TAKEN => 'taken',
+                    PublicWebsiteSetup::HOST_CLASHING => 'waiting-clashing', default => 'waiting'}; ?>">
                     <?php if ($publicHostStatus === PublicWebsiteSetup::HOST_APPROVED): ?>
                         <span class="badge text-bg-success me-1">Approved</span> The installation's administrator has approved this address, so the public door answers on it while the door is on.
                     <?php elseif ($publicHostStatus === PublicWebsiteSetup::HOST_MEMBERS): ?>
                         <span class="badge text-bg-warning me-1">Approved, not in use</span> The installation's administrator approved this address, but it is also an address members sign in at, so the public door does <strong>not</strong> answer on it. Change it to a name members do not use.
                     <?php elseif ($publicHostStatus === PublicWebsiteSetup::HOST_UNCHECKED): ?>
                         <span class="badge text-bg-warning me-1">Approved, not checked</span> The installation's administrator approved this address, but whether it is also an address members sign in at could not be checked just now, so the portal does not count it as the public door's address. Try again later.
+                    <?php elseif ($publicHostStatus === PublicWebsiteSetup::HOST_TAKEN): ?>
+                        <?php // D-121 (#895): another organisation was approved for this name. Never named here: the organisations on one installation may be different parties. ?>
+                        <span class="badge text-bg-danger me-1">Taken</span> This address is taken: another organisation on this portal has been approved for it, and each public address belongs to one organisation. It does nothing here. Choose a different name.
+                    <?php elseif ($publicHostStatus === PublicWebsiteSetup::HOST_CLASHING): ?>
+                        <span class="badge text-bg-warning me-1">Waiting</span> Waiting for the installation's administrator to approve it. Another organisation on this portal has asked for the same address, and only one of you can be approved; if it is the other, this one will be shown as taken. Until then it does nothing: it is not the public door.
                     <?php else: ?>
                         <span class="badge text-bg-warning me-1">Waiting</span> Waiting for the installation's administrator to approve it. Until then it does nothing: it is not the public door.
                     <?php endif; ?>
@@ -413,7 +419,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card mb-3" data-public-host-approvals="1">
             <div class="card-body">
                 <h2 class="h5">Public addresses (every organisation)</h2>
-                <p class="text-muted">An organisation's public address does nothing until you approve it here. Before approving, make sure the address is NOT one members sign in at — an alias of the portal's own address, say — because once approved, every page there answers only the public door. Withdrawing approval takes effect at once.</p>
+                <p class="text-muted">An organisation's public address does nothing until you approve it here. Before approving, make sure the address is NOT one members sign in at — an alias of the portal's own address, say — because once approved, every page there answers only the public door. Withdrawing approval takes effect at once. Several organisations may ask for the same address; only one can be approved for it, and the others are then shown as taken, to them and here.</p>
                 <?php if ($allPublicHosts === null): ?>
                     <div class="alert alert-warning mb-0" data-public-host-list-unreadable="1">The list of public addresses could not be read just now, so nothing can be approved or withdrawn here. Try again later; nothing was changed.</div>
                 <?php elseif ($allPublicHosts === []): ?>
@@ -424,14 +430,25 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php
                             // An approved address that is ALSO an address members sign in at is not the door
                             // (round 8 of P4a's check): said here too, not only on the organisation's card.
-                            $rowState = $one['approved'] === false ? 'waiting'
+                            // D-121 (#895): a request another organisation has been approved for is TAKEN and has no
+                            // Approve button (the handler and the database would refuse it anyway); one that shares its
+                            // name with other requests says which, so the clash is seen before anybody presses Approve.
+                            $rowState = $one['approved'] === false
+                                ? ($one['takenBy'] !== null ? 'taken' : ($one['alsoRequestedBy'] !== [] ? 'waiting-clashing' : 'waiting'))
                                 : ($one['membersAddress'] === true ? 'approved-members-address' : ($one['membersAddress'] === null ? 'approved-unchecked' : 'approved'));
                             ?>
                             <li class="mb-2" data-public-host-row="<?php echo (int) $one['siteId']; ?>" data-public-host-row-state="<?php echo $esc($rowState); ?>">
-                                <span class="badge <?php echo $rowState === 'approved' ? 'text-bg-success' : 'text-bg-warning'; ?> me-1"><?php echo $esc(match ($rowState) {
+                                <span class="badge <?php echo $rowState === 'approved' ? 'text-bg-success' : ($rowState === 'taken' ? 'text-bg-secondary' : 'text-bg-warning'); ?> me-1"><?php echo $esc(match ($rowState) {
                                     'approved' => 'Approved', 'approved-members-address' => 'Approved, not in use (members sign in at it)',
-                                    'approved-unchecked' => 'Approved, not checked', default => 'Waiting'}); ?></span>
+                                    'approved-unchecked' => 'Approved, not checked', 'taken' => 'Taken',
+                                    'waiting-clashing' => 'Waiting, clashes', default => 'Waiting'}); ?></span>
                                 <strong><?php echo $esc($one['host']); ?></strong> — <?php echo $esc($one['siteName']); ?>
+                                <?php if ($rowState === 'taken'): ?>
+                                    <div class="small text-muted" data-public-host-taken-by="<?php echo (int) $one['siteId']; ?>">Approved for <?php echo $esc((string) $one['takenBy']); ?>, so it cannot be approved here; <?php echo $esc($one['siteName']); ?> is told the address is taken. To give it to <?php echo $esc($one['siteName']); ?> instead, withdraw that approval first.</div>
+                                <?php elseif ($one['alsoRequestedBy'] !== []): ?>
+                                    <div class="small text-muted" data-public-host-clash="<?php echo (int) $one['siteId']; ?>">Also asked for by <?php echo $esc(implode(', ', $one['alsoRequestedBy'])); ?>. Only one organisation can be approved for it<?php echo $one['approved'] === true ? '; the others are told it is taken' : ': approve one, and the others are told it is taken'; ?>.</div>
+                                <?php endif; ?>
+                                <?php if ($rowState !== 'taken'): ?>
                                 <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" class="d-inline ms-2">
                                     <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
                                     <input type="hidden" name="action" value="<?php echo $one['approved'] === true ? 'public_host_withdraw' : 'public_host_approve'; ?>">
@@ -439,6 +456,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <input type="hidden" name="host" value="<?php echo $esc($one['host']); ?>">
                                     <button type="submit" class="btn btn-sm <?php echo $one['approved'] === true ? 'btn-outline-danger' : 'btn-outline-success'; ?>"><?php echo $one['approved'] === true ? 'Withdraw approval' : 'Approve'; ?></button>
                                 </form>
+                                <?php endif; ?>
                             </li>
                         <?php endforeach; ?>
                     </ul>
