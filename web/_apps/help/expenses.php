@@ -273,8 +273,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-list-check me-2 text-primary"></i>Viewing Your Claims</h2>
 
     <p>You can view all of your submitted expense claims and their current statuses at any time.</p>
-    <!-- D-130 (11 November 2026): every look at an expense record is recorded, the claimant's own included. -->
-    <p>Each time anybody opens a claim, one of its receipts or the expenses spreadsheet &mdash; you included &mdash; the portal records who looked and which claim, so your organisation can later see who has seen it.</p>
+    <!-- D-130 (11 November 2026): every look at an expense record is recorded, the claimant's own included.
+         Each sentence below says exactly what one kind of look records; keep them in step with the pages
+         (tools/access-pages-selftest.php, part L4, pins the records themselves). -->
+    <p>Looking at expense claims is recorded in the portal's activity log, with who looked &mdash; you included &mdash; so your organisation can later see who has seen them. What each look records:</p>
+    <ul>
+        <li><strong>Opening a claim</strong>, or the form to change one: the claim's number.</li>
+        <li><strong>Opening a receipt</strong>: the receipt's number and the claim's number.</li>
+        <li><strong>Your list of claims</strong> on the Expenses page, the <strong>approvals list</strong> and the <strong>treasury list</strong>: how many claims the list showed. A list that showed none records nothing.</li>
+        <li><strong>The expenses spreadsheet</strong>: which departments it covered and how many claims were in it &mdash; not which claims.</li>
+        <li><strong>Listing claims through the portal's API</strong>: whether it was the person's own claims or the whole organisation's, the status asked for, the page, and how many claims came back.</li>
+        <li><strong>A report of expense claims</strong> in Admin, Reports: a preview records how many rows it showed; running or exporting a saved report records which report it was.</li>
+    </ul>
+    <p>None of these records a claim's title, anybody's name, an amount or a file name. A look that is refused records nothing.</p>
 
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item d-flex gap-3 align-items-start">

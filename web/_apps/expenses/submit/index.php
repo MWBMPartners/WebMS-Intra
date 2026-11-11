@@ -62,6 +62,7 @@ declare(strict_types=1);
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
 use Portal\Core\ExpenseRules;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -202,6 +203,17 @@ $ownStatusClass = static fn (string $status): string => match ($status) {
     'Withdrawn'  => 'secondary',
     default      => 'secondary',
 };
+
+// 📝 D-130 (the owner, 11 November 2026): every look at expense records is
+//    recorded, a claimant's own included. The list above shows this person's
+//    claims (titles, amounts, departments), so when it shows any it writes one
+//    `ExpenseOwnClaimsView` record naming the person (#626), with the page and
+//    HOW MANY claims it showed — no title or amount. Somebody with no claims
+//    (or whose list could not be read) was shown none and records nothing, so
+//    opening the form to make a first claim leaves no record.
+if (count($ownClaims) > 0) {
+    Logger::activity('ExpenseOwnClaimsView', 'Opened their own expense claims list: page ' . $ownPage . ', ' . count($ownClaims) . ' claim(s) shown');
+}
 
 // 📄 Include shared header template
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';

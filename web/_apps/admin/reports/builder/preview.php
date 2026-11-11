@@ -26,6 +26,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\AppRegistry;
 use Portal\Core\Auth;
+use Portal\Core\Logger;
 use Portal\Core\ReportBuilder;
 use Portal\Core\Site;
 
@@ -67,6 +68,19 @@ try {
     $definition = ReportBuilder::decodeDefinitionJson((string) ($_POST['definition'] ?? ''));
     $compiled   = ReportBuilder::compile($definition, $siteId);
     $result     = ReportBuilder::run($compiled, 25, 0);
+
+    // 📝 D-130 (the owner, 11 November 2026): every look at EXPENSE records
+    //    is recorded. A preview of the expense-claims source shows claim
+    //    titles, claimants and (to a treasurer or administrator) amounts, so
+    //    when it shows any rows it writes one `ExpenseReportPreview` record
+    //    naming the person (#626) and HOW MANY rows — nothing of the rows.
+    //    Only the expenses source: D-130 does not extend the rule to other
+    //    apps. A saved report's Run and its CSV export already record
+    //    themselves with the source (`ReportRun` / `ReportExport`,
+    //    `source=expenses`), so neither needs a second record.
+    if ((string) ($definition['source'] ?? '') === 'expenses' && count($result['rows']) > 0) {
+        Logger::activity('ExpenseReportPreview', 'Previewed a report of expense claims: ' . count($result['rows']) . ' row(s) shown');
+    }
 
     echo json_encode([
         'status'  => 'ok',

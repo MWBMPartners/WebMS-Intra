@@ -119,7 +119,12 @@
  *      a claim page, a receipt, the spreadsheet or the API's claim list
  *      writes exactly one activity record with the person and the claim (or
  *      what was exported), while a refusal leaves the same trace as a
- *      made-up number: none.
+ *      made-up number: none. Round 3 tries the other organisation's people on
+ *      a claim of EVERY status the column allows, pins the API list's scope
+ *      words (an administrator's ?all=true, an API key, a member's own), the
+ *      claimant's own looks and the spreadsheet's form-token refusal, and
+ *      covers the rest of D-130: the approvals, treasury and own-claims lists,
+ *      the change form, and the report builder's preview, run and export.
  *   M. Withdrawing a claim, through the real page, reading back what is
  *      STORED. The claimant withdraws a pending claim and its status reads
  *      Withdrawn; a second press, and an approved, a paid and a rejected
@@ -294,7 +299,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 488; // 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 509; // 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -2734,7 +2739,11 @@ $l4Add(L4_R_OTHER, L3_OTHER_DEPT, 'Claim_' . L3_OTHER_DEPT . '_Receipt_1_2026-11
 $l4Add(L4_R_MEM, L3_MEM_CLAIM, 'Claim_' . L3_MEM_CLAIM . '_Receipt_1_2026-11-11.jpg', L3_MEM_CLAIM . '_1700000000_receipt1.jpg', 'image/jpeg', null, $l4Bytes[L4_R_MEM]);
 $l4Add(L4_R_PDF, L3_OWN_DEPT, 'Claim_' . L3_OWN_DEPT . '_Pending.pdf', 'claim_' . L3_OWN_DEPT . '.pdf', 'application/pdf', 'Pending', "%PDF-1.4 the claim's own form\n");
 $l4Add(L4_R_UP, L3_OWN_DEPT, 'up.pdf', '..' . $sep . '..' . $sep . '_auth_keys' . $sep . 'enc.key', 'application/pdf', null, null);
-$l4Add(L4_R_ABS, L3_OWN_DEPT, 'abs.pdf', $l4Secret, 'application/pdf', null, null);
+// A SHORT absolute path that exists on every machine this runs on: the key
+// file's own path is under the scratch folder, which can be longer than the
+// column's 255 characters (it was, on a deeply nested scratch folder, and the
+// insert failed). L4-16 also requires no file is sent at all for this row.
+$l4Add(L4_R_ABS, L3_OWN_DEPT, 'abs.pdf', '/etc/hosts', 'application/pdf', null, null);
 $l4Add(L4_R_DOTS, L3_OWN_DEPT, 'dots.pdf', '..', 'application/pdf', null, null);
 $l4Add(L4_R_LINK, L3_OWN_DEPT, 'link.pdf', L3_OWN_DEPT . '_1700000000_receipt9.pdf', 'application/pdf', null, null);
 if (symlink($l4Secret, $l4Folder . $sep . L3_OWN_DEPT . '_1700000000_receipt9.pdf') === false) {
@@ -3037,23 +3046,56 @@ q("INSERT INTO `tblRoles` (`roleID`, `siteID`, `roleKey`, `roleName`, `isStandar
 q('INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES (?, ?, ?)', 'iii', [L4_BTRS, L4_BTRS_ROLE, ORG_B]);
 q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [L4_BTRS, 'selftest-access-btrs', $hash]);
 $jar['btrs'] = signIn('btrs', ADDR_B);
-foreach (['badm' => 'the ADMINISTRATOR', 'btrs' => 'the TREASURER'] as $who => $words) {
-    $cross     = req($jar[$who], 'GET', ADDR_B . '/expenses/receipt?claim=' . L3_OWN_DEPT . '&id=' . L4_R_OWN);
-    $crossNone = req($jar[$who], 'GET', ADDR_B . '/expenses/receipt?claim=' . L3_NO_CLAIM . '&id=' . L4_NO_FILE);
-    ok(
-        'L4-29. ' . $words . ' of the other organisation, through THAT organisation\'s own address, asking for this organisation\'s receipt: 404, byte for byte a made-up receipt there, and none of the file',
-        $cross['status'] === 404 && $l4Same($cross, $crossNone) === true && $l4Leaks($cross) === false && strlen($crossNone['body']) > 200,
-        $l4Why($cross)
-    );
-    $crossPage     = req($jar[$who], 'GET', ADDR_B . '/expenses/view?id=' . L3_OWN_DEPT);
-    $crossPageNone = req($jar[$who], 'GET', ADDR_B . '/expenses/view?id=' . L3_NO_CLAIM);
-    ok(
-        'L4-30. …and opening this organisation\'s CLAIM PAGE there is the claim page\'s own not-found answer, byte for byte a made-up claim number there, with nothing of the claim in it',
-        $crossPage['status'] === 404 && $l4Same($crossPage, $crossPageNone) === true
-            && str_contains($crossPage['body'], 'ACCESS L3 CLAIM IN THE APPROVERS DEPT') === false && strlen($crossPageNone['body']) > 200,
-        'HTTP ' . $crossPage['status'] . '/' . $crossPageNone['status']
-    );
+// ONE CLAIM OF A IN EVERY STATUS THE COLUMN ALLOWS, each with a receipt
+// (round 2 of the check): with the condition planted as
+// `(EC.siteID = ? OR EC.status <> 'Pending')`, a check made only with a
+// Pending claim stayed green while B's people opened every other claim of A.
+// The statuses are read from the column itself, so a status added later is
+// covered without editing this list; the five known ones must be among them.
+$l4StatusType = (string) (one("SELECT `COLUMN_TYPE` AS t FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblExpenseClaims' AND `COLUMN_NAME` = 'status'")['t'] ?? '');
+ap_findAll("/'([^']*)'/", $l4StatusType, $l4StatusMatch);
+$l4Statuses = $l4StatusMatch[1] ?? [];
+if (array_diff(['Pending', 'Approved', 'Rejected', 'Reimbursed', 'Withdrawn'], $l4Statuses) !== []) {
+    refuse('the statuses of tblExpenseClaims.status could not be read (' . $l4StatusType . ')');
 }
+/** status => [claim number, receipt number, the receipt's bytes] */
+$l4ByStatus = [];
+foreach (array_values($l4Statuses) as $i => $status) {
+    $claimId = 916381 + $i;
+    $fileId  = 916851 + $i;
+    $bytes   = '%PDF-1.4 a receipt of a ' . $status . ' claim ' . bin2hex(random_bytes(8)) . "\n";
+    q(
+        'INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) VALUES (?, ?, ?, ?, ?, CURDATE(), 7.00, ?)',
+        'iiiiss', [$claimId, ORG_A, LEAD, DEPT, 'ACCESS L4 ' . strtoupper($status) . ' CLAIM', $status]
+    );
+    $l4Add($fileId, $claimId, 'Claim_' . $claimId . '_Receipt_1_2026-11-11.pdf', $claimId . '_1700000000_receipt1.pdf', 'application/pdf', null, $bytes);
+    $l4ByStatus[$status] = [$claimId, $fileId, $bytes];
+}
+foreach (['badm' => 'the ADMINISTRATOR', 'btrs' => 'the TREASURER'] as $who => $words) {
+    $crossNone     = req($jar[$who], 'GET', ADDR_B . '/expenses/receipt?claim=' . L3_NO_CLAIM . '&id=' . L4_NO_FILE);
+    $crossPageNone = req($jar[$who], 'GET', ADDR_B . '/expenses/view?id=' . L3_NO_CLAIM);
+    foreach ($l4ByStatus as $status => [$claimId, $fileId, $bytes]) {
+        $cross     = req($jar[$who], 'GET', ADDR_B . '/expenses/receipt?claim=' . $claimId . '&id=' . $fileId);
+        $crossPage = req($jar[$who], 'GET', ADDR_B . '/expenses/view?id=' . $claimId);
+        ok(
+            'L4-29. ' . $words . ' of the other organisation, through THAT organisation\'s own address, asking for this organisation\'s ' . strtoupper($status)
+                . ' claim: the receipt is a 404 byte for byte a made-up receipt there with none of the file, and the claim page is a 404 byte for byte a made-up claim there with nothing of the claim',
+            $cross['status'] === 404 && $l4Same($cross, $crossNone) === true && str_contains($cross['body'], $bytes) === false && strlen($crossNone['body']) > 200
+                && $crossPage['status'] === 404 && $l4Same($crossPage, $crossPageNone) === true
+                && str_contains($crossPage['body'], 'ACCESS L4 ' . strtoupper($status) . ' CLAIM') === false && strlen($crossPageNone['body']) > 200,
+            'receipt ' . $l4Why($cross) . '; page HTTP ' . $crossPage['status']
+        );
+    }
+}
+// …and the same claims DO open for this organisation's own treasurer, so the
+// refusals above are about the organisation and not a broken fixture.
+$l4OwnOpen = true;
+foreach ($l4ByStatus as $status => [$claimId, $fileId, $bytes]) {
+    $mine = req($jar['trs'], 'GET', ADDR_A . '/expenses/receipt?claim=' . $claimId . '&id=' . $fileId);
+    $l4OwnOpen = $l4OwnOpen && $mine['status'] === 200 && $mine['body'] === $bytes
+        && $l3Open('trs', $claimId)['status'] === 200;
+}
+ok('L4-30. …while this organisation\'s own treasurer opens every one of those claims and receipts on its own address', $l4OwnOpen);
 // The positive half, so the two checks above are not "B's administrator and
 // treasurer cannot open anything": each opens a claim of B's own through B's
 // address, and the treasurer its receipt.
@@ -3130,9 +3172,20 @@ ok(
     $refusedV === $noneV && $l4Expense($refusedV) === [],
     implode(' || ', $refusedV) . '  ##  ' . implode(' || ', $noneV)
 );
-$m   = $l4LogMark();
-$csv = $l3Csv('trs');
-$seen = $l4LogSince($m);
+/**
+ * The spreadsheet, with the log read for the DOWNLOAD ALONE. The form token
+ * comes from the approvals page, and since round 3 that page records a look
+ * of its own when it lists any claim, so the token is fetched BEFORE the mark.
+ * @return array{0: array, 1: list<string>} the answer, and every record the download wrote
+ */
+$l4Csv = static function (string $who) use (&$jar, $approve, $exportAddress, $l4LogMark, $l4LogSince): array {
+    $tok  = token(req($jar[$who], 'GET', $approve)['body']);
+    $mark = $l4LogMark();
+    $answer = req($jar[$who], 'GET', $exportAddress . '?csrf_token=' . urlencode($tok));
+
+    return [$answer, $l4LogSince($mark)];
+};
+[$csv, $seen] = $l4Csv('trs');
 $exported = $l4Expense($seen);
 ok(
     'L4-36. downloading the expenses spreadsheet writes EXACTLY ONE ExpenseClaimsExport record saying what was exported (every department, how many claims) and none of the rows',
@@ -3143,9 +3196,8 @@ ok(
 // APPR downloads the file only while holding the Approver role (L3 took it
 // away again), so it is given for this one download and taken back.
 $l3Role(APPR, true);
-$m   = $l4LogMark();
-$csvAppr = $l3Csv('appr');
-$exported = $l4Expense($l4LogSince($m));
+[$csvAppr, $apprSeen] = $l4Csv('appr');
+$exported = $l4Expense($apprSeen);
 $l3Role(APPR, false);
 ok(
     'L4-37. …and for an approver it names the department numbers the file covered',
@@ -3153,7 +3205,10 @@ ok(
         . (substr_count(trim($csvAppr['body']), "\n")) . ' claim(s)'],
     implode(' || ', $exported)
 );
-$refusedX = $traceOf(static fn () => req($jar['mem'], 'GET', $exportAddress . '?csrf_token=' . urlencode(token(req($jar['mem'], 'GET', ADDR_A . '/expenses/submit')['body']))));
+// The token is fetched FIRST: the Expenses page it comes from records a look
+// of its own (the member's list of claims), which is not the download's.
+$memTok   = token(req($jar['mem'], 'GET', ADDR_A . '/expenses/submit')['body']);
+$refusedX = $traceOf(static fn () => req($jar['mem'], 'GET', $exportAddress . '?csrf_token=' . urlencode($memTok)));
 ok(
     'L4-38. a REFUSED spreadsheet download writes no expense record',
     $l4Expense($refusedX) === [],
@@ -3169,9 +3224,174 @@ ok(
     'HTTP ' . $list['status'] . '; ' . implode(' || ', $listed)
 );
 
+// --- round 3 of the check: what was pinned by nothing ------------------------
+/** Only the expense records a request wrote. @return list<string> */
+$l4ExpenseOf = static fn (callable $request): array => $l4Expense($traceOf($request));
+// The API list's SCOPE words. With `$everyClaim = true;` deleted every
+// request was recorded as "own claims" — untrue in the reassuring direction —
+// and nothing noticed, because only a member's own list was tried.
+$allList = null;
+$allSeen = $l4ExpenseOf(static function () use (&$allList, &$jar): void {
+    $allList = req($jar['adm'], 'GET', ADDR_A . '/api/expenses/list?all=true');
+});
+ok(
+    'L4-40. an ADMINISTRATOR\'s ?all=true list is recorded as "every claim of the organisation", with the count it returned',
+    $allList['status'] === 200 && count($allSeen) === 1
+        && ap_find('/^' . ADM . '\|' . ORG_A . '\|ExpenseClaimsListApi\|Listed expense claims through the API: every claim of the organisation, page 1 of \d+, ' . count(data($allList)['claims'] ?? []) . ' claim\(s\)$/D', $allSeen[0]) === 1
+        && count(data($allList)['claims'] ?? []) > 0,
+    'HTTP ' . $allList['status'] . '; ' . implode(' || ', $allSeen)
+);
+$l4Key = 'wbms_' . bin2hex(random_bytes(16));
+q(
+    "INSERT INTO `tblApiKeys` (`siteID`, `name`, `keyHash`, `keyPrefix`, `scopes`, `isActive`, `createdByID`) VALUES (?, 'Selftest access expenses key', ?, ?, 'expenses:read', 1, NULL)",
+    'iss', [ORG_A, hash('sha256', $l4Key), substr($l4Key, 0, 12)]
+);
+$keyList = null;
+$keySeen = $l4ExpenseOf(static function () use (&$keyList, $l4Key): void {
+    $keyList = req('', 'GET', ADDR_A . '/api/expenses/list', null, $l4Key);
+});
+ok(
+    'L4-41. a list asked for with an API KEY is recorded as "every claim of the organisation", naming no person (a key has none)',
+    $keyList['status'] === 200 && count($keySeen) === 1
+        && ap_find('/^\|\d*\|ExpenseClaimsListApi\|Listed expense claims through the API: every claim of the organisation, page 1 of \d+, ' . count(data($keyList)['claims'] ?? []) . ' claim\(s\)$/D', $keySeen[0]) === 1
+        && count(data($keyList)['claims'] ?? []) > 0,
+    'HTTP ' . $keyList['status'] . '; ' . implode(' || ', $keySeen)
+);
+// The CLAIMANT's own looks: the help says "you included".
+$ownSeen = $l4ExpenseOf(static function () use ($l3Open, $l4Get, &$jar): void {
+    $l3Open('mem', L3_MEM_CLAIM);
+    $l4Get($jar['mem'], L3_MEM_CLAIM, L4_R_MEM);
+});
+ok(
+    'L4-42. the CLAIMANT opening their own claim page and their own receipt writes one record for each, naming them',
+    $ownSeen === [
+        MEM . '|' . ORG_A . '|ExpenseClaimView|Opened expense claim #' . L3_MEM_CLAIM,
+        MEM . '|' . ORG_A . '|ExpenseReceiptOpen|Opened receipt #' . L4_R_MEM . ' of expense claim #' . L3_MEM_CLAIM,
+    ],
+    implode(' || ', $ownSeen)
+);
+// The spreadsheet's SECOND refusal: somebody allowed the file who sends a
+// form token that is no good. L4-38's member never got past the first one.
+$badTok = null;
+$badSeen = $l4ExpenseOf(static function () use (&$badTok, &$jar, $exportAddress): void {
+    $badTok = req($jar['trs'], 'GET', $exportAddress . '?csrf_token=' . str_repeat('0', 64));
+});
+ok(
+    'L4-43. a treasurer sending a form token that is no good is sent back without the file and writes no expense record',
+    $badTok['status'] === 302 && str_contains($badTok['body'], 'Claimant') === false && $badSeen === [],
+    'HTTP ' . $badTok['status'] . '; ' . implode(' || ', $badSeen)
+);
+
+// --- D-130 is ALL expense viewing: the lists, the change form, the reports ----
+/** How many claims a list page drew (each claim number is a link since #867). */
+$l4Drawn = static fn (string $body): int => ap_findAll('/data-claim-link="\d+"/', $body);
+$page = null;
+$seen = $l4ExpenseOf(static function () use (&$page, &$jar, $approve): void {
+    $page = req($jar['appr'], 'GET', $approve);
+});
+ok(
+    'L4-44. the APPROVALS LIST writes one record with how many claims it showed, and nothing of them',
+    $page['status'] === 200 && $l4Drawn($page['body']) > 0
+        && $seen === [APPR . '|' . ORG_A . '|ExpenseApprovalsListView|Opened the expense approvals list: ' . $l4Drawn($page['body']) . ' claim(s) shown'],
+    'drawn ' . $l4Drawn($page['body']) . '; ' . implode(' || ', $seen)
+);
+$seen = $l4ExpenseOf(static function () use (&$page, &$jar, $approve): void {
+    $page = req($jar['mem'], 'GET', $approve);
+});
+ok(
+    'L4-45. …and an approvals list that showed NO claim (a member with nothing to decide) writes nothing',
+    $page['status'] === 200 && $l4Drawn($page['body']) === 0 && $seen === [],
+    implode(' || ', $seen)
+);
+$seen = $l4ExpenseOf(static function () use (&$page, &$jar): void {
+    $page = req($jar['trs'], 'GET', ADDR_A . '/expenses/treasury');
+});
+ok(
+    'L4-46. the TREASURY LIST writes one record with how many claims it showed',
+    $page['status'] === 200 && $l4Drawn($page['body']) > 0
+        && $seen === [TRS . '|' . ORG_A . '|ExpenseTreasuryListView|Opened the expense treasury list: ' . $l4Drawn($page['body']) . ' claim(s) shown'],
+    'drawn ' . $l4Drawn($page['body']) . '; ' . implode(' || ', $seen)
+);
+$seen = $l4ExpenseOf(static function () use (&$page, &$jar): void {
+    $page = req($jar['mem'], 'GET', ADDR_A . '/expenses/treasury');
+});
+ok('L4-47. …and a member REFUSED the treasury list writes nothing', $page['status'] === 403 && $seen === [], 'HTTP ' . $page['status'] . '; ' . implode(' || ', $seen));
+$seen = $l4ExpenseOf(static function () use (&$page, &$jar): void {
+    $page = req($jar['mem'], 'GET', ADDR_A . '/expenses/submit');
+});
+$ownShown = ap_findAll('#href="' . preg_quote(ADDR_A, '#') . '/expenses/view\?id=\d+"#', $page['body']);
+ok(
+    'L4-48. the claimant\'s OWN LIST on the Expenses page writes one record with the page and how many claims it showed',
+    $page['status'] === 200 && $ownShown > 0
+        && $seen === [MEM . '|' . ORG_A . '|ExpenseOwnClaimsView|Opened their own expense claims list: page 1, ' . $ownShown . ' claim(s) shown'],
+    'shown ' . $ownShown . '; ' . implode(' || ', $seen)
+);
+$seen = $l4ExpenseOf(static function () use (&$page, &$jar): void {
+    $page = req($jar['mem'], 'GET', ADDR_A . '/expenses/edit?id=' . L3_MEM_CLAIM);
+});
+ok(
+    'L4-49. the CHANGE FORM of a claim writes one record with the claim number',
+    $page['status'] === 200 && $seen === [MEM . '|' . ORG_A . '|ExpenseClaimEditView|Opened the change form of expense claim #' . L3_MEM_CLAIM],
+    'HTTP ' . $page['status'] . '; ' . implode(' || ', $seen)
+);
+$editRefused = $traceOf(static fn () => req($jar['appr'], 'GET', ADDR_A . '/expenses/edit?id=' . L3_MEM_CLAIM));
+$editNone    = $traceOf(static fn () => req($jar['appr'], 'GET', ADDR_A . '/expenses/edit?id=' . L3_NO_CLAIM));
+ok(
+    'L4-50. …and somebody else\'s change form leaves the same trace as a made-up number: no expense record',
+    $editRefused === $editNone && $l4Expense($editRefused) === [],
+    implode(' || ', $editRefused) . '  ##  ' . implode(' || ', $editNone)
+);
+// The report builder. A preview of the expenses source records; a preview of
+// another source does not (D-130 is about Expenses only); a saved report's
+// Run and CSV export already record themselves, with the source.
+// The form token is fetched OUTSIDE the traced request, from a page that
+// records nothing of Expenses (the builder's own list).
+$preview = static function (string $definition, string $tok) use (&$jar): array {
+    return req($jar['adm'], 'POST', ADDR_A . '/admin/reports/builder/preview', ['csrf_token' => $tok, 'definition' => $definition]);
+};
+$builderTok = static fn (): string => token(req($jar['adm'], 'GET', ADDR_A . '/admin/reports/builder')['body']);
+$prev = null;
+$tok  = $builderTok();
+$seen = $l4ExpenseOf(static function () use (&$prev, $preview, $tok): void {
+    $prev = $preview('{"v":1,"source":"expenses","columns":["claimTitle","status"]}', $tok);
+});
+$prevRows = count((json_decode($prev['body'], true)['rows'] ?? []));
+ok(
+    'L4-51. the report builder\'s PREVIEW of expense claims writes one record with how many rows it showed, and nothing of them',
+    $prev['status'] === 200 && $prevRows > 0
+        && $seen === [ADM . '|' . ORG_A . '|ExpenseReportPreview|Previewed a report of expense claims: ' . $prevRows . ' row(s) shown'],
+    'HTTP ' . $prev['status'] . ' ' . substr($prev['body'], 0, 120) . '; ' . implode(' || ', $seen)
+);
+$tok  = $builderTok();
+$seen = $l4ExpenseOf(static function () use (&$prev, $preview, $tok): void {
+    $prev = $preview('{"v":1,"source":"users","columns":["fullName"]}', $tok);
+});
+ok(
+    'L4-52. …and a preview of ANOTHER source writes no expense record (D-130 is about Expenses only)',
+    $prev['status'] === 200 && (json_decode($prev['body'], true)['status'] ?? '') === 'ok' && $seen === [],
+    'HTTP ' . $prev['status'] . ' ' . substr($prev['body'], 0, 120) . '; ' . implode(' || ', $seen)
+);
+const L4_REPORT = 916890;
+q(
+    "INSERT INTO `tblReportDefinitions` (`reportID`, `siteID`, `reportName`, `sourceKey`, `definition`, `isShared`, `createdByID`) VALUES (?, ?, 'ACCESS L4 expenses report', 'expenses', ?, 1, ?)",
+    'iisi', [L4_REPORT, ORG_A, '{"v":1,"source":"expenses","columns":["claimTitle","status"]}', ADM]
+);
+$runSeen = $traceOf(static fn () => req($jar['adm'], 'GET', ADDR_A . '/admin/reports/builder/run?id=' . L4_REPORT));
+$expSeen = $traceOf(static fn () => req($jar['adm'], 'GET', ADDR_A . '/admin/reports/builder/export?id=' . L4_REPORT));
+ok(
+    'L4-53. a saved expenses report\'s RUN and CSV EXPORT each record themselves with the source (ReportRun / ReportExport, source=expenses)',
+    in_array(ADM . '|' . ORG_A . '|ReportRun|reportID=' . L4_REPORT . ' source=expenses', $runSeen, true) === true
+        && array_filter($expSeen, static fn (string $l): bool => str_starts_with($l, ADM . '|' . ORG_A . '|ReportExport|reportID=' . L4_REPORT . ' source=expenses')) !== [],
+    implode(' || ', $runSeen) . '  ##  ' . implode(' || ', $expSeen)
+);
+q('DELETE FROM `tblReportDefinitions` WHERE `reportID` = ?', 'i', [L4_REPORT]);
+
 q('DELETE FROM `tblErrors` WHERE `errorCode` = ? AND `siteID` = ?', 'si', ['RECEIPT_UNAVAILABLE', ORG_A]);
 q('DELETE FROM `tblExpenseClaimFiles` WHERE `fileID` BETWEEN ? AND ?', 'ii', [L4_R_OWN, L4_NO_FILE]);
 q('DELETE FROM `tblExpenseClaims` WHERE `claimID` = ?', 'i', [L4_B_CLAIM]);
+// The one-claim-per-status claims (their receipt rows go with them, by the link's cascade) and the API key.
+q('DELETE FROM `tblExpenseClaims` WHERE `claimID` BETWEEN 916381 AND 916389');
+q('DELETE FROM `tblApiKeys` WHERE `keyHash` = ?', 's', [hash('sha256', $l4Key)]);
 q('DELETE FROM `tblDepts` WHERE `deptID` = ?', 'i', [L4_B_DEPT]);
 // L4_BTRS stays signed in and is removed with the rest of the made-up world;
 // its role row goes now, so no later part meets a treasurer of B it did not make.

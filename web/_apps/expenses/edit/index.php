@@ -38,6 +38,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\ExpenseRules;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -120,6 +121,15 @@ if ($reason === ExpenseRules::EDIT_NOT_YOURS) {
 }
 
 $editable = ($reason === ExpenseRules::EDIT_ALLOWED);
+
+// 📝 D-130 (the owner, 11 November 2026): every look at expense records is
+//    recorded. This form shows the claim's title, department and lines, so
+//    opening it writes one `ExpenseClaimEditView` record naming the person
+//    (#626) and the claim NUMBER — nothing else of the claim. Both refusals
+//    above are a 404 identical to a made-up number and record nothing, so the
+//    log cannot tell them apart either. Written whether or not the claim can
+//    still be changed: either way the page shows it.
+Logger::activity('ExpenseClaimEditView', 'Opened the change form of expense claim #' . $claimID);
 
 // -----------------------------------------------------------------------------
 // 📦 The lines it holds now

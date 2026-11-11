@@ -29,6 +29,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -120,6 +121,15 @@ if ($stmt !== false) {
         $claims[] = $row;
     }
     $stmt->close();
+}
+
+// 📝 D-130 (the owner, 11 November 2026): every look at expense records is
+//    recorded. Opening this list writes one `ExpenseTreasuryListView` record
+//    naming the person (#626) and saying HOW MANY claims it showed — no title,
+//    name or amount. A list showing none records nothing, and a refused
+//    visitor was answered with 403 above and records nothing either.
+if (count($claims) > 0) {
+    Logger::activity('ExpenseTreasuryListView', 'Opened the expense treasury list: ' . count($claims) . ' claim(s) shown');
 }
 
 // 📄 Include shared header template

@@ -177,7 +177,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>Best practice:</strong> Always verify that the claimed amount seems reasonable for the description provided, and check that any attached receipts match the amounts shown.
             To see them, press the claim's number in the list: it opens the claim's own page, where each receipt is a link that downloads it.
             The same is true on the Treasury list.
-            Opening a claim, one of its receipts or the spreadsheet is recorded in the activity log: who looked, and which claim.
+            Each look is recorded in the activity log with who looked: opening a claim records its number, a receipt the receipt's and the claim's numbers, the approvals and treasury lists how many claims they showed, and the spreadsheet which departments it covered and how many claims &mdash; never a title, name or amount. The <a href="<?php echo htmlspecialchars(\Portal\Core\Site::url('help/expenses'), ENT_QUOTES, 'UTF-8'); ?>#viewing">Expenses guide</a> lists every kind.
         </div>
         <!-- #867: until 11 November 2026 nothing in the portal could open a receipt, so this advice could not be followed. -->
     </div>

@@ -24,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\Auth;
 use Portal\Core\ExpenseRules;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -98,6 +99,17 @@ if ($stmt !== false) {
         $claims[] = $row;
     }
     $stmt->close();
+}
+
+// 📝 D-130 (the owner, 11 November 2026): every look at expense records is
+//    recorded. This list shows claim titles, claimants' names and amounts, so
+//    opening it writes one `ExpenseApprovalsListView` record naming the person
+//    (#626) and saying HOW MANY claims it showed — no title, name or amount.
+//    A list showing no claims showed no expense record, so it records nothing;
+//    that is also every member with nothing to decide, who would otherwise
+//    leave a record on every visit. `Logger::activity()` never throws.
+if (count($claims) > 0) {
+    Logger::activity('ExpenseApprovalsListView', 'Opened the expense approvals list: ' . count($claims) . ' claim(s) shown');
 }
 
 // 📄 Include shared header template
