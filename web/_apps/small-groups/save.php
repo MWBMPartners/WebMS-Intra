@@ -19,10 +19,20 @@
  * an exact matching bound-argument count, verified against
  * check_bind_param_arity.py (the audit check is the source of truth, per
  * the #150 build spec):
- *   create INSERT               — 26 placeholders ('issssiissssssssssddssiiiii')
- *   manage-all UPDATE           — 23 SET + 2 WHERE = 25 ('sssiisssssssssddsssiiiiii')
- *   leader-tier UPDATE          — 20 SET + 2 WHERE = 22 ('sssisssssssssddsssiiii')
+ *   create INSERT               — 28 placeholders ('issssiissssssssssddssiiiiiii')
+ *   manage-all UPDATE           — 25 SET + 2 WHERE = 27 ('sssiisssssssssddsssiiiiiiii')
+ *   leader-tier UPDATE          — 22 SET + 2 WHERE = 24 ('sssisssssssssddsssiiiiii')
  *   optional geocode follow-up  — 6  ('ddssii')
+ *
+ * 🏠 #809, D-120 — WHO ENTERED THE MEETING PLACE, AND WHETHER THEY AGREED TO A
+ * MAP OF IT. A small group often meets in somebody's home, so a map of the
+ * place is shown only where whoever entered it agreed. Every statement that
+ * writes the place therefore writes `placeEnteredByID` and `placeMapAgreed` IN
+ * THE SAME STATEMENT, worked out by `SmallGroups::placeAgreementAfterSave()`
+ * from the row as it stands. For an update that row is read again with
+ * `FOR UPDATE` inside a transaction, so an agreement can never be attached to
+ * a place somebody else changed a moment earlier (#647: a lock outside a
+ * transaction is decoration, so the transaction starts first).
  *
  * @package   Portal\SmallGroups
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -177,6 +187,19 @@ if (in_array($locationVisibility, ['leaders', 'members', 'site'], true) === fals
     $locationVisibility = 'members';
 }
 
+// 🏠 #809 — the "a map of this place may be shown" box. The hidden
+// `placeMapAsked` says the form DREW the box: an unticked box is not
+// submitted, so without the marker "unticked" and "never offered" would look
+// the same, and a save from a form without the box would withdraw an
+// agreement nobody touched (#677).
+$placeBoxDrawn = array_key_exists('placeMapAsked', $_POST) === true;
+$placeTicked   = ($_POST['placeMapAgreed'] ?? '') === '1';
+$postedPlace   = [
+    'addressLine1' => $addressLine1, 'addressLine2' => $addressLine2, 'city' => $city, 'region' => $region,
+    'postcode' => $postcode, 'countryCode' => $countryCode, 'latitude' => $latitude, 'longitude' => $longitude,
+    'what3words' => $w3w,
+];
+
 $resourcesURL = trim((string) ($_POST['resourcesURL'] ?? ''));
 $resourcesURL = $resourcesURL !== '' ? mb_substr($resourcesURL, 0, 500) : null;
 
@@ -246,8 +269,8 @@ if ($isCreate === true) {
         . '(siteID, groupName, groupSlug, groupType, description, serviceTypeID, meetingDay, meetingTime, '
         . 'meetingFrequency, meetingNotes, addressLine1, addressLine2, city, region, postcode, countryCode, '
         . 'latitude, longitude, what3words, locationVisibility, resourcesURL, isOpenEnrolment, capacity, '
-        . 'isActive, sortOrder, createdByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        . 'isActive, sortOrder, createdByID, `placeEnteredByID`, `placeMapAgreed`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
         $_SESSION['flash_msg']  = 'Could not save the group.';
@@ -256,70 +279,122 @@ if ($isCreate === true) {
         exit();
     }
     $createdByID = $userId > 0 ? $userId : null;
-    // 26 placeholders: i s s s s i i s s s s s s s s s d d s s s i i i i i
+    $place = SmallGroups::placeAgreementAfterSave(null, $postedPlace, $userId, $placeBoxDrawn, $placeTicked);
+    $placeEnteredBy = $place['enteredBy'];
+    $placeAgreed    = $place['agreed'];
+    // 28 placeholders: i s s s s i i s s s s s s s s s d d s s s i i i i i i i
     $stmt->bind_param(
-        'issssiissssssssssddssiiiii',
+        'issssiissssssssssddssiiiiiii',
         $siteId, $groupName, $slug, $groupType, $description, $serviceTypeId, $meetingDay, $meetingTime,
         $meetingFrequency, $meetingNotes, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode,
         $latitude, $longitude, $w3w, $locationVisibility, $resourcesURL, $isOpenEnrolment, $capacity,
-        $isActive, $sortOrder, $createdByID
+        $isActive, $sortOrder, $createdByID, $placeEnteredBy, $placeAgreed
     );
     $stmt->execute();
     $groupId = (int) $stmt->insert_id;
     $stmt->close();
-} elseif ($isManageAll === true) {
-    // 23 SET + 2 WHERE = 25 placeholders.
+} else {
+    // 🔒 #809: read the row again, locked, INSIDE a transaction, and work out
+    //    who entered the place from THAT — never from the copy read at the
+    //    top of this request, which another save may have changed since.
+    $db->begin_transaction();
+    try {
+        $lock = $db->prepare(
+            'SELECT `addressLine1`, `addressLine2`, `city`, `region`, `postcode`, `countryCode`, `latitude`, '
+            . '`longitude`, `what3words`, `placeEnteredByID`, `placeMapAgreed` '
+            . 'FROM `tblSmallGroups` WHERE `groupID` = ? AND `siteID` = ? FOR UPDATE'
+        );
+        $lock->bind_param('ii', $groupId, $siteId);
+        $lock->execute();
+        $lockedRow = $lock->get_result()->fetch_assoc();
+        $lock->close();
+    } catch (\Throwable $e) {
+        $db->rollback();
+        throw $e;
+    }
+    if ($lockedRow === null) {
+        $db->rollback();
+        $_SESSION['flash_msg']  = 'Group not found.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('small-groups'));
+        exit();
+    }
+    $place = SmallGroups::placeAgreementAfterSave($lockedRow, $postedPlace, $userId, $placeBoxDrawn, $placeTicked);
+    $placeEnteredBy = $place['enteredBy'];
+    $placeAgreed    = $place['agreed'];
+}
+
+if ($isCreate === false && $isManageAll === true) {
+    // 25 SET + 2 WHERE = 27 placeholders.
     $stmt = $db->prepare(
         'UPDATE tblSmallGroups SET '
         . 'groupName = ?, groupType = ?, description = ?, serviceTypeID = ?, meetingDay = ?, meetingTime = ?, '
         . 'meetingFrequency = ?, meetingNotes = ?, addressLine1 = ?, addressLine2 = ?, city = ?, region = ?, '
         . 'postcode = ?, countryCode = ?, latitude = ?, longitude = ?, what3words = ?, locationVisibility = ?, '
-        . 'resourcesURL = ?, isOpenEnrolment = ?, capacity = ?, isActive = ?, sortOrder = ? '
+        . 'resourcesURL = ?, isOpenEnrolment = ?, capacity = ?, isActive = ?, sortOrder = ?, '
+        . '`placeEnteredByID` = ?, `placeMapAgreed` = ? '
         . 'WHERE groupID = ? AND siteID = ?'
     );
     if ($stmt === false) {
+        $db->rollback();
         $_SESSION['flash_msg']  = 'Could not save the group.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . $backUrl);
         exit();
     }
     $stmt->bind_param(
-        'sssiisssssssssddsssiiiiii',
+        'sssiisssssssssddsssiiiiiiii',
         $groupName, $groupType, $description, $serviceTypeId, $meetingDay, $meetingTime,
         $meetingFrequency, $meetingNotes, $addressLine1, $addressLine2, $city, $region,
         $postcode, $countryCode, $latitude, $longitude, $w3w, $locationVisibility,
         $resourcesURL, $isOpenEnrolment, $capacity, $isActive, $sortOrder,
+        $placeEnteredBy, $placeAgreed,
         $groupId, $siteId
     );
-    $stmt->execute();
-    $stmt->close();
-} else {
+    try {
+        $stmt->execute();
+        $stmt->close();
+        $db->commit();
+    } catch (\Throwable $e) {
+        $db->rollback();
+        throw $e;
+    }
+} elseif ($isCreate === false) {
     // 🚫 Leader tier — serviceTypeID/isActive/sortOrder OMITTED entirely
-    // (not merely re-set to their old value): 20 SET + 2 WHERE = 22.
+    // (not merely re-set to their old value): 22 SET + 2 WHERE = 24.
     $stmt = $db->prepare(
         'UPDATE tblSmallGroups SET '
         . 'groupName = ?, groupType = ?, description = ?, meetingDay = ?, meetingTime = ?, '
         . 'meetingFrequency = ?, meetingNotes = ?, addressLine1 = ?, addressLine2 = ?, city = ?, region = ?, '
         . 'postcode = ?, countryCode = ?, latitude = ?, longitude = ?, what3words = ?, locationVisibility = ?, '
-        . 'resourcesURL = ?, isOpenEnrolment = ?, capacity = ? '
+        . 'resourcesURL = ?, isOpenEnrolment = ?, capacity = ?, '
+        . '`placeEnteredByID` = ?, `placeMapAgreed` = ? '
         . 'WHERE groupID = ? AND siteID = ?'
     );
     if ($stmt === false) {
+        $db->rollback();
         $_SESSION['flash_msg']  = 'Could not save the group.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . $backUrl);
         exit();
     }
     $stmt->bind_param(
-        'sssisssssssssddsssiiii',
+        'sssisssssssssddsssiiiiii',
         $groupName, $groupType, $description, $meetingDay, $meetingTime,
         $meetingFrequency, $meetingNotes, $addressLine1, $addressLine2, $city, $region,
         $postcode, $countryCode, $latitude, $longitude, $w3w, $locationVisibility,
         $resourcesURL, $isOpenEnrolment, $capacity,
+        $placeEnteredBy, $placeAgreed,
         $groupId, $siteId
     );
-    $stmt->execute();
-    $stmt->close();
+    try {
+        $stmt->execute();
+        $stmt->close();
+        $db->commit();
+    } catch (\Throwable $e) {
+        $db->rollback();
+        throw $e;
+    }
 }
 
 // -----------------------------------------------------------------------------

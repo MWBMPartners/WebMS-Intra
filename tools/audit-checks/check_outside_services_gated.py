@@ -30,10 +30,12 @@ WHAT IT LOOKS FOR
    note or use has gone -- change the count on purpose).
      gravatar.com, googleusercontent.com  -- ONLY OutsideServices.php.
      tile.openstreetmap.org                -- OutsideServices.php, the shared
-        map script, and the four pages whose map is of a BUILDING (a venue, an
-        event's venue, an organisation's own address, a small group's meeting
-        place). The member directory may NOT name it: its map is of a member's
-        home and must take the host from OutsideServices after deciding.
+        map script, and the three pages whose map is of a BUILDING (a venue,
+        an event's venue, an organisation's own address). The member directory
+        may NOT name it: its map is of a member's home and must take the host
+        from OutsideServices after deciding. Nor may a small group's page
+        (#809, D-120): a group often meets in somebody's home, so its map is
+        treated as the host's home on the same terms.
 2. `web/_core/Avatar.php` holds no outside host and, in CODE (comments
    removed by PHP's own tokeniser), calls both builders:
    `OutsideServices::providerPhotoIfAllowed(` and
@@ -46,6 +48,10 @@ WHAT IT LOOKS FOR
 5. `web/_apps/directory/profile.php`, in code, decides the map with
    `OutsideServices::allows(OutsideServices::MEMBER_MAP, $id)` and widens the
    rule with `OutsideServices::mapTileSource()`.
+6. `web/_apps/small-groups/group.php`, in code, decides its meeting-place map
+   with `OutsideServices::allowsMeetingPlaceMap(` (#809, D-120), widens the
+   rule with `OutsideServices::mapTileSource()` inside `if ($showMap === true)`,
+   and hands the partial `'showMap' => $showMap` rather than `true`.
 
 WHAT THIS CANNOT SEE, said plainly because an overstated guarantee is worse
 than none
@@ -56,7 +62,7 @@ than none
    services #778 governs; the follow-ups recorded on #778 (video players,
    address look-up, what3words, content-delivery libraries, the robot check)
    are NOT covered here.
-3. Whether the gated code RUNS. Checks 2, 3 and 5 are PRESENCE only (D-065:
+3. Whether the gated code RUNS. Checks 2, 3, 5 and 6 are PRESENCE only (D-065:
    "is this code reached" is behavioural). `tools/outside-services-selftest.php`
    drives the real pages and is what proves the decision is obeyed.
 
@@ -106,15 +112,17 @@ ALLOWED: dict[str, dict[str, tuple[int, str]]] = {
         "_apps/calendar/event.php": (1, "An event's VENUE map: a building, not a member's home."),
         "_apps/admin/settings/organisation/index.php": (1, "The organisation's OWN address map."),
         "_apps/venues/venue.php": (1, "A venue's map: a building, not a member's home."),
-        "_apps/small-groups/group.php": (
-            1, "A small group's MEETING PLACE map. It may be a host's home; that is #809, "
-               "not covered by this check."),
+        # 🏠 `_apps/small-groups/group.php` is deliberately NOT here any more
+        #    (#809, D-120): a group's meeting place is treated as the host's
+        #    home, so that page takes the host from OutsideServices after
+        #    deciding, exactly as the directory does (guard 6 below).
     },
 }
 
 AVATAR = "_core/Avatar.php"
 HEADER = "_core/templates/header.php"
 PROFILE = "_apps/directory/profile.php"
+GROUP = "_apps/small-groups/group.php"
 
 AVATAR_CALLS = (
     "OutsideServices::providerPhotoIfAllowed(",
@@ -130,6 +138,13 @@ PROFILE_DECIDE = re.compile(
 PROFILE_WIDEN = re.compile(
     r"if\s*\(\s*\$showMap\s*===\s*true\s*\)\s*\{\s*\$cspImgExtra\s*=\s*OutsideServices::mapTileSource\(\)\s*;"
 )
+GROUP_DECIDE = re.compile(
+    r"\$showMap\s*=\s*\$hasPin\s*===\s*true\s*&&\s*OutsideServices::allowsMeetingPlaceMap\(", re.S
+)
+GROUP_WIDEN = re.compile(
+    r"if\s*\(\s*\$showMap\s*===\s*true\s*\)\s*\{\s*\$cspImgExtra\s*=\s*OutsideServices::mapTileSource\(\)\s*;"
+)
+GROUP_PARTIAL = re.compile(r"'showMap'\s*=>\s*\$showMap\s*,")
 CSP_ASSIGN = re.compile(r"\$cspImgExtra\s*(?:\.?=)[^;]*;", re.S)
 
 # PHP's own tokeniser, comments dropped and everything else kept. Asked of PHP
@@ -218,6 +233,7 @@ def main() -> int:
         avatar = code_only(WEB / AVATAR)
         header = code_only(WEB / HEADER)
         profile = code_only(WEB / PROFILE)
+        group = code_only(WEB / GROUP)
         php_files = sorted(WEB.rglob("*.php"))
         all_code = {p.relative_to(WEB).as_posix(): code_only(p) for p in php_files
                     if "cspImgExtra" in p.read_text(encoding="utf-8", errors="ignore")}
@@ -261,6 +277,24 @@ def main() -> int:
             "`if ($showMap === true)`." % PROFILE
         )
 
+    if GROUP_DECIDE.search(group) is None:
+        problems.append(
+            "✗ %s no longer decides its meeting-place map with "
+            "`$showMap = $hasPin === true && OutsideServices::allowsMeetingPlaceMap(...)`.\n"
+            "   A group often meets in somebody's home, so the map is drawn only where the person who "
+            "entered the place agreed, on the terms of a member's own home map (#809, D-120)." % GROUP
+        )
+    if GROUP_WIDEN.search(group) is None:
+        problems.append(
+            "✗ %s no longer widens the page rule with OutsideServices::mapTileSource() inside "
+            "`if ($showMap === true)`." % GROUP
+        )
+    if GROUP_PARTIAL.search(group) is None:
+        problems.append(
+            "✗ %s no longer hands the location partial `'showMap' => $showMap`. Handing it `true` draws "
+            "the map's container whatever was decided (#809)." % GROUP
+        )
+
     if problems:
         print("\n".join(problems), file=sys.stderr)
         print("\n%d problem(s). The rule is #778 (D-058, D-072): Portal\\Core\\OutsideServices is the one "
@@ -269,7 +303,8 @@ def main() -> int:
 
     total = sum(len(v) for v in found.values())
     print("✓ Outside services are gated: %d file mention(s) of a member-identifying host, all accounted "
-          "for; Avatar, the page rule and the directory map all go through OutsideServices. "
+          "for; Avatar, the page rule, the directory map and the small-group meeting-place map all go "
+          "through OutsideServices. "
           "(Presence only -- tools/outside-services-selftest.php proves the pages obey it.)" % total)
     return 0
 

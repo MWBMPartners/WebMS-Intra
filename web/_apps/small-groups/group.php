@@ -6,7 +6,8 @@
  * -----------------------------------------------------------------------------
  * Read-only detail page for a single group: identity, meeting rhythm,
  * location (behind the `locationVisibility` gate — #456 shared partials,
- * no address override), roster visibility (leaders + count to everyone;
+ * no address override; its MAP only where the person who entered the place
+ * agreed — #809, D-120), roster visibility (leaders + count to everyone;
  * full names only to members/managers — membership itself is personal
  * data), recent meetings (managers only), and Join/Leave.
  *
@@ -27,6 +28,7 @@ use Portal\Core\Capabilities;
 // ⚠️ A class used by its SHORT name needs its `use` line in THIS file, and
 //    the line only fails when it RUNS — `php -l` is happy without it (#536).
 use Portal\Core\I18n;
+use Portal\Core\OutsideServices;
 use Portal\Core\Router;
 use Portal\Core\Settings;
 use Portal\Core\Site;
@@ -73,10 +75,29 @@ $locVisible = $canManageHere === true
     || ($visTier === 'site')
     || ($visTier === 'leaders' && $canManageHere === true);
 
-if ($locVisible === true && $group['latitude'] !== null && $group['longitude'] !== null) {
-    // 🗺️ Page-scoped CSP widening for OSM tiles — #386 precedent, only when
-    // there is actually a pin to show. Must be set BEFORE header.php.
-    $cspImgExtra = 'https://*.tile.openstreetmap.org';
+// 🛂 #809, D-120 — A MAP OF WHERE THE GROUP MEETS IS THE HOST'S HOME. A small
+// group very often meets in somebody's home, and drawing the map asks
+// OpenStreetMap, an outside company, for the map squares around that place,
+// together with the internet address of whoever is looking. The owner decided
+// it is shown only where WHOEVER ENTERED THE MEETING PLACE agreed, on the same
+// terms as a member's own home map (D-072): the strictest of the installation
+// and every organisation that person belongs to, their own choice, and the
+// viewer's own switch. `OutsideServices::allowsMeetingPlaceMap()` is the ONE
+// place that is decided. Otherwise the written address is still shown — to
+// whoever the group's own "who can see the meeting address" allows — with no
+// map.
+//
+// This page used to widen its page rule for the tile host itself whenever
+// there was a pin, with nothing asking anybody (#809). It must never name the
+// host again (`tools/audit-checks/check_outside_services_gated.py`).
+$hasPin  = $locVisible === true && $group['latitude'] !== null && $group['longitude'] !== null;
+$showMap = $hasPin === true
+    && OutsideServices::allowsMeetingPlaceMap($siteId, (int) ($group['placeEnteredByID'] ?? 0), (int) ($group['placeMapAgreed'] ?? 0) === 1) === true;
+
+// 🗺️ Page-scoped widening for the map squares, ONLY when a map will actually
+// be drawn (#386 precedent) — must be set BEFORE header.php.
+if ($showMap === true) {
+    $cspImgExtra = OutsideServices::mapTileSource();
 }
 
 // 👥 Roster — full names visible to members/managers only; everyone else
@@ -210,10 +231,16 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                     'w3w'     => $group['what3words'],
                     'visible' => $locVisible,
                     'coarsen' => false,
-                    'showMap' => true,
+                    'showMap' => $showMap,
                     'mapId'   => 'sgMap',
                     'label'   => 'Meeting location',
                 ]); ?>
+                <?php if ($hasPin === true && $showMap === false): ?>
+                    <p class="small text-secondary mb-1 portal-place-no-map">No map is shown: a map is drawn by
+                        OpenStreetMap, an outside company, and appears only when the person who entered this meeting
+                        place has agreed to it and you allow maps.
+                        <a href="<?php echo htmlspecialchars(Site::url('account/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Your choice</a>.</p>
+                <?php endif; ?>
                 <?php if ($locVisible === false): ?>
                     <p class="text-muted small mb-0"><i class="fa-solid fa-lock me-1"></i>Meeting location is visible to group members only.</p>
                 <?php endif; ?>
@@ -289,6 +316,9 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
 </div>
 
 <?php
-portal_location_map_assets(App::cspNonce());
+// The map script is loaded only when a map is drawn (the directory's shape).
+if ($showMap === true) {
+    portal_location_map_assets(App::cspNonce());
+}
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'footer.php';
 ?>

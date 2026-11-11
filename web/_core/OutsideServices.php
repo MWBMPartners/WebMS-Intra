@@ -15,7 +15,11 @@
  *     on that provider's servers that is unique to the person;
  *   - a MAP AROUND A MEMBER'S HOME (the member directory) asks OpenStreetMap for
  *     the map squares around where that member lives, together with the
- *     internet address of whoever is looking.
+ *     internet address of whoever is looking;
+ *   - a MAP OF WHERE A SMALL GROUP MEETS (#809). A small group very often
+ *     meets in somebody's home, so the owner decided (D-120) that this map is
+ *     the HOST'S HOME on the same terms as the one above. See
+ *     `allowsMeetingPlaceMap()` for whose agreement counts.
  *
  * Until #778 nothing let anybody switch any of these off.
  *
@@ -184,11 +188,19 @@ final class OutsideServices
         ],
         self::MEMBER_MAP => [
             'setting'    => 'privacy.outside.memberMap',
-            'name'       => 'Maps around a member\'s home in the member directory',
+            // 🗺️ #809, D-120: the same setting governs a map of where a small
+            //    group meets, because the owner decided that place is to be
+            //    treated as the host's home. The words say so, because a choice
+            //    made on a page that described only the directory would not be
+            //    an informed one.
+            'name'       => 'Maps around a member\'s home, and of where a small group meets',
             'company'    => 'OpenStreetMap',
             'sends'      => 'Which map squares to draw, which tells OpenStreetMap roughly where the member lives '
-                          . '(to about 110 metres), together with the internet address of whoever is looking. '
-                          . 'A map is shown only when BOTH the member shown and the person looking allow it.',
+                          . '(to about 110 metres), or exactly where a small group meets, together with the '
+                          . 'internet address of whoever is looking. A map of a member\'s home is shown only when '
+                          . 'BOTH the member shown and the person looking allow it; a map of a group\'s meeting '
+                          . 'place only when the person who entered that place agreed to it and the person '
+                          . 'looking allows it.',
             'imgSources' => ['https://*.tile.openstreetmap.org'],
             // 🗺️ NEVER ON BY DEFAULT (D-072): "a member's map appears only when
             //    THAT member has switched it on". So no level may say "on until a
@@ -613,6 +625,149 @@ final class OutsideServices
     public static function mapTileSource(): string
     {
         return implode(' ', self::SERVICES[self::MEMBER_MAP]['imgSources']);
+    }
+
+    // 🏠 =========================================================================
+    // A small group's meeting place (#809, D-120)
+    // ===========================================================================
+
+    /**
+     * ✅ THE RULE for a map of where a small group meets, on FACTS (#647).
+     *
+     * The owner decided (D-120, 11 November 2026) that a meeting place is to be
+     * treated as the HOST'S HOME, on the same terms as a member's own home map
+     * (D-072, with the strictest-wins rule of D-058 and D-073). Nothing records
+     * whose home a meeting place is, so D-120 names the person whose agreement
+     * counts: WHOEVER ENTERED THE MEETING PLACE. A map is drawn only when ALL of
+     * these hold:
+     *
+     *   1. somebody is recorded as having entered the place, AND they ticked
+     *      "a map of this place may be shown" when they did. That tick is this
+     *      place's "switched on"; an old group with nobody recorded has no
+     *      agreement and gets no map (the safe reading — nobody agreed);
+     *   2. that person is still somebody whose agreement can count: their
+     *      account is switched on, and they are still a member of the group's
+     *      organisation (or a global administrator). An ERASED account is
+     *      switched off and loses its memberships, so an erasure takes the map
+     *      away even though the group row still carries the tick;
+     *   3. for that person, maps are allowed at all (the installation and EVERY
+     *      organisation they belong to) and they have NOT switched maps off for
+     *      themselves — the tick cannot loosen their own standing "off";
+     *   4. for the person LOOKING, maps are allowed at all and they have not
+     *      switched them off (D-072's question of the viewer).
+     *
+     * Point 3 is `doesNotObject` for the enterer, which is D-072's "effective"
+     * with the tick standing in for "switched on": with the tick, the only ways
+     * to a no are a level saying `no` or the person's own `off`.
+     *
+     * @param array<string,mixed> $entererDecision From decide(MEMBER_MAP, …) for the enterer.
+     * @param array<string,mixed> $viewerDecision  From decide(MEMBER_MAP, …) for the viewer.
+     */
+    public static function meetingPlaceMapFrom(bool $agreed, bool $entererStillCounts, array $entererDecision, array $viewerDecision): bool
+    {
+        if ($agreed === false || $entererStillCounts === false) {
+            return false;
+        }
+        if (($entererDecision['readable'] ?? false) !== true || ($viewerDecision['readable'] ?? false) !== true) {
+            return false;
+        }
+
+        return ($entererDecision['doesNotObject'] ?? false) === true
+            && ($viewerDecision['doesNotObject'] ?? false) === true;
+    }
+
+    /**
+     * 🚦 May a small group's page draw a map of where the group meets?
+     *
+     * The ONE place this is decided (#809, D-120); `small-groups/group.php`
+     * asks it and then, only on a yes, widens its page rule with
+     * `mapTileSource()`. The page never names the tile host itself
+     * (`tools/audit-checks/check_outside_services_gated.py`).
+     *
+     * @param int  $groupSiteId     The organisation the GROUP belongs to.
+     * @param ?int $enteredById     `tblSmallGroups.placeEnteredByID`: who entered the place, or null.
+     * @param bool $agreed          `tblSmallGroups.placeMapAgreed` = 1: they ticked "a map may be shown".
+     *
+     * ANY read that fails is a no, as everywhere in this class: a permission
+     * that cannot be read must never read as granted.
+     */
+    public static function allowsMeetingPlaceMap(int $groupSiteId, ?int $enteredById, bool $agreed): bool
+    {
+        if ($agreed === false || $enteredById === null || $enteredById <= 0 || $groupSiteId <= 0) {
+            return false;
+        }
+        try {
+            $db = App::db();
+        } catch (\Throwable $e) {
+            self::logOnce('no database connection, so every outside service is treated as not allowed: ' . $e->getMessage());
+
+            return false;
+        }
+        try {
+            $stillCounts = self::entererStillCounts($db, $enteredById, $groupSiteId);
+        } catch (\Throwable $e) {
+            self::logOnce('whether the person who entered a meeting place still counts could not be read, so no '
+                . 'meeting-place map is drawn on this request: ' . $e->getMessage());
+
+            return false;
+        }
+        $openSite = Site::id();
+        $viewer   = self::viewerId();
+        $entererDecision = self::decide(self::MEMBER_MAP, self::factsFor($db, $enteredById, $openSite));
+        $viewerDecision  = self::decide(self::MEMBER_MAP, self::factsFor($db, $viewer, $openSite));
+
+        return self::meetingPlaceMapFrom($agreed, $stillCounts, $entererDecision, $viewerDecision);
+    }
+
+    /**
+     * Point 2 of the meeting-place rule: is the person who entered the place
+     * still somebody whose agreement can count? Their account is switched on,
+     * AND they hold a switched-on membership of the group's organisation or are
+     * a global administrator (who counts as a member of every organisation, as
+     * `membershipsOf()` counts them). Throws on a failed read.
+     */
+    private static function entererStillCounts(\mysqli $db, int $userId, int $siteId): bool
+    {
+        $stmt = $db->prepare(
+            'SELECT 1 FROM `tblUsers` `u` '
+            . 'LEFT JOIN `tblUserSites` `us` ON `us`.`userID` = `u`.`userID` AND `us`.`siteID` = ? AND `us`.`isActive` = 1 '
+            . 'WHERE `u`.`userID` = ? AND `u`.`isActive` = 1 AND (`us`.`userSiteID` IS NOT NULL OR `u`.`isRootAdmin` = 1) '
+            . 'LIMIT 1'
+        );
+        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->execute();
+        $found = $stmt->get_result()->fetch_assoc() !== null;
+        $stmt->close();
+
+        return $found;
+    }
+
+    /**
+     * Why the person signed in could not give a meeting-place map by ticking
+     * the box, in plain words — or '' when nothing in the tiers stands in the
+     * way. For the group's edit form, so a leader is never told a tick will do
+     * something the rule will then refuse.
+     */
+    public static function meetingPlaceTickBlockedFor(): string
+    {
+        $viewer = self::viewerId();
+        if ($viewer === null) {
+            return 'nobody is signed in.';
+        }
+        try {
+            $db = App::db();
+        } catch (\Throwable $e) {
+            return 'the portal could not read the settings that decide this, so it is treated as not allowed.';
+        }
+        $decision = self::decide(self::MEMBER_MAP, self::factsFor($db, $viewer, Site::id()));
+        if (($decision['readable'] ?? false) !== true || ($decision['ceiling'] ?? 0) === 0) {
+            return self::refusalReason($decision);
+        }
+        if (($decision['choice'] ?? null) === self::OFF) {
+            return 'you have switched maps off for yourself on your own Outside services page.';
+        }
+
+        return '';
     }
 
     // ✍️ =========================================================================

@@ -623,6 +623,122 @@ final class SmallGroups
     }
 
     // -------------------------------------------------------------------------
+    // 🏠 Who entered the meeting place, and whether they agreed to a map
+    //    (#809, D-120)
+    // -------------------------------------------------------------------------
+
+    /** The columns that together are "where the group meets". */
+    public const PLACE_COLUMNS = [
+        'addressLine1', 'addressLine2', 'city', 'region', 'postcode', 'countryCode',
+        'latitude', 'longitude', 'what3words',
+    ];
+
+    /**
+     * One place, made comparable: every part trimmed text, an empty part as
+     * '', and the two coordinates written to the seven decimal places the
+     * columns hold, so `52.2053` typed and `52.2053000` read back are the same
+     * place. Country alone is not a place (it always has a value), so it is
+     * compared but does not make a place "entered" on its own.
+     *
+     * @param array<string,mixed> $row Keyed by the column names in PLACE_COLUMNS.
+     *
+     * @return array<string,string>
+     */
+    public static function placeOf(array $row): array
+    {
+        $out = [];
+        foreach (self::PLACE_COLUMNS as $column) {
+            $value = $row[$column] ?? null;
+            if ($value === null || (is_string($value) === true && trim($value) === '')) {
+                $out[$column] = '';
+                continue;
+            }
+            if ($column === 'latitude' || $column === 'longitude') {
+                $out[$column] = number_format((float) $value, 7, '.', '');
+                continue;
+            }
+            $out[$column] = trim((string) $value);
+        }
+
+        return $out;
+    }
+
+    /** Whether a place (from placeOf()) holds anything that says where somewhere is. */
+    public static function placeIsEmpty(array $place): bool
+    {
+        foreach ($place as $column => $value) {
+            if ($column !== 'countryCode' && $value !== '') {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * ✍️ THE RULE for who is recorded as having entered a group's meeting
+     * place, and whether they agreed to a map of it, after one save. On FACTS
+     * (#647): the handler reads the stored row under a lock and asks this, so
+     * the answer is about the place as it really stands at the moment of the
+     * write.
+     *
+     * D-120: a map of the place is shown only where WHOEVER ENTERED IT has
+     * agreed. So an agreement belongs to one person and one place, and must
+     * never end up attached to a place that person did not enter:
+     *
+     *   1. the place is now EMPTY            → nobody, not agreed;
+     *   2. the place CHANGED (or is new)     → the person saving entered it;
+     *      their own tick is the agreement (no tick, or a form that did not
+     *      draw the box, is "not agreed");
+     *   3. unchanged, and the person saving IS the one recorded
+     *                                        → they may give or withdraw their
+     *      agreement with the tick; a form that did not draw the box changes
+     *      nothing (#677: ask whether a field ARRIVED, never what it holds);
+     *   4. unchanged, and NOBODY is recorded (a group from before #809)
+     *                                        → ticking makes the person saving
+     *      the one answerable for the place as it stands, with their agreement.
+     *      Not ticking leaves it as it was: nobody, not agreed;
+     *   5. unchanged, and SOMEBODY ELSE is recorded
+     *                                        → left exactly as it was. Their tick
+     *      is not theirs to give or take away; changing the place is the only way
+     *      to become the person whose agreement counts.
+     *
+     * @param ?array<string,mixed> $existing The stored row, or null for a new group.
+     * @param array<string,mixed>  $posted   The place as it will be stored, keyed by PLACE_COLUMNS.
+     *
+     * @return array{enteredBy:?int, agreed:int}
+     */
+    public static function placeAgreementAfterSave(?array $existing, array $posted, int $saverId, bool $boxDrawn, bool $ticked): array
+    {
+        $after = self::placeOf($posted);
+        if (self::placeIsEmpty($after) === true || $saverId <= 0) {
+            return ['enteredBy' => null, 'agreed' => 0];
+        }
+        $agreesNow = $boxDrawn === true && $ticked === true;
+        if ($existing === null || self::placeOf($existing) !== $after) {
+            return ['enteredBy' => $saverId, 'agreed' => $agreesNow === true ? 1 : 0];
+        }
+        $recorded  = isset($existing['placeEnteredByID']) === true ? (int) $existing['placeEnteredByID'] : 0;
+        $hadAgreed = (int) ($existing['placeMapAgreed'] ?? 0) === 1 ? 1 : 0;
+        if ($recorded > 0 && $recorded === $saverId) {
+            if ($boxDrawn === false) {
+                return ['enteredBy' => $saverId, 'agreed' => $hadAgreed];
+            }
+
+            return ['enteredBy' => $saverId, 'agreed' => $agreesNow === true ? 1 : 0];
+        }
+        if ($recorded <= 0) {
+            if ($agreesNow === true) {
+                return ['enteredBy' => $saverId, 'agreed' => 1];
+            }
+
+            return ['enteredBy' => null, 'agreed' => 0];
+        }
+
+        return ['enteredBy' => $recorded, 'agreed' => $hadAgreed];
+    }
+
+    // -------------------------------------------------------------------------
     // internals
     // -------------------------------------------------------------------------
 

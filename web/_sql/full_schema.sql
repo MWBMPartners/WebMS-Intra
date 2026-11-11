@@ -9679,6 +9679,8 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroups` (
     `geocodedAt`         DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180 pattern)',
     `geocodeSource`      VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `locationVisibility` ENUM('leaders','members','site') NOT NULL DEFAULT 'members' COMMENT 'Who may see the meeting address/pin — groups often meet in a member''s home; no public tier exists',
+    `placeEnteredByID`   INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last entered or changed where the group meets (#809, migration 275). Their agreement decides whether a MAP of the place is shown (D-120). Empty for a group from before #809, or with no place',
+    `placeMapAgreed`     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the person in placeEnteredByID agreed that a map of this meeting place may be shown (D-120: treated as the host''s home, on the terms of D-072). 0 = not agreed, the safe reading for every older group',
     `resourcesURL`       VARCHAR(500)  DEFAULT NULL COMMENT 'Lesson/study resources link (Documents category or external quarterly) — lightweight v1 of #150 lesson resources',
     `isOpenEnrolment`    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = members may request to join from the groups directory',
     `capacity`           INT           DEFAULT NULL COMMENT 'Optional member cap; NULL = unlimited',
@@ -9693,7 +9695,8 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroups` (
     KEY `idx_sg_servicetype` (`serviceTypeID`),
     CONSTRAINT `fk_sg_site`        FOREIGN KEY (`siteID`)        REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_sg_servicetype` FOREIGN KEY (`serviceTypeID`) REFERENCES `tblAttendanceServiceTypes`(`serviceTypeID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_sg_creator`     FOREIGN KEY (`createdByID`)   REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+    CONSTRAINT `fk_sg_creator`     FOREIGN KEY (`createdByID`)   REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_sg_place_enterer` FOREIGN KEY (`placeEnteredByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Small Groups — groups/classes register; groupID is the stable scope anchor for #304 messaging and #321 watch rooms (#150)';
 
@@ -11636,6 +11639,16 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('273_no_built_in_time_zone.sql'
 -- tblVenues.countryCode is written above with no default, and
 -- portal.sabbath.location_lat / location_lng are seeded empty; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('274_no_built_in_place.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 275_group_meeting_place_map_agreement.sql (#809; D-120) ────────────
+-- tblSmallGroups.placeEnteredByID and placeMapAgreed, and the link
+-- fk_sg_place_enterer, are written above in the table itself: who entered a
+-- group's meeting place, and whether they agreed that a map of it may be
+-- shown. Every existing group starts with nobody recorded and no agreement,
+-- so no map, which is the safe reading; a database built from this script has
+-- no existing groups. This is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('275_group_meeting_place_map_agreement.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 276_public_address_unique_on_approval.sql (#895, D-121) ────────────
