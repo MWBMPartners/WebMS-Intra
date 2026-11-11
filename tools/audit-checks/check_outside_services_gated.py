@@ -293,7 +293,8 @@ def main() -> int:
             "✗ %s no longer decides its meeting-place map with "
             "`$showMap = $hasPin === true && OutsideServices::allowsMeetingPlaceMap(...)`.\n"
             "   A group often meets in somebody's home, so the map is drawn only where the person who "
-            "entered the place agreed, on the terms of a member's own home map (#809, D-120)." % GROUP
+            "place's NAMED HOST agreed (D-124), or the place is marked not anybody's home (D-128), on the "
+            "terms of a member's own home map (#809, D-120)." % GROUP
         )
     if group.count(DECIDE_CALL) != 2:
         problems.append(

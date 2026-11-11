@@ -4295,9 +4295,11 @@ class GdprEraser
                 //    visitor's address from every fault the erased administrator
                 //    had ticked off. It is also why SEVERAL tables keep a personal
                 //    column on purpose - tblLiveChatMessages, tblEventRSVPInvites,
-                //    tblVenues' caretaker, tblKidCheckins' pickup name and
-                //    tblSmallGroups' meeting location - each recorded with its
-                //    reason in `notEmptiedHere`. No count is given: an earlier
+                //    tblVenues' caretaker and tblKidCheckins' pickup name -
+                //    each recorded with its reason in `notEmptiedHere`. (A small
+                //    group's meeting place was on this list until #809: it now
+                //    names its HOST, and the `hostUserID` instructions empty it,
+                //    matched on the person whose home it is.) No count is given: an earlier
                 //    version of this comment said four and there were five. When you add a
                 //    non-link column here, check what `userCol` MEANS first.
                 $sets[] = '`' . $c . '` = NULL';

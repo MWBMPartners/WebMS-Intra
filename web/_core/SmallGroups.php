@@ -709,7 +709,16 @@ final class SmallGroups
      *   5. and ONLY IF the person saving IS the host and the form DREW the box
      *      (#677: ask whether a field ARRIVED), their own tick replaces it.
      *      Anybody else's tick — a leader's, an administrator's — counts for
-     *      nothing, whatever they post.
+     *      nothing, whatever they post;
+     *  5b. but a host who has only just BEEN NAMED on an existing place starts
+     *      not agreed, whoever saves — even when the person saving named
+     *      THEMSELVES and ticked (check round 1 of #809, X1). An agreement
+     *      belongs to the person who gave it, so it is given on a later save by
+     *      the host as stored. Only a brand-new place (`$existing === null`)
+     *      may be agreed in the save that creates it, and only by its host.
+     *
+     * Who may change the host, or mark the place, is a separate question
+     * answered BEFORE this rule by `whyHostChangeRefused()`.
      *
      * `placeEnteredByID` keeps who last TYPED the place in (the person saving,
      * when it is new or changed). It decides nothing any more; it is the record
@@ -760,7 +769,10 @@ final class SmallGroups
 
         $placeChanged = $existing === null || self::placeOf($existing) !== $after;
         $hadHost      = $existing !== null && isset($existing['hostUserID']) === true ? (int) $existing['hostUserID'] : 0;
-        $hostChanged  = (int) ($host ?? 0) !== $hadHost;
+        // A host "changes" on any EXISTING row whose host is not the one being
+        // stored — including a row that had none (5b). A new row has no host to
+        // change from.
+        $hostChanged  = $existing !== null && (int) ($host ?? 0) !== $hadHost;
         $hadEnterer   = $existing !== null && isset($existing['placeEnteredByID']) === true ? (int) $existing['placeEnteredByID'] : 0;
         $enteredBy    = $placeChanged === true ? ($saverId > 0 ? $saverId : null) : ($hadEnterer > 0 ? $hadEnterer : null);
 
@@ -781,11 +793,58 @@ final class SmallGroups
             return ['enteredBy' => $enteredBy, 'host' => null, 'agreed' => 0, 'notAHome' => $notAHome];
         }
         $agreed = ($placeChanged === true || $hostChanged === true) ? 0 : ((int) ($existing['placeMapAgreed'] ?? 0) === 1 ? 1 : 0);
-        if ($saverId > 0 && $saverId === $host && $boxDrawn === true) {
+        if ($saverId > 0 && $saverId === $host && $boxDrawn === true && $hostChanged === false) {
             $agreed = $ticked === true ? 1 : 0;
         }
 
         return ['enteredBy' => $enteredBy, 'host' => $host, 'agreed' => $agreed, 'notAHome' => 0];
+    }
+
+    /**
+     * 🛡️ Is this save trying to take a place away from its named host? (Check
+     * round 1 of #809; D-124 and D-128 "rule out" a host's home shown without
+     * that host's agreement.)
+     *
+     * When a place HAS a stored named host and its ADDRESS IS UNCHANGED, only
+     * that stored host may remove or replace the host, or mark it "not
+     * anybody's home". Anybody else — a leader, an administrator — is refused:
+     * otherwise a leader could rename the host to themselves and agree (X1), or
+     * pick "nobody" and tick "not anybody's home" (X2), and the member's home
+     * would be on a map though the member never agreed. To change who lives
+     * there, the place is removed and entered again — removing deletes the old
+     * address at once (D-126), so nothing about the old host's home survives.
+     *
+     * A CHANGED address is not refused here: it already clears the agreement
+     * and the mark (rules 3 and 8 above), so whatever is now entered starts
+     * with nobody's agreement.
+     *
+     * @param ?array<string,mixed> $existing The stored row (locked), or null for a new place.
+     * @param array<string,mixed>  $posted   The place as it will be stored, keyed by PLACE_COLUMNS.
+     * @param ?int                 $newHost  The host the save would store.
+     * @param string               $how      How to start again, in words, for the refusal.
+     *
+     * @return string '' when allowed, else the plain reason it is refused.
+     */
+    public static function whyHostChangeRefused(?array $existing, array $posted, ?int $newHost, bool $markTicked, int $saverId, string $how): string
+    {
+        if ($existing === null) {
+            return '';
+        }
+        $storedHost = (int) ($existing['hostUserID'] ?? 0);
+        if ($storedHost <= 0 || $storedHost === $saverId) {
+            return '';
+        }
+        $after = self::placeOf($posted);
+        if (self::placeIsEmpty($after) === true || self::placeOf($existing) !== $after) {
+            return '';
+        }
+        if ((int) ($newHost ?? 0) === $storedHost && $markTicked === false) {
+            return '';
+        }
+
+        return 'This place is the home of the member named as its host, and only they can change who lives there or '
+            . 'mark it as not anybody\'s home. To change who lives there, ' . $how . ' and enter it again: that deletes '
+            . 'the old address. Nothing was saved.';
     }
 
     /**
@@ -872,9 +931,11 @@ final class SmallGroups
      * The places a group rotates between, oldest first. Site-scoped, like
      * every read here: another organisation's group answers nothing.
      *
-     * Each row carries its OWN host (`placeEnteredByID`) and agreement
-     * (`placeMapAgreed`): under D-123 each place is its own host's home, so
-     * one host's agreement never stands for another's.
+     * Each row carries its OWN named host (`hostUserID`, D-124) and that
+     * host's agreement (`placeMapAgreed`), or the "not anybody's home" mark
+     * (`notAHome`, D-128); `placeEnteredByID` only records who typed it. Under
+     * D-123 each place is its own host's home, so one host's agreement never
+     * stands for another's.
      *
      * @return list<array<string,mixed>>
      */

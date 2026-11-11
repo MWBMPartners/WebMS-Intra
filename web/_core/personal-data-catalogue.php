@@ -1153,7 +1153,7 @@ return [
     ],
     'tblSmallGroups' => [
         'decision' => 'unlink',
-        'reason'   => 'The group itself - its name, its purpose, its members. Deleting it because its founder left would dissolve the group and remove everybody else from it. Where it usually meets is its HOST\'s home (#809, D-124): erasing that host empties the address from the group (D-122), and the group stays.',
+        'reason'   => 'The group itself - its name, its purpose, its members. Deleting it because its founder left would dissolve the group and remove everybody else from it. Where it usually meets is its named HOST\'s home (#809, D-124): erasing that host empties the address from the group (D-122), and the group stays. An address with NO host named - every group from before migration 275 until somebody names one, and any place entered without a host or marked as not anybody\'s home - is NOT emptied by anybody\'s erasure, because nothing records whose home it is.',
         'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'createdByID', 'addressLine1', 'addressLine2', 'city', 'region',
                        'description', 'meetingNotes', 'hostUserID', 'placeEnteredByID'],
         // 🧑‍⚖️ #724: notes about a group's meetings, which may or may not be
@@ -1181,7 +1181,7 @@ return [
     ],
     'tblSmallGroupPlaces' => [
         'decision' => 'unlink',
-        'reason'   => 'The homes a small group takes turns meeting in (#809, D-123). Each is its named HOST\'s home (D-124): erasing that host empties its address, its name and the agreement to a map, and takes it off the group\'s list (D-122). The row stays so that a meeting held there still says it met somewhere no longer recorded. Who only typed a home in is unlinked, and their typing empties nothing. A place marked "not anybody\'s home" (D-128) has no host, so no erasure empties it.',
+        'reason'   => 'The homes a small group takes turns meeting in (#809, D-123). Each is its named HOST\'s home (D-124): erasing that host empties its address, its name and the agreement to a map, and takes it off the group\'s list (D-122). The row stays so that a meeting held there still says it met somewhere no longer recorded. Who only typed a home in is unlinked, and their typing empties nothing. A home entered with NO host named, and a place marked "not anybody\'s home" (D-128), is NOT emptied by anybody\'s erasure, because nothing records whose home it is; it stays until somebody removes it from the list.',
         'columns'  => ['hostUserID', 'placeEnteredByID', 'placeLabel', 'addressLine1', 'addressLine2', 'city', 'region', 'postcode',
                        'countryCode', 'latitude', 'longitude', 'what3words'],
     ],

@@ -200,8 +200,8 @@ final class OutsideServices
                           . '(to about 110 metres), or exactly where a small group meets, together with the '
                           . 'internet address of whoever is looking. A map of a member\'s home is shown only when '
                           . 'BOTH the member shown and the person looking allow it; a map of a group\'s meeting '
-                          . 'place only when that place\'s named host agreed to it and the person looking '
-                          . 'allows it.',
+                          . 'place only when that place\'s named host agreed to it, or it is marked as not '
+                          . 'anybody\'s home, and the person looking allows it.',
             'imgSources' => ['https://*.tile.openstreetmap.org'],
             // 🗺️ NEVER ON BY DEFAULT (D-072): "a member's map appears only when
             //    THAT member has switched it on". So no level may say "on until a

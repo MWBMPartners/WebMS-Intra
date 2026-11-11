@@ -368,6 +368,18 @@ if ($isCreate === true) {
     if ($markTicked === true && $hostPick['host'] !== null) {
         $refuseBoth();
     }
+    // 🛡️ Check round 1 of #809 (D-124, D-128): with the address unchanged,
+    //    only the place's own named host may change who lives there or mark it
+    //    "not anybody's home". Asked on the LOCKED row.
+    $takeOver = SmallGroups::whyHostChangeRefused($lockedRow, $postedPlace, $hostPick['host'], $markTicked, $userId,
+        'empty the meeting place\'s address and save');
+    if ($takeOver !== '') {
+        $db->rollback();
+        $_SESSION['flash_msg']  = $takeOver;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . $backUrl);
+        exit();
+    }
     $place = SmallGroups::placeAgreementAfterSave($lockedRow, $postedPlace, $hostPick['host'], $userId, $placeBoxDrawn, $placeTicked, $markDrawn, $markTicked);
     $placeEnteredBy = $place['enteredBy'];
     $placeHost      = $place['host'];

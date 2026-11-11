@@ -85,15 +85,16 @@ if (function_exists('portal_place_map_agreement') === false) {
             }
         } elseif ($hostId === 0 && ($cfg['notAHome'] ?? false) === true) {
             echo '<p class="small text-secondary mb-0 portal-place-host-status">This place is marked as not anybody\'s '
-                . 'home, so a map of it may be shown to members whose own map settings allow it.</p>';
+                . 'home, so a map of it may be shown to whoever can see its address, if their own map settings allow it.</p>';
         } elseif ($hostId === 0) {
             echo '<p class="small text-secondary mb-0 portal-place-host-status">No host is named for this place yet, '
                 . 'so no map of it is shown. Once a host is named, only they can agree to one.</p>';
         } else {
             echo '<p class="small text-secondary mb-0 portal-place-host-status">This is ' . $esc($name) . '\'s home. '
                 . $esc($name) . ' has ' . ($agreed === true ? 'agreed' : 'not agreed') . ' to a map of it. Only '
-                . $esc($name) . ' can change that, by opening this form themselves. If you name a different host or '
-                . 'change the address, any agreement given so far no longer counts.</p>';
+                . $esc($name) . ' can change that, by opening this form themselves, and only ' . $esc($name)
+                . ' can change who lives here or mark it as not anybody\'s home. If you change the address, any '
+                . 'agreement given so far no longer counts.</p>';
         }
         echo '</div>';
     }
@@ -144,7 +145,9 @@ if (function_exists('portal_place_host_select') === false) {
         }
         echo '<label for="hostUserID" class="form-label">Whose home is this? (its host)</label>';
         echo '<select name="hostUserID" id="hostUserID" class="form-select">';
-        echo '<option value=""' . ($hostId === 0 ? ' selected' : '') . '>Nobody named yet (no map can be shown)</option>';
+        // "Nobody named yet" — and NOT "(no map can be shown)", which was untrue
+        // the moment "not anybody's home" below is ticked (D-128).
+        echo '<option value=""' . ($hostId === 0 ? ' selected' : '') . '>Nobody named yet</option>';
         $listed = false;
         foreach ($cfg['members'] as $member) {
             $id = (int) $member['userID'];
@@ -158,13 +161,15 @@ if (function_exists('portal_place_host_select') === false) {
                 . ' (no longer a member of the group)</option>';
         }
         echo '</select>';
-        echo '<small class="text-muted">A member of the group. Only they can agree to a map of their home.</small>';
+        echo '<small class="text-muted">A member of the group. Only they can agree to a map of their home. With nobody '
+            . 'named, no map is shown unless the place is marked as not anybody\'s home below. Once a host is named, only '
+            . 'they can change who lives there.</small>';
         echo '<input type="hidden" name="notAHomeAsked" value="1">';
         echo '<div class="form-check mt-2">';
         echo '<input type="checkbox" class="form-check-input" name="notAHome" id="notAHome" value="1"'
             . (($cfg['notAHome'] ?? false) === true ? ' checked' : '') . '>';
         echo '<label class="form-check-label" for="notAHome">This is not anybody\'s home (for example, a church hall). '
-            . 'A map of it may be shown to members.</label>';
+            . 'A map of it may be shown to whoever can see its address.</label>';
         echo '</div>';
         echo '<small class="text-muted">Only tick this if nobody lives here: a home address ticked by mistake would be '
             . 'shown on a map. A place with a host named cannot be marked, and changing the address clears the mark '

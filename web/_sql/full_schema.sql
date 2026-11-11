@@ -11681,12 +11681,14 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('274_no_built_in_place.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── from 275_group_meeting_place_map_agreement.sql (#809; D-120, D-123) ─────
--- Written above in the tables themselves: tblSmallGroups.placeEnteredByID and
--- placeMapAgreed with the link fk_sg_place_enterer (who entered the group's
--- usual meeting place, and whether they agreed to a map of it); the table
--- tblSmallGroupPlaces (the homes a group takes turns meeting in, each with its
--- own host and agreement); and tblSmallGroupMeetings.placeID with
--- fk_sgmt_place (which of those a meeting was held in). Every existing group
+-- Written above in the tables themselves: tblSmallGroups.hostUserID (the
+-- member whose home the usual meeting place is, D-124), placeEnteredByID (who
+-- typed it in, a record only), placeMapAgreed (that HOST's agreement to a map)
+-- and notAHome (marked "not anybody's home", D-128), with the links
+-- fk_sg_host and fk_sg_place_enterer; the table tblSmallGroupPlaces (the homes
+-- a group takes turns meeting in, each with the same four columns of its own);
+-- and tblSmallGroupMeetings.placeID with fk_sgmt_place (which of those a
+-- meeting was held in). Every existing group
 -- starts with nobody recorded and no agreement, so no map, which is the safe
 -- reading; a database built from this script has no existing groups. Below:
 -- the two addresses that add, change and remove a place.

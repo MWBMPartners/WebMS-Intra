@@ -58,13 +58,16 @@
 -- -----------------------------------------------------------------------------
 -- EXISTING GROUPS: NOBODY, AND NOT AGREED -- ON PURPOSE
 -- -----------------------------------------------------------------------------
--- Every group that exists before this migration gets NO person recorded and
--- NO agreement, so its page shows the written address and no map. That is the
--- safe reading: nobody agreed. It is NOT filled from `createdByID`: the person
--- who made a group did not necessarily enter where it meets now, and an
--- agreement nobody gave cannot be inferred from who pressed "create". A leader
--- who opens the group's edit form and ticks the new box becomes the person
--- recorded, with their agreement.
+-- Every group that exists before this migration gets NO host named, NO
+-- agreement and NO "not anybody's home" mark, so its page shows the written
+-- address and no map. That is the safe reading: nobody agreed. It is NOT filled
+-- from `createdByID`: the person who made a group did not necessarily live where
+-- it meets now, and an agreement nobody gave cannot be inferred from who pressed
+-- "create". A leader names the host on the group's edit form; the agreement then
+-- comes only from that HOST, on their own form (D-124) — a leader's tick counts
+-- only if the leader IS the named host. Or, where the place is nobody's home,
+-- whoever sets it may mark it so (D-128). An older group's address with no host
+-- named is not emptied by anybody's erasure: nothing says whose home it is.
 --
 -- -----------------------------------------------------------------------------
 -- SAFE TO RUN TWICE

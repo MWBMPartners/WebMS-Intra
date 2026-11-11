@@ -225,8 +225,8 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
                                 'mapId'   => 'sgMeetingMap',
                             ]); ?>
                             <?php if ($shownPlace['latitude'] !== null && $shownPlace['longitude'] !== null && $showPlaceMap === false): ?>
-                                <p class="small text-secondary mb-0 portal-place-no-map">No map is shown: it appears only when the
-                                    person who entered this place has agreed to it and you allow maps.</p>
+                                <p class="small text-secondary mb-0 portal-place-no-map">No map is shown: it appears only when the member whose home this is (its named host) has agreed to it, or
+                                    when it is marked as not anybody's home, and only if you allow maps.</p>
                             <?php endif; ?>
                         </div>
                     <?php endif; ?>
