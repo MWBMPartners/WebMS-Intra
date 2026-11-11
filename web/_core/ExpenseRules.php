@@ -1952,13 +1952,21 @@ final class ExpenseRules
 
         // 🔤 The plain form: every other character becomes "_", runs of "_"
         //    become one, and a name left with nothing but punctuation falls
-        //    back to the made-up one.
-        $ascii = (string) preg_replace('/[^A-Za-z0-9._-]/', '_', $clean);
-        $ascii = (string) preg_replace('/_+/', '_', $ascii);
-        $ascii = trim($ascii, '._');
-        if ($ascii === '') {
-            $ascii = 'receipt-' . $fileId;
+        //    back to the made-up one. The EXTENSION is judged apart from the
+        //    rest and kept whenever it is plain letters and digits, so a label
+        //    written wholly in another script ("領収書.pdf") still saves as a
+        //    .pdf — the first version made that "pdf", with no dot, which a
+        //    computer could not open by its name.
+        $ext  = (string) pathinfo($clean, PATHINFO_EXTENSION);
+        $ext  = preg_match('/^[A-Za-z0-9]{1,10}$/D', $ext) === 1 ? $ext : '';
+        $stem = $ext === '' ? $clean : mb_substr($clean, 0, mb_strlen($clean, 'UTF-8') - mb_strlen($ext, 'UTF-8') - 1, 'UTF-8');
+        $stem = (string) preg_replace('/[^A-Za-z0-9._-]/', '_', $stem);
+        $stem = (string) preg_replace('/_+/', '_', $stem);
+        $stem = trim($stem, '._-');
+        if ($stem === '') {
+            $stem = 'receipt-' . $fileId;
         }
+        $ascii = $stem . ($ext === '' ? '' : '.' . $ext);
 
         return 'attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($clean);
     }

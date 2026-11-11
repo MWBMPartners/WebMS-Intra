@@ -273,6 +273,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-list-check me-2 text-primary"></i>Viewing Your Claims</h2>
 
     <p>You can view all of your submitted expense claims and their current statuses at any time.</p>
+    <!-- D-130 (11 November 2026): every look at an expense record is recorded, the claimant's own included. -->
+    <p>Each time anybody opens a claim, one of its receipts or the expenses spreadsheet &mdash; you included &mdash; the portal records who looked and which claim, so your organisation can later see who has seen it.</p>
 
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item d-flex gap-3 align-items-start">

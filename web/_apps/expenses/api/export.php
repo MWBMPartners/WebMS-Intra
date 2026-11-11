@@ -42,6 +42,7 @@ use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\CsvExporter;
 use Portal\Core\ExpenseRules;
+use Portal\Core\Logger;
 
 // 🔒 Authentication & authorisation
 Auth::ensureSession();
@@ -113,8 +114,9 @@ $siteId = Site::id();
 //
 //    Somebody with the role and no department at all gets the heading row
 //    alone (`1 = 0`), which is what their approvals page shows them: nothing.
-$userId = (int) ($_SESSION['user_id'] ?? 0);
-$reach  = ExpenseRules::reachSql(ExpenseRules::reachToSee($mysqli, $userId, $siteId), 'EC.deptID');
+$userId   = (int) ($_SESSION['user_id'] ?? 0);
+$reachSee = ExpenseRules::reachToSee($mysqli, $userId, $siteId);
+$reach    = ExpenseRules::reachSql($reachSee, 'EC.deptID');
 
 // 📊 Query expense claims
 $sql = "SELECT
@@ -159,6 +161,25 @@ while ($row = $result->fetch_assoc()) {
     $rows[] = $row;
 }
 $stmt->close();
+
+// 📝 D-130 (the owner, 11 November 2026): every look at expense records is
+//    recorded — the claim page, a receipt, and this spreadsheet. One
+//    `ExpenseClaimsExport` record, naming its person (#626), saying WHAT was
+//    exported — which claims the file covered (every department, or the
+//    department numbers of this person's reach) and how many rows — and never
+//    the rows themselves: no claimant, title or amount. Written after the
+//    rows are read and before the file is sent, so it records a download
+//    that is about to happen; `Logger::activity()` never throws. A refused
+//    request (no right to the file, or a form token that is no good) is
+//    answered above and records nothing.
+Logger::activity(
+    'ExpenseClaimsExport',
+    'Downloaded the expenses spreadsheet: '
+        . (($reachSee['all'] ?? false) === true
+            ? 'every department'
+            : (count($reachSee['depts'] ?? []) === 0 ? 'no department' : 'department(s) ' . implode(', ', $reachSee['depts'])))
+        . ', ' . count($rows) . ' claim(s)'
+);
 
 // 📥 Send CSV download.
 //

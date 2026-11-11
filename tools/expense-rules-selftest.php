@@ -974,7 +974,10 @@ check(
 );
 check(
     'the spreadsheet\'s rows follow the SAME reach as the claim page, inside the query',
-    str_contains($exportTight, "\$reach=ExpenseRules::reachSql(ExpenseRules::reachToSee(\$mysqli,\$userId,\$siteId),'EC.deptID');") === true
+    // Two statements since #867 round 2 (D-130): the reach is kept in
+    // `$reachSee` so the activity record can say which departments the file
+    // covered; it is still the claim page's reach, turned into the condition.
+    str_contains($exportTight, "\$reachSee=ExpenseRules::reachToSee(\$mysqli,\$userId,\$siteId);\$reach=ExpenseRules::reachSql(\$reachSee,'EC.deptID');") === true
         && str_contains($exportTight, "WHERE EC.siteID = ? AND \".\$reach['sql'].\"") === true
         && str_contains($exportTight, "\$stmt->bind_param('i'.\$reach['types'],\$siteId,...\$reach['params']);") === true
         && substr_count($exportPage, 'FROM tblExpenseClaims') === 1,

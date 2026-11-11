@@ -112,7 +112,14 @@
  *      path, a link) and numbers that are not plain numbers are refused; a
  *      label that could break the header gives one well-formed RFC 6266 /
  *      5987 header; and the claim page, the approvals list and the treasury
- *      list link to where the receipts are.
+ *      list link to where the receipts are. Round 2 of its check added: the
+ *      OTHER organisation's administrator and treasurer, through THEIR OWN
+ *      address, are refused this organisation's receipt and claim page (only
+ *      the organisation condition can refuse them there); and D-130 — opening
+ *      a claim page, a receipt, the spreadsheet or the API's claim list
+ *      writes exactly one activity record with the person and the claim (or
+ *      what was exported), while a refusal leaves the same trace as a
+ *      made-up number: none.
  *   M. Withdrawing a claim, through the real page, reading back what is
  *      STORED. The claimant withdraws a pending claim and its status reads
  *      Withdrawn; a second press, and an approved, a paid and a rejected
@@ -287,7 +294,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 474; // 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 488; // 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -2687,6 +2694,7 @@ const L4_R_LINK  = 916868; // a plain name, but a LINK to a file outside the fol
 const L4_R_GONE  = 916869; // a row whose file is not there
 const L4_R_NAME  = 916870; // a label with quotes, line breaks and non-ASCII letters
 const L4_R_TYPE  = 916871; // a stored type with something after it, over HTML bytes
+const L4_R_CJK   = 916872; // a label written wholly in another script
 const L4_NO_FILE = 916879; // matches no receipt at all
 
 $l4Folder = $child . $sep . 'web' . $sep . '_uploads' . $sep . 'expenses';
@@ -2701,11 +2709,14 @@ $l4Bytes = [
     L4_R_MEM   => "\xFF\xD8\xFF\xE0" . random_bytes(2500),
     L4_R_NAME  => "%PDF-1.4 the label test\n",
     L4_R_TYPE  => "<html><body><script>document.title='ran'</script></body></html>",
+    L4_R_CJK   => "%PDF-1.4 another script\n",
+    916873     => "%PDF-1.4 a receipt of the other organisation\n", // L4_B_RECEIPT, defined further down
 ];
 /** The type each one is served with: the stored type, or octet-stream when the stored one is not a bare type/subtype. */
 $l4Types = [
     L4_R_OWN => 'application/pdf', L4_R_OTHER => 'image/png', L4_R_MEM => 'image/jpeg',
     L4_R_NAME => 'application/pdf', L4_R_TYPE => 'application/octet-stream',
+    L4_R_CJK => 'application/pdf', 916873 => 'application/pdf',
 ];
 $l4Label = "Jane \"Smith\";\r\nX-Injected: yes\r\n café ünïcode.pdf";
 /** One receipt row, and its file when it has bytes. Stage and type may be NULL. */
@@ -2955,11 +2966,18 @@ ok(
 
 // --- the links ---------------------------------------------------------------
 $l4Href = static fn (int $claimId, int $fileId): string => 'href="' . ADDR_A . '/expenses/receipt?claim=' . $claimId . '&amp;id=' . $fileId . '"';
+// A row whose stage is EMPTY TEXT rather than NULL: nothing writes one, but
+// the claim page's link test and the address's `stage IS NULL` must agree
+// about it, or the page offers a link the address answers with 404.
+const L4_R_EMPTY = 916874;
+$l4Add(L4_R_EMPTY, L3_OWN_DEPT, 'Claim_' . L3_OWN_DEPT . '_Empty_stage.pdf', L3_OWN_DEPT . '_1700000000_receipt5.pdf', 'application/pdf', '', "%PDF-1.4 empty stage\n");
 $page = $l3Open('appr', L3_OWN_DEPT);
 ok(
-    'L4-23. the claim page links each RECEIPT to its address, and draws no link for the generated-PDF row (still listed by name)',
+    'L4-23. the claim page links each RECEIPT to its address, and draws no link for the generated-PDF row or a row whose stage is empty text — the same rows the address refuses (still listed by name)',
     $page['status'] === 200 && str_contains($page['body'], $l4Href(L3_OWN_DEPT, L4_R_OWN)) === true
         && str_contains($page['body'], 'data-receipt-link="' . L4_R_PDF . '"') === false
+        && str_contains($page['body'], 'data-receipt-link="' . L4_R_EMPTY . '"') === false
+        && $l4Get($jar['adm'], L3_OWN_DEPT, L4_R_EMPTY)['status'] === 404
         && str_contains($page['body'], 'Claim_' . L3_OWN_DEPT . '_Pending.pdf') === true,
     'HTTP ' . $page['status']
 );
@@ -2992,8 +3010,173 @@ ok(
     'HTTP ' . $refusedPage['status']
 );
 
+// --- a label wholly in another script keeps its extension -------------------
+$l4Add(L4_R_CJK, L3_OWN_DEPT, '領収書.pdf', L3_OWN_DEPT . '_1700000000_receipt4.pdf', 'application/pdf', null, $l4Bytes[L4_R_CJK]);
+$cjk = $l4Get($jar['adm'], L3_OWN_DEPT, L4_R_CJK);
+ok(
+    'L4-28. a label written wholly in another script still gives a plain name WITH its extension (receipt-<n>.pdf), and the full name encoded',
+    $l4Served($cjk, L4_R_CJK) === true
+        && $l4Header($cjk, 'Content-Disposition') === 'attachment; filename="receipt-' . L4_R_CJK . '.pdf"; filename*=UTF-8\'\'' . rawurlencode('領収書.pdf'),
+    'disposition: ' . $l4Header($cjk, 'Content-Disposition')
+);
+
+// --- the OTHER organisation's administrator and treasurer, at THEIR OWN address
+// (round 1 of the independent check, 11 November 2026.) Both "see every claim"
+// on their own organisation, so `mayViewClaim()` says yes to them; on B's
+// address `Site::id()` is B, so the ONLY thing between them and A's claim is
+// the organisation condition in the statement (`EC.siteID = ?`). L4-9 and
+// L4-10 ask on A's address, where that condition can never be reached: with
+// it replaced by `? > 0` all 474 checks stayed green while B's administrator
+// downloaded A's receipt. These ask on B's address, compared with the same
+// person asking for a made-up receipt and claim there.
+const L4_BTRS      = 916025; // a member of B only, holding B's treasurer role
+const L4_BTRS_ROLE = 916202;
+q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [L4_BTRS, 'Selftest access B treasurer', 'u' . L4_BTRS . '.access@selftest.invalid']);
+q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [L4_BTRS, ORG_B]);
+q("INSERT INTO `tblRoles` (`roleID`, `siteID`, `roleKey`, `roleName`, `isStandard`) VALUES (?, ?, 'treasurer', 'Treasurer', 1)", 'ii', [L4_BTRS_ROLE, ORG_B]);
+q('INSERT INTO `tblUserRoles` (`userID`, `roleID`, `siteID`) VALUES (?, ?, ?)', 'iii', [L4_BTRS, L4_BTRS_ROLE, ORG_B]);
+q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [L4_BTRS, 'selftest-access-btrs', $hash]);
+$jar['btrs'] = signIn('btrs', ADDR_B);
+foreach (['badm' => 'the ADMINISTRATOR', 'btrs' => 'the TREASURER'] as $who => $words) {
+    $cross     = req($jar[$who], 'GET', ADDR_B . '/expenses/receipt?claim=' . L3_OWN_DEPT . '&id=' . L4_R_OWN);
+    $crossNone = req($jar[$who], 'GET', ADDR_B . '/expenses/receipt?claim=' . L3_NO_CLAIM . '&id=' . L4_NO_FILE);
+    ok(
+        'L4-29. ' . $words . ' of the other organisation, through THAT organisation\'s own address, asking for this organisation\'s receipt: 404, byte for byte a made-up receipt there, and none of the file',
+        $cross['status'] === 404 && $l4Same($cross, $crossNone) === true && $l4Leaks($cross) === false && strlen($crossNone['body']) > 200,
+        $l4Why($cross)
+    );
+    $crossPage     = req($jar[$who], 'GET', ADDR_B . '/expenses/view?id=' . L3_OWN_DEPT);
+    $crossPageNone = req($jar[$who], 'GET', ADDR_B . '/expenses/view?id=' . L3_NO_CLAIM);
+    ok(
+        'L4-30. …and opening this organisation\'s CLAIM PAGE there is the claim page\'s own not-found answer, byte for byte a made-up claim number there, with nothing of the claim in it',
+        $crossPage['status'] === 404 && $l4Same($crossPage, $crossPageNone) === true
+            && str_contains($crossPage['body'], 'ACCESS L3 CLAIM IN THE APPROVERS DEPT') === false && strlen($crossPageNone['body']) > 200,
+        'HTTP ' . $crossPage['status'] . '/' . $crossPageNone['status']
+    );
+}
+// The positive half, so the two checks above are not "B's administrator and
+// treasurer cannot open anything": each opens a claim of B's own through B's
+// address, and the treasurer its receipt.
+// (DEPT_B is not made until part M, so this part makes its own department of B.)
+const L4_B_DEPT    = 916106;
+const L4_B_CLAIM   = 916393;
+const L4_B_RECEIPT = 916873;
+q("INSERT INTO `tblDepts` (`deptID`, `siteID`, `deptName`, `deptCode`, `isActive`) VALUES (?, ?, 'ACCESS L4 B dept', 'L4B', 1)", 'ii', [L4_B_DEPT, ORG_B]);
+q(
+    "INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) VALUES (?, ?, ?, ?, 'ACCESS L4 CLAIM OF B', CURDATE(), 9.00, 'Pending')",
+    'iiii', [L4_B_CLAIM, ORG_B, BMEM, L4_B_DEPT]
+);
+$l4Add(L4_B_RECEIPT, L4_B_CLAIM, 'Claim_' . L4_B_CLAIM . '_Receipt_1_2026-11-11.pdf', L4_B_CLAIM . '_1700000000_receipt1.pdf', 'application/pdf', null, $l4Bytes[L4_B_RECEIPT]);
+ok(
+    'L4-31. …while B\'s administrator opens B\'s own claim page, and B\'s treasurer B\'s own receipt, through B\'s address',
+    req($jar['badm'], 'GET', ADDR_B . '/expenses/view?id=' . L4_B_CLAIM)['status'] === 200
+        && $l4Served(req($jar['btrs'], 'GET', ADDR_B . '/expenses/receipt?claim=' . L4_B_CLAIM . '&id=' . L4_B_RECEIPT), L4_B_RECEIPT) === true
+);
+
+// --- D-130: every look at an expense record is in the activity log -----------
+// The owner (11 November 2026): opening a claim's page, downloading the
+// spreadsheet and opening a receipt are each recorded, with who looked and
+// which claim (or which export). A refusal records NOTHING, so it leaves the
+// same trace as a made-up number — any difference in the log would be the
+// existence leak the 404 exists to prevent.
+/** The highest log number now, so a check can read only what came after. */
+$l4LogMark = static fn (): int => (int) (one('SELECT COALESCE(MAX(`logID`), 0) AS m FROM `tblActivityLogs`')['m'] ?? 0);
+/** Every record written since a mark, as "userID|siteID|type|words" lines. @return list<string> */
+$l4LogSince = static function (int $mark): array {
+    return array_map(
+        static fn (array $r): string => (string) $r['userID'] . '|' . (string) $r['siteID'] . '|' . (string) $r['activityType'] . '|' . (string) $r['activityDescription'],
+        q('SELECT `userID`, `siteID`, `activityType`, `activityDescription` FROM `tblActivityLogs` WHERE `logID` > ? ORDER BY `logID`', 'i', [$mark])
+    );
+};
+/** Only the expense records among them. @param list<string> $lines @return list<string> */
+$l4Expense = static fn (array $lines): array => array_values(array_filter($lines, static fn (string $l): bool => str_contains($l, '|Expense') === true));
+
+$m = $l4LogMark();
+$l3Open('appr', L3_OWN_DEPT);
+$seen = $l4LogSince($m);
+ok(
+    'L4-32. opening a claim\'s page writes EXACTLY ONE ExpenseClaimView record, naming the person, in the organisation, with the claim number and nothing else of the claim',
+    $l4Expense($seen) === [APPR . '|' . ORG_A . '|ExpenseClaimView|Opened expense claim #' . L3_OWN_DEPT],
+    implode(' || ', $seen)
+);
+$m = $l4LogMark();
+$l4Get($jar['appr'], L3_OWN_DEPT, L4_R_OWN);
+$seen = $l4LogSince($m);
+ok(
+    'L4-33. opening a receipt writes EXACTLY ONE ExpenseReceiptOpen record with the receipt and claim numbers — no file name, label or amount',
+    $l4Expense($seen) === [APPR . '|' . ORG_A . '|ExpenseReceiptOpen|Opened receipt #' . L4_R_OWN . ' of expense claim #' . L3_OWN_DEPT],
+    implode(' || ', $seen)
+);
+// A refusal and a made-up number: the SAME trace, which is no expense record.
+$traceOf = static function (callable $request) use ($l4LogMark, $l4LogSince): array {
+    $mark = $l4LogMark();
+    $request();
+
+    return $l4LogSince($mark);
+};
+$refusedR = $traceOf(static fn () => $l4Get($jar['appr'], L3_OTHER_DEPT, L4_R_OTHER));
+$noneR    = $traceOf(static fn () => $l4Get($jar['appr'], L3_NO_CLAIM, L4_NO_FILE));
+$refusedV = $traceOf(static fn () => $l3Open('mem', L3_OWN_DEPT));
+$noneV    = $traceOf(static fn () => $l3Open('mem', L3_NO_CLAIM));
+$crossR   = $traceOf(static fn () => req($jar['badm'], 'GET', ADDR_B . '/expenses/receipt?claim=' . L3_OWN_DEPT . '&id=' . L4_R_OWN));
+$crossN   = $traceOf(static fn () => req($jar['badm'], 'GET', ADDR_B . '/expenses/receipt?claim=' . L3_NO_CLAIM . '&id=' . L4_NO_FILE));
+ok(
+    'L4-34. a REFUSED receipt and a made-up one leave the same trace in the log — no expense record — and so does another organisation\'s administrator on their own address',
+    $refusedR === $noneR && $l4Expense($refusedR) === [] && $crossR === $crossN && $l4Expense($crossR) === [],
+    implode(' || ', $refusedR) . '  ##  ' . implode(' || ', $noneR) . '  ##  ' . implode(' || ', $crossR)
+);
+ok(
+    'L4-35. a REFUSED claim page and a made-up one leave the same trace in the log — no expense record',
+    $refusedV === $noneV && $l4Expense($refusedV) === [],
+    implode(' || ', $refusedV) . '  ##  ' . implode(' || ', $noneV)
+);
+$m   = $l4LogMark();
+$csv = $l3Csv('trs');
+$seen = $l4LogSince($m);
+$exported = $l4Expense($seen);
+ok(
+    'L4-36. downloading the expenses spreadsheet writes EXACTLY ONE ExpenseClaimsExport record saying what was exported (every department, how many claims) and none of the rows',
+    $csv['status'] === 200 && count($exported) === 1
+        && ap_find('/^' . TRS . '\|' . ORG_A . '\|ExpenseClaimsExport\|Downloaded the expenses spreadsheet: every department, \d+ claim\(s\)$/D', $exported[0]) === 1,
+    'HTTP ' . $csv['status'] . '; ' . implode(' || ', $seen)
+);
+// APPR downloads the file only while holding the Approver role (L3 took it
+// away again), so it is given for this one download and taken back.
+$l3Role(APPR, true);
+$m   = $l4LogMark();
+$csvAppr = $l3Csv('appr');
+$exported = $l4Expense($l4LogSince($m));
+$l3Role(APPR, false);
+ok(
+    'L4-37. …and for an approver it names the department numbers the file covered',
+    $csvAppr['status'] === 200 && $exported === [APPR . '|' . ORG_A . '|ExpenseClaimsExport|Downloaded the expenses spreadsheet: department(s) ' . DEPT . ', '
+        . (substr_count(trim($csvAppr['body']), "\n")) . ' claim(s)'],
+    implode(' || ', $exported)
+);
+$refusedX = $traceOf(static fn () => req($jar['mem'], 'GET', $exportAddress . '?csrf_token=' . urlencode(token(req($jar['mem'], 'GET', ADDR_A . '/expenses/submit')['body']))));
+ok(
+    'L4-38. a REFUSED spreadsheet download writes no expense record',
+    $l4Expense($refusedX) === [],
+    implode(' || ', $refusedX)
+);
+$m    = $l4LogMark();
+$list = req($jar['mem'], 'GET', ADDR_A . '/api/expenses/list?status=Pending');
+$listed = $l4Expense($l4LogSince($m));
+ok(
+    'L4-39. the API\'s list of claims (an export of claim rows) writes EXACTLY ONE ExpenseClaimsListApi record saying whose claims, the filter and how many — none of the rows',
+    $list['status'] === 200 && count($listed) === 1
+        && ap_find('/^' . MEM . '\|' . ORG_A . '\|ExpenseClaimsListApi\|Listed expense claims through the API: own claims, status Pending, page 1 of \d+, ' . count(data($list)['claims'] ?? []) . ' claim\(s\)$/D', $listed[0]) === 1,
+    'HTTP ' . $list['status'] . '; ' . implode(' || ', $listed)
+);
+
 q('DELETE FROM `tblErrors` WHERE `errorCode` = ? AND `siteID` = ?', 'si', ['RECEIPT_UNAVAILABLE', ORG_A]);
 q('DELETE FROM `tblExpenseClaimFiles` WHERE `fileID` BETWEEN ? AND ?', 'ii', [L4_R_OWN, L4_NO_FILE]);
+q('DELETE FROM `tblExpenseClaims` WHERE `claimID` = ?', 'i', [L4_B_CLAIM]);
+q('DELETE FROM `tblDepts` WHERE `deptID` = ?', 'i', [L4_B_DEPT]);
+// L4_BTRS stays signed in and is removed with the rest of the made-up world;
+// its role row goes now, so no later part meets a treasurer of B it did not make.
+q('DELETE FROM `tblUserRoles` WHERE `roleID` = ?', 'i', [L4_BTRS_ROLE]);
+q('DELETE FROM `tblRoles` WHERE `roleID` = ?', 'i', [L4_BTRS_ROLE]);
 
 q('DELETE FROM tblUserRoles WHERE roleID = ?', 'i', [L3_ROLE]);
 q('DELETE FROM tblRoles WHERE roleID = ?', 'i', [L3_ROLE]);

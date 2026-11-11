@@ -46,10 +46,18 @@
  * information and must not be kept by a shared cache or by the portal's own
  * offline copy.
  *
- * NOT RECORDED IN THE ACTIVITY LOG, deliberately, to match the rest of
- * Expenses: no read there is recorded — opening the claim page is not, and
- * neither is downloading the claims spreadsheet. Recording reads is a decision
- * for all three together, not for this page alone.
+ * A RECEIPT THAT IS SERVED IS RECORDED IN THE ACTIVITY LOG (D-130, the owner,
+ * 11 November 2026: all looking at expense records is recorded — the claim
+ * page, the spreadsheet and a receipt). One `ExpenseReceiptOpen` record, naming
+ * its person (`Logger::activity()` fills `userID` from the session, #626) and
+ * carrying the receipt and claim NUMBERS only — never a file name, a label or
+ * an amount. It is written once it is decided the file WILL be sent and before
+ * a single header goes out, so it can never interrupt a download, and
+ * `Logger::activity()` never throws. A REFUSAL IS NOT RECORDED, and neither is
+ * a made-up number, so the two still leave the same trace (none): recording a
+ * refusal would make "not yours" and "not there" differ in the log, which is
+ * the existence leak the 404 exists to prevent. A receipt that is allowed but
+ * cannot be served writes an error record instead, not a look.
  *
  * A read-only GET, so it asks for no form token (the house rule for a
  * read-only GET; `giving/statements-download.php` is the same).
@@ -153,6 +161,18 @@ if ($path === null) {
     return;
 }
 $size = filesize($path);
+
+// 📝 D-130: a look at an expense record is recorded. Here, because it is now
+//    decided the file WILL be sent, and before the session is released and
+//    before any header goes out — `Logger::activity()` reads the session to
+//    name the person, and nothing it does can then interrupt the download (it
+//    catches everything itself). Numbers only: the label and the stored name
+//    are never written here (before #714 either could hold the uploader's own
+//    file name). The claim number goes in the WORDS, not in the log's
+//    `claimID` column: that column carries a link to `tblExpenseClaims` with
+//    no ON DELETE rule, so filling it would stop the API's delete from ever
+//    removing a claim somebody had looked at.
+Logger::activity('ExpenseReceiptOpen', 'Opened receipt #' . $fileID . ' of expense claim #' . $claimID);
 
 // 🔓 Let the session go before the file is sent: a 10 MB receipt on a slow
 //    connection must not hold every other tab of this person waiting.

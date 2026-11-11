@@ -33,6 +33,7 @@ declare(strict_types=1);
 use Portal\Core\ApiAuth;
 use Portal\Core\ApiResponse;
 use Portal\Core\App;
+use Portal\Core\Logger;
 use Portal\Core\Site;
 
 // 🔐 Require authentication for this API endpoint
@@ -73,8 +74,11 @@ $userId   = $isBearer === false ? (ApiAuth::actorUserId() ?? 0) : 0;
 $whereClause = 'WHERE EC.userID = ? AND EC.siteID = ?';
 $params      = [$userId, $siteId];
 $types       = 'ii';
+// Which of the two scopes was used, for the activity record below (D-130).
+$everyClaim  = false;
 
 if ($isBearer === true || ($showAll === true && App::isAdmin() === true)) {
+    $everyClaim  = true;
     $whereClause = 'WHERE EC.siteID = ?';
     $params      = [$siteId];
     $types       = 'i';
@@ -148,6 +152,23 @@ $dataStmt->close();
 
 // 📦 Build pagination metadata
 $totalPages = (int) ceil($totalCount / $limit);
+
+// 📝 D-130 (the owner, 11 November 2026): every look at expense records is
+//    recorded, and this list hands claim rows — claimants' names and e-mail
+//    addresses among them — out of the portal, so it is an export of claims
+//    like the spreadsheet. One `ExpenseClaimsListApi` record saying WHAT was
+//    asked for (whose claims, the status filter, the page) and how many rows
+//    came back; never the rows. It names a person when a signed-in session
+//    asked; a request made with an API key has no person, and the record then
+//    names none (#626 — `Logger::activity()` never invents one). A refused
+//    request is answered above and records nothing.
+Logger::activity(
+    'ExpenseClaimsListApi',
+    'Listed expense claims through the API: '
+        . ($everyClaim === true ? 'every claim of the organisation' : 'own claims')
+        . ($status !== '' ? ', status ' . $status : '')
+        . ', page ' . $page . ' of ' . max(1, $totalPages) . ', ' . count($claims) . ' claim(s)'
+);
 
 // ✅ Send successful response
 ApiResponse::success([

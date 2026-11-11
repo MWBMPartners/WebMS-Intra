@@ -14,6 +14,7 @@
  *
  * Each RECEIPT links to `expenses/receipt` (#867), which asks the same rule
  * as this page and sends the file; before #867 the list linked to nothing.
+ * Opening this page is recorded in the activity log (D-130); a refusal is not.
  *
  * It also shows the one-off message another Expenses page left for this
  * person (#587): the withdraw page sends people here, and until 12 October
@@ -35,6 +36,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
 use Portal\Core\ExpenseRules;
+use Portal\Core\Logger;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -111,6 +113,19 @@ if ($claim === null
     Router::renderError(404);
     return;
 }
+
+// 📝 D-130 (the owner, 11 November 2026): every look at an expense record is
+//    recorded — this page, the spreadsheet and a receipt. One `ExpenseClaimView`
+//    record per opening, naming its person (`Logger::activity()` fills `userID`
+//    from the session, #626) and carrying the claim NUMBER only: no title, no
+//    amount, no name. Written only HERE, once the page is going to be shown: a
+//    refusal and a made-up number are both answered above and both record
+//    nothing, so the log cannot tell them apart either (the existence-leak
+//    rule). The number is in the WORDS, not the log's `claimID` column, which
+//    links to `tblExpenseClaims` with no ON DELETE rule and would then stop
+//    `api/expenses/delete` removing a claim anybody had looked at.
+//    `Logger::activity()` catches everything itself, so it cannot stop the page.
+Logger::activity('ExpenseClaimView', 'Opened expense claim #' . $claimID);
 
 $isClaimant    = ((int) $claim['userID'] === $currentUserId);
 $isAdmin       = App::isAdmin();
@@ -409,15 +424,18 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <span class="d-md-none fw-semibold">File: </span>
                         <i class="fa-solid fa-file me-1"></i>
                         <?php
-                        // 📥 A RECEIPT opens (#867): a row with no stage, which only the
-                        //    submit handler writes. Anybody reading this line already
-                        //    passed this page's own `mayViewClaim()` above, which is the
-                        //    same rule the receipt address asks, so the link is drawn for
-                        //    exactly the people it will open for. A row WITH a stage is a
-                        //    version of the claim's generated PDF, which that address
-                        //    deliberately does not serve, so it stays plain text.
+                        // 📥 A RECEIPT opens (#867): a row with no stage (NULL), which
+                        //    only the submit handler writes. Anybody reading this line
+                        //    already passed this page's own `mayViewClaim()` above, which
+                        //    is the same rule the receipt address asks, so the link is
+                        //    drawn for exactly the people it will open for. A row WITH a
+                        //    stage is a version of the claim's generated PDF, which that
+                        //    address deliberately does not serve, so it stays plain text.
+                        //    EXACTLY `=== null`, the same test as the address's
+                        //    `stage IS NULL`: an empty-text stage (which nothing writes)
+                        //    would otherwise get a link the address answers with 404.
                         ?>
-                        <?php if ($f['stage'] === null || $f['stage'] === ''): ?>
+                        <?php if ($f['stage'] === null): ?>
                             <a href="<?php echo htmlspecialchars(Router::url('expenses/receipt') . '?claim=' . (int) $claim['claimID'] . '&id=' . (int) $f['fileID'], ENT_QUOTES, 'UTF-8'); ?>"
                                data-receipt-link="<?php echo (int) $f['fileID']; ?>"
                                title="Download this receipt"><?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?></a>
