@@ -577,7 +577,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
         <h1 class="mb-1"><i class="fa-solid fa-broom me-2"></i>Audit Retention Sweeper</h1>
-        <p class="text-secondary mb-0">Hard-delete activity logs and error rows older than the configured window.</p>
+        <?php // 📜 #940: this said "older than the configured window", which ignored an activity log
+              //    whose period is "never delete" (D-117): the clear-out deletes none of those. ?>
+        <p class="text-secondary mb-0" data-retention-subtitle="1">Hard-delete activity-log and error rows older than the period that applies to each: its organisation&rsquo;s, or the installation&rsquo;s for a row that belongs to none. Activity-log rows whose period is &ldquo;Never delete&rdquo; are not deleted.</p>
     </div>
     <a href="<?php echo htmlspecialchars(Site::url('admin'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary">
         <i class="fa-solid fa-arrow-left me-1"></i> Back to Admin

@@ -187,7 +187,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 108; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 109; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -221,6 +221,8 @@ const EXPECTED_CHECKS = 108; // 80 until #703 (D-016) added two: the two writers
                             // when the figure could not be read), L3 and L4 (the
                             // first steps' step 5 and the Retention page's card,
                             // pinned as rendered). 108.
+                            // Round 2 added L5 (the Retention page's subtitle,
+                            // which ignored "never"). 109.
 
 function refuse(string $why): never
 {
@@ -2824,9 +2826,12 @@ head('L. How long the activity log is kept, as a member reads it (#940; D-117, D
 //
 // The whole "Retention" section of the privacy page is ALSO pinned as rendered,
 // in every state, so an old sentence planted back BESIDE the new one fails too.
-// What this cannot drive: the "could not be read" state (it needs one read to
-// fail while the page still draws). Its words are compared by calling the class
-// directly, at the end.
+// The "could not be read" state is not reached over HTTP (it needs one read to
+// fail while the page still draws). It IS driven in this process, by L2: here
+// there is no `$mysqli`, so `App::db()` throws inside the class's own read, and
+// memberFactsForSite() must answer "unknown" with no figure. (#940 round 1 said
+// this state "cannot be driven" and compared only the words for hand-made
+// facts, so a catch that answered 365 days left every check green.)
 $alrLead = [
     'days'       => static fn (string $n): string => 'This organisation\'s activity log is deleted by a nightly clear-out after ' . $n
         . ', if that scheduled job has been set up. This organisation\'s administrators set that period, within the limit set for the whole portal.',
@@ -2903,13 +2908,26 @@ if (count(array_unique($alrSeen)) !== count($alrTable)) {
 }
 ok('L1 EVERY ACTIVITY-LOG STATE, IN ONE TABLE: for the installation\'s figure (days, one day, never) x this organisation\'s own (none, days, never), the privacy page and the privacy notice each say exactly the literal words written in this test, with the right state, and the privacy page\'s whole Retention section is its pinned markup (7 states) (#940)',
     count($alrTable) === 7 && $alrWrong === [], implode(' || ', $alrWrong));
-// The one state no request can reach: a figure that could not be read. Its words
-// are the class's own, compared with the literal text here.
+// A figure that could not be read, DRIVEN: this process has no `$mysqli`, so
+// the class's own read (`App::db()`) throws, and the REAL memberFactsForSite()
+// must answer "unknown" with no figure - premise first, because the words below
+// mean nothing unless that is the state a failed read produces. Then the words
+// both pages print for that answer, compared with the literal text here.
 require_once $repo . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ActivityLogRetention.php';
-$alrUnknown = ['state' => \Portal\Core\ActivityLogRetention::MEMBER_UNKNOWN, 'days' => 0];
-ok('L2 a figure that could not be read names NO figure on either page, and says it could not be read (#940)',
-    \Portal\Core\ActivityLogRetention::privacyPageWords($alrUnknown) === 'The activity log is deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless this organisation or the whole portal has chosen to keep it for ever. The period in force here could not be read just now.' . $alrTail
-    && \Portal\Core\ActivityLogRetention::privacyNoticeClause($alrUnknown) === 'the activity log, deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless this organisation or the whole portal has chosen to keep it for ever' . $alrClauseTail);
+$alrPremise = isset($GLOBALS['mysqli']) === false;
+try {
+    $alrUnknown = \Portal\Core\ActivityLogRetention::memberFactsForSite($db, ORG_A);
+} catch (\Throwable $e) {
+    $alrUnknown = ['threw' => get_class($e) . ': ' . $e->getMessage()];
+}
+$alrUnknownPage   = isset($alrUnknown['state']) === true ? \Portal\Core\ActivityLogRetention::privacyPageWords($alrUnknown) : '';
+$alrUnknownNotice = isset($alrUnknown['state']) === true ? \Portal\Core\ActivityLogRetention::privacyNoticeClause($alrUnknown) : '';
+ok('L2 a figure that could not be read: memberFactsForSite() itself answers "unknown" with no figure when its read fails (driven here, where the read throws), and both pages then name NO figure and say it could not be read (#940)',
+    $alrPremise === true
+    && $alrUnknown === ['state' => \Portal\Core\ActivityLogRetention::MEMBER_UNKNOWN, 'days' => 0]
+    && $alrUnknownPage === 'The activity log is deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless that period is for ever, which it is only where the whole portal keeps the log for ever and this organisation has not chosen a number of days of its own. The period in force here could not be read just now.' . $alrTail
+    && $alrUnknownNotice === 'the activity log, deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless that period is for ever (only where the whole portal keeps the log for ever and this organisation has not chosen a number of days of its own)' . $alrClauseTail,
+    json_encode([$alrPremise, $alrUnknown, $alrUnknownPage, $alrUnknownNotice]));
 
 // Two administrators' sentences #940 changed, pinned AS RENDERED so a reworded
 // one cannot pass unseen (each is checked by nothing else): step 5 of the first
@@ -2931,6 +2949,10 @@ $alrNote      = renderedRegion((string) $alrRetention['body'], $alrPick('p[data-
 ok('L4 the Retention page\'s activity-log card, for a global administrator, is exactly the pinned markup: this organisation\'s figure, the installation\'s, and which records follow the installation\'s (#940)',
     $alrRetention['status'] === 200 && renderedPin('retention page, activity log card', $alrNote),
     'HTTP ' . $alrRetention['status'] . ' ' . mb_substr($alrNote, 0, 600));
+$alrSubtitle = renderedRegion((string) $alrRetention['body'], $alrPick('p[data-retention-subtitle]'));
+ok('L5 the Retention page\'s subtitle says the clear-out deletes rows older than the period that applies to each, and none whose activity-log period is "Never delete" - exactly the pinned markup (#940 round 2)',
+    $alrRetention['status'] === 200 && renderedPin('retention page, subtitle', $alrSubtitle),
+    'HTTP ' . $alrRetention['status'] . ' ' . mb_substr($alrSubtitle, 0, 600));
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared
 // (#703 round 10: it sat after the help page's pin, before section K's, and so

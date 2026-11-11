@@ -267,10 +267,24 @@ function log_retention_days(string $key, int $siteId): int
  *
  * THE ROWS THAT BELONG TO NO ORGANISATION ARE SWEPT TOO, by the INSTALLATION's
  * own figure, and leaving them out would have been the quiet fault in this
- * change: `siteID` is empty on both tables for a record written before the
- * organisation was decided, for one written by a scheduled job, and for one
- * whose organisation has since been deleted (`fk_logs_site` and `fk_errors_site`
- * are both `ON DELETE SET NULL`). A loop over `tblSites` alone would have left
+ * change. HOW A ROW COMES TO HAVE NO ORGANISATION differs by table (#940,
+ * read from the code and measured by its independent check):
+ *   - `tblActivityLogs`: `Logger::activity()` binds `Site::id()`, which is a
+ *     whole number on every request and job (it starts at 1), and
+ *     `fk_logs_site` refuses 0 or an organisation that does not exist. So a
+ *     new record ALWAYS has one. An empty `siteID` comes only from the key's
+ *     `ON DELETE SET NULL` (its organisation was deleted), or from
+ *     `ActivityLogCleaner` copying the empty `siteID` of such a row. (This
+ *     used to say "written before the organisation was decided" and "written
+ *     by a scheduled job"; neither is true of this table.)
+ *   - `tblErrors`: empty when `Site` itself could not be loaded (a very early
+ *     fault - `Logger::errorPlatform()` catches that and records "not known"), when a
+ *     caller deliberately names no organisation
+ *     (`Logger::errorPlatformForSite(null, ...)`, as `SecretSettings` and
+ *     `FeedImporter` do for faults that belong to the whole installation),
+ *     and when its organisation is deleted (`fk_errors_site` is also
+ *     `ON DELETE SET NULL`).
+ * A loop over `tblSites` alone would have left
  * every one of them on disk for ever, which for the activity log means the
  * sender's address, the browser description and the session facts. They belong
  * to the installation, not to any customer, so the installation's administrator

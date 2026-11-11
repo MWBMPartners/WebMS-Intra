@@ -337,9 +337,15 @@ final class ActivityLogRetention
                 . 'deletes it.',
             self::MEMBER_INSTALLATION_NEVER => 'This portal keeps the activity log for ever, and this organisation '
                 . 'has not chosen a shorter period, so nothing deletes it.',
+            // #940 round 2: "unless this organisation or the whole portal has
+            // chosen to keep it for ever" was untrue - the whole portal's "for
+            // ever" is the LONGEST an organisation may keep it, not a rule for
+            // all, and an organisation that chose a number of days is still
+            // cleared after it (measured by the independent check).
             default => 'The activity log is deleted by a nightly clear-out after the period set for this '
-                . 'organisation, if that scheduled job has been set up, unless this organisation or the whole '
-                . 'portal has chosen to keep it for ever. The period in force here could not be read just now.',
+                . 'organisation, if that scheduled job has been set up, unless that period is for ever, which it '
+                . 'is only where the whole portal keeps the log for ever and this organisation has not chosen a '
+                . 'number of days of its own. The period in force here could not be read just now.',
         };
 
         return $period
@@ -370,8 +376,9 @@ final class ActivityLogRetention
             self::MEMBER_INSTALLATION_NEVER => 'the activity log, which this portal keeps for ever (this '
                 . 'organisation has not chosen a shorter period), so nothing clears it',
             default => 'the activity log, deleted by a nightly clear-out after the period set for this '
-                . 'organisation, if that scheduled job has been set up, unless this organisation or the whole '
-                . 'portal has chosen to keep it for ever',
+                . 'organisation, if that scheduled job has been set up, unless that period is for ever (only where '
+                . 'the whole portal keeps the log for ever and this organisation has not chosen a number of days '
+                . 'of its own)',
         };
 
         return $period . ' (a record made at another organisation on this portal follows that organisation\'s '

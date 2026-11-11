@@ -824,8 +824,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             period set for the organisation it was made under, which that organisation's
             administrator sets within the installation's, on Admin, Maintenance, Retention (a record
             that belongs to no organisation follows the installation's period).
-            <strong>Where the installation, or an organisation where the installation allows it, has
-            chosen to keep the activity log for ever, nothing deletes them.</strong>
+            <strong>Where the installation has chosen to keep the activity log for ever, nothing deletes
+            them in an organisation that has not chosen a number of days of its own, nor in records that
+            belong to no organisation</strong>; an organisation that has chosen a number of days is still
+            cleared after it. The installation's &ldquo;for ever&rdquo; is the longest an organisation may
+            keep the log, not a rule for all.
         </li>
         <li>
             <strong>Kept on purpose, because the words are about the organisation rather than the
