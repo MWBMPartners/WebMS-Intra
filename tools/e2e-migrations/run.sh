@@ -155,9 +155,17 @@
 #     another starting point one of them may not be seen, and that fails the phase)
 #   tools/e2e-migrations/run.sh --skip-stale   # skip the phase-4 catch-up simulation
 #   tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
+#   E2E_NAME_SUFFIX=p923a E2E_HOST_PORT=34923 tools/e2e-migrations/run.sh
+#     # a second run on the same machine: its own container, compose project and port
 #
-# Run one version at a time on one machine: both use the same container
-# name (portal-e2e-mysql) and the same host port (33069).
+# Two runs at once on one machine need DIFFERENT names and ports (#923).
+# E2E_NAME_SUFFIX (letters, digits, "_" and "-"; empty by default) is added to
+# the container name (portal-e2e-mysql-<suffix>) and to the compose project
+# (e2e-migrations-<suffix>); E2E_HOST_PORT (33069 by default) is the port
+# offered on this machine. With neither set, a run behaves exactly as it always
+# has. The harness REFUSES to start when a container of the chosen name, or
+# any container in the chosen compose project, already exists — running or
+# stopped — and it never removes a container it did not create.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -191,8 +199,62 @@ OLDEST_SCHEMA="${SCRIPT_DIR}/fixtures/full_schema-2026-03-06.sql"
 # database", and should say so in the commit.
 FIXTURE_BODY_CHECKSUM="957d8e5ccd186432ddb6b6a94c789f9a35596195"
 
+# -----------------------------------------------------------------------------
+# Which container, compose project and host port THIS run uses (#923)
+# -----------------------------------------------------------------------------
+# All three were fixed until 11 November 2026: one container name
+# (portal-e2e-mysql), one compose project and one host port (33069). The
+# project was fixed too, although nothing here named it: compose names a
+# project after the folder holding the compose file, and that folder is called
+# "e2e-migrations" in EVERY checkout. So two packages built side by side, each
+# in its own worktree, were one project with one container as far as Docker
+# could tell. Measured on 10 November 2026: #598's run started while #703's was
+# loading the install script, attached to that container, replaced its
+# database, and #703's run failed in phase 4 with "Unknown database
+# 'portal_e2e'"; #598's teardown then removed #703's container. Neither
+# package's code was at fault.
+#
+# ONE suffix decides both NAMES, so the two can never disagree: a name from one
+# run and a project from another is exactly how one run's teardown reaches the
+# other's container. The PORT cannot be worked out from a name, so it is its
+# own variable. Each defaults to today's value, so a plain run — and every job
+# in .github/workflows/e2e-migrations.yml, each on a machine of its own — is
+# unchanged.
+#
+# COMPOSE_PROJECT_NAME is IGNORED on purpose: this script must know its project
+# to check it is empty before starting, and to tear down only what it made, so
+# it names the project itself with `-p` on every compose call.
+E2E_NAME_SUFFIX="${E2E_NAME_SUFFIX:-}"
+# The narrower of the two rules that apply: compose accepts lower-case letters,
+# digits, "_" and "-" in a project name, starting with a letter or digit;
+# Docker accepts more in a container name. The anchors in the `docker ps
+# --filter name=` test further down are a regular expression, so a "." here
+# would match any character — another reason to keep the set this small.
+if [[ -n "${E2E_NAME_SUFFIX}" && ! "${E2E_NAME_SUFFIX}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+    echo "✗ E2E_NAME_SUFFIX must be lower-case letters, digits, '_' and '-', starting with a letter or digit — not '${E2E_NAME_SUFFIX}'" >&2
+    exit 64
+fi
+if [[ -n "${E2E_NAME_SUFFIX}" ]]; then
+    E2E_CONTAINER_NAME="portal-e2e-mysql-${E2E_NAME_SUFFIX}"
+    E2E_COMPOSE_PROJECT="e2e-migrations-${E2E_NAME_SUFFIX}"
+else
+    E2E_CONTAINER_NAME="portal-e2e-mysql"
+    E2E_COMPOSE_PROJECT="e2e-migrations"
+fi
+E2E_HOST_PORT="${E2E_HOST_PORT:-33069}"
+if [[ ! "${E2E_HOST_PORT}" =~ ^[1-9][0-9]{0,4}$ ]] || (( E2E_HOST_PORT > 65535 )); then
+    echo "✗ E2E_HOST_PORT must be a port number from 1 to 65535, not '${E2E_HOST_PORT}'" >&2
+    exit 64
+fi
+# docker-compose.yml reads the container name and the port; the project goes
+# on the command line (see COMPOSE_ARGS).
+export E2E_CONTAINER_NAME E2E_HOST_PORT
+COMPOSE_ARGS=(-p "${E2E_COMPOSE_PROJECT}" -f "${COMPOSE_FILE}")
+
 DB_HOST="127.0.0.1"
-DB_PORT="33069"
+# Nothing in this script connects through the host port — every query goes
+# through `docker exec` — so this is what a person connects to after --keep.
+DB_PORT="${E2E_HOST_PORT}"
 DB_USER="root"
 DB_PASS="e2e-root"
 DB_NAME="portal_e2e"
@@ -233,30 +295,66 @@ for arg in "$@"; do
     esac
 done
 
+# 1 once this run has checked that its container name and compose project are
+# both free and is about to call `docker compose up` — and not before. Until
+# then nothing in Docker is this run's, so teardown must touch nothing: the
+# refusal below exits through the same trap, and a teardown that ran `down`
+# there would remove the very container it had just refused to touch (#923).
+UP_ATTEMPTED=0
+
 trap teardown EXIT INT TERM
 
 teardown() {
     [[ -n "${SNAP_DIR:-}" ]] && rm -rf "${SNAP_DIR}" 2>/dev/null || true
+    if [[ "${UP_ATTEMPTED}" -ne 1 ]]; then
+        return 0
+    fi
     if [[ "${KEEP}" -eq 0 ]]; then
-        echo "→ Tearing down container"
-        docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans >/dev/null 2>&1 || true
+        echo "→ Tearing down container ${E2E_CONTAINER_NAME} (compose project ${E2E_COMPOSE_PROJECT})"
+        # Only containers in THIS run's compose project. The start refused to
+        # go ahead unless that project was empty, so every container in it now
+        # is one this run made — including one `up` CREATED but could not
+        # start (a host port already taken leaves it in the "Created" state).
+        #
+        # `docker stop`, then `docker rm -v`, and never `docker rm -f`:
+        # measured on 3 November 2026, a container that is force-removed can
+        # leave an anonymous volume behind where one that is stopped first
+        # leaves nothing. `-v` takes any volume of its own with it.
+        #
+        # This used to be `docker compose down -v --remove-orphans` alone,
+        # which removes every container compose counts as part of the
+        # project. With the project fixed, that was every checkout's harness
+        # container — which is how one package's teardown removed another's.
+        local id
+        for id in $(docker ps -aq --filter "label=com.docker.compose.project=${E2E_COMPOSE_PROJECT}"); do
+            docker stop "${id}" >/dev/null 2>&1 || true
+            docker rm -v "${id}" >/dev/null 2>&1 || true
+        done
+        # Then the network compose made for the project ("<project>_default").
+        # The containers are gone already, so this removes only that; no
+        # --remove-orphans, because an orphan in this project could only be
+        # somebody else's container that arrived after the check.
+        docker compose "${COMPOSE_ARGS[@]}" down -v >/dev/null 2>&1 || true
+        UP_ATTEMPTED=0
     else
-        echo "→ Leaving container up (--keep). Stop manually: docker compose -f ${COMPOSE_FILE} down -v"
+        echo "→ Leaving container ${E2E_CONTAINER_NAME} up (--keep), on host port ${E2E_HOST_PORT}. Remove it with:"
+        echo "    docker stop ${E2E_CONTAINER_NAME} && docker rm -v ${E2E_CONTAINER_NAME} && docker compose -p ${E2E_COMPOSE_PROJECT} -f '${COMPOSE_FILE}' down"
+        echo "  Until then a run with the same E2E_NAME_SUFFIX will refuse to start."
     fi
 }
 
 mysql_q() {
-    docker exec -i portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -h localhost --skip-column-names "${DB_NAME}" -e "$1"
+    docker exec -i "${E2E_CONTAINER_NAME}" "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -h localhost --skip-column-names "${DB_NAME}" -e "$1"
 }
 
 mysql_file() {
-    docker exec -i portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -h localhost "${DB_NAME}" < "$1"
+    docker exec -i "${E2E_CONTAINER_NAME}" "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -h localhost "${DB_NAME}" < "$1"
 }
 
 # Drops and recreates DB_NAME so each phase that needs a clean slate starts
 # from a genuinely empty database (also self-healing across --keep re-runs).
 reset_db() {
-    docker exec -i portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -e \
+    docker exec -i "${E2E_CONTAINER_NAME}" "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" -e \
         "DROP DATABASE IF EXISTS ${DB_NAME}; CREATE DATABASE ${DB_NAME} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
 }
 
@@ -270,7 +368,7 @@ wait_for_mysql() {
     # temporary init server runs with --skip-networking, so a TCP connect
     # only succeeds once the real, fully-initialised server is up.
     for i in $(seq 1 90); do
-        if docker exec portal-e2e-mysql "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" \
+        if docker exec "${E2E_CONTAINER_NAME}" "${E2E_DB_CLIENT}" -u"${DB_USER}" -p"${DB_PASS}" \
                 -h 127.0.0.1 --protocol=TCP -e "SELECT 1;" >/dev/null 2>&1; then
             echo " ready."
             return 0
@@ -286,7 +384,7 @@ wait_for_mysql() {
     # the server log, which says nothing about the real cause.
     echo "→ Could not reach the server with '${E2E_DB_CLIENT}'. Is that the right client for a '${E2E_DB_ENGINE}' image? (MariaDB 11.x has no 'mysql' program; MySQL has no 'mariadb' one.)" >&2
     echo "→ Last 30 lines of container log:" >&2
-    docker logs portal-e2e-mysql 2>&1 | tail -30 >&2 || true
+    docker logs "${E2E_CONTAINER_NAME}" 2>&1 | tail -30 >&2 || true
     exit 1
 }
 
@@ -1343,8 +1441,41 @@ check_missing_events_table() {
 # Start
 # -----------------------------------------------------------------------------
 
-echo "→ Bringing up ${E2E_DB_ENGINE} ${E2E_MYSQL_VERSION}"
-docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
+# Refuse to start when the chosen name, or anything in the chosen compose
+# project, already exists — running OR stopped (#923). Never attach to it and
+# never remove it: it may be another package's run part-way through, or one
+# somebody kept with --keep, and in either case it is not this run's to touch.
+# Before this, `up` found the existing container, counted it as its own and
+# carried on against somebody else's database.
+#
+# The name test is an anchored regular expression ("^/" because Docker stores
+# names with a leading slash), so "portal-e2e-mysql" does not also match
+# "portal-e2e-mysql-p923a". The suffix's character set (checked above) has
+# nothing in it a regular expression reads specially.
+#
+# What this cannot close: a container of the same name that appears in the
+# moment between this check and `up`. Two runs started with the same suffix in
+# the same second can still meet; give each run its own suffix.
+existing_by_name="$(docker ps -a --filter "name=^/${E2E_CONTAINER_NAME}\$" --format '{{.Names}} ({{.Status}})')"
+existing_in_project="$(docker ps -a --filter "label=com.docker.compose.project=${E2E_COMPOSE_PROJECT}" --format '{{.Names}} ({{.Status}})')"
+if [[ -n "${existing_by_name}" || -n "${existing_in_project}" ]]; then
+    {
+        echo "✗ refusing to start: this run would use container '${E2E_CONTAINER_NAME}' in compose project '${E2E_COMPOSE_PROJECT}', and Docker already has:"
+        printf '%s\n%s\n' "${existing_by_name}" "${existing_in_project}" | sort -u | sed '/^$/d; s/^/    /'
+        echo "  It may be another run in progress, or one left up with --keep. This run has not touched it."
+        echo "  To run alongside it, choose another name and port, for example:"
+        echo "    E2E_NAME_SUFFIX=<something-unique> E2E_HOST_PORT=<a free port> tools/e2e-migrations/run.sh"
+        echo "  If it is a container you left behind yourself, remove it first:"
+        echo "    docker stop ${E2E_CONTAINER_NAME} && docker rm -v ${E2E_CONTAINER_NAME}"
+    } >&2
+    exit 75
+fi
+
+echo "→ Bringing up ${E2E_DB_ENGINE} ${E2E_MYSQL_VERSION} as container ${E2E_CONTAINER_NAME} (compose project ${E2E_COMPOSE_PROJECT}, host port ${E2E_HOST_PORT})"
+UP_ATTEMPTED=1
+# No --remove-orphans: the project was empty a moment ago, so an "orphan" in
+# it now could only be another run's container (see the check above).
+docker compose "${COMPOSE_ARGS[@]}" up -d
 wait_for_mysql
 
 # Refuse to carry on unless the server is the version that was asked for.

@@ -263,12 +263,36 @@ E2E_DB_ENGINE=mariadb E2E_MYSQL_VERSION=11.4.13 tools/e2e-migrations/run.sh   # 
 E2E_BASE_REF=<commit, tag or branch> tools/e2e-migrations/run.sh   # phase 5 starts from there
 tools/e2e-migrations/run.sh --skip-stale   # phase 4 without its catching-up half
 tools/e2e-migrations/run.sh --keep         # leave the container up afterwards
+E2E_NAME_SUFFIX=p923a E2E_HOST_PORT=34923 tools/e2e-migrations/run.sh   # a second run alongside another
 ```
 
-Run one version at a time on one machine: both use the same container name
-(`portal-e2e-mysql`) and the same host port (`33069`). A whole run took
-between three and eight minutes on 12 October 2026, on a machine that was busy
-with other work.
+**Two runs at once on one machine need different names and ports (#923).**
+By default a run uses the container `portal-e2e-mysql`, the compose project
+`e2e-migrations` and host port `33069`, exactly as it always has. Set
+`E2E_NAME_SUFFIX` (lower-case letters, digits, `_` and `-`) to give a run its
+own container (`portal-e2e-mysql-<suffix>`) and compose project
+(`e2e-migrations-<suffix>`), and `E2E_HOST_PORT` to give it its own port.
+
+Until 11 November 2026 all three were fixed, and the compose project was fixed
+too without anybody naming it: compose names a project after the folder the
+compose file is in, which is `e2e-migrations` in every checkout. So two
+packages built side by side, each in its own worktree, shared one container.
+On 10 November 2026 one run attached to the other's database part-way through
+loading it, the first failed in phase 4 with "Unknown database 'portal_e2e'",
+and the second's teardown then removed the first one's container.
+
+The harness now **refuses to start** when a container of the chosen name, or
+any container in the chosen compose project, already exists — running or
+stopped — and says how to choose another name. It never attaches to that
+container and never removes it. Its teardown stops and removes only the
+containers in its own compose project (which it checked was empty before
+starting), with `docker stop` then `docker rm -v`, and then the project's
+network. One gap it cannot close: two runs started with the SAME suffix in the
+same second can both pass the check before either has created anything. Give
+each run its own suffix.
+
+A whole run took between three and eight minutes on 12 October 2026, on a
+machine that was busy with other work.
 
 A passing run looked like this on 12 October 2026 (the numbers grow with every
 migration; lines of `1` and password warnings from the `mysql` client are left
@@ -368,9 +392,12 @@ script plus the replay.
 
 - `docker-compose.yml` takes its image from `E2E_DB_ENGINE` (the repository
   name, `mysql` or `mariadb`) and `E2E_MYSQL_VERSION` (the tag: 8.0.36 by
-  default; always an exact version, never a moving tag), offers port `33069`
-  on the host (an unusual one, so it does not clash with a local MySQL), and
-  keeps the database in memory so every run starts empty.
+  default; always an exact version, never a moving tag), its container name
+  from `E2E_CONTAINER_NAME` and its host port from `E2E_HOST_PORT` (both set
+  by `run.sh`, defaulting to `portal-e2e-mysql` and `33069` — an unusual port,
+  so it does not clash with a local MySQL), and keeps the database in memory
+  so every run starts empty. `run.sh` passes the compose project with `-p` on
+  every call, so `COMPOSE_PROJECT_NAME` in your environment does not change it.
 - `run.sh` starts the container, waits until a signed-in query works
   (`wait_for_mysql`), then asks the server its own version and refuses to
   carry on if it is not the one asked for. Without that, a variable that never

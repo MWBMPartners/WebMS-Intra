@@ -21,7 +21,16 @@ services:
     # "mariadb"), so one compose file serves both. run.sh works out both
     # halves and exports them before calling docker compose.
     image: ${E2E_DB_ENGINE:-mysql}:${E2E_MYSQL_VERSION:-8.0.36}
-    container_name: portal-e2e-mysql
+    # The NAME comes from run.sh (#923), which works it out from
+    # E2E_NAME_SUFFIX and exports it as E2E_CONTAINER_NAME. With no suffix it
+    # is "portal-e2e-mysql", the name this harness has always used. It used to
+    # be fixed text here, so two runs on one machine — two packages built side
+    # by side, each in its own checkout — got the SAME container: the second
+    # attached to the first one's database mid-load and then tore it down
+    # (measured 10 November 2026, #703's run failing in phase 4 with "Unknown
+    # database 'portal_e2e'"). run.sh refuses to start when a container of the
+    # chosen name already exists, so it never attaches to somebody else's.
+    container_name: ${E2E_CONTAINER_NAME:-portal-e2e-mysql}
     environment:
       # The MariaDB image still honours the MYSQL_* names for compatibility
       # (checked against mariadb:11.4, 28 October 2026), so these serve both
@@ -31,7 +40,13 @@ services:
       MYSQL_USER: portal
       MYSQL_PASSWORD: e2e-portal
     ports:
-      - "33069:3306"  # uncommon host port so we don't clash with local mysql
+      # An uncommon host port so we don't clash with a local MySQL. It comes
+      # from run.sh as E2E_HOST_PORT (#923), defaulting to 33069, the port this
+      # harness has always offered; a second run on the same machine needs a
+      # port of its own. Nothing in run.sh connects through it (every query
+      # goes through `docker exec`), but compose still has to bind it, and a
+      # port already taken makes `up` fail.
+      - "${E2E_HOST_PORT:-33069}:3306"
     # The --default-authentication-plugin flag used to be set here. MySQL
     # 8.4 removed that server option and refuses to start when it is given
     # one it does not recognise ("unknown variable
