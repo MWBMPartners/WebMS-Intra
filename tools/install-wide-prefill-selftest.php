@@ -48,9 +48,17 @@
  *     sends what the page drew — which is what is posted here.)
  *   - It does not prove the pages' "Test connection" buttons do anything; they
  *     reach outside services and are deliberately never pressed.
- *   - Secrets are seeded installation-wide only. That a blank secret box keeps
- *     the stored secret is checked (step 4 covers those rows too); what a page
- *     does with an ORGANISATION's own secret is not.
+ *   - Secrets are seeded at BOTH levels (the installation's and A's own). That
+ *     a blank secret box keeps both is checked (steps 4 and 5 cover those rows),
+ *     and so is that neither secret reaches the page anywhere (check 10) and
+ *     that every password box is drawn empty (check 11). What a page does with
+ *     an organisation's secret beyond not showing it is not.
+ *   - Check 09 judges the NOTICE only: the rest of the page legitimately shows
+ *     the installation's values (in its boxes) and A's (in the "in use here"
+ *     cards), so "no seeded value anywhere" would be untrue of a correct page.
+ *     It matches a value as a whole token, so a value too ordinary to tell
+ *     apart from the notice's own words would not be seen; none of the seeded
+ *     values is such a word, which is why they were chosen as they were.
  *   - One worker, one request at a time (the built-in server), so nothing here
  *     says anything about two administrators saving at once.
  *
@@ -721,6 +729,62 @@ function setOrg(string $key, ?string $value): void
     );
 }
 
+/**
+ * 🔑 The test secret seeded for one key at one level. Distinctive on purpose:
+ * long, and unlike anything a page prints, so finding it means it leaked.
+ */
+function secretFor(string $whose, string $key): string
+{
+    return 'selftest-' . ($whose === 'installation' ? 'instsecret' : 'orgsecret') . '-' . $key;
+}
+
+/** The text of the install-wide notice on a page, or null when there is none. */
+function noticeText(string $html): ?string
+{
+    $doc    = Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $notice = $doc->querySelector('[data-install-wide-notice]');
+
+    return $notice === null ? null : (string) $notice->textContent;
+}
+
+/**
+ * Does `$text` hold `$value` as a whole token? Whole, so that a value such as
+ * `org` is not found inside the notice's own word "organisation", and `1` not
+ * inside `ms365`. The characters that count as "part of the same token" are
+ * letters, digits and `_ . @ -`; anything else (a space, `=`, `:`, a bracket)
+ * separates, so `sms.enabled=1` or `name (value)` is caught.
+ */
+function holdsValue(string $text, string $value): bool
+{
+    if ($value === '') {
+        return false;
+    }
+
+    return preg_match('/(?<![A-Za-z0-9_.@-])' . preg_quote($value, '/') . '(?![A-Za-z0-9_.@-])/', $text) === 1;
+}
+
+/**
+ * Every password box on a page drawn with a non-empty `value`, named. A
+ * password box is filled only by the page that drew it, so a value here is a
+ * secret handed to whoever opens the page (P12 put the installation's API key
+ * into one and left every earlier check green).
+ *
+ * @return list<string>
+ */
+function filledPasswordBoxes(string $html): array
+{
+    $doc   = Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $named = [];
+    foreach ($doc->querySelectorAll('input') as $input) {
+        if (strtolower((string) ($input->getAttribute('type') ?? '')) === 'password'
+            && (string) ($input->getAttribute('value') ?? '') !== '') {
+            $named[] = (string) ($input->getAttribute('name') ?? '(no name)');
+        }
+    }
+
+    return $named;
+}
+
 // =============================================================================
 // 🌍 Build the world
 // =============================================================================
@@ -908,8 +972,8 @@ foreach ($pages as $label => $page) {
         setOrg($key, $org);
     }
     foreach ($page['secrets'] as $key) {
-        setInstall($key, 'selftest-secret-' . $key);
-        setOrg($key, null);
+        setInstall($key, secretFor('installation', $key));
+        setOrg($key, secretFor('organisation', $key));
     }
     $snapshot = static function () use ($page): array {
         $keys = array_merge(array_column($page['seed'], 0), $page['secrets']);
@@ -964,6 +1028,58 @@ foreach ($pages as $label => $page) {
         'hiding the difference is how the old fault stayed invisible; looked for the notice and ' . $differing[0][0]
     );
 
+    // 🔒 The notice names settings and NEVER their values: a value here could be
+    //    an API key, and the notice is drawn for every global administrator who
+    //    opens the page anywhere. Every seeded value, the installation's and A's,
+    //    must be absent from it (P11 planted the value beside each name and left
+    //    every earlier check green).
+    $notice  = noticeText($shown['body']) ?? '';
+    $leaked  = [];
+    foreach ($page['seed'] as [$key, $control, $install, $org]) {
+        foreach (['installation' => $install, 'organisation' => $org] as $whose => $value) {
+            if ($value !== null && holdsValue($notice, $value) === true) {
+                $leaked[] = sprintf('%s value of %s (%s)', $whose, $key, var_export($value, true));
+            }
+        }
+    }
+    foreach ($page['secrets'] as $key) {
+        foreach (['installation', 'organisation'] as $whose) {
+            if (holdsValue($notice, secretFor($whose, $key)) === true) {
+                $leaked[] = sprintf('%s secret %s', $whose, $key);
+            }
+        }
+    }
+    ok(
+        "{$label}: 09 the notice shows setting NAMES only, none of their values",
+        $notice !== '' && $leaked === [],
+        $notice === '' ? 'no notice to judge (04 explains why)' : 'the notice holds ' . implode('; ', $leaked)
+    );
+
+    // 🔐 No secret, at either level, anywhere in what was sent — markup, a
+    //    password box's `value=`, a script, an attribute. Searched in the raw
+    //    answer AND with its HTML entities undone, so an escaped copy counts.
+    $decoded = html_entity_decode($shown['body'], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $exposed = [];
+    foreach ($page['secrets'] as $key) {
+        foreach (['installation', 'organisation'] as $whose) {
+            $secret = secretFor($whose, $key);
+            if (str_contains($shown['body'], $secret) === true || str_contains($decoded, $secret) === true) {
+                $exposed[] = $whose . ' ' . $key;
+            }
+        }
+    }
+    ok(
+        "{$label}: 10 no stored secret, the installation's or the organisation's, appears anywhere in the page",
+        $exposed === [],
+        'found in the page: ' . implode('; ', $exposed)
+    );
+    $filledBoxes = filledPasswordBoxes($shown['body']);
+    ok(
+        "{$label}: 11 every password box on the page is drawn EMPTY",
+        $filledBoxes === [],
+        'password boxes drawn with a value: ' . implode(', ', $filledBoxes)
+    );
+
     // 3️⃣ Save, untouched.
     $saved = req($jar, 'POST', postPath($form['action'], $page['path']), encodePairs($form['pairs']));
     $after = $snapshot();
@@ -1016,6 +1132,9 @@ foreach ($pages as $label => $page) {
             setInstall($key, (string) $org);   // agree, so the app stays open and nothing differs
             continue;
         }
+        setOrg($key, null);
+    }
+    foreach ($page['secrets'] as $key) {
         setOrg($key, null);
     }
     $plain = req($jar, 'GET', $page['path']);

@@ -38,7 +38,8 @@ $settings = is_array($settings) === true ? $settings : [];
 $installWideDiffering = InstallationSettings::differsHere('ai_assist');
 // 💷 The summary cards say what THIS organisation is really held to and using,
 //    which is what AiAssistant::improve() reads: the merged settings. Kept apart
-//    from the boxes on purpose, and labelled as this organisation's.
+//    from the boxes on purpose. Only the provider card's label says so ("in use
+//    here"); the cap card's wording ("of £X cap") was left as it was.
 $inForce         = App::settings()['ai_assist'] ?? [];
 $inForce         = is_array($inForce) === true ? $inForce : [];
 $capInForce      = (int) ($inForce['monthCapPence'] ?? 5000);

@@ -50,6 +50,5 @@
 # inherited `$SETTINGS` variable, or through a variable assigned
 # `App::settings()`, is still invisible: widening that branch was measured and
 # cried wolf on `admin/integrations/email.php`, which reads the Microsoft 365
-# mailbox only to SHOW the sending address. `admin/integrations/index.php` is
-# caught by its other reads. This limit is stated in the check's own header too,
-# because this is the file somebody works through.
+# mailbox only to SHOW the sending address. This limit is stated in the
+# check's own header too, because this is the file somebody works through.

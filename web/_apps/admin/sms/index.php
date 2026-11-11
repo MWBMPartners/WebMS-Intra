@@ -38,7 +38,8 @@ $settings = is_array($settings) === true ? $settings : [];
 $installWideDiffering = InstallationSettings::differsHere('sms');
 // 📊 The two summary cards say what THIS organisation is really held to and sending
 //    with, which is what Sms::send() reads: the merged settings. Kept apart from the
-//    boxes on purpose, and labelled as this organisation's.
+//    boxes on purpose. Only the provider card's label says so ("in use here"); the
+//    cap card's wording ("/ N cap") was left as it was.
 $inForce         = App::settings()['sms'] ?? [];
 $inForce         = is_array($inForce) === true ? $inForce : [];
 $dailyCapInForce = (int) ($inForce['dailyCap'] ?? 100);

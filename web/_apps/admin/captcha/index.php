@@ -285,7 +285,14 @@ $providerIcon = static function (string $key): string {
 <div class="alert alert-info">
     <i class="fa-solid fa-circle-info me-1"></i>
     <strong>How it works:</strong>
-    The active provider is the first item below that has both a site key and a secret key.
+    <?php // 🏢 "for the installation" is load-bearing (#943): the list below is the
+          //    INSTALLATION's order and keys, while "Active" is the provider THIS
+          //    organisation's forms use, and an organisation's own settings can
+          //    make those differ. Without the clause the sentence is untrue in
+          //    exactly the case the notice above exists for. ?>
+    For the installation, the active provider is the first item below that has both a
+    site key and a secret key; this organisation's own settings may choose differently
+    (the notice above says when they do).
     <?php
     // 🔒 "Drag to re-order" is only true for somebody who may save the order.
     //    It used to be shown to everybody. An administrator of one organisation
