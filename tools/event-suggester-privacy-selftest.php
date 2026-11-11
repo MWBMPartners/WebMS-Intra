@@ -47,7 +47,7 @@
  *      check goes red), the old `submittedBy` put back (A's webhook check
  *      goes red); then everything taken out again and green.
  *
- * #968 ADDED TWO SECTIONS AND THEIR PLANTS
+ * #968 ADDED THREE SECTIONS AND THEIR PLANTS
  *   M  the detail answer's working notes: `moderationNote` and the account
  *      numbers of whoever created, edited, suggested, moderated and last
  *      changed the status of the event, and `deletedAt`. A published,
@@ -55,26 +55,49 @@
  *      portal writes `moderationNote` today) is read by an ordinary member, a
  *      key holding only `events:read` (both addresses), a key holding
  *      `events:write`, a global administrator and an administrator of this
- *      organisation only. The first three get NONE of the seven fields and
- *      the note nowhere in the answer; the last three get all seven, with the
- *      note as written and every account number the right one. Measured
- *      against f9197eb9 (the code before #968): six red — the member and the
- *      read-only key at both addresses were sent all seven, the note included.
+ *      organisation only. The member (at BOTH addresses — the v1 one was
+ *      added in round 2 of #968's check, X6) and the read-only key (both
+ *      addresses) get NONE of the seven fields and the note nowhere in the
+ *      answer; the other three get all seven, with the note as written and
+ *      every account number the right one. Measured against f9197eb9 (the
+ *      code before #968), before the v1 member probe existed: six red — the
+ *      member and the read-only key at both addresses were sent all seven, the
+ *      note included.
  *   R  the event page (`/calendar/event`) and the calendar download
  *      (`/calendar/export`: one event, a series, the whole calendar) now
  *      name their columns instead of reading the whole row with `e.*`. Each
- *      is fetched for a public, a members-only, an all-day, a cancelled, a
- *      fully-shown imported, a briefly-shown imported and a repeating event,
- *      by a visitor, a member and an administrator; the right words must be
- *      there, the visitor's name and address and the note must be nowhere,
- *      and the same code fetched twice must come out identical once the
- *      random tokens are taken out (R8 — without it P13 would prove nothing).
- *   P9-P16  each of the seven field names taken off the detail handler's
- *      list, one at a time (the member and the read-only key are then sent
- *      exactly that field); the gate switched off both ways; `e.*` put back
- *      in the page and all three download lookups — every page and file must
- *      come out IDENTICAL to section R's, which is the before-and-after
- *      comparison; and a list one column too short, on each page, must show.
+ *      is fetched for a public (with a what3words address), a members-only,
+ *      an all-day, a cancelled, a fully-shown imported, a briefly-shown
+ *      imported, a what3words-only and a repeating event, by a visitor, a
+ *      member and an administrator; the right words must be there, the
+ *      visitor's name and address and the note must be nowhere, and the same
+ *      code fetched twice must come out identical once the random tokens are
+ *      taken out (R8 — without it P13 would prove nothing).
+ *      WHAT R PROVES IS NARROWER THAN IT LOOKS, and round 1 of #968's check
+ *      showed it: the first version had no what3words address in any event,
+ *      so P13 ("identical with `e.*` put back") passed while the page's list
+ *      left out `locationW3W` and every what3words link and one whole
+ *      "Where" card were gone. R proves the named lists lose nothing FOR ITS
+ *      OWN EVENTS. Section C is what checks the lists themselves.
+ *   C  the column lists, checked against the SOURCE with PHP's tokeniser
+ *      (no database, no server): every `$event['…']` the page reads, and every
+ *      `$row`/`$r`/`$ev`/`$events[0]` key the download reads, must be in that
+ *      page's SELECT list, every listed column must be read, the download's
+ *      three lists must agree, and every other use of the row (a key built at
+ *      run time, the row passed to a function or copied) is pinned, so a new
+ *      one fails until a person has looked at it. Its own header says what it
+ *      cannot see.
+ *   P8b-P22  a gate that lets a signed-in member through at v1 alone (P8b);
+ *      each of the seven field names taken off the detail handler's list, one
+ *      at a time (the member and the read-only key are then sent exactly that
+ *      field); the gate switched off both ways; `e.*` put back in the page and
+ *      all three download lookups — every page and file must come out
+ *      identical to section R's for R's own events; a list one column too
+ *      short, on each page, must show in R; and section C's own plants
+ *      (P17-P22): `locationW3W` and `cancelReason` off the page's list, an
+ *      unread column added, the row copied and read by a run-time key,
+ *      `updatedAt` off one of the download's three lists, and a download read
+ *      of a column none of them has.
  *
  * WHAT IT CANNOT DO, said plainly
  *   - The webhook body is read from `tblWebhookDeliveries.payload`, not caught
@@ -91,7 +114,8 @@
  *     columns; that half is guarded only by the column lists being written
  *     out in the source, which tools/audit-checks/check_sql_columns.py reads.
  *   - Section R's "identical" covers the events it makes. A page branch that
- *     needs a column none of them exercises would not be caught by P13.
+ *     needs a column none of them exercises is not caught by P13 — it is
+ *     caught by section C, which reads the source instead.
  *
  * MEASURING THE CODE BEFORE #963. Set SELFTEST_WEB_FROM to a folder holding an
  * older `web/` (for example `git archive <commit> web | tar -x -C <dir>`); the
@@ -818,6 +842,11 @@ $readModerated = static function () use ($http, $signIn, $apiKey, $writeKey, $mo
     $signIn('siteadmin');
     return [
         'member'    => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['jar' => 'member'])),
+        // Round 1 of #968's check (X6): the v1 address was asked only with a
+        // key, so a gate that let a signed-in member through at v1 alone
+        // would have passed. ApiRouter defines PORTAL_API_V1 there, which is
+        // exactly the kind of difference such a gate would key on.
+        'memberV1'  => $fieldsSeen($http('GET', '/api/v1/events/' . $moderated, [], ['jar' => 'member'])),
         'readKey'   => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['bearer' => $apiKey])),
         'readKeyV1' => $fieldsSeen($http('GET', '/api/v1/events/' . $moderated, [], ['bearer' => $apiKey])),
         'writeKey'  => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['bearer' => $writeKey])),
@@ -832,8 +861,8 @@ $wantIds = [
 ];
 $checkModerated = static function (string $prefix, array $m) use ($wantIds): void {
     echo "{$prefix}. The moderation note and the \"who did what\" numbers (#968)\n";
-    foreach (['member' => 'an ordinary member, signed in', 'readKey' => 'a key holding only events:read',
-              'readKeyV1' => 'the same key at /api/v1/events/{id}'] as $k => $who) {
+    foreach (['member' => 'an ordinary member, signed in', 'memberV1' => 'the same member at /api/v1/events/{id}',
+              'readKey' => 'a key holding only events:read', 'readKeyV1' => 'the same key at /api/v1/events/{id}'] as $k => $who) {
         echo "      ({$who} was sent: " . json_encode($m[$k]['fields']) . ")\n";
         check("{$prefix}1-{$k} {$who} reads THIS event", $m[$k]['isTheEvent'], true);
         check("{$prefix}2-{$k} ...with none of the seven fields", $m[$k]['fields'], []);
@@ -888,6 +917,15 @@ $rEvents = [
         'locationWebURL' => 'https://hall.selftest.invalid/', 'locationPhone' => '01234 567890',
         'locationGeoLat' => '52.2053000', 'locationGeoLng' => '0.1218000',
         'hostOrgName' => 'P968 Host Trust', 'partnerOrgs' => '["P968 Partner A","P968 Partner B"]', 'capacity' => 40,
+        'locationW3W' => 'filled.count.soap',
+    ]),
+    // Round 1 of #968's check: an event whose ONLY location is a what3words
+    // address. With `locationW3W` left off the page's list, its whole "Where"
+    // card disappeared and nothing warned.
+    'w3wOnly' => $p968Event($private + [
+        'eventName' => 'P968 meet at the gate', 'isPublic' => 1,
+        'startDateTime' => $day(7, '08:00:00'), 'endDateTime' => $day(7, '09:00:00'),
+        'locationW3W' => 'index.home.raft',
     ]),
     'members' => $p968Event($private + [
         'eventName' => 'P968 members meeting', 'isPublic' => 0,
@@ -1014,6 +1052,10 @@ $checkRenders = static function (string $prefix, array $r) use ($shown): void {
          $shown($r, 'visitor page public', '01234 567890'), $shown($r, 'visitor page public', 'hall.selftest.invalid')],
         [true, true, true, true, true, true]);
     check("{$prefix}2 the cancelled event says why, to a visitor", $shown($r, 'visitor page cancelled', 'P968 the roof leaks'), true);
+    check("{$prefix}2b the what3words address shows as a link, and an event with ONLY a what3words address still has its \"Where\" card",
+        [$shown($r, 'visitor page public', '///filled.count.soap'), $shown($r, 'visitor page w3wOnly', '///index.home.raft'),
+         $shown($r, 'member page w3wOnly', '>Where</h5>')],
+        [true, true, true]);
     check("{$prefix}3 a member sees the members-only event; a visitor is refused it",
         [$shown($r, 'member page members', 'P968 members meeting'), $r['visitor page members'][0]], [true, 404]);
     check("{$prefix}4 the imported event shows in full; the brief one shows its title to a visitor but not its details",
@@ -1044,6 +1086,230 @@ if ($rendersDiffer($rClean, $rAgain) !== []) {
     echo '      first difference: ' . $firstDifference($rClean, $rAgain, $rendersDiffer($rClean, $rAgain)) . "\n";
 }
 
+
+// ── C. The column lists are complete, checked by PHP's own tokeniser (#968) ──
+// Round 1 of #968's check found the event page's list one column short:
+// `locationW3W`, read twice with `?? ''` and `?? null`, so nothing warned and
+// every what3words link vanished. The list had been built from a search for
+// `$event['…']` that matched LETTERS only, and `W3W` holds a digit. Section R
+// could not see it either, because none of its events had a what3words
+// address: a fixture shows only what it exercises. So this section asks the
+// SOURCE, mechanically, with token_get_all() rather than any pattern:
+//
+//   - every `$var['literal']` read of a variable that holds a row of the
+//     lookup, and every `$events[0]['literal']`;
+//   - every subscript that is NOT a literal string (a key built at run time),
+//     which no reader of source can resolve — pinned below with its reason;
+//   - every other use of the variable (copied to another name, passed to a
+//     function, put in a list) — pinned below as a short token shape, so a NEW
+//     way the row travels fails here until a person has looked at it.
+//
+// and requires the page's SELECT list and those reads to match in BOTH
+// directions. The select list itself is read from the statement's text; the
+// identifiers are backticked, so `\w` (letters, digits, underscore) finds
+// them whole.
+//
+// WHAT IT CANNOT SEE, said plainly, and checked by hand on 11 November 2026:
+//   - A key built at run time. The one there is (`$row[$rendered]` in
+//     export.php's `$patternStillTrue`) walks a literal list of nine names, all
+//     in the list, and reads the SERIES-RUN query's rows (`$seriesRunForViewer`,
+//     which names its own columns), not this lookup's.
+//   - A row passed into a function in another file. The only one is
+//     EventVisibility::redact() (both files), which empties a fixed list of
+//     columns only where present and adds `detailsLimited`; it reads nothing.
+//     Ical::emit() is never given a row: it is given `$entry` arrays built
+//     from the keys collected here.
+//   - Reads under a different variable name. export.php re-uses `$row` and
+//     `$r` for the series-run rows; their keys are collected too, so they are
+//     counted against this list — over-strict, never blind, and every one of
+//     them is in the list today. No template file reads `$event`
+//     (`grep -n '\$event\b' web/_core/templates/*.php web/_core/partials/*.php`
+//     finds nothing).
+//   - `extract()`, `$$name`, `$GLOBALS`: each would show up as a new bare use
+//     (the row passed to a function) and fail the pin, not slip past.
+
+/**
+ * Every read of the row variables in one PHP source, by PHP's tokeniser.
+ *
+ * @param list<string> $rowVars Variable names, with the `$`.
+ * @return array{keys: list<string>, runtime: list<string>, bare: list<string>}
+ */
+function p968RowReads(string $source, array $rowVars): array
+{
+    $tokens = array_values(array_filter(
+        token_get_all($source),
+        static fn ($t): bool => is_array($t) === false || in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true) === false
+    ));
+    $text = static fn ($t): string => is_array($t) === true ? (string) $t[1] : (string) $t;
+    $keys = [];
+    $runtime = [];
+    $bare = [];
+    $n = count($tokens);
+    for ($i = 0; $i < $n; $i++) {
+        $t = $tokens[$i];
+        if (is_array($t) === false || $t[0] !== T_VARIABLE || in_array($t[1], $rowVars, true) === false) {
+            continue;
+        }
+        $k = $i + 1;
+        // Step over integer subscripts: `$events[0]['eventName']`.
+        while ($text($tokens[$k] ?? '') === '[' && is_array($tokens[$k + 1] ?? null) === true
+            && $tokens[$k + 1][0] === T_LNUMBER && $text($tokens[$k + 2] ?? '') === ']') {
+            $k += 3;
+        }
+        if ($text($tokens[$k] ?? '') === '[') {
+            $next = $tokens[$k + 1] ?? null;
+            if (is_array($next) === true && $next[0] === T_CONSTANT_ENCAPSED_STRING && $text($tokens[$k + 2] ?? '') === ']') {
+                $keys[] = substr($next[1], 1, -1);
+                continue;
+            }
+            if ($text($next) !== ']') {
+                $runtime[] = $t[1] . '[' . $text($next) . ']';
+                continue;
+            }
+        }
+        // A bare use: its shape is the two tokens before and the three after,
+        // so an edit right beside one changes its shape and it must be looked
+        // at again — a cost accepted for a pin a person has checked.
+        $shape = [];
+        for ($j = max(0, $i - 2); $j <= min($n - 1, $i + 3); $j++) {
+            $shape[] = $j === $i ? '<' . $t[1] . '>' : $text($tokens[$j]);
+        }
+        $bare[] = implode(' ', $shape);
+    }
+    $keys = array_values(array_unique($keys));
+    sort($keys);
+    $bare = array_values(array_unique($bare));
+    sort($bare);
+    $runtime = array_values(array_unique($runtime));
+    sort($runtime);
+    return ['keys' => $keys, 'runtime' => $runtime, 'bare' => $bare];
+}
+
+/**
+ * The names a SELECT list hands to PHP: the column, or its `AS` name. Reads
+ * every statement in `$source` that starts with `$startsWith` up to `FROM`.
+ *
+ * @return list<list<string>> One sorted list per statement found.
+ */
+function p968SelectLists(string $source, string $startsWith): array
+{
+    $lists = [];
+    $at = 0;
+    while (($pos = strpos($source, $startsWith, $at)) !== false) {
+        $end = strpos($source, 'FROM `tblEvents`', $pos);
+        if ($end === false) {
+            break;
+        }
+        preg_match_all('/`(\w+)`\.`(\w+)`(?:\s+AS\s+`(\w+)`)?/', substr($source, $pos, $end - $pos), $m, PREG_SET_ORDER);
+        $names = array_map(static fn (array $x): string => ($x[3] ?? '') !== '' ? $x[3] : $x[2], $m);
+        sort($names);
+        $lists[] = $names;
+        $at = $end;
+    }
+    return $lists;
+}
+
+/** Names the code reads that come from no column: the `%s` alias, and what redact() adds. */
+const P968_NOT_COLUMNS = ['canSeeFull', 'detailsLimited'];
+
+/** Every bare use of the row in event.php, each looked at by a person (11 November 2026). */
+const P968_EVENT_BARE = [
+    ') ; <$event> = null ;',                   // starts empty
+    ') ; <$event> = $stmt ->',                 // the lookup's one row
+    '$isVisibleStatus = <$event> !== null &&', // found or not
+    '$visible = <$event> !== null &&',         // found or not
+    '; } <$event> = EventVisibility ::',       // replaced by redact()'s copy
+    'redact ( <$event> , $canSeeFull )',       // redact(): empties, reads nothing
+];
+
+/** Every bare use of a row variable in export.php, each looked at by a person. */
+const P968_EXPORT_BARE = [
+    '0 ; <$events> = [ ]',                     // starts empty
+    ') ; <$row> = null ;',                     // starts empty
+    ') ; <$row> = $stmt ->',                   // the single-event lookup's row
+    'if ( <$row> !== null &&',                 // the draft rule
+    ') { <$row> = null ;',                     // a draft refused
+    'if ( <$row> === null )',                  // nothing for this viewer
+    '; } <$events> [ ] =',                     // collected
+    '] = <$row> ; } elseif',                   // collected
+    'while ( <$r> = $result ->',               // series / whole-calendar rows
+    ') { <$events> [ ] =',                     // collected
+    '] = <$r> ; } $stmt',                      // collected
+    'count ( <$events> ) === 0',               // nothing for this viewer
+    '$rows as <$row> ) { if',                  // SERIES-RUN rows (another query)
+    '( array <$r> ) : string',                 // SERIES-RUN rows (another query)
+    'foreach ( <$events> as $ev )',            // each row becomes an entry
+    '$events as <$ev> ) { $canSeeFull',        // each row becomes an entry
+    '1 ; <$ev> = EventVisibility ::',          // replaced by redact()'s copy
+    'redact ( <$ev> , $canSeeFull )',          // redact(): empties, reads nothing
+];
+
+/** Every key built at run time, each looked at by a person. */
+const P968_EXPORT_RUNTIME = [
+    '$row[$rendered]', // $patternStillTrue: nine literal names, SERIES-RUN rows
+];
+
+/**
+ * The whole of section C for one pair of sources, so the plants can ask the
+ * same questions of a changed copy.
+ */
+$columnsCheck = static function (string $eventSrc, string $exportSrc): array {
+    $page      = p968RowReads($eventSrc, ['$event']);
+    $pageLists = p968SelectLists($eventSrc, "'SELECT `e`.`eventID`, `e`.`siteID`");
+    $pageList  = $pageLists[0] ?? [];
+    $pageReads = array_values(array_diff($page['keys'], P968_NOT_COLUMNS));
+
+    $file      = p968RowReads($exportSrc, ['$row', '$r', '$ev', '$events']);
+    $fileLists = p968SelectLists($exportSrc, "'SELECT `e`.`eventID`, `e`.`seriesID`");
+    $fileList  = $fileLists[0] ?? [];
+    $fileReads = array_values(array_diff($file['keys'], P968_NOT_COLUMNS));
+
+    $sortedPins = static function (array $pins): array {
+        sort($pins);
+        return $pins;
+    };
+    return [
+        'pageStatements'  => count($pageLists),
+        'pageMissing'     => array_values(array_diff($pageReads, $pageList)),
+        'pageUnread'      => array_values(array_diff($pageList, $pageReads)),
+        'pageRuntime'     => $page['runtime'],
+        'pageBareNew'     => array_values(array_diff($page['bare'], P968_EVENT_BARE)),
+        'pageBareGone'    => array_values(array_diff($sortedPins(P968_EVENT_BARE), $page['bare'])),
+        'fileStatements'  => count($fileLists),
+        'fileSame'        => count(array_unique(array_map('json_encode', $fileLists))) === 1,
+        'fileMissing'     => array_values(array_diff($fileReads, $fileList)),
+        'fileUnread'      => array_values(array_diff($fileList, $fileReads)),
+        'fileRuntime'     => $file['runtime'],
+        'fileBareNew'     => array_values(array_diff($file['bare'], P968_EXPORT_BARE)),
+        'fileBareGone'    => array_values(array_diff($sortedPins(P968_EXPORT_BARE), $file['bare'])),
+        'pageReadsW3W'    => in_array('locationW3W', $pageReads, true),
+    ];
+};
+
+$checkColumns = static function (string $prefix, array $c): void {
+    echo "{$prefix}. The column lists match what the code reads, by PHP's tokeniser (#968)\n";
+    check("{$prefix}1 the event page has ONE such statement, and the tokeniser finds its locationW3W read (the round-1 miss)",
+        [$c['pageStatements'], $c['pageReadsW3W']], [1, true]);
+    check("{$prefix}2 every event column the page reads is in its list", $c['pageMissing'], []);
+    check("{$prefix}3 ...and every column in its list is read (so the list stays the page's, not a copy of the table)", $c['pageUnread'], []);
+    check("{$prefix}4 ...no key built at run time, and every other use of the row is one a person has looked at",
+        [$c['pageRuntime'], $c['pageBareNew'], $c['pageBareGone']], [[], [], []]);
+    check("{$prefix}5 the download has THREE such statements, all with the same list",
+        [$c['fileStatements'], $c['fileSame']], [3, true]);
+    check("{$prefix}6 every column the download reads from a row is in that list, and every listed column is read",
+        [$c['fileMissing'], $c['fileUnread']], [[], []]);
+    check("{$prefix}7 ...and its run-time key and every other use of a row are ones a person has looked at",
+        [$c['fileRuntime'], $c['fileBareNew'], $c['fileBareGone']], [P968_EXPORT_RUNTIME, [], []]);
+};
+
+$eventFile  = $webFrom . $sep . '_apps' . $sep . 'calendar' . $sep . 'event.php';
+$exportFile = $webFrom . $sep . '_apps' . $sep . 'calendar' . $sep . 'export.php';
+$cClean     = $columnsCheck((string) file_get_contents($eventFile), (string) file_get_contents($exportFile));
+if ($measuring === true) {
+    echo "C. Skipped: measuring an older web/ (SELFTEST_WEB_FROM), which read the whole row with `e.*`.\n";
+} else {
+    $checkColumns('C', $cClean);
+}
 
 // ── P. The plants ───────────────────────────────────────────────────────────
 if ($measuring === true) {
@@ -1162,6 +1428,19 @@ if ($measuring === true) {
         $waitForServer();
     };
 
+    // (c2) Round 1 X6: a gate that never strips a signed-in member at v1.
+    $plant968(
+        $detailPath,
+        '/if \(\$canManageEvents === false\) \{\n    foreach \(\$forManagersOnly/',
+        "if (\$canManageEvents === false && (defined('PORTAL_API_V1') === false || \$apiKeyRow !== null)) {\n    foreach (\$forManagersOnly",
+        1,
+        'the managers-only gate (v1 sessions let through)'
+    );
+    $m = $readModerated();
+    check('P8b with a signed-in member at v1 never stripped, that member is sent all seven while the old address and the keys are not (M2-memberV1 would have gone red)',
+        [$m['memberV1']['fields'], $m['member']['fields'], $m['readKeyV1']['fields']], [P968_MANAGERS_ONLY, [], []]);
+    $restore968();
+
     // (d) Each field put back, one at a time: the member and the read-only key
     //     must then be sent exactly that field (M2 would have gone red).
     foreach (P968_MANAGERS_ONLY as $field) {
@@ -1205,7 +1484,7 @@ if ($measuring === true) {
     );
     $before = $renderAll();
     $checkRenders('P12-', $before);
-    check('P13 with `e.*` back (the code before #968), every page and file is identical to the named-column version',
+    check('P13 with `e.*` back (the code before #968), every page and file of section R\'s events is identical to the named-column version (section C, not this, checks the lists themselves)',
         $rendersDiffer($rClean, $before), []);
     if ($rendersDiffer($rClean, $before) !== []) {
         echo '      first difference: ' . $firstDifference($rClean, $before, $rendersDiffer($rClean, $before)) . "\n";
@@ -1221,6 +1500,16 @@ if ($measuring === true) {
          array_values(array_filter($rendersDiffer($rClean, $short), static fn (string $k): bool => str_contains($k, ' file ')))],
         [true, false, []]);
     $restore968();
+    // (g2) The round-1 fault itself: `locationW3W` off the page's list. R2b
+    //      must go red — the link gone from the public event, and the
+    //      what3words-only event's whole "Where" card gone.
+    $plant968($eventPath, '/`e`\.`locationW3W`, /', '', 1, 'the event page\'s what3words column');
+    $short = $renderAll();
+    check('P14b with locationW3W off the page\'s list (round 1\'s finding), the link and the what3words-only "Where" card are gone',
+        [$shown($short, 'visitor page public', '///filled.count.soap'), $shown($short, 'visitor page w3wOnly', '///index.home.raft'),
+         $shown($short, 'member page w3wOnly', '>Where</h5>')],
+        [false, false, false]);
+    $restore968();
     $plant968($exportPath, '/`e`\.`description`, /', '', 3, 'the download\'s description column');
     $short = $renderAll();
     check('P15 with the description left off the download\'s lists, the files differ (and no page does)',
@@ -1228,6 +1517,32 @@ if ($measuring === true) {
          array_values(array_filter($rendersDiffer($rClean, $short), static fn (string $k): bool => str_contains($k, ' page ')))],
         [true, []]);
     $restore968();
+
+    // (h) Section C's plants. These change TEXT handed to the check, not the
+    //     server, so nothing is restarted; each is proved applied by its count.
+    $realEvent  = $originals968[$eventPath];
+    $realExport = $originals968[$exportPath];
+    $swap = static function (string $src, string $find, string $with, int $times, string $what): string {
+        if (substr_count($src, $find) !== $times) {
+            refuse("section P (#968, C) found " . substr_count($src, $find) . " copies of {$what} where it expected {$times}");
+        }
+        return str_replace($find, $with, $src);
+    };
+    $c = $columnsCheck($swap($realEvent, '`e`.`locationW3W`, ', '', 1, 'locationW3W in the page list'), $realExport);
+    check('P17 with locationW3W off the page\'s list (the round-1 fault), C2 names it', $c['pageMissing'], ['locationW3W']);
+    $c = $columnsCheck($swap($realEvent, '`e`.`cancelReason`, ', '', 1, 'cancelReason in the page list'), $realExport);
+    check('P18 with cancelReason off the page\'s list, C2 names it', $c['pageMissing'], ['cancelReason']);
+    $c = $columnsCheck($swap($realEvent, '`e`.`status`, ', '`e`.`status`, `e`.`isPublic`, ', 1, 'status in the page list'), $realExport);
+    check('P19 with a column selected that the page never reads (isPublic), C3 names it', $c['pageUnread'], ['isPublic']);
+    $c = $columnsCheck($swap($realEvent, '$pageTitle   = $event[\'eventName\'];', '$pageTitle   = $event[\'eventName\']; $copy = $event; $k = \'x\'; $v = $event[$k];', 1, 'the page title line'), $realExport);
+    check('P20 with the row copied to another name and read by a key built at run time, C4 reports both',
+        [count($c['pageBareNew']) === 1, $c['pageRuntime']], [true, ['$event[$k]']]);
+    $c = $columnsCheck($realEvent, $swap($realExport, '`e`.`status`, `e`.`updatedAt`, %s \'' . "\n" . '        . \'FROM `tblEvents` `e` WHERE `e`.`eventID`', '`e`.`status`, %s \'' . "\n" . '        . \'FROM `tblEvents` `e` WHERE `e`.`eventID`', 1, 'updatedAt in the single-event download list'));
+    check('P21 with updatedAt off ONE of the download\'s three lists, C5 says they differ and C6 names it',
+        [$c['fileSame'], $c['fileMissing']], [false, ['updatedAt']]);
+    $c = $columnsCheck($realEvent, $swap($realExport, "\$location = trim((string) (\$ev['locationName'] ?? ''));", "\$location = trim((string) (\$ev['locationName'] ?? '') . (\$ev['locationW3W'] ?? ''));", 1, 'the download\'s location line'));
+    check('P22 with the download reading a column none of its lists has (locationW3W, a name with a digit), C6 names it',
+        $c['fileMissing'], ['locationW3W']);
 
     $mAfter = $readModerated();
     check('P16 with every #968 plant taken out, the member and the read-only key are sent none of the seven again',

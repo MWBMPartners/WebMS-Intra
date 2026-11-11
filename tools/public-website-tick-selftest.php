@@ -3661,9 +3661,16 @@ check('P34 with only the first ask taken out (where a race leaves it), the ask a
     [true, true, 1, 'public', 'ticked']);
 // D-089: the event page's markup decision put back to "Public alone" for the
 // portal's own events — the box-off reading then carries markup again.
+// #968 round 2: the page now names its columns and no longer selects
+// `isPublic`, which nothing on it reads since D-089. The old decision READ it,
+// so putting the old decision back means putting the column back in the list
+// too — without that the planted line reads null, never sends markup, and this
+// plant cannot do what it exists to do (measured: P37 went red on the correct page).
 $p = $plant('_apps/calendar/event.php',
-    "\$jsonLdAllowed = \$onWebsite->get_result()->fetch_row() !== null && (\$isImported === false || \$canSeeFull === true);",
-    "\$jsonLdAllowed = (\$isImported === false) ? ((\$event['isPublic'] ?? null) === 1 || (\$event['isPublic'] ?? null) === '1') : (\$onWebsite->get_result()->fetch_row() !== null && \$canSeeFull === true);",
+    ["\$jsonLdAllowed = \$onWebsite->get_result()->fetch_row() !== null && (\$isImported === false || \$canSeeFull === true);",
+     "'`e`.`status`, `e`.`isFeatured`, "],
+    ["\$jsonLdAllowed = (\$isImported === false) ? ((\$event['isPublic'] ?? null) === 1 || (\$event['isPublic'] ?? null) === '1') : (\$onWebsite->get_result()->fetch_row() !== null && \$canSeeFull === true);",
+     "'`e`.`status`, `e`.`isPublic`, `e`.`isFeatured`, "],
     $scnOwnMarkup);
 check('P37 with an own event\'s markup following "Public" alone again (before D-089), the page sends markup with the website box off',
     [$p['applied'], $p['result']['Public, box off'] ?? null], [true, [200, true]]);

@@ -139,10 +139,16 @@ if ($eventId > 0) {
     //    columns `Ical::emit()` is given (SUMMARY, DESCRIPTION, LOCATION,
     //    GEO, STATUS, the dates, zone and all-day shape, UID, URL,
     //    LAST-MODIFIED) plus `seriesID`, which decides whether a series is
-    //    collapsed — and it is the same in all three statements. Section R of
-    //    tools/event-suggester-privacy-selftest.php downloads the file before
-    //    and after (it puts `e.*` back as a plant) and requires it unchanged.
-    //    ⚠️ Adding a field to the file? Add its column to all three lists.
+    //    collapsed — and it is the same in all three statements. Section C of
+    //    tools/event-suggester-privacy-selftest.php checks that with PHP's own
+    //    tokeniser: every `$row[…]`, `$r[…]`, `$ev[…]` and `$events[0][…]` read
+    //    in this file must be in the list, every listed column must be read,
+    //    and the three lists must agree (the event page's first list was one
+    //    column short, `locationW3W`, and only a rendering with a what3words
+    //    address showed it). Section R downloads the file for its own events
+    //    with these lists and with `e.*` put back, and compares.
+    //    ⚠️ Adding a field to the file? Add its column to all three lists;
+    //       section C fails until you do.
     $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
     $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
     $row  = null;

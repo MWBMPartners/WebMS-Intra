@@ -110,22 +110,34 @@ $today     = date('Y-m-d');
 //    arrived here unasked. Now a column reaches this page only when somebody
 //    names it below.
 //
-//    The list is exactly the event columns this page reads (every
-//    `$event['…']` in this file; nothing else is handed the whole row except
-//    EventVisibility::redact(), which only empties columns that are present).
-//    `externalFeedID` and `externalUidHash` are read only to decide whether
-//    the "Manage who sees this" link is drawn and are never printed.
-//    Checked by rendering the page before and after this change for a public,
-//    a members-only, two imported, an all-day, a repeating and a cancelled
-//    event, with an address, map position, host and partners, to each kind
-//    of viewer: section R of tools/event-suggester-privacy-selftest.php,
-//    which also puts `e.*` back as a plant and requires the page to come out
-//    identical.
+//    The list must be the event columns this page reads: every
+//    `$event['…']` in this file. Nothing else is handed the whole row except
+//    EventVisibility::redact(), which only empties columns that are present
+//    and adds `detailsLimited`. `externalFeedID` and `externalUidHash` are
+//    read only to decide whether the "Manage who sees this" link is drawn and
+//    are never printed.
+//
+//    THE FIRST VERSION OF THIS LIST LEFT OUT `locationW3W`, and nothing
+//    warned: the page reads it with `?? ''` and `?? null`, so every event
+//    with a what3words address lost its link, and an event whose only
+//    location was a what3words address lost its whole "Where" card. It was
+//    missed because the reads were collected with a pattern of letters only,
+//    and `W3W` holds a digit. So the list is now checked MECHANICALLY: section
+//    C of tools/event-suggester-privacy-selftest.php reads this file with
+//    PHP's own tokeniser, collects every `$event['…']`, and requires the list
+//    below and those reads to match in both directions (a column read but not
+//    selected, or selected but never read). It also pins every other use of
+//    `$event` (passed to a function, copied to another name, a key built at
+//    run time) so a new one is looked at by a person. Section R renders the
+//    page for a spread of events, and puts `e.*` back as a plant to compare;
+//    that shows only what its own events exercise, which is why C exists.
+//    `isPublic` and `seriesSlug` were in `e.*`'s day but are read by nothing
+//    here (an `isPublic` test was removed by D-089), so they are not selected.
 //
 //    ⚠️ ADDING SOMETHING TO THIS PAGE THAT SHOWS ANOTHER EVENT COLUMN? Add the
 //       column to the list in the statement below, or `$event['…']` reads
 //       nothing (PHP gives a warning and null, and the page quietly shows a
-//       blank).
+//       blank). Section C of the test fails until you do.
 //
 // 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
 //    joining it in with `.`: tools/audit-checks/check_sql_columns.py does
@@ -141,10 +153,10 @@ $stmt = $mysqli->prepare(sprintf(
     'SELECT `e`.`eventID`, `e`.`siteID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
     . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, '
     . '`e`.`locationName`, `e`.`locationAddress`, `e`.`locationWebURL`, `e`.`locationPhone`, '
-    . '`e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`hostOrgName`, `e`.`partnerOrgs`, `e`.`heroImage`, '
-    . '`e`.`status`, `e`.`isPublic`, `e`.`isFeatured`, `e`.`capacity`, `e`.`cancelReason`, `e`.`statusChangedAt`, '
+    . '`e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`locationW3W`, `e`.`hostOrgName`, `e`.`partnerOrgs`, `e`.`heroImage`, '
+    . '`e`.`status`, `e`.`isFeatured`, `e`.`capacity`, `e`.`cancelReason`, `e`.`statusChangedAt`, '
     . '`e`.`externalFeedID`, `e`.`externalUidHash`, '
-    . '`c`.`categoryName`, `t`.`typeName`, `s`.`seriesName`, `s`.`seriesSlug`, `ef`.`name` AS `importedFrom`, %s '
+    . '`c`.`categoryName`, `t`.`typeName`, `s`.`seriesName`, `ef`.`name` AS `importedFrom`, %s '
     . 'FROM `tblEvents` `e` '
     . 'LEFT JOIN `tblEventCategories` `c` ON `c`.`categoryID` = `e`.`categoryID` '
     . 'LEFT JOIN `tblEventTypes` `t` ON `t`.`typeID` = `e`.`typeID` '
