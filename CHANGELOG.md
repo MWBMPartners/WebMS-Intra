@@ -4,6 +4,41 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### No country is built in; the installer asks, and the installer pages send a strict browser rule (#942, D-133, migration 279)
+
+- **The installer asks for the installation's country and the first organisation's time zone**, suggesting both
+  from the installing person's own browser time zone (Europe/London suggests the United Kingdom); the suggestion
+  script, as written and pinned, looks nothing up and sends nothing anywhere. Both may be left unchosen. A country
+  the database already holds is kept, unless it is not a usable two-letter code (such as "GBR") and a country was
+  chosen; the time zone is written only to a database the installer built from nothing. The finish page and the
+  last page say what really happens, using what the database actually holds.
+- **Each organisation chooses its own country** on Admin, Settings, Organisation, starting from "Same as the
+  installation" (which removes that organisation's own row and nobody else's). The page says when the
+  organisation's time zone is not in its country, and explains a stored value that is not a usable code. A new
+  organisation's time zone is pre-selected from the installation's country instead of UTC.
+- **Nothing defaults to Great Britain:** the install script seeds the country empty; the shared address form no
+  longer fills an empty country box with GB; `GeoLocation::normaliseAddress()` keeps a missing country missing (so
+  an address arriving from ProjectBookIT or ProjectEPass with no country now has none); a small group's country
+  defaults to empty; a group's usual place and a listed home both refuse a country that is not two letters.
+  Migration 279 changes the small-group default and empties the setting's "reset to" value where it said GB.
+  Currency is still built in as GBP (#966).
+- **Security: every installer answer sends a strict Content Security Policy** (the installer had none). It blocks
+  any script without that answer's nonce, inline handlers, `javascript:` addresses, fetch, beacons, WebSockets and
+  requests for pictures, frames, fonts and media to other hosts. It does NOT stop navigation, `window.open`, a
+  jsDelivr stylesheet (#976), prerendering and speculation rules, WebRTC, requests to the installer's own server,
+  or DNS-prefetch and preconnect hints; that list is what was measured, not a promise of completeness. A text pin
+  (`check_installer_country_script_pinned.py`, a hard gate) guards the suggestion script; the other three
+  installer scripts are guarded by review only. Six check rounds (protected arm). Follow-ups: #966, #967, #974.
+
+### Passkeys: two promised behaviours are now tested (#907)
+
+- That the portal REFUSES passkeys when it cannot read its passkey setting (rather than quietly using the portal's
+  own name), and that where each organisation has its own web address passkeys follow that organisation's name,
+  are now driven over real HTTP (K56-K64 of `tools/two-step-selftest.php`), each with planted faults. No behaviour
+  changed. The passkey address code now says its "measured" claims were measured in Microsoft Edge 157 only, and
+  records what the code before #903 did with a name holding a letter outside a-z. One check round, clean.
+  Follow-ups: #973, #978, #979.
+
 ### Every audit check's own self-test now runs before a push and on GitHub (#919)
 
 - Nine checks in `tools/audit-checks/` carry a self-test, and until now only GitHub ran six of them, after the push;

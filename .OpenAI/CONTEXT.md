@@ -3200,7 +3200,7 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   ONE answer to where sunset is worked out (typed place, else the organisation's
   map position, else none and the fixed times, said on the page);
   `Venues::countryToStore()` the ONE rule for a venue's country (organisation's
-  own, else refused). The organisation's own country is still seeded GB (#942).
+  own, else refused). No country is built in (#942, D-133): `Countries::ofOrganisation()` is the ONE answer to an organisation's country (its own, else the installation's, which the installer asks for); the shared address form fills nothing; `GeoLocation::normaliseAddress()` keeps a missing country null. Every installer answer sends the policy from `web/_install/csp.php`, the ONE place it is built.
 - **The Sabbath page fills its boxes from `InstallationSettings::layer()` and
   writes only fields that ARRIVED (#936).** `check_install_wide_prefill.py`
   now examines a page that is its own saver, key by key; the pending list has been empty since #943, and the gate runs `--strict`.

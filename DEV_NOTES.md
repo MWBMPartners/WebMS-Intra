@@ -23294,3 +23294,38 @@ statement early: a reader that blanks or splits SQL must track strings and comme
 - No line-number plants were left to convert: `grep -n 'php:[0-9]' tools/audit-checks/*.py` finds only comments,
   and every other `file:line` expectation points at a file the test writes itself.
 - What it cannot see, and the case where it reports green wrongly, are #975.
+
+
+## No country is built in (#942, D-133)
+
+- `Portal\Core\Countries` is the ONE list of countries (247, from PHP's zone data, English names written out so
+  the intl extension is not needed) and `ofOrganisation()` the ONE answer to an organisation's country: its own row
+  when that holds two letters (in any case, read as capitals), else the installation's, else ''. The installer has
+  no autoloader, so it `require_once`s `Countries.php` and `place_words.php`.
+- The installer judges a stored country as the portal reads it (`installUsableCountry()`), so `gb` is the United
+  Kingdom and `GBR` is no country; a chosen country overwrites an unusable stored value and nothing else.
+- The organisation page selects what the organisation's OWN row holds (#674/#677). "Same as the installation"
+  deletes that row; a stored value not on the list is offered back selected, so a Save cannot silently drop it.
+- **"The installer sends nothing" took six check rounds, and the lesson is the instrument.** Rounds 1-3 tried to
+  prove a negative by sampling: node traps, then a real browser recording requests. Each round found a route the
+  sample missed (a deferred send, a picture built through `innerHTML`, a `pagehide` beacon, a preconnect hint). A
+  text pin was then dodged six ways through the HTML around it (`<SCRIPT>`, `onload=`, `srcdoc`, a
+  `<!-- <script` double escape). The answer was to make the BROWSER enforce it: `web/_install/csp.php` sends a
+  per-answer nonce and a strict policy. Then round 6 found the comments over-claiming what the policy blocks, and
+  the honest form is a list of what was MEASURED, labelled incomplete. **Where a property is "this cannot happen",
+  prefer a mechanism that enforces it over a test that samples it, and say exactly what the mechanism covers.**
+- Tests: N01-N14 of `tools/installer-selftest.php`; `tools/installer-country-script-selftest.mjs` (a real browser
+  against the real installer page under its real policy, with six planted sends proved live with the policy off
+  and blocked with it on); Q00-Q19 of `tools/time-zones-selftest.php`; the hard gate
+  `check_installer_country_script_pinned.py`.
+
+## Passkeys: making ONE settings read fail while the page still runs (#907)
+
+- `PasskeyAddress::stored()` refuses passkeys when its read of `auth.webauthn.rpID` FAILS. The test breaks exactly
+  that read by renaming `tblSettings` and putting a VIEW in its place that errors on `settingID` for the passkey row
+  only (the `site-modes-selftest.php` technique). The table must be put back BEFORE the clean-up restores settings,
+  because that restore finds rows by `settingID`, the very column the stand-in breaks; K56 checks the premise.
+- In "each organisation its own address" mode the plant that matters is "the set address, else the request",
+  which is what `PortalAddress::base()` gives in every other mode; only K60 can see it.
+- What the old code did with a name holding a letter outside a-z (sent as typed, which Edge refuses) is measured
+  in Edge only; Firefox and Safari were not measured.
