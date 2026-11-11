@@ -1,29 +1,30 @@
 # Handoff — where the work is right now
 
-*Overwritten, never appended. Current state only. 10 November 2026. Updated at every commit boundary and every
+*Overwritten, never appended. Current state only. 11 November 2026. Updated at every commit boundary and every
 change of a package's state (the owner, 10 November 2026: "update our handoff document regularly at each stage").*
 
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940.
-Last whole suite (with #940): 105/105 green.
+#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895.
+Last whole suite (with #895): 105/105 green; e2e all phases passed.
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #809 — group meeting-place maps, rotating host homes, next meeting (D-120, D-122 to D-128; migration 275) | `agent-a7b8ce76589cb7ec3` / `p809-build`, c48bfe86 (rebased on c3388cab) | Fully built incl. erasure; check round 1 running |
-| #895 — a public address requested by several until one is approved (D-121; migration 276) | `p895-build`, 15be7410 | CLEAN; cherry-picked with docs and the help sentence; e2e then whole suite, then push. Raised #948 |
-| #947 + #937 — retention-caps test restores settings; check.php array params; seed-parity check's quote bug | `agent-ab71343847f404ea8` / `p947-build`, 74920374 | Built; narrow check running |
+| #809 — group meeting-place maps, rotating host homes, next meeting (D-120, D-122 to D-128; migration 275) | `agent-a7b8ce76589cb7ec3` / `p809-build`, cded9e0c | Round 1 NOT CLEAN (leader could map a member's home; two unpinned privacy plants); round 2 built, check round 2 running (protected arm). Raised #952, #953 |
+| #947 + #937 — retention-caps test restores settings; check.php array params; seed-parity quote bug | `agent-ab71343847f404ea8` / `p947-build`, c0d5e378 | CLEAN at round 2; integrate next, fixing the refusal advice to say "drop and recreate" (checker's Found 1). Closes #894, #911 too. Raised #949 |
+| #923 — harness container name, project and port from the environment; Ctrl-C stops the run | `agent-a1dfac85c963d4872` / `p923-build`, fcc676ea | Built; check round 1 running (tooling, three-round cap). Raised #950 |
+| #891 + #892 — impossible dates on MySQL 9.7 (Sms::hold checks in PHP; venues booking ?date=) | `agent-a7c74a3e8bec76650` / `p892-build`, d085ff2f | Built; check round 1 running (protected arm). Raised #951 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
-**Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703), 273 (#782), 274 (#935), 275 (#809, if needed), 276 (#895, if needed). Next free: 277.
+**Migration numbers taken:** 269-276 (276 = #895, landed). Next free: 277.
 
 ## Next, in this order
 
-1. Finish #785, #935/#936 and #940 (check → integrate → whole suite → push).
-2. Raised this stretch, in the backlog: #919, #920, #922-#930, #933-#943. #931 closed by D-116.
+1. Finish the four in flight (check → integrate → whole suite → push).
+2. #882 with D-129 (no-end-time events stay listed to the end of their day, or a chosen time).
 3. The rest of the backlog (D-055: everything before the release), highest priority first, up to three builders
    at a time where files do not overlap; one migration number per package, assigned up front.
 4. #821 items 4-8. 5. #754 (waits on the merge). 6. The Codex review (D-007), then the merge.
@@ -36,7 +37,7 @@ cherry-picks a clean package, writes its docs FROM THE FINAL STATE (builders' fi
 rounds corrected), runs the whole suite, pushes, closes the issue. Brief checkers neutrally. When the same item
 fails two rounds running, simplify (P4d's sentences, #620's and #902's static checks — D-065: presence only,
 behaviour proven over HTTP). A round whose findings are all in tooling counts toward the three-round cap (D-064).
-**The e2e migration harness has ONE fixed container name — never run it while another package might (#923); it corrupted #703's run once.** Recurring findings: a refusal tested on only ONE form of address; a test that passes on broken code; an existence
+**The e2e migration harness has ONE fixed container name until #923 lands — never run it while another package might; it corrupted #703's run once.** Recurring findings: a refusal tested on only ONE form of address; a test that passes on broken code; an existence
 leak (403 vs 404) on one endpoint of a class — enumerate the class.
 
 ## Blocked on the owner
@@ -72,4 +73,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#953.
