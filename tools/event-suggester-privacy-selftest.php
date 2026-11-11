@@ -52,14 +52,17 @@
  *      numbers of whoever created, edited, suggested, moderated and last
  *      changed the status of the event, and `deletedAt`. A published,
  *      members-only event with every one filled in by hand (nothing in the
- *      portal writes `moderationNote` today) is read by an ordinary member, a
- *      key holding only `events:read` (both addresses), a key holding
- *      `events:write`, a global administrator and an administrator of this
- *      organisation only. The member (at BOTH addresses — the v1 one was
- *      added in round 2 of #968's check, X6) and the read-only key (both
- *      addresses) get NONE of the seven fields and the note nowhere in the
- *      answer; the other three get all seven, with the note as written and
- *      every account number the right one. Measured against f9197eb9 (the
+ *      portal writes `moderationNote` today) is read, at BOTH addresses, by an
+ *      ordinary member, a key holding only `events:read`, a key holding
+ *      `events:write` and a global administrator, and at the old address by an
+ *      administrator of this organisation only. D-136 (11 November 2026):
+ *      PEOPLE ONLY — the member and EVERY key, the write key included, get
+ *      NONE of the seven fields and the note nowhere in the answer; the two
+ *      kinds of signed-in administrator get all seven, with the note as
+ *      written and every account number the right one. (Round 1 of #968 gave
+ *      the write key the fields; D-136 reversed that. The v1 probes for the
+ *      member, the administrator and the write key were added by rounds 1 and
+ *      2 of the independent check.) Measured against f9197eb9 (the
  *      code before #968), before the v1 member probe existed: six red — the
  *      member and the read-only key at both addresses were sent all seven, the
  *      note included.
@@ -83,21 +86,30 @@
  *      (no database, no server): every `$event['…']` the page reads, and every
  *      `$row`/`$r`/`$ev`/`$events[0]` key the download reads, must be in that
  *      page's SELECT list, every listed column must be read, the download's
- *      three lists must agree, and every other use of the row (a key built at
- *      run time, the row passed to a function or copied) is pinned, so a new
- *      one fails until a person has looked at it. Its own header says what it
- *      cannot see.
- *   P8b-P22  a gate that lets a signed-in member through at v1 alone (P8b);
+ *      three lists must agree, each list must hold NOTHING but backticked
+ *      columns (no `e.*`, no un-backticked column — round 2 of the check), and
+ *      every other use of the row (a key built at run time, the row passed to
+ *      a function or copied) is pinned WITH ITS COUNT, so a new one or a
+ *      second copy fails until a person has looked at it. Reaching a variable
+ *      without naming it (`$$`, `${…}`, `compact()`, `extract()`,
+ *      `get_defined_vars()`, `$GLOBALS`, `eval`) is refused in both files. Its
+ *      own header says what it still cannot see.
+ *   P8b-P25  a gate that lets a signed-in member through at v1 alone (P8b);
  *      each of the seven field names taken off the detail handler's list, one
  *      at a time (the member and the read-only key are then sent exactly that
- *      field); the gate switched off both ways; `e.*` put back in the page and
+ *      field); the gate switched off both ways, and put back to round 1's
+ *      "a write key gets them" (P11b, D-136); `e.*` put back in the page and
  *      all three download lookups — every page and file must come out
  *      identical to section R's for R's own events; a list one column too
  *      short, on each page, must show in R; and section C's own plants
  *      (P17-P22): `locationW3W` and `cancelReason` off the page's list, an
  *      unread column added, the row copied and read by a run-time key,
- *      `updatedAt` off one of the download's three lists, and a download read
- *      of a column none of them has.
+ *      `updatedAt` off one of the download's three lists, a download read of
+ *      a column none of them has; then round 2's: `e.*`, `` `e`.* `` and an
+ *      un-backticked `e.locationEmail` in each of the four lists (P23, twelve
+ *      plants), `$$nm`, `${'event'}`, `compact()` and `extract($GLOBALS)` on
+ *      the page and `compact()` in the download (P24), and a second identical
+ *      fetch into `$event` (P25).
  *
  * WHAT IT CANNOT DO, said plainly
  *   - The webhook body is read from `tblWebhookDeliveries.payload`, not caught
@@ -850,7 +862,12 @@ $readModerated = static function () use ($http, $signIn, $apiKey, $writeKey, $mo
         'readKey'   => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['bearer' => $apiKey])),
         'readKeyV1' => $fieldsSeen($http('GET', '/api/v1/events/' . $moderated, [], ['bearer' => $apiKey])),
         'writeKey'  => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['bearer' => $writeKey])),
+        // Round 2 of #968's check: the v1 address was never asked by an
+        // administrator session or by the write key, so a gate that differed
+        // at v1 for either would have passed.
+        'writeKeyV1' => $fieldsSeen($http('GET', '/api/v1/events/' . $moderated, [], ['bearer' => $writeKey])),
         'admin'     => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['jar' => 'admin'])),
+        'adminV1'   => $fieldsSeen($http('GET', '/api/v1/events/' . $moderated, [], ['jar' => 'admin'])),
         'siteadmin' => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['jar' => 'siteadmin'])),
     ];
 };
@@ -860,16 +877,19 @@ $wantIds = [
     $people['admin']['id'], $people['siteadmin']['id'],
 ];
 $checkModerated = static function (string $prefix, array $m) use ($wantIds): void {
-    echo "{$prefix}. The moderation note and the \"who did what\" numbers (#968)\n";
+    echo "{$prefix}. The moderation note and the \"who did what\" numbers (#968, D-136: signed-in administrators only)\n";
+    // D-136: NO API key gets them, whatever its scope — the write key is with
+    // the member and the read-only key here, at both addresses.
     foreach (['member' => 'an ordinary member, signed in', 'memberV1' => 'the same member at /api/v1/events/{id}',
-              'readKey' => 'a key holding only events:read', 'readKeyV1' => 'the same key at /api/v1/events/{id}'] as $k => $who) {
+              'readKey' => 'a key holding only events:read', 'readKeyV1' => 'the same key at /api/v1/events/{id}',
+              'writeKey' => 'a key holding events:write', 'writeKeyV1' => 'the write key at /api/v1/events/{id}'] as $k => $who) {
         echo "      ({$who} was sent: " . json_encode($m[$k]['fields']) . ")\n";
         check("{$prefix}1-{$k} {$who} reads THIS event", $m[$k]['isTheEvent'], true);
         check("{$prefix}2-{$k} ...with none of the seven fields", $m[$k]['fields'], []);
         check("{$prefix}3-{$k} ...and the note nowhere in the answer", $m[$k]['noteAnywhere'], false);
     }
-    foreach (['admin' => 'a global administrator, signed in', 'siteadmin' => 'an administrator of this organisation only',
-              'writeKey' => 'a key holding events:write'] as $k => $who) {
+    foreach (['admin' => 'a global administrator, signed in', 'adminV1' => 'the same administrator at /api/v1/events/{id}',
+              'siteadmin' => 'an administrator of this organisation only'] as $k => $who) {
         check("{$prefix}4-{$k} {$who} reads THIS event", $m[$k]['isTheEvent'], true);
         check("{$prefix}5-{$k} ...with all seven fields", $m[$k]['fields'], P968_MANAGERS_ONLY);
         check("{$prefix}6-{$k} ...the note as written, and each account number the right one",
@@ -1101,13 +1121,26 @@ if ($rendersDiffer($rClean, $rAgain) !== []) {
 //   - every subscript that is NOT a literal string (a key built at run time),
 //     which no reader of source can resolve — pinned below with its reason;
 //   - every other use of the variable (copied to another name, passed to a
-//     function, put in a list) — pinned below as a short token shape, so a NEW
-//     way the row travels fails here until a person has looked at it.
+//     function, put in a list) — pinned below as a short token shape WITH HOW
+//     MANY TIMES IT APPEARS, so a NEW way the row travels, or a second copy of
+//     an old one (a second fetch into `$event`), fails here until a person has
+//     looked at it (round 2 of the check: the shapes were de-duplicated, so a
+//     second identical fetch was invisible);
+//   - any way of reaching a variable WITHOUT naming it: `$$name`, `${'…'}`,
+//     `compact()`, `extract()`, `get_defined_vars()`, `$GLOBALS`, `eval` —
+//     refused outright in these two files (neither uses any of them; round 2
+//     of the check showed `$$nm[...]`, `${'event'}[...]` and `compact('event')`
+//     walked straight past the pins, because no `$event` token appears).
 //
-// and requires the page's SELECT list and those reads to match in BOTH
-// directions. The select list itself is read from the statement's text; the
-// identifiers are backticked, so `\w` (letters, digits, underscore) finds
-// them whole.
+// and requires each page's SELECT list and those reads to match in BOTH
+// directions. The select list is read from the statement's text: each
+// backticked `` `alias`.`column` `` (with its `AS` name, if any) is a name,
+// found with `\w` (letters, digits, underscore). EVERYTHING ELSE between
+// SELECT and FROM must be commas, spaces, the `%s` the visibility rule is put
+// in through, and PHP's own `' . '` joins — anything left over (`e.*`,
+// `` `e`.* ``, an un-backticked `e.locationEmail`, a function call) fails and
+// is named (round 2 of the check: those three walked past, because only the
+// backticked form was collected).
 //
 // WHAT IT CANNOT SEE, said plainly, and checked by hand on 11 November 2026:
 //   - A key built at run time. The one there is (`$row[$rendered]` in
@@ -1119,20 +1152,21 @@ if ($rendersDiffer($rClean, $rAgain) !== []) {
 //     columns only where present and adds `detailsLimited`; it reads nothing.
 //     Ical::emit() is never given a row: it is given `$entry` arrays built
 //     from the keys collected here.
+//   - Code in ANOTHER file that reads the row by its name. No template or
+//     partial does (`grep -n '\$event\b' web/_core/templates/*.php
+//     web/_core/partials/*.php` finds nothing); a new include that did would
+//     not be seen here.
 //   - Reads under a different variable name. export.php re-uses `$row` and
 //     `$r` for the series-run rows; their keys are collected too, so they are
 //     counted against this list — over-strict, never blind, and every one of
-//     them is in the list today. No template file reads `$event`
-//     (`grep -n '\$event\b' web/_core/templates/*.php web/_core/partials/*.php`
-//     finds nothing).
-//   - `extract()`, `$$name`, `$GLOBALS`: each would show up as a new bare use
-//     (the row passed to a function) and fail the pin, not slip past.
+//     them is in the list today. A row copied to a NEW name is a new bare
+//     use, and fails the pin.
 
 /**
  * Every read of the row variables in one PHP source, by PHP's tokeniser.
  *
  * @param list<string> $rowVars Variable names, with the `$`.
- * @return array{keys: list<string>, runtime: list<string>, bare: list<string>}
+ * @return array{keys: list<string>, runtime: list<string>, bare: array<string,int>, indirect: list<string>}
  */
 function p968RowReads(string $source, array $rowVars): array
 {
@@ -1144,9 +1178,27 @@ function p968RowReads(string $source, array $rowVars): array
     $keys = [];
     $runtime = [];
     $bare = [];
+    $indirect = [];
     $n = count($tokens);
     for ($i = 0; $i < $n; $i++) {
         $t = $tokens[$i];
+        // 🚫 Ways of reaching a variable without naming it. A bare `$` token is
+        //    `$$name` or `${…}`; inside a string it is T_DOLLAR_OPEN_CURLY_BRACES.
+        if ($t === '$' || (is_array($t) === true && $t[0] === T_DOLLAR_OPEN_CURLY_BRACES)) {
+            $indirect[] = 'line ' . (is_array($tokens[$i + 1] ?? null) === true ? $tokens[$i + 1][2] : '?') . ': ' . $text($t) . $text($tokens[$i + 1] ?? '');
+            continue;
+        }
+        if (is_array($t) === true && ($t[0] === T_EVAL || ($t[0] === T_VARIABLE && $t[1] === '$GLOBALS'))) {
+            $indirect[] = 'line ' . $t[2] . ': ' . $t[1];
+            continue;
+        }
+        if (is_array($t) === true && in_array($t[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true) === true
+            && in_array(strtolower(ltrim($t[1], '\\')), ['compact', 'extract', 'get_defined_vars'], true) === true
+            && $text($tokens[$i + 1] ?? '') === '('
+            && in_array($text($tokens[$i - 1] ?? ''), ['->', '?->', '::', 'function', 'new'], true) === false) {
+            $indirect[] = 'line ' . $t[2] . ': ' . $t[1] . '(';
+            continue;
+        }
         if (is_array($t) === false || $t[0] !== T_VARIABLE || in_array($t[1], $rowVars, true) === false) {
             continue;
         }
@@ -1178,32 +1230,42 @@ function p968RowReads(string $source, array $rowVars): array
     }
     $keys = array_values(array_unique($keys));
     sort($keys);
-    $bare = array_values(array_unique($bare));
-    sort($bare);
+    // COUNTED, not de-duplicated: a second copy of a pinned shape is a change.
+    $bare = array_count_values($bare);
+    ksort($bare);
     $runtime = array_values(array_unique($runtime));
     sort($runtime);
-    return ['keys' => $keys, 'runtime' => $runtime, 'bare' => $bare];
+    return ['keys' => $keys, 'runtime' => $runtime, 'bare' => $bare, 'indirect' => $indirect];
 }
 
 /**
- * The names a SELECT list hands to PHP: the column, or its `AS` name. Reads
- * every statement in `$source` that starts with `$startsWith` up to `FROM`.
+ * The names a SELECT list hands to PHP (the column, or its `AS` name), and
+ * whatever else stands between SELECT and FROM. Reads every statement in
+ * `$source` that starts with `$startsWith`, up to `FROM `tblEvents``.
  *
- * @return list<list<string>> One sorted list per statement found.
+ * @return list<array{names: list<string>, leftover: string}> One per statement found.
  */
 function p968SelectLists(string $source, string $startsWith): array
 {
     $lists = [];
     $at = 0;
+    $item = '/`(\w+)`\.`(\w+)`(?:\s+AS\s+`(\w+)`)?/';
     while (($pos = strpos($source, $startsWith, $at)) !== false) {
         $end = strpos($source, 'FROM `tblEvents`', $pos);
         if ($end === false) {
             break;
         }
-        preg_match_all('/`(\w+)`\.`(\w+)`(?:\s+AS\s+`(\w+)`)?/', substr($source, $pos, $end - $pos), $m, PREG_SET_ORDER);
+        // The text of the list: drop the opening quote, and PHP's joins
+        // between the pieces of the string (`' . '`, across a line break).
+        $sql = (string) preg_replace("/'\\s*\\.\\s*'/", ' ', substr($source, $pos + 1, $end - $pos - 1));
+        preg_match_all($item, $sql, $m, PREG_SET_ORDER);
         $names = array_map(static fn (array $x): string => ($x[3] ?? '') !== '' ? $x[3] : $x[2], $m);
         sort($names);
-        $lists[] = $names;
+        $rest = (string) preg_replace($item, ' ', $sql);
+        $rest = (string) preg_replace('/^\s*SELECT\b/', ' ', $rest);
+        $rest = str_replace('%s', ' ', $rest);
+        $rest = trim((string) preg_replace('/[\s,]+/', ' ', $rest));
+        $lists[] = ['names' => $names, 'leftover' => $rest];
         $at = $end;
     }
     return $lists;
@@ -1212,36 +1274,36 @@ function p968SelectLists(string $source, string $startsWith): array
 /** Names the code reads that come from no column: the `%s` alias, and what redact() adds. */
 const P968_NOT_COLUMNS = ['canSeeFull', 'detailsLimited'];
 
-/** Every bare use of the row in event.php, each looked at by a person (11 November 2026). */
+/** Every bare use of the row in event.php, and how many times, each looked at by a person (11 November 2026). */
 const P968_EVENT_BARE = [
-    ') ; <$event> = null ;',                   // starts empty
-    ') ; <$event> = $stmt ->',                 // the lookup's one row
-    '$isVisibleStatus = <$event> !== null &&', // found or not
-    '$visible = <$event> !== null &&',         // found or not
-    '; } <$event> = EventVisibility ::',       // replaced by redact()'s copy
-    'redact ( <$event> , $canSeeFull )',       // redact(): empties, reads nothing
+    ') ; <$event> = null ;'                   => 1, // starts empty
+    ') ; <$event> = $stmt ->'                 => 1, // the lookup's one row
+    '$isVisibleStatus = <$event> !== null &&' => 1, // found or not
+    '$visible = <$event> !== null &&'         => 1, // found or not
+    '; } <$event> = EventVisibility ::'       => 1, // replaced by redact()'s copy
+    'redact ( <$event> , $canSeeFull )'       => 1, // redact(): empties, reads nothing
 ];
 
-/** Every bare use of a row variable in export.php, each looked at by a person. */
+/** Every bare use of a row variable in export.php, and how many times, each looked at by a person. */
 const P968_EXPORT_BARE = [
-    '0 ; <$events> = [ ]',                     // starts empty
-    ') ; <$row> = null ;',                     // starts empty
-    ') ; <$row> = $stmt ->',                   // the single-event lookup's row
-    'if ( <$row> !== null &&',                 // the draft rule
-    ') { <$row> = null ;',                     // a draft refused
-    'if ( <$row> === null )',                  // nothing for this viewer
-    '; } <$events> [ ] =',                     // collected
-    '] = <$row> ; } elseif',                   // collected
-    'while ( <$r> = $result ->',               // series / whole-calendar rows
-    ') { <$events> [ ] =',                     // collected
-    '] = <$r> ; } $stmt',                      // collected
-    'count ( <$events> ) === 0',               // nothing for this viewer
-    '$rows as <$row> ) { if',                  // SERIES-RUN rows (another query)
-    '( array <$r> ) : string',                 // SERIES-RUN rows (another query)
-    'foreach ( <$events> as $ev )',            // each row becomes an entry
-    '$events as <$ev> ) { $canSeeFull',        // each row becomes an entry
-    '1 ; <$ev> = EventVisibility ::',          // replaced by redact()'s copy
-    'redact ( <$ev> , $canSeeFull )',          // redact(): empties, reads nothing
+    '0 ; <$events> = [ ]'                     => 1, // starts empty
+    ') ; <$row> = null ;'                     => 1, // starts empty
+    ') ; <$row> = $stmt ->'                   => 1, // the single-event lookup's row
+    'if ( <$row> !== null &&'                 => 1, // the draft rule
+    ') { <$row> = null ;'                     => 1, // a draft refused
+    'if ( <$row> === null )'                  => 1, // nothing for this viewer
+    '; } <$events> [ ] ='                     => 1, // collected
+    '] = <$row> ; } elseif'                   => 1, // collected
+    'while ( <$r> = $result ->'               => 2, // series and whole-calendar rows
+    ') { <$events> [ ] ='                     => 2, // collected, both loops
+    '] = <$r> ; } $stmt'                      => 2, // collected, both loops
+    'count ( <$events> ) === 0'               => 2, // nothing for this viewer, both branches
+    '$rows as <$row> ) { if'                  => 1, // SERIES-RUN rows (another query)
+    '( array <$r> ) : string'                 => 1, // SERIES-RUN rows (another query)
+    'foreach ( <$events> as $ev )'            => 1, // each row becomes an entry
+    '$events as <$ev> ) { $canSeeFull'        => 1, // each row becomes an entry
+    '1 ; <$ev> = EventVisibility ::'          => 1, // replaced by redact()'s copy
+    'redact ( <$ev> , $canSeeFull )'          => 1, // redact(): empties, reads nothing
 ];
 
 /** Every key built at run time, each looked at by a person. */
@@ -1250,39 +1312,62 @@ const P968_EXPORT_RUNTIME = [
 ];
 
 /**
+ * Where two counted shape lists disagree: "shape: found N, pinned M".
+ *
+ * @param array<string,int> $found
+ * @param array<string,int> $pinned
+ * @return list<string>
+ */
+function p968ShapeDifferences(array $found, array $pinned): array
+{
+    $out = [];
+    foreach (array_unique(array_merge(array_keys($found), array_keys($pinned))) as $shape) {
+        $f = $found[$shape] ?? 0;
+        $p = $pinned[$shape] ?? 0;
+        if ($f !== $p) {
+            $out[] = "{$shape}: found {$f}, pinned {$p}";
+        }
+    }
+    sort($out);
+    return $out;
+}
+
+/**
  * The whole of section C for one pair of sources, so the plants can ask the
  * same questions of a changed copy.
  */
 $columnsCheck = static function (string $eventSrc, string $exportSrc): array {
     $page      = p968RowReads($eventSrc, ['$event']);
     $pageLists = p968SelectLists($eventSrc, "'SELECT `e`.`eventID`, `e`.`siteID`");
-    $pageList  = $pageLists[0] ?? [];
+    $pageList  = $pageLists[0]['names'] ?? [];
     $pageReads = array_values(array_diff($page['keys'], P968_NOT_COLUMNS));
 
     $file      = p968RowReads($exportSrc, ['$row', '$r', '$ev', '$events']);
     $fileLists = p968SelectLists($exportSrc, "'SELECT `e`.`eventID`, `e`.`seriesID`");
-    $fileList  = $fileLists[0] ?? [];
+    $fileList  = $fileLists[0]['names'] ?? [];
     $fileReads = array_values(array_diff($file['keys'], P968_NOT_COLUMNS));
 
-    $sortedPins = static function (array $pins): array {
-        sort($pins);
-        return $pins;
-    };
+    $leftovers = static fn (array $lists): array => array_values(array_filter(
+        array_map(static fn (array $l): string => $l['leftover'], $lists),
+        static fn (string $s): bool => $s !== ''
+    ));
     return [
-        'pageStatements'  => count($pageLists),
-        'pageMissing'     => array_values(array_diff($pageReads, $pageList)),
-        'pageUnread'      => array_values(array_diff($pageList, $pageReads)),
-        'pageRuntime'     => $page['runtime'],
-        'pageBareNew'     => array_values(array_diff($page['bare'], P968_EVENT_BARE)),
-        'pageBareGone'    => array_values(array_diff($sortedPins(P968_EVENT_BARE), $page['bare'])),
-        'fileStatements'  => count($fileLists),
-        'fileSame'        => count(array_unique(array_map('json_encode', $fileLists))) === 1,
-        'fileMissing'     => array_values(array_diff($fileReads, $fileList)),
-        'fileUnread'      => array_values(array_diff($fileList, $fileReads)),
-        'fileRuntime'     => $file['runtime'],
-        'fileBareNew'     => array_values(array_diff($file['bare'], P968_EXPORT_BARE)),
-        'fileBareGone'    => array_values(array_diff($sortedPins(P968_EXPORT_BARE), $file['bare'])),
-        'pageReadsW3W'    => in_array('locationW3W', $pageReads, true),
+        'pageStatements' => count($pageLists),
+        'pageLeftover'   => $leftovers($pageLists),
+        'pageMissing'    => array_values(array_diff($pageReads, $pageList)),
+        'pageUnread'     => array_values(array_diff($pageList, $pageReads)),
+        'pageRuntime'    => $page['runtime'],
+        'pageBare'       => p968ShapeDifferences($page['bare'], P968_EVENT_BARE),
+        'pageIndirect'   => $page['indirect'],
+        'fileStatements' => count($fileLists),
+        'fileSame'       => count(array_unique(array_map(static fn (array $l): string => (string) json_encode($l['names']), $fileLists))) === 1,
+        'fileLeftover'   => $leftovers($fileLists),
+        'fileMissing'    => array_values(array_diff($fileReads, $fileList)),
+        'fileUnread'     => array_values(array_diff($fileList, $fileReads)),
+        'fileRuntime'    => $file['runtime'],
+        'fileBare'       => p968ShapeDifferences($file['bare'], P968_EXPORT_BARE),
+        'fileIndirect'   => $file['indirect'],
+        'pageReadsW3W'   => in_array('locationW3W', $pageReads, true),
     ];
 };
 
@@ -1290,16 +1375,22 @@ $checkColumns = static function (string $prefix, array $c): void {
     echo "{$prefix}. The column lists match what the code reads, by PHP's tokeniser (#968)\n";
     check("{$prefix}1 the event page has ONE such statement, and the tokeniser finds its locationW3W read (the round-1 miss)",
         [$c['pageStatements'], $c['pageReadsW3W']], [1, true]);
+    check("{$prefix}1b ...and its list holds nothing but backticked columns (no `e.*`, no un-backticked column, no call)",
+        $c['pageLeftover'], []);
     check("{$prefix}2 every event column the page reads is in its list", $c['pageMissing'], []);
     check("{$prefix}3 ...and every column in its list is read (so the list stays the page's, not a copy of the table)", $c['pageUnread'], []);
-    check("{$prefix}4 ...no key built at run time, and every other use of the row is one a person has looked at",
-        [$c['pageRuntime'], $c['pageBareNew'], $c['pageBareGone']], [[], [], []]);
+    check("{$prefix}4 ...no key built at run time, and every other use of the row is one a person has looked at, as many times as pinned",
+        [$c['pageRuntime'], $c['pageBare']], [[], []]);
+    check("{$prefix}4b ...and nothing reaches a variable without naming it (\$\$, \${, compact, extract, get_defined_vars, \$GLOBALS, eval)",
+        $c['pageIndirect'], []);
     check("{$prefix}5 the download has THREE such statements, all with the same list",
         [$c['fileStatements'], $c['fileSame']], [3, true]);
+    check("{$prefix}5b ...and each of the three holds nothing but backticked columns", $c['fileLeftover'], []);
     check("{$prefix}6 every column the download reads from a row is in that list, and every listed column is read",
         [$c['fileMissing'], $c['fileUnread']], [[], []]);
-    check("{$prefix}7 ...and its run-time key and every other use of a row are ones a person has looked at",
-        [$c['fileRuntime'], $c['fileBareNew'], $c['fileBareGone']], [P968_EXPORT_RUNTIME, [], []]);
+    check("{$prefix}7 ...and its run-time key and every other use of a row are ones a person has looked at, as many times as pinned",
+        [$c['fileRuntime'], $c['fileBare']], [P968_EXPORT_RUNTIME, []]);
+    check("{$prefix}7b ...and nothing in it reaches a variable without naming it", $c['fileIndirect'], []);
 };
 
 $eventFile  = $webFrom . $sep . '_apps' . $sep . 'calendar' . $sep . 'event.php';
@@ -1431,10 +1522,10 @@ if ($measuring === true) {
     // (c2) Round 1 X6: a gate that never strips a signed-in member at v1.
     $plant968(
         $detailPath,
-        '/if \(\$canManageEvents === false\) \{\n    foreach \(\$forManagersOnly/',
-        "if (\$canManageEvents === false && (defined('PORTAL_API_V1') === false || \$apiKeyRow !== null)) {\n    foreach (\$forManagersOnly",
+        '/^\$seesWorkingNotes = \$apiKeyRow === null && \$canManageEvents === true;$/m',
+        "\$seesWorkingNotes = (\$apiKeyRow === null && \$canManageEvents === true) || (\$apiKeyRow === null && defined('PORTAL_API_V1') === true);",
         1,
-        'the managers-only gate (v1 sessions let through)'
+        'the working-notes gate (v1 sessions let through)'
     );
     $m = $readModerated();
     check('P8b with a signed-in member at v1 never stripped, that member is sent all seven while the old address and the keys are not (M2-memberV1 would have gone red)',
@@ -1451,16 +1542,24 @@ if ($measuring === true) {
         $restore968();
     }
 
-    // (e) The gate itself switched off, both ways.
-    $plant968($detailPath, '/if \(\$canManageEvents === false\) \{\n    foreach \(\$forManagersOnly/', "if (false) {\n    foreach (\$forManagersOnly", 1, 'the managers-only gate');
+    // (e) The gate itself switched off, both ways, and put back to round 1's
+    //     rule (D-136 replaced it).
+    $plant968($detailPath, '/^\$seesWorkingNotes = \$apiKeyRow === null && \$canManageEvents === true;$/m', '$seesWorkingNotes = true;', 1, 'the working-notes gate');
     $m = $readModerated();
-    check('P10 with the gate never applied, the member and the read-only key are sent all seven, and the note',
-        [$m['member']['fields'], $m['readKey']['fields'], $m['member']['noteAnywhere']], [P968_MANAGERS_ONLY, P968_MANAGERS_ONLY, true]);
+    check('P10 with the gate never applied, the member, the read-only key and the write key are sent all seven, and the note',
+        [$m['member']['fields'], $m['readKey']['fields'], $m['writeKey']['fields'], $m['member']['noteAnywhere']],
+        [P968_MANAGERS_ONLY, P968_MANAGERS_ONLY, P968_MANAGERS_ONLY, true]);
     $restore968();
-    $plant968($detailPath, '/if \(\$canManageEvents === false\) \{\n    foreach \(\$forManagersOnly/', "if (true) {\n    foreach (\$forManagersOnly", 1, 'the managers-only gate');
+    $plant968($detailPath, '/^\$seesWorkingNotes = \$apiKeyRow === null && \$canManageEvents === true;$/m', '$seesWorkingNotes = false;', 1, 'the working-notes gate');
     $m = $readModerated();
-    check('P11 with the gate applied to everybody, the administrators and the write key lose all seven (M5 would have gone red)',
-        [$m['admin']['fields'], $m['siteadmin']['fields'], $m['writeKey']['fields']], [[], [], []]);
+    check('P11 with the gate applied to everybody, both kinds of administrator lose all seven, at both addresses (M5 would have gone red)',
+        [$m['admin']['fields'], $m['adminV1']['fields'], $m['siteadmin']['fields']], [[], [], []]);
+    $restore968();
+    $plant968($detailPath, '/^\$seesWorkingNotes = \$apiKeyRow === null && \$canManageEvents === true;$/m', '$seesWorkingNotes = $canManageEvents === true;', 1, 'the working-notes gate');
+    $m = $readModerated();
+    check('P11b with round 1\'s rule back ("a write key may manage events, so it gets them"), the write key is sent all seven at both addresses (M2-writeKey would have gone red; D-136)',
+        [$m['writeKey']['fields'], $m['writeKeyV1']['fields'], $m['readKey']['fields'], $m['admin']['fields']],
+        [P968_MANAGERS_ONLY, P968_MANAGERS_ONLY, [], P968_MANAGERS_ONLY]);
     $restore968();
 
     // (f) `e.*` put back in the event page and all three download lookups:
@@ -1536,13 +1635,64 @@ if ($measuring === true) {
     check('P19 with a column selected that the page never reads (isPublic), C3 names it', $c['pageUnread'], ['isPublic']);
     $c = $columnsCheck($swap($realEvent, '$pageTitle   = $event[\'eventName\'];', '$pageTitle   = $event[\'eventName\']; $copy = $event; $k = \'x\'; $v = $event[$k];', 1, 'the page title line'), $realExport);
     check('P20 with the row copied to another name and read by a key built at run time, C4 reports both',
-        [count($c['pageBareNew']) === 1, $c['pageRuntime']], [true, ['$event[$k]']]);
+        [count($c['pageBare']) === 1, $c['pageRuntime']], [true, ['$event[$k]']]);
     $c = $columnsCheck($realEvent, $swap($realExport, '`e`.`status`, `e`.`updatedAt`, %s \'' . "\n" . '        . \'FROM `tblEvents` `e` WHERE `e`.`eventID`', '`e`.`status`, %s \'' . "\n" . '        . \'FROM `tblEvents` `e` WHERE `e`.`eventID`', 1, 'updatedAt in the single-event download list'));
     check('P21 with updatedAt off ONE of the download\'s three lists, C5 says they differ and C6 names it',
         [$c['fileSame'], $c['fileMissing']], [false, ['updatedAt']]);
     $c = $columnsCheck($realEvent, $swap($realExport, "\$location = trim((string) (\$ev['locationName'] ?? ''));", "\$location = trim((string) (\$ev['locationName'] ?? '') . (\$ev['locationW3W'] ?? ''));", 1, 'the download\'s location line'));
     check('P22 with the download reading a column none of its lists has (locationW3W, a name with a digit), C6 names it',
         $c['fileMissing'], ['locationW3W']);
+
+    // (i) Round 2 of #968's check: anything in a SELECT list that is not a
+    //     backticked column was invisible. Each of three forms, planted into
+    //     each of the FOUR lists in turn (the page's, then the download's
+    //     first, second and third), must be named by C1b or C5b.
+    $nth = static function (string $src, string $find, string $with, int $which): string {
+        $at = -1;
+        for ($i = 0; $i < $which; $i++) {
+            $at = strpos($src, $find, $at + 1);
+            if ($at === false) {
+                refuse("section P (#968, C) could not find copy {$which} of the download's list start");
+            }
+        }
+        return substr($src, 0, $at) . $with . substr($src, $at + strlen($find));
+    };
+    $pageStart = "'SELECT `e`.`eventID`, `e`.`siteID`, ";
+    $fileStart = "'SELECT `e`.`eventID`, `e`.`seriesID`, ";
+    $listPlants = 0;
+    foreach (['e.*', '`e`.*', 'e.locationEmail'] as $form) {
+        $c = $columnsCheck($swap($realEvent, $pageStart, $pageStart . "{$form}, ", 1, 'the page list start'), $realExport);
+        check("P23-page {$form} added to the event page's list, C1b names it", $c['pageLeftover'], [$form]);
+        $listPlants++;
+        for ($which = 1; $which <= 3; $which++) {
+            $c = $columnsCheck($realEvent, $nth($realExport, $fileStart, $fileStart . "{$form}, ", $which));
+            check("P23-file{$which} {$form} added to the download's list number {$which}, C5b names it", $c['fileLeftover'], [$form]);
+            $listPlants++;
+        }
+    }
+    check('P23 ...all twelve (three forms in four lists) were planted', $listPlants, 12);
+
+    // (j) Round 2: reaching the row without naming it walked past the pins.
+    $titleLine = "\$pageTitle   = \$event['eventName'];";
+    foreach ([
+        "\$nm = 'event'; \$leak = \$\$nm['submitterEmail'];" => '$$nm',
+        "\$leak = \${'event'}['submitterEmail'];"            => "\${'event'}",
+        "\$leak = compact('event');"                         => "compact('event')",
+        "\$leak = \\extract(\$GLOBALS);"                     => 'extract($GLOBALS)',
+    ] as $added => $label) {
+        $c = $columnsCheck($swap($realEvent, $titleLine, $titleLine . ' ' . $added, 1, 'the page title line'), $realExport);
+        check("P24 with {$label} on the event page, C4b reports it", $c['pageIndirect'] !== [], true);
+    }
+    $c = $columnsCheck($realEvent, $swap($realExport, "\$location = trim((string) (\$ev['locationName'] ?? ''));",
+        "\$location = trim((string) (\$ev['locationName'] ?? '')); \$leak = compact('ev');", 1, 'the download\'s location line'));
+    check('P24-file with compact(\'ev\') in the download, C7b reports it', $c['fileIndirect'] !== [], true);
+
+    // (k) Round 2: the shapes were de-duplicated, so a second identical fetch
+    //     into `$event` was invisible. Now their COUNT is pinned.
+    $fetch = "\$event = \$stmt->get_result()->fetch_assoc();";
+    $c = $columnsCheck($swap($realEvent, $fetch, $fetch . "\n    " . $fetch, 1, 'the page\'s fetch'), $realExport);
+    check('P25 with a second identical fetch into $event, C4 reports the shape found twice where once is pinned',
+        $c['pageBare'], [') ; <$event> = $stmt ->: found 2, pinned 1']);
 
     $mAfter = $readModerated();
     check('P16 with every #968 plant taken out, the member and the read-only key are sent none of the seven again',

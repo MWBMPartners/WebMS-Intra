@@ -273,7 +273,9 @@ $event['imported'] = (int) $event['imported'] === 1;
 unset($event['canSeeFull']);
 
 // 🔒 #968 — THE ORGANISATION'S OWN WORKING NOTES ABOUT AN EVENT GO ONLY TO
-//    WHOEVER MAY MANAGE EVENTS. Until #968 every caller allowed to see the
+//    AN ADMINISTRATOR SIGNED IN TO THE PORTAL (D-136), at both addresses
+//    (`/api/events/detail` and `/api/v1/events/{id}` run this same file).
+//    Until #968 every caller allowed to see the
 //    event was sent all of these, so any signed-in member and any key holding
 //    only `events:read` could read them (measured over HTTP with
 //    tools/event-suggester-privacy-selftest.php, section M, against f9197eb9):
@@ -299,18 +301,25 @@ unset($event['canSeeFull']);
 //                         included — a deleted event is not returned at all.
 //                         It is in this list only because it is part of the
 //                         "how this record was handled" trail and tells a
-//                         member nothing; a manager still gets it, unchanged,
-//                         so no existing integration loses a field.
+//                         member nothing; a signed-in administrator still
+//                         gets it, unchanged.
 //
-//    WHO counts as "may manage events" is `$canManageEvents`, decided at the
-//    top of this file and NOT a new rule: for a session it is App::isAdmin(),
-//    the same check calendar/manage/ and the moderation page
-//    (admin/calendar/moderation.php, moderate.php) make; for a key it is the
-//    `events:write` scope, which already lets the key create, edit, change the
-//    status of and delete any of the organisation's events and read its
-//    drafts. A write key therefore keeps these fields; it already holds the
-//    events these notes are about. (The visitor's NAME and ADDRESS are a
-//    different matter and go to nobody here, write key included — #963 above.)
+//    WHO gets them: a request with NO API key whose session passes
+//    App::isAdmin() — the same check calendar/manage/ and the moderation page
+//    (admin/calendar/moderation.php, moderate.php) make, so a global
+//    administrator and an administrator of this organisation both count. That
+//    is `$canManageEvents` for a session, decided at the top of this file.
+//    NEVER an API key, whatever its scope (the owner, 11 November 2026 —
+//    D-136: "people only"). A key holding `events:write` is still "may manage
+//    events" for the DRAFT rule above (it can already create, edit and delete
+//    events), and it was given these fields in #968's first version for that
+//    reason; D-136 decided otherwise, because a key is a connected outside
+//    system, not a person moderating, and a note written by a moderator may be
+//    about the person who suggested the event. (The visitor's NAME and ADDRESS
+//    are a different matter and go to nobody here at all — #963 above.)
+//    The session is ignored whenever a key is sent, exactly as for the draft
+//    rule, so a browser signed in as an administrator cannot lend a key these
+//    fields by sending both.
 //
 //    Left for everybody, on purpose: the times (`createdAt`, `updatedAt`,
 //    `submittedAt`, `moderatedAt`, `statusChangedAt`), `submissionStatus`,
@@ -333,7 +342,8 @@ $forManagersOnly = [
     'statusChangedByID',
     'deletedAt',
 ];
-if ($canManageEvents === false) {
+$seesWorkingNotes = $apiKeyRow === null && $canManageEvents === true;
+if ($seesWorkingNotes === false) {
     foreach ($forManagersOnly as $managersOnly) {
         unset($event[$managersOnly]);
     }
