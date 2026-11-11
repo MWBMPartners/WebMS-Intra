@@ -17,14 +17,15 @@
  *
  * `normaliseAddress()`/`nullableTrim()` intentionally mirror
  * `Venues::saveVenue()`'s address rules verbatim (255/255/100/100/20 max
- * lengths, countryCode uppercase-ISO2-or-'GB' fallback) so every app that
- * captures a structured address behaves identically.
+ * lengths, countryCode uppercase-ISO2 or nothing) so every app that
+ * captures a structured address behaves identically. A missing country stays
+ * missing: it is never made British (#942, D-133).
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/456
  * -----------------------------------------------------------------------------
  */
@@ -48,21 +49,32 @@ class GeoLocation
      * `Venues::saveVenue()` (408-519) — the house convention for a
      * structured address, kept identical across every app.
      *
-     * ⚠️ NO LONGER IDENTICAL FOR THE COUNTRY (#935). A venue's country now
-     * follows `Venues::countryToStore()`: the organisation's own when empty,
-     * and REFUSED when there is none, never 'GB'. This method still turns a
-     * missing or unreadable country into 'GB'; that, and the callers that rely
-     * on it, are #942.
+     * 🌍 THE COUNTRY (#942, D-133). Two letters, in capitals, or NULL when
+     * the country is missing, empty or not two letters. It used to become
+     * 'GB' in every one of those cases, for every customer anywhere, so an
+     * organisation that saved its address with the country box empty was
+     * stored as British. Nothing is made up now: an address with no country
+     * has no country, and the caller decides what that means (the
+     * organisation settings page: follow the installation's country; a venue:
+     * Venues::countryToStore(), the organisation's own or a refusal).
+     *
+     * The same is true of an address arriving over the wire from ProjectBookIT
+     * or ProjectEPass through fromLocationObject(): one sent with no country,
+     * or with something that is not a two-letter code, now comes back with
+     * `countryCode` null instead of 'GB'. (Nothing in this repository calls
+     * fromLocationObject() today — `grep -rn fromLocationObject web tools`
+     * answers this file alone — so no stored data changes with it.)
      *
      * @param array<string, mixed> $parts line1,line2,city,region,postcode,countryCode
      *
-     * @return array{line1:?string,line2:?string,city:?string,region:?string,postcode:?string,countryCode:string}
+     * @return array{line1:?string,line2:?string,city:?string,region:?string,postcode:?string,countryCode:?string}
      */
     public static function normaliseAddress(array $parts): array
     {
-        $countryCode = strtoupper(trim((string) ($parts['countryCode'] ?? 'GB')));
+        $rawCountry  = $parts['countryCode'] ?? null;
+        $countryCode = is_string($rawCountry) === true ? strtoupper(trim($rawCountry)) : '';
         if (preg_match('/^[A-Z]{2}$/', $countryCode) !== 1) {
-            $countryCode = 'GB';
+            $countryCode = null;
         }
 
         return [
@@ -300,7 +312,7 @@ class GeoLocation
      *
      * @param array<string, mixed> $obj A `location` object per contract §2
      *
-     * @return array{name:?string,address:array{line1:?string,line2:?string,city:?string,region:?string,postcode:?string,countryCode:string},lat:?float,lng:?float,w3w:?string,geocodedAt:?string,geocodeSource:?string}
+     * @return array{name:?string,address:array{line1:?string,line2:?string,city:?string,region:?string,postcode:?string,countryCode:?string},lat:?float,lng:?float,w3w:?string,geocodedAt:?string,geocodeSource:?string}
      */
     public static function fromLocationObject(array $obj): array
     {

@@ -70,7 +70,10 @@ WHAT THIS CHECKS
      the same string or heredoc — must be on the allow list below. Today
      that is exactly one file, `web/_apps/admin/sites/save.php`. A second
      writer would bypass the refusal entirely, however carefully save.php
-     itself is written.
+     itself is written. The one narrow exception is COLUMN_ONLY_WRITERS
+     (#942): a file there may only `UPDATE tblSites SET <listed columns>
+     WHERE`, never a key or an address, and is checked statement by
+     statement; a listed file that stops writing the table is a finding.
   E. THE WRITER STILL CHECKS. Every allow-listed file must contain the text
      `ReservedKeys::` — proof the refusal has not been quietly unwired from
      the one file that is allowed to write the table.
@@ -148,6 +151,33 @@ ALLOWED_WRITERS = {
         "ReservedKeys:: into it directly"
     ),
 }
+
+# ---------------------------------------------------------------------------
+# Files that may UPDATE tblSites, but only columns that cannot be a site's key
+# or address (#942). Check D's concern is a second writer of `siteKey` or
+# `hostPattern` getting round save.php's reserved-key refusal; a write that
+# touches NEITHER cannot do that, and needs no ReservedKeys:: call.
+#
+# Each such file is held to a narrow shape, checked statement by statement:
+# every tblSites write in it must be an `UPDATE tblSites SET <columns> WHERE`,
+# and every column it sets must be in its list. An INSERT or REPLACE, or any
+# other column, is a finding. A listed file that no longer writes tblSites is
+# a finding too, so the list cannot go stale (it fails BOTH ways).
+# ---------------------------------------------------------------------------
+COLUMN_ONLY_WRITERS = {
+    "web/_install/index.php": (
+        {"timezone"},
+        "the installer's finish sets the FIRST organisation's time zone, asked "
+        "for on the Web addresses page (#942, D-133), on a database it has just "
+        "built; it never writes a key or an address",
+    ),
+}
+
+# `UPDATE tblSites SET a = ?, b = ? WHERE` -- the SET list, read up to WHERE.
+COLUMN_UPDATE_RE = re.compile(
+    r"\bUPDATE\s+`?tblSites`?\s+SET\s+(?P<set>.*?)\bWHERE\b",
+    re.IGNORECASE | re.DOTALL,
+)
 
 WRITE_SCAN_DIRS = ["web/_apps", "web/_core", "web/_install", "web/public_html"]
 
@@ -503,8 +533,46 @@ def check() -> int:
     # Check D — save.php is the only writer of tblSites.
     # ---------------------------------------------------------------
     writers = scan_tblsites_writers()
+    writer_rels = {str(w.relative_to(REPO_ROOT)) for w in writers}
+    for rel_str in COLUMN_ONLY_WRITERS:
+        if rel_str not in writer_rels:
+            findings.append(
+                f"{rel_str} is in COLUMN_ONLY_WRITERS but no longer writes tblSites -- remove the entry."
+            )
     for writer in writers:
         rel = str(writer.relative_to(REPO_ROOT))
+        if rel in COLUMN_ONLY_WRITERS:
+            allowed_cols, _reason = COLUMN_ONLY_WRITERS[rel]
+            code = "\n".join(
+                line
+                for line in writer.read_text(encoding="utf-8", errors="replace").splitlines()
+                if not (
+                    line.strip().startswith("//")
+                    or line.strip().startswith("#")
+                    or line.strip().startswith("*")
+                )
+            )
+            writes = list(TBLSITES_WRITE_RE.finditer(code))
+            updates = list(COLUMN_UPDATE_RE.finditer(code))
+            if len(updates) != len(writes):
+                findings.append(
+                    f"{rel} may only UPDATE tblSites with a SET list and a WHERE (COLUMN_ONLY_WRITERS); "
+                    f"it has {len(writes)} write(s) of tblSites, of which {len(updates)} have that shape."
+                )
+            for upd in updates:
+                cols = {
+                    part.split("=", 1)[0].strip().strip("`").strip()
+                    for part in upd.group("set").split(",")
+                    if "=" in part
+                }
+                extra = sorted(c for c in cols if c not in allowed_cols)
+                if extra or not cols:
+                    findings.append(
+                        f"{rel} UPDATEs tblSites column(s) {extra or '(none read)'} that COLUMN_ONLY_WRITERS "
+                        f"does not allow it ({sorted(allowed_cols)}). A key or an address must go through "
+                        "save.php, which refuses reserved keys."
+                    )
+            continue
         if rel not in ALLOWED_WRITERS:
             findings.append(
                 f"{rel} writes tblSites but is not on the allow list. Organisations "

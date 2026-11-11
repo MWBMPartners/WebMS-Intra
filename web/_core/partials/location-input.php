@@ -17,11 +17,30 @@
  * `data-w3w-suggest` wiring hook when `What3Words::isConfigured()` is
  * true; the plain input still works either way.
  *
+ * 🌍 THE COUNTRY BOX NEVER FILLS ITSELF (#942, D-133). It used to put 'GB'
+ * into an empty country box on every page that draws it, for every customer
+ * anywhere, so a small group or a meeting place saved without a glance at
+ * that box was stored as British. Now:
+ *
+ *   - a country in `values` is shown as it is;
+ *   - otherwise `countryStart` is shown, when the caller passes one. A page
+ *     drawing a NEW record passes Countries::ofOrganisation(Site::id()) — the
+ *     organisation's own country, else the installation's, else '' — so a new
+ *     record starts where the organisation is. A page EDITING a record does
+ *     not pass it, so a record saved with no country keeps showing none and a
+ *     Save to correct something else does not quietly give it one;
+ *   - otherwise the box is empty, and an empty box stays empty.
+ *
+ * `countryPlaceholder` is grey hint text inside an empty box (the
+ * organisation settings page uses it to show the installation's country,
+ * which an empty box follows), and `showCountry` false leaves the box out for
+ * a page that draws its own.
+ *
  * @package   Portal\Core\Partials
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/456
  * -----------------------------------------------------------------------------
  */
@@ -40,7 +59,10 @@ if (function_exists('portal_location_input') === false) {
      *     showW3W?: bool,
      *     compact?: bool,
      *     lookup?: bool,
-     *     w3wSuggest?: bool
+     *     w3wSuggest?: bool,
+     *     countryStart?: string,
+     *     countryPlaceholder?: string,
+     *     showCountry?: bool
      * } $cfg
      */
     function portal_location_input(array $cfg): void
@@ -86,7 +108,7 @@ if (function_exists('portal_location_input') === false) {
             $showCity  = $showField('city');
             $showRegion = $showField('region');
             $showPostcode = $showField('postcode');
-            $showCountry = $showField('countryCode');
+            $showCountry = $showField('countryCode') && (bool) ($cfg['showCountry'] ?? true);
 
             if ($showField('line1') === true) {
                 echo '<div class="col-12 ' . ($showLine2 === true ? 'col-md-6' : '') . '">'
@@ -121,9 +143,18 @@ if (function_exists('portal_location_input') === false) {
                     . '</div>';
             }
             if ($showCountry === true) {
+                // 🌍 What the box starts with: the record's own country, else
+                //    the caller's `countryStart`, else nothing (see the file
+                //    header). Never a country of this file's choosing.
+                $countryShown = $val('countryCode') !== ''
+                    ? $val('countryCode')
+                    : $esc((string) ($cfg['countryStart'] ?? ''));
+                $countryHint  = (string) ($cfg['countryPlaceholder'] ?? '');
                 echo '<div class="col-12 col-md-2">'
                     . '<label class="' . $lblClass . '" for="' . $name('countryCode') . '">' . $esc(t('location.country')) . '</label>'
-                    . '<input type="text" class="' . $ctrlClass . ' text-uppercase" id="' . $name('countryCode') . '" name="' . $name('countryCode') . '" maxlength="2" value="' . ($val('countryCode') !== '' ? $val('countryCode') : 'GB') . '">'
+                    . '<input type="text" class="' . $ctrlClass . ' text-uppercase" id="' . $name('countryCode') . '" name="' . $name('countryCode') . '" maxlength="2"'
+                    . ($countryHint !== '' ? ' placeholder="' . $esc($countryHint) . '"' : '')
+                    . ' value="' . $countryShown . '">'
                     . '</div>';
             }
         }

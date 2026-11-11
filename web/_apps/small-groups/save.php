@@ -169,9 +169,30 @@ $region = $region !== '' ? mb_substr($region, 0, 100) : null;
 $postcode = trim((string) ($_POST['postcode'] ?? ''));
 $postcode = $postcode !== '' ? mb_substr($postcode, 0, 20) : null;
 
-$countryCode = strtoupper(trim((string) ($_POST['countryCode'] ?? 'GB')));
-if (preg_match('/^[A-Z]{2}$/', $countryCode) !== 1) {
-    $countryCode = 'GB';
+// 🌍 The group's country (#942, D-133). It used to become 'GB' when the box
+//    was missing, empty or not two letters, for every customer anywhere. Now:
+//    two letters are stored in capitals; an EMPTY box stores no country ('');
+//    anything else is refused with the reason and nothing is saved, rather
+//    than quietly changed into a country nobody typed. A request that did not
+//    SEND the box (#677: ask whether a field arrived, never what it contains)
+//    leaves an existing group's country as it is.
+//
+//    The form starts a NEW group on the organisation's own country, else the
+//    installation's (manage.php, through Countries::ofOrganisation()), so an
+//    empty box here means somebody emptied it. A group with no country still
+//    works everywhere: the map and the address are drawn without one, and the
+//    geocoder is simply not given a country hint.
+$countryPosted = $_POST['countryCode'] ?? null;
+if (is_string($countryPosted) === false) {
+    $countryCode = $existing !== null ? (string) ($existing['countryCode'] ?? '') : '';
+} else {
+    $countryCode = strtoupper(trim($countryPosted));
+    if ($countryCode !== '' && preg_match('/^[A-Z]{2}$/', $countryCode) !== 1) {
+        $_SESSION['flash_msg']  = 'The country must be a two-letter code, such as FR or US, or left empty. Nothing was saved.';
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . $backUrl);
+        exit();
+    }
 }
 
 // 📍 #456 — pre-validate a non-empty W3W so a typo flashes back rather
@@ -472,7 +493,7 @@ if ($latitude === null && $addressLine1 !== null && Geocoder::autoEnabled() === 
             'line1' => $addressLine1, 'line2' => $addressLine2, 'city' => $city,
             'region' => $region, 'postcode' => $postcode,
         ]);
-        $geo = Geocoder::forward($addressLine, $countryCode);
+        $geo = Geocoder::forward($addressLine, $countryCode !== '' ? $countryCode : null);
         if ($geo !== null) {
             $geocodedAt    = date('Y-m-d H:i:s');
             $geocodeSource = (string) ($geo['source'] ?? 'unknown');

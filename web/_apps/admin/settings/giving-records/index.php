@@ -33,11 +33,14 @@
  *
  * WHY THE COUNTRY IS ASKED FOR HERE
  * ---------------------------------
- * The portal's organisation address is one value for the whole installation
- * and its country is "GB" unless changed. Reading that would offer every
- * organisation the United Kingdom's figure as if it were theirs. So each
- * organisation says here which country's rules it follows, and until it does
- * it gets a cautious placeholder, clearly flagged.
+ * This used to say the portal's organisation address was one value for the
+ * whole installation, "GB" unless changed. Neither is true any more: the
+ * address is each organisation's own (#677) and no country is built in (#942,
+ * D-133). The question is still asked here, separately, because the owner
+ * chose a country per organisation FOR THESE RULES, and where an office is
+ * does not decide which country's giving-record law applies (see
+ * GivingRetention's header). Until an organisation answers it gets a cautious
+ * placeholder, clearly flagged.
  *
  * WHAT THIS PAGE CANNOT DO
  * ------------------------

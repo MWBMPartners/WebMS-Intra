@@ -30,6 +30,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Capabilities;
+use Portal\Core\Countries;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\SmallGroups;
@@ -279,13 +280,19 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
                     'city'        => $locValues['city'] ?? '',
                     'region'      => $locValues['region'] ?? '',
                     'postcode'    => $locValues['postcode'] ?? '',
-                    'countryCode' => $locValues['countryCode'] ?? 'GB',
+                    'countryCode' => $locValues['countryCode'] ?? '',
                     'lat'         => $locValues['latitude'] ?? '',
                     'lng'         => $locValues['longitude'] ?? '',
                     'w3w'         => $locValues['what3words'] ?? '',
                 ],
                 'lookup'     => true,
                 'w3wSuggest' => true,
+                // 🌍 #942: a NEW group starts on the organisation's own
+                //    country, else the installation's, else nothing. An
+                //    existing group shows what it holds, even when that is
+                //    nothing, so correcting its name does not give it a
+                //    country. It used to start every group on 'GB'.
+                'countryStart' => $editGroup === null ? Countries::ofOrganisation($siteId) : '',
             ]); ?>
 
             <?php

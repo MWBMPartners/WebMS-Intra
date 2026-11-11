@@ -20,6 +20,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Countries;
 use Portal\Core\ReservedKeys;
 use Portal\Core\Site;
 
@@ -326,6 +327,32 @@ $zonesWait = Site::timezoneFacts()['inRow'] === false;
 </div>
 
 <script nonce="<?php echo htmlspecialchars(\Portal\Core\App::cspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
+// 🕰️ A NEW organisation's time zone is pre-selected from the installation's
+//    country (#942, D-133): a new organisation follows the installation's
+//    country until it chooses its own, and the zone follows the country. It
+//    used to start on UTC for every customer anywhere.
+//
+//    The zones of the installation's country come from PHP's own zone data
+//    (Countries::zonesOf()). Of those: the zone of the browser in front of the
+//    page when it is one of them (somebody in New York setting up a United
+//    States installation gets New York, not the first zone alphabetically,
+//    which is Adak); else the country's only zone when it has exactly one;
+//    else nothing, and the box asks. Nothing is looked up or sent anywhere:
+//    the browser's zone is read in the browser. Only a suggestion: the box
+//    can be changed, and an EDITED organisation keeps the zone it has.
+var installationCountryZones = <?php echo json_encode(Countries::zonesOf(Countries::ofInstallation()), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+function suggestedZone() {
+    var browserZone = '';
+    try {
+        browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    } catch (e) {
+        browserZone = '';
+    }
+    if (installationCountryZones.indexOf(browserZone) !== -1) { return browserZone; }
+    if (installationCountryZones.length === 1) { return installationCountryZones[0]; }
+    return '';
+}
+
 function resetSiteForm() {
     document.getElementById('formSiteID').value = '';
     document.getElementById('formSiteName').value = '';
@@ -335,7 +362,10 @@ function resetSiteForm() {
     document.getElementById('formFaviconPath').value = '';
     document.getElementById('formPrimaryColor').value = '#5e6ad2';
     document.getElementById('formCopyrightOrg').value = '';
-    document.getElementById('formTimezone').value = 'UTC';
+    document.getElementById('formTimezone').value = suggestedZone();
+    if (document.getElementById('formTimezone').selectedIndex < 0) {
+        document.getElementById('formTimezone').value = '';
+    }
     document.getElementById('formIsActive').checked = true;
     document.getElementById('modalTitleText').textContent = 'New Site';
 }

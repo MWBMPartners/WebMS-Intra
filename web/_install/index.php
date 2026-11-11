@@ -137,6 +137,15 @@ require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR 
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Channel.php';
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'PortalAddress.php';
 
+// 🌍 Portal\Core\Countries: the list of countries and the zones in each
+//    (#942, D-133), for the country and time zone the Web addresses page now
+//    asks for. The installer has NO autoloader, so it is required here by
+//    hand; without this line the page is a fatal "class not found" on every
+//    installation, which `php -l` cannot see. Only the methods that use PHP
+//    alone may be called here: ofInstallation(), ownOf() and
+//    ofOrganisation() need the portal's database connection.
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Countries.php';
+
 // 🔐 Portal\Core\Auth, for ONE method only: Auth::setPassword(), which is the
 //    one place a password is hashed and stored (#728). **THIS WIZARD HAS NO
 //    AUTOLOADER** — every class it uses is required by hand, which is why the
@@ -1915,6 +1924,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // somebody is certain to be looking at the question.
         $checked = \Portal\Core\PortalAddress::check(installField('portal_address'));
         $support = trim(installField('support_email'));
+        // 🌍 The installation's country and the first organisation's time
+        //    zone (#942, D-133). Both may be left unchosen: a country is never
+        //    made up (an installation with none simply has no country until
+        //    somebody sets one), and an unchosen zone leaves the organisation
+        //    as the install script made it. Anything that is not on the
+        //    portal's lists is refused, with nothing kept.
+        $country = \Portal\Core\Countries::fromPosted(installField('country'));
+        $zone    = trim(installField('timezone'));
         if ($checked['problem'] !== '') {
             $error = 'Nothing was saved. ' . $checked['problem'];
         } elseif ($checked['address'] === '') {
@@ -1924,8 +1941,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($support !== '' && (strlen($support) > 254 || filter_var($support, FILTER_VALIDATE_EMAIL) === false)) {
             $error = 'Nothing was saved. The support e-mail address is not an e-mail address: type it as '
                    . 'name@example.org, or leave the box empty to show none.';
+        } elseif ($country === null) {
+            $error = 'Nothing was saved. The country chosen is not one the installer knows. Choose one from the list, '
+                   . 'or "Not chosen yet".';
+        } elseif ($zone !== '' && in_array($zone, timezone_identifiers_list(), true) === false) {
+            $error = 'Nothing was saved. The time zone chosen is not one the installer knows. Choose one from the list, '
+                   . 'or "Not chosen yet".';
         } else {
-            $_SESSION['install_addresses'] = ['address' => $checked['address'], 'support' => $support];
+            $_SESSION['install_addresses'] = [
+                'address'  => $checked['address'],
+                'support'  => $support,
+                'country'  => $country,
+                'timezone' => $zone,
+            ];
             header('Location: ?step=5');
             exit();
         }
@@ -2078,9 +2106,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             try {
                 $finishReport['addressTyped'] = (string) ($addresses['address'] ?? '');
                 $finishReport['supportTyped'] = (string) ($addresses['support'] ?? '');
+                // 🌍 The installation's country (#942, D-133) goes in by the same
+                //    rule as the two addresses: it fills a setting that holds
+                //    nothing (the install script seeds it empty), may replace a
+                //    value THIS RUN wrote, and keeps a country a database it was
+                //    asked to carry on with already had.
+                $finishReport['countryTyped'] = (string) ($addresses['country'] ?? '');
                 foreach ([
                     'address' => [\Portal\Core\PortalAddress::SETTING, $finishReport['addressTyped']],
                     'support' => ['portal.support.email', $finishReport['supportTyped']],
+                    'country' => [\Portal\Core\Countries::SETTING, $finishReport['countryTyped']],
                 ] as $which => [$settingKey, $typedValue]) {
                     $ownEarlier = is_string($filledBefore[$settingKey] ?? null) === true ? $filledBefore[$settingKey] : null;
                     $stored     = installFillSetting($writeDb, $settingKey, $typedValue, $ownEarlier);
@@ -2092,6 +2127,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Kept at once, so that it is there if a later step of this
                 // finish fails. A finish that completes throws it away.
                 $_SESSION['install_filled'] = ['database' => installDbIdentity($dbCreds), 'values' => $filledBefore];
+
+                // 🕰️ The first organisation's time zone (#942, D-133), suggested
+                //    on the Web addresses page from the country. It is written
+                //    into that organisation's own row (tblSites, the ONE place an
+                //    organisation's zone is kept, #604) ONLY when this run built
+                //    the database from nothing ("fresh", or "wipe and start
+                //    again"): there the row was made by the install script a
+                //    minute ago and holds its placeholder, UTC. A database the
+                //    person chose to CARRY ON with keeps the zone it has, because
+                //    that may be somebody's choice; the last page says so.
+                //    Writing the same value twice is harmless, so a finish that
+                //    is pressed again after a failure further down is safe.
+                $finishReport['zoneTyped']   = (string) ($addresses['timezone'] ?? '');
+                $finishReport['zoneWritten'] = false;
+                $finishReport['zoneKept']    = false;
+                if ($finishReport['zoneTyped'] !== '') {
+                    if (in_array(installChoiceHeld(), ['fresh', 'drop'], true) === true) {
+                        $zoneStmt = $writeDb->prepare('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = 1');
+                        $zoneStmt->bind_param('s', $finishReport['zoneTyped']);
+                        $zoneStmt->execute();
+                        $zoneStmt->close();
+                        $finishReport['zoneWritten'] = true;
+                    } else {
+                        $finishReport['zoneKept'] = true;
+                    }
+                }
             } catch (\mysqli_sql_exception $e) {
                 error_log('[WebMS-Intra] Installer: could not store the web addresses: ' . $e->getMessage());
                 $error = 'The installation was not finished, because the portal\'s address could not be saved in the '
@@ -2803,14 +2864,23 @@ if ($installPage === 'administrator') {
 // same way, but belongs to the part of that file that needs the portal.)
 $installAddressOffered = '';
 $installSupportOffered = '';
+// 🌍 The country and time zone offered (#942). Empty means "nothing chosen
+//    yet", and then the page's own script suggests both from the browser's
+//    time zone (see the form). Never a country of the installer's choosing.
+$installCountryOffered = '';
+$installZoneOffered    = '';
 if ($installPage === 'addresses' || $installPage === 'finish') {
     $kept = is_array($_SESSION['install_addresses'] ?? null) === true ? $_SESSION['install_addresses'] : [];
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && installField('action') === 'web_addresses') {
         $installAddressOffered = installField('portal_address');
         $installSupportOffered = installField('support_email');
+        $installCountryOffered = strtoupper(trim(installField('country')));
+        $installZoneOffered    = trim(installField('timezone'));
     } elseif ($kept !== []) {
         $installAddressOffered = (string) ($kept['address'] ?? '');
         $installSupportOffered = (string) ($kept['support'] ?? '');
+        $installCountryOffered = (string) ($kept['country'] ?? '');
+        $installZoneOffered    = (string) ($kept['timezone'] ?? '');
     } else {
         $https  = strtolower(is_string($_SERVER['HTTPS'] ?? null) === true ? $_SERVER['HTTPS'] : '');
         $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
@@ -4080,6 +4150,108 @@ header('X-Robots-Tag: noindex, nofollow');
                     </div>
                 </div>
 
+                <?php
+                // 🌍 WHERE THE ORGANISATION IS (#942, D-133). The portal used to
+                //    take every installation for British. It now asks. Both boxes
+                //    may be left on "Not chosen yet" and both can be changed later.
+                //
+                //    The SUGGESTION comes from this browser's own time zone, read
+                //    by the script below in the browser: Europe/London suggests the
+                //    United Kingdom. The browser's zone is matched to a country with
+                //    PHP's own zone data (Countries::ofZone()), written into the
+                //    page as each zone option's data-country; nothing is looked up
+                //    or sent anywhere. (The owner first asked for the installer's
+                //    internet address to be used; that needs an outside lookup
+                //    service or a large shipped file, so the browser's zone was
+                //    chosen instead.) The script only fills a box nobody has
+                //    filled: a choice already made, typed back after an error or
+                //    kept from an earlier visit, is never replaced.
+                $installCountryChoices = \Portal\Core\Countries::choices();
+                $installZoneNames      = timezone_identifiers_list();
+                ?>
+                <h3 class="h6 mt-4">Where your organisation is</h3>
+                <div class="mb-3">
+                    <label for="country" class="form-label">Country <span class="text-muted">(you may leave this unchosen)</span></label>
+                    <select class="form-select" id="country" name="country" aria-describedby="country_help" data-chosen="<?php echo $installCountryOffered !== '' ? '1' : '0'; ?>">
+                        <option value=""<?php echo $installCountryOffered === '' ? ' selected' : ''; ?>>Not chosen yet</option>
+                        <?php foreach ($installCountryChoices as $installCode => $installCountryName): ?>
+                            <option value="<?php echo htmlspecialchars((string) $installCode, ENT_QUOTES, 'UTF-8'); ?>"<?php echo (string) $installCode === $installCountryOffered ? ' selected' : ''; ?>><?php echo htmlspecialchars($installCountryName, ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text" id="country_help">
+                        The country this installation is in. Each organisation on it starts from this country and can choose its own later, in Admin, Settings, Organisation. New venues and groups start in it, and maps look addresses up in it. The installer suggests one from this computer&rsquo;s time zone: <strong>check it.</strong>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="timezone" class="form-label">Time zone of your organisation <span class="text-muted">(you may leave this unchosen)</span></label>
+                    <select class="form-select" id="timezone" name="timezone" aria-describedby="timezone_help" data-chosen="<?php echo $installZoneOffered !== '' ? '1' : '0'; ?>">
+                        <option value=""<?php echo $installZoneOffered === '' ? ' selected' : ''; ?>>Not chosen yet</option>
+                        <?php foreach ($installZoneNames as $installZoneName): ?>
+                            <option value="<?php echo htmlspecialchars($installZoneName, ENT_QUOTES, 'UTF-8'); ?>" data-country="<?php echo htmlspecialchars(\Portal\Core\Countries::ofZone($installZoneName), ENT_QUOTES, 'UTF-8'); ?>"<?php echo $installZoneName === $installZoneOffered ? ' selected' : ''; ?>><?php echo htmlspecialchars($installZoneName, ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text" id="timezone_help">
+                        Every time the portal shows, and every reminder it sends, follows this clock. Choosing a country suggests its time zone when it has only one. On a new database it is set for your organisation; a database you chose to carry on with keeps the time zone it has. You can change it later in Admin, Organisations. Left unchosen, the organisation stays on UTC until somebody sets it.
+                    </div>
+                </div>
+                <script>
+                // 🌍 Suggest a country and time zone from this browser's own time
+                //    zone (#942, D-133). Runs only in the browser and sends nothing.
+                //    Each option of the zone list carries the country PHP's zone
+                //    data puts it in (data-country), so no second list is needed.
+                (function () {
+                    var country = document.getElementById('country');
+                    var zone    = document.getElementById('timezone');
+                    if (!country || !zone) { return; }
+                    var browserZone = '';
+                    try {
+                        browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+                    } catch (e) {
+                        browserZone = '';
+                    }
+                    function optionFor(value) {
+                        for (var i = 0; i < zone.options.length; i++) {
+                            if (zone.options[i].value === value) { return zone.options[i]; }
+                        }
+                        return null;
+                    }
+                    function zonesIn(code) {
+                        var list = [];
+                        for (var i = 0; i < zone.options.length; i++) {
+                            if (zone.options[i].getAttribute('data-country') === code) { list.push(zone.options[i].value); }
+                        }
+                        return list;
+                    }
+                    // A zone for a country: the browser's own when it is in that
+                    // country, else the country's only zone, else none (a country
+                    // with several zones does not decide which).
+                    function zoneFor(code) {
+                        var list = zonesIn(code);
+                        if (list.indexOf(browserZone) !== -1) { return browserZone; }
+                        return list.length === 1 ? list[0] : '';
+                    }
+                    // The first visit: nothing chosen in either box yet.
+                    var browserOption = optionFor(browserZone);
+                    if (country.getAttribute('data-chosen') !== '1' && browserOption) {
+                        var code = browserOption.getAttribute('data-country') || '';
+                        if (code !== '') { country.value = code; }
+                    }
+                    if (zone.getAttribute('data-chosen') !== '1' && country.value !== '') {
+                        var suggested = zoneFor(country.value);
+                        if (suggested !== '') { zone.value = suggested; }
+                    }
+                    // Choosing a different country suggests its zone, but only when
+                    // the zone showing is not already in that country. Never forced:
+                    // the zone box can still be changed afterwards.
+                    country.addEventListener('change', function () {
+                        if (country.value === '') { return; }
+                        var shown = optionFor(zone.value);
+                        if (shown && shown.getAttribute('data-country') === country.value) { return; }
+                        zone.value = zoneFor(country.value);
+                    });
+                }());
+                </script>
+
                 <div class="d-flex justify-content-between">
                     <a href="?step=4" class="btn btn-outline-secondary">&larr; Back</a>
                     <button type="submit" class="btn btn-primary">Continue &rarr;</button>
@@ -4111,6 +4283,14 @@ header('X-Robots-Tag: noindex, nofollow');
                     <span class="install-check-value"><?php echo $installSupportOffered === '' ? 'None' : '<code>' . htmlspecialchars($installSupportOffered, ENT_QUOTES, 'UTF-8') . '</code>'; ?></span>
                 </li>
                 <li class="install-check">
+                    <strong class="install-check-label">Country</strong>
+                    <span class="install-check-value"><?php echo $installCountryOffered === '' ? 'Not chosen. No country is known until somebody sets one in Admin, Settings, Organisation.' : htmlspecialchars(\Portal\Core\Countries::name($installCountryOffered), ENT_QUOTES, 'UTF-8'); ?></span>
+                </li>
+                <li class="install-check">
+                    <strong class="install-check-label">Time zone of your organisation</strong>
+                    <span class="install-check-value"><?php echo $installZoneOffered === '' ? 'Not chosen. The organisation stays on UTC until somebody sets it in Admin, Organisations.' : '<code>' . htmlspecialchars($installZoneOffered, ENT_QUOTES, 'UTF-8') . '</code>'; ?></span>
+                </li>
+                <li class="install-check">
                     <strong class="install-check-label">Which copy of the portal this is</strong>
                     <span class="install-check-value">This is <?php echo htmlspecialchars($installChannelWords['copy'] . '. ' . $installChannelWords['how'], ENT_QUOTES, 'UTF-8'); ?></span>
                 </li>
@@ -4121,7 +4301,7 @@ header('X-Robots-Tag: noindex, nofollow');
                 <ul class="mb-0 mt-1">
                     <li>Makes the folders <code>_uploads</code> and <code>_backups</code>, and puts a file in them and in <code>_auth_keys</code> that tells the web server to refuse every request for anything inside.</li>
                     <li>Writes the key file, <code>_auth_keys/enc.key</code>, which every password and key saved in Settings is encrypted with. A key file that is already there is kept.</li>
-                    <li>Saves the two addresses above, and writes the database login into <code>_auth_keys/auth_creds.php</code>.</li>
+                    <li>Saves the two addresses, the country and the time zone above, and writes the database login into <code>_auth_keys/auth_creds.php</code>.</li>
                     <li>Locks the installer, so that it cannot be run again, and deletes the installation code.</li>
                 </ul>
             </div>
@@ -4166,6 +4346,29 @@ header('X-Robots-Tag: noindex, nofollow');
                 <li class="install-check" data-done="support">
                     <strong class="install-check-label">Support e-mail address</strong>
                     <span class="install-check-value"><?php echo $doneSupport === '' ? 'None is set. The Help page tells people to ask an administrator.' : '<code>' . htmlspecialchars($doneSupport, ENT_QUOTES, 'UTF-8') . '</code>'; ?></span>
+                </li>
+                <?php
+                // 🌍 What the finish did with the country and time zone (#942).
+                $doneCountry      = (string) ($finishReport['country'] ?? '');
+                $doneCountryTyped = (string) ($finishReport['countryTyped'] ?? '');
+                $doneZone         = (string) ($finishReport['zoneTyped'] ?? '');
+                ?>
+                <li class="install-check" data-done="country" data-country="<?php echo htmlspecialchars($doneCountry, ENT_QUOTES, 'UTF-8'); ?>">
+                    <strong class="install-check-label">Country</strong>
+                    <span class="install-check-value"><?php echo $doneCountry === '' ? 'None is set, so no country is known: a new venue needs one typed in. Set it in Admin, Settings, Organisation.' : htmlspecialchars(\Portal\Core\Countries::name($doneCountry), ENT_QUOTES, 'UTF-8') . '. Each organisation starts from it and can choose its own in Admin, Settings, Organisation.'; ?></span>
+                    <?php if ($doneCountry !== $doneCountryTyped && $doneCountry !== ''): ?>
+                        <span class="install-check-fix">That is not the country you chose. This database already had a country saved, and it was kept.</span>
+                    <?php endif; ?>
+                </li>
+                <li class="install-check" data-done="timezone" data-zone-written="<?php echo ($finishReport['zoneWritten'] ?? false) === true ? '1' : '0'; ?>">
+                    <strong class="install-check-label">Time zone of your organisation</strong>
+                    <?php if (($finishReport['zoneWritten'] ?? false) === true): ?>
+                        <span class="install-check-value"><code><?php echo htmlspecialchars($doneZone, ENT_QUOTES, 'UTF-8'); ?></code>. Change it in Admin, Organisations.</span>
+                    <?php elseif (($finishReport['zoneKept'] ?? false) === true): ?>
+                        <span class="install-check-value">Kept as it was, because you chose to carry on with a database that already had one. The time zone you chose, <code><?php echo htmlspecialchars($doneZone, ENT_QUOTES, 'UTF-8'); ?></code>, was not saved: check it in Admin, Organisations.</span>
+                    <?php else: ?>
+                        <span class="install-check-value">Not chosen, so the organisation is on UTC until somebody sets it in Admin, Organisations.</span>
+                    <?php endif; ?>
                 </li>
                 <li class="install-check" data-done="channel" data-channel-source="<?php echo htmlspecialchars((string) $installChannel['source'], ENT_QUOTES, 'UTF-8'); ?>">
                     <strong class="install-check-label">Which copy of the portal this is</strong>

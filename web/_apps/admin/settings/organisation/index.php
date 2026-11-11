@@ -34,6 +34,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Auth;
+use Portal\Core\Countries;
 use Portal\Core\PortalAddress;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -55,12 +56,61 @@ $values = [
     'city'        => (string) (App::settings('org.address.city') ?? ''),
     'region'      => (string) (App::settings('org.address.region') ?? ''),
     'postcode'    => (string) (App::settings('org.address.postcode') ?? ''),
-    'countryCode' => (string) (App::settings('org.address.countryCode') ?? 'GB'),
+    // 🌍 The country this organisation IS in (its own, else the installation's),
+    //    for the preview below only. The country BOX is drawn separately and
+    //    reads the organisation's OWN row: see $countryOwn.
+    'countryCode' => Countries::ofOrganisation(Site::id()),
     'lat'         => (string) (App::settings('org.latitude') ?? ''),
     'lng'         => (string) (App::settings('org.longitude') ?? ''),
     'w3w'         => (string) (App::settings('org.what3words') ?? ''),
 ];
 $hasCoords = $values['lat'] !== '' && $values['lng'] !== '';
+
+// 🌍 THE COUNTRY BOX (#942, D-133). Each organisation chooses its own country,
+//    starting from the installation's (which the installer asked for).
+//
+//    The box shows ONLY this organisation's own choice, never the merged
+//    value, for the reason the support e-mail box below gives (#674, #677):
+//    the merged value is the installation's where the organisation has none,
+//    and a Save would then copy it into the organisation's own row, so a later
+//    change to the installation's country would reach this organisation never
+//    again. "Same as the installation" is the first choice and is what an
+//    organisation that has not chosen sees selected.
+//
+//    It used to show the merged value, or 'GB' when there was none, for every
+//    customer anywhere — so pressing Save made the organisation British.
+$countryOwn          = Countries::ownOf(Site::id());
+$countryInstallation = Countries::ofInstallation();
+$countryChoices      = Countries::choices();
+// A code the organisation holds that is not on the list (only hand-written SQL
+// can store one) is offered as a choice too. Without it NO option would carry
+// `selected`, and a select with none selected is a vote for the first option
+// (#763) — here "Same as the installation", so the next Save would quietly
+// throw the organisation's own country away.
+if ($countryOwn !== '' && isset($countryChoices[$countryOwn]) === false) {
+    $countryChoices = [$countryOwn => $countryOwn . ' (not on the portal\'s list)'] + $countryChoices;
+}
+$countryInForce = $countryOwn !== '' ? $countryOwn : $countryInstallation;
+
+// 🕰️ A value that follows from the country: the organisation's TIME ZONE
+//    (D-133: pre-selected from the country, never forced). It is kept on the
+//    organisation's own row and changed at Admin, Organisations (#604), so
+//    this page does not change it: it says when the two do not agree, and
+//    which zone the country would suggest, and leaves the decision to whoever
+//    sets the zone.
+$zoneNow       = Site::timezone(Site::id());
+$zoneCountry   = Countries::ofZone($zoneNow);
+$zoneSuggested = $countryInForce !== '' ? Countries::onlyZone($countryInForce) : '';
+$zoneAdvice    = '';
+if ($countryInForce !== '' && $zoneCountry !== $countryInForce
+    && in_array($zoneNow, Countries::zonesOf($countryInForce), true) === false
+) {
+    $zoneAdvice = 'This organisation\'s time zone is ' . $zoneNow . ', which is not in '
+        . Countries::name($countryInForce) . '.'
+        . ($zoneSuggested !== '' ? ' ' . Countries::name($countryInForce) . ' uses ' . $zoneSuggested . '.' : '')
+        . ' If the time zone is wrong, ' . (App::isUmbrellaAdmin() === true ? 'change it' : 'ask a global administrator to change it')
+        . ' at Admin, Organisations; times on every page follow it.';
+}
 
 // 🌐 The "Web addresses" card. Everything about the portal's address comes
 //    from PortalAddress, so this card, the dashboard and every e-mailed link
@@ -176,11 +226,40 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/settings/organisation/save'), ENT_QUOTES, 'UTF-8'); ?>">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <?php portal_location_input([
-                'values'     => $values,
-                'compact'    => false,
-                'lookup'     => true,
-                'w3wSuggest' => true,
+                'values'      => $values,
+                'compact'     => false,
+                'lookup'      => true,
+                'w3wSuggest'  => true,
+                // 🌍 The country is a list drawn just below, not the shared
+                //    form's two-letter box (#942).
+                'showCountry' => false,
             ]); ?>
+            <div class="row g-3 mt-0">
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="countryCode"><?php echo $e(t('location.country')); ?></label>
+                    <select class="form-select" id="countryCode" name="countryCode" aria-describedby="countryHelp">
+                        <option value=""<?php echo $countryOwn === '' ? ' selected' : ''; ?>><?php echo $e($countryInstallation !== ''
+                            ? 'Same as the installation: ' . Countries::name($countryInstallation)
+                            : 'Same as the installation (none chosen yet)'); ?></option>
+                        <?php foreach ($countryChoices as $code => $countryName): ?>
+                            <option value="<?php echo $e((string) $code); ?>"<?php echo (string) $code === $countryOwn ? ' selected' : ''; ?>><?php echo $e($countryName); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text" id="countryHelp">
+                        <?php if ($countryInstallation !== ''): ?>
+                            Each organisation can be in its own country. &ldquo;Same as the installation&rdquo; follows the
+                            installation&rsquo;s country, <?php echo $e(Countries::name($countryInstallation)); ?>, and goes on
+                            following it if that changes.
+                        <?php else: ?>
+                            Each organisation can be in its own country. No country was chosen for the whole installation, so
+                            &ldquo;Same as the installation&rdquo; means no country is known: new venues then need one typed in.
+                        <?php endif; ?>
+                    </div>
+                    <?php if ($zoneAdvice !== ''): ?>
+                        <div class="alert alert-warning small mt-2 mb-0" role="note"><?php echo $e($zoneAdvice); ?></div>
+                    <?php endif; ?>
+                </div>
+            </div>
             <div class="mt-3">
                 <button type="submit" class="btn btn-primary"><i class="fa-solid fa-floppy-disk me-1"></i>Save address</button>
             </div>

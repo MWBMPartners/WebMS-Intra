@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 253;  // + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 271;  // + eighteen in part Q (#942: Q00-Q17) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -4110,6 +4110,191 @@ if (array_filter($pWas, static fn (array $row): bool => $row['siteID'] === null 
     q("DELETE FROM tblSettings WHERE settingKey = 'multisite.enabled' AND siteID IS NULL");
 }
 orgZone(1, $pOrgZone === null ? null : (string) $pOrgZone);
+
+// =============================================================================
+// Q. NO COUNTRY IS BUILT IN (#942, D-133)
+// =============================================================================
+// The installation's country was seeded 'GB'; the shared address form filled an
+// EMPTY country box with 'GB'; GeoLocation::normaliseAddress() turned a missing
+// country into 'GB'; and a small group's country defaulted to 'GB' and fell back
+// to it in two places. So on an installation where nobody had chosen, every new
+// group, meeting place and organisation address came out British. Now the
+// installer asks (proved in installer-selftest.php, N01-N07), each organisation
+// chooses its own starting from the installation's, and nothing makes one up.
+// Each check says what the OLD code gave.
+head('Q. #942: no country is built in');
+$qOrgWas     = q("SELECT siteID, settingKey, settingValue, defaultValue FROM tblSettings WHERE settingKey LIKE 'org.%' AND (siteID IS NULL OR siteID = 1)");
+$qGroupsWas  = one("SELECT settingValue FROM tblSettings WHERE settingKey = 'small-groups.enabled' AND siteID IS NULL");
+$qZoneWas    = one('SELECT timezone FROM tblSites WHERE siteID = 1')['timezone'] ?? null;
+$qRepo       = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR;
+require_once $qRepo . 'GeoLocation.php';
+require_once $qRepo . 'Countries.php';
+/** Which option of the select with this id carries `selected`, or null when none does (a vote for the first). */
+$qSelected = static function (string $html, string $id): ?string {
+    if (tz_find('#<select[^>]*\bid="' . $id . '"[^>]*>(.*?)</select>#s', $html, $sel) !== 1) {
+        return '(no such list)';
+    }
+    $n = tz_findAll('#<option value="([^"]*)"\s*selected#', $sel[1], $opts);
+
+    return $n === 1 ? html_entity_decode($opts[1][0], ENT_QUOTES, 'UTF-8') : ($n === 0 ? null : '(several selected)');
+};
+/** The organisation page's address form, as a browser would send it untouched (the country as drawn). */
+$qOrgForm = static function (string $html) use ($qSelected): array {
+    $fields = [];
+    foreach (['addressLine1', 'addressLine2', 'city', 'region', 'postcode', 'latitude', 'longitude', 'what3words'] as $name) {
+        if (tz_find('#<input[^>]*\bname="' . $name . '"[^>]*\bvalue="([^"]*)"#s', $html, $m) === 1) {
+            $fields[$name] = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+        }
+    }
+    $fields['countryCode'] = (string) $qSelected($html, 'countryCode');
+
+    return $fields;
+};
+$qOwnRow    = static fn (int $site = 1): ?string => one("SELECT settingValue FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID = ?", 'i', [$site])['settingValue'] ?? null;
+$qInstall   = static fn (): ?string => one("SELECT settingValue FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID IS NULL")['settingValue'] ?? null;
+$qSaveOrg   = static function (array $change) use ($adminJar, $qOrgForm): array {
+    $page = req($adminJar, 'GET', '/admin/settings/organisation');
+    $fields = array_merge($qOrgForm($page['body']), $change);
+    $fields['csrf_token'] = token($page['body']);
+
+    return req($adminJar, 'POST', '/admin/settings/organisation/save', $fields);
+};
+$qNewVenueBox = static function () use ($adminJar): string {
+    $page = req($adminJar, 'GET', '/venues/manage');
+
+    return tz_find('#id="countryCode" name="countryCode"[^>]*value="([^"]*)"#s', $page['body'], $m) === 1 ? $m[1] : '(no country box)';
+};
+
+// Start where a fresh installation whose installer was left on "Not chosen yet" starts.
+q("DELETE FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID IS NOT NULL");
+setting('org.address.countryCode', '');
+orgZone(1, 'Pacific/Auckland');
+
+$qSeed = one("SELECT `settingValue`, `defaultValue` FROM `tblSettings` WHERE `settingKey` = 'org.address.countryCode' AND `siteID` IS NULL");
+$qCol  = one("SELECT COLUMN_DEFAULT AS d FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblSmallGroups' AND COLUMN_NAME = 'countryCode'");
+ok(
+    'Q00 the install script names NO country: the installation\'s country is seeded empty, with an empty default, and a small group\'s country defaults to empty (all three were \'GB\')',
+    ($qSeed['defaultValue'] ?? null) === '' && $qCol !== null && in_array($qCol['d'], ['', "''"], true) === true,
+    json_encode([$qSeed, $qCol])
+);
+
+$qNorm = [
+    'missing'      => \Portal\Core\GeoLocation::normaliseAddress(['line1' => 'x'])['countryCode'],
+    'empty'        => \Portal\Core\GeoLocation::normaliseAddress(['countryCode' => ''])['countryCode'],
+    'three letters'=> \Portal\Core\GeoLocation::normaliseAddress(['countryCode' => 'GBR'])['countryCode'],
+    'a list'       => \Portal\Core\GeoLocation::normaliseAddress(['countryCode' => ['GB']])['countryCode'],
+    'typed untidy' => \Portal\Core\GeoLocation::normaliseAddress(['countryCode' => ' fr '])['countryCode'],
+    'over the wire'=> \Portal\Core\GeoLocation::fromLocationObject(['address' => ['line1' => '1 Rue X']])['address']['countryCode'],
+];
+ok(
+    'Q01 GeoLocation::normaliseAddress() keeps a missing country MISSING: none, empty, not two letters, or not text gives null; " fr " gives FR; and an address arriving over the wire with no country has none (each of the four used to be \'GB\')',
+    $qNorm === ['missing' => null, 'empty' => null, 'three letters' => null, 'a list' => null, 'typed untidy' => 'FR', 'over the wire' => null],
+    json_encode($qNorm)
+);
+
+$qPage = req($adminJar, 'GET', '/admin/settings/organisation');
+ok(
+    'Q02 with no country chosen anywhere, the organisation page offers "Same as the installation (none chosen yet)" as the ONE selected choice, and no box anywhere on it holds GB (it showed GB)',
+    $qPage['status'] === 200 && $qSelected($qPage['body'], 'countryCode') === '' && str_contains(words($qPage['body']), 'Same as the installation (none chosen yet)') === true
+        && tz_find('#value="GB"\s*selected|name="countryCode"[^>]*value="GB"#', $qPage['body']) === 0,
+    said($qPage) . '; selected ' . json_encode($qSelected($qPage['body'], 'countryCode'))
+);
+$qSaved = $qSaveOrg(['addressLine1' => 'Selftest 942 Lane']);
+ok(
+    'Q03 pressing Save with the country left as drawn stores NO country for the organisation and leaves the installation\'s alone (it stored GB as the organisation\'s own)',
+    $qOwnRow() === null && $qInstall() === '' && one("SELECT 1 AS x FROM tblSettings WHERE settingKey = 'org.address.line1' AND siteID = 1 AND settingValue = 'Selftest 942 Lane'") !== null,
+    said($qSaved) . '; own ' . json_encode($qOwnRow()) . ', installation ' . json_encode($qInstall())
+);
+
+setting('org.address.countryCode', 'NZ');
+$qPage = req($adminJar, 'GET', '/admin/settings/organisation');
+$qSaved = $qSaveOrg([]);
+ok(
+    'Q04 the installation\'s country, NZ, is offered as "Same as the installation: New Zealand", selected; Save untouched does NOT copy it into the organisation\'s own row (#674), so a later change to the installation\'s still reaches it',
+    $qSelected($qPage['body'], 'countryCode') === '' && str_contains(words($qPage['body']), 'Same as the installation: New Zealand') === true && $qOwnRow() === null,
+    said($qSaved) . '; own ' . json_encode($qOwnRow())
+);
+ok('Q05 a new venue in that organisation starts on the installation\'s country, NZ, which the organisation follows', $qNewVenueBox() === 'NZ', $qNewVenueBox());
+
+$qSaved = $qSaveOrg(['countryCode' => 'fr']);
+$qPage  = req($adminJar, 'GET', '/admin/settings/organisation');
+ok(
+    'Q06 an organisation may choose ITS OWN country: FR is stored on the organisation\'s own row, the installation keeps NZ, the second organisation is untouched, the page shows FR chosen, and a new venue starts on FR',
+    $qOwnRow() === 'FR' && $qInstall() === 'NZ' && $qOwnRow(ORG_TWO) === null && $qSelected($qPage['body'], 'countryCode') === 'FR' && $qNewVenueBox() === 'FR',
+    said($qSaved) . '; own ' . json_encode($qOwnRow()) . ', installation ' . json_encode($qInstall()) . ', venue box ' . $qNewVenueBox()
+);
+ok(
+    'Q07 the page SAYS the organisation\'s time zone (Pacific/Auckland) is not in France and which zone France uses; it suggests, it does not change the zone',
+    str_contains(words($qPage['body']), 'This organisation\'s time zone is Pacific/Auckland, which is not in France. France uses Europe/Paris.') === true
+        && zoneOfOrg(1) === 'Pacific/Auckland',
+    zoneOfOrg(1)
+);
+
+$qRefused = $qSaveOrg(['countryCode' => 'ZZ', 'addressLine1' => 'Selftest 942 Refused']);
+ok(
+    'Q08 a country that is not on the list is REFUSED with the reason and NOTHING is saved: the country stays FR and the address line is unchanged',
+    $qOwnRow() === 'FR' && one("SELECT 1 AS x FROM tblSettings WHERE settingKey = 'org.address.line1' AND siteID = 1 AND settingValue = 'Selftest 942 Refused'") === null
+        && str_contains(flashAfter($adminJar, '/admin/settings/organisation'), 'The country chosen is not one the portal knows') === true,
+    said($qRefused) . '; own ' . json_encode($qOwnRow())
+);
+
+$qSaved = $qSaveOrg(['countryCode' => '']);
+ok(
+    'Q09 choosing "Same as the installation" REMOVES the organisation\'s own row (an empty row would hide the installation\'s), so it follows NZ again',
+    $qOwnRow() === null && $qNewVenueBox() === 'NZ',
+    said($qSaved) . '; own ' . json_encode($qOwnRow())
+);
+
+// A two-letter code the portal does not list, put there by hand (only SQL can): offered, chosen, and kept by a Save.
+q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (1, 'org.address.countryCode', 'QQ', '', 0)");
+$qPage  = req($adminJar, 'GET', '/admin/settings/organisation');
+$qSaved = $qSaveOrg([]);
+ok(
+    'Q10 an organisation\'s own code that is NOT on the list is offered and selected, and Save untouched keeps it (with no option selected the browser would send "Same as the installation" and quietly drop it)',
+    $qSelected($qPage['body'], 'countryCode') === 'QQ' && $qOwnRow() === 'QQ',
+    said($qSaved) . '; selected ' . json_encode($qSelected($qPage['body'], 'countryCode')) . '; own ' . json_encode($qOwnRow())
+);
+q("DELETE FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID = 1");
+
+// ---- small groups --------------------------------------------------------------------------
+setting('small-groups.enabled', '1');
+setting('org.address.countryCode', '');
+$qGroupBox = static function (string $path) use ($adminJar): string {
+    $page = req($adminJar, 'GET', $path);
+
+    return tz_find('#id="countryCode" name="countryCode" maxlength="2"[^>]*value="([^"]*)"#s', $page['body'], $m) === 1 ? $m[1] : '(no country box: HTTP ' . $page['status'] . ')';
+};
+$qGroupCountry = static fn (string $name): ?string => one('SELECT countryCode FROM tblSmallGroups WHERE groupName = ? AND siteID = 1', 's', [$name])['countryCode'] ?? null;
+$qGroupId      = static fn (string $name): int => (int) (one('SELECT groupID FROM tblSmallGroups WHERE groupName = ? AND siteID = 1', 's', [$name])['groupID'] ?? 0);
+ok('Q11 with no country chosen anywhere, the new-group form\'s country box is EMPTY (the shared form filled it with GB)', $qGroupBox('/small-groups/manage') === '', $qGroupBox('/small-groups/manage'));
+post($adminJar, '/small-groups/manage', '/small-groups/save', ['action' => 'create', 'groupName' => 'Selftest 942 nowhere', 'countryCode' => '']);
+ok('Q12 a small group saved with the country box EMPTY is stored with NO country (it was stored as GB)', $qGroupCountry('Selftest 942 nowhere') === '', json_encode($qGroupCountry('Selftest 942 nowhere')));
+$qNowhere = $qGroupId('Selftest 942 nowhere');
+ok('Q13 and its edit form shows the box empty, not filled with any country, so correcting its name does not give it one', $qNowhere > 0 && $qGroupBox('/small-groups/manage?id=' . $qNowhere) === '', $qGroupBox('/small-groups/manage?id=' . $qNowhere));
+setting('org.address.countryCode', 'IE');
+ok('Q14 with the installation in Ireland, a NEW group\'s box starts on IE (the organisation follows the installation\'s country)', $qGroupBox('/small-groups/manage') === 'IE', $qGroupBox('/small-groups/manage'));
+ok('Q15 …while the existing group with no country still shows none', $qGroupBox('/small-groups/manage?id=' . $qNowhere) === '', $qGroupBox('/small-groups/manage?id=' . $qNowhere));
+post($adminJar, '/small-groups/manage', '/small-groups/save', ['action' => 'create', 'groupName' => 'Selftest 942 bad', 'countryCode' => 'Ireland']);
+ok('Q16 a country that is not two letters is REFUSED and no group is made (it was silently stored as GB)', $qGroupCountry('Selftest 942 bad') === null
+    && str_contains(flashAfter($adminJar, '/small-groups/manage'), 'The country must be a two-letter code') === true, json_encode($qGroupCountry('Selftest 942 bad')));
+post($adminJar, '/small-groups/manage', '/small-groups/save', ['action' => 'create', 'groupName' => 'Selftest 942 Spain', 'countryCode' => 'es']);
+$qSpain = $qGroupId('Selftest 942 Spain');
+post($adminJar, '/small-groups/manage?id=' . $qSpain, '/small-groups/save', ['action' => 'update', 'groupID' => $qSpain, 'groupName' => 'Selftest 942 Spain']);
+ok('Q17 a group saved as ES keeps ES when an edit does not SEND the country (#677; it became GB)', $qGroupCountry('Selftest 942 Spain') === 'ES', json_encode($qGroupCountry('Selftest 942 Spain')));
+
+// ---- put everything back as part Q found it ------------------------------------------
+q("DELETE FROM tblSmallGroups WHERE groupName LIKE 'Selftest 942%' AND siteID = 1");
+q("DELETE FROM tblSettings WHERE settingKey LIKE 'org.%' AND (siteID IS NULL OR siteID = 1)");
+foreach ($qOrgWas as $row) {
+    q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss',
+        [$row['siteID'] === null ? null : (int) $row['siteID'], (string) $row['settingKey'], (string) $row['settingValue'], (string) ($row['defaultValue'] ?? '')]);
+}
+if ($qGroupsWas === null) {
+    q("DELETE FROM tblSettings WHERE settingKey = 'small-groups.enabled' AND siteID IS NULL");
+} else {
+    setting('small-groups.enabled', (string) $qGroupsWas['settingValue']);
+}
+orgZone(1, $qZoneWas === null ? null : (string) $qZoneWas);
 
 // =============================================================================
 // 🏁 The end

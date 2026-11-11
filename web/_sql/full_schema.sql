@@ -9470,6 +9470,12 @@ CREATE TABLE IF NOT EXISTS `tblGeocodeCache` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Geocoder result cache — an address geocodes once (Nominatim policy) (migration 180)';
 
+-- 🌍 org.address.countryCode ships EMPTY (#942, D-133): no country is built
+--    in. The installer ASKS for the installation's country and writes it
+--    into this row (web/_install/index.php, the finish); each organisation
+--    may choose its own on Admin, Settings, Organisation. It used to be 'GB'
+--    for every customer anywhere, so every new venue, small group and meeting
+--    place started British.
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'w3w.enabled',              'false', 'false', 0),
     (NULL, 'w3w.apiKey',               '',      '',      1),
@@ -9481,7 +9487,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'org.address.city',         '',      '',      0),
     (NULL, 'org.address.region',       '',      '',      0),
     (NULL, 'org.address.postcode',     '',      '',      0),
-    (NULL, 'org.address.countryCode',  'GB',    'GB',    0),
+    (NULL, 'org.address.countryCode',  '',      '',      0),
     (NULL, 'org.latitude',             '',      '',      0),
     (NULL, 'org.longitude',            '',      '',      0),
     (NULL, 'org.what3words',           '',      '',      0)
@@ -9679,7 +9685,10 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroups` (
     `city`               VARCHAR(100)  DEFAULT NULL,
     `region`             VARCHAR(100)  DEFAULT NULL COMMENT 'County / state / province',
     `postcode`           VARCHAR(20)   DEFAULT NULL,
-    `countryCode`        CHAR(2)       NOT NULL DEFAULT 'GB' COMMENT 'ISO 3166-1 alpha-2',
+    -- 🌍 Empty means "no country known", on purpose (#942, migration 279):
+    -- it used to default to 'GB' for every customer. The form starts a new
+    -- group on the organisation's own country; an empty box stays empty.
+    `countryCode`        CHAR(2)       NOT NULL DEFAULT '' COMMENT 'ISO 3166-1 alpha-2; empty = no country known',
     `latitude`           DECIMAL(10,7) DEFAULT NULL,
     `longitude`          DECIMAL(10,7) DEFAULT NULL,
     `what3words`         VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
@@ -10954,11 +10963,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('230_event_status_repair.sql')
 -- on a page called Organisation settings.
 --
 -- This is the SAME statement as the migration, word for word, so an upgraded
--- database and a fresh one cannot drift. On a fresh install it moves exactly
--- one row: the seeded organisation (`default`) gets its own
--- `org.address.countryCode` of 'GB', because that is the only one of the nine
--- keys seeded with a value. The other eight are seeded empty and empty values
--- are deliberately not copied.
+-- database and a fresh one cannot drift. On a fresh install it moves NOTHING
+-- since #942: all nine keys are seeded empty, and empty values are
+-- deliberately not copied. (It used to give the seeded organisation its own
+-- `org.address.countryCode` of 'GB', the one key seeded with a value. The
+-- installer now writes the country it asks for into the INSTALLATION's row,
+-- at the finish, after this has run, so the organisation follows it.)
 --
 -- `portal.support.email` is NOT copied down, here or in the migration. It is
 -- per-organisation WITH A FALLBACK to the installation's value (owner,
@@ -11730,6 +11740,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('277_public_events_without_end_
 -- The `expenses/receipt` address is written above, in the Expenses block of
 -- the routes; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('278_expense_receipt_route.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 279_no_built_in_country.sql (#942, D-133) ──────────────────────────
+-- tblSmallGroups.countryCode is written above with an EMPTY default, and
+-- org.address.countryCode is seeded empty; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('279_no_built_in_country.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

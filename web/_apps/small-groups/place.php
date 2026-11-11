@@ -36,6 +36,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Countries;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\SmallGroups;
@@ -162,6 +163,11 @@ $values = $place ?? [];
                 ],
                 'lookup'     => true,
                 'w3wSuggest' => true,
+                // 🌍 #942: a NEW home starts on the organisation's own country,
+                //    else the installation's. The shared form used to fill an
+                //    empty box with 'GB' here; an existing home shows what it
+                //    holds, nothing included.
+                'countryStart' => $isNew === true ? Countries::ofOrganisation($siteId) : '',
             ]);
             portal_place_map_agreement([
                 'hostId'   => $hostId,

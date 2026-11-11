@@ -4531,11 +4531,15 @@ foreach (array_keys($real['countries']) as $code) {
 }
 $form = static fn (array $over = []): array => $over + ['countryCode' => '', 'scope' => 'receipted', 'years' => '', 'confirmed' => '', 'yearEndMonth' => '', 'yearEndDay' => '', 'hold' => '', 'understood' => ''];
 
-// THE COUNTRY TRAP. The installation's one organisation address says "GB"
-// unless changed. An organisation that has not set its own country must not
-// be treated as British because of it.
+// THE COUNTRY TRAP. An organisation's POSTAL address may say "GB"; one that
+// has not chosen a country FOR THESE RULES must not be treated as British
+// because of it. The address's country is set here by the test itself: until
+// #942 this check leaned on the install script seeding "GB" for every
+// installation, and since #942 (D-133) the script seeds no country at all, so
+// without this line the premise would simply be false.
+ge_setting(SITE_G2, 'org.address.countryCode', 'GB');
 $ruleG2 = GivingRetention::ruleForSite(SITE_G2);
-ge_ok('AN ORGANISATION WITH NO COUNTRY SET gets the flagged placeholder (' . $real['placeholderYears'] . ' years), even though the installation\'s own address says "GB"',
+ge_ok('AN ORGANISATION WITH NO COUNTRY SET gets the flagged placeholder (' . $real['placeholderYears'] . ' years), even though its own postal address says "GB"',
     App::settingForSite('org.address.countryCode', SITE_G2) === 'GB' && $ruleG2['countryCode'] === '' && $ruleG2['suggestion']['kind'] === 'placeholder'
     && $ruleG2['suggestion']['why'] === 'country-not-set' && $ruleG2['years'] === $real['placeholderYears'] && $ruleG2['confirmed'] === false,
     json_encode([$ruleG2['countryCode'], $ruleG2['suggestion']['kind'], $ruleG2['years']]));

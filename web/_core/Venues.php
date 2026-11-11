@@ -513,31 +513,23 @@ class Venues
     }
 
     /**
-     * 🌍 The organisation's own country, as a two-letter code, or '' when it
-     * has none a venue could use (#935).
+     * 🌍 The organisation's country, as a two-letter code, or '' when none is
+     * known a venue could use (#935).
      *
-     * It is `org.address.countryCode`, set at Admin, Settings, Organisation and
-     * per organisation since #677, read for THIS organisation with its own row
-     * first (App::settingForSite()). A value that is not two letters, or a read
+     * Asked of Countries::ofOrganisation(), the ONE answer since #942: the
+     * organisation's own `org.address.countryCode` when it has chosen one at
+     * Admin, Settings, Organisation, else the installation's (asked by the
+     * installer, D-133), else ''. A value that is not two letters, or a read
      * that fails, is '' (no country known), never a made-up one.
      *
-     * KNOWN LIMIT, recorded rather than hidden: the install script still seeds
-     * that setting with 'GB', and the shared address form fills an empty country
-     * box with 'GB' too, so on an installation where nobody has set the
-     * organisation's country this still answers 'GB'. It is at least ONE visible
-     * value an administrator can change in one place, rather than a default
-     * built into every venue. That is #942.
+     * The known limit #935 recorded here — that the install script seeded
+     * 'GB' and the shared address form filled an empty box with 'GB', so this
+     * still answered 'GB' wherever nobody had chosen — is gone with #942:
+     * nothing seeds or fills a country any more.
      */
     public static function organisationCountry(int $siteId): string
     {
-        try {
-            $country = App::settingForSite('org.address.countryCode', $siteId);
-        } catch (\Throwable $e) {
-            return '';
-        }
-        $country = strtoupper(trim((string) $country));
-
-        return preg_match('/^[A-Z]{2}$/', $country) === 1 ? $country : '';
+        return Countries::ofOrganisation($siteId);
     }
 
     /**

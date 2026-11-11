@@ -295,6 +295,9 @@ COMMENT='Geocoder result cache — an address geocodes once (Nominatim policy) (
 -- no network I/O appears on upgrade. geo.nominatim.lastCallAt is
 -- operational throttle state stored as a setting. The nine org.* keys
 -- back the /admin/settings/organisation site-HQ address page.
+-- org.address.countryCode was seeded 'GB' here until #942 (D-133): no
+-- country is built in any more, the installer asks for one, and migration
+-- 279 empties the value-to-"reset-to" on databases that already ran this.
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'w3w.enabled',              'false', 'false', 0),
     (NULL, 'w3w.apiKey',               '',      '',      1),
@@ -306,7 +309,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'org.address.city',         '',      '',      0),
     (NULL, 'org.address.region',       '',      '',      0),
     (NULL, 'org.address.postcode',     '',      '',      0),
-    (NULL, 'org.address.countryCode',  'GB',    'GB',    0),
+    (NULL, 'org.address.countryCode',  '',      '',      0),
     (NULL, 'org.latitude',             '',      '',      0),
     (NULL, 'org.longitude',            '',      '',      0),
     (NULL, 'org.what3words',           '',      '',      0)

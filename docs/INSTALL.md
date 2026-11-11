@@ -258,6 +258,14 @@ password needs at least 12 characters, with a capital letter, a small letter, a 
   begins with `https://` if your website has a security certificate. Every link in an e-mail the portal sends
   begins with this address.
 - **Support e-mail address.** Where people should write when they need help. You may leave it empty.
+- **Country.** The country this installation is in. Nothing is assumed: the installer suggests one from your own
+  computer's time zone (for example, a computer set to London suggests the United Kingdom), and nothing is looked up
+  or sent anywhere to do that. Check it. Each organisation on the installation starts from this country and can
+  choose its own later, in Admin, Settings, Organisation. You may leave it unchosen; then no country is known, and a
+  new venue needs one typed in.
+- **Time zone of your organisation.** Suggested from the country when the country has only one time zone, or from
+  your computer's when it is in that country. On a new database it is set for your organisation; a database you
+  chose to carry on with keeps the time zone it already has. Change it later in Admin, Organisations.
 
 ## 10. Finish (stage 7)
 
@@ -272,6 +280,7 @@ The last page is shown **once**. It tells you:
 
 - the address the portal will use in e-mails. If the database already held an address before you started, that one
   is kept, and the page says so;
+- the country and the time zone. A country or time zone the database already held is kept, and the page says so;
 - which copy of the portal this is, and what the installer did about the file `.channel`: it writes the
   package's word into it (`live` for a released package) unless a `.channel` file was already there, which it
   leaves exactly as it is;

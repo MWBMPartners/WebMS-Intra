@@ -28,6 +28,10 @@
  *
  * The rest of this header is about the postal address form.
  *
+ * The organisation's COUNTRY is its own choice, starting from the
+ * installation's (#942, D-133): see "THE ORGANISATION'S OWN COUNTRY" below.
+ * It used to be stored as 'GB' whenever the box was left empty.
+ *
  * Normalises the address via `GeoLocation::normaliseAddress()`, validates
  * coords/W3W (invalid non-empty W3W is rejected with a flash — nothing
  * saved; empty is fine), applies the W3W dual-mode verify/fill contract
@@ -91,6 +95,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\Countries;
 use Portal\Core\Geocoder;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
@@ -358,6 +363,52 @@ $address = GeoLocation::normaliseAddress([
     'countryCode' => $_POST['countryCode'] ?? null,
 ]);
 
+// 🌍 THE ORGANISATION'S OWN COUNTRY (#942, D-133). Each organisation may be
+//    in a different country, and chooses its own starting from the
+//    installation's (asked by the installer).
+//
+//    IT USED TO BE 'GB' WHENEVER THE BOX WAS EMPTY: normaliseAddress() turned
+//    a missing country into 'GB' and this handler stored that as the
+//    organisation's own, so an organisation that never looked at the box was
+//    British. Now the box is a list, and:
+//
+//      - "Same as the installation" (an empty value) REMOVES the
+//        organisation's own row, so it follows the installation's country —
+//        and follows it again if the installation's ever changes. It does not
+//        store an empty string: a stored row wins over the installation's in
+//        the merged settings, so an empty one would hide it (the support
+//        e-mail address below works the same way, #677);
+//      - a country on the portal's list (Countries) is stored as the
+//        organisation's own;
+//      - the organisation's OWN stored code, unchanged, is accepted even when
+//        it is not on the list (only hand-written SQL can put one there), so
+//        the address can still be saved; the page offers that code as a
+//        choice for the same reason;
+//      - anything else is refused with the reason, BEFORE anything is
+//        written, so a refusal changes nothing.
+//
+//    IT ASKS WHETHER THE FIELD ARRIVED (#677): a request without it leaves
+//    the country exactly as it was.
+$countrySent      = array_key_exists('countryCode', $_POST) === true;
+$countryOwnBefore = Countries::ownOf($siteId);
+$countryChosen    = null;
+if ($countrySent === true) {
+    $countryChosen = Countries::fromPosted($_POST['countryCode']);
+    if ($countryChosen === null && $countryOwnBefore !== '' && is_string($_POST['countryCode']) === true
+        && strtoupper(trim($_POST['countryCode'])) === $countryOwnBefore
+    ) {
+        $countryChosen = $countryOwnBefore;
+    }
+    if ($countryChosen === null) {
+        $reject('Nothing was saved. The country chosen is not one the portal knows. Choose one from the list, or "Same as the installation".');
+    }
+}
+// The country the map look-up is told about: the one just chosen, else the
+// one the organisation already follows. Empty means "no hint", never a guess.
+$countryForLookup = ($countryChosen !== null && $countryChosen !== '')
+    ? $countryChosen
+    : ($countryChosen === '' ? Countries::ofInstallation() : Countries::ofOrganisation($siteId));
+
 $coords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
 
 $w3wRaw = trim((string) ($_POST['what3words'] ?? ''));
@@ -387,7 +438,7 @@ if ($w3w !== null && What3Words::isConfigured() === true) {
 if ($coords === null && Geocoder::autoEnabled() === true) {
     $formatted = GeoLocation::formatAddress($address);
     if ($formatted !== '') {
-        $geocoded = Geocoder::forward($formatted, $address['countryCode']);
+        $geocoded = Geocoder::forward($formatted, $countryForLookup !== '' ? $countryForLookup : null);
         if ($geocoded !== null) {
             $coords = ['lat' => $geocoded['lat'], 'lng' => $geocoded['lng']];
         }
@@ -399,7 +450,19 @@ $upsert($db, 'org.address.line2', (string) ($address['line2'] ?? ''), $siteId);
 $upsert($db, 'org.address.city', (string) ($address['city'] ?? ''), $siteId);
 $upsert($db, 'org.address.region', (string) ($address['region'] ?? ''), $siteId);
 $upsert($db, 'org.address.postcode', (string) ($address['postcode'] ?? ''), $siteId);
-$upsert($db, 'org.address.countryCode', $address['countryCode'], $siteId);
+if ($countryChosen === '') {
+    // "Same as the installation": remove this organisation's own row, so it
+    // follows the installation's country (see the note above).
+    $dropCountry = $db->prepare('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?');
+    if ($dropCountry !== false) {
+        $countryKey = Countries::SETTING;
+        $dropCountry->bind_param('si', $countryKey, $siteId);
+        $dropCountry->execute();
+        $dropCountry->close();
+    }
+} elseif ($countryChosen !== null) {
+    $upsert($db, Countries::SETTING, $countryChosen, $siteId);
+}
 // 📍 A coordinate is stored as a PLAIN decimal (#935). `(string)` on a float writes
 //    anything under 0.0001 with an exponent ('4.0E-5'), which is not what a person or
 //    most readers expect of a latitude; the Sabbath window's first reader refused it
@@ -414,7 +477,12 @@ $upsert($db, 'org.latitude', $coords !== null ? $plainCoordinate((float) $coords
 $upsert($db, 'org.longitude', $coords !== null ? $plainCoordinate((float) $coords['lng']) : '', $siteId);
 $upsert($db, 'org.what3words', $w3w ?? '', $siteId);
 
-Logger::activity('OrgAddressSaved', 'Organisation address updated');
+Logger::activity(
+    'OrgAddressSaved',
+    'Organisation address updated. Country: '
+        . ($countryChosen === null ? 'not changed' : ($countryChosen === '' ? 'same as the installation' : $countryChosen))
+        . '.'
+);
 
 $_SESSION['flash_msg']  = $warning !== null ? ('Address saved. ' . $warning) : 'Organisation address saved.';
 $_SESSION['flash_type'] = $warning !== null ? 'warning' : 'success';
