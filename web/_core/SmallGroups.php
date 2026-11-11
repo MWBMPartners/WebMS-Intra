@@ -648,8 +648,9 @@ final class SmallGroups
      * are built from THIS list by `placePartsInWords()`, so a column added to
      * PLACE_COLUMNS needs its label added HERE, in the same change, or the
      * sentence would silently leave it out while telling people what "every
-     * part" means. The country is not a part (it always has a value, and an
-     * emptied place keeps it). Two columns may share a label (the position).
+     * part" means. The country is not a part: a country alone does not say
+     * where anybody meets, so an emptied place may keep one (the group's usual
+     * place always has a country; a listed home's may be empty, #935). Two columns may share a label (the position).
      * `outside-services-selftest.php` fails when a place column has no label.
      */
     public const PLACE_PART_LABELS = [
@@ -694,7 +695,8 @@ final class SmallGroups
      * One place, made comparable: every part trimmed text, an empty part as
      * '', and the two coordinates written to the seven decimal places the
      * columns hold, so `52.2053` typed and `52.2053000` read back are the same
-     * place. Country alone is not a place (it always has a value), so it is
+     * place. Country alone is not a place (a country does not say where anybody
+     * meets; a listed home's country may even be empty, #935), so it is
      * compared but does not make a place "entered" on its own.
      *
      * @param array<string,mixed> $row Keyed by the column names in PLACE_COLUMNS.
