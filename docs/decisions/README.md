@@ -195,7 +195,8 @@ appended with its real date and a note that it was added later.
 | [D-137](137-a-failed-sign-in-keeps-the-name-that-was-typed.md) | 2026-11-11 | A failed sign-in keeps the name that was typed, readable, in the activity log | in force |
 | [D-138](138-an-organisations-own-labels-stay-in-activity-descriptions.md) | 2026-11-11 | An organisation's own labels stay in activity-log descriptions | in force |
 | [D-139](139-every-money-record-keeps-its-own-currency.md) | 2026-11-11 | Every money record keeps its own currency; an expense keeps the quoted and the converted amount | in force |
+| [D-140](140-a-visitors-event-suggestion-details-are-erased-on-request.md) | 2026-11-11 | A visitor's event-suggestion details are erased on request, not automatically | in force |
 
-*139 decisions. This index is checked against the folder by
+*140 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
