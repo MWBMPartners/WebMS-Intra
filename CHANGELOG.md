@@ -4,6 +4,25 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Thirteen installation-wide admin pages no longer copy one organisation's setting to every organisation (#943, #674)
+
+- **Pressing Save without changing anything no longer makes one organisation's value everyone's.** AI Assist,
+  the bot check (keys and priority order), Hymnal Lookup (remote lookup and the public Order of Service switch),
+  Cloudflare Stream, Geocoding, Error monitoring, the Microsoft 365 shared mailbox on the Integrations page, Web
+  Push, what3words, Zoom, SMS, the backup schedule and QR codes all save for the whole installation, but filled
+  their boxes from the open organisation's own values. A global administrator who opened one inside an
+  organisation with its own value and pressed Save made that value everyone's — the AI monthly spending limit and
+  the SMS daily limit included. Each page now shows the installation's own values, and says when the
+  organisation you are in uses something different (setting names only, never a value). No password box is
+  filled in.
+- Hymnal Lookup no longer calls the public Order of Service switch "site-level": it is saved for the whole
+  installation. The bot-check page's "How it works" sentence now says the order it describes is the
+  installation's, and that this organisation's own settings may choose another provider.
+- The QR codes page saves the provider and the address only when they were sent; it and the backup schedule
+  show what was just saved rather than the values from before the save.
+- `check_install_wide_prefill.py`'s pending list is empty and the pull-request gate runs it with `--strict`.
+  The limits these pages hold are still READ from the merged settings by the code that enforces them (#957).
+
 ### Two migration test runs can share one machine, and an interrupt stops one (#923)
 
 - **The migration harness can run twice at once (#923).** `tools/e2e-migrations/run.sh` used one fixed

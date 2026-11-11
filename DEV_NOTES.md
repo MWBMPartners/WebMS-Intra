@@ -23124,3 +23124,29 @@ nine lines of `full_schema.sql` hold `--` in a column comment. Each lost its clo
 began mid-string, and every migration mark in a mis-cut statement went unread (258 of 268). It now tracks
 quotes exactly as the splitter does. A near relative is #675, where a `;` inside a `--` comment ended a
 statement early: a reader that blanks or splits SQL must track strings and comments together.
+
+
+## Installation-wide forms read the installation's rows (#943)
+
+- `InstallationSettings::value('a.b.c')` reads one installation-wide setting by dotted name (null = no row);
+  `InstallationSettings::differsHere(...prefixes)` lists the dotted NAMES the open organisation holds a different
+  value for, and `_core/templates/install-wide-notice.php` is the one notice that prints them. Names only: a value
+  printed there would put one organisation's setting in front of whoever opens the page.
+- A page that saves installation-wide fills its boxes from `value()`/`layer()`. Anything that says what THIS
+  organisation is really using (a "provider in use here" card, the cap the spend is measured against, whether
+  "Test connection" can be pressed) reads the merged settings, kept in a separately named variable.
+- `Captcha::listProviders(?array $from = null)` judges the given layer; the admin page passes the installation's,
+  because its priority form posts the order it draws.
+- `check_install_wide_prefill.py` counts `InstallationSettings::value(` as reading the layer but NOT
+  `differsHere(` alone (that fills no box). It skips any page that reads the layer at all, so a later
+  single-field regression on one of these thirteen is caught only by the HTTP test — and that test runs in
+  `portal-selftests.yml`, which GitHub has never registered (#754).
+- `tools/install-wide-prefill-selftest.php` drives all fifteen forms over HTTP: organisation A given its own
+  value, the page opened as a global administrator inside A, the form submitted exactly as parsed, the
+  installation's and A's rows required unchanged, then a "probe" field that must reach the installation's row —
+  because "nothing changed" is also what a save that never ran looks like. Two traps it handles: the bot-check
+  saver re-encrypts site keys with a fresh nonce on every save, so rows are compared by what they decrypt to; and
+  three pages (AI Assist, Zoom, SMS) are behind their app's own switch, so the "notice gone" case aligns that one
+  switch instead of deleting it. Checks 09-11 pin "names only" in the notice, no stored secret anywhere in the
+  page, and every password box empty — the first version pinned neither promise (the check round planted a value
+  into the notice and a key into a password box and stayed green).

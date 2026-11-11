@@ -1297,6 +1297,7 @@ another repo, ever**.
   is not a member of the organisation the address opens, in every way of telling organisations apart. A global
   administrator is let in everywhere. Still open in #511: coordinator grants across organisations, and the older
   portal-wide administrator flag.
+- Admin pages that save for the whole installation show the installation's values, and say (by setting name only) when the organisation you are in uses its own (#943).
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.
 
 ### 🚦 Release channels and hosting (#499, #500) ✅
