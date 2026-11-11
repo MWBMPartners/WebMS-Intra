@@ -746,10 +746,12 @@ final class PublicDoor
                 // pages; one that counts down uses startsAt.
                 'startsOnClock'  => self::clockText($row['startDateTime'], $zone),
                 'endsOnClock'    => self::clockText($row['endDateTime'], $zone),
-                // #882 (D-129): the moment the door stops listing it, so a
-                // reader — the script's countdown above all — follows the
-                // SAME rule as this list rather than guessing one for an
-                // event with no end time.
+                // #882 (D-129): the moment the door stops LISTING it, for a
+                // website that keeps its own list. It is NOT the event's end:
+                // an event with no end time stays listed after it begins.
+                // The script's countdown deliberately does not use it (round
+                // 1 of #882's check: it made a morning service "Happening
+                // now" until midnight); it goes by startsAt and endsAt.
                 'listedUntil'    => self::listedUntilText($row, $zone, $noEnd),
                 'allDay'         => (int) $row['isAllDay'] === 1,
                 'timezone'       => $zone->getName(),

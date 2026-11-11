@@ -353,23 +353,19 @@
     // =========================================================================
 
     /**
-     * When an event stops counting as "still on", as an instant. The feed's
-     * `listedUntil` first (#882, D-129): it is the door's OWN rule for how
-     * long an event stays listed, including an event with no end time (until
-     * the end of its day, or a fixed time the organisation chose), so the
-     * countdown can never disagree with the list beside it. Before #882 an
-     * event with no end time ended at its START here, and a 10:00 service
-     * vanished from the countdown at 10:00. A feed without the field (an
-     * older portal) falls back to the rule this script always had: its end,
-     * or for an all-day event the end of its last day on its own clock.
+     * When an event ends, as an instant: its end, or for an all-day event the
+     * end of its last day on its own clock; an event with no end time ends at
+     * its START, so once it has begun the countdown moves on to the next one.
+     *
+     * ⚠️ DELIBERATELY NOT the feed's `listedUntil` (#882, round 1 of its
+     *    check). That field says how long the door keeps an event on its LIST
+     *    (D-129: an event with no end time until the end of its day), which
+     *    is not when it ends. Used here it made a 10:00 service with no end
+     *    time "Happening now" until midnight, so the countdown never reached
+     *    the 18:30 service after it: a claim about the event that nobody made.
+     *    D-129 decided the list, not what the countdown says is under way.
      */
     function endOf(ev, start) {
-        if (typeof ev.listedUntil === 'string') {
-            var listed = Date.parse(ev.listedUntil);
-            if (!isNaN(listed)) {
-                return listed;
-            }
-        }
         if (ev.allDay === true) {
             var basis = typeof ev.endsAt === 'string' ? ev.endsAt : ev.startsAt;
             var lastDay = Date.parse(basis.slice(0, 10) + 'T23:59:59' + offsetOf(basis));

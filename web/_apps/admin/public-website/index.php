@@ -424,6 +424,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card-body">
             <h2 class="h5">Events with no end time</h2>
             <p class="text-muted">An event with an end time stays on your public website's list until it ends, and an all-day event until the end of its day. An event with a start time but <strong>no end time</strong> stays listed for as long as you choose here. Each event is judged on its own clock.</p>
+            <?php if ($noEndShown['ignored'] === true): ?>
+                <?php // A value the card would refuse (a hand edit). Said HERE and not in the error log, because the door reads it on every public request (round 1 of #882's check). ?>
+                <div class="alert alert-warning" data-no-end-ignored="1">The time stored for this is not one this page accepts, so it is being ignored and the default is used. Choose again and save to put it right.</div>
+            <?php endif; ?>
             <p class="mb-2" data-no-end-now="1"><strong>Now:</strong> such an event stays listed <?php echo $esc(PublicWebsiteSetup::noEndListingWords($noEndMinutes)); ?><?php echo $noEndShown['own'] === true ? '' : ' (the default)'; ?>.</p>
             <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" data-no-end-form="1">
                 <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">

@@ -151,6 +151,34 @@ function stampIn(ms, zone) {
     return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${off}`;
 }
 
+/**
+ * #882: the feed's `listedUntil` as the real door writes it — its end for an
+ * event with one; for one with no end time (the default, D-129) midnight at
+ * the end of the day it starts on, on its own clock; for an all-day event
+ * midnight after its last day. So the made-up feeds carry the field the real
+ * feed carries, and the script is shown to IGNORE it for the countdown.
+ * Midnight is found by stepping back from "a day later" by the clock's own
+ * hours and minutes, re-read until the clock says 00:00 (a day of 23 or 25
+ * hours needs a second step).
+ */
+function listedUntilOf(startMs, endMs, zone, allDay = false) {
+    if (endMs !== null && allDay === false) {
+        return stampIn(endMs, zone);
+    }
+    let ms = (endMs ?? startMs) + 86400000;
+    for (let i = 0; i < 3; i += 1) {
+        const t = stampIn(ms, zone);
+        const hh = Number(t.slice(11, 13));
+        const mm = Number(t.slice(14, 16));
+        const ss = Number(t.slice(17, 19));
+        if (hh === 0 && mm === 0 && ss === 0) {
+            break;
+        }
+        ms -= ((hh > 12 ? hh - 24 : hh) * 3600 + mm * 60 + ss) * 1000;
+    }
+    return stampIn(ms, zone);
+}
+
 /* ⚠️ HOSTILE TEXT IN EVERY FIELD THE SCRIPT DRAWS — round 1 of P4b's check.
       The first version put markup only in the event's title, description and
       place name and the poster's title and link; the poster's kicker,
@@ -190,8 +218,8 @@ function feeds() {
     const ev = (title, startMs, endMs, zone, extra = {}) => ({
         id: title.toLowerCase().replace(/[^a-z]+/g, '-'), title, startsAt: stampIn(startMs, zone),
         endsAt: endMs === null ? null : stampIn(endMs, zone), startsOnClock: stampIn(startMs, zone).slice(0, 19),
-        endsOnClock: endMs === null ? null : stampIn(endMs, zone).slice(0, 19), allDay: false, timezone: zone, detailsLimited: false,
-        description: null, location: null, ...extra,
+        endsOnClock: endMs === null ? null : stampIn(endMs, zone).slice(0, 19), listedUntil: listedUntilOf(startMs, endMs, zone), allDay: false,
+        timezone: zone, detailsLimited: false, description: null, location: null, ...extra,
     });
     const events = (zone, list) => ({ format: 'webms-public-events', version: 1, organisation: org(zone), generatedAt: new Date().toISOString(), events: list });
     return {
@@ -199,6 +227,7 @@ function feeds() {
             {
                 id: 'evil', title: EVIL_TITLE, startsAt: '2030-06-01T10:30:00-04:00', endsAt: '2030-06-01T12:00:00-04:00',
                 startsOnClock: '2030-06-01T10:30:00', endsOnClock: '2030-06-01T12:00:00',
+                listedUntil: '2030-06-01T12:00:00-04:00',
                 allDay: false, timezone: 'America/New_York', detailsLimited: false, description: EVIL_ABOUT,
                 location: { name: EVIL_PLACE_NAME, address: EVIL_ADDRESS, url: 'javascript:window.__pwned=3' },
             },
@@ -206,7 +235,7 @@ function feeds() {
             ev('Plain venue', now + 2 * 86400000, null, 'Europe/London', { location: { name: 'Plain', address: null, url: 'http://plain.example.invalid/' } }),
             {
                 id: 'zone', title: 'Zone markup', startsAt: '2030-07-01T09:00:00+00:00', endsAt: null,
-                startsOnClock: '2030-07-01T09:00:00', endsOnClock: null, allDay: false, timezone: `Atlantic/${EVIL_ZONE_PLACE}`,
+                startsOnClock: '2030-07-01T09:00:00', endsOnClock: null, listedUntil: '2030-07-02T00:00:00+00:00', allDay: false, timezone: `Atlantic/${EVIL_ZONE_PLACE}`,
                 detailsLimited: false, description: null, location: null,
             },
             // The morning London's clocks go forward: stored at 01:30, which
@@ -214,7 +243,7 @@ function feeds() {
             // website must SHOW 01:30, as the portal's own pages do (#777).
             {
                 id: 'gap', title: 'Missing hour', startsAt: '2031-03-30T02:30:00+01:00', endsAt: '2031-03-30T03:00:00+01:00',
-                startsOnClock: '2031-03-30T01:30:00', endsOnClock: '2031-03-30T03:00:00', allDay: false, timezone: 'Europe/London',
+                startsOnClock: '2031-03-30T01:30:00', endsOnClock: '2031-03-30T03:00:00', listedUntil: '2031-03-30T03:00:00+01:00', allDay: false, timezone: 'Europe/London',
                 detailsLimited: false, description: null, location: null,
             },
         ]),
@@ -244,16 +273,17 @@ function feeds() {
             ev('Tomorrow', now + 86400000, null, 'Europe/London'),
         ]),
         EMPTYEEEEEEEEEEEEEEEEEEEE: events('Europe/London', []),
-        // #882 (D-129): an event with NO end time that started two hours ago
-        // and that the door still lists for three more hours (its
-        // `listedUntil`). The countdown must follow the door's list and say it
-        // is under way. The script before #882 ended it at its START, so it
-        // skipped to "Later today". A no-end event whose listedUntil has
-        // passed is gone either way.
+        // #882 (D-129) and round 1 of its check: a morning service with NO end
+        // time that began two hours ago, still on the door's LIST (its
+        // listedUntil is hours away), and an evening service, also with no end
+        // time, later today. The countdown must count down to the EVENING one
+        // — exactly what it did before #882 — and must not call the morning
+        // one "Happening now" for the rest of the day: being kept on the list
+        // (D-129) is not being under way. listedUntil here is set well ahead
+        // explicitly, so the case holds at any hour the test runs.
         NOENDFFFFFFFFFFFFFFFFFFFF: events('Europe/London', [
-            ev('Gone, no end time', now - 5 * 3600000, null, 'Europe/London', { listedUntil: stampIn(now - 3600000, 'Europe/London') }),
-            ev('Still on, no end time', now - 2 * 3600000, null, 'Europe/London', { listedUntil: stampIn(now + 3 * 3600000, 'Europe/London') }),
-            ev('Later today', now + 4 * 3600000, now + 5 * 3600000, 'Europe/London'),
+            ev('Morning service', now - 2 * 3600000, null, 'Europe/London', { listedUntil: stampIn(now + 10 * 3600000, 'Europe/London') }),
+            ev('Evening service', now + (6 * 3600 + 30 * 60) * 1000, null, 'Europe/London', { listedUntil: stampIn(now + 20 * 3600000, 'Europe/London') }),
         ]),
     };
 }
@@ -751,9 +781,9 @@ async function main() {
                 base.nextTick.first[3] !== base.nextTick.second[3]], ['2', '03', '25', true, true]);
         check('N03 the clock is a timer for assistive technology, and hidden for the event under way', base.nextClocks, ['timer', 'hidden']);
         check('N04 "next" asks for 50 events, so it can choose by instant rather than by the feed\'s order', base.nextLimit, ['50', '50']);
-        check('N05 (#882, D-129) an event with NO end time that the door still lists (its listedUntil is three hours away) is "Happening now", not skipped for the next one; one whose listedUntil has passed is not shown',
-            [base.noEndReady, base.noEnd.map((n) => n.titles), base.noEnd[0]?.text?.startsWith('Happening now')],
-            [true, [['Still on, no end time']], true]);
+        check('N05 (#882, round 1 of its check) a morning service with no end time that began two hours ago is still on the door\'s LIST, yet the countdown counts down to the EVENING service — as it did before #882 — and never calls the morning one "Happening now"',
+            [base.noEndReady, base.noEnd.map((n) => n.titles), base.noEnd[0]?.text?.startsWith('Next')],
+            [true, [['Evening service']], true]);
 
         console.log('O. The door off, and an empty feed');
         check('O01 a door that refuses its feed draws NOTHING; an empty feed says "No upcoming events."', [base.offReady, base.off], [true, [{ empty: true, text: '' }, { empty: false, text: 'No upcoming events.' }]]);
@@ -802,7 +832,9 @@ async function main() {
             (r) => r.feedRequests.some((q) => q.referer !== null));
         await plant('X08 "next" choosing the FIRST in the feed rather than the soonest instant: N01 notices', 'if (best === null || start < best.start) {', 'if (best === null) {',
             (r) => JSON.stringify(r.next.map((n) => n.titles)) !== JSON.stringify(base.next.map((n) => n.titles)));
-        await plant('X08b (#882) the countdown ignoring the door\'s listedUntil (the script before #882): N05 notices', "if (typeof ev.listedUntil === 'string') {", 'if (false) {',
+        await plant('X08b (#882, round 1) the countdown taking the door\'s listedUntil as the event\'s end (the first #882 build): N05 notices',
+            "    function endOf(ev, start) {\n        if (ev.allDay === true) {",
+            "    function endOf(ev, start) {\n        if (typeof ev.listedUntil === 'string' && !isNaN(Date.parse(ev.listedUntil))) {\n            return Date.parse(ev.listedUntil);\n        }\n        if (ev.allDay === true) {",
             (r) => JSON.stringify(r.noEnd.map((n) => n.titles)) !== JSON.stringify(base.noEnd.map((n) => n.titles)));
         await plant('X09 a global variable leaked (the wrapper taken away from one name): I04 notices', "(function () {\n    'use strict';", "window.webmsDoor = true;\n(function () {\n    'use strict';",
             (r) => r.evPage.newGlobals.length > 0);

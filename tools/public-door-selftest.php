@@ -48,7 +48,11 @@
  *      moments disagree, with `limit` set so reading order drops the sooner.
  *      N11-N15 run the REAL PublicDoor::events() in-process at fixed moments
  *      on London's 25-hour and 23-hour days, because the real "now" cannot be
- *      chosen. PN1-PN11 put the old code back piece by piece.
+ *      chosen. N17-N18 read listedUntil where D-129 says nothing changes (an
+ *      end time; all-day events of one day and of three) under both settings;
+ *      N20 needs the window to reach a zone's HISTORIC highest offset
+ *      (London 1941, +2), whatever the season. PN1-PN15 put the old or a
+ *      wrong code back piece by piece.
  *   J  (#493 P4b) the script a website pastes in, /w/{name}/door.js and
  *      /door.js on a public address: the file kept outside the web root,
  *      byte for byte, as text/javascript with its headers; the same gate
@@ -205,7 +209,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 369; // #882 (D-129) and #898 add N01-N16, H06 and PN1-PN11 to the 341 below; #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
+const PDS_EXPECTED_CHECKS = 377; // #882 (D-129) and #898 add N01-N20, H06 and PN1-PN15 to the 341 below; #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2064,6 +2068,29 @@ $nMake('PDS N later, earlier reading', 'Pacific/Pago_Pago', $nOrderDay . ' 08:00
 // the portal's own classes (the real "now" cannot be chosen).
 $nMake('PDS N clock 25-hour day', 'Europe/London', '2026-10-25 00:30:00', null);
 $nMake('PDS N clock 23-hour day', 'Europe/London', '2027-03-28 00:30:00', null);
+// Round 1 of #882's check: listedUntil for an event WITH an end time and for
+// all-day events of one day and of three, read under both settings.
+$nLondonTomorrow = (new DateTimeImmutable('now', new DateTimeZone('Europe/London')))->modify('+1 day')->format('Y-m-d');
+$nMake('PDS N with an end time', 'Europe/London', $nLondonTomorrow . ' 10:00:00', $nLondonTomorrow . ' 12:00:00');
+$nAllDayOne   = $nMake('PDS N all day, one day', 'Europe/London', $nLondonTomorrow . ' 00:00:00', null);
+$nAllDayThree = $nMake('PDS N all day, three days', 'Europe/London', $nLondonTomorrow . ' 00:00:00',
+    (new DateTimeImmutable($nLondonTomorrow))->modify('+2 days')->format('Y-m-d') . ' 00:00:00');
+$setEv($nAllDayOne, ['isAllDay' => '1']);
+$setEv($nAllDayThree, ['isAllDay' => '1']);
+// Round 1 of #882's check: the second read's window must reach a zone's
+// HIGHEST offset in its history, not only today's. Organisation C (UTC, and
+// its only other event in UTC) gets two events running since June 1941, when
+// London was on DOUBLE summer time (+2): 08:00 in Pago Pago (19:00 UTC) and
+// 20:30 in London (18:30 UTC, sooner, though its reading sorts later). With
+// `limit=1` the first read takes Pago Pago's, T = 19:00 UTC, and London's
+// reading is between T + 1 hour and T + 2 hours — inside the window only when
+// it reaches London's historic +2. Every zone involved has a CURRENT offset
+// of at most +1 in any season, so a window built from today's offsets misses
+// it all year round. Both end in 2099, so they are still listed.
+$nHistoricLondon = $makeEvent('PDS N historic London', $siteC, 'Europe/London', '1941-06-01 20:30:00', '2099-01-01 00:00:00', ['showOnWebsite' => '0']);
+$nHistoricPago   = $makeEvent('PDS N historic Pago Pago', $siteC, 'Pacific/Pago_Pago', '1941-06-01 08:00:00', '2099-01-01 00:00:00', ['showOnWebsite' => '0']);
+$nIds['PDS N historic London']    = $nHistoricLondon;
+$nIds['PDS N historic Pago Pago'] = $nHistoricPago;
 $state['nIds'] = array_values($nIds);
 register_shutdown_function(static function () use (&$state, $db): void {
     foreach ($state['nIds'] ?? [] as $id) {
@@ -2132,11 +2159,12 @@ $n03a = $card('root', 'no_end_listing', ['mode' => 'fixed', 'hours' => '0', 'min
 $n03b = $card('root', 'no_end_listing', ['mode' => 'fixed', 'hours' => '24', 'minutes' => '1']);
 $n03c = $card('root', 'no_end_listing', ['mode' => 'fixed', 'minutes' => '30']);
 $n03d = $card('root', 'no_end_listing', ['mode' => 'sometimes']);
-check('N03 the card refuses, with the reason and on record, a time under 15 minutes, one over 24 hours, a fixed time whose hours box did not arrive, and an unknown choice — and writes nothing',
-    [$nFlash($n03a['page']), $nFlash($n03b['page']), $nFlash($n03c['page']), $nFlash($n03d['page']),
+$n03e = $card('root', 'no_end_listing', ['hours' => '1', 'minutes' => '0']);
+check('N03 the card refuses, with the reason and on record, a time under 15 minutes, one over 24 hours, a fixed time whose hours box did not arrive, an unknown choice, and a post with no choice at all (round 1: that one was refused but not recorded) — and writes nothing',
+    [$nFlash($n03a['page']), $nFlash($n03b['page']), $nFlash($n03c['page']), $nFlash($n03d['page']), $nFlash($n03e['page']),
         $logged('PublicWebsiteSetupRefused', $people['root']['id']) - $nRefusedBefore, $nOwnRow()],
     ['The time must be at least 15 minutes and at most 24 hours. Nothing was saved.', 'The time must be at least 15 minutes and at most 24 hours. Nothing was saved.',
-        'That form did not arrive whole. Nothing was saved.', 'That choice was not recognised. Nothing was saved.', 4, null]);
+        'That form did not arrive whole. Nothing was saved.', 'That choice was not recognised. Nothing was saved.', 'That form did not arrive whole. Nothing was saved.', 5, null]);
 $nSavedBefore = $logged('PublicWebsiteNoEndListingSaved', $people['root']['id']);
 $n04 = $card('root', 'no_end_listing', ['mode' => 'fixed', 'hours' => '2', 'minutes' => '0']);
 check('N04 a fixed time of 2 hours is saved as A\'s own row (120 minutes), recorded, and the card says so and pre-selects it',
@@ -2204,19 +2232,23 @@ $mysqli->set_charset('utf8mb4');
 $site = (int) $argv[1];
 \Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => '']], $site);
 try {
-    $read = \Portal\Core\PublicDoor::events($mysqli, $site, 50, (int) $argv[2]);
+    $read = \Portal\Core\PublicDoor::events($mysqli, $site, (int) ($argv[3] ?? 50), (int) $argv[2]);
 } catch (\Throwable $e) {
     echo json_encode(['error' => get_class($e) . ': ' . $e->getMessage()]);
     exit;
 }
-echo json_encode(array_values(array_filter(array_column($read['events'], 'title'), static fn (string $t): bool => str_starts_with($t, 'PDS N clock'))));
+$prefix = (string) ($argv[4] ?? 'PDS N clock');
+echo json_encode(array_values(array_filter(array_column($read['events'], 'title'), static fn (string $t): bool => str_starts_with($t, $prefix))));
 ASK);
-$nAsk = static function (string $utc) use ($child, $sep, $siteA): mixed {
+/** The real reader for organisation `$site` at `$utc`, `$limit` events, the titles starting `$prefix`. */
+$nAskFor = static function (int $site, string $utc, int $limit, string $prefix) use ($child, $sep): mixed {
     $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -d ' . escapeshellarg('error_log=' . $child . $sep . 'n-ask.log') . ' '
-        . escapeshellarg($child . $sep . 'n-ask.php') . ' ' . $siteA . ' ' . (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->getTimestamp() . ' 2>&1');
+        . escapeshellarg($child . $sep . 'n-ask.php') . ' ' . $site . ' ' . (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->getTimestamp()
+        . ' ' . $limit . ' ' . escapeshellarg($prefix) . ' 2>&1');
     $got = json_decode($raw, true);
     return is_array($got) === true ? $got : ['could not ask' => $raw];
 };
+$nAsk = static fn (string $utc): mixed => $nAskFor($siteA, $utc, 50, 'PDS N clock');
 $nClocks = ['PDS N clock 25-hour day', 'PDS N clock 23-hour day'];
 /** At each moment, is the named clock event listed? */
 $nClockAt = static function (string $name, array $moments) use ($nShow, $nClocks, $nAsk): array {
@@ -2244,9 +2276,54 @@ check('N14 (2 hours chosen) across the clocks going FORWARD: starting at 00:30, 
 check('N15 (2 hours chosen) across the clocks going BACK: starting at 00:30, listed at the SECOND 01:15 (1 h 45 min later) and gone at the second 01:45',
     $nClockAt('PDS N clock 25-hour day', ['2026-10-25 01:15:00', '2026-10-25 01:45:00']), ['2026-10-25 01:15:00' => true, '2026-10-25 01:45:00' => false]);
 $setOwn($siteA, 'public.events.noEndListedFor', '5');
-check('N16 a stored time the card would refuse (5 minutes, a hand edit) is IGNORED and the default applies: the event that started 90 minutes ago is still listed',
-    in_array('PDS N no end 90 minutes ago', $nListed() ?? [], true), true);
+/** Lines of the web server's PHP error log, so a check can see whether a request wrote one. */
+$nErrorLines = static fn (): int => is_file($child . $sep . 'php-errors.log') === true ? count(file($child . $sep . 'php-errors.log') ?: []) : 0;
+$nScenario16 = static function () use ($nListed, $nErrorLines, $http, $people): array {
+    $before = $nErrorLines();
+    $listed = in_array('PDS N no end 90 minutes ago', $nListed() ?? [], true);
+    $logged = $nErrorLines() - $before;
+    $page   = $http('GET', '/admin/public-website', ['jar' => $people['root']['jar']])['body'];
+    return [$listed, $logged, str_contains($page, 'data-no-end-ignored="1"')];
+};
+check('N16 a stored time the card would refuse (5 minutes, a hand edit) is IGNORED and the default applies (the event that started 90 minutes ago is still listed); the public request writes NOTHING to the error log (round 1: one line per anonymous request); the card says it is being ignored',
+    $nScenario16(), [true, 0, true]);
 $setOwn($siteA, 'public.events.noEndListedFor', null);
+
+// Round 1 of #882's check: listedUntil for the cases D-129 says must NOT change.
+$nUntil = static function () use ($nShow, $feedA): array {
+    return $nShow(['PDS N with an end time', 'PDS N all day, one day', 'PDS N all day, three days'], static function () use ($feedA): array {
+        $out = [];
+        foreach (json_decode($feedA('events.json?limit=50')['body'], true)['events'] ?? [] as $one) {
+            if (str_starts_with((string) $one['title'], 'PDS N ') === true) {
+                $out[$one['title']] = [$one['listedUntil'] ?? 'missing', $one['endsAt'] ?? null];
+            }
+        }
+        ksort($out);
+        return $out;
+    });
+};
+$nLondon = new DateTimeZone('Europe/London');
+$nMidnight = static fn (string $day): string => (new DateTimeImmutable($day . ' 00:00:00', $nLondon))->format('Y-m-d\TH:i:sP');
+$nEndAt = (new DateTimeImmutable($nLondonTomorrow . ' 12:00:00', $nLondon))->format('Y-m-d\TH:i:sP');
+$nUntilWant = [
+    'PDS N all day, one day'    => [$nMidnight((new DateTimeImmutable($nLondonTomorrow))->modify('+1 day')->format('Y-m-d')), null],
+    'PDS N all day, three days' => [$nMidnight((new DateTimeImmutable($nLondonTomorrow))->modify('+3 days')->format('Y-m-d')),
+        (new DateTimeImmutable((new DateTimeImmutable($nLondonTomorrow))->modify('+2 days')->format('Y-m-d') . ' 00:00:00', $nLondon))->format('Y-m-d\TH:i:sP')],
+    'PDS N with an end time'    => [$nEndAt, $nEndAt],
+];
+check('N17 (the default) listedUntil is the END for an event with an end time; midnight after its day for a one-day all-day event; midnight after its LAST day for a three-day all-day event',
+    $nUntil(), $nUntilWant);
+$setOwn($siteA, 'public.events.noEndListedFor', '120');
+check('N18 (2 hours chosen) exactly the same: the choice changes listedUntil for none of the three (D-129)', $nUntil(), $nUntilWant);
+$setOwn($siteA, 'public.events.noEndListedFor', null);
+$nHistoric = static fn (): mixed => $nShow(['PDS N historic London', 'PDS N historic Pago Pago'],
+    static fn (): mixed => $nAskFor($siteC, gmdate('Y-m-d H:i:s'), 1, 'PDS N historic'));
+check('N19 the premise: in June 1941 London was two hours ahead of UTC, and today every clock organisation C uses is at most one hour ahead',
+    [(new DateTimeImmutable('1941-06-01 20:30:00', $nLondon))->format('P'),
+        max(array_map(static fn (string $z): int => (new DateTimeZone($z))->getOffset(new DateTimeImmutable('now')), ['UTC', 'Europe/London', 'Pacific/Pago_Pago'])) <= 3600],
+    ['+02:00', true]);
+check('N20 (#898) with limit=1, the sooner of two events whose reading lies between one and two hours past the first read\'s latest moment is the one given — the window reaches London\'s HISTORIC +2, not only today\'s offset',
+    $nHistoric(), ['PDS N historic London']);
 
 // =============================================================================
 echo "J. The script a website pastes in (#493 P4b; D-056, D-084)\n";
@@ -4590,6 +4667,23 @@ $p = $plant('_core/PublicDoor.php', "'(((e.`isAllDay` = 1 OR e.`endDateTime` IS 
     static fn (): mixed => $nUnder('120', $allDayShown));
 check('PN11 with the fixed time\'s rule forgetting all-day events, an all-day event with no end time vanishes while a fixed time is chosen (N06 catches it)',
     [$p['applied'], $p['result']], [true, []]);
+// Round 1 of #882's check: three faults that left every check above green.
+$p = $plant('_core/PublicDoor.php', "            if (is_array(\$states) === true) {\n                foreach (\$states as \$state) {\n                    \$max = max(\$max, (int) \$state['offset']);\n                }\n            }\n",
+    '', $nHistoric);
+check('PN12 (plant A) with the second read\'s window built from each zone\'s CURRENT offset only, the sooner event is never read and the later one is given (N20 catches it)',
+    [$p['applied'], $p['result']], [true, ['PDS N historic Pago Pago']]);
+$p = $plant('_core/PublicDoor.php', "\$basis = \$allDay === true && \$row['endDateTime'] !== null ? I18n::wallClockReading((string) \$row['endDateTime']) : \$start;",
+    '$basis = $start;', $nUntil);
+check('PN13 (plant B) with an all-day event\'s listedUntil taken from its FIRST day, the three-day event leaves the list two days early (N17 catches it)',
+    [$p['applied'], $p['result']['PDS N all day, three days'][0] ?? null], [true, $nUntilWant['PDS N all day, one day'][0]]);
+$p = $plant('_core/PublicDoor.php', "if (\$allDay === false && \$row['endDateTime'] !== null) {", 'if (false) {', $nUntil);
+check('PN14 (plant C) with an event WITH an end time given midnight instead of its end, listedUntil is no longer its end (N17 catches it)',
+    [$p['applied'], ($p['result']['PDS N with an end time'][0] ?? null) === $nEndAt], [true, false]);
+$p = $plant('_core/PublicWebsiteSetup.php', "            return ['minutes' => null, 'own' => \$own !== null, 'ignored' => true];",
+    "            error_log('planted: a bad stored value'); return ['minutes' => null, 'own' => \$own !== null, 'ignored' => true];",
+    static fn (): mixed => $nUnder('5', $nScenario16));
+check('PN15 with a log line written for a bad stored value again, every public request writes one (N16 catches it)',
+    [$p['applied'], ($p['result'][1] ?? 0) > 0], [true, true]);
 $p = $plant('_core/PublicDoor.php', '| JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT', '',
     static fn (): bool => str_contains($feedA('events.json?limit=50')['body'], '</script>'));
 check('P41 with the JSON_HEX_ flags taken out, a live </script> reaches the answer', [$p['applied'], $p['result']], [true, true]);

@@ -160,12 +160,10 @@ if ($action === 'door_on' || $action === 'door_replace' || $action === 'door_off
 //    boxes did not both arrive. The same gate as everything else here
 //    (maySetUp(), above); every save and refusal recorded by the class.
 if ($action === 'no_end_listing') {
+    // A missing `mode` is passed on as null, so the class refuses AND records
+    // it like any other refusal (round 1 of #882's check).
     $field = static fn (string $name): ?string => is_string($_POST[$name] ?? null) === true ? $_POST[$name] : null;
-    $mode  = $field('mode');
-    if ($mode === null) {
-        $finish('That form did not arrive whole. Nothing was changed.', 'danger');
-    }
-    $out = PublicWebsiteSetup::saveNoEndListing($mysqli, $siteId, $mode, $field('hours'), $field('minutes'), $actorId);
+    $out   = PublicWebsiteSetup::saveNoEndListing($mysqli, $siteId, $field('mode'), $field('hours'), $field('minutes'), $actorId);
     $finish($out['message'], $out['type']);
 }
 

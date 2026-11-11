@@ -91,7 +91,7 @@
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$"
         },
         "listedUntil": {
-          "description": "The moment the door stops listing this event, as an INSTANT in the same form as startsAt (#882). For an event with an end time it is endsAt. For an all-day event it is midnight at the end of its last day on its own clock. For an event with a start time and NO end time it is, by the organisation's choice, midnight at the end of its start's day on its own clock (the default) or exactly a fixed time after startsAt (15 minutes to 24 hours). A reader deciding whether an event is still on, such as a countdown, should use this rather than endsAt, which is null for an event with no end time. null exactly when startsAt is null.",
+          "description": "The moment the door stops listing this event, as an INSTANT in the same form as startsAt (#882). For an event with an end time it is endsAt. For an all-day event it is midnight at the end of its last day on its own clock. For an event with a start time and NO end time it is, by the organisation's choice, midnight at the end of its start's day on its own clock (the default) or exactly a fixed time after startsAt (15 minutes to 24 hours). It is when the door stops LISTING the event, NOT when the event ends: an event with no end time stays listed after it has begun, and nothing here says it is still happening. Use it to decide how long to keep an event on a list; a countdown or a \"happening now\" label should go by startsAt and endsAt, as the portal's own script does. null exactly when startsAt is null.",
           "type": ["string", "null"],
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
         },

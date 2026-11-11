@@ -1631,8 +1631,9 @@ final class PublicWebsiteSetup
      *
      * The organisation's own row, else the installation's (seeded 'day').
      * A value nobody could have saved here (a hand edit, a number outside the
-     * bounds) is IGNORED and logged, and the default applies; so does a
-     * database that cannot be asked. The default is the safe direction for a
+     * bounds) is IGNORED, without a log line (see `noEndListingShown()`), and
+     * the default applies; so does a database that cannot be asked, which IS
+     * logged, because a visitor cannot cause it. The default is the safe direction for a
      * display setting: it lists an event a little longer, never drops one
      * the organisation meant to show. Never throws.
      */
@@ -1645,9 +1646,16 @@ final class PublicWebsiteSetup
      * What the card shows, and what the door uses: the stored choice read
      * back CHECKED. `own` says whether the organisation has a row of its own
      * (false: it follows the installation's default); `minutes` is null for
-     * the end of the day. Never throws.
+     * the end of the day; `ignored` is true when the stored value is one the
+     * card would refuse (a hand edit), which is then ignored and the default
+     * used. Never throws.
      *
-     * @return array{minutes:?int, own:bool}
+     * ⚠️ NOTHING IS LOGGED for such a value (round 1 of #882's check). This is
+     *    read on every public door request, by anybody, so a log line here
+     *    would be one per anonymous request for as long as the value stayed.
+     *    The card on Admin → Public website says so instead (`ignored`).
+     *
+     * @return array{minutes:?int, own:bool, ignored:bool}
      */
     public static function noEndListingShown(\mysqli $db, int $siteId): array
     {
@@ -1668,20 +1676,17 @@ final class PublicWebsiteSetup
             error_log('[WebMS-Intra] PublicWebsiteSetup: how long an event with no end time is listed could not be read, '
                 . 'so the default (the end of its day) is used: ' . $e->getMessage());
 
-            return ['minutes' => null, 'own' => false];
+            return ['minutes' => null, 'own' => false, 'ignored' => false];
         }
         if ($stored === null || $stored === self::NO_END_DAY) {
-            return ['minutes' => null, 'own' => $own !== null];
+            return ['minutes' => null, 'own' => $own !== null, 'ignored' => false];
         }
         $minutes = preg_match('/^[1-9][0-9]{0,4}$/D', $stored) === 1 ? (int) $stored : 0;
         if ($minutes < self::NO_END_MIN_MINUTES || $minutes > self::NO_END_MAX_MINUTES) {
-            error_log('[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteId . '\'s stored time for an event with no end '
-                . 'time is not one this page would accept, so the default (the end of its day) is used.');
-
-            return ['minutes' => null, 'own' => $own !== null];
+            return ['minutes' => null, 'own' => $own !== null, 'ignored' => true];
         }
 
-        return ['minutes' => $minutes, 'own' => $own !== null];
+        return ['minutes' => $minutes, 'own' => $own !== null, 'ignored' => false];
     }
 
     /** "until the end of its day" or "for 2 hours 30 minutes after it starts": the words for a choice, on the card and in the log. */
@@ -1994,9 +1999,15 @@ final class PublicWebsiteSetup
      *
      * @return array{saved:bool, type:string, message:string}
      */
-    public static function saveNoEndListing(\mysqli $db, int $siteId, string $mode, ?string $hours, ?string $minutes, ?int $actorId): array
+    public static function saveNoEndListing(\mysqli $db, int $siteId, ?string $mode, ?string $hours, ?string $minutes, ?int $actorId): array
     {
         $what = 'time an event with no end time stays listed';
+        // A post with no `mode` at all is refused AND recorded, like every
+        // other refusal here (round 1 of #882's check: the handler refused it
+        // itself and recorded nothing).
+        if ($mode === null) {
+            return self::refusedAndRecorded($what, $siteId, 'That form did not arrive whole. Nothing was saved.', $actorId);
+        }
         if ($mode === self::NO_END_DAY) {
             $value   = self::NO_END_DAY;
             $chosen  = null;
