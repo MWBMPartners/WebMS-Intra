@@ -857,7 +857,10 @@ function brs_heldBack(): array
  * the expectation.
  *
  * Measured on 31 October 2026: one row (`org.address.countryCode`, siteID 1)
- * disappears, and `restoreAll()` reports both reasons in its `warnings`.
+ * disappears, and `restoreAll()` reports both reasons in its `warnings`. Since
+ * #942 a fresh install holds no such row (the country is seeded empty, so
+ * migration 231 copies nothing down), so proofs 6 and 17 each add a
+ * per-organisation row of their own for the cascade to take.
  *
  * @param list<string> $cannot The tables the old form cannot put back.
  */
@@ -1615,6 +1618,18 @@ function brs_proof5(): void
 function brs_proof6(): void
 {
     brs_addSelfPointingRows();
+    // 🏠 A per-ORGANISATION settings row of this proof's own, so the old-form
+    //    restore's `tblSites` cascade has something to take and #694's rescue
+    //    something to keep. This proof used to lean on the install script: until
+    //    #942 it seeded the installation's country as 'GB', and migration 231
+    //    copied that down into organisation 1's own row. Since #942 (D-133) the
+    //    country is seeded EMPTY, the copy-down copies nothing, a fresh database
+    //    holds no per-organisation settings row at all, and every #694 check
+    //    below went red with the rescue working perfectly. A test's premise
+    //    must not be a seed value somebody may rightly change. Its number is in
+    //    the fixture range, so brs_tidy() removes it between proofs.
+    brs_sql("INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) "
+          . "VALUES (970011, 1, 'org.address.countryCode', 'FR', '', 0, '2026-01-02 00:00:00')");
     $before = brs_fingerprint();
     // Kept so this proof can mend the world it is about to break: see
     // brs_putHeldBackRows() for why that is this proof's job.
@@ -2385,6 +2400,14 @@ function brs_proof17(): void
     // when tblSettings stopped being allowed on its own.)
     brs_sql("INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) "
           . "VALUES (970010, NULL, 'brs.selftest.setting', 'edited by an administrator', 'the default', 0, '2026-01-02 00:00:00')");
+    // 🏠 And a per-ORGANISATION row of this proof's own, for the old-form
+    //    restore's cascade to take and #694 to keep: proof 6 explains why this
+    //    can no longer come from the install script (#942 seeds no country).
+    brs_sql("INSERT INTO tblSettings (settingID, siteID, settingKey, settingValue, defaultValue, isSensitive, updatedAt) "
+          . "VALUES (970012, 1, 'org.address.countryCode', 'FR', '', 0, '2026-01-02 00:00:00')");
+    // Kept so this proof can mend the world it breaks: the starting set
+    // (Brs::$heldBackBase) does not hold the row just added.
+    $heldBackWas = brs_savedHeldBack();
     $before = brs_fingerprint();
     $backup = brs_backup('p17');
 
@@ -2433,7 +2456,7 @@ function brs_proof17(): void
     // 🩹 Mend what the old-form restore above could not put back, so the rest of
     //    this proof compares against the world it started in. brs_reset() does
     //    this between proofs; inside one, the proof that breaks it mends it.
-    brs_putHeldBackRows(Brs::$heldBackBase);
+    brs_putHeldBackRows($heldBackWas);
     brs_checkSame($before, 'and once the held-back rows are put back, the whole database is as it was');
 
     // tblSettings is no longer allowed on its own (see proof 26), so this
@@ -3694,12 +3717,12 @@ function brs_proof27(): void
     $putBackMark = static fn (): int => (int) Brs::$writer->query('SELECT COUNT(*) FROM tblRestoreHeldRows WHERE putBackAtUtc IS NOT NULL')->fetch_row()[0];
 
     // 🔢 HOW MANY PER-ORGANISATION SETTINGS ROWS THERE ARE IS ASKED, NEVER
-    //    TYPED. A fresh install already holds some: migration 231 (#677) copied
-    //    each organisation's address down into its own row, and that is exactly
-    //    the change #690 showed had quietly broken two tests that had hard-coded
-    //    "none". The count comes from the pristine database, which is
-    //    independent of the code under test, so this cannot go stale when
-    //    another migration adds one.
+    //    TYPED. Migration 231 (#677) used to give a fresh install one (the
+    //    seeded 'GB' country, copied down), which is the change #690 showed had
+    //    quietly broken two tests that had hard-coded "none"; since #942 the
+    //    country is seeded empty and a fresh install has none. The count comes
+    //    from the database as it stands, so this cannot go stale either way;
+    //    `>= 1` holds because this proof added one of its own.
     $orgSettings = (int) Brs::$writer->query('SELECT COUNT(*) FROM tblSettings WHERE siteID IS NOT NULL')->fetch_row()[0];
     brs_check($settingRows() === 1 && $codeRows() === 3 && $waiting() === 0 && $orgSettings >= 1,
         'the world starts with ' . $orgSettings . ' per-organisation setting(s) (this proof added one of them), three sign-in codes and nothing being kept',

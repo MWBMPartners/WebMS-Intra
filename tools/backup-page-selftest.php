@@ -2522,12 +2522,13 @@ Brs::$writer->query(
     "INSERT INTO tblTotpBackupCodes (codeID, userID, codeHash, isUsed) VALUES "
     . "(970950, $hrUserA, 'not-a-real-hash-a1', 0), (970951, $hrUserA, 'not-a-real-hash-a2', 0), (970952, $hrUserB, 'not-a-real-hash-b1', 0)"
 );
-// 🔢 HOW MANY PER-ORGANISATION SETTINGS ROWS THERE ARE IS ASKED, NEVER TYPED. A
-//    fresh install already holds some — migration 231 (#677) copied each
-//    organisation's address down into a row of its own — and that is exactly the
-//    change #690 showed had quietly broken two tests that had hard-coded "none".
-//    The counts come from the database as it stands, which is independent of the
-//    code under test, so they cannot go stale when another migration adds one.
+// 🔢 HOW MANY PER-ORGANISATION SETTINGS ROWS THERE ARE IS ASKED, NEVER TYPED.
+//    Migration 231 (#677) used to give a fresh install one (the seeded 'GB'
+//    country, copied down), which is the change #690 showed had quietly broken
+//    two tests that had hard-coded "none"; since #942 the country is seeded
+//    empty and a fresh install has none. The counts come from the database as it
+//    stands, so they cannot go stale either way, and `>= 1` holds because this
+//    section adds a row of its own just above.
 $hrOrgSettings = (int) Brs::$writer->query('SELECT COUNT(*) FROM tblSettings WHERE siteID IS NOT NULL')->fetch_row()[0];
 $hrOrgCount    = (int) Brs::$writer->query('SELECT COUNT(DISTINCT siteID) FROM tblSettings WHERE siteID IS NOT NULL')->fetch_row()[0];
 // 🩹 A copy of those rows, kept so this section can mend the world it is about
