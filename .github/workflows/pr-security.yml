@@ -1658,6 +1658,18 @@ jobs:
         if: always()
         run: node tools/brand-colour-selftest.mjs
 
+      # 🌍 #942, D-133: the installer's country suggestion sends NOTHING
+      #    anywhere. The real script, read out of web/_install/index.php, runs in
+      #    a real browser in four time zones while every request is recorded,
+      #    with a control page proving the recording is live. A text search and
+      #    a list of traps each missed a planted send (two check rounds), so this
+      #    asks the browser. Needs a browser and PHP (the runner image has both);
+      #    it REFUSES rather than skipping without them.
+      - name: 'The installer country suggestion sends nothing, in a real browser (#942)'
+        id: installer_country_browser
+        if: always()
+        run: node tools/installer-country-script-selftest.mjs
+
       # The test OF both checks above (#641, #646). Adding `and False` to any of
       # their conditions leaves the check itself green - measured on eight
       # separate conditions, not supposed. This plants 26 faults into the real
@@ -2068,6 +2080,7 @@ jobs:
             echo "- The form token really reaches every carrier, in a browser: ${{ steps.csrf_carriers_browser.outcome }} (#768)"
             echo "- Brand colours read in a real browser: ${{ steps.brand_colour_browser.outcome }} (D-091)"
             echo "- Every audit check's own self-test passes: ${AUDIT_SELFTESTS_OUTCOME} (hard gate, #919)"
+            echo "- The installer country suggestion sends nothing, in a browser: ${{ steps.installer_country_browser.outcome }} (#942)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

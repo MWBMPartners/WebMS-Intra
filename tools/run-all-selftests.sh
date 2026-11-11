@@ -296,6 +296,7 @@ scheduled-jobs-gate|python3 -I tools/scheduled-jobs-gate-selftest.py
 document-write-check|python3 -I tools/document-write-check-selftest.py
 clock-writes-check|python3 -I tools/wall-clock-writes-selftest.py
 csrf-carriers|node tools/csrf-carriers-selftest.mjs
+installer-country-script|node tools/installer-country-script-selftest.mjs
 public-door-script|node tools/public-door-script-selftest.mjs
 brand-colour-browser|node tools/brand-colour-selftest.mjs
 passkey-address-browser|node tools/passkey-address-browser-selftest.mjs

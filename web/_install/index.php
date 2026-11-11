@@ -145,6 +145,10 @@ require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR 
 //    alone may be called here: ofInstallation(), ownOf() and
 //    ofOrganisation() need the portal's database connection.
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Countries.php';
+// 🌍 The ONE place the sentences about the country and the time zone are made,
+//    and the database read for them (#942). Its own file so the self-test can
+//    call every case of it; see its header.
+require_once __DIR__ . DIRECTORY_SEPARATOR . 'place_words.php';
 
 // 🔐 Portal\Core\Auth, for ONE method only: Auth::setPassword(), which is the
 //    one place a password is hashed and stored (#728). **THIS WIZARD HAS NO
@@ -2398,39 +2402,6 @@ function installAccountCount(\mysqli $db): int
  *
  * @throws \mysqli_sql_exception When the table cannot be read or written.
  */
-function installHeldPlace(?\mysqli $db): array
-{
-    // 🌍 What the database already holds for the two "where" questions (#942):
-    //    the installation's country and the first organisation's time zone.
-    //    The finish page and the last page say what will happen, or what did,
-    //    from THIS, never from an assumption: a database the person chose to
-    //    carry on with may hold any country and any zone, and a sentence saying
-    //    "UTC" about one on America/Chicago is untrue. `read` is false when the
-    //    database could not be asked, and the pages then say something that is
-    //    true whatever it holds.
-    $held = ['country' => '', 'zone' => '', 'read' => false];
-    if ($db === null) {
-        return $held;
-    }
-    try {
-        $key  = 'org.address.countryCode';
-        $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL ORDER BY `settingID` ASC LIMIT 1');
-        $stmt->bind_param('s', $key);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-        $held['country'] = trim((string) ($row['settingValue'] ?? ''));
-        $zone = $db->query('SELECT `timezone` FROM `tblSites` WHERE `siteID` = 1');
-        $zoneRow = $zone !== false ? $zone->fetch_assoc() : null;
-        $held['zone'] = trim((string) ($zoneRow['timezone'] ?? ''));
-        $held['read'] = true;
-    } catch (\Throwable $e) {
-        return ['country' => '', 'zone' => '', 'read' => false];
-    }
-
-    return $held;
-}
-
 function installFillSetting(\mysqli $db, string $key, string $value, ?string $ownEarlier = null): array
 {
     $find = $db->prepare('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL ORDER BY settingID ASC LIMIT 1');
@@ -2940,46 +2911,21 @@ if ($installPage === 'finish') {
     if ($installPeek !== null) {
         $installPeek->close();
     }
-    $installName = static fn (string $code): string => \Portal\Core\Countries::name($code);
-    // The finish fills the country by installFillSetting()'s rule: a country
-    // the database already holds is kept, unless THIS run wrote it itself.
+    // What this run itself wrote as the country during an earlier Finish that
+    // stopped part way: the finish may replace that, so the line must say so.
     $installOwnEarlier = (is_array($_SESSION['install_filled']['values'] ?? null) === true
         && is_string($_SESSION['install_filled']['database'] ?? null) === true
         && hash_equals(installDbIdentity($_SESSION['install_db'] ?? null), $_SESSION['install_filled']['database']) === true)
         ? (string) ($_SESSION['install_filled']['values'][\Portal\Core\Countries::SETTING] ?? '') : '';
-    $installHeldCountry = $installHeld['country'];
-    $installKeepsHeld   = $installHeldCountry !== '' && $installHeldCountry !== $installOwnEarlier;
-    if ($installHeld['read'] === false) {
-        $installCountryWords = $installCountryOffered === ''
-            ? 'Not chosen. If this database already holds a country, it is kept; if not, no country is known until somebody sets one in Admin, Settings, Organisation.'
-            : $installName($installCountryOffered) . ', unless this database already holds a country, which is kept.';
-    } elseif ($installCountryOffered === '') {
-        $installCountryWords = $installKeepsHeld === true
-            ? 'Not chosen here, so the country this database already holds is kept: ' . $installName($installHeldCountry) . '.'
-            : 'Not chosen. No country is known until somebody sets one in Admin, Settings, Organisation.';
-    } elseif ($installKeepsHeld === true && $installHeldCountry !== $installCountryOffered) {
-        $installCountryWords = 'You chose ' . $installName($installCountryOffered) . ', but this database already holds a country, '
-            . $installName($installHeldCountry) . ', and it is kept. Change it later in Admin, Settings, Organisation.';
-    } else {
-        $installCountryWords = $installName($installCountryOffered);
-    }
-    // The zone is written only on a database built from nothing (see the finish).
-    $installWritesZone = in_array(installChoiceHeld(), ['fresh', 'drop'], true) === true;
-    $installHeldZone   = $installHeld['zone'];
-    if ($installZoneOffered !== '' && $installWritesZone === true) {
-        $installZoneWords = $installZoneOffered;
-    } elseif ($installHeld['read'] === false) {
-        $installZoneWords = $installZoneOffered === ''
-            ? 'Not chosen, so your organisation keeps the time zone this database holds (UTC on a new database) until somebody changes it in Admin, Organisations.'
-            : 'You chose ' . $installZoneOffered . ', but this database is being carried on with, so it keeps the time zone it holds. Change it in Admin, Organisations.';
-    } elseif ($installZoneOffered === '') {
-        $installZoneWords = $installHeldZone !== ''
-            ? 'Not chosen, so your organisation stays on ' . $installHeldZone . ', the time zone this database holds, until somebody changes it in Admin, Organisations.'
-            : 'Not chosen, so your organisation keeps the time zone this database holds until somebody changes it in Admin, Organisations.';
-    } else {
-        $installZoneWords = 'You chose ' . $installZoneOffered . ', but this database is being carried on with, so it keeps its own time zone, '
-            . ($installHeldZone !== '' ? $installHeldZone : 'whatever it holds') . '. Change it in Admin, Organisations.';
-    }
+    $installPreview = installPreviewPlaceWords(
+        $installHeld,
+        $installCountryOffered,
+        $installZoneOffered,
+        $installOwnEarlier,
+        in_array(installChoiceHeld(), ['fresh', 'drop'], true) === true
+    );
+    $installCountryWords = $installPreview['country'];
+    $installZoneWords    = $installPreview['zone'];
 }
 
 // Nothing here is kept by a browser or a cache in between, and no search
@@ -4440,32 +4386,21 @@ header('X-Robots-Tag: noindex, nofollow');
                     <span class="install-check-value"><?php echo $doneSupport === '' ? 'None is set. The Help page tells people to ask an administrator.' : '<code>' . htmlspecialchars($doneSupport, ENT_QUOTES, 'UTF-8') . '</code>'; ?></span>
                 </li>
                 <?php
-                // 🌍 What the finish did with the country and time zone (#942).
-                $doneCountry      = (string) ($finishReport['country'] ?? '');
-                $doneCountryTyped = (string) ($finishReport['countryTyped'] ?? '');
-                $doneZone         = (string) ($finishReport['zoneTyped'] ?? '');
-                $doneZoneNow      = (string) ($finishReport['zoneNow'] ?? '');
+                // 🌍 What the finish did with the country and time zone (#942):
+                //    worded only by installDonePlaceWords() (place_words.php).
+                $doneCountry = (string) ($finishReport['country'] ?? '');
+                $donePlace   = installDonePlaceWords($finishReport);
                 ?>
                 <li class="install-check" data-done="country" data-country="<?php echo htmlspecialchars($doneCountry, ENT_QUOTES, 'UTF-8'); ?>">
                     <strong class="install-check-label">Country</strong>
-                    <span class="install-check-value"><?php echo $doneCountry === '' ? 'None is set, so no country is known: a new venue needs one typed in. Set it in Admin, Settings, Organisation.' : htmlspecialchars(\Portal\Core\Countries::name($doneCountry), ENT_QUOTES, 'UTF-8') . '. Each organisation starts from it and can choose its own in Admin, Settings, Organisation.'; ?></span>
-                    <?php if ($doneCountryTyped === '' && $doneCountry !== ''): ?>
-                        <span class="install-check-fix">You chose none, so the country this database already had saved was kept.</span>
-                    <?php elseif ($doneCountry !== $doneCountryTyped && $doneCountry !== ''): ?>
-                        <span class="install-check-fix">That is not the country you chose. This database already had a country saved, and it was kept.</span>
+                    <span class="install-check-value"><?php echo htmlspecialchars($donePlace['country'], ENT_QUOTES, 'UTF-8'); ?></span>
+                    <?php if ($donePlace['countryNote'] !== ''): ?>
+                        <span class="install-check-fix"><?php echo htmlspecialchars($donePlace['countryNote'], ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php endif; ?>
                 </li>
                 <li class="install-check" data-done="timezone" data-zone-written="<?php echo ($finishReport['zoneWritten'] ?? false) === true ? '1' : '0'; ?>">
                     <strong class="install-check-label">Time zone of your organisation</strong>
-                    <?php if (($finishReport['zoneWritten'] ?? false) === true): ?>
-                        <span class="install-check-value"><code><?php echo htmlspecialchars($doneZone, ENT_QUOTES, 'UTF-8'); ?></code>. Change it in Admin, Organisations.</span>
-                    <?php elseif (($finishReport['zoneKept'] ?? false) === true): ?>
-                        <span class="install-check-value">Kept as it was<?php echo $doneZoneNow !== '' ? ', <code>' . htmlspecialchars($doneZoneNow, ENT_QUOTES, 'UTF-8') . '</code>' : ''; ?>, because you chose to carry on with a database that already had one. The time zone you chose, <code><?php echo htmlspecialchars($doneZone, ENT_QUOTES, 'UTF-8'); ?></code>, was not saved: check it in Admin, Organisations.</span>
-                    <?php elseif ($doneZoneNow !== ''): ?>
-                        <span class="install-check-value">Not chosen, so your organisation is on <code><?php echo htmlspecialchars($doneZoneNow, ENT_QUOTES, 'UTF-8'); ?></code>, the time zone this database holds. Change it in Admin, Organisations.</span>
-                    <?php else: ?>
-                        <span class="install-check-value">Not chosen, so your organisation keeps the time zone this database holds. Check it in Admin, Organisations.</span>
-                    <?php endif; ?>
+                    <span class="install-check-value"><?php echo htmlspecialchars($donePlace['zone'], ENT_QUOTES, 'UTF-8'); ?></span>
                 </li>
                 <li class="install-check" data-done="channel" data-channel-source="<?php echo htmlspecialchars((string) $installChannel['source'], ENT_QUOTES, 'UTF-8'); ?>">
                     <strong class="install-check-label">Which copy of the portal this is</strong>

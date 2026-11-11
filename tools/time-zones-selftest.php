@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 275;  // + twenty-two in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 276;  // + twenty-three in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q10c, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -4281,6 +4281,16 @@ ok(
         && $qSelected($qPage['body'], 'countryCode') === 'GBR' && one("SELECT settingValue FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID = 1")['settingValue'] === 'GBR'
         && $qLine1Is('Selftest 942 Kept GBR') === true && str_contains($qSaid, 'Organisation address saved.') === true,
     said($qSaved) . '; selected ' . json_encode($qSelected($qPage['body'], 'countryCode')) . '; said: ' . $qSaid
+);
+// A code in small letters ("fr", as the general Settings editor can store) IS France to every other reader, so the
+// page must say France, not "fr (not on the portal's list)", and give no warning about it.
+q("UPDATE tblSettings SET settingValue = 'fr' WHERE settingKey = 'org.address.countryCode' AND siteID = 1");
+$qPage = req($adminJar, 'GET', '/admin/settings/organisation');
+ok(
+    'Q10c an organisation row holding "fr" in small letters is shown as France, selected, with no "not on the portal\'s list" label and no warning, because the portal uses France for it (round 3 of the #942 check found it labelled as not on the list)',
+    $qSelected($qPage['body'], 'countryCode') === 'FR' && str_contains($qPage['body'], 'not on the portal&#039;s list') === false
+        && str_contains($qPage['body'], 'data-country-unusable') === false && tz_find('#<option value="FR" selected>France</option>#', $qPage['body']) === 1,
+    'selected ' . json_encode($qSelected($qPage['body'], 'countryCode'))
 );
 q("DELETE FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID = 1");
 

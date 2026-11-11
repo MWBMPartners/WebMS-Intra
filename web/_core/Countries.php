@@ -438,17 +438,25 @@ final class Countries
     }
 
     /**
-     * 🏠 What an organisation's own row HOLDS, trimmed, whatever it is ('' when
-     * it has no row). Only its settings page needs this: a row holding text
-     * that is not two capital letters (say "GBR", typed into the general
-     * Settings editor) counts as "not chosen" everywhere else, and the page
-     * must SAY so and offer that text back rather than show "Same as the
-     * installation" — which the next Save would act on by deleting the row,
-     * with nobody told.
+     * 🏠 What an organisation's own row HOLDS, trimmed ('' when it has no row),
+     * for the organisation settings page and its save handler only.
+     *
+     * Two letters in any case come back in CAPITALS, because that is how
+     * every other reader takes them: a row holding "fr" IS France to
+     * ofOrganisation(), so the page must offer France, not "fr (not on the
+     * portal's list)" (round 3 of #942's check found exactly that label).
+     * Anything else comes back as stored. A row holding text that is not a
+     * two-letter code (say "GBR", typed into the general Settings editor)
+     * counts as "not chosen" everywhere else, so the page must SAY so and
+     * offer that text back, rather than show "Same as the installation" —
+     * which the next Save would act on by deleting the row, with nobody told
+     * — and the save handler accepts it back unchanged.
      */
     public static function ownStoredText(int $siteId): string
     {
-        return self::readRows($siteId)['ownText'];
+        $text = self::readRows($siteId)['ownText'];
+
+        return preg_match('/^[A-Za-z]{2}$/', $text) === 1 ? strtoupper($text) : $text;
     }
 
     /**

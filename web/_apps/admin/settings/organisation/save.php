@@ -406,11 +406,23 @@ if ($countrySent === true) {
         $reject('Nothing was saved. The country chosen is not one the portal knows. Choose one from the list, or "Same as the installation".');
     }
 }
-// The country the map look-up is told about: the one just chosen, else the
-// one the organisation already follows. Empty means "no hint", never a guess.
-$countryForLookup = ($countryChosen !== null && $countryChosen !== '')
-    ? $countryChosen
-    : ($countryChosen === '' ? Countries::ofInstallation() : Countries::ofOrganisation($siteId));
+// The country the map look-up is told about. Empty means "no hint", never a
+// guess.
+//   - A two-letter code just chosen: that code.
+//   - "Same as the installation": the installation's (the organisation's own
+//     row is about to go).
+//   - Anything else, including the stored text accepted back unchanged:
+//     Countries::ofOrganisation(), which IGNORES text that is not a two-letter
+//     code. Passing the chosen value through instead sent "GBR" to the
+//     geocoder as `countrycodes=GBR` (round 3 of #942's check): an ignored
+//     value has to be ignored here too.
+if ($countryChosen !== null && preg_match('/^[A-Z]{2}$/', $countryChosen) === 1) {
+    $countryForLookup = $countryChosen;
+} elseif ($countryChosen === '') {
+    $countryForLookup = Countries::ofInstallation();
+} else {
+    $countryForLookup = Countries::ofOrganisation($siteId);
+}
 
 $coords = GeoLocation::validateCoords($_POST['latitude'] ?? null, $_POST['longitude'] ?? null);
 
