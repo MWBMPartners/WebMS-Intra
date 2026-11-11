@@ -382,6 +382,43 @@ $stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) SELECT ?');
 $stmt->bind_param('s', $s);
 """, {("$s", "tblEvents.startDateTime")}),
 
+    # ⚠️ P31-P33: ROUND 4 DELETED THE "CARRIED MOMENT" BRANCH AS UNREACHABLE.
+    #    It is reachable whenever the value argument holds a moment returned by
+    #    a call with no variable in it -- round 3 reported these, round 4 did
+    #    not (the independent check's round 4).
+    ("P31 a moment from a no-argument helper, handed to a constructor",
+     HEAD + """
+function postedTs(): int
+{
+    return (int) strtotime((string) $_POST['s']);
+}
+$s = (new \\DateTimeImmutable('@' . postedTs()))->format('Y-m-d H:i:s');
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P32 the same through createFromFormat('U', ...)",
+     HEAD + """
+function postedTs(): int
+{
+    return (int) strtotime((string) $_POST['s']);
+}
+$s = \\DateTimeImmutable::createFromFormat('U', (string) postedTs())->format('Y-m-d H:i:s');
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
+    ("P33 a FORMATTED moment from a helper, re-read by a constructor",
+     HEAD + """
+function postedStart(): string
+{
+    return date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
+}
+$s = (new \\DateTimeImmutable(postedStart()))->format('Y-m-d H:i:s');
+$stmt = $mysqli->prepare('INSERT INTO tblEvents (startDateTime) VALUES (?)');
+$stmt->bind_param('s', $s);
+""", {("$s", "tblEvents.startDateTime")}),
+
     ("P14 a single value carried into a closure through its use list",
      HEAD + """
 $start = date('Y-m-d H:i:s', strtotime((string) $_POST['s']));
@@ -780,10 +817,10 @@ print(f"\n{len(results)} checks: {len(results) - len(failed)} passed, {len(faile
 #    hold the pinned copy to the real lists, so an entry removed from ONE of
 #    them fails -- but an entry removed from BOTH in one edit left every
 #    remaining case green and silently tested one thing fewer.
-if plants != 30 or greens != 11 or refusals != 9 or lists != 6 or generated != 38:
+if plants != 33 or greens != 11 or refusals != 9 or lists != 6 or generated != 38:
     print(f"FAIL: a case list has changed size ({plants} plants / {greens} green / "
           f"{refusals} refusals / {lists} list pins / {generated} generated; "
-          f"pinned 30 / 11 / 9 / 6 / 38). "
+          f"pinned 33 / 11 / 9 / 6 / 38). "
           f"Change the pin in the same edit, deliberately.")
     sys.exit(1)
 sys.exit(1 if len(failed) > 0 else 0)

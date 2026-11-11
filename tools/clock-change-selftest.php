@@ -1056,6 +1056,14 @@ if ($foundBoth === false) {
         ['Europe/London',    'sunday 2026-03-28 01:30',      '2026-03-29 02:30', '2026-03-29 01:30:00'],
         ['Europe/London',    'Sun, 28 Mar 2026 01:30',       '2026-03-29 02:30', '2026-03-29 01:30:00'],
         ['Africa/Cairo',     '2027-04-29 00:30 +1 weekday',  '2027-04-30 01:30', '2027-04-30 00:30:00'],
+        // ⚠️ AND TWO MORE THE INDEPENDENT CHECK'S ROUND 4 FOUND UNPINNED, with
+        //    the same shape: the year rule and `first day of` each removed
+        //    from the canonical cell left section K green. And a fraction
+        //    `date_parse()` truncates to six digits, which an earlier comment
+        //    wrongly said would fall back.
+        ['Europe/London',    '2025-03-29 01:30 +1 year',     '2026-03-29 02:30', '2026-03-29 01:30:00'],
+        ['Africa/Cairo',     'first day of next month 2014-07-15 00:30', '2014-08-01 01:30', '2014-08-01 00:30:00'],
+        ['Europe/London',    '03/29/2026 01:30:00.9999995',  '2026-03-29 02:30', '2026-03-29 01:30:00'],
     ];
     $premiseWrong = [];
     $gapWrong     = [];
@@ -1202,6 +1210,34 @@ if ($foundBoth === false) {
         $exactPremise === [] ? 'all in the gap' : implode(' | ', $exactPremise), 'all in the gap');
     check('K07f2 msec/usec time arithmetic keeps its EXACT answer, not stored an hour early',
         $exactWrong === [] ? 'all exact' : implode(' | ', $exactWrong), 'all exact');
+
+    // K07g — NO PHP WARNING FROM STEP (d). For `<weekday> N weeks ago`,
+    //        `date_parse()` reports a relative weekday of -7, -6 or -1, and
+    //        round 4 looked that up in the day-name list: "Undefined array key
+    //        -7", logged to tblErrors for every such row and visible on dev and
+    //        beta (the independent check's round 4). Such a cell keeps the old
+    //        answer now. The warning is caught by a handler here because the
+    //        value alone cannot show it: PHP carries on after the warning.
+    $warned = [];
+    $weeksWrong = [];
+    set_error_handler(static function (int $no, string $msg) use (&$warned): bool {
+        $warned[] = $msg;
+        return true;
+    });
+    foreach ([
+        ['sunday 1 week ago 2026-04-05 01:30',                   '2026-03-29 02:30:00'],
+        ['saturday 2 weeks ago 2026-04-12 01:30 +86400000 msec', '2026-03-29 02:30:00'],
+    ] as [$weeksCell, $weeksWant]) {
+        $weeksGot = $fmtStore($weeksCell);
+        if ($weeksGot !== $weeksWant) {
+            $weeksWrong[] = $weeksCell . ' gave ' . ($weeksGot ?? 'REFUSED') . ', wanted ' . $weeksWant;
+        }
+    }
+    restore_error_handler();
+    check('K07g a weekday date_parse() reports outside 0-6 raises no PHP warning',
+        $warned === [] ? 'no warning' : implode(' | ', array_unique($warned)), 'no warning');
+    check('K07g2 and such a cell keeps the old answer',
+        $weeksWrong === [] ? 'as before' : implode(' | ', $weeksWrong), 'as before');
 
     // K03 — THE PREMISE, so K02 cannot pass by refusing everything. If the
     //       closure simply returned null the checks above would both be

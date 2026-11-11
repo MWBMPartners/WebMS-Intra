@@ -47,10 +47,13 @@
  *     changed only in form (`PASS_THROUGH`: trim, substr ...).
  *   * EVERY construct in this list and in the two below has a case in
  *     `tools/wall-clock-writes-selftest.py` that was measured to go red when
- *     that construct's handling is switched off (36 of 36 in round 4 of #785).
+ *     that construct's handling is switched off (39 of 39 in round 5 of #785).
  *     That was not true before round 4: switching `foreach` off left the
  *     self-test green, and an arrow function's body was never read at all
- *     although this list said it was -- `=>` ended the expression.
+ *     although this list said it was -- `=>` ended the expression. And round
+ *     4 deleted the "carried moment" branch for a constructor as
+ *     unreachable, which it is not: a moment returned by a call with no
+ *     variable in it reaches only that branch (round 5 restored it).
  *   * NOT into the arguments of any other call. That is deliberate and was
  *     MEASURED: the first version let a value flow through every call, and
  *     `import.php`'s `Events::alreadyInCalendar($db, ..., $storedStart)` --
@@ -937,24 +940,51 @@ function momentIn(array $file, int $s, int $from, int $to): ?int
         $argsCarry = momentIn($file, $s, $open + 1, $close);
         if ($prev === T_NEW) {
             // `new DateTime(...)` / `new \DateTimeImmutable(...)`
-            // (No "carried moment" test here: a moment in the value
-            // argument is a variable there, so the test above already
-            // fires, and a moment passed as the ZONE is not a thing anybody
-            // writes. The first version had one, and round 4 of #785
-            // measured it unreachable -- no case could turn it red.)
-            if (in_array($name, CONSTRUCTED, true) === true
-                && isset($args[0]) === true && holdsVariable($file, $args[0][0], $args[0][1]) === true) {
-                return $t[$j][2];
+            // ⚠️ THE "CARRIED MOMENT" TEST IS REACHABLE, AND ROUND 4 OF #785
+            //    DELETED IT AS UNREACHABLE. A moment in the value argument is
+            //    NOT always a variable there: `new \DateTimeImmutable('@' .
+            //    postedTs())`, where `postedTs()` returns `strtotime($_POST
+            //    ...)`, holds no variable at all, and is a moment carried in by
+            //    a call. Round 3 reported it; round 4 did not (found by the
+            //    independent check's round 4). "Measured unreachable" meant
+            //    only that no case I had written could reach it. Plants
+            //    P31-P33.
+            //
+            //    The same for a FORMATTED moment re-read: `new
+            //    \DateTimeImmutable(postedStart())`, where `postedStart()`
+            //    returns `date(..., strtotime($_POST ...))`, rebuilds a moment
+            //    from text that already went through one. That was missed
+            //    before round 4 too; it is cheap to see, so it is seen.
+            if (in_array($name, CONSTRUCTED, true) === true) {
+                if (isset($args[0]) === true && holdsVariable($file, $args[0][0], $args[0][1]) === true) {
+                    return $t[$j][2];
+                }
+                if ($argsCarry !== null) {
+                    return $argsCarry;
+                }
+                $reread = formattedIn($file, $s, $open + 1, $close);
+                if ($reread !== null) {
+                    return $reread;
+                }
             }
             $j = $close;
             continue;
         }
         if ($prev === T_DOUBLE_COLON) {
-            // `X::createFromFormat(format, VALUE)`
-            // (Likewise no "carried moment" test: unreachable, see `new`.)
-            if ($name === 'createfromformat'
-                && isset($args[1]) === true && holdsVariable($file, $args[1][0], $args[1][1]) === true) {
-                return $t[$j][2];
+            // `X::createFromFormat(format, VALUE)` -- and, as for `new`, a
+            // moment carried in by a call (`createFromFormat('U', (string)
+            // postedTs())`, plant P32) or formatted text re-read.
+            if ($name === 'createfromformat') {
+                if (isset($args[1]) === true && holdsVariable($file, $args[1][0], $args[1][1]) === true) {
+                    return $t[$j][2];
+                }
+                if ($argsCarry !== null) {
+                    return $argsCarry;
+                }
+                $reread = formattedIn($file, $s, $open + 1, $close);
+                if ($reread !== null) {
+                    return $reread;
+                }
             }
             if (isset($file['retM'][$name]) === true) {
                 return $file['retM'][$name];

@@ -693,37 +693,42 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //             the time to 00:00 (measured).
     //
     //        ⚠️ ROUND 3 REMOVED TEST 1 AS "MEASURED REDUNDANT", AND IT WAS NOT.
-    //           `date_parse()` MISREPORTS two date rules -- `next <weekday>` is
-    //           reported exactly as `<weekday>`, and `last <weekday> of
-    //           <month>` as day 1 minus 7 days -- so the canonical cell lands
-    //           on a different day, and REPORTED time arithmetic of exactly
-    //           that difference made the two readings match again:
+    //           `date_parse()` MISREPORTS some date rules -- `next sunday` is
+    //           reported exactly as `sunday`, for one -- so the canonical cell
+    //           lands on a different day, and REPORTED time arithmetic of
+    //           exactly that difference made the two readings match again:
     //           `next sunday 2026-03-29 01:30 -168 hours` and `last sunday of
     //           april 2026 01:30 -672 hours` were stored at 01:30, where an
-    //           exact count of hours gives 02:30 (676 such cells across zones
-    //           in the independent check's round 3). Test 1 refuses those. My
-    //           own sweep had not tried a misreported rule COMBINED with
-    //           arithmetic, so "redundant" was a claim about the cells I had
-    //           thought of.
+    //           exact count of hours gives 02:30. Measured with my sweep
+    //           against round 3's reader: 278 `next ... -168 hours` cells and
+    //           148 `last ... of ... -672 hours` cells. Test 1 refuses both.
+    //           (This sentence first said "676 such cells, test 1 refuses
+    //           those", citing the independent check -- but its 676 was 338
+    //           `-168 hours` cells PLUS 338 `-604800000 msec` cells, and that
+    //           msec half is the limit below, which test 1 does NOT refuse.)
     //
-    //        THE LIMIT THAT REMAINS, stated rather than implied: a date rule
-    //        `date_parse()` misreports (`next <weekday>`, `last <weekday> of`)
-    //        combined with HIDDEN time arithmetic (msec or usec) that exactly
-    //        cancels the misreport -- `next sunday 2026-03-29 01:30
-    //        -604800000 msec` -- passes both tests and is stored as the
-    //        reading written (01:30) where an exact count gives 02:30. Neither
-    //        test can see it: test 1 cannot see the msec, and the comparison
-    //        is fooled by the misreport. Nobody writes such a cell in a
-    //        spreadsheet; it is recorded on #946 with the two misreported forms.
-    //        So these tests do NOT prove that no time arithmetic was applied.
-    //        They catch every REPORTED time arithmetic, and every HIDDEN one
-    //        that a misreported date rule does not exactly cancel.
+    //        THE LIMIT THAT REMAINS, as a CLASS: any date rule `date_parse()`
+    //        misreports, combined with HIDDEN time arithmetic (msec or usec)
+    //        that exactly cancels the misreport, passes both tests and is
+    //        stored as the reading written where an exact count gives an hour
+    //        later. Test 1 cannot see the msec; the comparison is fooled by the
+    //        misreport. Known members, as EXAMPLES and not a complete list:
+    //        `next <weekday>`, `last <weekday> of <month>`, `<weekday> next
+    //        week`, a bare `next`/`last`/`this`/`previous week`, `<ordinal>
+    //        <weekday> of next/this/last month`, and `<weekday> N weeks ago`
+    //        -- for instance `next sunday 2026-03-29 01:30 -604800000 msec` in
+    //        London, or `first sunday of next month 2026-02-08 02:30
+    //        +604800000 msec` in New York. Nobody writes such a cell in a
+    //        spreadsheet; the class is recorded on #946. So these tests do NOT
+    //        prove that no time arithmetic was applied: they catch every
+    //        REPORTED time arithmetic, and every HIDDEN one that a misreported
+    //        date rule does not exactly cancel.
     //
     //        The canonical cell is only ever a CHECK and never the stored
     //        value -- the lesson of round 1, which rebuilt the reading from
     //        these same fields and STORED it, with the wrong date for three
-    //        kinds of cell. A mismatch therefore hands the cell to the line
-    //        below; the only way a wrong value is stored is the limit above.
+    //        kinds of cell. A mismatch hands the cell to the line below; the
+    //        only way a wrong value is stored is the class above.
     //
     //        DELIBERATE: arithmetic that adds up to NOTHING is no arithmetic,
     //        within each test's sight: `+0 hours` and `+1 hour -1 hour`
@@ -733,16 +738,24 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        (`+1 hour -3600000 msec`) is refused by test 1 and keeps the line
     //        below.
     //
+    //        A WEEKDAY `date_parse()` REPORTS OUTSIDE 0-6 keeps the line below.
+    //        For `<weekday> N weeks ago` it reports -7, -6 or -1, and the first
+    //        version looked that up in the day-name list -- PHP's "Undefined
+    //        array key -7" warning, logged to `tblErrors` on every such row and
+    //        visible on dev and beta (the independent check's round 4). Such a
+    //        cell is one of the misreported rules above anyway.
+    //
     //        KNOWN AND LEFT, safe in direction: a cell the canonical cell
     //        cannot reproduce keeps the line below, which is what it stored
     //        before #785 -- `next sunday 2026-03-22 01:30`, because of the
     //        misreport above, is still stored moved if that Sunday's 01:30 is
-    //        in the skipped hour. So is a fraction that rounds up to a whole
-    //        second (`01:30:00.9999995`): it becomes 1,000,000 microseconds,
-    //        which the canonical cell carries into the next second, so the
-    //        readings differ.
+    //        in the skipped hour. (A fraction such as `01:30:00.9999995` is NOT
+    //        one of these: `date_parse()` truncates it to six digits, 0.999999,
+    //        so the readings match and it is stored as written -- an earlier
+    //        version of this paragraph said it rounded up and fell back, which
+    //        was false.)
     //
-    //        Three earlier versions were wrong: the first REFUSED such a cell
+    //        Four earlier versions were wrong: the first REFUSED such a cell
     //        (a refusal by spelling, which round 14 of #777 rules out); the
     //        second STORED a reading rebuilt from fields (the wrong date for
     //        `+1 weekday`, `first/last day of` and an ordinal `+1 month`); the
@@ -761,7 +774,11 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
         && is_int($parsed['day']) === true
         && (int) ($relative['hour'] ?? 0) === 0
         && (int) ($relative['minute'] ?? 0) === 0
-        && (int) ($relative['second'] ?? 0) === 0) {
+        && (int) ($relative['second'] ?? 0) === 0
+        && (isset($relative['weekday']) === false
+            || (is_int($relative['weekday']) === true
+                && $relative['weekday'] >= 0
+                && $relative['weekday'] <= 6))) {
         $utc = new \DateTimeZone('UTC');
         $asRead = null;
         $asWritten = null;
