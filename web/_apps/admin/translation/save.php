@@ -178,8 +178,10 @@ if ($capPence > Translation::MAX_CAP_PENCE) {
         'TranslationCapRefused',
         'A monthly translation limit above the most this portal allows was refused.'
     );
-    $_SESSION['flash_msg'] = 'Nothing was saved. The monthly translation limit cannot be more than £'
-        . number_format(Translation::MAX_CAP_PENCE / 100, 2)
+    // 💷 In the installation's currency (#966): one API key pays for every
+    //    organisation, so the limit is the installation's money, not "£".
+    $_SESSION['flash_msg'] = 'Nothing was saved. The monthly translation limit cannot be more than '
+        . \Portal\Core\Currency::format(Translation::MAX_CAP_PENCE, \Portal\Core\Currency::ofInstallation())
         . '. Enter 0 for no limit, or a smaller figure.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('admin/translation'));

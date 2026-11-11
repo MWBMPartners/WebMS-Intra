@@ -97,7 +97,8 @@ class ExpenseMailer
         $claimTitle = htmlspecialchars($claim['claimTitle'], ENT_QUOTES, 'UTF-8');
         $claimant   = htmlspecialchars($claim['claimantName'], ENT_QUOTES, 'UTF-8');
         $dept       = htmlspecialchars($claim['deptName'], ENT_QUOTES, 'UTF-8');
-        $total      = '&pound;' . number_format((float) $claim['totalAmount'], 2);
+        // 💷 The organisation's currency (#966), never a pound sign by default.
+        $total      = htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $claim['totalAmount'], \Portal\Core\Currency::ofOrganisation($siteId)), ENT_QUOTES, 'UTF-8');
         $claimDate  = date('j M Y', strtotime($claim['claimDate']));
 
         switch ($event) {

@@ -109,15 +109,13 @@ $provider = (string) ($_POST['provider'] ?? 'stripe');
 if (in_array($provider, ['stripe','paypal','gocardless'], true) === false) {
     $provider = 'stripe';
 }
-$currency = (string) ($_POST['currency'] ?? 'GBP');
-if (in_array($currency, ['GBP','EUR','USD'], true) === false) {
-    $currency = 'GBP';
-}
+// 💷 No currency here any more (#966): payments are taken in the
+//    organisation's currency (Portal\Core\Currency). A posted `currency` is
+//    ignored, and `payments.currency` is not written.
 
 $upsert($db, 'payments.enabled',    isset($_POST['enabled']) === true ? '1' : '0', false);
 $upsert($db, 'payments.test_mode',  isset($_POST['test_mode']) === true ? '1' : '0', false);
 $upsert($db, 'payments.provider',   $provider, false);
-$upsert($db, 'payments.currency',   $currency, false);
 
 $upsert($db, 'payments.stripe.publishable', trim((string) ($_POST['stripe_pub'] ?? '')), false);
 $stSec = trim((string) ($_POST['stripe_secret'] ?? ''));

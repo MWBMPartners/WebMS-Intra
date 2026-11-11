@@ -602,8 +602,8 @@ $updA    = CT_LOW + 31;
 //    api-spec.json says so; this is a fixture working round it, not a fault.
 $descA   = 'We are raising money to replace the boiler in our church hall this winter.';
 $updBody = 'Thank you: the first thousand pounds came in this week.';
-q('INSERT INTO `tblProject` (`projectID`, `siteID`, `slug`, `title`, `description`, `targetAmountPence`, `status`, `isPublic`) '
-  . 'VALUES (?, ?, ?, ?, ?, 500000, ?, 1)',
+q('INSERT INTO `tblProject` (`projectID`, `siteID`, `slug`, `title`, `description`, `targetAmountPence`, `currency`, `status`, `isPublic`) '
+  . 'VALUES (?, ?, ?, ?, ?, 500000, \'EUR\', ?, 1)',
     'iissss', [$projA, $siteA, 'ct-proj-a', 'CT Boiler appeal', $descA, 'active']);
 q('INSERT INTO `tblProjectUpdate` (`updateID`, `projectID`, `content`) VALUES (?, ?, ?)', 'iis', [$updA, $projA, $updBody]);
 
@@ -632,12 +632,12 @@ $projHidden = CT_LOW + 34;  // organisation A's own project, NOT public
 $descB      = 'Organisation B is raising money to re-lay its own car park surface.';
 $updBodyB   = 'B reports that the car park tender has been awarded this month.';
 $descHidden = 'A quiet appeal nobody has published yet, for the vestry window.';
-q('INSERT INTO `tblProject` (`projectID`, `siteID`, `slug`, `title`, `description`, `targetAmountPence`, `status`, `isPublic`) '
-  . 'VALUES (?, ?, ?, ?, ?, 400000, ?, 1)',
+q('INSERT INTO `tblProject` (`projectID`, `siteID`, `slug`, `title`, `description`, `targetAmountPence`, `currency`, `status`, `isPublic`) '
+  . 'VALUES (?, ?, ?, ?, ?, 400000, \'EUR\', ?, 1)',
     'iissss', [$projB, $siteB, 'ct-proj-b', 'CT B car park', $descB, 'active']);
 q('INSERT INTO `tblProjectUpdate` (`updateID`, `projectID`, `content`) VALUES (?, ?, ?)', 'iis', [$updB, $projB, $updBodyB]);
-q('INSERT INTO `tblProject` (`projectID`, `siteID`, `slug`, `title`, `description`, `targetAmountPence`, `status`, `isPublic`) '
-  . 'VALUES (?, ?, ?, ?, ?, 300000, ?, 0)',
+q('INSERT INTO `tblProject` (`projectID`, `siteID`, `slug`, `title`, `description`, `targetAmountPence`, `currency`, `status`, `isPublic`) '
+  . 'VALUES (?, ?, ?, ?, ?, 300000, \'EUR\', ?, 0)',
     'iissss', [$projHidden, $siteA, 'ct-proj-hidden', 'CT hidden appeal', $descHidden, 'planning']);
 
 // 🚨 AND THREE MORE, because a SECOND round of the independent check found

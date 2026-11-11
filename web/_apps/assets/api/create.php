@@ -23,7 +23,7 @@
  *     "status":            "in-service",                    (optional, default "in-service")
  *     "purchaseDate":      "2024-09-01",                    (optional, Y-m-d)
  *     "purchaseCostPence": 89999,                            (optional — PENCE, not pounds)
- *     "currency":          "GBP",                            (optional, default "GBP")
+ *     "currency":          "EUR",                            (optional, default the organisation's currency)
  *     "isConfidential":    false,                            (optional, default false)
  *     "publicPageEnabled": true,                             (optional, default true)
  *     "labelSymbology":    "qr"                              (optional, default "qr")

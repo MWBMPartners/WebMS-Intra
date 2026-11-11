@@ -103,7 +103,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="col-md-4">
         <div class="card"><div class="card-body">
             <div class="small text-muted">This month's spend</div>
-            <div class="display-6">£<?php echo number_format($monthSpend / 100, 2); ?></div>
+            <div class="display-6"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($monthSpend / 100, 2); ?></div>
         </div></div>
     </div>
     <div class="col-md-4">

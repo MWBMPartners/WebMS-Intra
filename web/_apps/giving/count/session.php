@@ -219,9 +219,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="card-body">
                 <?php if ($session['status'] === 'closed'): ?>
                     <div class="row small">
-                        <div class="col-4">Loose cash<br><strong>&pound;<?php echo $cash !== null ? number_format((float) $cash, 2) : '—'; ?></strong></div>
-                        <div class="col-4">Loose cheque<br><strong>&pound;<?php echo $cheque !== null ? number_format((float) $cheque, 2) : '—'; ?></strong></div>
-                        <div class="col-4">Envelope total<br><strong>&pound;<?php echo $envelope !== null ? number_format((float) $envelope, 2) : '—'; ?></strong></div>
+                        <div class="col-4">Loose cash<br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), $cash !== null ? number_format((float) $cash, 2) : '—'; ?></strong></div>
+                        <div class="col-4">Loose cheque<br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), $cheque !== null ? number_format((float) $cheque, 2) : '—'; ?></strong></div>
+                        <div class="col-4">Envelope total<br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), $envelope !== null ? number_format((float) $envelope, 2) : '—'; ?></strong></div>
                     </div>
                 <?php else: ?>
                     <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
@@ -279,8 +279,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             ?>
                 <div class="portal-data-row">
                     <div class="col-12 col-md-3 fw-semibold"><?php echo htmlspecialchars($bucketLabels[$key], ENT_QUOTES, 'UTF-8'); ?></div>
-                    <div class="col-4 col-md-3 text-md-end">&pound;<?php echo number_format($v1, 2); ?></div>
-                    <div class="col-4 col-md-3 text-md-end">&pound;<?php echo number_format($v2, 2); ?></div>
+                    <div class="col-4 col-md-3 text-md-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($v1, 2); ?></div>
+                    <div class="col-4 col-md-3 text-md-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($v2, 2); ?></div>
                     <div class="col-4 col-md-3 text-md-end">
                         <span class="badge bg-<?php echo $mismatch === true ? 'danger' : 'success'; ?>">
                             <?php echo ($diffPence > 0 ? '+' : '') . number_format($diffPence / 100, 2); ?>
@@ -332,9 +332,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card-header d-flex justify-content-between align-items-center">
         <strong>Named Giving Envelopes</strong>
         <span class="small <?php echo $session['envelopeTotal'] !== null && $envelopesReconcile === false ? 'text-danger fw-semibold' : 'text-muted'; ?>">
-            Logged: &pound;<?php echo number_format($envelopeSum, 2); ?>
+            Logged: <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($envelopeSum, 2); ?>
             <?php if ($session['envelopeTotal'] !== null): ?>
-                / Agreed envelope total: &pound;<?php echo number_format((float) $session['envelopeTotal'], 2); ?>
+                / Agreed envelope total: <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $session['envelopeTotal'], 2); ?>
             <?php endif; ?>
         </span>
     </div>
@@ -357,7 +357,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="portal-data-row">
                         <div class="col-12 col-md-5"><?php echo htmlspecialchars($giverLabel, ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-12 col-md-2 text-muted small"><?php echo htmlspecialchars((string) $e['method'], ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="col-12 col-md-2 text-md-end">&pound;<?php echo number_format((float) $e['amount'], 2); ?></div>
+                        <div class="col-12 col-md-2 text-md-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $e['amount'], 2); ?></div>
                         <div class="col-12 col-md-3 text-md-end">
                             <?php if ($session['status'] !== 'closed'): ?>
                                 <form method="post" action="<?php echo htmlspecialchars(Site::url('giving/count/save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
@@ -426,7 +426,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <li>Waiting on both counters' totals to agree (or an admin resolve).</li>
                 <?php endif; ?>
                 <?php if ($agreedSet === true && $envelopesReconcile === false): ?>
-                    <li>Named envelopes (&pound;<?php echo number_format($envelopeSum, 2); ?>) exceed the agreed envelope total (&pound;<?php echo number_format((float) ($session['envelopeTotal'] ?? 0), 2); ?>) — adjust the named envelopes or the agreed envelope total above.</li>
+                    <li>Named envelopes (<?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor($envelopeSum, \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?>) exceed the agreed envelope total (<?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) ($session['envelopeTotal'] ?? 0), 2); ?>) — adjust the named envelopes or the agreed envelope total above.</li>
                 <?php endif; ?>
             </ul>
         <?php endif; ?>

@@ -72,7 +72,7 @@ if ($stmt !== false) {
 // -----------------------------------------------------------------------------
 $unmatchedCount = 0;
 $unmatchedPence = 0;
-$unmatchedCurrency = (string) (App::settings('giving.currency') ?? 'GBP');
+$unmatchedCurrency = \Portal\Core\Currency::ofSite();
 $stmt = $db->prepare(
     'SELECT COUNT(*) AS cnt, COALESCE(SUM(amountPence), 0) AS totalPence '
     . 'FROM tblBankTxns WHERE siteID = ? AND matchStatus = \'unmatched\''

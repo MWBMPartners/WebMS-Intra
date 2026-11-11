@@ -295,7 +295,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
              handler from the lines above, and a posted total is never read. -->
         <p class="mt-3">
             <strong>Total now:</strong>
-            &pound;<?php echo htmlspecialchars(number_format((float) ($claim['totalAmount'] ?? 0), 2), ENT_QUOTES, 'UTF-8'); ?>
+            <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) ($claim['totalAmount'] ?? 0), \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?>
             <span class="text-body-secondary small">
                 &mdash; this is worked out again from the lines when you save.
             </span>

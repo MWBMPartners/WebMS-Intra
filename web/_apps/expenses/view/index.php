@@ -328,7 +328,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card shadow-sm">
             <div class="card-body text-center">
                 <small class="text-muted d-block">Total Amount</small>
-                <h3 class="mb-0">&pound;<?php echo number_format((float) $claim['totalAmount'], 2); ?></h3>
+                <h3 class="mb-0"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $claim['totalAmount'], 2); ?></h3>
             </div>
         </div>
     </div>
@@ -366,8 +366,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="portal-data-row portal-data-header d-none d-md-flex">
                 <div class="col-md-4">Description</div>
                 <div class="col-md-2 text-center">Qty</div>
-                <div class="col-md-2 text-end">Unit &pound;</div>
-                <div class="col-md-2 text-end">Line &pound;</div>
+                <div class="col-md-2 text-end">Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="col-md-2 text-end">Line <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
                 <div class="col-md-2">Supplier</div>
             </div>
 
@@ -383,11 +383,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="d-md-none fw-semibold">Unit: </span>
-                        &pound;<?php echo number_format((float) $item['unitCost'], 2); ?>
+                        <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $item['unitCost'], 2); ?>
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="d-md-none fw-semibold">Line: </span>
-                        <strong>&pound;<?php echo number_format((float) $item['lineTotal'], 2); ?></strong>
+                        <strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $item['lineTotal'], 2); ?></strong>
                     </div>
                     <div class="col-12 col-md-2">
                         <span class="d-md-none fw-semibold">Supplier: </span>
@@ -398,7 +398,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
             <div class="portal-data-row fw-bold">
                 <div class="col-12 col-md-8 text-md-end">Total</div>
-                <div class="col-12 col-md-2 text-md-end">&pound;<?php echo number_format((float) $claim['totalAmount'], 2); ?></div>
+                <div class="col-12 col-md-2 text-md-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $claim['totalAmount'], 2); ?></div>
                 <div class="col-md-2"></div>
             </div>
         </div>
@@ -541,7 +541,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="d-md-none fw-semibold">Amount: </span>
-                        <?php echo $p['payAmount'] !== null ? '&pound;' . number_format((float) $p['payAmount'], 2) : '—'; ?>
+                        <?php echo $p['payAmount'] !== null ? htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $p['payAmount'], \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8') : '—'; ?>
                     </div>
                     <div class="col-12 col-md-2">
                         <span class="d-md-none fw-semibold">Paid By: </span>

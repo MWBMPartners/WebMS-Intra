@@ -62,7 +62,7 @@ if ((int) $campaign['isActive'] === 0 && $canManage === false) {
 }
 
 $settings = App::settings()['giving'] ?? [];
-$currency = (string) ($campaign['currency'] ?? ($settings['currency'] ?? 'GBP'));
+$currency = (string) ($campaign['currency'] ?? \Portal\Core\Currency::ofSite());
 
 // -----------------------------------------------------------------------------
 // 📊 Thermometer (§3.1) — raised is a single indexed SUM; the *100 happens in

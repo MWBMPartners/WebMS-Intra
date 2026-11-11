@@ -267,18 +267,18 @@ function assets_api_build_data(array $body, ?array $existing): array
     }
 
     // -------------------------------------------------------------------
-    // 💷 currency — 3-letter ISO 4217 shape check, falls back to GBP/
-    // existing (never a hard 400 — a shape-invalid currency is rare
-    // enough, and low-stakes enough, to match save.php's silent-fallback
-    // treatment rather than the stricter ENUM-list rule above).
+    // 💷 currency — a currency the portal can store in hundredths, else
+    // the organisation's (#966; it used to fall back to GBP). Never a hard
+    // 400, to match save.php's fallback rather than the stricter ENUM-list
+    // rule above.
     // -------------------------------------------------------------------
     if ($has('currency') === true) {
         $currency = strtoupper(trim((string) $body['currency']));
-        if (preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
-            $currency = 'GBP';
+        if (\Portal\Core\Currency::isChoosable($currency) === false) {
+            $currency = \Portal\Core\Currency::ofSite();
         }
     } else {
-        $currency = $existing !== null ? (string) $was('currency') : null; // null ⇒ createAsset() defaults to GBP
+        $currency = $existing !== null ? (string) $was('currency') : null; // null ⇒ createAsset() uses the organisation's currency
     }
 
     // -------------------------------------------------------------------

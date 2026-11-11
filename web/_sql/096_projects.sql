@@ -71,6 +71,6 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'projects.enabled',     '0', '0', 0),
     (NULL, 'projects.displayName', 'Projects', 'Projects', 0),
-    (NULL, 'projects.displayIcon', 'fa-solid fa-bullseye', 'fa-solid fa-bullseye', 0),
-    (NULL, 'projects.currency',    'GBP', 'GBP', 0)
+    (NULL, 'projects.displayIcon', 'fa-solid fa-bullseye', 'fa-solid fa-bullseye', 0)
+    -- projects.currency is no longer seeded (#966, D-133): one currency per organisation, `org.currency` (migration 282).
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);

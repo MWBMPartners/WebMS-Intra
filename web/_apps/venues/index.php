@@ -111,7 +111,7 @@ if ($venueId > 0) {
     sort($years);
 }
 
-$currency = (string) (Settings::get('venues.currency', 'GBP') ?? 'GBP');
+$currency = \Portal\Core\Currency::ofSite();
 $today    = date('Y-m-d');
 
 $pageTitle   = 'Venue Bookings';

@@ -57,7 +57,7 @@ if ($stmt !== false) {
 $pendingPledges = [];
 $stmt = $db->prepare(
     'SELECT p.pledgeID, p.amountPence, p.pledgedAt, p.donorName, '
-    . '       pr.title, pr.slug, u.fullName '
+    . '       pr.title, pr.slug, pr.`currency`, u.fullName '
     . 'FROM tblProjectPledge p '
     . 'INNER JOIN tblProject pr ON pr.projectID = p.projectID '
     . 'LEFT JOIN tblUsers u ON u.userID = p.donorID '
@@ -188,7 +188,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="row py-1 border-bottom small align-items-center">
                         <div class="col-md-3"><?php echo htmlspecialchars((string) $p['title'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-3"><?php echo htmlspecialchars($donor, ENT_QUOTES, 'UTF-8'); ?></div>
-                        <div class="col-md-2">£<?php echo number_format(((int) $p['amountPence']) / 100, 2); ?></div>
+                        <div class="col-md-2"><?php echo htmlspecialchars(\Portal\Core\Currency::format((int) $p['amountPence'], (string) $p['currency']), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars(date('j M', (int) strtotime((string) $p['pledgedAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-end">
                             <form method="post" action="<?php echo htmlspecialchars(Site::url('projects/fulfil'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
@@ -226,7 +226,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-2"><span class="badge bg-secondary"><?php echo htmlspecialchars((string) $r['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                     <div class="col-md-3">
                         <div class="progress" style="height:6px;"><div class="progress-bar bg-success" style="width: <?php echo $pct; ?>%;"></div></div>
-                        <small class="text-muted"><?php echo $pct; ?>% · £<?php echo number_format(((int) $r['raised']) / 100, 2); ?> of £<?php echo number_format($target / 100, 2); ?></small>
+                        <small class="text-muted"><?php echo $pct; ?>% · <?php echo htmlspecialchars(\Portal\Core\Currency::format((int) $r['raised'], (string) $r['currency']), ENT_QUOTES, 'UTF-8'); ?> of <?php echo htmlspecialchars(\Portal\Core\Currency::format((int) $target, (string) $r['currency']), ENT_QUOTES, 'UTF-8'); ?></small>
                     </div>
                     <div class="col-md-1 text-muted"><?php echo (int) $r['pledgeCount']; ?> pledges</div>
                     <div class="col-md-2 text-end">

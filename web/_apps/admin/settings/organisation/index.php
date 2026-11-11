@@ -35,6 +35,7 @@ use Portal\Core\App;
 use Portal\Core\InstallationSettings;
 use Portal\Core\Auth;
 use Portal\Core\Countries;
+use Portal\Core\Currency;
 use Portal\Core\PortalAddress;
 use Portal\Core\Router;
 use Portal\Core\Site;
@@ -118,6 +119,50 @@ if ($countryInForce !== '' && $zoneCountry !== $countryInForce
         . ($zoneSuggested !== '' ? ' ' . Countries::name($countryInForce) . ' uses ' . $zoneSuggested . '.' : '')
         . ' If the time zone is wrong, ' . (App::isUmbrellaAdmin() === true ? 'change it' : 'ask a global administrator to change it')
         . ' at Admin, Organisations; times on every page follow it.';
+}
+
+// 💷 THE CURRENCY BOX (#966, D-133). One currency per organisation: its own
+//    when it has chosen one, else the installation's, else none (amounts are
+//    then plain numbers, never pounds).
+//
+//    The box shows the organisation's OWN row (#674): showing the currency in
+//    force would copy the installation's into this organisation's own row on
+//    a Save that touched nothing. It is pre-selected from the country (D-133)
+//    ONLY when no currency is in force at all — the setting-up case, where
+//    there is nothing to relabel. Otherwise the page ADVISES when the
+//    currency and the country disagree, as it does for the time zone.
+//
+//    While money is recorded the box is shown disabled with the reason
+//    (Currency::whyCannotChange()). A disabled control is not submitted, so
+//    the save handler, which asks whether the field ARRIVED (#677), leaves
+//    the currency alone; it also checks again itself, under a lock.
+$currencyOwn          = Currency::ownOf(Site::id());
+$currencyInstallation = Currency::ofInstallation();
+$currencyOwnText      = Currency::ownStoredText(Site::id());
+$currencyOwnUnusable  = $currencyOwnText !== '' && $currencyOwn === '';
+$currencyInForce      = $currencyOwn !== '' ? $currencyOwn : $currencyInstallation;
+$currencyChoices      = Currency::choices();
+$currencySelected     = $currencyOwnText;
+if ($currencySelected !== '' && isset($currencyChoices[$currencySelected]) === false) {
+    $currencyChoices = [$currencySelected => $currencySelected . ' (not a currency the portal can use)'] + $currencyChoices;
+}
+$currencyCountryUses  = $countryInForce !== '' ? Currency::ofCountry($countryInForce) : '';
+$currencySuggested    = $countryInForce !== '' ? Currency::suggestFor($countryInForce) : '';
+$currencyPreselected  = false;
+if ($currencyInForce === '' && $currencySelected === '' && $currencySuggested !== '') {
+    $currencySelected    = $currencySuggested;
+    $currencyPreselected = true;
+}
+// Any change at all would be refused while money is recorded: asked with
+// '' as the new value, which differs from any currency in force.
+$currencyLocked = Currency::whyCannotChange($mysqli, Site::id(), $currencyInForce, '', false);
+$currencyAdvice = '';
+if ($currencyCountryUses !== '' && $currencySuggested === '') {
+    $currencyAdvice = Countries::name($countryInForce) . ' uses ' . $currencyCountryUses . '. '
+        . Currency::whyNotChoosable($currencyCountryUses);
+} elseif ($currencySuggested !== '' && $currencyInForce !== '' && $currencyInForce !== $currencySuggested) {
+    $currencyAdvice = 'This organisation\'s currency is ' . $currencyInForce . ', and '
+        . Countries::name($countryInForce) . ' uses ' . $currencySuggested . '.';
 }
 
 // 🌐 The "Web addresses" card. Everything about the portal's address comes
@@ -273,6 +318,38 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php endif; ?>
                     <?php if ($zoneAdvice !== ''): ?>
                         <div class="alert alert-warning small mt-2 mb-0" role="note"><?php echo $e($zoneAdvice); ?></div>
+                    <?php endif; ?>
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label" for="currency">Currency</label>
+                    <select class="form-select" id="currency" name="currency" aria-describedby="currencyHelp"<?php echo $currencyLocked !== '' ? ' disabled' : ''; ?> data-currency-locked="<?php echo $currencyLocked !== '' ? '1' : '0'; ?>">
+                        <option value=""<?php echo $currencySelected === '' ? ' selected' : ''; ?>><?php echo $e($currencyInstallation !== ''
+                            ? 'Same as the installation: ' . $currencyInstallation
+                            : 'Same as the installation (none chosen)'); ?></option>
+                        <?php foreach ($currencyChoices as $code => $currencyName): ?>
+                            <option value="<?php echo $e((string) $code); ?>"<?php echo (string) $code === $currencySelected ? ' selected' : ''; ?>><?php echo $e($currencyName); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text" id="currencyHelp">
+                        Every amount this organisation records, shows and takes in payments is in this currency.
+                        <?php if ($currencyPreselected === true): ?>
+                            Suggested from the country, <?php echo $e(Countries::name($countryInForce)); ?>: <strong>check it, and save to keep it.</strong>
+                        <?php elseif ($currencyInForce === ''): ?>
+                            No currency is chosen yet, so amounts are shown as plain numbers and no payment can be taken.
+                        <?php endif; ?>
+                        It can be changed only while the organisation has no money recorded.
+                    </div>
+                    <?php if ($currencyLocked !== ''): ?>
+                        <div class="alert alert-secondary small mt-2 mb-0" role="note" data-currency-locked-reason><?php echo $e($currencyLocked); ?></div>
+                    <?php endif; ?>
+                    <?php if ($currencyOwnUnusable === true): ?>
+                        <div class="alert alert-warning small mt-2 mb-0" role="note"><?php echo $e(
+                            'This organisation\'s currency is stored as "' . $currencyOwnText . '", which is not a currency the portal can use, '
+                            . 'so ' . ($currencyInstallation !== '' ? 'the installation\'s, ' . $currencyInstallation . ',' : 'no currency') . ' is used instead.'
+                        ); ?></div>
+                    <?php endif; ?>
+                    <?php if ($currencyAdvice !== ''): ?>
+                        <div class="alert alert-warning small mt-2 mb-0" role="note" data-currency-advice><?php echo $e($currencyAdvice); ?></div>
                     <?php endif; ?>
                 </div>
             </div>

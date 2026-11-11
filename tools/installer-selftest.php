@@ -192,7 +192,8 @@ declare(strict_types=1);
  * number means a block was skipped or ran twice. With a second server named
  * (SELFTEST_DB_PORT_2) one more is made: see `$expectedChecks`.
  */
-const EXPECTED_CHECKS = 152; // 136 + N01, N01b, N02, N03-N06, N06b, N07-N14 (#942; N02b's traps were replaced by the installer's browser rule, a text pin and a browser test)
+const EXPECTED_CHECKS = 158; // 136 + N01, N01b, N02, N03-N06, N06b, N07-N14 (#942; N02b's traps were replaced by the installer's browser rule, a text pin and a browser test)
+// 💷 + M01-M06 (#966, the currency): 158.
 
 /** The made-up addresses this run types. `.invalid` never reaches anybody. */
 const ADDRESS_TYPED = 'https://portal.installer-selftest.invalid';
@@ -1529,6 +1530,14 @@ $zoneList     = preg_match('/<select[^>]*id="timezone"[^>]*>(.*?)<\/select>/s', 
 $suggestJs    = preg_match('/<script nonce="[0-9a-f]{32}">\s*(\/\/ 🌍 Suggest a country.*?)<\/script>/s', $addressPage['body'], $m) === 1 ? $m[1] : '';
 preg_match_all('/<option value="([A-Z]{2})"/', $countryList, $countryOptions);
 preg_match_all('/<option value="([^"]+)" data-country="([A-Z]*)"/', $zoneList, $zoneOptions, PREG_SET_ORDER);
+// 💷 #966: each country option carries the currency it suggests, and the currency list.
+$moneyList = preg_match('/<select[^>]*id="currency"[^>]*>(.*?)<\/select>/s', $addressPage['body'], $m) === 1 ? $m[1] : '';
+preg_match_all('/<option value="([A-Z]{2})" data-currency="([A-Z]{0,3})"/', $countryList, $countryMoney, PREG_SET_ORDER);
+$moneyOf = [];
+foreach ($countryMoney as $pair) {
+    $moneyOf[$pair[1]] = $pair[2];
+}
+preg_match_all('/<option value="([A-Z]{3})"/', $moneyList, $moneyOptions);
 ok('N01 the web addresses page ASKS for the country and the time zone, and chooses NEITHER itself: "Not chosen yet" is the only selected option in each, no country is built in (#942)',
     count($countryOptions[1]) === 247 && substr_count($countryList, ' selected') === 1 && str_contains($countryList, '<option value="" selected>Not chosen yet</option>') === true
     && substr_count($zoneList, ' selected') === 1 && str_contains($zoneList, '<option value="" selected>Not chosen yet</option>') === true
@@ -1549,28 +1558,30 @@ ok('N01b (a quick text tripwire only; see the comment above for what the browser
 // for the two lists (built from the page's real options) and the browser's time zone set through TZ, which is where
 // node's Intl reads it from. Each case: [browser zone, country already chosen, zone already chosen, a country chosen
 // afterwards (or ''), country expected, zone expected].
-$simulate = static function (string $browserZone, string $country, string $zone, string $changeTo) use ($suggestJs, $countryOptions, $zoneOptions): array {
+$simulate = static function (string $browserZone, string $country, string $zone, string $changeTo, string $moneyChosen = '') use ($suggestJs, $countryOptions, $zoneOptions, $moneyOf, $moneyOptions): array {
     $harness = <<<'JS'
 const data = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
 function list(rows, initial, chosen) {
-    const opts = rows.map(([v, c]) => ({ value: v, getAttribute: (n) => (n === 'data-country' ? c : null) }));
+    const opts = rows.map(([v, c, m]) => ({ value: v, getAttribute: (n) => (n === 'data-country' ? c : (n === 'data-currency' ? (m || '') : null)) }));
     let value = initial;
     const heard = {};
     return {
         options: opts,
         get value() { return value; },
+        get selectedIndex() { return opts.findIndex((o) => o.value === value); },
         set value(x) { value = opts.some((o) => o.value === x) ? x : ''; },
         getAttribute: (n) => (n === 'data-chosen' ? chosen : null),
         addEventListener: (t, f) => { heard[t] = f; },
         fire: (t) => { if (heard[t]) { heard[t](); } },
     };
 }
-const country = list([['', '']].concat(data.countries.map((c) => [c, ''])), data.country, data.country === '' ? '0' : '1');
+const country = list([['', '']].concat(data.countries.map((c) => [c, '', data.moneyOf[c] || ''])), data.country, data.country === '' ? '0' : '1');
 const zone = list([['', '']].concat(data.zones), data.zone, data.zone === '' ? '0' : '1');
-global.document = { getElementById: (id) => (id === 'country' ? country : (id === 'timezone' ? zone : null)) };
+const money = list([['', '']].concat(data.currencies.map((c) => [c, ''])), data.moneyChosen, data.moneyChosen === '' ? '0' : '1');
+global.document = { getElementById: (id) => (id === 'country' ? country : (id === 'timezone' ? zone : (id === 'currency' ? money : null))) };
 eval(data.script);
 if (data.changeTo !== '') { country.value = data.changeTo; country.fire('change'); }
-process.stdout.write(JSON.stringify({ chosen: country.value + '|' + zone.value }));
+process.stdout.write(JSON.stringify({ chosen: country.value + '|' + zone.value, money: money.value }));
 JS;
     $dir  = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'installer-selftest-942-' . bin2hex(random_bytes(4));
     @mkdir($dir, 0700);
@@ -1578,6 +1589,7 @@ JS;
     file_put_contents($dir . '/data.json', json_encode([
         'script' => $suggestJs, 'countries' => $countryOptions[1], 'zones' => array_map(static fn (array $o): array => [$o[1], $o[2]], $zoneOptions),
         'country' => $country, 'zone' => $zone, 'changeTo' => $changeTo,
+        'moneyOf' => $moneyOf, 'currencies' => $moneyOptions[1], 'moneyChosen' => $moneyChosen,
     ]));
     $out = (string) shell_exec('TZ=' . escapeshellarg($browserZone) . ' node ' . escapeshellarg($dir . '/harness.js') . ' ' . escapeshellarg($dir . '/data.json') . ' 2>&1');
     @unlink($dir . '/harness.js');
@@ -1611,7 +1623,34 @@ ok('N03 a country that is not on the list is refused in words, and nothing is ke
 $badZone = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'country' => 'FR', 'timezone' => 'Mars/Olympus_Mons']);
 ok('N04 a time zone that is not on the list is refused in words, nothing is kept, and the country chosen is offered back as chosen',
     page($badZone) === 'addresses' && str_contains(message($badZone), 'The time zone chosen is not one the installer knows') === true && page(req($owner, 'GET', '/?step=5')) === 'addresses'
-    && str_contains($badZone['body'], '<option value="FR" selected>') === true && str_contains($badZone['body'], 'id="country" name="country" aria-describedby="country_help" data-chosen="1"') === true, said($badZone));
+    && str_contains($badZone['body'], '<option value="FR" data-currency="EUR" selected>') === true && str_contains($badZone['body'], 'id="country" name="country" aria-describedby="country_help" data-chosen="1"') === true, said($badZone));
+
+// 💷 #966: the currency. The page chooses none itself; each country's option names the currency it suggests,
+//    and a country whose currency is not counted in hundredths (Japan) suggests none.
+ok('M01 the web addresses page asks for a currency and chooses none itself: "Not chosen yet" is the only one selected; France\'s option suggests EUR, the United Kingdom\'s GBP, Japan\'s nothing, and the yen is not offered at all (#966)',
+    substr_count($moneyList, ' selected') === 1 && str_contains($moneyList, '<option value="" selected>Not chosen yet</option>') === true
+    && ($moneyOf['FR'] ?? '?') === 'EUR' && ($moneyOf['GB'] ?? '?') === 'GBP' && ($moneyOf['JP'] ?? '?') === '' && count($moneyOf) === 247
+    && in_array('JPY', $moneyOptions[1], true) === false && in_array('EUR', $moneyOptions[1], true) === true,
+    'selected: ' . substr_count($moneyList, ' selected') . '; FR ' . ($moneyOf['FR'] ?? '?') . ', JP ' . ($moneyOf['JP'] ?? '?') . '; ' . count($moneyOf) . ' countries');
+$moneyCases = [];
+foreach ([
+    'a browser in Paris: France, so EUR'                                    => ['Europe/Paris', '', '', '', '', 'EUR'],
+    'a browser in Tokyo: Japan, whose currency cannot be chosen, so none'   => ['Asia/Tokyo', '', '', '', '', ''],
+    'a currency already chosen (sent back after an error) is kept'         => ['Europe/Paris', '', '', '', 'USD', 'USD'],
+    'choosing France afterwards, from a London browser, suggests EUR'      => ['Europe/London', '', '', 'FR', '', 'EUR'],
+    'a browser on UTC suggests no currency'                                => ['UTC', '', '', '', '', ''],
+] as $what => [$browserZone, $country, $zone, $changeTo, $moneyChosen, $expected]) {
+    $got = $simulate($browserZone, $country, $zone, $changeTo, $moneyChosen);
+    if (($got['money'] ?? '(no answer)') !== $expected) {
+        $moneyCases[] = $what . ': expected ' . ($expected === '' ? 'none' : $expected) . ', got ' . (string) ($got['money'] ?? json_encode($got));
+    }
+}
+ok('M02 the page\'s script, RUN in node: the currency follows the country it suggests or the one chosen, a currency already chosen is kept, and a country whose currency cannot be chosen suggests none',
+    $moneyCases === [], implode(' | ', $moneyCases));
+$badMoney = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'country' => 'JP', 'currency' => 'JPY']);
+ok('M03 a currency the portal cannot store in hundredths (the yen) is refused in words, and nothing is kept',
+    page($badMoney) === 'addresses' && str_starts_with(message($badMoney), 'Nothing was saved.') === true
+    && str_contains(message($badMoney), 'The currency chosen is not one the installer can use') === true && page(req($owner, 'GET', '/?step=5')) === 'addresses', said($badMoney));
 
 $typed = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ' HTTPS://Portal.Installer-Selftest.invalid/ ', 'support_email' => SUPPORT_TYPED]);
 ok('I15 a good address, typed untidily, is accepted and leads to the finish; nothing has been written to the database yet', $typed['status'] === 302 && $typed['location'] === '?step=5' && setting($databases['a'], 'site.url') === '', said($typed));
@@ -1649,7 +1688,7 @@ ok('I36 a finish that stops at its LAST write (the database login cannot be writ
     page($stopped) === 'finish' && str_contains(message($stopped), 'the file that holds the database login could not be written') === true && names($authA) === '.htaccess, enc.key, install-code.php'
     && setting($databases['a'], 'portal.installed_version') === '' && setting($databases['a'], 'site.url') === 'https://mistyped.installer-selftest.invalid'
     && setting($databases['a'], 'portal.support.email') === 'mistyped@installer-selftest.invalid', said($stopped) . '; ' . names($authA) . '; ' . setting($databases['a'], 'site.url'));
-$corrected = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'country' => 'fr', 'timezone' => 'Europe/Paris']);
+$corrected = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'country' => 'fr', 'timezone' => 'Europe/Paris', 'currency' => 'eur']);
 
 // An EMPTY file where the key file goes, as a failed upload leaves one: it is no key, and must not be kept as one.
 // (Emptied again here: the finish that stopped had written a key into it.)
@@ -1712,6 +1751,13 @@ ok('N06 the last page says the country by name and the time zone set',
     str_contains($done['body'], 'data-done="country" data-country="FR"') === true && str_contains(words($done), 'France. Each organisation starts from it') === true
     && str_contains($done['body'], 'data-zone-written="1"') === true && str_contains(words($done), 'Europe/Paris. Change it in Admin, Organisations.') === true,
     said($done));
+$moneyRows = q($databases['a'], "SELECT `siteID`, `settingValue` FROM `tblSettings` WHERE `settingKey` = 'org.currency'");
+ok('M04 the currency chosen (typed in small letters) is the INSTALLATION\'s: exactly one row, installation-wide, holding EUR, no organisation given a copy; and the last page says EUR (#966)',
+    count($moneyRows) === 1 && $moneyRows[0]['siteID'] === null && $moneyRows[0]['settingValue'] === 'EUR'
+    && str_contains($done['body'], 'data-done="currency" data-currency="EUR"') === true,
+    json_encode($moneyRows));
+ok('M05 none of the four old per-app currency settings exists on a new installation: org.currency replaces them (#966)',
+    count(q($databases['a'], "SELECT 1 FROM `tblSettings` WHERE `settingKey` IN ('giving.currency', 'projects.currency', 'payments.currency', 'venues.currency')")) === 0);
 // #942: every installer answer carries its browser rule (web/_install/csp.php), and EVERY script on the page carries
 // THAT answer's nonce, or the browser would refuse to run it (and the installer would quietly stop working). The rule
 // itself is proved in a real browser by tools/installer-country-script-selftest.mjs; this proves it is on the three pages N14 fetches (Web addresses, finish, last page); L20 walks all ten pages but does not check the policy.
@@ -2131,7 +2177,9 @@ q($databases['b'], "UPDATE tblSettings SET settingValue = 'https://kept.installe
 // Stored in SMALL letters on purpose: the portal reads "ie" as Ireland, so every sentence below must too (round 3).
 q($databases['b'], "UPDATE `tblSettings` SET `settingValue` = 'ie' WHERE `settingKey` = 'org.address.countryCode' AND `siteID` IS NULL");
 q($databases['b'], "UPDATE `tblSites` SET `timezone` = 'America/Chicago' WHERE `siteID` = 1");
-$typed = post($fourth, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => 'portal-b.installer-selftest.invalid', 'support_email' => '', 'country' => 'NZ', 'timezone' => 'Pacific/Auckland']);
+// #966: and a currency of its own, which must be kept too.
+q($databases['b'], "UPDATE `tblSettings` SET `settingValue` = 'CHF' WHERE `settingKey` = 'org.currency' AND `siteID` IS NULL");
+$typed = post($fourth, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => 'portal-b.installer-selftest.invalid', 'support_email' => '', 'country' => 'NZ', 'timezone' => 'Pacific/Auckland', 'currency' => 'NZD']);
 ok('L13 a bare host name is taken to mean https, and the support address may be left empty', $typed['status'] === 302 && $typed['location'] === '?step=5'
     && str_contains(req($fourth, 'GET', '/?step=5')['body'], '<code>https://portal-b.installer-selftest.invalid</code>') === true, said($typed));
 // #942: what the finish page says about a database CARRIED ON with that holds a country and a zone of its own.
@@ -2173,7 +2221,7 @@ ok('L23 a finish that stops at its last write on a database that ALREADY held an
 // #942: the finish that completes is made WITH a country and a zone chosen that differ from what this carried-on
 // database holds, so the last page's "your choice was NOT saved" sentences are reached by a real finish. (Round 2 of
 // the check found them pinned by nothing: every finish this test made took another path.)
-post($fourth, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => 'portal-b.installer-selftest.invalid', 'support_email' => '', 'country' => 'NZ', 'timezone' => 'Pacific/Auckland']);
+post($fourth, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => 'portal-b.installer-selftest.invalid', 'support_email' => '', 'country' => 'NZ', 'timezone' => 'Pacific/Auckland', 'currency' => 'NZD']);
 $done = post($fourth, '/?step=5', ['action' => 'finalize', 'owner_code' => installCodeAsShown(codeOf($rootB))]);
 ok('L14 the installation finishes, and a key file that was already there is KEPT, to the byte, and the last page says so', page($done) === 'done' && @file_get_contents($authB . $sep . 'enc.key') === $olderKey
     && str_contains(words($done), 'a key file was already there, and it was kept') === true, said($done));
@@ -2195,6 +2243,10 @@ $doneLine = static function (array $page, string $which): string {
     return preg_match('/data-done="' . $which . '"[^>]*>(.*?)<\/li>/s', $page['body'], $m) === 1
         ? trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'))) : '(no such line)';
 };
+ok('M06 a database CARRIED ON with keeps the currency it already had (CHF) although NZD was chosen, and the last page says so (#966)',
+    setting($databases['b'], 'org.currency') === 'CHF'
+    && $doneLine($done, 'currency') === 'Currency CHF. The database you carried on with already had it, so it was kept, not NZD.',
+    setting($databases['b'], 'org.currency') . ' / ' . $doneLine($done, 'currency'));
 ok('N07 a database CARRIED ON with keeps the country and the time zone it already had although others were CHOSEN, and the last page names the STORED ones and the chosen ones as not saved: Ireland kept, not New Zealand; America/Chicago kept, Pacific/Auckland not saved (#942)',
     setting($databases['b'], 'org.address.countryCode') === 'ie' && (q($databases['b'], 'SELECT `timezone` FROM `tblSites` WHERE `siteID` = 1')[0]['timezone'] ?? '') === 'America/Chicago'
     && $doneLine($done, 'country') === 'Country Ireland. Each organisation starts from it and can choose its own in Admin, Settings, Organisation. That is not the country you chose (New Zealand). This database already had a country saved, and it was kept.'

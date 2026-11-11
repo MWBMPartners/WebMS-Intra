@@ -264,7 +264,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="d-md-none fw-semibold">Total: </span>
-                        &pound;<?php echo number_format((float) $own['totalAmount'], 2); ?>
+                        <?php echo htmlspecialchars(\Portal\Core\Currency::formatMajor((float) $own['totalAmount'], \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?>
                     </div>
                     <div class="col-12 col-md-2 text-md-end">
                         <span class="badge bg-<?php echo $ownStatusClass((string) $own['status']); ?>"><?php echo htmlspecialchars((string) $own['status'], ENT_QUOTES, 'UTF-8'); ?></span>
@@ -341,8 +341,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="d-none d-md-flex fw-semibold border-bottom py-1 mb-2 small text-secondary">
         <div class="col-md-5">Description</div>
         <div class="col-md-2 text-end">Qty</div>
-        <div class="col-md-2 text-end">Unit &pound;</div>
-        <div class="col-md-2 text-end">Line &pound;</div>
+        <div class="col-md-2 text-end">Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
+        <div class="col-md-2 text-end">Line <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
         <div class="col-md-1"></div>
     </div>
 
@@ -366,7 +366,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <input type="number" name="itemQty[]" class="form-control text-end" aria-label="Quantity" min="1" value="<?php echo htmlspecialchars($kept['qty'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="col-4 col-md-2">
-                    <label class="form-label d-md-none">Unit &pound;</label>
+                    <label class="form-label d-md-none">Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></label>
                     <input type="number" step="0.01" name="itemUnit[]" class="form-control text-end" aria-label="Unit price" value="<?php echo htmlspecialchars($kept['unit'], ENT_QUOTES, 'UTF-8'); ?>">
                 </div>
                 <div class="col-4 col-md-3"></div>
@@ -379,7 +379,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <button type="button" id="addRow" class="btn btn-outline-secondary btn-sm mb-3">+ Add item</button>
 
     <div class="mb-3 text-end">
-        <strong>Total: &pound; <span id="grandTotal">0.00</span></strong>
+        <strong>Total: <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?><span id="grandTotal">0.00</span></strong>
         <input type="hidden" name="totalAmount" id="totalAmount">
     </div>
 

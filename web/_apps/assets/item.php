@@ -1539,7 +1539,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                                         <input type="text" class="form-control form-control-sm" name="performedByName" maxlength="255" value="<?php echo htmlspecialchars((string) ($m['performedByName'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>">
                                     </div>
                                     <div class="col-6">
-                                        <label class="form-label small">Cost (£)</label>
+                                        <label class="form-label small">Cost<?php echo \Portal\Core\Currency::label((string) $asset['currency']) !== '' ? ' (' . htmlspecialchars(\Portal\Core\Currency::label((string) $asset['currency']), ENT_QUOTES, 'UTF-8') . ')' : ''; ?></label>
                                         <input type="number" step="0.01" min="0" class="form-control form-control-sm" name="costPounds" value="<?php echo $m['costPence'] !== null ? number_format(((int) $m['costPence']) / 100, 2, '.', '') : ''; ?>">
                                     </div>
                                     <div class="col-6">
@@ -1625,7 +1625,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
                     <input type="text" class="form-control form-control-sm" id="performedByName" name="performedByName" maxlength="255">
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label small" for="costPounds">Cost (£) <span class="text-muted">(optional)</span></label>
+                    <label class="form-label small" for="costPounds">Cost<?php echo \Portal\Core\Currency::label((string) $asset['currency']) !== '' ? ' (' . htmlspecialchars(\Portal\Core\Currency::label((string) $asset['currency']), ENT_QUOTES, 'UTF-8') . ')' : ''; ?> <span class="text-muted">(optional)</span></label>
                     <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="costPounds" name="costPounds" placeholder="0.00">
                 </div>
                 <div class="col-md-6">

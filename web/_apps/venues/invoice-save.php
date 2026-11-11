@@ -182,7 +182,7 @@ $data = [
     'issueDate'    => (string) ($_POST['issueDate'] ?? ''),
     'dueDate'      => (string) ($_POST['dueDate'] ?? ''),
     'amountPence'  => $toPence((string) ($_POST['amount'] ?? '')) ?? -1,
-    'currency'     => (string) ($_POST['currency'] ?? 'GBP'),
+    'currency'     => (string) ($_POST['currency'] ?? \Portal\Core\Currency::ofSite()),
     'notes'        => (string) ($_POST['notes'] ?? ''),
 ];
 

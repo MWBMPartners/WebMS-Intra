@@ -119,8 +119,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 <div class="row g-3 mb-3">
     <div class="col-md-4"><div class="card"><div class="card-body">
         <div class="small text-muted">This month spend</div>
-        <div class="display-6">£<?php echo number_format($spend / 100, 2); ?></div>
-        <div class="small text-muted">of £<?php echo number_format($capInForce / 100, 2); ?> cap</div>
+        <div class="display-6"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($spend / 100, 2); ?></div>
+        <div class="small text-muted">of <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($capInForce / 100, 2); ?> cap</div>
     </div></div></div>
     <div class="col-md-4"><div class="card"><div class="card-body">
         <div class="small text-muted">Calls today</div>
@@ -148,7 +148,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </select>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Monthly cap (£)</label>
+                <label class="form-label">Monthly cap <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'); ?></label>
                 <input type="number" min="0" step="0.01" class="form-control" name="monthCap" value="<?php echo number_format($cap / 100, 2, '.', ''); ?>">
             </div>
             <div class="col-md-2">

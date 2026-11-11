@@ -177,8 +177,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php echo $isOverdue ? ' (overdue)' : ''; ?>
                     </span>
                 </div>
-                <div class="col-2 text-end">£<?php echo number_format(((int) $inv['amountPence']) / 100, 2); ?></div>
-                <div class="col-2 text-end">£<?php echo number_format(((int) $inv['paidPence']) / 100, 2); ?></div>
+                <div class="col-2 text-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix((string) $inv['currency']), ENT_QUOTES, 'UTF-8'), number_format(((int) $inv['amountPence']) / 100, 2); ?></div>
+                <div class="col-2 text-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix((string) $inv['currency']), ENT_QUOTES, 'UTF-8'), number_format(((int) $inv['paidPence']) / 100, 2); ?></div>
                 <div class="col-1">
                     <span class="badge bg-<?php echo $statusBadge[(string) $inv['status']] ?? 'secondary'; ?>">
                         <?php echo htmlspecialchars((string) $inv['status'], ENT_QUOTES, 'UTF-8'); ?>
@@ -193,9 +193,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php endforeach; ?>
     </div>
     <div class="d-flex justify-content-end gap-4 text-end mb-4">
-        <div><span class="text-muted small">Billed</span><br><strong>£<?php echo number_format($totalBilled / 100, 2); ?></strong></div>
-        <div><span class="text-muted small">Paid</span><br><strong>£<?php echo number_format($totalPaid / 100, 2); ?></strong></div>
-        <div><span class="text-muted small">Outstanding</span><br><strong>£<?php echo number_format($totalOutstanding / 100, 2); ?></strong></div>
+        <div><span class="text-muted small">Billed</span><br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($totalBilled / 100, 2); ?></strong></div>
+        <div><span class="text-muted small">Paid</span><br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($totalPaid / 100, 2); ?></strong></div>
+        <div><span class="text-muted small">Outstanding</span><br><strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($totalOutstanding / 100, 2); ?></strong></div>
     </div>
 <?php endif; ?>
 

@@ -256,12 +256,12 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div></div></div>
     <div class="col-md-3"><div class="card"><div class="card-body">
         <div class="small text-muted">This month</div>
-        <div class="display-6">&pound;<?php echo number_format($monthSpend / 100, 2); ?></div>
+        <div class="display-6"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($monthSpend / 100, 2); ?></div>
         <div class="small text-muted">
-            of &pound;<?php echo number_format($capPence / 100, 2); ?>
+            of <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($capPence / 100, 2); ?>
             <?php if ($cappedAbove === true): ?>
                 <br><span class="text-warning-emphasis">Your organisation asked for more; the installation allows
-                &pound;<?php echo number_format($installCap / 100, 2); ?>.</span>
+                <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($installCap / 100, 2); ?>.</span>
             <?php endif; ?>
         </div>
     </div></div></div>
@@ -327,7 +327,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Account key</div><div class="col-md-8"><?php echo $ready === true ? 'Set' : 'Not set'; ?></div></div>
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Language</div><div class="col-md-8"><?php echo htmlspecialchars($language, ENT_QUOTES, 'UTF-8'); ?></div></div>
                 <div class="row py-1 border-bottom"><div class="col-md-4 text-muted">Recordings per run</div><div class="col-md-8"><?php echo (int) $batchInRun; ?></div></div>
-                <div class="row py-1"><div class="col-md-4 text-muted">Monthly budget</div><div class="col-md-8">&pound;<?php echo number_format($capPence / 100, 2); ?></div></div>
+                <div class="row py-1"><div class="col-md-4 text-muted">Monthly budget</div><div class="col-md-8"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($capPence / 100, 2); ?></div></div>
             </div>
         <?php else: ?>
             <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/transcription/save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-3">
@@ -352,7 +352,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <label class="form-label" for="tCap">Monthly budget (pence)</label>
                     <input type="number" min="0" max="<?php echo (int) Transcription::HARD_MAX_CAP_PENCE; ?>" class="form-control" id="tCap" name="monthCapPence" value="<?php echo (int) $installCap; ?>">
                     <div class="form-text">
-                        &pound;<?php echo number_format($installCap / 100, 2); ?> a month.
+                        <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format($installCap / 100, 2); ?> a month.
                         This is the MOST any organisation on the installation may spend; an organisation can
                         hold itself to less and can never give itself more.
                     </div>
@@ -457,7 +457,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2"><span class="badge bg-<?php echo htmlspecialchars($cls, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(Transcription::statusWords((string) $t['status']), ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars((string) $t['provider'], ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2 text-muted"><?php echo $t['durationSec'] !== null ? htmlspecialchars((string) round(((int) $t['durationSec']) / 60, 1), ENT_QUOTES, 'UTF-8') . ' min' : '&mdash;'; ?></div>
-                        <div class="col-md-2 text-end text-muted"><?php echo $t['costPence'] !== null ? '&pound;' . number_format(((int) $t['costPence']) / 100, 2) : '&mdash;'; ?></div>
+                        <div class="col-md-2 text-end text-muted"><?php echo $t['costPence'] !== null ? htmlspecialchars(\Portal\Core\Currency::format((int) $t['costPence'], \Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8') : '&mdash;'; ?></div>
                     </div>
                 <?php endforeach; ?>
             </div>

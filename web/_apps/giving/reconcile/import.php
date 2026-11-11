@@ -427,7 +427,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $headersNorm    = array_map(static fn ($h): string => reconcile_normalise_header((string) $h), $headerRow);
 
         $bankKey  = reconcile_detect_bank($headersNorm);
-        $currency = (string) (App::settings('giving.currency') ?? 'GBP');
+        $currency = \Portal\Core\Currency::ofSite();
         $mapping  = reconcile_auto_map($headersNorm);
         $mode     = $mapping['mode'];
 

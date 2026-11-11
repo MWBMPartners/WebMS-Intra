@@ -102,9 +102,9 @@ if ($updated !== null) {
     }
     $outstanding = (int) $updated['amountPence'] - $paid;
     $_SESSION['flash_msg'] = sprintf(
-        'Payment recorded — invoice now %s (£%s outstanding).',
+        'Payment recorded — invoice now %s (%s outstanding).',
         (string) $updated['status'],
-        number_format($outstanding / 100, 2)
+        \Portal\Core\Currency::format($outstanding, (string) $updated['currency'])
     );
 } else {
     $_SESSION['flash_msg'] = 'Payment recorded.';

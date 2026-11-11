@@ -379,6 +379,20 @@ if ($settingId > 0) {
         header('Location: ' . Site::url('settings'));
         exit();
     }
+    // 💷 The currency (#966) is changed only on the organisation settings
+    //    page, which refuses a change under money already recorded. This
+    //    editor has no such check, so it refuses the key outright.
+    if (\Portal\Core\Currency::lockedInGeneralEditor($storedKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $storedKey . '" is the currency and can only be changed on the organisation settings page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Currency::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
     if (Site::lockedInGeneralEditor($storedKey) === true) {
         Logger::activity(
             'SettingsUpdateRefused',
@@ -974,6 +988,19 @@ if ($settingId > 0) {
             $_SESSION['user_id'] ?? null
         );
         $_SESSION['flash_msg']  = \Portal\Core\NoticeboardFoyer::LOCKED_MESSAGE;
+        $_SESSION['flash_type'] = 'danger';
+        header('Location: ' . Site::url('settings'));
+        exit();
+    }
+    // 💷 Nor the currency (#966): adding a row for it here would skip the
+    //    organisation page's check for money already recorded.
+    if (\Portal\Core\Currency::lockedInGeneralEditor($settingKey) === true) {
+        Logger::activity(
+            'SettingsUpdateRefused',
+            'Refused: "' . $settingKey . '" is the currency and can only be set on the organisation settings page',
+            $_SESSION['user_id'] ?? null
+        );
+        $_SESSION['flash_msg']  = \Portal\Core\Currency::LOCKED_MESSAGE;
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('settings'));
         exit();

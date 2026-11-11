@@ -109,18 +109,15 @@ class Giving
     }
 
     /**
-     * Format pence as a currency display string. Default GBP — caller
-     * passes the currency code from `giving.currency` or per-entry.
+     * Format pence as a currency display string. Pass the entry's OWN
+     * currency where it has one; left out (null), it is the open
+     * organisation's currency (Currency::ofSite()). It used to default to
+     * GBP, so an organisation anywhere had its gifts shown in pounds (#966).
+     * The writing itself is Currency::format(), the one place it is done.
      */
-    public static function formatAmount(int $pence, string $currency = 'GBP'): string
+    public static function formatAmount(int $pence, ?string $currency = null): string
     {
-        $symbol = match ($currency) {
-            'GBP' => '£',
-            'EUR' => '€',
-            'USD' => '$',
-            default => $currency . ' ',
-        };
-        return $symbol . number_format($pence / 100, 2);
+        return Currency::format($pence, $currency ?? Currency::ofSite());
     }
 
     /**
@@ -336,7 +333,8 @@ class Giving
         $settings    = App::settings()['giving'] ?? [];
         $charityName = (string) ($settings['charityName'] ?? '');
         $charityNo   = (string) ($settings['charityNumber'] ?? '');
-        $currency    = (string) ($settings['currency'] ?? 'GBP');
+        // The organisation's currency, for a total; each line shows its own (#966).
+        $currency    = Currency::ofOrganisation($siteId);
 
         $esc = static fn (string $s): string => htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
         $total = 0;

@@ -26,11 +26,11 @@ $userId = (int) ($_SESSION['user_id'] ?? 0);
 // 💳 "Pay now" entry point (#268) — only offered when Payments has a
 // provider enabled AND the pledge's own project currency matches the
 // configured checkout currency (gap-item Q5: `/payments/checkout` always
-// charges `payments.currency`, so a mismatched project would otherwise be
+// charges the organisation's currency, Currency::ofSite() since #966, so a mismatched project would otherwise be
 // silently charged in the wrong currency at face value).
 $paymentsSettings = App::settings()['payments'] ?? [];
 $paymentsEnabled  = (string) ($paymentsSettings['enabled'] ?? '0') === '1';
-$paymentsCurrency = (string) ($paymentsSettings['currency'] ?? 'GBP');
+$paymentsCurrency = \Portal\Core\Currency::ofSite();
 $csrf = Auth::csrfToken();
 
 $rows = [];
@@ -64,8 +64,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card"><div class="card-body">
         <div class="portal-data-list">
             <?php foreach ($rows as $r):
-                $cur = (string) ($r['currency'] ?? 'GBP');
-                $sym = match ($cur) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $cur . ' ' };
+                $cur = (string) ($r['currency'] ?? '');
+                $sym = \Portal\Core\Currency::prefix($cur);
             ?>
                 <div class="row py-2 border-bottom">
                     <div class="col-md-5"><a href="<?php echo htmlspecialchars(Site::url('projects/view'), ENT_QUOTES, 'UTF-8'); ?>?slug=<?php echo urlencode((string) $r['slug']); ?>"><strong><?php echo htmlspecialchars((string) $r['title'], ENT_QUOTES, 'UTF-8'); ?></strong></a></div>

@@ -933,10 +933,14 @@ q("INSERT INTO tblAttendanceSessions (sessionID, siteID, serviceTypeID, sessionD
 // 🕰️ The zone is named because tblVenues.timezone has no default since #782 (migration 273); London is
 //    the value this row always got from the old default, so nothing this test sees changes.
 q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone, isActive) VALUES (?, ?, ?, 'GB', ?, 1)", 'iiss', [VENUE, ORG_A, VENUE_MARK . ' hall', 'Europe/London']);
+// 💷 Organisation A keeps its money in EUROS (#966): no currency is built in any
+//    more, and P4 and the reports total below prove its pages say so and never
+//    print a pound sign. Organisation B has none chosen.
+q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, \'org.currency\', \'EUR\', \'\', 0)', 'i', [ORG_A]);
 q('INSERT INTO tblVenueUsageTypes (usageTypeID, siteID, venueID, typeName) VALUES (916721, ?, ?, ?)', 'iis', [ORG_A, VENUE, VENUE_MARK . ' use']);
 q('INSERT INTO tblVenueStatuses (statusID, siteID, statusName) VALUES (916731, ?, ?)', 'is', [ORG_A, VENUE_MARK . ' status']);
-q("INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, startTime, endTime, notes) VALUES (?, ?, ?, ?, 916721, 916731, '09:00:00', '12:00:00', ?)", 'iiiss', [BOOKING, ORG_A, VENUE, $today, VENUE_MARK . ' note']);
-q("INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, startTime, endTime, notes) VALUES (?, ?, ?, ?, 916721, 916731, '09:00:00', '12:00:00', ?)", 'iiiss', [BOOKING_LATER, ORG_A, VENUE, $eventDay, VENUE_MARK . ' note']);
+q("INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, startTime, endTime, notes, `currency`) VALUES (?, ?, ?, ?, 916721, 916731, '09:00:00', '12:00:00', ?, 'EUR')", 'iiiss', [BOOKING, ORG_A, VENUE, $today, VENUE_MARK . ' note']);
+q("INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, startTime, endTime, notes, `currency`) VALUES (?, ?, ?, ?, 916721, 916731, '09:00:00', '12:00:00', ?, 'EUR')", 'iiiss', [BOOKING_LATER, ORG_A, VENUE, $eventDay, VENUE_MARK . ' note']);
 // I: an approved chat message and a live prompt on A's internal event and on its public one.
 foreach ([EV_INT => 'internal', EV_PUB => 'public'] as $id => $kind) {
     q("INSERT INTO tblLiveChatMessages (siteID, eventID, sessionToken, displayName, body, status) VALUES (?, ?, ?, 'Seeded', ?, 'approved')", 'iiss', [ORG_A, $id, str_repeat('ab', 16), 'ACCESS-CHAT ' . $kind . ' message']);
@@ -3670,7 +3674,7 @@ $reports = static function () use ($jar): array {
 
     return [
         'claims' => ap_find('#<div class="h3 mb-0 text-warning">([\d,]+)</div>\s*<small class="text-muted">Expense Claims</small>#', $body, $m) === 1 ? $m[1] : '(not shown)',
-        'value'  => ap_find('#Total value: <strong>&pound;([\d,.]+)</strong>#', $section, $m) === 1 ? $m[1] : '(not shown)',
+        'value'  => ap_find('#Total value: <strong>€([\d,.]+)</strong>#', $section, $m) === 1 ? $m[1] : '(not shown)',
         'bars'   => array_combine($bars[1], array_map('intval', $bars[2])),
     ];
 };
@@ -4452,8 +4456,8 @@ ok(
 );
 $row = $rowOf($pageOne['body'], 916342);
 ok(
-    'P4. a listed claim shows its total as the claim\'s page writes money, its status badge in the claim page\'s colour, and its title and department written as text',
-    str_contains($row, '&pound;1,234.50') === true && str_contains($row, 'class="badge bg-warning">Pending</span>') === true
+    'P4. a listed claim shows its total in the organisation\'s own currency (euros, never a pound sign: #966), its status badge in the claim page\'s colour, and its title and department written as text',
+    str_contains($row, '€1,234.50') === true && str_contains($row, '&pound;') === false && str_contains($row, '£') === false && str_contains($row, 'class="badge bg-warning">Pending</span>') === true
         && str_contains($row, htmlspecialchars($pTitle, ENT_QUOTES, 'UTF-8')) === true && str_contains($pageOne['body'], '<i>claim</i>') === false
         && str_contains($row, htmlspecialchars(DEPT_P_NAME, ENT_QUOTES, 'UTF-8')) === true && str_contains($pageOne['body'], DEPT_P_NAME) === false
         && str_contains($rowOf($pageOne['body'], 916343), 'class="badge bg-secondary">Withdrawn</span>') === true,

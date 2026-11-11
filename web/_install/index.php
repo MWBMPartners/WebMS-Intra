@@ -154,6 +154,11 @@ require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR 
 //    alone may be called here: ofInstallation(), ownOf() and
 //    ofOrganisation() need the portal's database connection.
 require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Countries.php';
+// 💷 Portal\Core\Currency (#966, D-133): the currency suggested from the
+//    country. Required by hand for the same reason; only its plain-PHP
+//    methods may be called here (never ofInstallation() and the other
+//    database readers, which need App and Site).
+require_once INSTALL_ROOT . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'Currency.php';
 // 🌍 The ONE place the sentences about the country and the time zone are made,
 //    and the database read for them (#942). Its own file so the self-test can
 //    call every case of it; see its header.
@@ -1944,6 +1949,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         //    as the install script made it. Anything that is not on the
         //    portal's lists is refused, with nothing kept.
         $country = \Portal\Core\Countries::fromPosted(installField('country'));
+        // 💷 The installation's currency (#966): may be left unchosen, never
+        //    made up, and a currency the portal cannot store is refused.
+        $currency = \Portal\Core\Currency::fromPosted(installField('currency'));
         $zone    = trim(installField('timezone'));
         if ($checked['problem'] !== '') {
             $error = 'Nothing was saved. ' . $checked['problem'];
@@ -1957,6 +1965,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($country === null) {
             $error = 'Nothing was saved. The country chosen is not one the installer knows. Choose one from the list, '
                    . 'or "Not chosen yet".';
+        } elseif ($currency === null) {
+            $error = 'Nothing was saved. The currency chosen is not one the installer can use. Choose one from the list, '
+                   . 'or "Not chosen yet".';
         } elseif ($zone !== '' && in_array($zone, timezone_identifiers_list(), true) === false) {
             $error = 'Nothing was saved. The time zone chosen is not one the installer knows. Choose one from the list, '
                    . 'or "Not chosen yet".';
@@ -1966,6 +1977,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'support'  => $support,
                 'country'  => $country,
                 'timezone' => $zone,
+                'currency' => $currency,
             ];
             header('Location: ?step=5');
             exit();
@@ -2128,16 +2140,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // What the country setting held BEFORE this finish, as text, so
                 // the last page can say so when it was not a country code.
                 $finishReport['countryHeldText'] = installHeldPlace($writeDb)['country'];
+                // 💷 The installation's currency (#966, D-133), by the same rule:
+                //    it fills an empty setting, may replace this run's own earlier
+                //    value, and keeps a currency a carried-on database already had.
+                $finishReport['currencyTyped'] = (string) ($addresses['currency'] ?? '');
                 foreach ([
                     'address' => [\Portal\Core\PortalAddress::SETTING, $finishReport['addressTyped']],
                     'support' => ['portal.support.email', $finishReport['supportTyped']],
                     'country' => [\Portal\Core\Countries::SETTING, $finishReport['countryTyped']],
+                    'currency' => [\Portal\Core\Currency::SETTING, $finishReport['currencyTyped']],
                 ] as $which => [$settingKey, $typedValue]) {
                     $ownEarlier = is_string($filledBefore[$settingKey] ?? null) === true ? $filledBefore[$settingKey] : null;
                     // The country is judged as the portal reads it (see
                     // installUsableCountry() and installFillSetting()).
                     $stored     = installFillSetting($writeDb, $settingKey, $typedValue, $ownEarlier,
-                        $which === 'country' ? 'installUsableCountry' : null);
+                        $which === 'country' ? 'installUsableCountry' : ($which === 'currency' ? 'installUsableCurrency' : null));
                     $finishReport[$which] = $stored['value'];
                     if ($stored['wrote'] === true) {
                         $filledBefore[$settingKey] = $stored['value'];
@@ -2431,6 +2448,19 @@ function installAccountCount(\mysqli $db): int
  *
  * @throws \mysqli_sql_exception When the table cannot be read or written.
  */
+/**
+ * 💷 A stored currency AS THE PORTAL READS IT (#966): a currency the portal
+ * can use, in capitals, or '' (none). The same rule as Currency::readRows(),
+ * so the finish judges "is something already there" the way every reader
+ * will (installUsableCountry() is the country's twin, for the same reason).
+ */
+function installUsableCurrency(string $stored): string
+{
+    $code = strtoupper(trim($stored));
+
+    return \Portal\Core\Currency::isChoosable($code) === true ? $code : '';
+}
+
 function installFillSetting(\mysqli $db, string $key, string $value, ?string $ownEarlier = null, ?callable $asRead = null): array
 {
     $find = $db->prepare('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL ORDER BY settingID ASC LIMIT 1');
@@ -2909,6 +2939,7 @@ $installSupportOffered = '';
 //    time zone (see the form). Never a country of the installer's choosing.
 $installCountryOffered = '';
 $installZoneOffered    = '';
+$installCurrencyOffered = '';
 if ($installPage === 'addresses' || $installPage === 'finish') {
     $kept = is_array($_SESSION['install_addresses'] ?? null) === true ? $_SESSION['install_addresses'] : [];
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && installField('action') === 'web_addresses') {
@@ -2916,11 +2947,13 @@ if ($installPage === 'addresses' || $installPage === 'finish') {
         $installSupportOffered = installField('support_email');
         $installCountryOffered = strtoupper(trim(installField('country')));
         $installZoneOffered    = trim(installField('timezone'));
+        $installCurrencyOffered = strtoupper(trim(installField('currency')));
     } elseif ($kept !== []) {
         $installAddressOffered = (string) ($kept['address'] ?? '');
         $installSupportOffered = (string) ($kept['support'] ?? '');
         $installCountryOffered = (string) ($kept['country'] ?? '');
         $installZoneOffered    = (string) ($kept['timezone'] ?? '');
+        $installCurrencyOffered = (string) ($kept['currency'] ?? '');
     } else {
         $https  = strtolower(is_string($_SERVER['HTTPS'] ?? null) === true ? $_SERVER['HTTPS'] : '');
         $scheme = ($https !== '' && $https !== 'off') ? 'https' : 'http';
@@ -4237,6 +4270,12 @@ header('X-Robots-Tag: noindex, nofollow');
                 //    filled: a choice already made, typed back after an error or
                 //    kept from an earlier visit, is never replaced.
                 $installCountryChoices = \Portal\Core\Countries::choices();
+                // 💷 Each country's suggested currency (#966), written into its
+                //    option as data-currency, so the script below can follow the
+                //    country without asking anything. '' for a country whose
+                //    currency the portal cannot store in hundredths.
+                $installCurrencyOfCountry = \Portal\Core\Currency::countryMap();
+                $installCurrencyChoices   = \Portal\Core\Currency::choices();
                 $installZoneNames      = timezone_identifiers_list();
                 ?>
                 <h3 class="h6 mt-4">Where your organisation is</h3>
@@ -4245,11 +4284,23 @@ header('X-Robots-Tag: noindex, nofollow');
                     <select class="form-select" id="country" name="country" aria-describedby="country_help" data-chosen="<?php echo $installCountryOffered !== '' ? '1' : '0'; ?>">
                         <option value=""<?php echo $installCountryOffered === '' ? ' selected' : ''; ?>>Not chosen yet</option>
                         <?php foreach ($installCountryChoices as $installCode => $installCountryName): ?>
-                            <option value="<?php echo htmlspecialchars((string) $installCode, ENT_QUOTES, 'UTF-8'); ?>"<?php echo (string) $installCode === $installCountryOffered ? ' selected' : ''; ?>><?php echo htmlspecialchars($installCountryName, ENT_QUOTES, 'UTF-8'); ?></option>
+                            <option value="<?php echo htmlspecialchars((string) $installCode, ENT_QUOTES, 'UTF-8'); ?>" data-currency="<?php echo htmlspecialchars((string) ($installCurrencyOfCountry[(string) $installCode] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"<?php echo (string) $installCode === $installCountryOffered ? ' selected' : ''; ?>><?php echo htmlspecialchars($installCountryName, ENT_QUOTES, 'UTF-8'); ?></option>
                         <?php endforeach; ?>
                     </select>
                     <div class="form-text" id="country_help">
                         The country this installation is in. Each organisation on it starts from this country and can choose its own later, in Admin, Settings, Organisation. New venues and groups start in it, and maps look addresses up in it. The installer suggests one from this computer&rsquo;s time zone: <strong>check it.</strong>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="currency" class="form-label">Currency <span class="text-muted">(you may leave this unchosen)</span></label>
+                    <select class="form-select" id="currency" name="currency" aria-describedby="currency_help" data-chosen="<?php echo $installCurrencyOffered !== '' ? '1' : '0'; ?>">
+                        <option value=""<?php echo $installCurrencyOffered === '' ? ' selected' : ''; ?>>Not chosen yet</option>
+                        <?php foreach ($installCurrencyChoices as $installCurrencyCode => $installCurrencyName): ?>
+                            <option value="<?php echo htmlspecialchars((string) $installCurrencyCode, ENT_QUOTES, 'UTF-8'); ?>"<?php echo (string) $installCurrencyCode === $installCurrencyOffered ? ' selected' : ''; ?>><?php echo htmlspecialchars($installCurrencyName, ENT_QUOTES, 'UTF-8'); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-text" id="currency_help">
+                        The money every amount is recorded, shown and paid in. Choosing a country suggests its currency; each organisation can choose its own later, in Admin, Settings, Organisation, until it has money recorded. Left unchosen, amounts are shown as plain numbers and no payment can be taken. Only currencies counted in hundredths can be chosen (not, for example, the Japanese yen).
                     </div>
                 </div>
                 <div class="mb-3">
@@ -4272,6 +4323,7 @@ header('X-Robots-Tag: noindex, nofollow');
                 (function () {
                     var country = document.getElementById('country');
                     var zone    = document.getElementById('timezone');
+                    var money   = document.getElementById('currency');
                     if (!country || !zone) { return; }
                     var browserZone = '';
                     try {
@@ -4310,11 +4362,22 @@ header('X-Robots-Tag: noindex, nofollow');
                         var suggested = zoneFor(country.value);
                         if (suggested !== '') { zone.value = suggested; }
                     }
+                    // The currency a country suggests (#966): its option's
+                    // data-currency, '' when the portal cannot store it.
+                    function moneyFor() {
+                        var chosen = country.options[country.selectedIndex];
+                        return chosen ? (chosen.getAttribute('data-currency') || '') : '';
+                    }
+                    if (money && money.getAttribute('data-chosen') !== '1' && moneyFor() !== '') {
+                        money.value = moneyFor();
+                    }
                     // Choosing a different country suggests its zone, but only when
                     // the zone showing is not already in that country. Never forced:
                     // the zone box can still be changed afterwards.
                     country.addEventListener('change', function () {
                         if (country.value === '') { return; }
+                        // Choosing a country suggests its currency; never forced.
+                        if (money && moneyFor() !== '') { money.value = moneyFor(); }
                         var shown = optionFor(zone.value);
                         if (shown && shown.getAttribute('data-country') === country.value) { return; }
                         zone.value = zoneFor(country.value);
@@ -4429,6 +4492,22 @@ header('X-Robots-Tag: noindex, nofollow');
                     <?php if ($donePlace['countryNote'] !== ''): ?>
                         <span class="install-check-fix"><?php echo htmlspecialchars($donePlace['countryNote'], ENT_QUOTES, 'UTF-8'); ?></span>
                     <?php endif; ?>
+                </li>
+                <?php
+                // 💷 What the finish did with the currency (#966).
+                $doneCurrency      = (string) ($finishReport['currency'] ?? '');
+                $doneCurrencyTyped = (string) ($finishReport['currencyTyped'] ?? '');
+                if ($doneCurrency === '') {
+                    $doneCurrencyWords = 'None is chosen. Amounts are shown as plain numbers, and no payment can be taken, until a currency is chosen in Admin, Settings, Organisation.';
+                } elseif ($doneCurrencyTyped !== '' && $doneCurrencyTyped !== $doneCurrency) {
+                    $doneCurrencyWords = $doneCurrency . '. The database you carried on with already had it, so it was kept, not ' . $doneCurrencyTyped . '.';
+                } else {
+                    $doneCurrencyWords = $doneCurrency . '.';
+                }
+                ?>
+                <li class="install-check" data-done="currency" data-currency="<?php echo htmlspecialchars($doneCurrency, ENT_QUOTES, 'UTF-8'); ?>">
+                    <strong class="install-check-label">Currency</strong>
+                    <span class="install-check-value"><?php echo htmlspecialchars($doneCurrencyWords, ENT_QUOTES, 'UTF-8'); ?></span>
                 </li>
                 <li class="install-check" data-done="timezone" data-zone-written="<?php echo ($finishReport['zoneWritten'] ?? false) === true ? '1' : '0'; ?>">
                     <strong class="install-check-label">Time zone of your organisation</strong>

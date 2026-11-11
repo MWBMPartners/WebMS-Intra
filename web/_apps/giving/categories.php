@@ -43,7 +43,7 @@ if ($stmt !== false) {
 }
 
 $settings = App::settings()['giving'] ?? [];
-$currency = (string) ($settings['currency'] ?? 'GBP');
+$currency = \Portal\Core\Currency::ofSite();
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';

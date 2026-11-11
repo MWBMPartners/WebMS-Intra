@@ -57,7 +57,7 @@ $backTo = static fn (): string => Auth::safeRedirectUrl($_POST['return_to'] ?? n
 // form. Pledges are exempt (their amount is forced from the pledge row
 // below, never the POSTed value, so a large pledge is never at risk of
 // this rejecting it). Tune here.
-const GIVING_MAX_AMOUNT_PENCE = 1_000_000; // £10,000.00
+const GIVING_MAX_AMOUNT_PENCE = 1_000_000; // 10,000.00 in the organisation's currency
 
 Auth::ensureSession();
 Auth::requireLogin();
@@ -74,7 +74,8 @@ if ((string) ($settings['enabled'] ?? '0') !== '1') {
 
 $siteId   = Site::id();
 $userId   = (int) ($_SESSION['user_id'] ?? 0);
-$currency = (string) ($settings['currency'] ?? 'GBP');
+// 💷 The organisation's currency (#966); a pledge below uses its project's own.
+$currency = \Portal\Core\Currency::ofSite();
 
 $amountRaw   = (string) ($_POST['amount'] ?? '');
 $clean       = preg_replace('/[^0-9.]/', '', $amountRaw) ?? '';
@@ -172,6 +173,19 @@ if ($purpose === 'pledge') {
     // along on the pending row.
     $purpose    = 'other';
     $purposeRef = null;
+}
+
+// 💷 Refused BEFORE anything reaches a provider (#966): with no currency
+//    chosen there is nothing honest to charge in, and a currency outside the
+//    list is one the portal does not send to Stripe or PayPal (a zero-decimal
+//    one would be charged 100 times over). It used to fall back to GBP.
+if (in_array($currency, \Portal\Core\Currency::PAYMENT_CURRENCIES, true) === false) {
+    $_SESSION['flash_msg']  = $currency === ''
+        ? 'Payments cannot be taken yet: no currency is chosen for this organisation.'
+        : 'Payments cannot be taken in ' . $currency . ' online.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $backTo());
+    exit();
 }
 
 $redirect = Payments::startCheckout($siteId, $userId, $amountPence, $currency, $description, $purpose, $purposeRef !== null && $purposeRef !== '' ? $purposeRef : null);

@@ -5529,8 +5529,8 @@ for ($tries = 0; $tries < 200 && $jobWaited === false; $tries++) {
         break;
     }
 }
-$other->query('INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, donatedAt, method) VALUES ('
-    . SITE_F5 . ', ' . P_WD . ', ' . (int) $catF[SITE_F5] . ", 9900, '" . $todayG1 . "', 'bank-transfer')");
+$other->query('INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, `currency`, donatedAt, method) VALUES ('
+    . SITE_F5 . ', ' . P_WD . ', ' . (int) $catF[SITE_F5] . ", 9900, 'EUR', '" . $todayG1 . "', 'bank-transfer')");
 $raceGift = (int) $other->insert_id;
 $other->commit();
 $other->close();

@@ -79,7 +79,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'giving.enabled',     '0', '0', 0),
     (NULL, 'giving.displayName', 'Giving', 'Giving', 0),
     (NULL, 'giving.displayIcon', 'fa-solid fa-hand-holding-dollar', 'fa-solid fa-hand-holding-dollar', 0),
-    (NULL, 'giving.currency',    'GBP', 'GBP', 0),
+    -- giving.currency is no longer seeded (#966, D-133): one currency per organisation, `org.currency` (migration 282).
     (NULL, 'giving.charityName', '', '', 0),
     (NULL, 'giving.charityNumber','', '', 0),
     (NULL, 'giving.hmrcRef',     '', '', 0)

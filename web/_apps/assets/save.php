@@ -218,11 +218,13 @@ if ($parentAssetId !== null) {
 }
 
 // -----------------------------------------------------------------------------
-// 💷 Currency — 3-letter ISO 4217 shape check, falls back to GBP.
+// 💷 Currency — empty means the organisation's (#966); anything else must be a
+//    currency the portal can store in hundredths. It used to fall back to
+//    GBP silently whatever was typed.
 // -----------------------------------------------------------------------------
-$currency = strtoupper(trim((string) ($_POST['currency'] ?? 'GBP')));
-if (preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
-    $currency = 'GBP';
+$currency = strtoupper(trim((string) ($_POST['currency'] ?? '')));
+if ($currency === '' || \Portal\Core\Currency::isChoosable($currency) === false) {
+    $currency = \Portal\Core\Currency::ofSite();
 }
 
 // -----------------------------------------------------------------------------

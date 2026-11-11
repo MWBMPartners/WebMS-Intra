@@ -255,6 +255,6 @@ Logger::audit('tblExpenseClaims', $claimId, 'create', null, [
     'status'      => $status,
     'itemCount'   => count($items),
 ]);
-Logger::activity('ApiExpenseCreate', 'API: submitted expense claim #' . $claimId . ' (£' . number_format($totalAmount, 2) . ')');
+Logger::activity('ApiExpenseCreate', 'API: submitted expense claim #' . $claimId . ' (' . \Portal\Core\Currency::formatMajor($totalAmount, \Portal\Core\Currency::ofSite()) . ')');
 
 ApiResponse::success(['claimID' => $claimId], 201);

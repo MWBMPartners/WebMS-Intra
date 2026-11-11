@@ -34,7 +34,7 @@ $db        = App::db();
 $siteId    = Site::id();
 $userId    = (int) ($_SESSION['user_id'] ?? 0);
 $settings  = App::settings()['giving'] ?? [];
-$currency  = (string) ($settings['currency'] ?? 'GBP');
+$currency  = \Portal\Core\Currency::ofSite();
 $canManage = Giving::canManage();
 
 // -----------------------------------------------------------------------------

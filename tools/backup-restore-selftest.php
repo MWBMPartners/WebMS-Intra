@@ -928,7 +928,7 @@ function brs_addSelfPointingRows(): void
     brs_sql(
         // 🕰️ The zone is named because tblVenues.timezone has no default since #782 (migration 273).
         "INSERT INTO tblVenues (venueID, venueName, countryCode, timezone) VALUES (" . BRS_VENUE . ", 'Self-test hall', 'GB', 'Europe/London')",
-        "INSERT INTO tblVenueAgreements (agreementID, siteID, venueID, title, status) VALUES (970001, 1, " . BRS_VENUE . ", 'Hall hire 2025', 'active'), (970002, 1, " . BRS_VENUE . ", 'Hall hire 2026', 'active')",
+        "INSERT INTO tblVenueAgreements (agreementID, siteID, venueID, title, status, `currency`) VALUES (970001, 1, " . BRS_VENUE . ", 'Hall hire 2025', 'active', 'EUR'), (970002, 1, " . BRS_VENUE . ", 'Hall hire 2026', 'active', 'EUR')",
         "UPDATE tblVenueAgreements SET status = 'superseded', supersededByID = 970002 WHERE agreementID = 970001",
         "INSERT INTO tblTasks (taskID, siteID, title) VALUES (970001, 1, 'Older task'), (970002, 1, 'Newer task'), (970003, 1, 'Ring A'), (970004, 1, 'Ring B'), (970005, 1, 'Points at itself')",
         "UPDATE tblTasks SET parentTaskID = 970002 WHERE taskID = 970001",
@@ -945,7 +945,7 @@ function brs_addSelfPointingRows(): void
         "UPDATE tblAttendanceServiceTypes SET parentID = 970002 WHERE serviceTypeID = 970001",
         "INSERT INTO tblAssetLocations (locationID, locationName) VALUES (970001, 'Older location'), (970002, 'Newer location')",
         "UPDATE tblAssetLocations SET parentLocationID = 970002 WHERE locationID = 970001",
-        "INSERT INTO tblAssets (assetID, name, publicToken) VALUES (970001, 'Older asset', REPEAT('y', 32)), (970002, 'Newer asset', REPEAT('z', 32))",
+        "INSERT INTO tblAssets (assetID, name, publicToken, `currency`) VALUES (970001, 'Older asset', REPEAT('y', 32), 'EUR'), (970002, 'Newer asset', REPEAT('z', 32), 'EUR')",
         "UPDATE tblAssets SET parentAssetID = 970002 WHERE assetID = 970001",
         "INSERT INTO tblAssetLoans (loanID, assetID, direction, counterpartyType) VALUES (970001, 970001, 'out', 'other'), (970002, 970001, 'out', 'other')",
         "UPDATE tblAssetLoans SET parentLoanID = 970002 WHERE loanID = 970001"

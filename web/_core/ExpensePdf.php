@@ -147,7 +147,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;p
 
 <!-- 📦 Line Items -->
 <table class="table">
-    <thead><tr><th>Description</th><th>Qty</th><th>Unit &pound;</th><th>Line &pound;</th></tr></thead>
+    <thead><tr><th>Description</th><th>Qty</th><th>Unit <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></th><th>Line <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></th></tr></thead>
     <tbody>
     <?php foreach ($items as $item): ?>
         <tr>
@@ -161,7 +161,7 @@ body{font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#000;margin:0;p
     <tfoot>
         <tr>
             <td colspan="3" class="total">Total</td>
-            <td class="total">&pound;<?php echo number_format((float) $claim['totalAmount'], 2); ?></td>
+            <td class="total"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $claim['totalAmount'], 2); ?></td>
         </tr>
     </tfoot>
 </table>

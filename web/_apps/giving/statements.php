@@ -40,7 +40,7 @@ if (Giving::canManage() === false) {
 
 $siteId   = Site::id();
 $settings = App::settings()['giving'] ?? [];
-$currency = (string) ($settings['currency'] ?? 'GBP');
+$currency = \Portal\Core\Currency::ofSite();
 
 // 📅 Q1 default — last FULL calendar year. A free from/to pair (plus the
 // client-side UK-tax-year preset button below) covers everything else;

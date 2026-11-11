@@ -196,7 +196,7 @@ final class ReportRegistry
                 // OR site admin. Filtering on this column without the gate
                 // is refused identically to selecting it (§3.4) — a
                 // non-treasurer can't row-count-oracle claim amounts either.
-                'totalAmount' => ['expr' => 'ec.totalAmount', 'label' => 'Total (GBP)', 'type' => 'decimal',
+                'totalAmount' => ['expr' => 'ec.totalAmount', 'label' => 'Total (the organisation\'s currency)', 'type' => 'decimal',
                                   'gates' => ['treasurer', '@siteAdmin'],
                                   'aggs'  => ['sum', 'avg', 'min', 'max', 'count']],
                 'claimant'    => ['expr' => 'u.fullName',     'label' => 'Claimant',    'type' => 'string',

@@ -123,7 +123,7 @@ foreach ($txns as $t) {
 }
 
 $tolDays      = max(0, (int) (App::settings('giving.reconcile.toleranceDays') ?? '5'));
-$siteCurrency = (string) (App::settings('giving.currency') ?? 'GBP');
+$siteCurrency = \Portal\Core\Currency::ofSite();
 $depositsApplicable = ($currency === $siteCurrency);
 
 // -----------------------------------------------------------------------------

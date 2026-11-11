@@ -96,7 +96,7 @@ $icons = ['room' => 'fa-door-open', 'equipment' => 'fa-screwdriver-wrench', 'veh
                                 <span class="badge bg-warning text-dark">Approval required</span>
                             <?php endif; ?>
                             <?php if ($r['hourlyRatePence'] !== null): ?>
-                                <span class="badge bg-info text-dark">£<?php echo number_format((int) $r['hourlyRatePence'] / 100, 2); ?>/hr</span>
+                                <span class="badge bg-info text-dark"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((int) $r['hourlyRatePence'] / 100, 2); ?>/hr</span>
                             <?php endif; ?>
                             <?php if (($r['description'] ?? '') !== ''): ?>
                                 <p class="small mt-2 mb-2"><?php echo htmlspecialchars((string) $r['description'], ENT_QUOTES, 'UTF-8'); ?></p>

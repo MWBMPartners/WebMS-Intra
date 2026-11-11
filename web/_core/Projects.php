@@ -131,7 +131,7 @@ class Projects
         $projectId   = (int) $row['projectID'];
         $donorId     = $row['donorID'] !== null ? (int) $row['donorID'] : null;
         $amount      = (int) $row['amountPence'];
-        $currency    = (string) ($row['currency'] ?? 'GBP');
+        $currency    = (string) ($row['currency'] ?? '');
 
         // Optional Giving entry — only when the app is installed and a category is given.
         $givingEntryId = null;

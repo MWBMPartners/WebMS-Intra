@@ -6421,7 +6421,7 @@ function pw_run(): void
         pa_q("INSERT INTO tblVenueStatuses (statusID, siteID, statusName) VALUES (919121, ?, 'W59 status')", 'i', [ORG_A]);
         foreach ([919131 => 'public', 919132 => 'internal', 919133 => 'draft'] as $booking59 => $kind59) {
             pa_q(
-                'INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, eventID) VALUES (?, ?, 919101, ?, 919111, 919121, ?)',
+                'INSERT INTO tblVenueBookings (bookingID, siteID, venueID, bookingDate, usageTypeID, statusID, eventID, `currency`) VALUES (?, ?, 919101, ?, 919111, 919121, ?, \'EUR\')',
                 'iisi', [$booking59, ORG_A, $day59, $w59[$kind59]]
             );
         }

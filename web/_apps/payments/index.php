@@ -31,7 +31,12 @@ $settings = App::settings()['payments'] ?? [];
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
 $provider = (string) ($settings['provider'] ?? 'stripe');
 $testMode = (string) ($settings['test_mode'] ?? '1') === '1';
-$currency = (string) ($settings['currency'] ?? 'GBP');
+// 💷 The organisation's currency (#966): one per organisation, chosen on
+//    Organisation settings. `payments.currency` (GBP, EUR or USD for the whole
+//    installation) is gone, because it let a payment be taken in a different
+//    money from the gifts and projects it paid for.
+$currency = \Portal\Core\Currency::ofSite();
+$currencyTakesPayments = in_array($currency, \Portal\Core\Currency::PAYMENT_CURRENCIES, true);
 
 $stripePub  = (string) ($settings['stripe']['publishable'] ?? '');
 $hasStSec   = ((string) ($settings['stripe']['secret'] ?? '')) !== '';
@@ -82,7 +87,7 @@ $flashType = $_SESSION['flash_type'] ?? '';
 unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 $csrf = Auth::csrfToken();
 
-$sym = match ($currency) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $currency . ' ' };
+$sym = \Portal\Core\Currency::prefix($currency);
 
 $pageTitle   = 'Payments';
 $pageSection = 'payments';
@@ -155,12 +160,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <?php endif; ?>
             </div>
             <div class="col-md-2">
-                <label class="form-label">Currency</label>
-                <select class="form-select" name="currency">
-                    <?php foreach (['GBP','EUR','USD'] as $c): ?>
-                        <option value="<?php echo $c; ?>" <?php echo $currency === $c ? 'selected' : ''; ?>><?php echo $c; ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <span class="form-label d-block">Currency</span>
+                <?php // Not a box any more (#966): payments are taken in the organisation's
+                      // currency, which is chosen on Organisation settings. ?>
+                <div class="fw-semibold" data-payments-currency="<?php echo htmlspecialchars($currency, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($currency !== '' ? $currency : 'None chosen', ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="form-text">
+                    <?php if ($currency === ''): ?>
+                        <span class="text-danger">No currency is chosen for this organisation, so no payment can be taken. Choose one in <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Organisation settings</a>.</span>
+                    <?php elseif ($currencyTakesPayments === false): ?>
+                        <span class="text-danger">Online payments cannot be taken in <?php echo htmlspecialchars($currency, ENT_QUOTES, 'UTF-8'); ?>: it is not one the portal sends to Stripe and PayPal.</span>
+                    <?php else: ?>
+                        The organisation&rsquo;s currency, set in <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Organisation settings</a>.
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="col-md-3 d-flex align-items-end">
                 <div class="form-check">
@@ -250,7 +262,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="col-md-2 text-muted"><?php echo htmlspecialchars(date('d/m H:i', (int) strtotime((string) $p['createdAt'])), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-3"><?php echo htmlspecialchars((string) ($p['fullName'] ?? 'anon'), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2"><span class="badge bg-light text-dark"><?php echo htmlspecialchars((string) $p['purpose'], ENT_QUOTES, 'UTF-8'); ?></span></div>
-                        <div class="col-md-2"><?php echo $sym . number_format(((int) $p['amountPence']) / 100, 2); ?></div>
+                        <div class="col-md-2"><?php echo htmlspecialchars(\Portal\Core\Currency::format((int) $p['amountPence'], (string) ($p['currency'] ?? $currency)), ENT_QUOTES, 'UTF-8'); ?></div>
                         <div class="col-md-2"><span class="badge bg-<?php echo $cls; ?>"><?php echo htmlspecialchars((string) $p['status'], ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-1 text-end">
                             <?php if ((string) $p['status'] === 'succeeded'): ?>

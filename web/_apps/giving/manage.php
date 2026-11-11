@@ -25,7 +25,7 @@ if (Giving::canManage() === false) {
 $db       = App::db();
 $siteId   = Site::id();
 $settings = App::settings()['giving'] ?? [];
-$currency = (string) ($settings['currency'] ?? 'GBP');
+$currency = \Portal\Core\Currency::ofSite();
 
 // 📅 THE RANGE IS CHECKED BEFORE ANY QUERY (#891, #892) -- the same rule,
 //    for the same reason, as giving/reports.php: both ends go into

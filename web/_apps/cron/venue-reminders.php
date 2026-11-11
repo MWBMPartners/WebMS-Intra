@@ -274,7 +274,8 @@ foreach ($siteIds as $siteId) {
 
         $subject = I18n::t('venues.reminder.invoice_subject', ['ref' => $ref]);
         $body = '<p>Invoice <strong>' . htmlspecialchars($ref, ENT_QUOTES, 'UTF-8') . '</strong> for '
-              . htmlspecialchars($venueName, ENT_QUOTES, 'UTF-8') . ' — £' . $amountStr . ', due '
+              . htmlspecialchars($venueName, ENT_QUOTES, 'UTF-8') . ' — '
+              . htmlspecialchars(\Portal\Core\Currency::format((int) $inv['amountPence'], (string) ($inv['currency'] ?? '')), ENT_QUOTES, 'UTF-8') . ', due '
               . htmlspecialchars($dueDate, ENT_QUOTES, 'UTF-8') . htmlspecialchars($overdueNote, ENT_QUOTES, 'UTF-8') . '.</p>'
               . PortalAddress::linkHtml('venues/invoice?id=' . $refId, 'Review this invoice', $siteId);
 

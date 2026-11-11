@@ -218,7 +218,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-2 small text-muted">
                     <?php if ($a['rateAmountPence'] !== null): ?>
-                        £<?php echo number_format(((int) $a['rateAmountPence']) / 100, 2); ?> / <?php echo htmlspecialchars((string) ($a['rateUnit'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?>
+                        <?php echo htmlspecialchars(\Portal\Core\Currency::format((int) $a['rateAmountPence'], (string) ($a['currency'] ?? \Portal\Core\Currency::ofSite())), ENT_QUOTES, 'UTF-8'); ?> / <?php echo htmlspecialchars((string) ($a['rateUnit'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?>
                     <?php else: ?>
                         —
                     <?php endif; ?>
@@ -247,7 +247,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     $isEdit       = $editAgreement !== null;
     $isSupersede  = $supersedeFrom !== null;
     $formAction   = $isSupersede ? 'supersede' : 'save';
-    $defaultCurrency = (string) App::settings('venues.currency') ?: 'GBP';
+    $defaultCurrency = \Portal\Core\Currency::ofSite();
     ?>
     <div class="card mb-4" id="agreement-form">
         <div class="card-body">
@@ -328,7 +328,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-md-2">
                     <label class="form-label small" for="rateAmount">Rate</label>
                     <div class="input-group input-group-sm">
-                        <span class="input-group-text">£</span>
+                        <span class="input-group-text"><?php echo htmlspecialchars(\Portal\Core\Currency::label((string) ($f['currency'] ?? $defaultCurrency)) !== '' ? \Portal\Core\Currency::label((string) ($f['currency'] ?? $defaultCurrency)) : 'Amount', ENT_QUOTES, 'UTF-8'); ?></span>
                         <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="rateAmount" name="rateAmount"
                                value="<?php echo isset($f['rateAmountPence']) && $f['rateAmountPence'] !== null && $isSupersede === false ? htmlspecialchars(number_format(((int) $f['rateAmountPence']) / 100, 2, '.', ''), ENT_QUOTES, 'UTF-8') : ''; ?>">
                     </div>

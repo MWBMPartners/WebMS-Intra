@@ -89,7 +89,7 @@ $isPaypalFailed  = $payment !== null && (string) $payment['provider'] === 'paypa
         <i class="fa-solid fa-circle-check text-success" style="font-size:64px;"></i>
         <h1 class="mt-3">Thank you</h1>
         <?php if ($payment !== null): ?>
-            <?php $sym = match ((string) $payment['currency']) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $payment['currency'] . ' ' }; ?>
+            <?php $sym = \Portal\Core\Currency::prefix((string) $payment['currency']); ?>
             <p class="lead"><?php echo $sym . number_format(((int) $payment['amountPence']) / 100, 2); ?> received.</p>
         <?php endif; ?>
         <p class="text-muted">Your receipt will arrive by email shortly.</p>

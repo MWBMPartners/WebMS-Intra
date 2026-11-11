@@ -258,6 +258,7 @@ public-website-tick|tools/public-website-tick-selftest.php|selftest_pwtick|SELFT
 public-door|tools/public-door-selftest.php|selftest_pubdoor|SELFTEST_WEB_PORT=9497
 htaccess-apache|tools/htaccess-apache-selftest.php|-|HTACCESS_SELFTEST_PORT=9499
 settings-locks|tools/settings-locks-selftest.php|selftest_locks|SELFTEST_WEB_PORT=9836
+currency|tools/currency-selftest.php|selftest_currency|SELFTEST_WEB_PORT=9966
 content-translation|tools/content-translation-selftest.php|selftest_cttrans|web:content-translation SELFTEST_WEB_PORT=9671
 erasure-pages|tools/erasure-pages-selftest.php|selftest_erasurepages|web:erasure-pages SELFTEST_WEB_PORT=9071
 activity-description|tools/activity-description-selftest.php|selftest_actdesc|web:activity-description SELFTEST_WEB_PORT=9933

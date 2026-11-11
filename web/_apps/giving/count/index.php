@@ -241,7 +241,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
                 <div class="col-12 col-md-2 text-md-end">
                     <span class="d-md-none fw-semibold">Total: </span>
-                    <strong><?php echo $agreedTotal !== null ? '&pound;' . number_format($agreedTotal, 2) : '—'; ?></strong>
+                    <strong><?php echo $agreedTotal !== null ? htmlspecialchars(\Portal\Core\Currency::formatMajor($agreedTotal, \Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8') : '—'; ?></strong>
                 </div>
                 <div class="col-12 col-md-1 text-md-center">
                     <span class="badge bg-<?php echo $statusClass((string) $s['status']); ?>"><?php echo htmlspecialchars((string) $s['status'], ENT_QUOTES, 'UTF-8'); ?></span>

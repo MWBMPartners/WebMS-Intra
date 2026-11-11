@@ -54,7 +54,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="card"><div class="card-body">
         <div class="portal-data-list">
             <?php foreach ($rows as $r):
-                $sym = match ((string) $r['currency']) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $r['currency'] . ' ' };
+                $sym = \Portal\Core\Currency::prefix((string) $r['currency']);
             ?>
                 <div class="row py-1 border-bottom small">
                     <div class="col-md-3"><strong><?php echo $sym . number_format(((int) $r['amountPence']) / 100, 2); ?></strong></div>

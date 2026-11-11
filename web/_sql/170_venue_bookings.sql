@@ -574,7 +574,7 @@ COMMENT='Venue Bookings — reminder single-shot dedupe log, no FKs by design (#
 -- -----------------------------------------------------------------------------
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'venues.enabled',                  '0',        '0',        0),
-    (NULL, 'venues.currency',                 'GBP',      'GBP',      0),
+    -- venues.currency is no longer seeded (#966, D-133): one currency per organisation, `org.currency` (migration 282).
     (NULL, 'venues.maxFileSize',              '10485760', '10485760', 0),
     (NULL, 'venues.unagreed_lead_days',       '21',       '21',       0),
     (NULL, 'venues.renewal_lead_days',        '60',       '60',       0),

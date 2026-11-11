@@ -81,7 +81,10 @@ $agreements = array_values(array_filter(
     static fn (array $a): bool => (string) $a['status'] !== 'superseded'
 ));
 
-$defaultCurrency = (string) App::settings('venues.currency') ?: 'GBP';
+$defaultCurrency = \Portal\Core\Currency::ofSite();
+// 💷 Amounts on this page are in the invoice's OWN currency (#966), or the
+//    organisation's for a new one. They used to be printed with "£".
+$invoiceCurrency = $invoice !== null ? (string) $invoice['currency'] : $defaultCurrency;
 
 // -----------------------------------------------------------------------------
 // 📅 Booking candidates for the "add allocation line" select — inside the
@@ -215,7 +218,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-md-3">
                 <label class="form-label small" for="amount">Amount</label>
                 <div class="input-group input-group-sm">
-                    <span class="input-group-text">£</span>
+                    <span class="input-group-text"><?php echo htmlspecialchars(\Portal\Core\Currency::label($invoiceCurrency) !== '' ? \Portal\Core\Currency::label($invoiceCurrency) : 'Amount', ENT_QUOTES, 'UTF-8'); ?></span>
                     <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" id="amount" name="amount" required
                            value="<?php echo $invoice !== null ? htmlspecialchars(number_format(((int) $invoice['amountPence']) / 100, 2, '.', ''), ENT_QUOTES, 'UTF-8') : ''; ?>">
                 </div>
@@ -273,7 +276,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <div class="portal-data-row align-items-center">
                             <div class="col-4"><?php echo htmlspecialchars((string) $line['bookingDate'], ENT_QUOTES, 'UTF-8'); ?></div>
                             <div class="col-4 small text-muted"><?php echo htmlspecialchars((string) ($line['bookingNotes'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
-                            <div class="col-2 text-end"><?php echo $line['amountPence'] !== null ? '£' . number_format(((int) $line['amountPence']) / 100, 2) : '—'; ?></div>
+                            <div class="col-2 text-end"><?php echo $line['amountPence'] !== null ? htmlspecialchars(\Portal\Core\Currency::format((int) $line['amountPence'], $invoiceCurrency), ENT_QUOTES, 'UTF-8') : '—'; ?></div>
                             <div class="col-2 text-end">
                                 <form method="post" action="<?php echo htmlspecialchars(Site::url('venues/invoice-save'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-confirm="Remove this allocation?">
                                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
@@ -308,7 +311,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-3">
                         <label class="form-label small" for="lineAmount">Amount (optional)</label>
                         <div class="input-group input-group-sm">
-                            <span class="input-group-text">£</span>
+                            <span class="input-group-text"><?php echo htmlspecialchars(\Portal\Core\Currency::label($invoiceCurrency) !== '' ? \Portal\Core\Currency::label($invoiceCurrency) : 'Amount', ENT_QUOTES, 'UTF-8'); ?></span>
                             <input type="number" step="0.01" min="0" class="form-control form-control-sm" id="lineAmount" name="amount">
                         </div>
                     </div>
@@ -343,7 +346,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php foreach ($invoice['payments'] as $p): ?>
                         <div class="portal-data-row align-items-center">
                             <div class="col-2"><?php echo htmlspecialchars((string) $p['paidDate'], ENT_QUOTES, 'UTF-8'); ?></div>
-                            <div class="col-2 text-end">£<?php echo number_format(((int) $p['amountPence']) / 100, 2); ?></div>
+                            <div class="col-2 text-end"><?php echo htmlspecialchars(\Portal\Core\Currency::prefix($invoiceCurrency), ENT_QUOTES, 'UTF-8'), number_format(((int) $p['amountPence']) / 100, 2); ?></div>
                             <div class="col-2 small"><?php echo htmlspecialchars((string) $p['method'], ENT_QUOTES, 'UTF-8'); ?></div>
                             <div class="col-2 small text-muted"><?php echo htmlspecialchars((string) ($p['reference'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?></div>
                             <div class="col-2 small text-muted"><?php echo htmlspecialchars($recorderNames[(int) $p['recordedByID']] ?? ('User #' . (int) $p['recordedByID']), ENT_QUOTES, 'UTF-8'); ?></div>
@@ -362,9 +365,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <?php endif; ?>
 
             <div class="mb-3 small">
-                <strong>Paid so far:</strong> £<?php echo number_format($paidPence / 100, 2); ?>
+                <strong>Paid so far:</strong> <?php echo htmlspecialchars(\Portal\Core\Currency::prefix($invoiceCurrency), ENT_QUOTES, 'UTF-8'), number_format($paidPence / 100, 2); ?>
                 &nbsp;|&nbsp;
-                <strong>Outstanding:</strong> £<?php echo number_format($outstandingPence / 100, 2); ?>
+                <strong>Outstanding:</strong> <?php echo htmlspecialchars(\Portal\Core\Currency::prefix($invoiceCurrency), ENT_QUOTES, 'UTF-8'), number_format($outstandingPence / 100, 2); ?>
             </div>
 
             <?php if (in_array((string) $invoice['status'], Venues::INVOICE_MANUAL_STATUSES, true) === false): ?>
@@ -379,7 +382,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-md-2">
                         <label class="form-label small" for="payAmount">Amount</label>
                         <div class="input-group input-group-sm">
-                            <span class="input-group-text">£</span>
+                            <span class="input-group-text"><?php echo htmlspecialchars(\Portal\Core\Currency::label($invoiceCurrency) !== '' ? \Portal\Core\Currency::label($invoiceCurrency) : 'Amount', ENT_QUOTES, 'UTF-8'); ?></span>
                             <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" id="payAmount" name="amount" required>
                         </div>
                     </div>

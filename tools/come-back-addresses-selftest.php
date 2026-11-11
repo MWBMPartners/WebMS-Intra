@@ -415,7 +415,7 @@ foreach ($people as $who => $id) {
     q('INSERT INTO tblLocalAccounts (userID, username, passwordHash, isVerified) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-cb-' . $who, $hash]);
 }
 foreach ([[ASSET_B, ORG_B], [ASSET_1, 1]] as [$asset, $site]) {
-    q('INSERT INTO tblAssets (assetID, siteID, name, publicToken) VALUES (?, ?, ?, ?)', 'iiss', [$asset, $site, 'Selftest come-back asset', bin2hex(random_bytes(16))]);
+    q('INSERT INTO tblAssets (assetID, siteID, name, publicToken, `currency`) VALUES (?, ?, ?, ?, \'EUR\')', 'iiss', [$asset, $site, 'Selftest come-back asset', bin2hex(random_bytes(16))]);
 }
 // NEWS_1: two links, one with two query parts (so the HTML holds "&amp;"),
 // one in a text block. NEWS_B: one link row, put in directly.

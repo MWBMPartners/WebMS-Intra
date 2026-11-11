@@ -429,8 +429,8 @@ try {
     Logger::audit('tblExpenseClaims', $claimID, 'update', $oldRecord, $newRecord);
     Logger::activity(
         'ExpenseEdit',
-        'Claim #' . $claimID . ' changed (£' . number_format((float) ($claim['totalAmount'] ?? 0), 2)
-        . ' → £' . number_format($total, 2) . ')',
+        'Claim #' . $claimID . ' changed (' . \Portal\Core\Currency::formatMajor((float) ($claim['totalAmount'] ?? 0), \Portal\Core\Currency::ofSite())
+        . ' → ' . \Portal\Core\Currency::formatMajor($total, \Portal\Core\Currency::ofSite()) . ')',
         $userId
     );
 

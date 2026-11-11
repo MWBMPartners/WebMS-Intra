@@ -25,7 +25,7 @@ if (Giving::canManage() === false) {
 $db       = App::db();
 $siteId   = Site::id();
 $settings = App::settings()['giving'] ?? [];
-$currency = (string) ($settings['currency'] ?? 'GBP');
+$currency = \Portal\Core\Currency::ofSite();
 
 // 📅 THE RANGE IS CHECKED BEFORE ANY QUERY (#891, #892). Both ends go into
 //    `donatedAt BETWEEN ? AND ?` below, and until this change they went in

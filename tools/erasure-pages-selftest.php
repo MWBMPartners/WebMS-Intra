@@ -1836,7 +1836,7 @@ foreach ([ORG_A, ORG_B] as $site) {
     $category[$site] = (int) one('SELECT MAX(categoryID) AS id FROM tblGivingCategory WHERE siteID = ?', 'i', [$site])['id'];
 }
 $gift = static function (int $site, int $donor, string $date, int $pence) use ($category): int {
-    q("INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, donatedAt, method) VALUES (?, ?, ?, ?, ?, 'cash')", 'iiiis', [$site, $donor, $category[$site], $pence, $date]);
+    q("INSERT INTO tblGivingEntry (siteID, donorID, categoryID, amountPence, `currency`, donatedAt, method) VALUES (?, ?, ?, ?, 'EUR', ?, 'cash')", 'iiiis', [$site, $donor, $category[$site], $pence, $date]);
 
     return (int) one('SELECT MAX(entryID) AS id FROM tblGivingEntry WHERE siteID = ? AND donorID = ?', 'ii', [$site, $donor])['id'];
 };

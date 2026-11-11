@@ -600,14 +600,14 @@ q('INSERT INTO tblGivingCategory (categoryID, siteID, name, isActive) VALUES (?,
 // engines were measured on, so "31 February as one end" would include some of them on MySQL 9.7 and MariaDB.
 $giftYear = (int) $now->format('Y') - 2;
 foreach (['-02-15', '-03-02', '-03-10', '-06-01'] as $g => $day) {
-    q('INSERT INTO `tblGivingEntry` (`entryID`, `siteID`, `donorName`, `categoryID`, `amountPence`, `donatedAt`, `method`) VALUES (?, ?, ?, ?, 1000, ?, \'cash\')',
+    q('INSERT INTO `tblGivingEntry` (`entryID`, `siteID`, `donorName`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, ?, 1000, \'EUR\', ?, \'cash\')',
         'iisis', [$n + $g, $site, 'Page Scripts Selftest Giver', $n, $giftYear . $day]);
 }
 // ...and one gift BY the member (it has a donor account), on 15 February: the statement pages only list gifts with a
 // donor, so without it a statement run finds nobody on any engine and part G's statement checks could not see the
 // difference that matters -- on MySQL 9.7 a range ending 31 February FINDS this donor and then tries to write
 // 31 February into a DATE column of the statement record.
-q('INSERT INTO `tblGivingEntry` (`entryID`, `siteID`, `donorID`, `categoryID`, `amountPence`, `donatedAt`, `method`) VALUES (?, ?, ?, ?, 1500, ?, \'cash\')',
+q('INSERT INTO `tblGivingEntry` (`entryID`, `siteID`, `donorID`, `categoryID`, `amountPence`, `currency`, `donatedAt`, `method`) VALUES (?, ?, ?, ?, 1500, \'EUR\', ?, \'cash\')',
     'iiiis', [$n + 4, $site, MEMBER, $n, $giftYear . '-02-15']);
 q('INSERT INTO tblLivestreamChannel (channelID, siteID, name, platform, channelOrVideoId) VALUES (?, ?, ?, \'youtube\', \'selftestvideo\')', 'iis', [$n, $site, 'Page Scripts Selftest Channel']);
 q('INSERT INTO tblLivestreamSchedule (scheduleID, channelID, dayOfWeek, startTime, endTime, timezone, isActive) VALUES (?, ?, ?, \'10:00:00\', \'12:00:00\', ?, 1)', 'iiis', [$n, $n, $tomorrow, $zone]);

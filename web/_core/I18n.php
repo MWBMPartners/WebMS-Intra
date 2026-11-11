@@ -1428,22 +1428,24 @@ class I18n
      * Format a currency amount according to the current locale.
      *
      * @param float|int $amount   Amount in major units
-     * @param string    $currency Currency code (e.g. 'GBP', 'USD', 'EUR')
+     * @param string    $currency Currency code (e.g. 'EUR'); '' means the open
+     *                            organisation's own currency (Currency::ofSite()),
+     *                            and when it has none the amount is a plain number.
+     *                            Never pounds by default (#966, D-133).
      *
      * @return string Formatted currency string
      */
     public static function formatCurrency(float|int $amount, string $currency = ''): string
     {
         if ($currency === '') {
-            $currency = App::settings('site.currency') ?? 'GBP';
+            // `site.currency` used to be read here and was seeded nowhere, so
+            // every caller fell through to 'GBP'. The organisation's currency is
+            // the one answer now (#966).
+            $currency = Currency::ofSite();
         }
 
-        // 📋 Currency symbols
-        $symbols = [
-            'GBP' => '£', 'USD' => '$', 'EUR' => '€', 'JPY' => '¥',
-            'CAD' => 'CA$', 'AUD' => 'A$', 'CHF' => 'CHF ',
-        ];
-        $symbol = $symbols[$currency] ?? $currency . ' ';
+        // 📋 The symbol from the ONE table (Currency), '' when none is known
+        $symbol = Currency::prefix($currency);
 
         $formatted = self::formatNumber((float) $amount, 2);
 

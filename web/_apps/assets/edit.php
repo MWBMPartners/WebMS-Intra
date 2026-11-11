@@ -299,7 +299,7 @@ $nonce = htmlspecialchars(App::cspNonce(), ENT_QUOTES, 'UTF-8');
             </div>
             <div class="col-md-3">
                 <label class="form-label" for="currency">Currency</label>
-                <input type="text" class="form-control text-uppercase" id="currency" name="currency" maxlength="3" placeholder="GBP" value="<?php echo $val('currency', 'GBP'); ?>">
+                <input type="text" class="form-control text-uppercase" id="currency" name="currency" maxlength="3" placeholder="<?php echo htmlspecialchars(\Portal\Core\Currency::ofSite(), ENT_QUOTES, 'UTF-8'); ?>" value="<?php echo $val('currency', \Portal\Core\Currency::ofSite()); ?>">
             </div>
             <div class="col-md-4">
                 <label class="form-label" for="warrantyExpiry">Warranty expiry</label>

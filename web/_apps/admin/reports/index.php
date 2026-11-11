@@ -269,7 +269,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         </div>
                     <?php endforeach; ?>
                     <p class="small text-muted mt-3 mb-0">
-                        Total value: <strong>&pound;<?php echo number_format($stats['totalExpenses'] ?? 0, 2); ?></strong>
+                        Total value: <strong><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format($stats['totalExpenses'] ?? 0, 2); ?></strong>
                     </p>
                 <?php endif; ?>
             </div>

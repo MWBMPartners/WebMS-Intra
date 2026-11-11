@@ -29,9 +29,9 @@ $db       = App::db();
 $siteId   = Site::id();
 $settings = App::settings()['payments'] ?? [];
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
-$currency = (string) ($settings['currency'] ?? 'GBP');
+$currency = \Portal\Core\Currency::ofSite();
 $testMode = (string) ($settings['test_mode'] ?? '1') === '1';
-$sym      = match ($currency) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $currency . ' ' };
+$sym      = \Portal\Core\Currency::prefix($currency);
 
 // 🛒 Active giving categories, site-scoped. Zero categories → friendly
 // "not set up yet" card rather than an empty/broken form.

@@ -134,7 +134,7 @@ function assets_import_field_defs(): array
         'conditionState'     => ['label' => 'Condition',             'required' => false, 'aliases' => ['condition']],
         'status'             => ['label' => 'Status',                'required' => false, 'aliases' => ['status']],
         'purchaseDate'       => ['label' => 'Purchase Date',         'required' => false, 'aliases' => ['purchase date', 'date purchased']],
-        'purchaseCostPounds' => ['label' => 'Purchase Cost (GBP)',   'required' => false, 'aliases' => ['purchase cost (gbp)', 'purchase cost', 'cost', 'purchase price']],
+        'purchaseCostPounds' => ['label' => 'Purchase Cost',         'required' => false, 'aliases' => ['purchase cost (gbp)', 'purchase cost', 'cost', 'purchase price']],
     ];
 }
 
@@ -793,7 +793,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 Columns are matched by header name against the Asset Tracker's own
                 <a href="<?php echo htmlspecialchars(Site::url('assets'), ENT_QUOTES, 'UTF-8'); ?>?export=csv&csrf_token=<?php echo htmlspecialchars(urlencode($csrf), ENT_QUOTES, 'UTF-8'); ?>">CSV export</a>
                 — Name, Kind, Category, Location, Manufacturer, Model, Serial Number, Asset Tag, Condition, Status,
-                Purchase Date, Purchase Cost (GBP). Only <strong>Name</strong> is required; you can adjust the column
+                Purchase Date, Purchase Cost (in the organisation&rsquo;s currency). Only <strong>Name</strong> is required; you can adjust the column
                 mapping if it doesn't match automatically. Max 1&nbsp;MB / 2000 rows. New assets always import as
                 <strong>non-confidential</strong> — licence keys and confidential flags aren't importable in bulk.
             </p>

@@ -800,7 +800,7 @@ $stmt->execute();
 $stmt = $db->prepare('INSERT INTO tblServicePlan (planID, siteID, title, serviceDate) VALUES (?, 1, \'Page-head confidence plan\', CURDATE())');
 $stmt->bind_param('i', $g8['plan']);
 $stmt->execute();
-$stmt = $db->prepare('INSERT INTO tblAssets (assetID, siteID, name, publicToken, publicPageEnabled, isConfidential, isDeleted) VALUES (?, 1, \'Page-head projector\', ?, 1, 0, 0)');
+$stmt = $db->prepare('INSERT INTO tblAssets (assetID, siteID, name, publicToken, publicPageEnabled, isConfidential, isDeleted, `currency`) VALUES (?, 1, \'Page-head projector\', ?, 1, 0, 0, \'EUR\')');
 $stmt->bind_param('is', $g8['asset'], $tagToken);
 $stmt->execute();
 $stmt = $db->prepare('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, \'Page-head Member\', ?, 1, 0, 0)');

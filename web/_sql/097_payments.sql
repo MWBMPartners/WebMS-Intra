@@ -78,7 +78,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'payments.displayIcon',       'fa-solid fa-credit-card', 'fa-solid fa-credit-card', 0),
     (NULL, 'payments.provider',          'stripe', 'stripe', 0),
     (NULL, 'payments.test_mode',         '1', '1', 0),
-    (NULL, 'payments.currency',          'GBP', 'GBP', 0),
+    -- payments.currency is no longer seeded (#966, D-133): one currency per organisation, `org.currency` (migration 282).
     (NULL, 'payments.stripe.publishable','', '', 0),
     (NULL, 'payments.stripe.secret',     '', '', 1),
     (NULL, 'payments.stripe.webhookSecret','', '', 1),

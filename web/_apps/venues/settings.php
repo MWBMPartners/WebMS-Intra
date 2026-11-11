@@ -8,7 +8,7 @@
  *
  * WRITE IDIOM (03-build-plan.md §2.4 / 02b open Q5 resolution):
  *   - Per-site keys (calendar_default_venue, reminder_roles, the three
- *     lead-day ints, currency, reminders_enabled) upsert with
+ *     lead-day ints, reminders_enabled) upsert with
  *     `siteID = Site::id()` via `INSERT … ON DUPLICATE KEY UPDATE` — the
  *     unique key `(settingKey, siteID)` fires normally because BOTH columns
  *     are non-NULL.
@@ -217,10 +217,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $calendarDefaultVenue = 0;
     }
 
-    $currency = strtoupper(trim((string) ($_POST['currency'] ?? 'GBP')));
-    if (preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
-        $currency = 'GBP';
-    }
+    // 💷 No currency here any more (#966): venues use the organisation's
+    //    currency (Portal\Core\Currency), chosen on Organisation settings. A
+    //    venues-only currency let a hall's charges be in a different money from
+    //    the rest of the organisation's accounts.
 
     $unagreedLeadDays    = max(0, min(3650, (int) ($_POST['unagreed_lead_days'] ?? 21)));
     $renewalLeadDays     = max(0, min(3650, (int) ($_POST['renewal_lead_days'] ?? 60)));
@@ -247,7 +247,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reminderRolesCsv = implode(',', $chosenRoles);
 
     venues_settings_upsert_per_site($db, $siteId, 'venues.calendar_default_venue', (string) $calendarDefaultVenue);
-    venues_settings_upsert_per_site($db, $siteId, 'venues.currency', $currency);
     venues_settings_upsert_per_site($db, $siteId, 'venues.unagreed_lead_days', (string) $unagreedLeadDays);
     venues_settings_upsert_per_site($db, $siteId, 'venues.renewal_lead_days', (string) $renewalLeadDays);
     venues_settings_upsert_per_site($db, $siteId, 'venues.invoice_due_lead_days', (string) $invoiceDueLeadDays);
@@ -280,7 +279,7 @@ if ($roleGetStmt !== false) {
 }
 
 $calendarDefaultVenue = (int) Settings::get('venues.calendar_default_venue', '0');
-$currency             = (string) Settings::get('venues.currency', 'GBP');
+$currency             = \Portal\Core\Currency::ofSite();
 $unagreedLeadDays     = (int) Settings::get('venues.unagreed_lead_days', '21');
 $renewalLeadDays      = (int) Settings::get('venues.renewal_lead_days', '60');
 $invoiceDueLeadDays   = (int) Settings::get('venues.invoice_due_lead_days', '7');
@@ -330,9 +329,9 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="form-text">Which venue the calendar's event-save "is it booked?" check and the live event-form widget run against.</div>
             </div>
             <div class="col-md-2">
-                <label class="form-label small" for="currency">Currency</label>
-                <input type="text" class="form-control form-control-sm text-uppercase" id="currency" name="currency" maxlength="3"
-                       value="<?php echo htmlspecialchars($currency, ENT_QUOTES, 'UTF-8'); ?>">
+                <span class="form-label small d-block">Currency</span>
+                <div class="small fw-semibold"><?php echo htmlspecialchars($currency !== '' ? $currency : 'None chosen', ENT_QUOTES, 'UTF-8'); ?></div>
+                <div class="form-text">The organisation&rsquo;s, set in <a href="<?php echo htmlspecialchars(Site::url('admin/settings/organisation'), ENT_QUOTES, 'UTF-8'); ?>">Organisation settings</a>.</div>
             </div>
 
             <div class="col-md-2">

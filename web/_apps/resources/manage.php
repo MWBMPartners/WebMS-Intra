@@ -162,7 +162,7 @@ $csrf = Auth::csrfToken();
             </div>
             <div class="col-md-3"><label class="form-label small">Capacity (optional)</label><input type="number" name="capacity" min="0" class="form-control form-control-sm"></div>
             <div class="col-md-6"><label class="form-label small">Location</label><input type="text" name="location" class="form-control form-control-sm" maxlength="255"></div>
-            <div class="col-md-3"><label class="form-label small">Hourly rate £ (optional)</label><input type="number" step="0.01" name="hourlyRate" min="0" class="form-control form-control-sm"></div>
+            <div class="col-md-3"><label class="form-label small">Hourly rate <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?> (optional)</label><input type="number" step="0.01" name="hourlyRate" min="0" class="form-control form-control-sm"></div>
             <div class="col-md-3"><label class="form-label small">Buffer minutes</label><input type="number" name="bufferMinutes" min="0" max="240" class="form-control form-control-sm" value="<?php echo $defaultBuffer; ?>"></div>
             <?php portal_location_input([
                 'showAddress' => false,
@@ -197,7 +197,7 @@ $csrf = Auth::csrfToken();
                         </div>
                         <div class="col-md-2 small">
                             <?php if ((int) $r['requiresApproval'] === 1): ?><span class="badge bg-warning text-dark">Approval</span><?php endif; ?>
-                            <?php if ($r['hourlyRatePence'] !== null): ?>£<?php echo number_format((int) $r['hourlyRatePence'] / 100, 2); ?>/hr<?php endif; ?>
+                            <?php if ($r['hourlyRatePence'] !== null): ?><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((int) $r['hourlyRatePence'] / 100, 2); ?>/hr<?php endif; ?>
                         </div>
                         <div class="col-md-2 text-end">
                             <form method="post" class="d-inline">

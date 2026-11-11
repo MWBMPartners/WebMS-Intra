@@ -223,6 +223,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delet
             header('Location: ' . Site::url('settings'));
             exit();
         }
+        // 💷 The currency (#966): deleting an organisation's row here would switch
+        //    it to the installation's currency with no check for money recorded.
+        if ($lockedKey !== null && \Portal\Core\Currency::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
+            Logger::activity(
+                'SettingsDeleteRefused',
+                'Refused: "' . (string) $lockedKey['settingKey'] . '" is the currency and can only be changed on the organisation settings page',
+                $_SESSION['user_id'] ?? null
+            );
+            $_SESSION['flash_msg']  = \Portal\Core\Currency::LOCKED_MESSAGE;
+            $_SESSION['flash_type'] = 'danger';
+            header('Location: ' . Site::url('settings'));
+            exit();
+        }
         if ($lockedKey !== null && Site::lockedInGeneralEditor((string) $lockedKey['settingKey']) === true) {
             Logger::activity(
                 'SettingsDeleteRefused',

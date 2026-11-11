@@ -96,6 +96,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Countries;
+use Portal\Core\Currency;
 use Portal\Core\Geocoder;
 use Portal\Core\GeoLocation;
 use Portal\Core\Logger;
@@ -406,6 +407,29 @@ if ($countrySent === true) {
         $reject('Nothing was saved. The country chosen is not one the portal knows. Choose one from the list, or "Same as the installation".');
     }
 }
+// 💷 THE CURRENCY (#966, D-133), by the country's rules above:
+//    - it is touched only when the field ARRIVED (#677). The page disables the
+//      box while money is recorded, and a disabled control is not submitted;
+//    - "Same as the installation" ('') deletes the organisation's own row;
+//    - a currency the portal can use is stored as the organisation's own;
+//    - text that is not one, sent back exactly as the row holds it, is kept
+//      unchanged; anything else is REFUSED, before anything is written.
+//    Whether the change may happen at all is asked below, inside the
+//    transaction that writes, under a lock (Currency::whyCannotChange()).
+$currencySent      = array_key_exists('currency', $_POST) === true;
+$currencyOwnBefore = Currency::ownStoredText($siteId);
+$currencyChosen    = null;
+if ($currencySent === true) {
+    $currencyChosen = Currency::fromPosted($_POST['currency']);
+    if ($currencyChosen === null && $currencyOwnBefore !== '' && is_string($_POST['currency']) === true
+        && trim($_POST['currency']) === $currencyOwnBefore
+    ) {
+        $currencyChosen = $currencyOwnBefore;
+    }
+    if ($currencyChosen === null) {
+        $reject('Nothing was saved. The currency chosen is not one the portal can use. Choose one from the list, or "Same as the installation".');
+    }
+}
 // The country the map look-up is told about. Empty means "no hint", never a
 // guess.
 //   - A two-letter code just chosen: that code.
@@ -460,6 +484,38 @@ if ($coords === null && Geocoder::autoEnabled() === true) {
     }
 }
 
+// 🔒 Everything below is written in ONE transaction (#966). The currency's
+//    money check takes locking reads (#647), which hold only inside a
+//    transaction (#697), so no money can be recorded for this organisation
+//    between the check and the write. The check comes FIRST, so a refusal
+//    leaves nothing written and "Nothing was saved" is true.
+$db->begin_transaction();
+try {
+if ($currencyChosen !== null && $currencyChosen !== $currencyOwnBefore) {
+    $currencyInstallation = Currency::ofInstallation();
+    $currencyOwnNow       = Currency::ownOf($siteId);
+    $currencyNow          = $currencyOwnNow !== '' ? $currencyOwnNow : $currencyInstallation;
+    $currencyNextOwn      = Currency::isChoosable($currencyChosen) === true ? $currencyChosen : '';
+    $currencyNext         = $currencyNextOwn !== '' ? $currencyNextOwn : $currencyInstallation;
+    $currencyRefusal      = Currency::whyCannotChange($db, $siteId, $currencyNow, $currencyNext, true);
+    if ($currencyRefusal !== '') {
+        $db->rollback();
+        Logger::activity('OrgCurrencyRefused', 'A change of this organisation\'s currency from ' . $currencyNow . ' to '
+            . ($currencyNext !== '' ? $currencyNext : 'none') . ' was refused: money is recorded or could not be checked.');
+        $reject('Nothing was saved. ' . $currencyRefusal);
+    }
+    if ($currencyChosen === '') {
+        $dropCurrency = $db->prepare('DELETE FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` = ?');
+        if ($dropCurrency !== false) {
+            $currencyKey = Currency::SETTING;
+            $dropCurrency->bind_param('si', $currencyKey, $siteId);
+            $dropCurrency->execute();
+            $dropCurrency->close();
+        }
+    } else {
+        $upsert($db, Currency::SETTING, $currencyChosen, $siteId);
+    }
+}
 $upsert($db, 'org.address.line1', (string) ($address['line1'] ?? ''), $siteId);
 $upsert($db, 'org.address.line2', (string) ($address['line2'] ?? ''), $siteId);
 $upsert($db, 'org.address.city', (string) ($address['city'] ?? ''), $siteId);
@@ -491,11 +547,21 @@ $plainCoordinate = static function (float $value): string {
 $upsert($db, 'org.latitude', $coords !== null ? $plainCoordinate((float) $coords['lat']) : '', $siteId);
 $upsert($db, 'org.longitude', $coords !== null ? $plainCoordinate((float) $coords['lng']) : '', $siteId);
 $upsert($db, 'org.what3words', $w3w ?? '', $siteId);
+$db->commit();
+} catch (\Throwable $saveFault) {
+    // Nothing half-written: put it all back and let the fault be reported
+    // as before (the error handler records it).
+    $db->rollback();
+    throw $saveFault;
+}
 
 Logger::activity(
     'OrgAddressSaved',
     'Organisation address updated. Country: '
         . ($countryChosen === null ? 'not changed' : ($countryChosen === '' ? 'same as the installation' : $countryChosen))
+        . '. Currency: '
+        . ($currencyChosen === null || $currencyChosen === $currencyOwnBefore ? 'not changed'
+            : ($currencyChosen === '' ? 'same as the installation' : $currencyChosen))
         . '.'
 );
 

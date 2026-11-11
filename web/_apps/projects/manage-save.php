@@ -83,11 +83,16 @@ if ($id > 0) {
     $slugForRedirect = $slug;
     $i = $db->prepare(
         'INSERT INTO tblProject (siteID, slug, title, description, targetAmountPence, status, '
-        . 'startedAt, endsAt, coverImagePath, isPublic, createdByID) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        . 'startedAt, endsAt, coverImagePath, isPublic, createdByID, `currency`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($i !== false) {
-        $i->bind_param('isssissssii', $siteId, $slug, $title, $desc, $targetPence, $status, $startOrNull, $endOrNull, $coverOrNull, $isPublic, $userId);
+        // 💷 The project is made in the organisation's currency (#966). This
+        //    INSERT used to name no currency, so EVERY project was stored as GBP
+        //    by the column's default, whatever `projects.currency` said; the
+        //    column has no default now, so leaving it out fails loudly.
+        $projectCurrency = \Portal\Core\Currency::ofSite();
+        $i->bind_param('isssissssiis', $siteId, $slug, $title, $desc, $targetPence, $status, $startOrNull, $endOrNull, $coverOrNull, $isPublic, $userId, $projectCurrency);
         $i->execute();
         $i->close();
     }

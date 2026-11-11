@@ -44,8 +44,8 @@ $raised    = Projects::raisedPence($projectId);
 $pledged   = Projects::pledgedPence($projectId);
 $target    = max(1, (int) $project['targetAmountPence']);
 $pct       = min(100, (int) round(($raised / $target) * 100));
-$cur       = (string) ($project['currency'] ?? 'GBP');
-$sym       = match ($cur) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $cur . ' ' };
+$cur       = (string) ($project['currency'] ?? '');
+$sym       = \Portal\Core\Currency::prefix($cur);
 $canPledge = (string) $project['status'] === 'active';
 
 $updates = [];

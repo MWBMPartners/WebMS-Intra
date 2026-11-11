@@ -64,7 +64,7 @@ declare(strict_types=1);
  * @param int     $tolDays  Matching window in days (giving.reconcile.toleranceDays).
  * @param string  $currency Import's currency — entries are matched currency-scoped;
  *                          the deposit pass only runs when this equals the site's
- *                          current giving.currency (count sessions carry no
+ *                          current currency, Currency::ofSite() (count sessions carry no
  *                          currency column — documented limitation).
  *
  * @return int Count of bank txns newly matched by this run.
@@ -115,9 +115,9 @@ function giving_reconcile_automatch(\mysqli $db, int $siteId, int $importId, int
     // bank txn. Deposit pence is an EXACT DECIMAL*100 ROUND (never a float
     // comparison). Currency-scoping: tblCountSessions carries no currency
     // column, so this universe is only meaningful when the import's
-    // currency matches the site's current giving.currency.
+    // currency matches the organisation's currency (Currency::ofSite(), #966).
     $sessByAmount = [];
-    $siteCurrency = (string) (\Portal\Core\App::settings('giving.currency') ?? 'GBP');
+    $siteCurrency = \Portal\Core\Currency::ofSite();
     if ($currency === $siteCurrency) {
         $stmt = $db->prepare(
             'SELECT cs.countSessionID, cs.serviceDate, '

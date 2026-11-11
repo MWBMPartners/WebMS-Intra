@@ -47,7 +47,8 @@ if ($invoice === null) {
 }
 
 $h = static fn (mixed $v): string => htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
-$money = static fn (int $pence): string => '£' . number_format($pence / 100, 2);
+// 💷 The invoice's own currency (#966); it was "£" for every invoice.
+$money = static fn (int $pence): string => \Portal\Core\Currency::format($pence, (string) $invoice['currency']);
 
 $paidPence = 0;
 foreach ($invoice['payments'] as $p) {

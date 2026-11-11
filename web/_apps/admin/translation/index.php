@@ -215,8 +215,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div></div></div>
     <div class="col-md-3"><div class="card"><div class="card-body">
         <div class="small text-muted">Money spent this month</div>
-        <div class="display-6"><?php echo $usage === null ? '&mdash;' : '£' . number_format($usage['pence'] / 100, 2); ?></div>
-        <div class="small text-muted"><?php echo $capInForce > 0 ? 'of £' . number_format($capInForce / 100, 2) . ' limit' : 'no money limit'; ?></div>
+        <div class="display-6"><?php echo $usage === null ? '&mdash;' : htmlspecialchars(\Portal\Core\Currency::format((int) $usage['pence'], \Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'); ?></div>
+        <div class="small text-muted"><?php echo $capInForce > 0 ? 'of ' . htmlspecialchars(\Portal\Core\Currency::format((int) $capInForce, \Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8') . ' limit' : 'no money limit'; ?></div>
     </div></div></div>
     <div class="col-md-3"><div class="card"><div class="card-body">
         <div class="small text-muted">Translations sent this month</div>
@@ -284,7 +284,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </select>
             </div>
             <div class="col-md-3">
-                <label class="form-label">Monthly cap (£)</label>
+                <label class="form-label">Monthly cap <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'); ?></label>
                 <?php
                 // 💸 `max` is the hard maximum in code, in pounds. It is a courtesy
                 //    to whoever is filling the form in; `save.php` is the boundary and
@@ -294,7 +294,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 //    only way to use a page becomes shortening the figure.
                 ?>
                 <input type="number" min="0" max="<?php echo (int) (Translation::MAX_CAP_PENCE / 100); ?>" step="0.01" class="form-control" name="monthCap" value="<?php echo number_format(min($cap, Translation::MAX_CAP_PENCE) / 100, 2, '.', ''); ?>">
-                <div class="form-text">0 means no limit. The most that can be set here is &pound;<?php echo number_format(Translation::MAX_CAP_PENCE / 100, 2); ?> a month.</div>
+                <div class="form-text">0 means no limit. The most that can be set here is <?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofInstallation()), ENT_QUOTES, 'UTF-8'), number_format(Translation::MAX_CAP_PENCE / 100, 2); ?> a month.</div>
             </div>
             <div class="col-md-3">
                 <label class="form-label">Monthly limit on the number of translations</label>

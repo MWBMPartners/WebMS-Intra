@@ -714,6 +714,10 @@ siteSetting(OTHER, 'transcription.enabled', '1');
 // 🔑 A provider key, so `providerIsReady()` is true. It is NOT a real key and
 //    nothing here ever reaches a network: `openaiTranscribe()` opens no
 //    connection when the key is empty, and section L empties it on purpose.
+// 💷 Spending on the provider is the INSTALLATION's money (one API key pays for
+//    every organisation), shown in the installation's currency (#966). US
+//    dollars here, so every figure below proves no pound sign is built in.
+installSetting('org.currency', 'USD');
 installSetting('transcription.provider', 'openai');
 installSetting('transcription.openai.apiKey', 'sk-selftest-not-a-real-key');
 installSetting('transcription.batchSize', '5');
@@ -1315,7 +1319,7 @@ head('J. The monthly budget, and which of the two levels wins');
 $budgetInForce = static function () use (&$jar, $adminPage): string {
     $body = text(req($jar['global'], 'GET', $adminPage)['body']);
 
-    return preg_match('/of £([\d,]+\.\d\d)/', $body, $m) === 1 ? $m[1] : '(not shown)';
+    return preg_match('/of \$([\d,]+\.\d\d)/', $body, $m) === 1 ? $m[1] : '(not shown)';
 };
 
 clearSiteSetting(ORG, 'transcription.monthCapPence');
@@ -1540,7 +1544,7 @@ q(
 $spendText = text(req($jar['global'], 'GET', $adminPage)['body']);
 ok(
     'L04 the month\'s spend excludes the other organisation',
-    preg_match('/This month £0\.00/', $spendText) === 1,
+    preg_match('/This month \$0\.00/', $spendText) === 1 && str_contains($spendText, '£') === false,
     'the spend shown includes another organisation: ' . mb_substr((string) (preg_match('/This month.{0,40}/', $spendText, $m) === 1 ? $m[0] : '?'), 0, 60)
 );
 
@@ -2028,7 +2032,7 @@ installSetting('transcription.monthCapPence', '5000');
 clearSiteSetting(ORG, 'transcription.monthCapPence');
 installSetting('transcription.monthCapPence', '999999999');
 $hardCapText = text(req($jar['global'], 'GET', $adminPage)['body']);
-ok('R10 the figure in force is the hard maximum in code', str_contains($hardCapText, 'of £5,000.00') === true, 'showed: ' . mb_substr((string) (preg_match('/of £[\d,\.]+/', $hardCapText, $m) === 1 ? $m[0] : '?'), 0, 40));
+ok('R10 the figure in force is the hard maximum in code', str_contains($hardCapText, 'of $5,000.00') === true, 'showed: ' . mb_substr((string) (preg_match('/of \$[\d,\.]+/', $hardCapText, $m) === 1 ? $m[0] : '?'), 0, 40));
 ok(
     'R11 and the organisation is NOT blamed for a figure it never chose',
     str_contains($hardCapText, 'asked for more') === false,

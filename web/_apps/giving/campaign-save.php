@@ -70,7 +70,7 @@ if ($endDate !== null && (strtotime($endDate) === false || $endDate < $startDate
 }
 
 $settings   = App::settings()['giving'] ?? [];
-$currency   = (string) ($settings['currency'] ?? 'GBP');
+$currency   = \Portal\Core\Currency::ofSite();
 $descParam  = $description === '' ? null : $description;
 
 if ($campaignId > 0) {

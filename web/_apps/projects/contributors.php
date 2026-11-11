@@ -34,8 +34,8 @@ if ($project === null) {
 }
 
 $projectId = (int) $project['projectID'];
-$currency  = (string) ($project['currency'] ?? 'GBP');
-$sym       = match ($currency) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $currency . ' ' };
+$currency  = (string) ($project['currency'] ?? '');
+$sym       = \Portal\Core\Currency::prefix($currency);
 
 $rows = [];
 $stmt = $db->prepare(

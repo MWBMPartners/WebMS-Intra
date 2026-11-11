@@ -247,7 +247,7 @@ if ($booking !== null && (int) ($booking['groupID'] ?? 0) > 0) {
     }
 }
 
-$currency = (string) ($booking['currency'] ?? Settings::get('venues.currency', 'GBP') ?? 'GBP');
+$currency = (string) ($booking['currency'] ?? \Portal\Core\Currency::ofSite());
 $costValue = $booking !== null && $booking['costPence'] !== null ? number_format((int) $booking['costPence'] / 100, 2, '.', '') : '';
 
 $pageTitle   = $booking !== null ? 'Booking — ' . $venue['venueName'] : 'New booking — ' . $venue['venueName'];

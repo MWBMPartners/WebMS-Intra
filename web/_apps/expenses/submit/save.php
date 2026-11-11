@@ -670,7 +670,7 @@ try {
     // 6. 📓 Log activity — a COUNT of receipts not attached, never their names.
     Logger::activity(
         'ExpenseSubmit',
-        'Claim #' . $claimID . ' created (£' . number_format($totalAmt, 2) . ')'
+        'Claim #' . $claimID . ' created (' . \Portal\Core\Currency::formatMajor($totalAmt, \Portal\Core\Currency::ofSite()) . ')'
             . (count($notAttached) > 0 ? '; ' . count($notAttached) . ' file(s) not attached' : ''),
         $userId
     );

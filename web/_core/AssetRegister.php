@@ -434,8 +434,9 @@
  *      vault, point 8 above, since a policy number/insured value sits at
  *      roughly that same sensitivity). Neither total in this section
  *      currency-converts — every pence figure is summed as-is, matching
- *      the register's existing single-reporting-currency assumption (see
- *      `_apps/assets/index.php`'s own CSV export, which hard-codes "(GBP)").
+ *      the register's single-reporting-currency assumption: one
+ *      currency per organisation, which may change only while no money
+ *      is recorded (Currency::whyCannotChange(), #966).
  *
  *  14. Kiosk self check-in/out (#414, Phase 3 Pass 5). Unattended, PUBLIC
  *      terminal access — `_apps/assets/kiosk.php`/`kiosk-action.php` carry
@@ -2552,7 +2553,9 @@ class AssetRegister
             'purchaseDate'       => [$data['purchaseDate'] ?? null, 's'],
             'purchaseStore'      => [$data['purchaseStore'] ?? null, 's'],
             'purchaseCostPence'  => [$data['purchaseCostPence'] ?? null, 'i'],
-            'currency'           => [(string) ($data['currency'] ?? 'GBP'), 's'],
+            // The organisation's currency unless the caller chose one (#966):
+            // the column has no default, so this line is what names it.
+            'currency'           => [(string) ($data['currency'] ?? Currency::ofOrganisation($siteId)), 's'],
             'warrantyExpiry'     => [$data['warrantyExpiry'] ?? null, 's'],
             'warrantyDetails'    => [$data['warrantyDetails'] ?? null, 's'],
             'licenseKey'         => [$licenseKeyCipher, 's'],

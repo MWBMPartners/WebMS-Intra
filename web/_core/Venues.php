@@ -1599,9 +1599,14 @@ class Venues
                 $costPence = null;
             }
         }
-        $currency = strtoupper(trim((string) ($data['currency'] ?? 'GBP')));
-        if (preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
-            $currency = 'GBP';
+        // 💷 The organisation's currency unless one was chosen (#966). A
+        //    currency the portal cannot store in hundredths, or does not know,
+        //    is REFUSED: it used to become GBP without a word.
+        $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
+        if ($currency === '') {
+            $currency = Currency::ofOrganisation($siteId);
+        } elseif (Currency::isChoosable($currency) === false) {
+            $errors[] = 'The currency is not one the portal can use.';
         }
 
         // ⏰ Time resolution (§3.4 rule)
@@ -1861,6 +1866,8 @@ class Venues
                 }
             }
 
+            // 💷 The column has no default since #966: name the organisation's currency.
+            $seriesCurrency = Currency::ofOrganisation($siteId);
             $created = [];
             foreach ($expansion['dates'] as $date) {
                 $window = self::resolveWindow($usageTypeId, $date, $siteId);
@@ -1868,15 +1875,16 @@ class Venues
                 $end = $window['end'] ?? null;
                 $bstmt = $db->prepare(
                     'INSERT INTO tblVenueBookings (siteID, venueID, roomID, groupID, bookingDate, usageTypeID, '
-                    . 'startTime, endTime, timesOverridden, statusID, notes, createdByID) '
-                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)'
+                    . 'startTime, endTime, timesOverridden, statusID, notes, createdByID, `currency`) '
+                    . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)'
                 );
                 if ($bstmt === false) {
                     continue;
                 }
                 $bstmt->bind_param(
-                    'iiiisissisi',
-                    $siteId, $venueId, $roomVal, $groupId, $date, $usageTypeId, $start, $end, $statusId, $notes, $actorUserId
+                    'iiiisissisis',
+                    $siteId, $venueId, $roomVal, $groupId, $date, $usageTypeId, $start, $end, $statusId, $notes, $actorUserId,
+                    $seriesCurrency
                 );
                 $ok = $bstmt->execute();
                 $bstmt->close();
@@ -2661,12 +2669,14 @@ class Venues
                 $notes = self::nullableTrim($row['rawNotes'] ?? null, 65000);
                 $ins = $db->prepare(
                     'INSERT INTO tblVenueBookings (siteID, venueID, bookingDate, usageTypeID, startTime, endTime, '
-                    . 'timesOverridden, statusID, notes, createdByID) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    . 'timesOverridden, statusID, notes, createdByID, `currency`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 if ($ins === false) {
                     continue;
                 }
-                $ins->bind_param('iisississi', $siteId, $venueId, $bookingDate, $usageTypeId, $start, $end, $overridden, $statusId, $notes, $actorUserId);
+                // 💷 The column has no default since #966: name the organisation's currency.
+                $importCurrency = Currency::ofOrganisation($siteId);
+                $ins->bind_param('iisississis', $siteId, $venueId, $bookingDate, $usageTypeId, $start, $end, $overridden, $statusId, $notes, $actorUserId, $importCurrency);
                 $ok = $ins->execute();
                 $newBookingId = (int) $ins->insert_id;
                 $ins->close();
@@ -2880,9 +2890,14 @@ class Venues
         }
         $rateUnit = (string) ($data['rateUnit'] ?? '');
         $rateUnitVal = in_array($rateUnit, self::RATE_UNITS, true) === true ? $rateUnit : null;
-        $currency = strtoupper(trim((string) ($data['currency'] ?? 'GBP')));
-        if (preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
-            $currency = 'GBP';
+        // 💷 The organisation's currency unless one was chosen (#966). A
+        //    currency the portal cannot store in hundredths, or does not know,
+        //    is REFUSED: it used to become GBP without a word.
+        $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
+        if ($currency === '') {
+            $currency = Currency::ofOrganisation($siteId);
+        } elseif (Currency::isChoosable($currency) === false) {
+            $errors[] = 'The currency is not one the portal can use.';
         }
         $status = (string) ($data['status'] ?? 'draft');
         if (in_array($status, self::AGREEMENT_STATUSES, true) === false) {
@@ -3194,9 +3209,14 @@ class Venues
         if ($amountPence <= 0) {
             $errors[] = 'Amount must be a positive number of pence.';
         }
-        $currency = strtoupper(trim((string) ($data['currency'] ?? 'GBP')));
-        if (preg_match('/^[A-Z]{3}$/', $currency) !== 1) {
-            $currency = 'GBP';
+        // 💷 The organisation's currency unless one was chosen (#966). A
+        //    currency the portal cannot store in hundredths, or does not know,
+        //    is REFUSED: it used to become GBP without a word.
+        $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
+        if ($currency === '') {
+            $currency = Currency::ofOrganisation($siteId);
+        } elseif (Currency::isChoosable($currency) === false) {
+            $errors[] = 'The currency is not one the portal can use.';
         }
         $notes = self::nullableTrim($data['notes'] ?? null, 65000);
 

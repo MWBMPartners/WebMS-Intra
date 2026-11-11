@@ -44,9 +44,9 @@
  *
  * CURRENCY: every pence total on this page is summed as-is across every
  * asset — no currency conversion. Matches the register's existing
- * single-reporting-currency assumption (`index.php`'s own CSV export
- * hard-codes "(GBP)" regardless of any individual asset's `currency`
- * column) — a genuinely multi-currency register would need real FX
+ * single-reporting-currency assumption: one currency per organisation
+ * (Portal\Core\Currency, #966), which may change only while no money is
+ * recorded — a genuinely multi-currency register would need real FX
  * handling this pass does not attempt.
  *
  * @package   Portal\Assets
@@ -107,9 +107,14 @@ if ($isCsvExport === true) {
     // 📊 Column allow-list — deliberately explicit, never a dump of the
     // raw row. NEVER includes licenseKey, publicToken, or
     // insurancePolicyNumber — see file header note.
+    // 💷 Titled with the organisation's currency, never "(GBP)" (#966).
+    $curTitle   = \Portal\Core\Currency::ofSite() !== '' ? ' (' . \Portal\Core\Currency::ofSite() . ')' : '';
+    $costTitle  = 'Purchase Cost' . $curTitle;
+    $valueTitle = 'Current Value' . $curTitle;
+    $insTitle   = 'Insured Value' . $curTitle;
     $csvHeaders = [
-        'Name', 'Asset Tag', 'Category', 'Purchase Cost (GBP)', 'Depreciation Method',
-        'Current Value (GBP)', 'Valuation Basis', 'Percent Depreciated', 'Insured Value (GBP)',
+        'Name', 'Asset Tag', 'Category', $costTitle, 'Depreciation Method',
+        $valueTitle, 'Valuation Basis', 'Percent Depreciated', $insTitle,
     ];
     $csvRows = [];
     foreach ($depreciationRows as $r) {
@@ -121,12 +126,12 @@ if ($isCsvExport === true) {
             'Name'                 => (string) $r['name'],
             'Asset Tag'            => $r['assetTagCode'] !== null ? (string) $r['assetTagCode'] : '',
             'Category'             => $r['categoryName'] !== null ? (string) $r['categoryName'] : '',
-            'Purchase Cost (GBP)'  => $r['purchaseCostPence'] !== null ? number_format(((int) $r['purchaseCostPence']) / 100, 2, '.', '') : '',
+            $costTitle             => $r['purchaseCostPence'] !== null ? number_format(((int) $r['purchaseCostPence']) / 100, 2, '.', '') : '',
             'Depreciation Method'  => ucwords(str_replace('-', ' ', (string) $r['depreciationMethod'])),
-            'Current Value (GBP)'  => $r['currentValuePence'] !== null ? number_format(((int) $r['currentValuePence']) / 100, 2, '.', '') : '',
+            $valueTitle            => $r['currentValuePence'] !== null ? number_format(((int) $r['currentValuePence']) / 100, 2, '.', '') : '',
             'Valuation Basis'      => $valuationBasis,
             'Percent Depreciated'  => $r['pctDepreciated'] !== null ? (string) $r['pctDepreciated'] : '',
-            'Insured Value (GBP)'  => $r['insuredValuePence'] !== null ? number_format(((int) $r['insuredValuePence']) / 100, 2, '.', '') : '',
+            $insTitle              => $r['insuredValuePence'] !== null ? number_format(((int) $r['insuredValuePence']) / 100, 2, '.', '') : '',
         ];
     }
 
@@ -163,10 +168,12 @@ $underInsured = array_values(array_filter(
         && (int) $r['insuredValuePence'] < (int) $r['currentValuePence']
 ));
 
-// 💷 Money formatter — "GBP 123.45", matching item.php's own convention for
-// this app (currency CODE prefix, not a symbol).
-$money = static function (?int $pence): string {
-    return $pence !== null ? 'GBP ' . number_format($pence / 100, 2) : '—';
+// 💷 Money formatter — "EUR 123.45", matching item.php's own convention for
+// this app (currency CODE prefix, not a symbol). The organisation's currency
+// (#966; it was "GBP " for everybody), or a plain number with none chosen.
+$reportCurrency = \Portal\Core\Currency::ofSite();
+$money = static function (?int $pence) use ($reportCurrency): string {
+    return $pence !== null ? ($reportCurrency !== '' ? $reportCurrency . ' ' : '') . number_format($pence / 100, 2) : '—';
 };
 
 $csrf = Auth::csrfToken();

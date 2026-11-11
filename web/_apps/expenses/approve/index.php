@@ -168,7 +168,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <div class="col-md-3">Title</div>
             <div class="col-md-2">Claimant</div>
             <div class="col-md-2">Department</div>
-            <div class="col-md-1 text-end">Total &pound;</div>
+            <div class="col-md-1 text-end">Total <?php echo htmlspecialchars(\Portal\Core\Currency::label(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'); ?></div>
             <div class="col-md-2 text-end">Submitted</div>
             <div class="col-md-1 text-end"></div>
         </div>
@@ -196,7 +196,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <span class="d-md-none fw-semibold">Dept: </span><?php echo htmlspecialchars($c['deptName'], ENT_QUOTES, 'UTF-8'); ?>
                 </div>
                 <div class="col-12 col-md-1 text-md-end">
-                    <span class="d-md-none fw-semibold">Total: </span>&pound;<?php echo number_format((float) $c['totalAmount'], 2); ?>
+                    <span class="d-md-none fw-semibold">Total: </span><?php echo htmlspecialchars(\Portal\Core\Currency::prefix(\Portal\Core\Currency::ofSite()), ENT_QUOTES, 'UTF-8'), number_format((float) $c['totalAmount'], 2); ?>
                 </div>
                 <div class="col-12 col-md-2 text-md-end small text-secondary">
                     <span class="d-md-none fw-semibold">Submitted: </span><?php echo \Portal\Core\I18n::formatDate($c['createdAt']); ?>

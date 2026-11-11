@@ -606,10 +606,10 @@ class Payments
         $returnUrl = $base . '/payments/return?payment=' . $paymentId . '&result=ok';
         $cancelUrl = $base . '/payments/return?payment=' . $paymentId . '&result=cancel';
 
-        // 💷 Integer math only — never float. GBP/EUR/USD (the only three
-        // the settings whitelist allows) are all 2-decimal currencies; a
-        // zero-decimal currency (e.g. JPY) would need a distinct minor-units
-        // map if ever whitelisted.
+        // 💷 Integer math only — never float. Every currency a payment may
+        // be taken in (Currency::PAYMENT_CURRENCIES, #966) is counted in
+        // hundredths; a zero-decimal currency (e.g. JPY) cannot be chosen at
+        // all, because it would need a distinct minor-units map.
         $value = sprintf('%d.%02d', intdiv($amountPence, 100), $amountPence % 100);
 
         // 🧹 Control-char strip + PayPal's own 127-char field limit —

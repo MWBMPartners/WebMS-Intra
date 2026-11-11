@@ -1020,11 +1020,25 @@ compare_replay_with_install_script_alone() {
 #   does for the zone above: the Sabbath page has always written these, so a
 #   Cambridge already there may be a church in Cambridge. Same treatment, and
 #   the same ⚠: delete both lines from the p5 list the day this reaches main.
+#   org.currency is EMPTY on a fresh install and GBP on the database upgraded
+#   from the last release (#966, migration 282). Empty means no currency chosen; the
+#   install script used to seed giving/projects/payments/venues.currency as
+#   GBP for every customer. Migration 282 carries the old installation's ONE
+#   currency into org.currency when the four agree, because the payments and
+#   venues pages have always written two of them, so a GBP already there may
+#   be somebody's choice — the treatment, and the reason, of 273 and 274.
+#   The same ⚠: delete the line from the p5 list the day this reaches main.
+#   It is NOT in the p6 list, measured on 11 November 2026: a database from
+#   the March 2026 install script got the four old settings only from
+#   migrations 094, 096, 097 and 170, whose seeds #966 takes out (the
+#   installer replays every migration, so a seed left there would put GBP
+#   back on a fresh install). So it never has them, and ends equal.
 KNOWN_P5_VALUE_DIFFERENCES=(
     "auth.password.minLength | every organisation | 12 → 8"
     "portal.sabbath.timezone | every organisation |  → Europe/London"
     "portal.sabbath.location_lat | every organisation |  → 52.205"
     "portal.sabbath.location_lng | every organisation |  → 0.119"
+    "org.currency | every organisation |  → GBP"
 )
 KNOWN_P5_LEFTOVER_SETTINGS=()
 KNOWN_P6_VALUE_DIFFERENCES=(

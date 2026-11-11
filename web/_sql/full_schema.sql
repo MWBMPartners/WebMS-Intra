@@ -4791,7 +4791,7 @@ CREATE TABLE IF NOT EXISTS `tblPledgeCampaigns` (
     `name`            VARCHAR(255) NOT NULL,
     `description`     TEXT         DEFAULT NULL,
     `goalAmountPence` INT          NOT NULL COMMENT 'Integer minor units — house pence convention (#266)',
-    `currency`        CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `currency`        CHAR(3)      NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `startDate`       DATE         NOT NULL,
     `endDate`         DATE         DEFAULT NULL COMMENT 'NULL = open-ended',
     `isActive`        TINYINT(1)   NOT NULL DEFAULT 1,
@@ -4832,7 +4832,7 @@ CREATE TABLE IF NOT EXISTS `tblGivingEntry` (
     `donorName`    VARCHAR(255) DEFAULT NULL,
     `categoryID`   INT          NOT NULL,
     `amountPence`  INT          NOT NULL,
-    `currency`     CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `currency`     CHAR(3)      NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `donatedAt`    DATE         NOT NULL,
     `method`       ENUM('cash','cheque','bank-transfer','card','standing-order','other') NOT NULL DEFAULT 'cash',
     `reference`    VARCHAR(100) DEFAULT NULL,
@@ -4930,7 +4930,8 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'giving.enabled',     '0', '0', 0),
     (NULL, 'giving.displayName', 'Giving', 'Giving', 0),
     (NULL, 'giving.displayIcon', 'fa-solid fa-hand-holding-dollar', 'fa-solid fa-hand-holding-dollar', 0),
-    (NULL, 'giving.currency',    'GBP', 'GBP', 0),
+    -- giving.currency is no longer seeded (#966, D-133): one currency per organisation,
+    -- `org.currency`, replaces it. See web/_core/Currency.php.
     (NULL, 'giving.charityName', '', '', 0),
     (NULL, 'giving.charityNumber','', '', 0),
     (NULL, 'giving.hmrcRef',     '', '', 0),
@@ -5023,7 +5024,7 @@ CREATE TABLE IF NOT EXISTS `tblProject` (
     `title`             VARCHAR(255) NOT NULL,
     `description`       TEXT         DEFAULT NULL,
     `targetAmountPence` INT          NOT NULL,
-    `currency`          CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `currency`          CHAR(3)      NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `startedAt`         DATE         DEFAULT NULL,
     `endsAt`            DATE         DEFAULT NULL,
     `status`            ENUM('planning','active','funded','completed','cancelled') NOT NULL DEFAULT 'planning',
@@ -5085,8 +5086,8 @@ ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'projects.enabled',     '1', '1', 0),
     (NULL, 'projects.displayName', 'Projects', 'Projects', 0),
-    (NULL, 'projects.displayIcon', 'fa-solid fa-bullseye', 'fa-solid fa-bullseye', 0),
-    (NULL, 'projects.currency',    'GBP', 'GBP', 0)
+    (NULL, 'projects.displayIcon', 'fa-solid fa-bullseye', 'fa-solid fa-bullseye', 0)
+    -- projects.currency is no longer seeded (#966): see `org.currency`.
 ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
 
 -- =============================================================================
@@ -5119,7 +5120,7 @@ CREATE TABLE IF NOT EXISTS `tblPayment` (
     `idempotencyKey`   VARCHAR(80)  DEFAULT NULL,
     `amountPence`      INT          NOT NULL,
     `feePence`         INT          DEFAULT NULL,
-    `currency`         CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `currency`         CHAR(3)      NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `status`           ENUM('pending','succeeded','failed','refunded') NOT NULL DEFAULT 'pending',
     `purpose`          ENUM('giving','pledge','membership','other') NOT NULL DEFAULT 'other',
     `purposeRef`       VARCHAR(100) DEFAULT NULL,
@@ -5169,7 +5170,8 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'payments.displayIcon',       'fa-solid fa-credit-card', 'fa-solid fa-credit-card', 0),
     (NULL, 'payments.provider',          'stripe', 'stripe', 0),
     (NULL, 'payments.test_mode',         '1', '1', 0),
-    (NULL, 'payments.currency',          'GBP', 'GBP', 0),
+    -- payments.currency is no longer seeded (#966): a payment is taken in the
+    -- organisation's currency, `org.currency`.
     (NULL, 'payments.stripe.publishable','', '', 0),
     (NULL, 'payments.stripe.secret',     '', '', 1),
     (NULL, 'payments.stripe.webhookSecret','', '', 1),
@@ -7555,7 +7557,7 @@ CREATE TABLE IF NOT EXISTS `tblBankImports` (
     `siteID`       INT          NOT NULL DEFAULT 1,
     `filename`     VARCHAR(255) NOT NULL COMMENT 'Original client filename (basename only, display)',
     `bankKey`      VARCHAR(20)  NOT NULL DEFAULT 'generic' COMMENT 'Detected/chosen preset: lloyds|hsbc|barclays|monzo|starling|generic',
-    `currency`     CHAR(3)      NOT NULL DEFAULT 'GBP' COMMENT 'From giving.currency at import time; matching is currency-scoped',
+    `currency`     CHAR(3)      NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `fileHash`     CHAR(64)     NOT NULL COMMENT 'SHA-256 of raw upload bytes — duplicate-import guard',
     `rowCount`     INT          NOT NULL DEFAULT 0 COMMENT 'Credit lines imported (immutable parse snapshot)',
     `skippedCount` INT          NOT NULL DEFAULT 0 COMMENT 'Debit/zero/blank lines skipped (immutable parse snapshot)',
@@ -7817,7 +7819,7 @@ CREATE TABLE IF NOT EXISTS `tblAssets` (
     `purchaseDate`        DATE          DEFAULT NULL,
     `purchaseStore`       VARCHAR(255)  DEFAULT NULL,
     `purchaseCostPence`   INT           DEFAULT NULL COMMENT 'Integer minor units — house pence convention (#266)',
-    `currency`            CHAR(3)       NOT NULL DEFAULT 'GBP' COMMENT 'ISO 4217 currency code',
+    `currency`            CHAR(3)       NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `warrantyExpiry`      DATE          DEFAULT NULL,
     `warrantyDetails`     VARCHAR(500)  DEFAULT NULL,
     `licenseKey`          VARCHAR(500)  DEFAULT NULL
@@ -8566,7 +8568,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueAgreements` (
     `noticePeriodDays` INT          DEFAULT NULL COMMENT 'Contractual notice period; reminder sweep warns noticePeriodDays before termEnd too',
     `rateAmountPence`  INT          DEFAULT NULL COMMENT 'Integer minor units — house pence convention (#266)',
     `rateUnit`         ENUM('per-booking','per-hour','per-day','per-week','per-month','per-quarter','per-year','fixed-total') DEFAULT NULL,
-    `currency`         CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `currency`         CHAR(3)      NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `status`           ENUM('draft','active','expired','terminated','superseded') NOT NULL DEFAULT 'draft',
     `supersededByID`   INT          DEFAULT NULL COMMENT 'Self-FK — renewal chain (mirrors tblAssetLoans.parentLoanID pattern)',
     `notes`            TEXT         DEFAULT NULL,
@@ -8670,7 +8672,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueBookings` (
     `eventID`         INT        DEFAULT NULL COMMENT 'Optional link to the calendar event this hire hosts (mirrors tblServicePlan.eventID)',
     `agreementID`     INT        DEFAULT NULL COMMENT 'Which hire agreement covers this booking; NULL = none recorded (cost may still be set directly)',
     `costPence`       INT        DEFAULT NULL COMMENT 'Integer minor units — house pence convention (#266). NULL = not costed / derive from agreement rate',
-    `currency`        CHAR(3)    NOT NULL DEFAULT 'GBP' COMMENT 'ISO 4217',
+    `currency`        CHAR(3)    NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `isDeleted`       TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Soft delete — cancellations are normally a STATUS change; this is for true mistakes',
     `createdByID`     INT        DEFAULT NULL COMMENT 'Empty once this person has asked to be forgotten. The record is kept; only the name is removed.',
     `updatedByID`     INT        DEFAULT NULL,
@@ -8718,7 +8720,7 @@ CREATE TABLE IF NOT EXISTS `tblVenueInvoices` (
     `issueDate`   DATE         NOT NULL,
     `dueDate`     DATE         DEFAULT NULL COMMENT 'Feeds the payment-due reminder sweep (§9)',
     `amountPence` INT          NOT NULL COMMENT 'Integer minor units — house pence convention (#266)',
-    `currency`    CHAR(3)      NOT NULL DEFAULT 'GBP',
+    `currency`    CHAR(3)      NOT NULL COMMENT 'ISO 4217 code: the organisation''s currency when the row was made (#966). No default: every writer names it. Empty = none chosen',
     `status`      ENUM('pending','part-paid','paid','disputed','cancelled') NOT NULL DEFAULT 'pending'
                   COMMENT 'Maintained by the PHP choke-point from SUM(tblVenueInvoicePayments.amountPence) vs amountPence',
     `paidAt`      DATETIME     DEFAULT NULL COMMENT 'Stamped when status flips to paid',
@@ -8909,7 +8911,7 @@ COMMENT='Venue Bookings — reminder single-shot dedupe log, no FKs by design (#
 -- -----------------------------------------------------------------------------
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'venues.enabled',                  '1',        '1',        0),
-    (NULL, 'venues.currency',                 'GBP',      'GBP',      0),
+    -- venues.currency is no longer seeded (#966): see `org.currency`.
     (NULL, 'venues.maxFileSize',              '10485760', '10485760', 0),
     (NULL, 'venues.unagreed_lead_days',       '21',       '21',       0),
     (NULL, 'venues.renewal_lead_days',        '60',       '60',       0),
@@ -9476,6 +9478,12 @@ COMMENT='Geocoder result cache — an address geocodes once (Nominatim policy) (
 --    may choose its own on Admin, Settings, Organisation. It used to be 'GB'
 --    for every customer anywhere, so every new venue, small group and meeting
 --    place started British.
+-- 💷 org.currency ships EMPTY too (#966, D-133): the installer suggests one
+--    from the country chosen and writes it into this row; each organisation
+--    may choose its own on Admin, Settings, Organisation. Empty means no
+--    currency is known, and amounts are shown as plain numbers, never in
+--    pounds. It replaces giving/projects/payments/venues.currency, which were
+--    seeded GBP for every customer. Read only through Portal\Core\Currency.
 INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
     (NULL, 'w3w.enabled',              'false', 'false', 0),
     (NULL, 'w3w.apiKey',               '',      '',      1),
@@ -9488,6 +9496,7 @@ INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue
     (NULL, 'org.address.region',       '',      '',      0),
     (NULL, 'org.address.postcode',     '',      '',      0),
     (NULL, 'org.address.countryCode',  '',      '',      0),
+    (NULL, 'org.currency',             '',      '',      0),
     (NULL, 'org.latitude',             '',      '',      0),
     (NULL, 'org.longitude',            '',      '',      0),
     (NULL, 'org.what3words',           '',      '',      0)
@@ -11746,6 +11755,15 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('278_expense_receipt_route.sql'
 -- tblSmallGroups.countryCode is written above with an EMPTY default, and
 -- org.address.countryCode is seeded empty; this is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('279_no_built_in_country.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 282_no_built_in_currency.sql (#966, D-133) ─────────────────────────
+-- The nine `currency` columns are written above with NO default, org.currency
+-- is seeded empty, and the four per-app currency settings are not seeded at
+-- all. The migration's other two steps (carrying an old installation's one
+-- currency into org.currency, and deleting the four old keys) have nothing to
+-- act on in a fresh install; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('282_no_built_in_currency.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

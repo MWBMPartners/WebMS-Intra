@@ -19,7 +19,7 @@ Auth::ensureSession();
 $db       = App::db();
 $siteId   = Site::id();
 $settings = App::settings()['projects'] ?? [];
-$currency = (string) ($settings['currency'] ?? 'GBP');
+$currency = \Portal\Core\Currency::ofSite();
 
 $rows = [];
 $stmt = $db->prepare(
@@ -62,7 +62,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             $raised = (int) $r['raised'];
             $pct    = min(100, (int) round(($raised / $target) * 100));
             $cur    = (string) ($r['currency'] ?? $currency);
-            $sym    = match ($cur) { 'GBP' => '£', 'EUR' => '€', 'USD' => '$', default => $cur . ' ' };
+            $sym    = \Portal\Core\Currency::prefix($cur);
         ?>
             <div class="col-md-6 col-lg-4">
                 <div class="card h-100">

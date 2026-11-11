@@ -67,7 +67,7 @@ $samples = [
     'statusLabel'       => 'Approved',
     'decisionNote'      => 'Looks fine — thanks!',
     'claimLink'         => 'https://example.org/expenses/view?id=123',
-    'claimAmount'       => '£123.45',
+    'claimAmount'       => \Portal\Core\Currency::format(12345, \Portal\Core\Currency::ofSite()),
 ];
 
 $rendered = $bodyHtml;

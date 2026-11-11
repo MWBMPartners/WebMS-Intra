@@ -1,6 +1,7 @@
 (function () {
 var country = document.getElementById('country');
 var zone = document.getElementById('timezone');
+var money = document.getElementById('currency');
 if (!country || !zone) { return; }
 var browserZone = '';
 try {
@@ -35,8 +36,16 @@ if (zone.getAttribute('data-chosen') !== '1' && country.value !== '') {
 var suggested = zoneFor(country.value);
 if (suggested !== '') { zone.value = suggested; }
 }
+function moneyFor() {
+var chosen = country.options[country.selectedIndex];
+return chosen ? (chosen.getAttribute('data-currency') || '') : '';
+}
+if (money && money.getAttribute('data-chosen') !== '1' && moneyFor() !== '') {
+money.value = moneyFor();
+}
 country.addEventListener('change', function () {
 if (country.value === '') { return; }
+if (money && moneyFor() !== '') { money.value = moneyFor(); }
 var shown = optionFor(zone.value);
 if (shown && shown.getAttribute('data-country') === country.value) { return; }
 zone.value = zoneFor(country.value);

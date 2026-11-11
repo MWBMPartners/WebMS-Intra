@@ -1238,12 +1238,12 @@
           "purchaseCostPence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset cost, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
+            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
           },
           "currency": {
             "type": "string",
-            "example": "GBP",
-            "description": "The ISO 4217 three-letter code every money field on this asset is stated in, such as `GBP`."
+            "example": "EUR",
+            "description": "The ISO 4217 three-letter code every money field on this asset is stated in, such as `EUR`."
           },
           "warrantyExpiry": {
             "type": "string",
@@ -1289,7 +1289,7 @@
           "salvageValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset is expected to be worth at the end of its useful life, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Writing-down never takes the value below this."
+            "description": "What the asset is expected to be worth at the end of its useful life, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Writing-down never takes the value below this."
           },
           "currentValuePence": {
             "type": "integer",
@@ -1310,7 +1310,7 @@
           "insuredValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "The sum the asset is insured for, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
+            "description": "The sum the asset is insured for, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says."
           },
           "insuranceRenewalDate": {
             "type": "string",
@@ -1365,7 +1365,7 @@
         "required": [
           "name"
         ],
-        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not pounds-decimal strings), and an invalid ENUM value (assetKind/conditionState/status/depreciationMethod/labelSymbology) 400s rather than silently defaulting — **`currency` is the exception and is NOT in that list: an unusable code is quietly replaced with `GBP`** — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
+        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not pounds-decimal strings), and an invalid ENUM value (assetKind/conditionState/status/depreciationMethod/labelSymbology) 400s rather than silently defaulting — **`currency` is the exception and is NOT in that list: an unusable code is quietly replaced with the organisation's own currency** — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
         "properties": {
           "name": {
             "type": "string",
@@ -1460,13 +1460,12 @@
           "purchaseCostPence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset cost, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. **Unlike the form this endpoint mirrors, it takes pence directly.** A value that is not a number, or is negative, is refused with 400; a decimal is accepted and its fraction dropped."
+            "description": "What the asset cost, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. **Unlike the form this endpoint mirrors, it takes pence directly.** A value that is not a number, or is negative, is refused with 400; a decimal is accepted and its fraction dropped."
           },
           "currency": {
             "type": "string",
-            "default": "GBP",
-            "example": "GBP",
-            "description": "The ISO 4217 three-letter code the money fields are in; it is upper-cased for you. **An unusable value is silently replaced with `GBP` rather than refused** — this is the one field in this body that does not refuse a bad value, and the schema's own summary wrongly listed it among those that do until 30 October 2026."
+            "example": "EUR",
+            "description": "The ISO 4217 three-letter code the money fields are in; it is upper-cased for you. Left out, it is the organisation's own currency (chosen on Organisation settings; there is no built-in currency since #966). Only a currency counted in hundredths can be used. **An unusable value is silently replaced with the organisation's currency rather than refused** — this is the one field in this body that does not refuse a bad value, and the schema's own summary wrongly listed it among those that do until 30 October 2026."
           },
           "warrantyExpiry": {
             "type": "string",
@@ -1518,7 +1517,7 @@
           "salvageValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "What the asset should be worth at the end of its life, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
+            "description": "What the asset should be worth at the end of its life, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
           },
           "insurerName": {
             "type": "string",
@@ -1533,7 +1532,7 @@
           "insuredValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "The sum to insure the asset for, **in pence (minor units)** — send 89999 for £899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
+            "description": "The sum to insure the asset for, **in pence (minor units)** — send 89999 for 899.99, never a pounds-and-pence string. The currency is whatever `currency` says. Not a number, or negative, is refused with 400."
           },
           "insuranceRenewalDate": {
             "type": "string",
