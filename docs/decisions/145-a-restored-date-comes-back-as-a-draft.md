@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-11  
 **Status:** in force  
-**Superseded in part by:** D-146 (a date cancelled before it was hidden comes back cancelled)
+**Superseded in part by:** D-146 (a date cancelled before it was hidden comes back cancelled), D-147 (a date postponed before it was hidden comes back postponed)
 
 **Question:** when a hidden date of a series is brought back, should it return as a draft (hidden from members until
 somebody publishes it) or with the status it had before it was hidden?
