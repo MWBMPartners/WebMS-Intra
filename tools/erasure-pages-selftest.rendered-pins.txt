@@ -6,7 +6,8 @@
 # the help page's whole section on what an erasure keeps, and Delete my account's "What is kept" section
 # (drawn under a hold at the organisation and under one on the whole installation). Since #940, also the
 # privacy PAGE's whole "Retention" section in each of section L's seven activity-log states (D-117, D-118),
-# step 5 of the administrators' first steps, and the Retention page's activity-log card and subtitle. A section runs from its heading to the
+# step 5 of the administrators' first steps, and the Retention page's activity-log card, subtitle and the
+# card's explanation in both views. A section runs from its heading to the
 # next heading of the SAME or a HIGHER level (an <h3> section ends at the next <h3>, <h2> or <h1>).
 #
 # WHAT IS COMPARED, exactly, with every run of white space made one space and nothing else changed:
@@ -87,3 +88,9 @@ ANCESTORS: <body data-portal-name="Portal" data-print-date="(today)" data-portal
 
 == retention page, subtitle
 ANCESTORS: <body data-portal-name="Portal" data-print-date="(today)" data-portal-authenticated="1"> <main class="portal-main" id="main-content" role="main"> <div class="container"> <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2"> <div> REGION: <p class="text-secondary mb-0" data-retention-subtitle="1">Hard-delete activity-log and error rows older than the period that applies to each: its organisation’s, or the installation’s for a row that belongs to none. Activity-log rows whose period is “Never delete” are not deleted.</p>
+
+== retention page, activity log explained, installation
+ANCESTORS: <body data-portal-name="Portal" data-print-date="(today)" data-portal-authenticated="1"> <main class="portal-main" id="main-content" role="main"> <div class="container"> <div class="row g-3 mb-4"> <div class="col-12" id="activity-log-retention"> <div class="card shadow-sm border-primary" data-activity-log-retention-card="1"> <div class="card-body"> REGION: <p class="small text-muted" data-activity-log-explained="installation"> The activity log records who did what, and when. The nightly clear-out deletes records older than the figures below. <strong>“Never delete”</strong> for every organisation is the most an organisation may choose, not a rule for all: it keeps for ever the records that belong to no organisation and those of every organisation that has not chosen a number of days of its own, while an organisation that has chosen a number of days is still cleared after it. “Never delete” for one organisation keeps that organisation’s records for ever, where the installation allows it. The log then grows without limit. Some records describe a person — usually by account number, and for some kinds of record by name or e-mail address — and those descriptions stay for ever, even after that person has asked to be erased. </p>
+
+== retention page, activity log explained, organisation
+ANCESTORS: <body data-portal-name="Portal" data-print-date="(today)" data-portal-authenticated="1"> <main class="portal-main" id="main-content" role="main"> <div class="container"> <div class="card shadow-sm border-primary" id="activity-log-retention" data-activity-log-retention-card="organisation"> <div class="card-body" data-activity-log-in-force="365"> REGION: <p class="small text-muted" data-activity-log-explained="organisation"> The activity log records who did what, and when. The nightly clear-out deletes records older than the figure below. <strong>“Never delete”</strong> keeps this organisation’s records for ever, where this installation allows it. The log then grows without limit. Some records describe a person — usually by account number, and for some kinds of record by name or e-mail address — and those descriptions stay for ever, even after that person has asked to be erased. </p>

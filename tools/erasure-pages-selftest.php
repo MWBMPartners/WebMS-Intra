@@ -187,7 +187,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 109; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 112; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -223,6 +223,8 @@ const EXPECTED_CHECKS = 109; // 80 until #703 (D-016) added two: the two writers
                             // pinned as rendered). 108.
                             // Round 2 added L5 (the Retention page's subtitle,
                             // which ignored "never"). 109.
+                            // Round 3 added L6-L8 (the card's explanation in both
+                            // views, and the three "Never delete" messages). 112.
 
 function refuse(string $why): never
 {
@@ -2914,20 +2916,35 @@ ok('L1 EVERY ACTIVITY-LOG STATE, IN ONE TABLE: for the installation\'s figure (d
 // mean nothing unless that is the state a failed read produces. Then the words
 // both pages print for that answer, compared with the literal text here.
 require_once $repo . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ActivityLogRetention.php';
-$alrPremise = isset($GLOBALS['mysqli']) === false;
 try {
     $alrUnknown = \Portal\Core\ActivityLogRetention::memberFactsForSite($db, ORG_A);
 } catch (\Throwable $e) {
     $alrUnknown = ['threw' => get_class($e) . ': ' . $e->getMessage()];
 }
+// THE PREMISE, asked of the thing that matters (#940 round 3): can the class's
+// read get a connection at all? `App::db()` answers from a static that
+// `App::init()` sets, and only then from a global `$mysqli`, so "no `$mysqli`"
+// alone was not enough - with `App::init($db, [])` planted above the call the
+// read succeeded while this still said the premise held. So ask App::db()
+// itself, AFTER the call (the class has loaded App by then): it must THROW.
+$alrPremise = 'App::db() gave a connection, so the read did not fail';
+if (class_exists(\Portal\Core\App::class, false) === false) {
+    $alrPremise = 'App was never loaded, so the class never reached its read';
+} else {
+    try {
+        \Portal\Core\App::db();
+    } catch (\Throwable $e) {
+        $alrPremise = true;
+    }
+}
 $alrUnknownPage   = isset($alrUnknown['state']) === true ? \Portal\Core\ActivityLogRetention::privacyPageWords($alrUnknown) : '';
 $alrUnknownNotice = isset($alrUnknown['state']) === true ? \Portal\Core\ActivityLogRetention::privacyNoticeClause($alrUnknown) : '';
-ok('L2 a figure that could not be read: memberFactsForSite() itself answers "unknown" with no figure when its read fails (driven here, where the read throws), and both pages then name NO figure and say it could not be read (#940)',
+ok('L2 a figure that could not be read: memberFactsForSite() itself answers "unknown" with no figure when its read fails (driven here, where App::db() is proved to throw), and both pages then name NO figure and say it could not be read (#940)',
     $alrPremise === true
     && $alrUnknown === ['state' => \Portal\Core\ActivityLogRetention::MEMBER_UNKNOWN, 'days' => 0]
     && $alrUnknownPage === 'The activity log is deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless that period is for ever, which it is only where the whole portal keeps the log for ever and this organisation has not chosen a number of days of its own. The period in force here could not be read just now.' . $alrTail
     && $alrUnknownNotice === 'the activity log, deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless that period is for ever (only where the whole portal keeps the log for ever and this organisation has not chosen a number of days of its own)' . $alrClauseTail,
-    json_encode([$alrPremise, $alrUnknown, $alrUnknownPage, $alrUnknownNotice]));
+    ($alrPremise === true ? '' : 'PREMISE FAILED: ' . $alrPremise . ' | ') . json_encode([$alrUnknown, $alrUnknownPage, $alrUnknownNotice]));
 
 // Two administrators' sentences #940 changed, pinned AS RENDERED so a reworded
 // one cannot pass unseen (each is checked by nothing else): step 5 of the first
@@ -2953,6 +2970,55 @@ $alrSubtitle = renderedRegion((string) $alrRetention['body'], $alrPick('p[data-r
 ok('L5 the Retention page\'s subtitle says the clear-out deletes rows older than the period that applies to each, and none whose activity-log period is "Never delete" - exactly the pinned markup (#940 round 2)',
     $alrRetention['status'] === 200 && renderedPin('retention page, subtitle', $alrSubtitle),
     'HTTP ' . $alrRetention['status'] . ' ' . mb_substr($alrSubtitle, 0, 600));
+// #940 round 3: the card's explanation said "'Never delete' keeps every record
+// for ever" under the INSTALLATION's form, where it is only the most an
+// organisation may choose. Pinned as rendered in both views of the page: the
+// global administrator's, and an organisation administrator's (ADM holds no
+// global right, so the page shows ADM the organisation's form alone).
+$alrExplained = renderedRegion((string) $alrRetention['body'], $alrPick('p[data-activity-log-explained]'));
+ok('L6 the Retention card\'s explanation for a global administrator says the installation\'s "Never delete" is the most an organisation may choose, and an organisation with its own number of days is still cleared after it - exactly the pinned markup (#940 round 3)',
+    $alrRetention['status'] === 200 && renderedPin('retention page, activity log explained, installation', $alrExplained),
+    'HTTP ' . $alrRetention['status'] . ' ' . mb_substr($alrExplained, 0, 600));
+$alrOrgView     = req($jar['adm'], 'GET', '/admin/maintenance/retention');
+$alrOrgExplains = renderedRegion((string) $alrOrgView['body'], $alrPick('p[data-activity-log-explained]'));
+ok('L7 the Retention card\'s explanation for an organisation administrator says "Never delete" keeps THIS organisation\'s records for ever, where the installation allows it - exactly the pinned markup (#940 round 3)',
+    $alrOrgView['status'] === 200 && renderedPin('retention page, activity log explained, organisation', $alrOrgExplains),
+    'HTTP ' . $alrOrgView['status'] . ' ' . mb_substr($alrOrgExplains, 0, 600));
+// The three messages a global administrator can be shown about "Never delete"
+// at the installation's level, each pressed through the real page and read back
+// as shown, compared with literal words. The installation's figure is put back
+// to 365 afterwards (and the clean-up restores the original).
+$alrFlash = static function (string $html): string {
+    return preg_match('/<div class="alert alert-\w+ alert-dismissible[^"]*">\s*(.*?)\s*<button/s', $html, $m) === 1
+        ? trim((string) preg_replace('/\s+/', ' ', html_entity_decode($m[1], ENT_QUOTES, 'UTF-8'))) : '(no message shown)';
+};
+$alrPress = static function (array $fields) use ($jar, $alrFlash): string {
+    $form = req($jar['root'], 'GET', '/admin/maintenance/retention');
+    req($jar['root'], 'POST', '/admin/maintenance/retention', ['csrf_token' => token($form['body']), 'action' => 'activity-retention-installation'] + $fields);
+
+    return $alrFlash((string) req($jar['root'], 'GET', '/admin/maintenance/retention')['body']);
+};
+$alrMessages = [];
+try {
+    $alrMessages['a number of 0'] = [$alrPress(['choice' => 'days', 'days' => '0']),
+        'A number of days has to be a whole number from 1 to 3650. For no time limit, choose "Never delete" instead. Nothing was saved.'];
+    $alrMessages['a number above ten years'] = [$alrPress(['choice' => 'days', 'days' => '99999']),
+        'A number of days can be at most 3650 (ten years). For no time limit, choose "Never delete" instead. Nothing was saved.'];
+    $alrMessages['Never delete, saved'] = [$alrPress(['choice' => 'never']),
+        'Saved. This installation now sets no time limit on the activity log. Records that belong to no organisation, and those of every '
+        . 'organisation that has not chosen a number of days of its own, are never deleted; an organisation that has chosen a number of days '
+        . 'is still cleared after it, and every organisation may choose a number of days or "Never delete" for itself.'];
+} finally {
+    q("UPDATE tblSettings SET settingValue = '365' WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'");
+}
+$alrMessagesWrong = [];
+foreach ($alrMessages as $case => [$got, $want]) {
+    if ($got !== $want) {
+        $alrMessagesWrong[] = $case . ': ' . $got;
+    }
+}
+ok('L8 the three messages a global administrator is shown about "Never delete" for the installation (a 0 refused, a figure over ten years refused, Never delete saved) are exactly the literal words here, and none says the installation\'s choice keeps every record (#940 round 3)',
+    count($alrMessages) === 3 && $alrMessagesWrong === [], implode(' || ', $alrMessagesWrong));
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared
 // (#703 round 10: it sat after the help page's pin, before section K's, and so

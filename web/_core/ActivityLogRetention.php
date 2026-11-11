@@ -487,7 +487,7 @@ final class ActivityLogRetention
             // 🚫 Refused, never clamped (#668, D-013). "Never" is the way to
             //    keep it longer than ten years, and it is named.
             return $refuse('A number of days can be at most ' . self::HARD_MAX_DAYS . ' (ten years). '
-                . 'To keep the activity log for ever, choose "Never delete" instead. Nothing was saved.', 'above-hard-max');
+                . 'For no time limit, choose "Never delete" instead. Nothing was saved.', 'above-hard-max');
         }
 
         try {
@@ -542,8 +542,12 @@ final class ActivityLogRetention
         return [
             'saved' => true, 'type' => 'success', 'refusal' => '', 'outcome' => 'stored', 'blockedOrganisations' => 0,
             'message' => $days === self::NEVER
-                ? 'Saved. This installation now never deletes activity-log records, and every organisation may '
-                  . 'choose a number of days or "Never delete" for itself.'
+                // #940 round 3: this said "This installation now never deletes activity-log records",
+                // which is untrue of an organisation that has chosen a number of days (D-117).
+                ? 'Saved. This installation now sets no time limit on the activity log. Records that belong to no '
+                  . 'organisation, and those of every organisation that has not chosen a number of days of its own, '
+                  . 'are never deleted; an organisation that has chosen a number of days is still cleared after it, '
+                  . 'and every organisation may choose a number of days or "Never delete" for itself.'
                 : 'Saved. This installation now keeps activity-log records for ' . self::inWords($days)
                   . ', and no organisation may keep them longer.',
         ];

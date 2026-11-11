@@ -268,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST'
                 $alrWho
             );
             $alrFinish('A number of days has to be a whole number from 1 to ' . ActivityLogRetention::HARD_MAX_DAYS
-                . '. To keep the activity log for ever, choose "Never delete" instead. Nothing was saved.', 'danger');
+                . '. For no time limit, choose "Never delete" instead. Nothing was saved.', 'danger');
         }
         $alrDays = (int) $alrRaw;
     }
@@ -462,10 +462,11 @@ if ($isGlobalAdmin === false) {
     <?php endif; ?>
     <div class="card shadow-sm border-primary" id="activity-log-retention" data-activity-log-retention-card="organisation">
         <div class="card-body" data-activity-log-in-force="<?php echo (int) $activityDays; ?>">
-            <p class="small text-muted">
+            <?php // 🗣️ #940 round 3: "keeps every record for ever" said whose: this organisation's. ?>
+            <p class="small text-muted" data-activity-log-explained="organisation">
                 The activity log records who did what, and when. The nightly clear-out deletes records
-                older than the figure below. <strong>&ldquo;Never delete&rdquo;</strong> keeps every record
-                for ever, where this installation allows it. <?php echo htmlspecialchars($alrNeverCost, ENT_QUOTES, 'UTF-8'); ?>
+                older than the figure below. <strong>&ldquo;Never delete&rdquo;</strong> keeps this
+                organisation&rsquo;s records for ever, where this installation allows it. <?php echo htmlspecialchars($alrNeverCost, ENT_QUOTES, 'UTF-8'); ?>
             </p>
             <?php $alrOrganisationForm(); ?>
         </div>
@@ -647,10 +648,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <div class="card shadow-sm border-primary" data-activity-log-retention-card="1">
             <div class="card-body">
                 <h2 class="h6"><i class="fa-solid fa-list-check me-1"></i>How long the activity log is kept</h2>
-                <p class="small text-muted">
+                <?php // 🗣️ #940 round 3: this said "'Never delete' keeps every record for ever". Untrue of
+                      //    the installation's form below: there "Never delete" is the most an organisation may
+                      //    choose (D-117), and an organisation with its own number of days is still cleared
+                      //    after it (measured by the independent check: installation never, organisation 30,
+                      //    and that organisation's 40- to 5000-day rows were deleted). ?>
+                <p class="small text-muted" data-activity-log-explained="installation">
                     The activity log records who did what, and when. The nightly clear-out deletes records
-                    older than the figure below. <strong>&ldquo;Never delete&rdquo;</strong> keeps every
-                    record for ever. <?php echo htmlspecialchars($alrNeverCost, ENT_QUOTES, 'UTF-8'); ?>
+                    older than the figures below. <strong>&ldquo;Never delete&rdquo;</strong> for every
+                    organisation is the most an organisation may choose, not a rule for all: it keeps for
+                    ever the records that belong to no organisation and those of every organisation that has
+                    not chosen a number of days of its own, while an organisation that has chosen a number of
+                    days is still cleared after it. &ldquo;Never delete&rdquo; for one organisation keeps that
+                    organisation&rsquo;s records for ever, where the installation allows it. <?php echo htmlspecialchars($alrNeverCost, ENT_QUOTES, 'UTF-8'); ?>
                 </p>
                 <div class="row g-4">
                     <div class="col-lg-6">
