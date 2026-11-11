@@ -2919,8 +2919,11 @@ class Auth
         //    This is the answer that counts, because the lock is held.)
         if (RateLimiter::isBlocked($ip) === true) {
             self::$localSignInWait = max(1, RateLimiter::lockoutRemaining($ip));
-            // #933: the name's MARK, never the name (RateLimiter::nameMark()).
-            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . RateLimiter::nameMark($identifier));
+            // The typed name stays READABLE here on purpose (D-137, #933): an
+            //    administrator looking into repeated failed sign-ins needs to
+            //    see which name was tried. It is the one place in this file a
+            //    record keeps text somebody typed about a person.
+            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $identifier);
             return false;
         }
 
@@ -2995,7 +2998,7 @@ class Auth
         //    exactly the same way, so this gives nothing away.
         if (RateLimiter::isNameBlocked($countedAs) === true) {
             self::$localSignInWait = max(1, RateLimiter::nameLockoutRemaining($countedAs));
-            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . RateLimiter::nameMark($countedAs));
+            Logger::activity('LoginBlocked', 'Rate-limited login attempt for: ' . $countedAs);
             return false;
         }
 
@@ -3004,19 +3007,20 @@ class Auth
             // ⏱️ Spend the time a real check would take: see NO_ACCOUNT_HASH.
             //    The answer is deliberately not used.
             password_verify($password, self::NO_ACCOUNT_HASH);
-            // 📝 Log the failed attempt (used by RateLimiter). The name's MARK,
-            //    never the name (#933): the limit for one name counts these
-            //    records by their exact words, and a mark counts exactly as the
-            //    name did without keeping an e-mail address readable for as
-            //    long as the log is kept.
-            Logger::activity('LoginFailed', RateLimiter::FAILED_NO_ACCOUNT . RateLimiter::nameMark($countedAs));
+            // 📝 Log the failed attempt (used by RateLimiter). The name stays
+            //    readable on purpose (D-137, #933): the limit for one name
+            //    counts these records by their exact words, and an
+            //    administrator needs to see which name was tried. An erasure
+            //    cannot reach it — a failed attempt names no account — and the
+            //    owner chose that knowingly.
+            Logger::activity('LoginFailed', RateLimiter::FAILED_NO_ACCOUNT . $countedAs);
             return false;
         }
 
         // 🔑 Verify password using PHP's built-in password_verify
         // See: https://www.php.net/manual/en/function.password-verify.php
         if (password_verify($password, $row['passwordHash']) === false) {
-            Logger::activity('LoginFailed', RateLimiter::FAILED_WRONG_PASSWORD . RateLimiter::nameMark($countedAs));
+            Logger::activity('LoginFailed', RateLimiter::FAILED_WRONG_PASSWORD . $countedAs);
             return false;
         }
 

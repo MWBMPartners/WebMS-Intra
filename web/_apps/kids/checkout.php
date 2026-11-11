@@ -68,10 +68,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($ok === false) {
                 $message = '"' . htmlspecialchars($pickupName, ENT_QUOTES, 'UTF-8') . '" is NOT on the authorised pickup list for ' . htmlspecialchars((string) $row['fullName'], ENT_QUOTES, 'UTF-8') . '. Refer to a leader.';
                 $messageClass = 'danger';
-                // #933: never the name typed for the adult collecting. That
-                //    person usually has no account here, so no erasure could
-                //    ever find their name in the log's words.
-                Logger::activity('KidCheckoutBlocked', 'Child #' . $row['childID'] . ' (check-in #' . (int) $row['checkinID'] . '): a name not on the authorised pickup list was refused');
+                // 🛡️ The name typed for the adult who tried to collect the child
+                //    stays READABLE here, on purpose (#933, the D-137 reasoning
+                //    applied to a safeguarding record): a refused collection is
+                //    exactly what a children's worker or the safeguarding lead
+                //    must be able to look into afterwards, and the name is the
+                //    one thing that says who it was. A refused attempt is not
+                //    stored anywhere else — the check-in row records only the
+                //    adult who DID collect — so this line is the only record.
+                //    The cost, knowingly: that person usually has no account
+                //    here, so no erasure can reach their name in these words.
+                //    (A collection that went ahead is recorded by numbers only,
+                //    below: its name is on the check-in row.)
+                Logger::activity('KidCheckoutBlocked', 'Child #' . $row['childID'] . ' tried by "' . $pickupName . '"');
             } else {
                 // 🧾 Who checked the child OUT is written by name as well as
                 //    by number (#703, D-111, migration 272): an erasure keeps

@@ -77,7 +77,6 @@ if ($ok === false) {
     ApiResponse::error('Failed to create task', 500);
 }
 
-// #933: the number only; a title is free text and often names a person.
-Logger::activity('ApiTaskCreate', 'API: created task #' . $newId);
+Logger::activity('ApiTaskCreate', 'API: created task #' . $newId . ' "' . $title . '"');
 
 ApiResponse::success(['taskID' => $newId], 201);

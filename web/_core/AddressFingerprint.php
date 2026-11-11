@@ -7,12 +7,6 @@
  * The ONE place that decides what the portal stores in place of a network
  * address. Never hash an address anywhere else, and never store one.
  *
- * ONE OTHER CALLER, ON PURPOSE (#933): `RateLimiter::nameMark()` passes a
- * sign-in name through of(), behind the prefix "sign-in name|" so a name can
- * never give the same value as an address. It needs exactly this property —
- * a value that tells repeats apart without being readable from the database
- * alone — and a second salted hash would be a second place to keep right.
- *
  * -----------------------------------------------------------------------------
  * WHY A PLAIN SHA-256 IS NOT ENOUGH, MEASURED RATHER THAN ARGUED
  * -----------------------------------------------------------------------------

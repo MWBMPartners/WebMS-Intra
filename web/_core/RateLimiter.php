@@ -64,12 +64,6 @@ class RateLimiter
     public const FAILED_WRONG_PASSWORD = 'Incorrect password for: ';
 
     /**
-     * @var string What a name's MARK begins with in a record (#933). Read it
-     *      as "the sign-in name whose fingerprint is ...". See nameMark().
-     */
-    private const NAME_MARK_PREFIX = 'name ';
-
-    /**
      * @var string The record a completed password reset writes for the
      *      account's name (clearNameFailures()). Failures recorded BEFORE the
      *      newest such record are no longer counted against that name.
@@ -265,7 +259,7 @@ class RateLimiter
     {
         $name = self::nameKey($name);
         if ($name !== '') {
-            Logger::activity(self::NAME_CLEARED_TYPE, self::NAME_CLEARED_PREFIX . self::nameMark($name));
+            Logger::activity(self::NAME_CLEARED_TYPE, self::NAME_CLEARED_PREFIX . $name);
         }
     }
 
@@ -273,58 +267,6 @@ class RateLimiter
     private static function nameKey(string $name): string
     {
         return strtolower(trim($name));
-    }
-
-    /**
-     * 🔏 What a record says IN PLACE OF a sign-in name (#933). The ONE place a
-     *    sign-in name becomes text an activity record may carry.
-     *
-     * WHY. The limit for one name finds its records by their exact words
-     * (nameFailuresSql()), so the name used to be written into the record in
-     * readable text — and a sign-in name is usually an e-mail address. An
-     * erasure empties a record's account number, address and session copy but
-     * keeps its words (#626: a record names its person in `userID`, never in
-     * its words), and an installation may keep the log for ever (D-117). So
-     * every failed sign-in a member ever made kept their e-mail address
-     * readable for as long as the log is kept, erased or not. Most of these
-     * records carry no account number at all (nobody is signed in when a
-     * sign-in fails), so nothing could ever have reached them.
-     *
-     * WHAT IT IS. "name " and the first 16 hex characters of the salted
-     * fingerprint `AddressFingerprint::of()` makes, with "sign-in name|" in
-     * front so a name can never give the same mark as a network address. The
-     * salt is the installation's key file, which is NOT in the database or in a
-     * database backup: somebody holding only the log cannot test a list of
-     * e-mail addresses against it. 16 characters (64 bits) is ample for telling
-     * names apart in a 15-minute window and short enough to read.
-     *
-     * WHAT IT STILL DOES. One name always gives one mark on one installation, so
-     * the counting works exactly as before, and an administrator can still see
-     * that ten failures were for ONE name and from which addresses.
-     *
-     * WHAT IT GIVES UP, knowingly: an administrator can no longer READ which
-     * name was tried. Where an account was involved its number is not written
-     * either, because a failed sign-in may be a stranger guessing and the
-     * account's number would then put the stranger's address on the member's
-     * record (data download, erasure). If that is needed one day, the answer is
-     * a page that computes the mark for a name an administrator types, not
-     * readable names in the log.
-     *
-     * Capitals are folded with mb_strtolower(), so a name typed in capitals of
-     * any alphabet counts as one name. (The database's own comparison folded
-     * accents too; a mark does not. For an account it never mattered, because
-     * the name counted is the account's own user name as stored; for a name
-     * with no account it gives a guesser nothing.)
-     *
-     * WHEN THE KEY FILE CANNOT BE READ AddressFingerprint falls back to the
-     * portal's version as the salt (its own docblock says why), so the mark is
-     * weaker and changes at an upgrade — which resets the counts once, the same
-     * as the 15 minutes after this change is installed.
-     */
-    public static function nameMark(string $name): string
-    {
-        return self::NAME_MARK_PREFIX
-            . substr(AddressFingerprint::of('sign-in name|' . mb_strtolower(trim($name))), 0, 16);
     }
 
     /**
@@ -445,10 +387,8 @@ class RateLimiter
      * and anybody could lock a short name out by failing as a longer one.
      * NOW the record must be exactly one of the two sentences
      * Auth::loginLocal() writes for that name (FAILED_NO_ACCOUNT,
-     * FAILED_WRONG_PASSWORD). Since #933 those sentences carry the name's
-     * MARK (nameMark()), not the name, so capitals are folded by nameMark()
-     * itself and accents are no longer folded at all; see nameMark() for why
-     * that costs nothing.
+     * FAILED_WRONG_PASSWORD). The table's own rules for comparing text still
+     * fold capitals and accents.
      *
      * Failures recorded before the name's newest "count cleared" record are
      * left out: see clearNameFailures().
@@ -457,8 +397,7 @@ class RateLimiter
      * this, so every sign-in try scans the log (as it always has). And for
      * the first 15 minutes after this change is installed, failures recorded
      * the old way under an e-mail address are not counted against the
-     * account. The same is true once more of #933: failures recorded with the
-     * name in readable text are not counted against its mark.
+     * account.
      *
      * @param string $name          Already folded by nameKey().
      * @param int    $windowMinutes Time window in minutes
@@ -501,15 +440,12 @@ class RateLimiter
      */
     private static function nameFailuresValues(string $name): array
     {
-        // #933: the records carry the name's MARK, never the name.
-        $mark = self::nameMark($name);
-
         return [
             'LoginFailed',
-            self::FAILED_NO_ACCOUNT . $mark,
-            self::FAILED_WRONG_PASSWORD . $mark,
+            self::FAILED_NO_ACCOUNT . $name,
+            self::FAILED_WRONG_PASSWORD . $name,
             self::NAME_CLEARED_TYPE,
-            self::NAME_CLEARED_PREFIX . $mark,
+            self::NAME_CLEARED_PREFIX . $name,
         ];
     }
 

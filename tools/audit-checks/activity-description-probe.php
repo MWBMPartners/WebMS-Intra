@@ -11,7 +11,8 @@
  * times, #494 and #763 among them) and prints ONE JSON document: for every
  * call to `Logger::activity(` (written `Logger::`, `Portal\Core\Logger::` or
  * `\Portal\Core\Logger::`), the names its SECOND argument — the description —
- * is built from.
+ * is built from, and the text of its FIRST argument (the record's type), so
+ * an exception can name the one record it covers rather than a whole file.
  *
  * WHAT A "NAME" IS HERE. Every variable (`$fullName`), every array key written
  * as a literal (`$row['emailAddress']` gives `row` AND `emailAddress`), every
@@ -22,10 +23,9 @@
  *   - anything after an `(int)`, `(float)` or `(bool)` cast — the cast's own
  *     operand only (a variable with its subscripts, or one bracketed group);
  *   - the arguments of count(), intval(), strlen(), mb_strlen(),
- *     number_format(), round(), abs(), max(), min() and array_sum(), which
- *     answer a number;
- *   - the arguments of RateLimiter::nameMark(), which turns a sign-in name
- *     into a salted fingerprint (#933) — that is the very cure;
+ *     number_format(), round(), abs() and array_sum(), which answer a number
+ *     whatever they are given. (max() and min() are NOT on the list: they
+ *     answer one of their arguments, so max($name, '') is the name.)
  *   - the arguments of parse_url(..., PHP_URL_HOST), which answers only the
  *     host of an address. Any other parse_url() is NOT left out.
  *
@@ -55,7 +55,7 @@ if ($argc < 2 || is_dir($argv[1]) === false) {
 $root = rtrim((string) realpath($argv[1]), DIRECTORY_SEPARATOR);
 
 /** Function names whose arguments become a number, so cannot carry text. */
-const NUMBER_FUNCTIONS = ['count', 'intval', 'strlen', 'mb_strlen', 'number_format', 'round', 'abs', 'max', 'min', 'array_sum'];
+const NUMBER_FUNCTIONS = ['count', 'intval', 'strlen', 'mb_strlen', 'number_format', 'round', 'abs', 'array_sum'];
 
 /** Tokens that are not code. */
 function isNoise(mixed $t): bool
@@ -183,8 +183,7 @@ function namesIn(array $toks): array
             $viaColons = $p >= 0 && is_array($toks[$p]) === true && $toks[$p][0] === T_DOUBLE_COLON;
             if ($isCall === true) {
                 $fn = strtolower($t[1]);
-                if (($viaArrow === false && $viaColons === false && in_array($fn, NUMBER_FUNCTIONS, true) === true)
-                    || ($viaColons === true && $fn === 'namemark')) {
+                if ($viaArrow === false && $viaColons === false && in_array($fn, NUMBER_FUNCTIONS, true) === true) {
                     $i = skipGroup($toks, $after) - 1;
                     continue;
                 }
@@ -329,9 +328,14 @@ foreach ($files as $path => $info) {
             }
         }
         $bare = count($desc) === 1 && is_array($desc[0]) === true && $desc[0][0] === T_VARIABLE;
+        $typeText = '';
+        foreach ($args[0] ?? [] as $t) {
+            $typeText .= textOf($t);
+        }
         $out[] = [
             'file'        => $rel,
             'line'        => $toks[$i][2],
+            'type'        => trim((string) preg_replace('/\s+/', ' ', $typeText)),
             'names'       => array_values(array_unique(namesIn($desc))),
             'passThrough' => $bare === true && $scope !== null && in_array(substr($desc[0][1], 1), $scope['params'], true) === true,
             'scope'       => $scope === null ? '' : $scope['name'],

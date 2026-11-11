@@ -11,12 +11,14 @@
  * browser name and session copy, and keeps its DESCRIPTION as written (#626:
  * a record names its person in `userID`, never in its words). Under D-117 an
  * installation may keep the log for ever. Until #933, 53 writers put a
- * person's details into those words — a sign-in name (usually an e-mail
- * address) on every failed sign-in, the e-mail address on every password
+ * person's details into those words — the e-mail address on every password
  * reset and provider link, a registrant's name, a new member's name and
- * address — so those details outlived every erasure. Many of the records
- * belong to whoever ACTED (an administrator), so erasing the person in the
- * words could never reach them at all.
+ * address, among others — so those details outlived every erasure. Many of
+ * the records belong to whoever ACTED (an administrator), so erasing the
+ * person in the words could never reach them at all. 41 now write numbers and
+ * fixed words. A failed sign-in keeps the sign-in name that was typed,
+ * readable, on purpose (the owner, D-137), and an organisation's own labels
+ * stay (D-138).
  *
  * Nothing fails while that is so: every page works. So this file drives the
  * real pages and reads what they stored.
@@ -29,8 +31,8 @@
  * file of the portal is changed in the copy. Then:
  *
  *   A  A wrong password for a real person, and a made-up name: each failure
- *      record names the name by its MARK ("name" and 16 hex characters), and
- *      neither the sign-in name nor the e-mail address is in it.
+ *      record keeps the sign-in name, readable (D-137), and nothing else of the
+ *      person — not their full name, not their e-mail address.
  *   B  The same person asks for a password reset by e-mail address: the
  *      record carries their account number in its words AND in its own
  *      column (so an erasure reaches it), and not the address.
@@ -50,14 +52,15 @@
  *      the scratch copy's own start-up, exactly as a page does.
  *   Z  Every record this run wrote, every column but `userID` and
  *      `visitorIP`: none holds any of the names or e-mail addresses the run
- *      typed. (`visitorIP` is the one column made to hold a network address,
+ *      typed, except the sign-in names D-137 keeps in the words of a failed
+ *      sign-in. (`visitorIP` is the one column made to hold a network address,
  *      and an erasure empties it.)
  *
  * WHAT IT CANNOT SHOW
  * -------------------
- * - The other 46 changed writers are not driven; they are held by
- *   `tools/audit-checks/check_activity_descriptions_personal.py`, which reads
- *   the code (and names the nine it cannot see).
+ * - The other changed writers are not driven (this drives five of the 41);
+ *   they are held by `tools/audit-checks/check_activity_descriptions_personal.py`,
+ *   which reads the code and names the three it cannot see.
  * - A real Microsoft or Google sign-in (part G calls the method instead).
  * - Records written BEFORE #933. No customer installation exists yet (D-135),
  *   so there are none; on an installation that had them, they would stay
@@ -347,10 +350,17 @@ function written(int $mark, string $type): array
     return q('SELECT * FROM tblActivityLogs WHERE logID > ? AND activityType = ? ORDER BY logID', 'is', [$mark, $type]);
 }
 
-/** The first personal text found in one record's words, or '' when none is. */
-function personalIn(string $words): string
+/**
+ * The first personal text found in one record's words, or '' when none is.
+ *
+ * @param list<string> $allowed texts kept on purpose in THIS record (D-137)
+ */
+function personalIn(string $words, array $allowed = []): string
 {
     foreach (PERSONAL_TEXTS as $text) {
+        if (in_array($text, $allowed, true) === true) {
+            continue;
+        }
         if (str_contains(mb_strtolower($words), mb_strtolower($text)) === true) {
             return $text;
         }
@@ -493,29 +503,35 @@ $signIn    = static function (string $who, string $login, string $pw) use ($jarO
 };
 
 // =============================================================================
-head('A. A failed sign-in names the name by its mark');
+head('A. A failed sign-in keeps the name that was typed, and only that (D-137)');
 // =============================================================================
 $mark = lastLog();
 $signIn('stranger1', PIA_LOGIN, 'wrong-' . bin2hex(random_bytes(4)));
 $signIn('stranger2', MADE_UP_LOGIN, 'wrong-' . bin2hex(random_bytes(4)));
 $failed = written($mark, 'LoginFailed');
 $words  = array_column($failed, 'activityDescription');
+// The owner decided (D-137, 11 November 2026) that a failed sign-in keeps the
+// sign-in name READABLE: an administrator looking into repeated failures needs
+// to see which name was tried, and the limit for one name matches these exact
+// words. #933's first build replaced the name with a fingerprint; that was
+// withdrawn. So A1 pins the readable words, and A2 pins that NOTHING ELSE
+// about the person rides along with them.
 ok(
-    'A1 a wrong password for a real person writes "Incorrect password for: name <16 hex>", and a made-up name "Failed login attempt for: name <16 hex>"',
+    'A1 a wrong password for a real person writes "Incorrect password for: <the account\'s sign-in name>", and a made-up name "Failed login attempt for: <what was typed>" (D-137)',
     count($failed) === 2
-        && preg_match('/^Incorrect password for: name [0-9a-f]{16}$/', (string) ($words[0] ?? '')) === 1
-        && preg_match('/^Failed login attempt for: name [0-9a-f]{16}$/', (string) ($words[1] ?? '')) === 1,
+        && ($words[0] ?? '') === 'Incorrect password for: ' . PIA_LOGIN
+        && ($words[1] ?? '') === 'Failed login attempt for: ' . MADE_UP_LOGIN,
     json_encode($words)
 );
 ok(
-    'A2 neither record holds the sign-in name, the person\'s e-mail address or the made-up name typed',
-    count($failed) === 2 && personalIn(implode(' | ', $words)) === '',
+    'A2 neither record holds the person\'s full name or e-mail address: only the sign-in name D-137 keeps',
+    count($failed) === 2 && personalIn(implode(' | ', $words), [PIA_LOGIN, MADE_UP_LOGIN]) === '',
     json_encode($words)
 );
 ok(
-    'A3 two different names give two different marks (so the limit for one name still counts each name on its own)',
-    count($failed) === 2 && substr((string) $words[0], -16) !== substr((string) $words[1], -16),
-    json_encode($words)
+    'A3 both name nobody in their own column, so an erasure cannot reach them: the cost D-137 accepted, pinned so a change to it is a decision',
+    count($failed) === 2 && $failed[0]['userID'] === null && $failed[1]['userID'] === null,
+    json_encode(array_column($failed, 'userID'))
 );
 
 // =============================================================================
@@ -682,14 +698,19 @@ foreach ($rows as $row) {
         if (in_array($column, ['userID', 'visitorIP'], true) === true || $value === null) {
             continue;
         }
-        $found = personalIn((string) $value);
+        // D-137: a failed or rate-limited sign-in keeps the sign-in name in
+        //    its words, and nothing else of the person.
+        $keptHere = (in_array($row['activityType'], ['LoginFailed', 'LoginBlocked'], true) === true && $column === 'activityDescription')
+            ? [PIA_LOGIN, MADE_UP_LOGIN]
+            : [];
+        $found = personalIn((string) $value, $keptHere);
         if ($found !== '') {
             $leaks[] = $row['activityType'] . '.' . $column . ' holds "' . $found . '"';
         }
     }
 }
 ok(
-    'Z1 ' . count($rows) . ' records were written by this run, and none holds a name, e-mail address or sign-in name it typed',
+    'Z1 ' . count($rows) . ' records were written by this run, and none holds a name, e-mail address or sign-in name it typed, except the sign-in names D-137 keeps in the failed sign-ins\' words',
     count($rows) >= 10 && $leaks === [],
     'records: ' . count($rows) . '; ' . implode('; ', $leaks)
 );

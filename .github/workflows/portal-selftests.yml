@@ -1136,9 +1136,10 @@ jobs:
       #    words. An erasure empties a record's account number and address
       #    but keeps its words, and an installation may keep the log for ever
       #    (D-117), so a name or e-mail address written there outlived every
-      #    erasure. This drives the main writers over HTTP (failed sign-in,
-      #    password reset, event registration, a new account, the member list,
-      #    a provider link) and reads every column of every record back.
+      #    erasure. This drives the main writers over HTTP (password reset,
+      #    event registration, a new account, the member list, a provider link,
+      #    and a failed sign-in, which keeps the typed name on purpose, D-137)
+      #    and reads every column of every record back.
       #    It deletes every activity record written while it runs, so it has
       #    a database of its own. Wired with the test, not later (#646).
       - name: 'Activity record words self-test (#933)'

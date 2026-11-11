@@ -112,13 +112,10 @@ if ($taskId > 0) {
         $stmt->execute();
         $stmt->close();
     }
-    // #933: a task's title is free text and often names a person, so the
-    //    record carries the task's NUMBER, never its title.
-    Logger::activity('TaskUpdated', 'Updated task #' . $taskId, $userId);
+    Logger::activity('TaskUpdated', 'Updated task: ' . $title, $userId);
     $_SESSION['flash_msg']  = 'Task updated.';
 } else {
     // 📋 Create
-    $newTaskId = 0;
     $stmt = $mysqli->prepare(
         'INSERT INTO tblTasks (siteID, title, description, priority, dueDate, assignedToID, '
         . 'createdByID, reminderDate, isRecurring, recurrenceType, recurrenceInterval, recurrenceEndDate) '
@@ -132,11 +129,9 @@ if ($taskId > 0) {
             $recurrenceType, $recurrenceInterval, $recurrenceEndDate
         );
         $stmt->execute();
-        $newTaskId = (int) $stmt->insert_id;
         $stmt->close();
     }
-    // #933: the new task's NUMBER, never its title (see TaskUpdated above).
-    Logger::activity('TaskCreated', 'Created task #' . $newTaskId, $userId);
+    Logger::activity('TaskCreated', 'Created task: ' . $title, $userId);
     $_SESSION['flash_msg']  = 'Task created.';
 }
 

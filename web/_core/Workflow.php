@@ -409,11 +409,7 @@ class Workflow
 
             $db->commit();
 
-            // #933: the reason is typed by a person and may name somebody, so
-            //    it is not copied into the activity log's words, which an
-            //    erasure cannot reach. It is on the instance's own history
-            //    when a step could be found for it (recordAction() above).
-            Logger::activity('WorkflowCancelled', 'Instance #' . $instanceId . ' cancelled' . ($reason !== '' ? ' (a reason was given)' : ''), $actorId);
+            Logger::activity('WorkflowCancelled', 'Instance #' . $instanceId . ' cancelled: ' . $reason, $actorId);
             Logger::audit(
                 'tblWorkflowInstances',
                 $instanceId,

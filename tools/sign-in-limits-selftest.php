@@ -1283,21 +1283,7 @@ head('A. One record per refused try');
 // =============================================================================
 $rows = q("SELECT activityDescription FROM tblActivityLogs WHERE visitorIP = ? AND activityType = 'LoginFailed'", 's', [ip(11)]);
 ok('a wrong password for a real name is answered "Invalid credentials" and writes exactly ONE failure record', said($first) === 'danger: Invalid credentials.' && count($rows) === 1, describe($first) . '; records: ' . count($rows));
-// #933: the record used to carry the sign-in name in readable text, and this
-//    check required it ("the limit for one name depends on it"). The limit
-//    still depends on the record naming the name, but by its MARK
-//    (RateLimiter::nameMark(): "name " and 16 hex characters of a salted
-//    fingerprint), so the record keeps nobody's e-mail address readable for as
-//    long as the log is kept. Both halves are asked: the exact shape, and that
-//    the name itself is NOT there. Sections C onwards prove the counting still
-//    works by the mark (ten failures for one name, a longer name, capitals).
-ok(
-    'that one record names the person by a MARK, never in readable text (the limit for one name depends on it; #933)',
-    count($rows) === 1
-        && preg_match('/^Incorrect password for: name [0-9a-f]{16}$/', (string) $rows[0]['activityDescription']) === 1
-        && stripos((string) $rows[0]['activityDescription'], login('alpha')) === false,
-    implode(' | ', array_column($rows, 'activityDescription'))
-);
+ok('that one record names the person (the limit for one name depends on it)', count($rows) === 1 && str_contains((string) $rows[0]['activityDescription'], login('alpha')) === true, implode(' | ', array_column($rows, 'activityDescription')));
 $answer = tryPassword(ip(12), 'sil-nobody-here', 'wrong-' . bin2hex(random_bytes(4)));
 ok('a made-up name gets the same words and also writes exactly one', said($answer) === 'danger: Invalid credentials.' && records(ip(12), 'LoginFailed') === 1, describe($answer) . '; records: ' . records(ip(12), 'LoginFailed'));
 $answer = tryPassword(ip(13), login('alpha'), '');
