@@ -191,10 +191,16 @@ if ($ok === false) {
     // #933: never the visitor's network address in the words. Logger already
     //    keeps it in the record's own column (visitorIP) and the request's own
     //    row has a copy (submitterIP), so a third copy in the words added
-    //    nothing. Be exact about what removes them: this visitor is anonymous,
-    //    so the record names nobody and an erasure cannot find it; the activity
-    //    log's own clear-out removes it (or nothing does, where the log is kept
-    //    for ever, D-117).
+    //    nothing. Be exact about what removes them, because it depends on who
+    //    sent it. A visitor who is not signed in: the record names nobody, an
+    //    erasure cannot find it, and only the activity log's own clear-out
+    //    removes it (or nothing does, where the log is kept for ever, D-117). A
+    //    member who IS signed in: this page does not refuse them, and
+    //    Logger::activity() puts the session's account in `userID` when none is
+    //    passed (#626), so this "anonymous" request's record names their account
+    //    - which an erasure then reaches, and which an administrator reading the
+    //    log can see. Whether an anonymous request should be tied to an account
+    //    at all is #988; this comment only says what happens today.
     Logger::activity('PrayerRequestAnonSubmitted', 'Anonymous request #' . $newId . ' submitted');
 
     // 🙏 Opt-in round-robin auto-assign (#311, migration 148) — no-op unless

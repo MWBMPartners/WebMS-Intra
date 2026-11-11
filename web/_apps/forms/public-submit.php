@@ -204,9 +204,13 @@ if ($newId > 0) {
     // #933: never the visitor's network address in the words. Logger already
     //    keeps it in the record's own column (visitorIP) and the response row has
     //    its own copy, so a third copy in the words added nothing. Be exact about
-    //    what removes them: this visitor is not signed in, so the record names
-    //    nobody and an erasure cannot find it; the activity log's own clear-out
-    //    removes it (or nothing does, where the log is kept for ever, D-117).
+    //    what removes them, because it depends on who sent the form. A visitor
+    //    who is not signed in: the record names nobody, an erasure cannot find
+    //    it, and only the activity log's own clear-out removes it (or nothing
+    //    does, where the log is kept for ever, D-117). A member who IS signed in:
+    //    this page does not refuse them, and Logger::activity() puts the session's
+    //    account in `userID` when none is passed (#626), so the record names
+    //    their account and an erasure of that account empties the address.
     Logger::activity('FormResponsePublic', 'Form #' . $formId . ' response #' . $newId . ' from a visitor');
 } else {
     Logger::errorPlatform('MySQL', 'Error', 'FORM_PUBLIC_RESPONSE_FAIL', 'saveResponse() returned 0', 'formID=' . $formId);

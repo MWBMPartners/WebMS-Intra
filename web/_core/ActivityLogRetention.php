@@ -40,12 +40,19 @@
  * nobody at all (check round 3 of #932 measured well under a third of the
  * several hundred `Logger::activity(` calls naming a person). Of those that
  * do name somebody, most do so by account number; a few by name or e-mail
- * address. Since #933 those few are deliberate: a failed or rate-limited
- * sign-in keeps the sign-in name that was typed, often an e-mail address
- * (Auth.php, `LoginFailed` / `LoginBlocked`, D-137); a refused child
- * collection keeps the name typed for the adult (kids/checkout.php,
- * `KidCheckoutBlocked`); and an organisation's own labels stay, a task's title
- * among them, which can name somebody (D-138). #933 changed 41 others to
+ * address. Since #933 the deliberate ones are exactly the name-bearing
+ * entries of `ON_PURPOSE` in
+ * tools/audit-checks/check_activity_descriptions_personal.py, plus D-138: a
+ * failed or rate-limited sign-in, and the matching "count cleared" record,
+ * keep the sign-in name that was typed, often an e-mail address (Auth.php,
+ * RateLimiter.php, D-137); a refused child collection keeps the name typed for
+ * the adult (kids/checkout.php, `KidCheckoutBlocked`); a change to the
+ * organisation's support e-mail address records the address
+ * (`PortalAddressSaved` - an organisation's setting that can be a person's own
+ * mailbox, not a D-138 label); and an organisation's own labels stay, a task's
+ * title among them, which can name somebody (D-138). That is the deliberate
+ * list, not a promise that nothing else does: the gate's header says what it
+ * cannot see. #933 changed 41 others to
  * numbers only — `UserCreated`, the six password-reset records,
  * `EventInviteSent`, the children's-profile records, an event registration
  * received and a sign-in provider linked or unlinked among them — so records

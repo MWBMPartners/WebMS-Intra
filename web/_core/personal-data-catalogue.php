@@ -1571,8 +1571,11 @@ return [
         //    and either level may choose to keep the log for ever - the
         //    organisation only where the installation has. #933: a record's
         //    words can still give a name or an e-mail address (a failed
-        //    sign-in, D-137; a refused child collection; an organisation's
-        //    labels, D-138), and under "for ever" they last for ever.
+        //    sign-in, D-137; a refused child collection; a change to the
+        //    organisation's support e-mail address; an organisation's labels,
+        //    D-138 - the deliberate list, which GdprEraser's comment above
+        //    its activity-log reason ties to the gate's ON_PURPOSE), and
+        //    under "for ever" they last for ever.
         'reason'   => 'Kept for running and repairing the portal, until the nightly clear-out deletes it after'
                     . ' audit.retentionDays for the organisation it was recorded under (365 days unless changed;'
                     . ' that organisation\'s own administrator sets it, within the limit for the whole installation),'
@@ -1584,8 +1587,8 @@ return [
                     . ' still cleared after it. On'
                     . ' the person\'s own records the account number, the address, the browser, the headers and'
                     . ' the session details are removed, but what each record SAYS is kept as written for as long'
-                    . ' as the record is: it can still name them, give their e-mail address or give their account'
-                    . ' number: a failed sign-in, for instance, keeps the sign-in name that was typed, which is'
+                    . ' as the record is, so it can still name them, give their e-mail address or give their account'
+                    . ' number. A failed sign-in, for instance, keeps the sign-in name that was typed, which is'
                     . ' often an e-mail address (D-137). Records other people made can mention them too',
         'columns'  => ['userID', 'requestHeaders', 'sessionID', 'visitorIP', 'userAgent', 'sessionDataSnapshot'],
     ],

@@ -341,10 +341,16 @@ $alrSiteName  = (string) (Site::current()['siteName'] ?? '');
 // What "never" costs, in words no stronger than is true: an erasure unlinks a
 // person's records but does not rewrite descriptions. Most descriptions name
 // nobody; of those that name somebody, most do so by account number, and a few
-// by name or e-mail address — since #933 on purpose only: a failed or
-// rate-limited sign-in keeps the typed sign-in name (D-137), a refused child
-// collection keeps the typed name, and an organisation's labels such as a
-// task's title stay (D-138). (UserCreated, the password-reset records,
+// by name or e-mail address. Since #933 the deliberate ones are exactly the
+// name-bearing entries of ON_PURPOSE in
+// tools/audit-checks/check_activity_descriptions_personal.py, plus D-138: a
+// failed or rate-limited sign-in and its "count cleared" record keep the typed
+// sign-in name (D-137), a refused child collection keeps the typed name, a
+// change to the organisation's support e-mail address records the address
+// (PortalAddressSaved; it can be a person's own mailbox), and an
+// organisation's labels such as a task's title stay (D-138). That is the
+// deliberate list, not a promise that nothing else does: the gate's header
+// says what it cannot see. (UserCreated, the password-reset records,
 // EventInviteSent, the children's-profile records and the provider link and
 // unlink records named people before #933 and are numbers only now; EventSubmitted
 // carried an address only before #963.) ActivityLogRetention's header says the

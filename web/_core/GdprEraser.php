@@ -1260,13 +1260,22 @@ class GdprEraser
              //    examples this comment used to give, an event registration's
              //    "(<their full name>)" and a sign-in provider's e-mail address on
              //    `AccountLink` / `AccountUnlink`, are among them. What still keeps
-             //    a name or address in its words, on purpose: a failed or
-             //    rate-limited sign-in (the sign-in name typed, D-137), a refused
-             //    child collection (the name typed, kids/checkout.php), and an
-             //    organisation's own labels such as a task's title (D-138); and
-             //    records other people made still give a person's NUMBER ("Added
-             //    user #N to site #M", admin/sites/users.php). The sentence's
-             //    example is therefore a failed sign-in.
+             //    a name or address in its words ON PURPOSE is exactly the
+             //    name-bearing entries of `ON_PURPOSE` in
+             //    tools/audit-checks/check_activity_descriptions_personal.py, plus
+             //    D-138: a failed or rate-limited sign-in and the matching "count
+             //    cleared" record (the sign-in name typed, D-137); a refused child
+             //    collection (the name typed, kids/checkout.php); the
+             //    organisation's support e-mail address when an administrator
+             //    changes it (`PortalAddressSaved` - an organisation's setting,
+             //    but it can be a person's own mailbox, and it is not a D-138
+             //    label); and an organisation's own labels such as a task's title
+             //    (D-138). That is the deliberate list, not a promise that nothing
+             //    else does: the gate's header says what it cannot see, and
+             //    records written before #933 still say what they said. Records
+             //    other people made still give a person's NUMBER ("Added user #N
+             //    to site #M", admin/sites/users.php). The sentence's example is
+             //    therefore a failed sign-in.
              // 🗣️ #940 (D-117, D-118, D-119): the activity log may now be kept
              //    for ever, by the installation's choice or, where the
              //    installation allows it, an organisation's; and an

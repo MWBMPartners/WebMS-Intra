@@ -42,9 +42,14 @@ if (class_exists(Captcha::class) === true && Captcha::isConfigured() === true) {
         //    address)"; a value that is not text at all (`slug[]=x`) too.
         //    Stripping the other characters instead was tried and rejected: it
         //    kept the letters of a typed name ("Pia Privacy" became
-        //    "PiaPrivacy"). What this still lets through, said plainly: a name
-        //    written in an event address's own shape ("pia-privacy") is
-        //    indistinguishable from one, and is kept.
+        //    "PiaPrivacy"). What this still lets through, said plainly: anything
+        //    that happens to have an event address's shape is indistinguishable
+        //    from one and is kept - a name written that way ("pia-privacy"), and
+        //    a telephone number (07700900123 is letters-and-digits only, so it
+        //    fits). The statement below is pinned whole by
+        //    tools/audit-checks/check_activity_descriptions_personal.py
+        //    (TEXT_PINS), because the description is built from a local
+        //    variable that check cannot otherwise see through.
         $slugTried = (is_string($_POST['slug'] ?? null) === true
                 && preg_match('/^[a-z0-9][a-z0-9\-]{0,79}$/i', trim($_POST['slug'])) === 1)
             ? trim($_POST['slug'])

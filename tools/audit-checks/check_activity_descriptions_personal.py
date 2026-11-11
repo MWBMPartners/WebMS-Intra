@@ -57,6 +57,10 @@ times — #494, #763.) This file then fails on:
      exactly one of its own parameters — that is not named in
      PASS_THROUGH_ON_PURPOSE. What reaches such a call is decided by its
      callers, which the probe does not follow, so each one is a decision.
+  4. A statement in TEXT_PINS that is no longer exactly as pinned (as `php -w`
+     prints it), or appears more or fewer times than once. This covers, for
+     the ONE place pinned so far, the blind spot below: a value built in a
+     local variable first (the event-registration bot check's `$slugTried`).
 
 Both lists of exceptions FAIL BOTH WAYS: an entry that no longer matches
 anything is reported too, because a stale exception reads as a reason nobody
@@ -183,6 +187,29 @@ PASS_THROUGH_ON_PURPOSE = {
         "counts and the restore's own outcome words",
 }
 
+# Statements pinned WHOLE, as text, where a description is built from a local
+# variable this check cannot see through (its stated blind spot). Each value is
+# the statement as `php -w` prints it - comments and spacing removed by PHP
+# itself, so a reworded comment or a re-indent does not matter and a changed
+# statement does. It must appear exactly ONCE in the file: a dead copy above
+# the live one would otherwise satisfy it.
+#
+# The event-registration bot check (#933 round 3): the visitor's `slug` reaches
+# the log only through `$slugTried`, and deleting the `preg_match()` that keeps
+# it to an event address's shape left every other check green - measured by
+# the independent check of round 3, and by this file's own self-test now.
+# Pinned with the record it feeds, so the description cannot be pointed back at
+# the raw request either. Changing either statement on purpose means changing
+# this pin in the same commit; that is the point.
+TEXT_PINS = {
+    "_apps/calendar/event-register-save.php": [
+        "$slugTried = (is_string($_POST['slug'] ?? null) === true && "
+        "preg_match('/^[a-z0-9][a-z0-9\\-]{0,79}$/i', trim($_POST['slug'])) === 1) "
+        "? trim($_POST['slug']) : '(not an event address)'; "
+        "Logger::activity('EventRegistrationCaptchaFailed', 'Slug=' . $slugTried);",
+    ],
+}
+
 
 class CouldNotRun(Exception):
     """The probe could not give an answer; never a clean result."""
@@ -207,6 +234,31 @@ def probe(web: str) -> list[dict]:
         # the wrong folder or has stopped recognising the call.
         raise CouldNotRun(f"the probe found only {len(calls)} calls to Logger::activity()")
     return calls
+
+
+def text_pin_findings(web: str) -> list[str]:
+    """Every TEXT_PINS statement must appear exactly once in its file, as PHP strips it."""
+    php = shutil.which("php")
+    if php is None:
+        raise CouldNotRun("there is no `php` on this machine, and the text pins ask `php -w`")
+    faults: list[str] = []
+    for rel, statements in TEXT_PINS.items():
+        path = os.path.join(web, rel.replace("/", os.sep))
+        try:
+            done = subprocess.run([php, "-w", path], capture_output=True, timeout=TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            raise CouldNotRun(f"`php -w {rel}` did not finish") from exc
+        if done.returncode != 0 or done.stdout == b"":
+            raise CouldNotRun(f"`php -w` could not read web/{rel}")
+        code = done.stdout.decode("utf-8", "replace")
+        for statement in statements:
+            count = code.count(statement)
+            if count != 1:
+                faults.append(f"web/{rel}: the pinned statement appears {count} time(s), not once: "
+                              f"{statement[:160]}... It guards what reaches an activity record's words "
+                              "through a local variable this check cannot see through. If the change "
+                              "is deliberate, change TEXT_PINS in the same commit.")
+    return faults
 
 
 def findings(calls: list[dict]) -> list[str]:
@@ -310,6 +362,30 @@ def self_test() -> int:
             print(f"REFUSED — the self-test could not run the probe: {why}")
             return 1
         ok("the real portal, unchanged, has no findings", clean == [], "\n".join(clean))
+        pins_clean = text_pin_findings(copy)
+        ok("the real portal's pinned statements are all present, once each", pins_clean == [], "\n".join(pins_clean))
+
+        # The slug plant (#933 round 4): delete the shape test from the
+        # assignment, leaving the variable and the record as they are. Every
+        # name-based rule stays green on this, which is why the pin exists.
+        register = os.path.join(copy, "_apps", "calendar", "event-register-save.php")
+        with open(register, encoding="utf-8") as handle:
+            reg_source = handle.read()
+        shape_test = "\n                && preg_match('/^[a-z0-9][a-z0-9\\-]{0,79}$/i', trim($_POST['slug'])) === 1)"
+        if reg_source.count(shape_test) != 1:
+            ok("the slug plant found the shape test it removes", False,
+               f"the shape test appears {reg_source.count(shape_test)} times")
+        else:
+            with open(register, "w", encoding="utf-8") as handle:
+                handle.write(reg_source.replace(shape_test, ")", 1))
+            ok("the slug plant (shape test deleted) leaves the name rules green - the blind spot the pin covers",
+               findings(probe(copy)) == [])
+            pinned = text_pin_findings(copy)
+            ok("the slug plant is reported by the text pin", any("event-register-save.php" in f for f in pinned),
+               "\n".join(pinned))
+            with open(register, "w", encoding="utf-8") as handle:
+                handle.write(reg_source)
+            ok("and with the file put back, the pin is green again", text_pin_findings(copy) == [])
 
         folder = os.path.join(copy, "_apps", "zz933selftest")
         os.makedirs(folder)
@@ -376,7 +452,12 @@ def main() -> int:
         print(f"  • check_activity_descriptions_personal: COULD NOT RUN — {why}. "
               "This is a failure, not a clean result.")
         return 1
-    faults = findings(calls)
+    try:
+        faults = findings(calls) + text_pin_findings(web)
+    except CouldNotRun as why:
+        print(f"  • check_activity_descriptions_personal: COULD NOT RUN — {why}. "
+              "This is a failure, not a clean result.")
+        return 1
     if faults:
         print("Activity-record words built from a person's details (#933):")
         for fault in faults:
@@ -384,7 +465,8 @@ def main() -> int:
         return 1
     print(f"OK: {len(calls)} calls to Logger::activity() read; no description is built "
           "from a name on the personal list or from unconverted request text, other than "
-          f"the {len(ON_PURPOSE)} named exceptions, and every pass-through wrapper is named. "
+          f"the {len(ON_PURPOSE)} named exceptions, every pass-through wrapper is named, and "
+          f"{sum(len(v) for v in TEXT_PINS.values())} pinned statement(s) are as pinned. "
           "(A presence check: see this file's header for what it cannot see.)")
     return 0
 
