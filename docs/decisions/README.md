@@ -188,7 +188,9 @@ appended with its real date and a note that it was added later.
 | [D-130](130-looking-at-expense-records-is-recorded.md) | 2026-11-11 | Looking at expense records is written to the activity log | superseded in part by D-132 |
 | [D-131](131-a-retyped-home-marked-not-anybodys-home-is-a-known-limit.md) | 2026-11-11 | A home emptied and typed back in as 'not anybody's home' is a known limit, with a warning | in force |
 | [D-132](132-a-look-at-expense-records-that-showed-none-is-not-recorded.md) | 2026-11-11 | A look at expense records that showed no claim is not recorded | in force |
+| [D-133](133-the-installation-and-each-organisation-choose-their-country.md) | 2026-11-11 | The installation and each organisation choose their own country; nothing defaults to Great Britain | in force |
+| [D-134](134-an-approved-suggestion-e-mails-the-person-who-suggested-it.md) | 2026-11-11 | An approved event suggestion e-mails the person who suggested it | in force |
 
-*132 decisions. This index is checked against the folder by
+*134 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
