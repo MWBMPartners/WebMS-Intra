@@ -163,7 +163,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
 > measured on 9.7.4: ERROR 1305)**: every named lock was built with `SHA1()`,
 > so on 9.7 nobody could sign in with a password. Write `LEFT(SHA2(…, 256),
 > 40)`; `tools/audit-checks/check_no_removed_sql_functions.py` is the hard
-> gate. Still open: on 9.7 a BOUND impossible date reads as a real one (#892).
+> gate. A BOUND impossible date reads as a real one on 9.7: every site that relied on the database refusing one now checks in PHP first (#891, #892, #951 — `Giving::isRealDay()`; use `>= ? AND <= ?`, not `BETWEEN`, over a range that may hold one).
 >
 > **MySQL 8.0 AND MariaDB 10.6 STAY ACCEPTED, WITH A WARNING — the owner's
 > decision, 3 November 2026. DO NOT "TIDY" `MIN_MYSQL` OR `MIN_MARIADB`
@@ -448,6 +448,12 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   builder. Strictest of installation, EVERY organisation the member belongs to, and their own
   choice; for a map, both people. Unreadable is `no`. Guards:
   `check_outside_services_gated.py` (presence) and `tools/outside-services-selftest.php` (behaviour).
+  A small group's meeting place is its NAMED host's home, or marked not anybody's home (#809; D-120, D-123,
+  D-124, D-128, D-131): `OutsideServices::allowsMeetingPlaceMap()` decides each place's map by its own host,
+  `SmallGroups::hostFromPost()` / `placeAgreementAfterSave()` record host and agreement, and
+  `SmallGroups::whyHostChangeRefused()` is the ONE rule that only the host may change the host or the mark.
+  Expense receipts are opened only through `expenses/receipt` (#867), which asks the claim page's rule
+  and holds none of its own; every look at expense records is logged as numbers only (D-130, D-132).
   The technical record is DEV_NOTES.md, "Outside services in three tiers (#778)".
 - **The public website, for events (#493 P1; D-057, D-077, D-078, D-080, D-081).**
   `EventVisibility::where()` in "website" mode is the ONE rule for which events the public website lists
@@ -467,7 +473,9 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   door must send rather than building its own. Test: section W of `tools/public-website-tick-selftest.php`.
   `Portal\Core\PublicDoor` is the ONE gate for the public door's feeds and media (#493 P4a; D-056, D-097,
   D-098): it reads only `Site::doorSiteId()`, which `Site::preDetect()` decides from the address alone before
-  any session, and `PublicDoor::addressFor()` is the ONE place a door address is built. Every web-root file
+  any session, and `PublicDoor::addressFor()` is the ONE place a door address is built. `PublicDoor::stillListedWhere()`
+  is the ONE rule for whether an event is still listed (no end time: end of its own day, or the organisation's
+  fixed time, D-129, `PublicWebsiteSetup::noEndListingFor()`), and `events()` orders by the real moment (#898). Every web-root file
   that loads start-up hands a door request over straight after it (`Site::isDoorRequest()`,
   `Site::publicAddressUnknown()`; hard gate `check_webroot_door_handoff.py`). A public address is the door's
   only once the installation's global administrator approves it (D-101); `PublicWebsiteSetup::publicHostStatus()`

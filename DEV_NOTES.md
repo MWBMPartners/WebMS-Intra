@@ -23150,3 +23150,99 @@ statement early: a reader that blanks or splits SQL must track strings and comme
   switch instead of deleting it. Checks 09-11 pin "names only" in the notice, no stored secret anywhere in the
   page, and every password box empty — the first version pinned neither promise (the check round planted a value
   into the notice and a key into a password box and stayed green).
+
+
+## A small group's meeting place is its host's home (#809)
+
+- **The map.** `OutsideServices::allowsMeetingPlaceMap($site, $group, $host, $agreed, $notAHome)` is the ONE
+  place it is decided, one place at a time; the host must still be an active member of the group.
+- **The record.** `SmallGroups::hostFromPost()` resolves the host and `placeAgreementAfterSave()` the agreement,
+  for `tblSmallGroups` and `tblSmallGroupPlaces` alike, asked on the row re-read `FOR UPDATE` and written in the
+  same statement as the address. Only the host's own save, from a form that drew the box (#677), sets it; a
+  changed address or host clears it; a new host always starts not agreed.
+- **Who may change the HOST** is `SmallGroups::whyHostChangeRefused()`: while a place names a host, only that
+  host may change the host or mark the place, WHATEVER happens to the address; anybody else's one way past is to
+  empty the usual place or remove a listed home. **This took six check rounds and the lesson is the shape:**
+  round 2's rule refused only when the address was unchanged, and a changed country, one letter's case or the
+  seventh decimal of the position walked through it; round 3 judged "empty" correctly but its tests covered a
+  hand-picked sample of parts, so ignoring an address line passed. The cases are now GENERATED from
+  `SmallGroups::PLACE_COLUMNS` (one "keep only this part" case per column except the country, the position pair
+  counted once), and the part names in every sentence come from `PLACE_PART_LABELS` through
+  `placePartsInWords()`. **Cover the dimension, not an example of it.**
+- **Erasure.** `GdprEraser` matches `hostUserID` (whose home it is) to empty a place, and `placeEnteredByID`
+  (in `ACTOR_COLUMNS`: who typed it) only to unlink. Never move the address columns onto the typist's
+  instruction: that would empty members' homes because a leader was erased, and miss the host.
+- **"Not anybody's home" (D-128, D-131)** never goes together with a host, and is cleared by a changed address.
+  The empty-and-retype route is a known limit answered by a warning, not by a fingerprint of past addresses.
+- **Planned meetings** are meeting rows dated after `SmallGroups::todayFor()`, a date on the organisation's
+  clock compared as text (#777); `attendanceStats()` stops at today.
+- Tests: sections P, R, N and S of `tools/outside-services-selftest.php`; section 22 of
+  `tools/gdpr-eraser-selftest.php`. Not exercised: concurrent saves (one worker), MariaDB for migration 275, a
+  meeting dated exactly today.
+
+## Opening an expense receipt, and logging every look (#867, D-130, D-132)
+
+- `web/_apps/expenses/view/receipt.php` (route `expenses/receipt`) asks `ExpenseRules::reachToSee()` FIRST,
+  then reads the receipt joined to its claim in one statement (`fileID`, `claimID`, `siteID`, `stage IS NULL`),
+  then `mayViewClaim()`; a refusal is `Router::renderError(404)`, the same as no row, after the same work.
+- **The organisation condition is the only guard against the OTHER organisation's administrator or treasurer at
+  THEIR OWN address** (their "every claim" reach passes `mayViewClaim()`), on the receipt and on the older claim
+  page alike. Test it on THAT address and with a claim in EVERY status: round 1's tests asked on this
+  organisation's address, and round 2's used one Pending claim, so `OR EC.status <> 'Pending'` passed.
+- `ExpenseRules::receiptsFolder()` is the ONE place the folder is named and `receiptFile()` the ONE place a
+  stored name becomes a path (a plain name, and `realpath()` directly inside the folder). A row with a `stage`
+  is the claim's generated PDF, deliberately not served (#954).
+- `receiptDisposition()`: `attachment`, a plain ASCII `filename=` keeping the extension, and an RFC 5987
+  `filename*`, control characters and bad UTF-8 removed first. Also `nosniff`, a sandboxing page rule and
+  `no-store`. Address numbers are read strictly, never `(int)`.
+- **D-130 records** go through `Logger::activity()` (names the person, #626) with numbers in the WORDS, never in
+  `tblActivityLogs.claimID` — that column links to `tblExpenseClaims` with no ON DELETE rule, so filling it
+  would stop a claim being deleted. A refusal records nothing, so it leaves the same trace as a made-up number.
+  A look that held no claim records nothing (D-132). Each counted look is pinned at exactly ONE claim and at
+  NONE, because fixtures that all showed several let `> 0` become `> 1` or `>= 0` unnoticed. An API-key look
+  names the key's number, never its secret. A HEAD request to a receipt is recorded as an opened receipt
+  (measured on PHP's built-in server; Apache not measured) — the safe direction for an audit record.
+- Test: part L4 of `tools/access-pages-selftest.php`; it is not re-runnable on one database (#955).
+
+## An impossible date and the database (#891, #892, #951)
+
+- **Decide whether a day exists in PHP, never by what the database makes of it.** Writes refuse an impossible
+  date (1292) on every engine, 9.7 included. What splits is date FUNCTIONS, `CAST`, `BETWEEN` and expression
+  comparisons, and on 9.7 a literal and a bound value differ. MySQL 8.0/8.4 read month or day 00 as a real date
+  in `TIMESTAMPDIFF`, `DATE_SUB`, `DATE_ADD` and `BETWEEN`: "the database answers NULL for an impossible date"
+  was never true. For the giving app the one test is `Giving::isRealDay()`.
+- **Measure with ONE side impossible.** Round 1 tested `BETWEEN` with both ends impossible, which agrees
+  everywhere, and wrote "agrees on all four". With one end impossible 8.0/8.4 return no rows and 9.7 and
+  MariaDB return rows. Where a range may hold an impossible day, use `>= ? AND <= ?`: for month 00-12 and day
+  00-31 the plain comparisons give the same rows on all four engines (month 13 or day 32 does not).
+- **`strtotime()` is not a validity test** (it accepts 31 February). `createFromFormat()` also rolls, but SAYS
+  so: `DateTime::getLastErrors()` then holds a warning. Refuse on that and keep the call you had. Two rounds
+  tried to replace the call instead and both refused real values the old one took (unpadded parts; then
+  two-digit years, two spaces, a tab). **Compare a replacement with the REAL old method over a grid that varies
+  every dimension the input has, in both directions.**
+- **A guard over a range needs a test case for EACH end**: an impossible TO was tested on two pages of seven, and
+  the eraser's `>=`/`<=` could each become strict with every check green, until a gift was put on each end day.
+- Still unpinned: the extra checks in `Giving::renderStatementPdf()` and `MailRoutes::standingWarning()`
+  (no request can reach them past the pages' own checks).
+
+## The public door's still-listed rule and its real order (#882, #898, D-129)
+
+- `PublicDoor::stillListedWhere()` is the ONE rule for whether an event is on the door's list at a moment; every
+  surface reads through `events()`. No end time: by default the end of its START's day, compared as readings
+  with `Events::readingOnItsOwnClockAt()` (so a 23- or 25-hour day is just that day); or the organisation's
+  fixed time via `Events::startsAtOrAfter()`, exact seconds. The setting is `public.events.noEndListedFor`
+  (`day` or 15-1440 minutes), read and written only through `PublicWebsiteSetup` and locked in the general
+  editor; a stored value the card would refuse is ignored with no log line (the door reads it on every
+  anonymous request).
+- `Events::readingsAtOrAfter($zone, $atUtc)` works out, per zone, the SET of stored readings whose instant is at
+  or after a moment, asking `I18n::wallClockInstant()` rather than re-deriving it (a skipped-hour reading moves
+  forward, so the set can be more than one range). Independently checked against it in millions of cases.
+- **Ordering (#898):** a per-zone `CASE` cannot order (it binds one reading per zone for one moment). `events()`
+  reads the first `limit` rows in reading order, takes T as their latest real moment, then reads every listed
+  row up to T plus the highest offset any zone in use has EVER had (`maxOffsetOfZones()`, PHP's whole transition
+  history) and sorts in PHP. **Trap worth keeping:** the first test paired London with Pacific/Pago_Pago, whose
+  pre-1892 local mean time is +12:37:12, so that zone alone made every window 12½ hours wide and the test passed
+  whatever the window code did. When a fixture zone is meant to be "small", check its WHOLE `getTransitions()`
+  list. Remaining gaps: #961.
+- `listedUntil` is when the door stops LISTING an event, not when it ends; the countdown keeps its own rule,
+  because using it made a 10:00 service "Happening now" until midnight.

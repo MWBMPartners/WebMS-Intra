@@ -224,6 +224,7 @@ screens and didn't say what it meant.
   frame its public pages (D-082), the installation's framing switch (D-094), and "Check my set-up". Gate:
   `website.setup` (D-085), held out of the box by global administrators only; only a global administrator may
   hand it out (D-093). An organisation's public address does nothing until the installation's global administrator approves it on the same page, which lists every organisation's address with Approve and Withdraw approval (D-101, #493 P4a). Several organisations may ask for the same address; the list shows the clash, only one can be approved, and the others are then shown it as taken (D-121, #895). The organisation's card says Waiting (and whether another organisation asked too), Taken, Approved, Approved but not in use (members sign in at it), or Approved but not checked.
+- **Events with no end time** stay on the public door's list until the end of their own day, or for a fixed time the organisation chooses on Admin → Public website (#882, D-129); the feed's `listedUntil` says when each leaves the list, and the list is in real-moment order across time zones (#898).
 - **The public door** (#493 P4a; D-056, D-097, D-098): a card at the top of Admin → Public website turns an
   organisation's door on, replaces its name and switches it off (each recorded; every door starts off). Once
   on, the organisation's own website can read `events.json` (published, Public, ticked for the website,
@@ -824,6 +825,8 @@ Service-type-aware headcount tracker.
 
 Full claim lifecycle with multi-approver, treasury, PDF, CSV.
 
+- Receipts on a claim can be opened by anybody who may open the claim (#867); the claim's generated PDF is still listed by name only (#954). Every look at expense records is in the activity log with who looked, as numbers only (D-130); a look that showed no claim is not recorded (D-132).
+
 - Submit (`/expenses/submit`) — claim with line items, receipt uploads, auto-attached PDF. Receipts: JPG,
   PNG, GIF, HEIC/HEIF (D-096), PDF, Word, Excel or CSV, up to 10 MB each (or the server's lower limit). A
   file that cannot be attached is named to the claimant with the reason and what to change, and the claim is
@@ -958,6 +961,8 @@ Reminder / task system.
 ---
 
 ### 👥 Small Groups — `/small-groups/` ✅ (#150)
+
+- Meeting places (#809): each place — the usual one, and the members' homes a group takes turns in — names its host, and its map is shown only with that host's own agreement (D-120, D-123, D-124); a place that is nobody's home may be marked so and then shows a map with no host (D-128); members may add their own home (D-125); a recorded meeting says where it was held; members see the next planned meeting (D-127). Only the named host can change who the host is.
 
 Groups/classes register — Sabbath School classes, home groups, Bible
 studies. New installable app, opt-in (`small-groups.enabled` defaults

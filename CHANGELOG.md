@@ -4,6 +4,86 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Small groups that meet in members' homes: the host decides about the map (#809; D-120, D-122 to D-128, D-131; migration 275)
+
+- **A meeting place names its host, and its map needs that host's own agreement.** A group's page used to draw
+  an OpenStreetMap map of where the group meets whenever it had a map position, with nobody asked, though a
+  small group very often meets in somebody's home. Every meeting place now names its host, a member of the
+  group, and its map appears only when that member has agreed on their own form, maps are allowed for them,
+  and the person looking has not switched maps off. A leader who fills in a member's address cannot agree for
+  them; changing the address or the host clears the agreement; the written address is still shown. Existing
+  groups start with no host named, so no map.
+- **A group may take turns meeting in different members' homes (D-123, D-125, D-126).** A group keeps a list of
+  hosts' homes and each recorded meeting says where it was held. Leaders may add any home and a member may add
+  their own. Removing a home deletes its address at once.
+- **A place that is nobody's home (a church hall) may be marked so (D-128)** and then shows a map with no host,
+  following only the installation's, the organisation's and each member's own map settings. The tick warns
+  that ticking it for somebody's home shows that home on a map without them agreeing (D-131: emptying a home
+  and typing it back in as a hall cannot be detected).
+- **Only a place's named host can change who the host is or mark it**, whatever happens to the address. Anybody
+  else may still correct its address (the host must then agree to a map again); to meet somewhere else they
+  remove a listed home, or clear every part of the usual place except the country, and enter the new one.
+- **Erasing a member empties the homes they are named as hosting (D-122, D-124)**, and nobody else's. An address
+  with NO host named is not emptied by anybody's erasure, because nothing records whose home it is: that covers
+  every group from before this change until a host is named, and any place entered without one. A leader who
+  only typed an address in is unlinked and nothing else changes. A member's own data download lists the homes
+  they host.
+- **Members see where their group meets next (D-127).** A meeting given a future date is a planned meeting; the
+  group's members see the next one, with its place following the group's address setting. A planned meeting
+  takes no roll and is not counted in attendance.
+- The in-app help for Small Groups explains hosts, homes and maps. Six check rounds (protected arm). Found and
+  raised: #952, #953.
+
+### Expense receipts can be opened, and every look at expense records is logged (#867; D-130, D-132; migration 278)
+
+- **Receipts can be opened.** The claim page listed each receipt's label, type and size with no link and nothing
+  served the receipts folder, so an approver or treasurer could not look at the evidence they were deciding or
+  paying against. `expenses/receipt?claim=<n>&id=<n>` sends one receipt as a download to exactly the people who
+  may open the claim (the claimant, the department's lead, approver or required approver, a treasurer, an
+  administrator), by asking the claim page's own rule; everybody else gets byte for byte what a receipt that
+  does not exist gets. The claim number on the approvals and treasury lists now opens the claim.
+- **Looking at expense records is recorded (D-130).** Each look writes one activity record naming the person,
+  with numbers only — never a title, name, amount or file name: the claim number for a claim page, change form
+  or receipt; a count for the approvals, treasury and own lists and an expenses report preview (the own list
+  also its page); departments and a count for the spreadsheet; scope, filter, page, count and, for an API key,
+  the key's number for the API list. A look that showed no claim, or was refused, records nothing (D-132). The
+  in-app help lists exactly this, and says what is not recorded (organisation-wide totals and counts).
+- The claim page's own organisation condition, the only guard against another organisation's administrator at
+  their own address, is now tested for a claim in every status. Four check rounds (protected arm). Found and
+  raised: #954, #955.
+
+### Impossible dates no longer depend on which database is in use (#891, #892, #951)
+
+- **Held texts:** a text held for quiet hours whose use-by moment does not exist is refused, not kept for up to
+  48 hours. That covers 31 February on MySQL 9.7, whose date functions treat a bound impossible date as real,
+  and also month or day 00 on MySQL 8.0/8.4.
+- **Giving pages:** the giving reports, the giving list, the Gift Aid (HMRC) file and the statement pages refuse
+  a date that does not exist instead of handing it to the database, where `BETWEEN` found no gifts on MySQL
+  8.0/8.4 and some on 9.7 and MariaDB — so the Gift Aid file could be empty on one server and full on another.
+  A cleared date box now means the default range. The small-group attendance report and its CSV, and the venue
+  booking page's `?date=`, ignore such a day and use their default.
+- **Report builder (#951):** a date-and-time filter that names a day or time that does not exist is refused;
+  every real value it accepted before still works (unpadded parts, a two-digit year, two spaces or a tab). A
+  date filter followed by a newline is refused.
+- **Erasure:** a statement PDF whose period names an impossible day now follows the ordinary rule on every engine
+  (deleted when a gift on it lost the donor's name, kept when only kept gifts are); before, the engine decided.
+- Held texts are tested on all five engines in `calendar-selftests.yml`. Four check rounds (protected arm).
+  Found and raised: #956, #960.
+
+### The public website keeps an event with no end time listed until its day ends, and lists in true order (#882, #898, D-129; migration 277)
+
+- **An event with no end time no longer leaves the public website's list the moment it starts.** It stays on the
+  public door's list (the feeds, the framed page and the pasted-in script's list) until the end of its day on its
+  own clock; an organisation can instead choose a fixed time after the start (15 minutes to 24 hours) on
+  Admin → Public website, "Events with no end time". Events with an end time and all-day events are unchanged.
+  The events feed gains `listedUntil`, when the door stops LISTING an event (not when it ends). The script's
+  countdown is unchanged.
+- **The list is in true order (#898).** Events on different clocks are ordered by when they really start, so a
+  `limit` can no longer cut off a sooner event in favour of a later one whose clock reading sorts first.
+- Measured, #882 point 2: no page lets an organisation hold its own row for a setting that becomes a header on
+  door answers, so door refusals stay identical. Closed at the three-round cap (every finding was in tests or
+  comments); the remaining test gaps are #961 and #962.
+
 ### Thirteen installation-wide admin pages no longer copy one organisation's setting to every organisation (#943, #674)
 
 - **Pressing Save without changing anything no longer makes one organisation's value everyone's.** AI Assist,
