@@ -4,6 +4,16 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Every audit check's own self-test now runs before a push and on GitHub (#919)
+
+- Nine checks in `tools/audit-checks/` carry a self-test, and until now only GitHub ran six of them, after the push;
+  one went red on correct code and stayed red unnoticed. `tools/audit-check-selftests.py` FINDS every check offering
+  `--self-test` or `--selftest` (reading each with Python's own parser, never a hand-written list) and runs them. It
+  refuses when it cannot trust its finding (a near-miss flag spelling, an unreachable self-test function, both
+  spellings, an unparseable check, or none found). The whole-suite runner gains an `audit:` row per self-test plus an
+  `audit:finder` row and starts its database servers only when a selected row needs one; the pre-push hook runs the
+  self-tests after the checks; `pr-security.yml` runs all nine as a hard gate. Known blind spots: #975.
+
 ### An approved event suggestion e-mails the person who suggested it (#859, D-134)
 
 - The public "Submit an Event" form promised an e-mail on approval and nothing ever sent one. Approving a

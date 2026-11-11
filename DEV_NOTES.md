@@ -23281,3 +23281,16 @@ statement early: a reader that blanks or splits SQL must track strings and comme
   give an editor whose edits change nothing (#671).
 - Test: section E of `tools/public-website-tick-selftest.php` (plants P120-P130). E19 keeps one message for real
   (SMTP pointed at a port nothing listens on) and reads its stored HTML from the queue.
+
+
+## The audit checks' own self-tests (#919)
+
+- `tools/audit-check-selftests.py` finds a self-test by a string constant exactly `--self-test` or `--selftest`
+  (six and three checks use each spelling), read with `ast` so a flag quoted in another check's comment does not
+  count. `--list` names them and judges the finding; `--rows` feeds `tools/run-all-selftests.sh`.
+- **The pre-push hook takes about two minutes**, not the "nine seconds" the documents said: 124 s is the loop over
+  the 78 audit checks (three take 76 s of it), and the nine self-tests add about 6 s. Measured 11 November 2026 on
+  one Mac.
+- No line-number plants were left to convert: `grep -n 'php:[0-9]' tools/audit-checks/*.py` finds only comments,
+  and every other `file:line` expectation points at a file the test writes itself.
+- What it cannot see, and the case where it reports green wrongly, are #975.

@@ -93,14 +93,25 @@ WHAT IT DOES NOT FIND, said plainly
 
 WHAT RUNS WHERE (11 November 2026)
 ----------------------------------
-GitHub runs six of the nine from `pr-security.yml`, which it has registered
-(sign_in_begins_session, redirect_targets_judged, no_removed_sql_functions,
-htaccess_php_denied, no_curl_close, event_status_matches_column). Two more are
-named only in workflows GitHub has never registered (#754):
-bind_param_arity in `portal-selftests.yml`, backup_column_types in
-`backup-selftest.yml`. And `check_inline_scripts_have_nonce.py --self-test` is
-named in NO workflow at all. Locally, from #919, all of them run in the
-pre-push hook and in `tools/run-all-selftests.sh`.
+GitHub runs ALL nine from `pr-security.yml`, which it has registered, through
+this finder's own step ("Every audit check's own self-test passes", #919). Six
+of them also have a step of their own there (sign_in_begins_session,
+redirect_targets_judged, no_removed_sql_functions, htaccess_php_denied,
+no_curl_close, event_status_matches_column), kept so a failure is reported
+under the check's own name. Before #919, bind_param_arity and
+backup_column_types were named only in workflows GitHub has never registered
+(#754), and `check_inline_scripts_have_nonce.py --self-test` in no workflow at
+all. Locally all of them run in the pre-push hook and in
+`tools/run-all-selftests.sh`.
+
+WHAT IT DOES NOT FIND, OR FINDS WRONGLY (measured by #919's check; #975)
+-------------------------------------------------------------------------
+It misses a flag built at run time (an f-string, a constant imported from
+another module), a `--self-test=` prefix and a single-dash `-selftest`. And a
+check with NO self-test is run as if it had one when the exact flag appears
+anywhere in it as a string (a usage message, a list of arguments for another
+check), and reported green after running in its normal mode. Nothing in the
+repository does either today.
 
 @package   Portal\\Tools
 @author    MWBM Partners Ltd (t/a MWservices)
