@@ -12,45 +12,48 @@
  * WHY, AND WHY HERE. D-133 promises that the installer's country suggestion
  * "sends nothing anywhere": it reads the installing person's own browser time
  * zone, in the browser. Four check rounds tried to PROVE that by reading the
- * page's source or watching a browser, and each was got past: a WebSocket, a
+ * page's source or watching a browser, and each was got past (a WebSocket, a
  * timer, an `innerHTML` picture, a `pagehide` beacon, a script tag in capitals,
  * an `onload=` attribute, an `<iframe srcdoc>`, a `javascript:` address, a tag
- * built in PHP from two halves. Reading source cannot list every way HTML runs
- * code. So the BROWSER enforces it: with this policy
+ * built in PHP from two halves). So the browser is given a rule to enforce.
  *
- *   - only a `<script>` carrying THIS answer's nonce (a random value made fresh
- *     for every answer) runs. Every other script, in any case or spelling,
- *     every `onload=`/`onclick=` attribute, every `javascript:` address and
- *     every script inside an `<iframe srcdoc>` is refused;
- *   - nothing may be fetched, beaconed, streamed or opened as a WebSocket
- *     (`connect-src 'none'`), no frame may load (`frame-src 'none'`), no form may
- *     post anywhere but the installer itself (`form-action 'self'`), and a
- *     picture may come only from the installer's own server or be written into
- *     the page (`img-src 'self' data:`).
+ * WHAT THE POLICY BLOCKS:
+ *   a script without this answer's nonce (in any case or spelling, built in
+ *   PHP from pieces, or inside an `<iframe srcdoc>`), inline event handlers
+ *   (`onload=` and the like), `javascript:` addresses, fetch, XMLHttpRequest,
+ *   WebSockets, beacons (on `pagehide` too), prefetch, and pictures, frames,
+ *   fonts and media from other hosts.
+ * WHAT IT DOES NOT BLOCK:
+ *   navigating the page elsewhere (`location`, a `<meta http-equiv=refresh>`
+ *   a script adds); a stylesheet from `cdn.jsdelivr.net` with anything after
+ *   the host name (a source in a policy matches every path under it, so
+ *   `https://cdn.jsdelivr.net/x?z=Europe%2FLondon` loads); DNS-prefetch and
+ *   preconnect hints; and `window.open` (not measured in a headless browser).
+ * (Measured in a browser during #942's checks: the refusal of nonce-less
+ * scripts, handlers, `javascript:` addresses, fetch, WebSockets, beacons and
+ * prefetch, and every item in the second list but `window.open`.
+ * XMLHttpRequest, and pictures, frames, fonts and media from other hosts,
+ * follow from the directives in csp.php and were not tried one by one.)
+ *
+ * The text pin (tools/audit-checks/check_installer_country_script_pinned.py)
+ * guards ONLY the suggestion script. The installer's other three scripts carry
+ * the nonce too (the early theme choice, the theme and colour-blind switches,
+ * the password strength meter) and are guarded by nothing but review. So
+ * "sends nothing" holds for the suggestion script AS WRITTEN AND PINNED, not
+ * against a deliberate change to an unpinned script. And a hint or a
+ * navigation written into our own code can reveal that somebody opened the
+ * installer.
  *
  * The installer has no autoloader and no `App`, so this lives here, in the
- * installer, and `App::cspNonce()` is not used. The installer's FOUR inline
- * scripts each carry `installCspNonce()`; an extra script would run only if it
- * were written into our own code WITH that nonce, which is a change a reviewer
- * reads.
- *
- * WHAT IT DOES NOT BLOCK, said plainly:
- *   - DNS-prefetch and preconnect HINTS (`<link rel=dns-prefetch>` /
- *     `preconnect`). Browsers do not put them under any directive, so a host
- *     name in such a hint is looked up whatever this says. The suggestion
- *     script is therefore ALSO pinned as text
- *     (tools/audit-checks/check_installer_country_script_pinned.py): a hint built
- *     from the time zone has to be written somewhere in our own code.
- *   - Navigating the whole page to another address (a link, a redirect). Not
- *     restricted by this policy; the pin is the guard for the suggestion
- *     script.
- *   - Requests to the installer's OWN server: pictures from 'self' are allowed.
+ * installer, and `App::cspNonce()` is not used. Its FOUR inline scripts each
+ * carry `installCspNonce()`.
  *
  * WHAT THE PAGES NEED, measured: one stylesheet from the jsDelivr CDN (Bootstrap,
  * with an integrity hash), inline `<style>` blocks and `style=` attributes (so
- * `'unsafe-inline'` for styles — a style cannot run code or reach another host
- * under `img-src`/`font-src`), pictures in the CSS written as `data:` addresses,
- * and favicons from the installer's own server.
+ * `'unsafe-inline'` for styles; a style runs no code, but it may load a
+ * stylesheet from cdn.jsdelivr.net, which is the route listed above), pictures
+ * in the CSS written as `data:` addresses, and favicons from the installer's own
+ * server.
  *
  * @package   Portal\Install
  * @author    MWBM Partners Ltd (t/a MWservices)

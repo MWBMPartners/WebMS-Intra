@@ -1659,13 +1659,14 @@ jobs:
         run: node tools/brand-colour-selftest.mjs
 
       # 🌍 #942, D-133: the installer's country suggestion promises to send
-      #    nothing anywhere. Four check rounds showed that reading the page's
-      #    source cannot prove that, so the BROWSER enforces it: every installer
-      #    answer carries a strict Content Security Policy (web/_install/csp.php).
-      #    The text pin below guards the one thing that policy cannot block (a
-      #    DNS or preconnect hint built from the time zone, which would have to
-      #    be written into the suggestion script): any change to that script
-      #    fails here until it is re-pinned with --repin, in front of a reviewer.
+      #    nothing anywhere. Every installer answer carries a strict Content
+      #    Security Policy (web/_install/csp.php). It refuses scripts without the
+      #    nonce, handlers, javascript: addresses, fetch, beacons and WebSockets;
+      #    it does NOT stop a navigation, a cdn.jsdelivr.net stylesheet, a DNS
+      #    hint or window.open. This text pin guards ONLY the suggestion script:
+      #    any change to it fails here until it is re-pinned with --repin, in
+      #    front of a reviewer. The installer's other three scripts are guarded
+      #    by nothing but review.
       - name: 'The installer country suggestion script is as pinned (hard gate, #942)'
         id: installer_country_pinned
         if: always()
@@ -1677,7 +1678,7 @@ jobs:
       # javascript: address, a PHP-built tag) all reach a listener with the
       # policy off and none with it on. Needs a browser and PHP (the runner
       # image has both); it REFUSES rather than skipping without them.
-      - name: 'The installer browser rule blocks every send, in a real browser (#942)'
+      - name: 'The installer browser rule, proved in a real browser (#942)'
         id: installer_country_browser
         if: always()
         run: node tools/installer-country-script-selftest.mjs
@@ -2093,7 +2094,7 @@ jobs:
             echo "- Brand colours read in a real browser: ${{ steps.brand_colour_browser.outcome }} (D-091)"
             echo "- Every audit check's own self-test passes: ${AUDIT_SELFTESTS_OUTCOME} (hard gate, #919)"
             echo "- The installer country suggestion script is as pinned: ${{ steps.installer_country_pinned.outcome }} (hard gate, #942)"
-            echo "- The installer browser rule blocks every send, in a browser: ${{ steps.installer_country_browser.outcome }} (#942)"
+            echo "- The installer browser rule, proved in a real browser: ${{ steps.installer_country_browser.outcome }} (#942)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

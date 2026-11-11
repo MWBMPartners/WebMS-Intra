@@ -4,35 +4,54 @@ The installer's country suggestion script's TEXT is pinned (#942, D-133).
 
 Path: tools/audit-checks/check_installer_country_script_pinned.py
 
-WHAT ENFORCES "SENDS NOTHING", AND WHAT THIS ADDS
---------------------------------------------------
+WHAT THE BROWSER ENFORCES, AND WHAT THIS ADDS
+----------------------------------------------
 D-133: the installer suggests a country and a time zone from the installing
 person's own browser time zone, and "nothing is looked up or sent anywhere".
 
-THE BROWSER ENFORCES THAT, not this check. Every installer answer carries a
-strict Content Security Policy (web/_install/csp.php): only a script carrying
-the answer's nonce runs, and nothing may be fetched, beaconed, streamed, framed
-or posted elsewhere. Four check rounds each got the zone out past a guard that
-READ the page's source (a WebSocket; a timer; an `innerHTML` picture; a
-`pagehide` beacon; then a `<SCRIPT>` in capitals, the `<!-- <script` double
-escape, an `onload=` attribute, an `<iframe srcdoc>`, a `javascript:` address
-and a tag built in PHP from two halves). Reading source cannot list every way
-HTML runs code; a browser obeying the policy does not need to.
-`tools/installer-country-script-selftest.mjs` proves the policy blocks each of
-those in a real browser.
+Every installer answer carries a strict Content Security Policy
+(web/_install/csp.php), proved in a real browser by
+`tools/installer-country-script-selftest.mjs`. Four check rounds had each got
+the zone out past a guard that READ the page's source, which is why the browser
+is now given a rule to enforce.
 
-WHAT THIS CHECK GUARDS is the one thing the policy does NOT block: a
-DNS-prefetch or preconnect HINT built from the time zone (browsers put hints
-under no directive). Such a hint, or any other change, would have to be written
-into the suggestion script itself — the `<script>` whose first line is
-`// 🌍 Suggest a country`, which runs because it carries the nonce. So its CODE
+WHAT THE POLICY BLOCKS:
+  a script without this answer's nonce (in any case or spelling, built in
+  PHP from pieces, or inside an `<iframe srcdoc>`), inline event handlers
+  (`onload=` and the like), `javascript:` addresses, fetch, XMLHttpRequest,
+  WebSockets, beacons (on `pagehide` too), prefetch, and pictures, frames,
+  fonts and media from other hosts.
+WHAT IT DOES NOT BLOCK:
+  navigating the page elsewhere (`location`, a `<meta http-equiv=refresh>`
+  a script adds); a stylesheet from `cdn.jsdelivr.net` with anything after
+  the host name (a source in a policy matches every path under it, so
+  `https://cdn.jsdelivr.net/x?z=Europe%2FLondon` loads); DNS-prefetch and
+  preconnect hints; and `window.open` (not measured in a headless browser).
+(Measured in a browser during #942's checks: the refusal of nonce-less
+scripts, handlers, `javascript:` addresses, fetch, WebSockets, beacons and
+prefetch, and every item in the second list but `window.open`.
+XMLHttpRequest, and pictures, frames, fonts and media from other hosts,
+follow from the directives in csp.php and were not tried one by one.)
+
+The text pin (tools/audit-checks/check_installer_country_script_pinned.py)
+guards ONLY the suggestion script. The installer's other three scripts carry
+the nonce too (the early theme choice, the theme and colour-blind switches,
+the password strength meter) and are guarded by nothing but review. So
+"sends nothing" holds for the suggestion script AS WRITTEN AND PINNED, not
+against a deliberate change to an unpinned script. And a hint or a
+navigation written into our own code can reveal that somebody opened the
+installer.
+
+WHAT THIS CHECK GUARDS: the suggestion script — the `<script>` whose first line
+is `// 🌍 Suggest a country`, which runs because it carries the nonce. Its CODE
 must equal `installer-country-script.pinned.js` beside this file, exactly; any
 change to a statement fails until somebody re-pins it with `--repin`, a
 separate, visible act that puts the change in front of a reviewer.
 
-It also refuses `<!--` and `<script` (in any case) inside the pinned body,
-because in HTML they change where the browser thinks the script ENDS (the
-"double escape"), so the code that runs would no longer be the code pinned.
+It also refuses `<!--`, `<script` and `</script` (any case, followed by
+anything, such as `</script >`, `</script/>` or `</script\t>`) inside the
+pinned body: each changes where a browser ends the script, so the code that
+runs would no longer be the code pinned.
 
 HOW THE CODE IS COMPARED
 ------------------------
@@ -96,9 +115,12 @@ def the_script(text: str) -> tuple[str | None, str]:
     # `<!--` and `<script` inside a script change where an HTML parser ends it
     # (the "double escape"): code after the first `</script>` would then run as
     # part of THIS script, carrying its nonce, while this check stopped reading.
-    if "<!--" in found[0] or re.search(r"<script", found[0], re.IGNORECASE) is not None:
-        return None, ("the suggestion script holds `<!--` or `<script`, which change where a browser ends it "
-                      "(the double escape), so the code that runs would not be the code pinned")
+    # `</script` too, in ANY form: `</script >`, `</script/>` and `</script\t>`
+    # all end the script in a browser (round 6 of #942's check proved each with
+    # `--dump-dom`), while this check's extraction reads on to `</script>`.
+    if "<!--" in found[0] or re.search(r"</?script", found[0], re.IGNORECASE) is not None:
+        return None, ("the suggestion script holds `<!--`, `<script` or `</script`, which change where a browser "
+                      "ends it, so the code that runs would not be the code pinned")
     return found[0], ""
 
 
@@ -136,10 +158,10 @@ def main() -> int:
                     f"      First difference at character {where} of the normalised code:\n"
                     f"        pinned: …{want[max(0, where - 60):where + 60]}…\n"
                     f"        found:  …{live[max(0, where - 60):where + 60]}…\n"
-                    f"      THIS FAILS ON ANY CHANGE TO A STATEMENT, ON PURPOSE: the installer's policy blocks every "
-                    f"send but a DNS or preconnect hint, and a hint built from the time zone would have to be "
-                    f"written here. Read the change; if it is right, run this check with --repin and say in the "
-                    f"commit message what changed."
+                    f"      THIS FAILS ON ANY CHANGE TO A STATEMENT, ON PURPOSE: the installer's policy does not "
+                    f"stop a navigation, a jsDelivr stylesheet or a DNS hint, and this pin is what makes a change "
+                    f"to the suggestion script be read. Read the change; if it is right, run this check with "
+                    f"--repin and say in the commit message what changed."
                 )
     if problems:
         for problem in problems:

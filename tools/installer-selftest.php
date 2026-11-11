@@ -1536,11 +1536,12 @@ ok('N01 the web addresses page ASKS for the country and the time zone, and choos
     count($countryOptions[1]) . ' countries; selected in country list: ' . substr_count($countryList, ' selected'));
 // N01b is a QUICK TEXT TRIPWIRE and nothing more. A text search cannot show that a script sends nothing (round 1 of
 // the #942 check passed it with a planted `new WebSocket('wss://…')`), and neither can a browser that samples what it
-// sees (round 3). WHAT ENFORCES IT is the installer's browser rule (web/_install/csp.php: nothing may be fetched, and
-// only a script carrying the answer's nonce runs), proved in a real browser by tools/installer-country-script-selftest.mjs
-// and present on every page by N14. The one thing that rule cannot block, a DNS or preconnect hint, would have to be
-// written into this script, whose text is pinned by tools/audit-checks/check_installer_country_script_pinned.py.
-ok('N01b (a quick text tripwire only: the browser rule enforces it, and the text pin guards hints) the script reads the browser\'s own time zone, and its text names none of the usual ways of sending something',
+// sees (round 3). The installer's browser rule (web/_install/csp.php) refuses scripts without the nonce, handlers,
+// javascript: addresses, fetch, beacons and WebSockets; it does NOT stop a navigation, a cdn.jsdelivr.net stylesheet,
+// a DNS hint or window.open. The suggestion script's text is pinned by
+// tools/audit-checks/check_installer_country_script_pinned.py; the installer's other three scripts are guarded by
+// nothing but review.
+ok('N01b (a quick text tripwire only; see the comment above for what the browser rule and the text pin each cover) the script reads the browser\'s own time zone, and its text names none of the usual ways of sending something',
     str_contains($suggestJs, 'Intl.DateTimeFormat().resolvedOptions().timeZone') === true && preg_match('/fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|new\s+Image|wss?:\/\/|https?:\/\/|\.src\s*=|location|window\.open/i', $suggestJs) !== 1,
     $suggestJs === '' ? 'no such script on the page' : 'a request or an address was found in the script');
 
@@ -1736,7 +1737,7 @@ foreach (['the Web addresses page' => $addressPage, 'the finish page' => $finish
         $cspFaults[] = $what . ': ' . $fault;
     }
 }
-ok('N14 every installer page carries the browser rule (nothing by default, nothing fetched, scripts only by nonce), EVERY script on it carries that answer\'s nonce, and the nonce is new for each answer',
+ok('N14 three installer pages (the Web addresses page, the finish page and the last page) carry the browser rule (nothing by default, nothing fetched, scripts only by nonce), EVERY script on them carries that answer\'s nonce, and the nonce is new for each answer',
     $cspFaults === [] && count(array_unique($nonces)) === 3, implode(' | ', $cspFaults) . ' ' . json_encode($nonces));
 ok('N06b the stored "GBR" (not a country code, so ignored) was REPLACED by the country chosen, and the last page says so (it said "GBR" was a country that was kept, and France was dropped)',
     str_contains(words($done), 'This database held "GBR" as its country, which is not a country code, so the country you chose replaced it.') === true,

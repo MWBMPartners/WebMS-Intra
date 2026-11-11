@@ -1,23 +1,47 @@
 /**
- * The installer's browser rule (its Content Security Policy) blocks every way of sending, in a real browser.
+ * The installer's browser rule (its Content Security Policy), proved in a real browser.
  *
  * Path: tools/installer-country-script-selftest.mjs
  *
- * WHAT ENFORCES "SENDS NOTHING"
- * ------------------------------
+ * WHAT THE BROWSER ENFORCES
+ * --------------------------
  * D-133 (#942): the installer suggests a country and a time zone from the
  * installing person's own browser time zone, and "nothing is looked up or sent
  * anywhere". Four check rounds tried to prove that by READING the page's source
  * or by WATCHING a browser for a send, and each was got past (a WebSocket, a
  * timer, an `innerHTML` picture, a `pagehide` beacon, a `<SCRIPT>` in capitals,
  * the `<!-- <script` double escape, an `onload=` attribute, an `<iframe
- * srcdoc>`, a `javascript:` address, a tag built in PHP from two halves).
+ * srcdoc>`, a `javascript:` address, a tag built in PHP from two halves). So
+ * every installer answer now carries a strict Content Security Policy
+ * (web/_install/csp.php), and this file proves it in a real browser, on the
+ * REAL installer page served by PHP's own web server.
  *
- * So the BROWSER enforces it now: every installer answer carries a strict
- * Content Security Policy (web/_install/csp.php). Only a script carrying the
- * answer's nonce runs, and nothing may be fetched, beaconed, streamed, framed
- * or posted elsewhere. THIS FILE PROVES THE POLICY WORKS, in a real browser,
- * on the REAL installer page served by PHP's own web server.
+ * WHAT THE POLICY BLOCKS:
+ *   a script without this answer's nonce (in any case or spelling, built in
+ *   PHP from pieces, or inside an `<iframe srcdoc>`), inline event handlers
+ *   (`onload=` and the like), `javascript:` addresses, fetch, XMLHttpRequest,
+ *   WebSockets, beacons (on `pagehide` too), prefetch, and pictures, frames,
+ *   fonts and media from other hosts.
+ * WHAT IT DOES NOT BLOCK:
+ *   navigating the page elsewhere (`location`, a `<meta http-equiv=refresh>`
+ *   a script adds); a stylesheet from `cdn.jsdelivr.net` with anything after
+ *   the host name (a source in a policy matches every path under it, so
+ *   `https://cdn.jsdelivr.net/x?z=Europe%2FLondon` loads); DNS-prefetch and
+ *   preconnect hints; and `window.open` (not measured in a headless browser).
+ * (Measured in a browser during #942's checks: the refusal of nonce-less
+ * scripts, handlers, `javascript:` addresses, fetch, WebSockets, beacons and
+ * prefetch, and every item in the second list but `window.open`.
+ * XMLHttpRequest, and pictures, frames, fonts and media from other hosts,
+ * follow from the directives in csp.php and were not tried one by one.)
+ *
+ * The text pin (tools/audit-checks/check_installer_country_script_pinned.py)
+ * guards ONLY the suggestion script. The installer's other three scripts carry
+ * the nonce too (the early theme choice, the theme and colour-blind switches,
+ * the password strength meter) and are guarded by nothing but review. So
+ * "sends nothing" holds for the suggestion script AS WRITTEN AND PINNED, not
+ * against a deliberate change to an unpinned script. And a hint or a
+ * navigation written into our own code can reveal that somebody opened the
+ * installer.
  *
  * WHAT IT PROVES
  * --------------
@@ -46,17 +70,14 @@
  *
  * WHAT IT CANNOT SEE OR SHOW, said plainly
  * ----------------------------------------
- *   * The policy does NOT block DNS-prefetch or preconnect HINTS: browsers put
- *     them under no directive, and DNS and TLS server names never reach the
- *     Network domain, so neither the policy nor this recorder stops or sees
- *     one. The guard against a hint built from the time zone is the text pin
- *     of the suggestion script (tools/audit-checks/
- *     check_installer_country_script_pinned.py): a hint must be written in our
- *     own code.
+ *   * What the policy does not block (above) is not tried here; DNS and TLS
+ *     server names never reach the Network domain at all, so a hint is
+ *     neither stopped nor seen.
  *   * Only the code page of the real installer is driven in a browser: the
- *     later pages need a database. installer-selftest.php requires that every
- *     installer page carries the policy and that every script on it carries
- *     that answer's nonce, over HTTP.
+ *     later pages need a database. installer-selftest.php's N14 checks, over
+ *     HTTP, that THREE more pages (the Web addresses page, the finish page and
+ *     the last page) carry the policy and that every script on them carries
+ *     that answer's nonce.
  *   * A `pagehide` beacon was NOT recorded by the Network domain in B (measured);
  *     under the policy it is refused anyway (`connect-src 'none'`).
  *   * Same-origin requests are allowed by B's recorder (`fetch('/?z=')` passes
@@ -409,7 +430,7 @@ setTimeout(function () {
 
     console.log('');
     console.log(`${passed + failed} checks: ${passed} passed, ${failed} failed.`);
-    console.log('The policy in web/_install/csp.php is the enforcement; the text pin guards the hints it cannot block.');
+    console.log('See the header for what the policy blocks and what it does not; the text pin guards the suggestion script only.');
     process.exit(failed === 0 ? 0 : 1);
 }
 
@@ -434,8 +455,10 @@ async function copyWeb(to) {
     await rename(path.join(to, 'public_html'), path.join(to, 'httpdocs'));
 }
 
-/* The router imitates the web folder's .htaccess (the same as installer-selftest.php's).
-   With STRIP set it takes the policy OFF, for the control run that proves the plants are live. */
+/* The router imitates the web folder's .htaccess, LIKE installer-selftest.php's but not the same: it
+   leaves out that one's 404 for any `.php` address other than the three real ones, and its special case
+   for `/assets`, neither of which the code page needs. With STRIP set it takes the policy OFF, for the
+   control run that proves the plants are live. */
 const ROUTER = `<?php
 declare(strict_types=1);
 if (getenv('STRIP_CSP') === '1') { header_register_callback(static function (): void { header_remove('Content-Security-Policy'); }); }

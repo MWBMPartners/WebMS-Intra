@@ -78,8 +78,9 @@ declare(strict_types=1);
 // 🛡️ The browser's rule for what these pages may run and reach (#942), sent
 //    FIRST so every answer carries it: the wizard's pages, the plain error
 //    pages and the redirects. Only a script carrying installCspNonce() runs,
-//    and nothing may be fetched or sent anywhere. See csp.php for why, and for
-//    what it does not block.
+//    and fetches, beacons and WebSockets are refused. It does NOT stop a page
+//    being navigated elsewhere, a stylesheet from cdn.jsdelivr.net, or a DNS
+//    hint: csp.php lists exactly what it blocks and what it does not.
 require_once __DIR__ . DIRECTORY_SEPARATOR . 'csp.php';
 installSendCsp();
 
