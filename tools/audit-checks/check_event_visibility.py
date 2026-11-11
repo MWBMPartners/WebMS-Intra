@@ -133,7 +133,12 @@ DEFAULT_SCAN_SUBDIRS = ("_apps", "_core", "public_html")
 # written `EventVisibility::` but a comment paraphrasing it should not
 # be required to match case for case).
 MARKER_RE = re.compile(
-    r"EventVisibility::|externalFeedID\s+IS\s+(?:NOT\s+)?NULL",
+    # The column may carry a table prefix (`e.externalFeedID`) and backticks
+    # (`e`.`externalFeedID`): house style backticks every identifier in new SQL
+    # (#655), and a pattern that only knew the bare spelling would have made
+    # that style fail this check. Measured: 386 matches over web/ before, 388
+    # after (the two extras are backticked spellings); none lost.
+    r"EventVisibility::|(?:`?\w+`?\.)?`?externalFeedID`?\s+IS\s+(?:NOT\s+)?NULL",
     re.IGNORECASE,
 )
 

@@ -15,25 +15,47 @@
  * the database's own unique key swallowed, so the row could be neither seen
  * nor removed.
  *
- * WHAT IT CHECKS (each scenario is run on the real code, then with the fault
- * planted, then with the code put back):
- *   A. "Dave" (day 1, posted through the real mark handler), "dave" (day 2,
- *      likewise) and "DAVE " with a trailing space (day 3, written straight
- *      into the table, because the handler trims — the shape restored or
- *      hand-edited data has): ONE walk-in row, and ALL THREE cells ticked.
+ * WHAT IT CHECKS (the whole scenario runs on the real code, once per planted
+ * fault, and on the restored code):
+ *   A. "Dave" is enrolled through the real form (day 1); the second day is
+ *      added by pressing the empty cell, as the page would; "dave" (day 2) and
+ *      "DAVE " with a trailing space (day 3) are then written straight into
+ *      the table, the shape restored or hand-edited data has: ONE walk-in row,
+ *      and ALL THREE cells ticked.
  *   B. Pressing a ticked cell exactly as the page posts it (`toggle=0` and the
- *      name the page printed) removes THAT day's row and only that day's.
+ *      walk-in's REFERENCE, `walkinRef`, never a name) removes THAT day's row
+ *      and only that day's.
  *   C. The database's own rule is what groups: "Zoe" and "Zoë" (equal in
- *      utf8mb4_general_ci) are one walk-in; "Strasse" and "Strasse" spelt with
- *      the sharp s (not equal) are two. Measured on MySQL 8.0.36 and asserted
- *      here so a change in the database's rule is noticed, not assumed.
- *   D. PLANTED FAULT: the grid's grouping put back to exact bytes must turn
- *      checks A and B red. A test that cannot see the fault proves nothing.
+ *      utf8mb4_general_ci) are one walk-in; "Strasse" and "Straße" (not equal)
+ *      are two, listed in the database's order. Measured on MySQL 8.0.36 and
+ *      asserted here so a change in the database's rule is noticed.
+ *   E. What the database does NOT ignore, written straight into the table: a
+ *      trailing tab and a leading space make DIFFERENT walk-ins ("DAVE" and
+ *      "DAVE<TAB>", "Ann" and " Ann"). Pressing each one's cell removes or
+ *      adds only that walk-in's row (the old handler trimmed the name and
+ *      acted on the wrong row or none).
+ *   F. Scope: another event of the same organisation, and an event of another
+ *      (inactive) organisation, hold walk-ins with the same names. They must
+ *      not tick this event's cells, and a reference taken from them must be
+ *      refused with the one truthful message and change nothing.
+ *   G. A STALE reference (its oldest row already removed, as with a second tab
+ *      or the back button) is answered with that same message, nothing is
+ *      changed, and a reload gives a reference that works.
+ *   D. PLANTED FAULTS, each in the scratch copy and each required to turn its
+ *      named checks red (or, for one, to leave a named check GREEN): the grid
+ *      grouping by exact bytes; the handler trimming the stored name; the grid
+ *      and the reference lookup not scoped to the event; and the handler's own
+ *      event-belongs-to-organisation check bypassed (F04 must stay green,
+ *      because the lookup's own organisation test still holds) and then that
+ *      test removed too (F04 must go red). A test that cannot see the fault it
+ *      exists to catch proves nothing.
  *
  * WHAT IT CANNOT DO. It runs as one made-up administrator on one engine (the
- * one SELFTEST_DB_* points at; CI uses MySQL 8.0.36). It does not prove the
- * rule on MariaDB or on a server whose column collation was changed, and it
- * does not look at how the grid LOOKS.
+ * one SELFTEST_DB_* points at; run on MySQL 8.0.36 and MariaDB 11.4.13 when it
+ * was written). No workflow runs it yet: the commissioning session wires it
+ * into portal-selftests.yml and `tools/run-all-selftests.sh` already lists it.
+ * It does not prove the rule on a server whose column collation was changed,
+ * and it does not look at how the grid LOOKS.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_x SELFTEST_DB_PORT=… SELFTEST_DB_PASS=… \
  *             php tools/attendance-walkins-selftest.php
@@ -43,7 +65,9 @@
  *         `web/_sql/full_schema.sql`. Needs curl and proc_open.
  * Exit:   0 only when every check ran and passed; 1 otherwise.
  *
- * Rows it adds: one person and one event, numbered 927001; removed afterwards.
+ * Rows it adds: one person, three events (two in this organisation, one in a
+ * second, inactive organisation it also adds) and their attendance rows, all
+ * numbered 927001 to 927003; removed afterwards.
  *
  * @package   Portal\Tools
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -457,6 +481,25 @@ function press(string $ref, string $day, string $toggle, int $event = EVENT): ar
     ]);
 }
 
+/**
+ * Was this answer the ONE truthful refusal? The handler redirects to the grid
+ * with a flash, so the next grid load must carry the words; a 404 also counts
+ * (the event itself is not this organisation's). Call it straight after the
+ * press: loading the grid is what consumes the flash.
+ */
+function refused(array $answer): bool
+{
+    global $jar;
+    if ($answer['status'] === 404) {
+        return true;
+    }
+    if ($answer['status'] !== 302) {
+        return false;
+    }
+
+    return str_contains(req($jar, 'GET', '/calendar/event/attendance?eventID=' . EVENT)['body'], 'no longer on this event');
+}
+
 /** Enrol a NEW walk-in by typing the name, as the enrol form posts it. */
 function enrol(string $name, string $day): array
 {
@@ -564,7 +607,7 @@ function scenario(string $tag): int
         $ticks = count(array_filter($row['cells'], static fn (array $c): bool => $c['toggle'] === '0'));
         ok($tag . ' C02 "' . $row['name'] . '" shows every row held for it as attended', $ticks === (stripos($row['name'], 'zo') === 0 ? 2 : 1), $ticks . ' tick(s)');
     }
-    ok($tag . ' C03 the list is in the database\'s order: "Strasse", "Straße", "Zoe"', array_column($names, 'name') === ['Straße', 'Strasse', 'Zoe'], implode(' / ', array_column($names, 'name')));
+    ok($tag . ' C03 the list is in the database\'s order: "Straße" (sorts as "Strase") before "Strasse", then "Zoe"', array_column($names, 'name') === ['Straße', 'Strasse', 'Zoe'], implode(' / ', array_column($names, 'name')));
 
     // E. The characters the database does NOT ignore: a trailing tab, a leading space.
     clearAll();
@@ -622,42 +665,81 @@ function scenario(string $tag): int
     ok($tag . ' F01 another event\'s "eve" does not tick this event\'s "Eve" (only day 1 is ticked)', togglesOf('Eve') === '0,1,1', togglesOf('Eve'));
     ok($tag . ' F02 another event\'s walk-in is not listed on this event\'s grid', count(walkinRows()) === 1, implode(' / ', array_column(walkinRows(), 'name')));
     $before = [rowsHeld(EVENT), rowsHeld(EVENT_OTHER), rowsHeld(EVENT_OTHER_ORG)];
-    $a = press((string) $foreign, $days[0], '0');
-    $b = press((string) $foreignOrgZ, $days[0], '0');
-    $c = press((string) $foreignOrg, $days[2], '1');
-    $d = press((string) $foreignOrg, $days[2], '1', EVENT_OTHER_ORG); // the other organisation's own event, own row
-    ok($tag . ' F03 a reference from another event is answered "not found" (404)', $a['status'] === 404, 'HTTP ' . $a['status']);
-    ok($tag . ' F04 a reference from another organisation is answered "not found" (404)', $b['status'] === 404 && $c['status'] === 404 && $d['status'] === 404, 'HTTP ' . $b['status'] . ' / ' . $c['status'] . ' / ' . $d['status']);
-    ok($tag . ' F05 and no row anywhere was added or removed by them', [rowsHeld(EVENT), rowsHeld(EVENT_OTHER), rowsHeld(EVENT_OTHER_ORG)] === $before);
+    $a1 = refused(press((string) $foreign, $days[0], '0'));
+    ok($tag . ' F03 a reference from another event is refused with the one truthful message', $a1 === true);
+    $b1 = refused(press((string) $foreignOrgZ, $days[0], '0'));
+    $c1 = refused(press((string) $foreignOrg, $days[2], '1'));
+    $d1 = refused(press((string) $foreignOrg, $days[2], '1', EVENT_OTHER_ORG)); // the other organisation's own event and row
+    ok($tag . ' F04 a reference from another organisation, and a press on its event, are refused', $b1 === true && $c1 === true && $d1 === true, json_encode([$b1, $c1, $d1]));
+    ok($tag . ' F05 and no row anywhere was added or removed by any of them', [rowsHeld(EVENT), rowsHeld(EVENT_OTHER), rowsHeld(EVENT_OTHER_ORG)] === $before);
+
+    // G. A stale reference: the group's oldest row is removed behind the page's back.
+    clearAll();
+    $oldest = addRow(EVENT, 'Gus', $days[0]);
+    addRow(EVENT, 'gus', $days[1]);
+    $gus = null;
+    foreach (walkinRows() as $row) {
+        if ($row['name'] === 'Gus') {
+            $gus = $row;
+        }
+    }
+    q('DELETE FROM `tblEventAttendance` WHERE `attendanceID` = ?', 'i', [$oldest]); // the other tab removes it
+    $heldBefore = rowsHeld();
+    $stale = $gus === null ? ['status' => 0, 'location' => '', 'body' => ''] : press($gus['cells'][2]['ref'], $days[2], '1');
+    ok($tag . ' G01 a stale reference is refused with the one truthful message, not a bare 404', $stale['status'] === 302 && refused($stale) === true, 'HTTP ' . $stale['status']);
+    ok($tag . ' G02 and the stale press changed nothing', rowsHeld() === $heldBefore, implode(', ', rowsHeld()));
+    $fresh = null;
+    foreach (walkinRows() as $row) {
+        if ($row['name'] === 'gus') {
+            $fresh = $row;
+        }
+    }
+    if ($fresh !== null) {
+        press($fresh['cells'][2]['ref'], $days[2], '1');
+    }
+    ok($tag . ' G03 after a reload the new reference works: day 3 is added to the same walk-in', count(rowsHeld()) === 2 && in_array('2027-01-03|gus', rowsHeld(), true) === true, implode(', ', rowsHeld()));
 
     return $fail - $failBefore;
 }
 
 /**
- * Plant ONE fault in the scratch copy, run the scenario, and return the labels
- * that failed (with the tag stripped). The caller puts the file back.
+ * Plant a fault (one or more edits, each [file, text, replacement]) in the
+ * scratch copy, run the scenario, put every file back, and return the labels
+ * that failed (tag stripped).
+ *
+ * @param list<array{0:string,1:string,2:string}> $edits
  *
  * @return list<string>
  */
-function plantedRun(string $name, string $file, string $from, string $to): array
+function plantedRun(string $name, array $edits): array
 {
     global $pass, $fail, $failedLabels;
-    $orig = (string) file_get_contents($file);
-    if (substr_count($orig, $from) !== 1) {
-        ok($name . ' the line to plant into is in the scratch copy exactly once', false, 'the text changed; update the plant: ' . $from);
+    $originals = [];
+    foreach ($edits as [$file, $from, $to]) {
+        $orig = $originals[$file] ?? (string) file_get_contents($file);
+        $originals[$file] = $orig;
+        $current = (string) file_get_contents($file);
+        if (substr_count($current, $from) !== 1) {
+            ok($name . ' the line to plant into is in the scratch copy exactly once', false, 'the text changed; update the plant: ' . $from);
+            foreach ($originals as $f => $o) {
+                file_put_contents($f, $o);
+            }
 
-        return [];
+            return [];
+        }
+        file_put_contents($file, str_replace($from, $to, $current));
+        clearstatcache(true, $file);
     }
-    file_put_contents($file, str_replace($from, $to, $orig));
-    clearstatcache(true, $file);
     $saved = [$pass, $fail];
     $failedLabels = [];
     scenario('[' . $name . ']');
     $labels = array_map(static fn (string $l): string => (string) preg_replace('/^\[[^\]]*\] (\S+).*$/u', '$1', $l), $failedLabels);
     // Failures here are EXPECTED: take them back out of the totals.
     [$pass, $fail] = $saved;
-    file_put_contents($file, $orig);
-    clearstatcache(true, $file);
+    foreach ($originals as $f => $o) {
+        file_put_contents($f, $o);
+        clearstatcache(true, $f);
+    }
 
     return $labels;
 }
@@ -671,20 +753,26 @@ head('2. PLANTED FAULTS — each must turn the checks meant to catch it red');
 $helper  = $child . $sep . 'web' . $sep . '_core' . $sep . 'AttendanceWalkins.php';
 $handler = $child . $sep . 'web' . $sep . '_apps' . $sep . 'calendar' . $sep . 'event-attendance-mark.php';
 
+$bypass = [$handler, "if (\$ok === false) { http_response_code(404); exit('Event not found'); }", "if (\$ok === false && false) { http_response_code(404); exit('Event not found'); }"];
 $plants = [
-    // [name, file, from, to, labels that MUST fail]
-    ['byte-exact grouping', $helper, 'ON g.`walkinName` = a.`walkinName` AND', 'ON BINARY g.`walkinName` = BINARY a.`walkinName` AND', ['A07', 'B02', 'B03']],
-    ['trim of the stored name in the handler (7a94388a)', $handler, '    $walkinName = $stored;', '    $walkinName = trim($stored);', ['E02', 'E03', 'E04']],
-    ['grid not scoped to the event', $helper, 'WHERE a.`eventID` = ? \'', 'WHERE ? > 0 \'', ['F01']],
-    ['reference lookup not scoped to the event', $helper, 'WHERE a.`attendanceID` = ? AND a.`eventID` = ? AND', 'WHERE a.`attendanceID` = ? AND ? > 0 AND', ['F03']],
+    // [name, edits, labels that MUST fail, labels that must stay GREEN]
+    ['byte-exact grouping', [[$helper, 'ON g.`walkinName` = a.`walkinName` AND', 'ON BINARY g.`walkinName` = BINARY a.`walkinName` AND']], ['A07', 'B02', 'B03'], []],
+    ['trim of the stored name in the handler (7a94388a)', [[$handler, '    $walkinName = $stored;', '    $walkinName = trim($stored);']], ['E02', 'E03', 'E04'], []],
+    ['grid not scoped to the event', [[$helper, 'WHERE a.`eventID` = ? \'', 'WHERE ? > 0 \'']], ['F01'], []],
+    ['reference lookup not scoped to the event', [[$helper, 'WHERE a.`attendanceID` = ? AND a.`eventID` = ? AND', 'WHERE a.`attendanceID` = ? AND ? > 0 AND']], ['F03'], []],
+    // The handler's own check is the first wall; the lookup's organisation test is the second.
+    ['handler event check bypassed (lookup still scoped to the organisation)', [$bypass], [], ['F03', 'F04', 'F05']],
+    ['handler event check bypassed AND the lookup not scoped to the organisation', [$bypass, [$helper, 'AND e.`siteID` = ? \'', 'AND ? > 0 \'']], ['F04'], []],
 ];
-foreach ($plants as [$name, $file, $from, $to, $mustFail]) {
-    $labels = plantedRun($name, $file, $from, $to);
+foreach ($plants as [$name, $edits, $mustFail, $mustStayGreen]) {
+    $labels  = plantedRun($name, $edits);
     $missing = array_values(array_diff($mustFail, $labels));
+    $wrongly = array_values(array_intersect($mustStayGreen, $labels));
     ok(
-        'D ' . $name . ' goes RED on ' . implode(', ', $mustFail) . ' (failed: ' . implode(', ', array_values(array_unique($labels))) . ')',
-        $labels !== [] && $missing === [],
-        'these checks did not fail and should have: ' . implode(', ', $missing)
+        'D ' . $name . ': ' . ($mustFail === [] ? '' : 'RED on ' . implode(', ', $mustFail)) . ($mustStayGreen === [] ? '' : 'GREEN on ' . implode(', ', $mustStayGreen))
+        . ' (failed: ' . implode(', ', array_values(array_unique($labels))) . ')',
+        ($mustFail === [] ? true : $labels !== []) && $missing === [] && $wrongly === [],
+        'did not fail and should have: ' . implode(', ', $missing) . '; failed and should not have: ' . implode(', ', $wrongly)
     );
 }
 

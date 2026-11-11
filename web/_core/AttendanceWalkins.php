@@ -48,7 +48,9 @@
  *     that same stored value is what `storedName()` hands the handler, so the
  *     removal and the add use exactly the bytes the grid drew.
  *   - A row whose name is EMPTY ('') groups with other empty names and is
- *     drawn with a blank label; not handled specially (see #655 notes).
+ *     DRAWN with a blank label, but its cell cannot be pressed (the handler
+ *     ignores an empty name). Only hand-written SQL can create one: both
+ *     portal writers refuse an empty name. Not handled further (#655 notes).
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -171,11 +173,8 @@ final class AttendanceWalkins
             'SELECT a.`walkinName` FROM `tblEventAttendance` a '
             . 'JOIN `tblEvents` e ON e.`eventID` = a.`eventID` '
             . 'WHERE a.`attendanceID` = ? AND a.`eventID` = ? AND e.`siteID` = ? '
-            // Same event rule as the handler and the grid: not deleted, not
-            // imported. `externalFeedID` is written unquoted on purpose:
-            // check_event_visibility.py looks for that literal text, and the
-            // word is not reserved.
-            . 'AND e.`isDeleted` = 0 AND e.externalFeedID IS NULL '
+            // Same event rule as the handler and the grid: not deleted, not imported.
+            . 'AND e.`isDeleted` = 0 AND e.`externalFeedID` IS NULL '
             . 'AND a.`userID` IS NULL AND a.`walkinName` IS NOT NULL'
         );
         if ($stmt === false) {

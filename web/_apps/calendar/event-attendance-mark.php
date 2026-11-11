@@ -67,18 +67,24 @@ $ok = (bool) $stmt->get_result()->fetch_assoc();
 $stmt->close();
 if ($ok === false) { http_response_code(404); exit('Event not found'); }
 
-// 🔑 A walk-in cell posts a reference; use the STORED name exactly. A
-// reference that is not a walk-in row of THIS event in THIS organisation is
-// answered like a missing event, so it also reveals nothing about other ones.
+$redirect = Site::url('calendar/event/attendance') . '?eventID=' . $eventId;
+
+// 🔑 A walk-in cell posts a reference; use the STORED name exactly. ONE
+// truthful answer for every reference that cannot be used — another event's,
+// another organisation's, one that never existed, and one whose row has since
+// been removed (a second tab, a second coordinator, the back button). The same
+// words for all four, so the answer reveals nothing about other events, and
+// the press is not silently lost: the grid is redrawn and says so.
 if ($walkinRef > 0) {
     $stored = AttendanceWalkins::storedName($mysqli, $eventId, $siteId, $walkinRef);
     if ($stored === null) {
-        http_response_code(404); exit('Event not found');
+        $_SESSION['flash_msg']  = 'That walk-in is no longer on this event\'s list. The list has been reloaded; please try again. Nothing was changed.';
+        $_SESSION['flash_type'] = 'warning';
+        header('Location: ' . $redirect, true, 302);
+        exit();
     }
     $walkinName = $stored;
 }
-
-$redirect = Site::url('calendar/event/attendance') . '?eventID=' . $eventId;
 
 if ($toggle === 1) {
     // 💾 Insert once. `INSERT IGNORE` throws the second copy away, and it can
