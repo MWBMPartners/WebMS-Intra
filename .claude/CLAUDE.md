@@ -429,7 +429,7 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   D-119).** 0 = never delete, the largest value; set on Admin → Maintenance → Retention only (an organisation's
   figure by its own administrator, the installation's by a global administrator); an installation figure below
   an organisation's is refused, naming it; the error log's 0 still means a year. Tests:
-  `tools/activity-log-retention-selftest.php`, section F of `tools/retention-caps-selftest.php`.
+  `tools/activity-log-retention-selftest.php`, section F of `tools/retention-caps-selftest.php`. What a member reads about it is worded ONLY by `ActivityLogRetention::privacyPageWords()` / `privacyNoticeClause()` from `memberFactsForSite()` (#940); test: section L of `tools/erasure-pages-selftest.php`.
 - **No time zone is built in (#782, migration 273).** `Livestream::zoneOf()`, `Venues::zoneToStore()` /
   `venueTimezone()` and `Sabbath::zone()` are the one answers for a livestream slot's, a venue's and the
   quiet window's clock; each falls back to `Site::timezone()`. The quiet window is per ORGANISATION: pass

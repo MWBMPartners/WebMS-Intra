@@ -144,6 +144,25 @@
 - Organisation names in these sentences are shown as text, never markup.
 - Open: #926–#931, #933, #934, #938–#941. #940 (the activity log's "never delete" wording) follows next.
 
+### What members and administrators read about the activity log's period is the real one (#940; D-117, D-118)
+
+- **The privacy page and the privacy notice print this organisation's real activity-log period:** a number of
+  days, or "kept for ever" saying whether this organisation or the whole portal chose it. It comes from the same
+  reader the nightly clear-out uses, and is worded in one place (`ActivityLogRetention::privacyPageWords()` /
+  `privacyNoticeClause()`). If the figure cannot be read, the page says so and names none.
+- **Every erasure sentence now says** the log is cleared after the period of the organisation a record was made
+  under (set by that organisation's administrator within the installation's limit), if the scheduled clear-out is
+  set up. The installation's "for ever" keeps an organisation's records only where that organisation has not
+  chosen a number of days of its own. What a record says, which can give a full name, an e-mail address or an
+  account number, stays as long as the record (#933). This covers My data, Request erasure, the written list, the
+  erasure policy, the administrators' first steps and the help page's "What an erasure keeps".
+- **The Retention page:**
+  - its cards no longer say "Never delete" keeps every record for ever;
+  - its refusals are worded per form, so an organisation is offered only the choices and the range it really has
+    (under an installation figure of 30 days, "from 1 to 30", with no "Never delete");
+  - it no longer says records "written before the organisation was decided, or by a scheduled job" belong to no
+    organisation.
+
 ### The activity log can be kept for ever, by choice (#932, D-117, D-118, D-119)
 
 - **"Never delete" is now a choice for the activity log** (`audit.retentionDays`, stored as 0), on Admin →

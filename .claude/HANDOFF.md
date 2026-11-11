@@ -13,7 +13,7 @@ Last whole suite (with #935/#936): 105/105 green; e2e harness all phases (272-27
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, 1c91e797 | CLEAN. Integrating now: cherry-pick, docs, whole suite, push. Then #809's erasure step (D-122/D-123) rebases onto it. Raised #947 |
+| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, 1c91e797 | Cherry-picked with docs; whole suite running, then push and close. Then #809's erasure step (D-122/D-123) rebases onto it. Raised #947 |
 | #809 — group meeting-place maps, rotating host homes (D-120, D-122, D-123; migration 275) | `agent-a7b8ce76589cb7ec3` / `p809-build`, 260090bb | Single-place version built; extending for rotating homes (D-123); erasure step after #940 lands |
 | #895 — a public address requested by several until one is approved (D-121; migration 276) | `agent-ab2ee553b3ce8e110` / `p895-build`, 9de429e9 | Built (unique key on a generated 'approved' column; locked approval; two-process race 5/5). Check round 1 running |
 

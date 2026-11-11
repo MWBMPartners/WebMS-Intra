@@ -22818,6 +22818,32 @@ section K (the file runs 186):
 - **Two things recorded rather than changed.** An organisation figure above 3650 (only possible through SQL)
   blocks lowering never to 3650, although the reader already holds it to 3650. And D-119's read moved before
   the lock cannot be caught without a hook inside the method.
+- **The member-facing words are #940's.** `ActivityLogRetention::memberFactsForSite()` reads the figure from
+  `daysForSite()`, the clear-out's own reader, so the page and the clear-out cannot disagree. Only when that answer
+  is "never" does it read the organisation's own row, to say WHO chose it. A failed read is its own state and
+  names no figure. The words for both privacy pages are in the class, with each state spelled out whole.
+- **"The installation chose for ever" is a ceiling, not a rule.** Every member-facing "for ever" sentence must say
+  that an organisation which chose a number of days is still cleared after it. #940 round 2 found eight sentences
+  that said otherwise, and round 3 found the Retention card and three messages.
+- **A message shared by two forms must be true for both.** The 0-days refusal offered "Never delete" from 1 to 3650
+  on the organisation's form, where the installation allowed only 1 to 30. #932's own test F4 had PINNED that
+  untrue wording. Refusals are now worded per form, through `refusalWordsForSite()`.
+- **A "could not read" path is tested only by DRIVING it.** L2 calls the real reader in a process with no
+  connection, and asserts that the premise really failed. Comparing words for hand-made facts let a catch
+  answering 365 pass.
+- **A page that prints a setting makes its pins depend on that setting.** `retention-caps-selftest.php` leaves the
+  installation's figure at 30 (#947), so erasure-pages sets the figure at set-up and puts the original back.
+- **Which activity records belong to no organisation (measured):** `Logger::activity()` binds `Site::id()`, an int
+  from 1, and the foreign key refuses 0 or an unknown site. A record has no organisation only through the key's
+  `SET NULL` when its organisation is removed, or as `ActivityLogCleaner`'s copy of such a row.
+- Tests for #940: section L of `tools/erasure-pages-selftest.php`:
+  - L1: seven states × both pages, literal words;
+  - L2: could-not-read, driven;
+  - L3–L8: rendered pins and the messages pressed through the page;
+  - L9: the organisation's form under never and under 30 days, with 0, empty, `abc`, `-1`, `1.5` and 99999, as an
+    organisation administrator and as a global administrator, and with an organisation's own figure.
+  
+  Also the #940 check in `tools/gdpr-coverage-selftest.php`.
 - Tests: `tools/activity-log-retention-selftest.php` (over HTTP) and section F of
   `tools/retention-caps-selftest.php`. The member-facing wording is #940, after #703.
 
