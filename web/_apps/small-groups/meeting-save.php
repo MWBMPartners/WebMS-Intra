@@ -24,6 +24,13 @@
  * meeting held in a since-removed home does not lose that fact. Anything else
  * is REFUSED, never quietly stored as "the usual place". A form that did not
  * send the field at all leaves the meeting's place as it was (#677).
+ *
+ * 🗓️ #809, D-127 — A PLANNED MEETING. A date still to come on the
+ * organisation's own clock (`SmallGroups::todayFor()`) makes this a planned
+ * meeting: the group's members see the next one. Nobody can have been present
+ * at it yet, so a planned meeting's roll is left untouched and nothing is
+ * pushed to the Attendance app (which would otherwise record a headcount of
+ * nobody for a service that has not happened).
  *   mark insert     — 3  ('iii': meetingID, userID, markedByID)
  *   unmark delete   — 2  ('ii': meetingID, userID)
  *
@@ -99,6 +106,10 @@ $notes = $notes !== '' ? $notes : null;
 $visitorCount = max(0, (int) ($_POST['visitorCount'] ?? 0));
 $recordedByID = $userId > 0 ? $userId : null;
 $wantsPush = isset($_POST['pushAttendance']);
+$isPlanned = strcmp($meetingDate, SmallGroups::todayFor($siteId)) > 0;
+if ($isPlanned === true) {
+    $wantsPush = false;
+}
 
 // 🔁 Where it was held (#809, D-123).
 $db = App::db();
@@ -202,8 +213,9 @@ try {
     }
     $exStmt->close();
 
-    $toInsert = array_diff_key($presentUserIds, $existingMarked);
-    $toDelete = array_diff_key($existingMarked, $presentUserIds);
+    // A planned meeting has no roll yet: leave whatever is stored alone.
+    $toInsert = $isPlanned === true ? [] : array_diff_key($presentUserIds, $existingMarked);
+    $toDelete = $isPlanned === true ? [] : array_diff_key($existingMarked, $presentUserIds);
 
     if (count($toInsert) > 0) {
         $insStmt = $db->prepare('INSERT INTO tblSmallGroupMeetingAttendance (meetingID, userID, markedByID) VALUES (?, ?, ?)');
@@ -257,7 +269,7 @@ if ($wantsPush === true) {
     }
 }
 
-$_SESSION['flash_msg']  = 'Meeting roll saved.';
+$_SESSION['flash_msg']  = $isPlanned === true ? 'Planned meeting saved. The group\'s members can see it.' : 'Meeting roll saved.';
 $_SESSION['flash_type'] = 'success';
 header('Location: ' . $backUrl);
 exit();

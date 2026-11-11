@@ -18,8 +18,9 @@
  *     internet address of whoever is looking;
  *   - a MAP OF WHERE A SMALL GROUP MEETS (#809). A small group very often
  *     meets in somebody's home, so the owner decided (D-120) that this map is
- *     the HOST'S HOME on the same terms as the one above. See
- *     `allowsMeetingPlaceMap()` for whose agreement counts.
+ *     the HOST'S HOME on the same terms as the one above, and (D-124) that the
+ *     host is a member NAMED for each place, whose agreement alone counts. See
+ *     `allowsMeetingPlaceMap()`.
  *
  * Until #778 nothing let anybody switch any of these off.
  *
@@ -199,8 +200,8 @@ final class OutsideServices
                           . '(to about 110 metres), or exactly where a small group meets, together with the '
                           . 'internet address of whoever is looking. A map of a member\'s home is shown only when '
                           . 'BOTH the member shown and the person looking allow it; a map of a group\'s meeting '
-                          . 'place only when the person who entered that place agreed to it and the person '
-                          . 'looking allows it.',
+                          . 'place only when that place\'s named host agreed to it and the person looking '
+                          . 'allows it.',
             'imgSources' => ['https://*.tile.openstreetmap.org'],
             // 🗺️ NEVER ON BY DEFAULT (D-072): "a member's map appears only when
             //    THAT member has switched it on". So no level may say "on until a
@@ -628,7 +629,7 @@ final class OutsideServices
     }
 
     // 🏠 =========================================================================
-    // A small group's meeting place (#809, D-120)
+    // A small group's meeting place (#809; D-120, D-123, D-124)
     // ===========================================================================
 
     /**
@@ -636,68 +637,70 @@ final class OutsideServices
      *
      * The owner decided (D-120, 11 November 2026) that a meeting place is to be
      * treated as the HOST'S HOME, on the same terms as a member's own home map
-     * (D-072, with the strictest-wins rule of D-058 and D-073). Nothing records
-     * whose home a meeting place is, so D-120 names the person whose agreement
-     * counts: WHOEVER ENTERED THE MEETING PLACE. A map is drawn only when ALL of
-     * these hold:
+     * (D-072, with the strictest-wins rule of D-058 and D-073). D-124 (which
+     * supersedes D-120 in part) says WHO the host is: a MEMBER NAMED on the
+     * form, not whoever typed the place in. A map is drawn only when ALL of these
+     * hold:
      *
-     *   1. somebody is recorded as having entered the place, AND they ticked
-     *      "a map of this place may be shown" when they did. That tick is this
-     *      place's "switched on"; an old group with nobody recorded has no
+     *   1. a host is named, AND that host ticked "a map of this place may be
+     *      shown" themselves. That tick is this place's "switched on"; a place
+     *      with no host, or an old group nobody has named one for, has no
      *      agreement and gets no map (the safe reading — nobody agreed);
-     *   2. that person is still somebody whose agreement can count: their
-     *      account is switched on, and they are still a member of the group's
-     *      organisation (or a global administrator). An ERASED account is
-     *      switched off and loses its memberships, so an erasure takes the map
-     *      away even though the group row still carries the tick;
-     *   3. for that person, maps are allowed at all (the installation and EVERY
+     *   2. the host is still somebody whose agreement can count: their account
+     *      is switched on, they still belong to the group's organisation (or are
+     *      a global administrator), AND they are still an active member of THE
+     *      GROUP. A host who leaves the group, or whose account is switched off,
+     *      takes the map away even though the row still carries the tick — and an
+     *      ERASED account is switched off and loses its memberships;
+     *   3. for the host, maps are allowed at all (the installation and EVERY
      *      organisation they belong to) and they have NOT switched maps off for
      *      themselves — the tick cannot loosen their own standing "off";
      *   4. for the person LOOKING, maps are allowed at all and they have not
      *      switched them off (D-072's question of the viewer).
      *
-     * Point 3 is `doesNotObject` for the enterer, which is D-072's "effective"
-     * with the tick standing in for "switched on": with the tick, the only ways
-     * to a no are a level saying `no` or the person's own `off`.
+     * Point 3 is `doesNotObject` for the host, which is D-072's "effective" with
+     * the tick standing in for "switched on": with the tick, the only ways to a
+     * no are a level saying `no` or the host's own `off`.
      *
-     * @param array<string,mixed> $entererDecision From decide(MEMBER_MAP, …) for the enterer.
-     * @param array<string,mixed> $viewerDecision  From decide(MEMBER_MAP, …) for the viewer.
+     * @param array<string,mixed> $hostDecision   From decide(MEMBER_MAP, …) for the host.
+     * @param array<string,mixed> $viewerDecision From decide(MEMBER_MAP, …) for the viewer.
      */
-    public static function meetingPlaceMapFrom(bool $agreed, bool $entererStillCounts, array $entererDecision, array $viewerDecision): bool
+    public static function meetingPlaceMapFrom(bool $agreed, bool $hostStillCounts, array $hostDecision, array $viewerDecision): bool
     {
-        if ($agreed === false || $entererStillCounts === false) {
+        if ($agreed === false || $hostStillCounts === false) {
             return false;
         }
-        if (($entererDecision['readable'] ?? false) !== true || ($viewerDecision['readable'] ?? false) !== true) {
+        if (($hostDecision['readable'] ?? false) !== true || ($viewerDecision['readable'] ?? false) !== true) {
             return false;
         }
 
-        return ($entererDecision['doesNotObject'] ?? false) === true
+        return ($hostDecision['doesNotObject'] ?? false) === true
             && ($viewerDecision['doesNotObject'] ?? false) === true;
     }
 
     /**
      * 🚦 May a small group's page draw a map of where the group meets?
      *
-     * The ONE place this is decided (#809, D-120); `small-groups/group.php`
-     * and `small-groups/meeting.php` ask it and then, only on a yes, widen the
-     * page rule with `mapTileSource()`. Neither page names the tile host itself
+     * The ONE place this is decided (#809); `small-groups/group.php` and
+     * `small-groups/meeting.php` ask it and then, only on a yes, widen the page
+     * rule with `mapTileSource()`. Neither page names the tile host itself
      * (`tools/audit-checks/check_outside_services_gated.py`).
      *
      * ONE PLACE AT A TIME (D-123). A group may take turns meeting in several
-     * hosts' homes; the caller passes THAT place's own row's host and
-     * agreement, so one host's agreement never stands for another's home.
+     * hosts' homes; the caller passes THAT place's own row's host and agreement,
+     * so one host's agreement never stands for another's home.
      *
-     * @param int  $groupSiteId     The organisation the GROUP belongs to.
-     * @param ?int $enteredById     `tblSmallGroups.placeEnteredByID`: who entered the place, or null.
-     * @param bool $agreed          `tblSmallGroups.placeMapAgreed` = 1: they ticked "a map may be shown".
+     * @param int  $groupSiteId The organisation the GROUP belongs to.
+     * @param int  $groupId     The group, so the host can be asked whether they still belong to it.
+     * @param ?int $hostId      The place's `hostUserID`: the member whose home it is (D-124), or null.
+     * @param bool $agreed      The place's `placeMapAgreed` = 1: THAT host ticked "a map may be shown".
      *
      * ANY read that fails is a no, as everywhere in this class: a permission
      * that cannot be read must never read as granted.
      */
-    public static function allowsMeetingPlaceMap(int $groupSiteId, ?int $enteredById, bool $agreed): bool
+    public static function allowsMeetingPlaceMap(int $groupSiteId, int $groupId, ?int $hostId, bool $agreed): bool
     {
-        if ($agreed === false || $enteredById === null || $enteredById <= 0 || $groupSiteId <= 0) {
+        if ($agreed === false || $hostId === null || $hostId <= 0 || $groupSiteId <= 0 || $groupId <= 0) {
             return false;
         }
         try {
@@ -708,37 +711,40 @@ final class OutsideServices
             return false;
         }
         try {
-            $stillCounts = self::entererStillCounts($db, $enteredById, $groupSiteId);
+            $stillCounts = self::hostStillCounts($db, $hostId, $groupSiteId, $groupId);
         } catch (\Throwable $e) {
-            self::logOnce('whether the person who entered a meeting place still counts could not be read, so no '
-                . 'meeting-place map is drawn on this request: ' . $e->getMessage());
+            self::logOnce('whether a meeting place\'s host still counts could not be read, so no meeting-place map '
+                . 'is drawn on this request: ' . $e->getMessage());
 
             return false;
         }
         $openSite = Site::id();
         $viewer   = self::viewerId();
-        $entererDecision = self::decide(self::MEMBER_MAP, self::factsFor($db, $enteredById, $openSite));
-        $viewerDecision  = self::decide(self::MEMBER_MAP, self::factsFor($db, $viewer, $openSite));
+        $hostDecision   = self::decide(self::MEMBER_MAP, self::factsFor($db, $hostId, $openSite));
+        $viewerDecision = self::decide(self::MEMBER_MAP, self::factsFor($db, $viewer, $openSite));
 
-        return self::meetingPlaceMapFrom($agreed, $stillCounts, $entererDecision, $viewerDecision);
+        return self::meetingPlaceMapFrom($agreed, $stillCounts, $hostDecision, $viewerDecision);
     }
 
     /**
-     * Point 2 of the meeting-place rule: is the person who entered the place
-     * still somebody whose agreement can count? Their account is switched on,
-     * AND they hold a switched-on membership of the group's organisation or are
-     * a global administrator (who counts as a member of every organisation, as
-     * `membershipsOf()` counts them). Throws on a failed read.
+     * Point 2 of the meeting-place rule: is the place's host still somebody
+     * whose agreement can count? Their account is switched on, they hold a
+     * switched-on membership of the group's organisation or are a global
+     * administrator (who counts as a member of every organisation, as
+     * `membershipsOf()` counts them), AND they are an ACTIVE member of the group
+     * itself. Throws on a failed read.
      */
-    private static function entererStillCounts(\mysqli $db, int $userId, int $siteId): bool
+    private static function hostStillCounts(\mysqli $db, int $userId, int $siteId, int $groupId): bool
     {
         $stmt = $db->prepare(
             'SELECT 1 FROM `tblUsers` `u` '
+            . 'JOIN `tblSmallGroupMembers` `gm` ON `gm`.`userID` = `u`.`userID` AND `gm`.`groupID` = ? '
+            . "AND `gm`.`siteID` = ? AND `gm`.`status` = 'active' "
             . 'LEFT JOIN `tblUserSites` `us` ON `us`.`userID` = `u`.`userID` AND `us`.`siteID` = ? AND `us`.`isActive` = 1 '
             . 'WHERE `u`.`userID` = ? AND `u`.`isActive` = 1 AND (`us`.`userSiteID` IS NOT NULL OR `u`.`isRootAdmin` = 1) '
             . 'LIMIT 1'
         );
-        $stmt->bind_param('ii', $siteId, $userId);
+        $stmt->bind_param('iiii', $groupId, $siteId, $siteId, $userId);
         $stmt->execute();
         $found = $stmt->get_result()->fetch_assoc() !== null;
         $stmt->close();
@@ -749,7 +755,7 @@ final class OutsideServices
     /**
      * Why the person signed in could not give a meeting-place map by ticking
      * the box, in plain words — or '' when nothing in the tiers stands in the
-     * way. For the group's edit form, so a leader is never told a tick will do
+     * way. For the host's own form, so a host is never told a tick will do
      * something the rule will then refuse.
      */
     public static function meetingPlaceTickBlockedFor(): string

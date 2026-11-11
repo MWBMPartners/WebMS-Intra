@@ -75,15 +75,16 @@ $locVisible = $canManageHere === true
     || ($visTier === 'site')
     || ($visTier === 'leaders' && $canManageHere === true);
 
-// 🛂 #809, D-120 — A MAP OF WHERE THE GROUP MEETS IS THE HOST'S HOME. A small
-// group very often meets in somebody's home, and drawing the map asks
+// 🛂 #809, D-120, D-124 — A MAP OF WHERE THE GROUP MEETS IS THE HOST'S HOME. A
+// small group very often meets in somebody's home, and drawing the map asks
 // OpenStreetMap, an outside company, for the map squares around that place,
 // together with the internet address of whoever is looking. The owner decided
-// it is shown only where WHOEVER ENTERED THE MEETING PLACE agreed, on the same
-// terms as a member's own home map (D-072): the strictest of the installation
-// and every organisation that person belongs to, their own choice, and the
-// viewer's own switch. `OutsideServices::allowsMeetingPlaceMap()` is the ONE
-// place that is decided. Otherwise the written address is still shown — to
+// it is shown only where the place's NAMED HOST — a member of the group, chosen
+// on the form (D-124) — agreed, on the same terms as a member's own home map
+// (D-072): the strictest of the installation and every organisation the host
+// belongs to, the host's own choice, and the viewer's own switch; and only
+// while the host is still an active member of the group.
+// `OutsideServices::allowsMeetingPlaceMap()` is the ONE place that is decided. Otherwise the written address is still shown — to
 // whoever the group's own "who can see the meeting address" allows — with no
 // map.
 //
@@ -92,7 +93,7 @@ $locVisible = $canManageHere === true
 // host again (`tools/audit-checks/check_outside_services_gated.py`).
 $hasPin  = $locVisible === true && $group['latitude'] !== null && $group['longitude'] !== null;
 $showMap = $hasPin === true
-    && OutsideServices::allowsMeetingPlaceMap($siteId, (int) ($group['placeEnteredByID'] ?? 0), (int) ($group['placeMapAgreed'] ?? 0) === 1) === true;
+    && OutsideServices::allowsMeetingPlaceMap($siteId, $groupId, (int) ($group['hostUserID'] ?? 0), (int) ($group['placeMapAgreed'] ?? 0) === 1) === true;
 
 // 🔁 #809, D-123 — THE HOMES THE GROUP TAKES TURNS IN. Each is its OWN host's,
 //    so each is decided on its own row: one host's agreement never stands for
@@ -103,7 +104,36 @@ $placeMapShown = [];
 foreach ($places as $pl) {
     $plId = (int) $pl['placeID'];
     $placeMapShown[$plId] = $pl['latitude'] !== null && $pl['longitude'] !== null
-        && OutsideServices::allowsMeetingPlaceMap($siteId, (int) ($pl['placeEnteredByID'] ?? 0), (int) ($pl['placeMapAgreed'] ?? 0) === 1) === true;
+        && OutsideServices::allowsMeetingPlaceMap($siteId, $groupId, (int) ($pl['hostUserID'] ?? 0), (int) ($pl['placeMapAgreed'] ?? 0) === 1) === true;
+}
+
+// 🗓️ #809, D-127 — WHERE THE GROUP MEETS NEXT, for its MEMBERS (and the people
+//    who run it). A meeting dated today or later is a planned one. Somebody
+//    outside the group sees nothing of it. Where it is follows the group's own
+//    "who can see the meeting address" setting ($locVisible), and its map is
+//    the SAME decision already made above for that place — its own host's —
+//    never a looser one.
+// 👥 Members and the people who run the group: they see the full roster (names
+//    are personal data) and the next meeting.
+$rosterFull    = $canManageHere === true || $isMemberHere === true;
+$nextMeeting   = $rosterFull === true ? SmallGroups::nextMeeting($siteId, $groupId) : null;
+$nextPlace     = null;
+$nextPlaceGone = false;
+$nextShowMap   = false;
+if ($nextMeeting !== null) {
+    $nextPlaceId = $nextMeeting['placeID'] !== null ? (int) $nextMeeting['placeID'] : 0;
+    if ($nextPlaceId === 0) {
+        $nextPlace   = $group;
+        $nextShowMap = $showMap;
+    } else {
+        $listedPlace = SmallGroups::getPlace($siteId, $groupId, $nextPlaceId);
+        if ($listedPlace !== null && (int) $listedPlace['isActive'] === 1) {
+            $nextPlace   = $listedPlace;
+            $nextShowMap = $placeMapShown[$nextPlaceId] ?? false;
+        } else {
+            $nextPlaceGone = true;
+        }
+    }
 }
 $anyMap = $showMap === true || in_array(true, $placeMapShown, true) === true;
 
@@ -115,7 +145,6 @@ if ($anyMap === true) {
 
 // 👥 Roster — full names visible to members/managers only; everyone else
 // sees leaders' names + a headcount (membership itself is personal data).
-$rosterFull = $canManageHere === true || $isMemberHere === true;
 $activeMembers = SmallGroups::membersOf($siteId, $groupId, 'active');
 $leaders = array_values(array_filter($activeMembers, static fn ($m) => in_array($m['memberRole'], ['leader', 'co-leader'], true)));
 
@@ -136,6 +165,7 @@ if ($canManageHere === true) {
 // Every place the group has ever listed, removed ones included, so a past
 // meeting held in a removed home can say so rather than look like the usual one.
 $placeNames = [];
+$todayHere  = SmallGroups::todayFor($siteId);
 if ($canManageHere === true) {
     foreach (SmallGroups::placesOf($siteId, $groupId, false) as $pl) {
         $placeNames[(int) $pl['placeID']] = SmallGroups::placeName($pl);
@@ -210,6 +240,47 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
 </div>
 
 <div class="row g-3">
+    <?php if ($nextMeeting !== null): ?>
+    <div class="col-12">
+        <div class="card portal-next-meeting">
+            <div class="card-header">Next meeting</div>
+            <div class="card-body small">
+                <?php
+                // The date is a date on the organisation's calendar, so it is
+                // read as a date in UTC and never as a moment (#777).
+                $nextDate = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $nextMeeting['meetingDate'], new \DateTimeZone('UTC'));
+                $nextTime = (string) ($nextMeeting['meetingTime'] ?? ($group['meetingTime'] ?? ''));
+                ?>
+                <p class="mb-1"><strong><?php echo $esc($nextDate !== false ? $nextDate->format('l j F Y') : (string) $nextMeeting['meetingDate']); ?></strong>
+                    <?php if ($nextTime !== ''): ?> at <?php echo $esc(I18n::formatClockTime($nextTime)); ?><?php endif; ?></p>
+                <?php if (($nextMeeting['topic'] ?? '') !== ''): ?>
+                    <p class="mb-1"><?php echo $esc($nextMeeting['topic']); ?></p>
+                <?php endif; ?>
+                <?php if ($locVisible === false): ?>
+                    <p class="text-muted mb-0 portal-next-meeting-hidden"><i class="fa-solid fa-lock me-1"></i>Where it meets is shown only to the people the group's leaders have chosen.</p>
+                <?php elseif ($nextPlaceGone === true): ?>
+                    <p class="text-muted mb-0">At a place no longer recorded.</p>
+                <?php elseif ($nextPlace !== null): ?>
+                    <?php portal_location_display([
+                        'address' => [
+                            'line1' => $nextPlace['addressLine1'], 'line2' => $nextPlace['addressLine2'],
+                            'city' => $nextPlace['city'], 'region' => $nextPlace['region'],
+                            'postcode' => $nextPlace['postcode'],
+                        ],
+                        'lat'     => $nextPlace['latitude'] !== null ? (float) $nextPlace['latitude'] : null,
+                        'lng'     => $nextPlace['longitude'] !== null ? (float) $nextPlace['longitude'] : null,
+                        'w3w'     => $nextPlace['what3words'],
+                        'visible' => true,
+                        'coarsen' => false,
+                        'showMap' => $nextShowMap,
+                        'mapId'   => 'sgNextMap',
+                        'label'   => isset($nextPlace['placeID']) === true ? SmallGroups::placeName($nextPlace) : 'The usual place',
+                    ]); ?>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
     <div class="col-md-6">
         <div class="card h-100">
             <div class="card-header">About</div>
@@ -258,15 +329,15 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                 ]); ?>
                 <?php if ($hasPin === true && $showMap === false): ?>
                     <p class="small text-secondary mb-1 portal-place-no-map">No map is shown: a map is drawn by
-                        OpenStreetMap, an outside company, and appears only when the person who entered this meeting
-                        place has agreed to it and you allow maps.
+                        OpenStreetMap, an outside company, and appears only when the member whose home this meeting
+                        place is has agreed to it and you allow maps.
                         <a href="<?php echo htmlspecialchars(Site::url('account/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Your choice</a>.</p>
                 <?php endif; ?>
                 <?php if ($locVisible === false): ?>
                     <p class="text-muted small mb-0"><i class="fa-solid fa-lock me-1"></i>Meeting location is visible to group members only.</p>
                 <?php endif; ?>
 
-                <?php if ($places !== [] || ($canManageHere === true && $locVisible === true)): ?>
+                <?php if ($places !== [] || (($canManageHere === true || $isMemberHere === true) && $locVisible === true)): ?>
                     <hr>
                     <p class="mb-1"><strong>Homes the group takes turns in</strong></p>
                     <?php if ($places === []): ?>
@@ -292,15 +363,18 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                             ]); ?>
                             <?php if ($pl['latitude'] !== null && $pl['longitude'] !== null && ($placeMapShown[$plId] ?? false) === false): ?>
                                 <p class="small text-secondary mb-1 portal-place-no-map">No map is shown: it appears only when the
-                                    person who entered this home has agreed to it and you allow maps.</p>
+                                    member whose home it is has agreed to it and you allow maps.</p>
                             <?php endif; ?>
-                            <?php if ($canManageHere === true): ?>
+                            <?php if ($canManageHere === true || ((int) ($pl['hostUserID'] ?? 0) === $userId && $isMemberHere === true)): ?>
                                 <a class="small" href="<?php echo htmlspecialchars(Site::url('small-groups/place'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>&amp;placeID=<?php echo $plId; ?>">Edit this home</a>
                             <?php endif; ?>
                         </div>
                     <?php endforeach; ?>
                     <?php if ($canManageHere === true): ?>
                         <a class="btn btn-sm btn-outline-primary" href="<?php echo htmlspecialchars(Site::url('small-groups/place'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>"><i class="fa-solid fa-house-medical me-1"></i>Add a host's home</a>
+                    <?php elseif ($isMemberHere === true): ?>
+                        <?php // D-125: any member may add their OWN home, as its host. ?>
+                        <a class="btn btn-sm btn-outline-primary" href="<?php echo htmlspecialchars(Site::url('small-groups/place'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>"><i class="fa-solid fa-house-medical me-1"></i>Add my home</a>
                     <?php endif; ?>
                 <?php endif; ?>
             </div>
@@ -363,6 +437,9 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                                 <div class="col-6 col-md-2">
                                     <?php if ($mt['attendanceSessionID'] !== null): ?>
                                         <span class="badge bg-success">pushed</span>
+                                    <?php endif; ?>
+                                    <?php if (strcmp((string) $mt['meetingDate'], $todayHere) > 0): ?>
+                                        <span class="badge bg-info text-dark">planned</span>
                                     <?php endif; ?>
                                 </div>
                                 <div class="col-6 col-md-2 text-md-end">

@@ -9679,8 +9679,9 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroups` (
     `geocodedAt`         DATETIME      DEFAULT NULL COMMENT 'When lat/lng last set by the Geocoder (migration 180 pattern)',
     `geocodeSource`      VARCHAR(20)   DEFAULT NULL COMMENT 'google, nominatim, manual or w3w',
     `locationVisibility` ENUM('leaders','members','site') NOT NULL DEFAULT 'members' COMMENT 'Who may see the meeting address/pin — groups often meet in a member''s home; no public tier exists',
-    `placeEnteredByID`   INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last entered or changed where the group meets (#809, migration 275). Their agreement decides whether a MAP of the place is shown (D-120). Empty for a group from before #809, or with no place',
-    `placeMapAgreed`     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the person in placeEnteredByID agreed that a map of this meeting place may be shown (D-120: treated as the host''s home, on the terms of D-072). 0 = not agreed, the safe reading for every older group',
+    `placeEnteredByID`   INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last typed in or changed where the group usually meets (#809, migration 275). A record of who did it; it decides nothing (D-124)',
+    `hostUserID`         INT           DEFAULT NULL COMMENT 'FK to tblUsers: the member whose home the usual meeting place is (D-124). Only that member can agree to a map of it. Empty = no host named, so no map',
+    `placeMapAgreed`     TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the host in hostUserID agreed that a map of this meeting place may be shown (D-120, D-124). 0 = not agreed, the safe reading for every older group',
     `resourcesURL`       VARCHAR(500)  DEFAULT NULL COMMENT 'Lesson/study resources link (Documents category or external quarterly) — lightweight v1 of #150 lesson resources',
     `isOpenEnrolment`    TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = members may request to join from the groups directory',
     `capacity`           INT           DEFAULT NULL COMMENT 'Optional member cap; NULL = unlimited',
@@ -9696,7 +9697,8 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroups` (
     CONSTRAINT `fk_sg_site`        FOREIGN KEY (`siteID`)        REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_sg_servicetype` FOREIGN KEY (`serviceTypeID`) REFERENCES `tblAttendanceServiceTypes`(`serviceTypeID`) ON DELETE SET NULL,
     CONSTRAINT `fk_sg_creator`     FOREIGN KEY (`createdByID`)   REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
-    CONSTRAINT `fk_sg_place_enterer` FOREIGN KEY (`placeEnteredByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+    CONSTRAINT `fk_sg_place_enterer` FOREIGN KEY (`placeEnteredByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_sg_host`        FOREIGN KEY (`hostUserID`)    REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Small Groups — groups/classes register; groupID is the stable scope anchor for #304 messaging and #321 watch rooms (#150)';
 
@@ -9715,17 +9717,20 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroupPlaces` (
     `latitude`         DECIMAL(10,7) DEFAULT NULL,
     `longitude`        DECIMAL(10,7) DEFAULT NULL,
     `what3words`       VARCHAR(100)  DEFAULT NULL COMMENT 'what3words address',
-    `placeEnteredByID` INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last entered or changed this place. Under D-120 and D-123 this place is THAT host''s home: their agreement alone decides its map (#809, migration 275)',
-    `placeMapAgreed`   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the person in placeEnteredByID agreed that a map of this place may be shown (D-120). 0 = not agreed',
+    `hostUserID`       INT           DEFAULT NULL COMMENT 'FK to tblUsers: the member whose home this is (D-124). Only that member can agree to a map of it, and erasing them removes it (D-122). Empty = no host, so no map',
+    `placeEnteredByID` INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last typed in or changed this home (#809, migration 275). A record of who did it; it decides nothing (D-124)',
+    `placeMapAgreed`   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the host in hostUserID agreed that a map of this home may be shown (D-120, D-124). 0 = not agreed',
     `isActive`         TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = removed from the group''s list. A removed place keeps its row so a past meeting can say it met somewhere no longer recorded, but its address, who entered it and the agreement are emptied',
     `createdAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`placeID`),
     KEY `idx_sgp_group_active` (`groupID`, `isActive`),
     KEY `idx_sgp_site` (`siteID`),
+    KEY `idx_sgp_host` (`hostUserID`),
     CONSTRAINT `fk_sgp_site`    FOREIGN KEY (`siteID`)           REFERENCES `tblSites`(`siteID`),
     CONSTRAINT `fk_sgp_group`   FOREIGN KEY (`groupID`)          REFERENCES `tblSmallGroups`(`groupID`) ON DELETE CASCADE,
-    CONSTRAINT `fk_sgp_enterer` FOREIGN KEY (`placeEnteredByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
+    CONSTRAINT `fk_sgp_enterer` FOREIGN KEY (`placeEnteredByID`) REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL,
+    CONSTRAINT `fk_sgp_host`    FOREIGN KEY (`hostUserID`)       REFERENCES `tblUsers`(`userID`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
 COMMENT='Small Groups — the homes a group takes turns meeting in, each its own host''s (#809, D-123)';
 

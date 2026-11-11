@@ -4,21 +4,26 @@
  * -----------------------------------------------------------------------------
  * Small Groups — save, change or remove a host's home 🏠💾 (#809, D-123)
  * -----------------------------------------------------------------------------
- * POST-only, form token first, flash + redirect on every exit. Gate:
- * `SmallGroups::canManage()` on the group fetched by `groupID` AND `siteID`
- * first; a place is then looked up by `placeID` AND that group AND that
- * organisation, so a place of another group is indistinguishable from a
- * missing one.
+ * POST-only, form token first, flash + redirect on every exit. The group is
+ * fetched by `groupID` AND `siteID` first; a place is then looked up by
+ * `placeID` AND that group AND that organisation, so a place of another group
+ * is indistinguishable from a missing one.
  *
- * WHO ENTERED THE PLACE, AND THEIR AGREEMENT. Each home is its own host's
- * (D-120, D-123): a map of it is shown only where the person who entered THIS
- * home agreed. `SmallGroups::placeAgreementAfterSave()` is the ONE rule for who
- * is recorded after a save — the same rule the group's usual place uses — and
- * this handler asks it on the place's row read again with `FOR UPDATE` inside
- * a transaction, writing both columns in the SAME statement as the address.
- * So an agreement can never be attached to a home somebody else changed a
- * moment earlier (#647; the transaction starts first, because a lock outside
- * a transaction is decoration — #697).
+ * WHO MAY (the owner, D-125): `SmallGroups::mayEditHome()`, the same answer the
+ * page draws from. A leader may add or change ANY home; any other active
+ * member only their OWN, as its host — and the host is then forced to them,
+ * whatever is posted.
+ *
+ * WHOSE HOME, AND THEIR AGREEMENT (D-124). Each home names its host, a member
+ * of the group; only THAT member can agree to a map of it. The host is
+ * resolved by `SmallGroups::hostFromPost()` and the agreement by
+ * `SmallGroups::placeAgreementAfterSave()` — the same two the group's usual
+ * place uses — asked on the place's row read again with `FOR UPDATE` inside a
+ * transaction, and written in the SAME statement as the address. So an
+ * agreement can never be carried to another host or another address, nor
+ * attached to a home somebody else changed a moment earlier (#647; the
+ * transaction starts first, because a lock outside a transaction is
+ * decoration — #697).
  *
  * REMOVE empties the address, who entered it and the agreement, and switches
  * the row off. The row itself stays, so a past meeting held there still points
@@ -76,15 +81,26 @@ if ($group === null) {
     header('Location: ' . Site::url('small-groups'));
     exit();
 }
-if (SmallGroups::canManage($siteId, $groupId) === false) {
-    Router::renderError(403);
-    return;
-}
+$canManage = SmallGroups::canManage($siteId, $groupId);
+$isMember  = SmallGroups::isActiveMemberOf($siteId, $groupId, $userId);
 
 $action  = (string) ($_POST['action'] ?? '');
 $placeId = (int) ($_POST['placeID'] ?? 0);
 if (in_array($action, ['create', 'update', 'remove'], true) === false) {
     Router::renderError(400);
+    return;
+}
+// 🚪 D-125, asked on the place as it is stored now (the update path asks again
+//    on the LOCKED row below, because the host may have changed meanwhile).
+$current = $action === 'create' ? null : SmallGroups::getPlace($siteId, $groupId, $placeId);
+if ($action !== 'create' && ($current === null || (int) $current['isActive'] !== 1)) {
+    $_SESSION['flash_msg']  = 'That home is not on this group\'s list.';
+    $_SESSION['flash_type'] = 'warning';
+    header('Location: ' . $groupUrl);
+    exit();
+}
+if (SmallGroups::mayEditHome($canManage, $isMember, $current, $userId) === false) {
+    Router::renderError(403);
     return;
 }
 $formUrl = Site::url('small-groups/place') . '?id=' . $groupId . ($placeId > 0 ? '&placeID=' . $placeId : '');
@@ -98,10 +114,16 @@ if ($action === 'remove') {
     $stmt = $db->prepare(
         'UPDATE `tblSmallGroupPlaces` SET `placeLabel` = NULL, `addressLine1` = NULL, `addressLine2` = NULL, '
         . '`city` = NULL, `region` = NULL, `postcode` = NULL, `countryCode` = NULL, `latitude` = NULL, '
-        . '`longitude` = NULL, `what3words` = NULL, `placeEnteredByID` = NULL, `placeMapAgreed` = 0, `isActive` = 0 '
+        . '`longitude` = NULL, `what3words` = NULL, `placeEnteredByID` = NULL, `hostUserID` = NULL, '
+        . '`placeMapAgreed` = 0, `isActive` = 0 '
         . 'WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ? AND `isActive` = 1'
+        . ($canManage === true ? '' : ' AND `hostUserID` = ?')
     );
-    $stmt->bind_param('iii', $placeId, $groupId, $siteId);
+    if ($canManage === true) {
+        $stmt->bind_param('iii', $placeId, $groupId, $siteId);
+    } else {
+        $stmt->bind_param('iiii', $placeId, $groupId, $siteId, $userId);
+    }
     $stmt->execute();
     $removed = $stmt->affected_rows === 1;
     $stmt->close();
@@ -161,20 +183,32 @@ if (SmallGroups::placeIsEmpty(SmallGroups::placeOf($postedPlace)) === true) {
 $boxDrawn = array_key_exists('placeMapAsked', $_POST) === true;
 $ticked   = ($_POST['placeMapAgreed'] ?? '') === '1';
 
+$refuseHost = static function () use ($formUrl): never {
+    $_SESSION['flash_msg']  = 'The host must be an active member of this group. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $formUrl);
+    exit();
+};
+
 if ($action === 'create') {
-    $agreement = SmallGroups::placeAgreementAfterSave(null, $postedPlace, $userId, $boxDrawn, $ticked);
+    $hostPick = SmallGroups::hostFromPost($siteId, $groupId, null, $canManage, $userId, $_POST);
+    if ($hostPick['ok'] === false) {
+        $refuseHost();
+    }
+    $agreement = SmallGroups::placeAgreementAfterSave(null, $postedPlace, $hostPick['host'], $userId, $boxDrawn, $ticked);
     $enteredBy = $agreement['enteredBy'];
+    $host      = $agreement['host'];
     $agreed    = $agreement['agreed'];
     $stmt = $db->prepare(
         'INSERT INTO `tblSmallGroupPlaces` (`siteID`, `groupID`, `placeLabel`, `addressLine1`, `addressLine2`, `city`, '
-        . '`region`, `postcode`, `countryCode`, `latitude`, `longitude`, `what3words`, `placeEnteredByID`, `placeMapAgreed`) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        . '`region`, `postcode`, `countryCode`, `latitude`, `longitude`, `what3words`, `hostUserID`, `placeEnteredByID`, '
+        . '`placeMapAgreed`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    // 14 placeholders: i i s s s s s s s d d s i i
+    // 15 placeholders: i i s s s s s s s d d s i i i
     $stmt->bind_param(
-        'iisssssssddsii',
+        'iisssssssddsiii',
         $siteId, $groupId, $label, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode,
-        $latitude, $longitude, $w3w, $enteredBy, $agreed
+        $latitude, $longitude, $w3w, $host, $enteredBy, $agreed
     );
     $stmt->execute();
     $stmt->close();
@@ -193,7 +227,7 @@ $db->begin_transaction();
 try {
     $lock = $db->prepare(
         'SELECT `addressLine1`, `addressLine2`, `city`, `region`, `postcode`, `countryCode`, `latitude`, `longitude`, '
-        . '`what3words`, `placeEnteredByID`, `placeMapAgreed` FROM `tblSmallGroupPlaces` '
+        . '`what3words`, `placeEnteredByID`, `hostUserID`, `placeMapAgreed` FROM `tblSmallGroupPlaces` '
         . 'WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ? AND `isActive` = 1 FOR UPDATE'
     );
     $lock->bind_param('iii', $placeId, $groupId, $siteId);
@@ -207,20 +241,34 @@ try {
         header('Location: ' . $groupUrl);
         exit();
     }
-    $agreement = SmallGroups::placeAgreementAfterSave($locked, $postedPlace, $userId, $boxDrawn, $ticked);
+    // D-125 again, on the locked row: the host may have changed since the
+    // first look, and a member may change only a home that is still theirs.
+    if (SmallGroups::mayEditHome($canManage, $isMember, $locked, $userId) === false) {
+        $db->rollback();
+        Router::renderError(403);
+        return;
+    }
+    $storedHost = $locked['hostUserID'] !== null ? (int) $locked['hostUserID'] : null;
+    $hostPick   = SmallGroups::hostFromPost($siteId, $groupId, $storedHost, $canManage, $userId, $_POST);
+    if ($hostPick['ok'] === false) {
+        $db->rollback();
+        $refuseHost();
+    }
+    $agreement = SmallGroups::placeAgreementAfterSave($locked, $postedPlace, $hostPick['host'], $userId, $boxDrawn, $ticked);
     $enteredBy = $agreement['enteredBy'];
+    $host      = $agreement['host'];
     $agreed    = $agreement['agreed'];
     $stmt = $db->prepare(
         'UPDATE `tblSmallGroupPlaces` SET `placeLabel` = ?, `addressLine1` = ?, `addressLine2` = ?, `city` = ?, '
         . '`region` = ?, `postcode` = ?, `countryCode` = ?, `latitude` = ?, `longitude` = ?, `what3words` = ?, '
-        . '`placeEnteredByID` = ?, `placeMapAgreed` = ? '
+        . '`hostUserID` = ?, `placeEnteredByID` = ?, `placeMapAgreed` = ? '
         . 'WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ?'
     );
-    // 15 placeholders: s s s s s s s d d s i i i i i
+    // 16 placeholders: s s s s s s s d d s i i i i i i
     $stmt->bind_param(
-        'sssssssddsiiiii',
+        'sssssssddsiiiiii',
         $label, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode, $latitude, $longitude, $w3w,
-        $enteredBy, $agreed, $placeId, $groupId, $siteId
+        $host, $enteredBy, $agreed, $placeId, $groupId, $siteId
     );
     $stmt->execute();
     $stmt->close();

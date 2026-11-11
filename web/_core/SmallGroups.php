@@ -568,6 +568,15 @@ final class SmallGroups
     {
         $db = self::db();
 
+        // 🗓️ #809, D-127: a meeting dated in the future is PLANNED, not held,
+        //    and has no roll yet. Counting it would read as a meeting nobody
+        //    came to, so the range never runs past today on the organisation's
+        //    clock (dates compare as text, both `Y-m-d`).
+        $today = self::todayFor($siteId);
+        if (strcmp($to, $today) > 0) {
+            $to = $today;
+        }
+
         $meetings = [];
         $mStmt = $db->prepare(
             'SELECT tblSmallGroupMeetings.meetingID, tblSmallGroupMeetings.meetingDate, '
@@ -676,70 +685,142 @@ final class SmallGroups
     }
 
     /**
-     * ✍️ THE RULE for who is recorded as having entered a group's meeting
-     * place, and whether they agreed to a map of it, after one save. On FACTS
+     * ✍️ THE RULE for a meeting place after one save: who is its HOST, who
+     * typed it in, and whether the host has agreed to a map of it. On FACTS
      * (#647): the handler reads the stored row under a lock and asks this, so
      * the answer is about the place as it really stands at the moment of the
      * write.
      *
-     * D-120: a map of the place is shown only where WHOEVER ENTERED IT has
-     * agreed. So an agreement belongs to one person and one place, and must
-     * never end up attached to a place that person did not enter. D-123: a
-     * group may take turns in several hosts' homes, each its own host's, so
-     * this ONE rule serves both the group's usual place (`tblSmallGroups`) and
-     * every home on its list (`tblSmallGroupPlaces`, the same column names) —
-     * asked separately for each row, so one host's tick never touches another's:
+     * THE HOST IS A NAMED MEMBER (the owner, D-124, superseding D-120 and D-122
+     * in part). A place is its host's home, and only THAT member can agree to a
+     * map of it. A leader who types in Ann's address names Ann as the host; the
+     * leader cannot tick on Ann's behalf. D-123: a group may take turns in
+     * several hosts' homes, so this ONE rule serves both the group's usual place
+     * (`tblSmallGroups`) and every home on its list (`tblSmallGroupPlaces`, the
+     * same column names), asked separately for each row:
      *
-     *   1. the place is now EMPTY            → nobody, not agreed;
-     *   2. the place CHANGED (or is new)     → the person saving entered it;
-     *      their own tick is the agreement (no tick, or a form that did not
-     *      draw the box, is "not agreed");
-     *   3. unchanged, and the person saving IS the one recorded
-     *                                        → they may give or withdraw their
-     *      agreement with the tick; a form that did not draw the box changes
-     *      nothing (#677: ask whether a field ARRIVED, never what it holds);
-     *   4. unchanged, and NOBODY is recorded (a group from before #809)
-     *                                        → ticking makes the person saving
-     *      the one answerable for the place as it stands, with their agreement.
-     *      Not ticking leaves it as it was: nobody, not agreed;
-     *   5. unchanged, and SOMEBODY ELSE is recorded
-     *                                        → left exactly as it was. Their tick
-     *      is not theirs to give or take away; changing the place is the only way
-     *      to become the person whose agreement counts.
+     *   1. the place is now EMPTY                → no host, nobody, not agreed;
+     *   2. no host is named                      → not agreed (nobody's
+     *      agreement exists to count);
+     *   3. the HOST changed, or the PLACE changed → the old agreement is gone:
+     *      it was one person's agreement about one address, and must never be
+     *      carried to another person or another address;
+     *   4. otherwise the stored agreement stands;
+     *   5. and ONLY IF the person saving IS the host and the form DREW the box
+     *      (#677: ask whether a field ARRIVED), their own tick replaces it.
+     *      Anybody else's tick — a leader's, an administrator's — counts for
+     *      nothing, whatever they post.
      *
-     * @param ?array<string,mixed> $existing The stored row, or null for a new group.
-     * @param array<string,mixed>  $posted   The place as it will be stored, keyed by PLACE_COLUMNS.
+     * `placeEnteredByID` keeps who last TYPED the place in (the person saving,
+     * when it is new or changed). It decides nothing any more; it is the record
+     * of who did it.
      *
-     * @return array{enteredBy:?int, agreed:int}
+     * @param ?array<string,mixed> $existing  The stored row, or null for a new one.
+     * @param array<string,mixed>  $posted    The place as it will be stored, keyed by PLACE_COLUMNS.
+     * @param ?int                 $host      The host it will be stored with (the handler has
+     *                                        already checked who may be named), or null for none.
+     *
+     * @return array{enteredBy:?int, host:?int, agreed:int}
      */
-    public static function placeAgreementAfterSave(?array $existing, array $posted, int $saverId, bool $boxDrawn, bool $ticked): array
+    public static function placeAgreementAfterSave(?array $existing, array $posted, ?int $host, int $saverId, bool $boxDrawn, bool $ticked): array
     {
         $after = self::placeOf($posted);
-        if (self::placeIsEmpty($after) === true || $saverId <= 0) {
-            return ['enteredBy' => null, 'agreed' => 0];
+        if (self::placeIsEmpty($after) === true) {
+            return ['enteredBy' => null, 'host' => null, 'agreed' => 0];
         }
-        $agreesNow = $boxDrawn === true && $ticked === true;
-        if ($existing === null || self::placeOf($existing) !== $after) {
-            return ['enteredBy' => $saverId, 'agreed' => $agreesNow === true ? 1 : 0];
-        }
-        $recorded  = isset($existing['placeEnteredByID']) === true ? (int) $existing['placeEnteredByID'] : 0;
-        $hadAgreed = (int) ($existing['placeMapAgreed'] ?? 0) === 1 ? 1 : 0;
-        if ($recorded > 0 && $recorded === $saverId) {
-            if ($boxDrawn === false) {
-                return ['enteredBy' => $saverId, 'agreed' => $hadAgreed];
-            }
+        $host = $host !== null && $host > 0 ? $host : null;
 
-            return ['enteredBy' => $saverId, 'agreed' => $agreesNow === true ? 1 : 0];
-        }
-        if ($recorded <= 0) {
-            if ($agreesNow === true) {
-                return ['enteredBy' => $saverId, 'agreed' => 1];
-            }
+        $placeChanged = $existing === null || self::placeOf($existing) !== $after;
+        $hadHost      = $existing !== null && isset($existing['hostUserID']) === true ? (int) $existing['hostUserID'] : 0;
+        $hostChanged  = (int) ($host ?? 0) !== $hadHost;
+        $hadEnterer   = $existing !== null && isset($existing['placeEnteredByID']) === true ? (int) $existing['placeEnteredByID'] : 0;
+        $enteredBy    = $placeChanged === true ? ($saverId > 0 ? $saverId : null) : ($hadEnterer > 0 ? $hadEnterer : null);
 
-            return ['enteredBy' => null, 'agreed' => 0];
+        if ($host === null) {
+            return ['enteredBy' => $enteredBy, 'host' => null, 'agreed' => 0];
+        }
+        $agreed = ($placeChanged === true || $hostChanged === true) ? 0 : ((int) ($existing['placeMapAgreed'] ?? 0) === 1 ? 1 : 0);
+        if ($saverId > 0 && $saverId === $host && $boxDrawn === true) {
+            $agreed = $ticked === true ? 1 : 0;
         }
 
-        return ['enteredBy' => $recorded, 'agreed' => $hadAgreed];
+        return ['enteredBy' => $enteredBy, 'host' => $host, 'agreed' => $agreed];
+    }
+
+    /**
+     * 🚪 May this person add a home to the group's list, or change this one?
+     * (The owner, D-125.) Administrators, whoever manages small groups and the
+     * group's own leaders (`$canManage`, which is `canManage()`) may add or
+     * change ANY home. Any other ACTIVE member of the group may add their OWN
+     * home — as its host — and change only a home whose host they are. Nobody
+     * else may do either. On facts, so the page and the handler cannot disagree.
+     *
+     * @param ?array<string,mixed> $place The home being changed, or null when adding one.
+     */
+    public static function mayEditHome(bool $canManage, bool $isActiveMember, ?array $place, int $userId): bool
+    {
+        if ($canManage === true) {
+            return true;
+        }
+        if ($isActiveMember === false || $userId <= 0) {
+            return false;
+        }
+
+        return $place === null || (int) ($place['hostUserID'] ?? 0) === $userId;
+    }
+
+    /**
+     * 🏠 The host a save will store, from what was posted (D-124, D-125). The
+     * ONE place both handlers resolve it.
+     *
+     *   - somebody who may NOT choose (a member adding or changing their own
+     *     home) is always the host, whatever is posted;
+     *   - the field not sent at all → the stored host is kept (#677: ask
+     *     whether a field ARRIVED, never what it holds);
+     *   - an empty choice → nobody named;
+     *   - the host already stored → kept, even if they have since left the
+     *     group (the form shows them as the current choice, so an untouched
+     *     Save must not change it; the map rule refuses them anyway);
+     *   - anybody else → only an ACTIVE member of THIS group. Anything else is
+     *     refused (`ok` false), never quietly stored as "nobody".
+     *
+     * @param array<string,mixed> $post The request's posted fields.
+     *
+     * @return array{ok:bool, host:?int}
+     */
+    public static function hostFromPost(int $siteId, int $groupId, ?int $storedHost, bool $canChoose, int $saverId, array $post): array
+    {
+        if ($canChoose === false) {
+            return ['ok' => $saverId > 0, 'host' => $saverId > 0 ? $saverId : null];
+        }
+        if (array_key_exists('hostUserID', $post) === false) {
+            return ['ok' => true, 'host' => $storedHost !== null && $storedHost > 0 ? $storedHost : null];
+        }
+        $raw = trim((string) (is_string($post['hostUserID']) === true ? $post['hostUserID'] : ''));
+        if ($raw === '') {
+            return ['ok' => true, 'host' => null];
+        }
+        if (preg_match('/^[1-9][0-9]{0,9}$/', $raw) !== 1) {
+            return ['ok' => false, 'host' => null];
+        }
+        $chosen = (int) $raw;
+        if ($storedHost !== null && $chosen === $storedHost) {
+            return ['ok' => true, 'host' => $chosen];
+        }
+
+        return self::isActiveMemberOf($siteId, $groupId, $chosen) === true
+            ? ['ok' => true, 'host' => $chosen]
+            : ['ok' => false, 'host' => null];
+    }
+
+    /**
+     * Whether a person may be named as a host: an ACTIVE member of THIS group.
+     * A home is its host's, and the map rule asks whether the host still
+     * belongs to the group, so somebody outside it can never be named.
+     */
+    public static function isActiveMemberOf(int $siteId, int $groupId, int $userId): bool
+    {
+        return $userId > 0 && self::isMember($siteId, $groupId, $userId) === true;
     }
 
     // -------------------------------------------------------------------------
@@ -800,6 +881,47 @@ final class SmallGroups
     }
 
     /**
+     * 📅 Today's DATE on the organisation's own clock, as `Y-m-d`. A meeting's
+     * date is a date on the organisation's calendar, never a moment, so "is it
+     * still to come" is a comparison of dates as text with this (#777's rule:
+     * never build a moment from a reading). An organisation with no usable
+     * zone falls back to UTC rather than to the server's.
+     */
+    public static function todayFor(int $siteId): string
+    {
+        $zoneName = Site::timezone($siteId);
+        $zone     = Site::isZoneName($zoneName) === true ? new \DateTimeZone($zoneName) : new \DateTimeZone('UTC');
+
+        return substr(I18n::wallClockNow($zone), 0, 10);
+    }
+
+    /**
+     * 🗓️ The group's NEXT meeting: the earliest one dated today or later on the
+     * organisation's clock, or null. A meeting with a date still to come is a
+     * PLANNED meeting (#809, D-127): the same row a leader records the roll on
+     * once it has happened.
+     *
+     * @return array<string,mixed>|null
+     */
+    public static function nextMeeting(int $siteId, int $groupId): ?array
+    {
+        $today = self::todayFor($siteId);
+        $stmt  = self::db()->prepare(
+            'SELECT `meetingID`, `meetingDate`, `meetingTime`, `placeID`, `topic` FROM `tblSmallGroupMeetings` '
+            . 'WHERE `groupID` = ? AND `siteID` = ? AND `meetingDate` >= ? ORDER BY `meetingDate` LIMIT 1'
+        );
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('iis', $groupId, $siteId, $today);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row !== null ? $row : null;
+    }
+
+    /**
      * What a place is called on the pages: its own short name, else the first
      * line of its address and its town, else — for a place that was removed
      * and emptied — a plain statement that it is no longer recorded.
@@ -824,11 +946,11 @@ final class SmallGroups
     }
 
     /**
-     * The name of the person recorded as having entered a place, for the edit
-     * forms only (so a leader knows whose agreement stands). '' when there is
+     * A person's name, for the meeting-place forms only (so a leader knows
+     * whose home a place is and whether they have agreed). '' when there is
      * nobody, or the account cannot be read.
      */
-    public static function entererName(int $userId): string
+    public static function personName(int $userId): string
     {
         if ($userId <= 0) {
             return '';

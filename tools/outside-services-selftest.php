@@ -35,17 +35,22 @@
  *      and delete
  *   G  D-072 maps: drawn only when the member shown AND the person looking
  *      allow it; otherwise the location is text, no map, no tile host
- *   P  #809, D-120: a small group's MEETING-PLACE map is the host's home.
- *      Drawn only where the person who entered the place ticked "a map may be
- *      shown" (through the REAL edit form and save handler) and the tiers allow
- *      it for them and for the viewer; otherwise the written address is still
- *      shown, with no map and no tile host. Who is recorded as having entered
- *      the place is read back from the database after each kind of save
- *   R  #809, D-123: a group that takes turns in SEVERAL hosts' homes. Each
- *      home's map is decided by its OWN host; one host's agreement, withdrawal
- *      or switched-off account never touches another's; each meeting records
- *      and shows its own place; a place of another group is refused; a removed
- *      home is emptied and its past meetings say so
+ *   P  #809, D-120, D-124: a small group's usual MEETING PLACE is its NAMED
+ *      HOST's home. Its map is drawn only where THAT host ticked "a map may be
+ *      shown" on their own form — a leader naming the host cannot tick for them
+ *      — and the tiers allow it for the host and the viewer, and the host still
+ *      belongs to the group; otherwise the written address is still shown, with
+ *      no map and no tile host. Everything goes through the REAL edit form and
+ *      save handler and is read back from the database
+ *   R  #809, D-123, D-124, D-125: a group that takes turns in SEVERAL homes,
+ *      each naming its own host. One host's agreement, withdrawal, departure or
+ *      switched-off account never touches another's; a member may add only
+ *      their own home; each meeting records and shows its own place
+ *   S  #809, D-126, D-127: members see where the group meets next (the place
+ *      following the group's address setting, a map only with that home's
+ *      host's agreement), a non-member sees nothing, a planned meeting takes no
+ *      roll and no Attendance push and is left out of the report, and removing
+ *      a home deletes its address at once
  *
  * WHAT IT CANNOT DO, said plainly
  *   - It cannot show what a real browser fetches. It reads the HTML and the page
@@ -103,6 +108,7 @@ const MEMBER_X = 918021; // two members with ADJACENT numbers, for section T's
 const MEMBER_Y = 918022; // "two different members saving at once"
 const HOSTP  = 918031; // section P: a group's leader, who enters its meeting place
 const HOST2  = 918032; // section R: a second host, whose home the group also meets in
+const MEMBERP = 918033; // sections R and S: a plain member of the group
 const SGROUP = 918201; // section P: the small group
 
 function refuse(string $why): never
@@ -246,7 +252,7 @@ const K_MAP = 'privacy.outside.memberMap';
 function removeWorld(): void
 {
     global $db;
-    $people = [M, AONLY, BADMIN, AADMIN, GLOBAL_ADMIN, PLAIN, SUBJ, VIEWER, MEMBER_X, MEMBER_Y, HOSTP, HOST2];
+    $people = [M, AONLY, BADMIN, AADMIN, GLOBAL_ADMIN, PLAIN, SUBJ, VIEWER, MEMBER_X, MEMBER_Y, HOSTP, HOST2, MEMBERP];
     $list   = implode(',', $people);
     $rs = $db->query("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'tblUsers'");
     while ($row = $rs->fetch_assoc()) {
@@ -349,7 +355,7 @@ q('INSERT INTO `tblSites` (`siteID`, `siteKey`, `siteName`, `hostPattern`, `isAc
 $people = [
     M => ['m', 0], AONLY => ['aonly', 0], BADMIN => ['badmin', 0], AADMIN => ['aadmin', 0],
     GLOBAL_ADMIN => ['global', 1], PLAIN => ['plain', 0], SUBJ => ['subj', 0], VIEWER => ['viewer', 0],
-    MEMBER_X => ['memberx', 0], MEMBER_Y => ['membery', 0], HOSTP => ['hostp', 0], HOST2 => ['host2', 0],
+    MEMBER_X => ['memberx', 0], MEMBER_Y => ['membery', 0], HOSTP => ['hostp', 0], HOST2 => ['host2', 0], MEMBERP => ['memberp', 0],
 ];
 $password = bin2hex(random_bytes(12)) . 'Aa1!';
 $hash     = password_hash($password, PASSWORD_DEFAULT);
@@ -360,7 +366,7 @@ foreach ($people as $id => [$who, $root]) {
 }
 foreach ([[M, ORG_A, 0], [M, ORG_B, 0], [AONLY, ORG_A, 0], [BADMIN, ORG_B, 1], [AADMIN, ORG_A, 1], [GLOBAL_ADMIN, ORG_A, 0],
           [PLAIN, ORG_A, 0], [SUBJ, ORG_A, 0], [VIEWER, ORG_A, 0], [MEMBER_X, ORG_A, 0], [MEMBER_Y, ORG_A, 0],
-          [HOSTP, ORG_A, 0], [HOST2, ORG_A, 0]] as [$user, $site, $admin]) {
+          [HOSTP, ORG_A, 0], [HOST2, ORG_A, 0], [MEMBERP, ORG_A, 0]] as [$user, $site, $admin]) {
     q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, ?, 0)', 'iii', [$user, $site, $admin]);
 }
 // The map's member: a home location, shown to all members.
@@ -1489,33 +1495,36 @@ setChoice(M, 'gravatar', null);
 setChoice(M, 'providerPhoto', null);
 
 // =============================================================================
-// P. #809, D-120: A SMALL GROUP'S MEETING PLACE IS THE HOST'S HOME
+// P. #809: A SMALL GROUP'S MEETING PLACE IS ITS NAMED HOST'S HOME
+//    D-120 (treated as the host's home), D-124 (the host is a member NAMED for
+//    the place; only that member can agree to a map of it).
 // =============================================================================
-head('P. A small group\'s meeting-place map: the person who entered it, AND the person looking');
+head('P. A small group\'s usual meeting place: its named host, AND the person looking');
 require $core . 'SmallGroups.php';
 
-// ---- P-A. The two rules on FACTS, hand-pinned ------------------------------
+// ---- P-A. The rules on FACTS, hand-pinned ---------------------------------
 $placeA  = ['addressLine1' => '12 Host Lane', 'addressLine2' => null, 'city' => 'Cambridge', 'region' => null,
             'postcode' => 'CB1 1AA', 'countryCode' => 'GB', 'latitude' => 52.21, 'longitude' => 0.13, 'what3words' => null];
 $storedA = array_merge($placeA, ['latitude' => '52.2100000', 'longitude' => '0.1300000']);
 $placeB  = array_merge($placeA, ['addressLine1' => '40 Other Road']);
 $emptyPl = array_merge(array_fill_keys(\Portal\Core\SmallGroups::PLACE_COLUMNS, null), ['countryCode' => 'GB']);
-$rowBy   = static fn (?int $by, int $agreed): array => $storedA + ['placeEnteredByID' => $by, 'placeMapAgreed' => $agreed];
-$after   = static fn (?array $existing, array $posted, int $saver, bool $drawn, bool $ticked): array
-    => \Portal\Core\SmallGroups::placeAgreementAfterSave($existing, $posted, $saver, $drawn, $ticked);
+$rowBy   = static fn (?int $host, int $agreed, ?int $by = 9): array => $storedA + ['hostUserID' => $host, 'placeMapAgreed' => $agreed, 'placeEnteredByID' => $by];
+$after   = static fn (?array $existing, array $posted, ?int $host, int $saver, bool $drawn, bool $ticked): array
+    => \Portal\Core\SmallGroups::placeAgreementAfterSave($existing, $posted, $host, $saver, $drawn, $ticked);
 $pinned = [
-    'PA01 a new group with a place, ticked: the person saving entered it and agreed'          => [$after(null, $placeA, 7, true, true), ['enteredBy' => 7, 'agreed' => 1]],
-    'PA02 a new group with a place, not ticked: entered, not agreed'                          => [$after(null, $placeA, 7, true, false), ['enteredBy' => 7, 'agreed' => 0]],
-    'PA03 a new group with NO place: nobody, whatever was ticked'                            => [$after(null, $emptyPl, 7, true, true), ['enteredBy' => null, 'agreed' => 0]],
-    'PA04 the place CHANGED by somebody else, not ticked: they entered it, NOT agreed'       => [$after($rowBy(5, 1), $placeB, 7, true, false), ['enteredBy' => 7, 'agreed' => 0]],
-    'PA05 the place changed through a form that did not draw the box: not agreed'            => [$after($rowBy(5, 1), $placeB, 5, false, true), ['enteredBy' => 5, 'agreed' => 0]],
-    'PA06 unchanged (stored 52.2100000, typed 52.21), the recorded person unticks: withdrawn' => [$after($rowBy(5, 1), $placeA, 5, true, false), ['enteredBy' => 5, 'agreed' => 0]],
-    'PA07 unchanged, the recorded person, no box drawn: their agreement is KEPT'             => [$after($rowBy(5, 1), $placeA, 5, false, false), ['enteredBy' => 5, 'agreed' => 1]],
-    'PA08 unchanged, SOMEBODY ELSE recorded, who ticks: left exactly as it was'              => [$after($rowBy(5, 0), $placeA, 7, true, true), ['enteredBy' => 5, 'agreed' => 0]],
-    'PA09 unchanged, somebody else recorded, who does not tick: the agreement stands'        => [$after($rowBy(5, 1), $placeA, 7, true, false), ['enteredBy' => 5, 'agreed' => 1]],
-    'PA10 unchanged, NOBODY recorded (an old group), ticked: the saver takes it on'          => [$after($rowBy(null, 0), $placeA, 7, true, true), ['enteredBy' => 7, 'agreed' => 1]],
-    'PA11 unchanged, nobody recorded, not ticked: still nobody, not agreed'                  => [$after($rowBy(null, 0), $placeA, 7, true, false), ['enteredBy' => null, 'agreed' => 0]],
-    'PA12 the place emptied by the recorded person: nobody, not agreed'                      => [$after($rowBy(5, 1), $emptyPl, 5, true, true), ['enteredBy' => null, 'agreed' => 0]],
+    'PA01 a new place whose HOST saves it, ticked: agreed'                                       => [$after(null, $placeA, 7, 7, true, true), ['enteredBy' => 7, 'host' => 7, 'agreed' => 1]],
+    'PA02 a new place named for host 5 by a LEADER (7) who ticks: NOT agreed (only the host can)' => [$after(null, $placeA, 5, 7, true, true), ['enteredBy' => 7, 'host' => 5, 'agreed' => 0]],
+    'PA03 a new place with NO host, ticked by whoever: not agreed'                               => [$after(null, $placeA, null, 7, true, true), ['enteredBy' => 7, 'host' => null, 'agreed' => 0]],
+    'PA04 an EMPTY place: nobody, no host, not agreed'                                            => [$after($rowBy(5, 1), $emptyPl, 5, 5, true, true), ['enteredBy' => null, 'host' => null, 'agreed' => 0]],
+    'PA05 unchanged, host 5 agreed, a LEADER saves (no box): the agreement STANDS'               => [$after($rowBy(5, 1), $placeA, 5, 7, false, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1]],
+    'PA06 unchanged, host 5 agreed, a leader POSTS an unticked box: still stands (not theirs)'  => [$after($rowBy(5, 1), $placeA, 5, 7, true, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1]],
+    'PA07 unchanged, host 5 not agreed, a leader POSTS a tick: still NOT agreed'                => [$after($rowBy(5, 0), $placeA, 5, 7, true, true), ['enteredBy' => 9, 'host' => 5, 'agreed' => 0]],
+    'PA08 unchanged, the HOST unticks: withdrawn (stored 52.2100000, typed 52.21: unchanged)'    => [$after($rowBy(5, 1), $placeA, 5, 5, true, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 0]],
+    'PA09 unchanged, the host saves a form that did NOT draw the box: kept (#677)'              => [$after($rowBy(5, 1), $placeA, 5, 5, false, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1]],
+    'PA10 the ADDRESS changed by a leader: the host\'s agreement is gone, the leader typed it'  => [$after($rowBy(5, 1), $placeB, 5, 7, false, false), ['enteredBy' => 7, 'host' => 5, 'agreed' => 0]],
+    'PA11 the address changed by the HOST, ticked: agreed to the NEW address'                   => [$after($rowBy(5, 1), $placeB, 5, 5, true, true), ['enteredBy' => 5, 'host' => 5, 'agreed' => 1]],
+    'PA12 the HOST changed (5 to 6), place unchanged: the old agreement does NOT move to 6'     => [$after($rowBy(5, 1), $placeA, 6, 7, false, false), ['enteredBy' => 9, 'host' => 6, 'agreed' => 0]],
+    'PA13 the host named is removed (to nobody): not agreed'                                     => [$after($rowBy(5, 1), $placeA, null, 7, false, false), ['enteredBy' => 9, 'host' => null, 'agreed' => 0]],
 ];
 foreach ($pinned as $name => [$got, $want]) {
     check($name, $got === $want, 'got ' . json_encode($got));
@@ -1523,13 +1532,18 @@ foreach ($pinned as $name => [$got, $want]) {
 $yes = ['readable' => true, 'doesNotObject' => true];
 $no  = ['readable' => true, 'doesNotObject' => false];
 $bad = ['readable' => false, 'doesNotObject' => true];
-check('PA13 the map rule: agreed, still counts, neither objects -> yes', OutsideServices::meetingPlaceMapFrom(true, true, $yes, $yes) === true);
-check('PA14 ...not agreed -> no', OutsideServices::meetingPlaceMapFrom(false, true, $yes, $yes) === false);
-check('PA15 ...the person who entered it no longer counts -> no', OutsideServices::meetingPlaceMapFrom(true, false, $yes, $yes) === false);
-check('PA16 ...the person who entered it objects -> no', OutsideServices::meetingPlaceMapFrom(true, true, $no, $yes) === false);
-check('PA17 ...the viewer objects -> no', OutsideServices::meetingPlaceMapFrom(true, true, $yes, $no) === false);
-check('PA18 ...either side unreadable -> no', OutsideServices::meetingPlaceMapFrom(true, true, $bad, $yes) === false
+check('PA14 the map rule: agreed, host still counts, neither objects -> yes', OutsideServices::meetingPlaceMapFrom(true, true, $yes, $yes) === true);
+check('PA15 ...not agreed -> no', OutsideServices::meetingPlaceMapFrom(false, true, $yes, $yes) === false);
+check('PA16 ...the host no longer counts -> no', OutsideServices::meetingPlaceMapFrom(true, false, $yes, $yes) === false);
+check('PA17 ...the host objects -> no', OutsideServices::meetingPlaceMapFrom(true, true, $no, $yes) === false);
+check('PA18 ...the viewer objects -> no', OutsideServices::meetingPlaceMapFrom(true, true, $yes, $no) === false);
+check('PA19 ...either side unreadable -> no', OutsideServices::meetingPlaceMapFrom(true, true, $bad, $yes) === false
     && OutsideServices::meetingPlaceMapFrom(true, true, $yes, $bad) === false);
+$may = static fn (bool $manage, bool $member, ?array $place, int $user): bool => \Portal\Core\SmallGroups::mayEditHome($manage, $member, $place, $user);
+check('PA20 D-125 on facts: a leader may add or change ANY home', $may(true, true, null, 7) === true && $may(true, false, ['hostUserID' => 5], 7) === true);
+check('PA21 ...a member may add a home (their own) and change one whose host they are', $may(false, true, null, 7) === true && $may(false, true, ['hostUserID' => 7], 7) === true);
+check('PA22 ...a member may NOT change somebody else\'s home', $may(false, true, ['hostUserID' => 5], 7) === false);
+check('PA23 ...somebody who is not an active member may do neither', $may(false, false, null, 7) === false && $may(false, false, ['hostUserID' => 7], 7) === false);
 
 // ---- P-B. The real pages --------------------------------------------------
 $sgEnabledBefore = $state['settings']['small-groups.enabled'];
@@ -1539,187 +1553,25 @@ if ($sgEnabledBefore === null) {
     q("UPDATE `tblSettings` SET `settingValue` = '1' WHERE `settingKey` = 'small-groups.enabled' AND `siteID` IS NULL");
 }
 setAt('small-groups.enabled', ORG_A, null);
-// The group as migration 275 leaves an OLD one: a place, nobody recorded, not agreed.
+// The group as migration 275 leaves an OLD one: a place, no host, not agreed.
 q("INSERT INTO `tblSmallGroups` (`groupID`, `siteID`, `groupName`, `groupSlug`, `addressLine1`, `city`, `postcode`, `countryCode`, "
     . "`latitude`, `longitude`, `locationVisibility`, `isActive`) VALUES (?, ?, 'Selftest Host Group', 'selftest-host-group', "
     . "'12 Host Lane', 'Cambridge', 'CB1 1AA', 'GB', 52.21, 0.13, 'site', 1)", 'ii', [SGROUP, ORG_A]);
-q("INSERT INTO `tblSmallGroupMembers` (`siteID`, `groupID`, `userID`, `memberRole`, `status`, `joinedAt`) VALUES (?, ?, ?, 'leader', 'active', NOW())",
-    'iii', [ORG_A, SGROUP, HOSTP]);
+foreach ([[HOSTP, 'leader'], [HOST2, 'co-leader'], [MEMBERP, 'member']] as [$who, $role]) {
+    q("INSERT INTO `tblSmallGroupMembers` (`siteID`, `groupID`, `userID`, `memberRole`, `status`, `joinedAt`) VALUES (?, ?, ?, ?, 'active', NOW())",
+        'iiis', [ORG_A, SGROUP, $who, $role]);
+}
 setAt(K_MAP, null, 'off');
 
 $jarHost   = signIn('hostp', ORG_A);
+$jarHost2  = signIn('host2', ORG_A);
+$jarMember = signIn('memberp', ORG_A);
 $groupPage = static fn (string $jar): array => req($jar, 'GET', '/small-groups/group?id=' . SGROUP);
 $sgMap     = static fn (array $g): bool => str_contains($g['body'], 'id="sgMap"') === true;
-$sgTiles   = static fn (array $g): bool => str_contains(imgSrc($g), 'tile.openstreetmap.org') === true
-    || str_contains($g['body'], 'tile.openstreetmap.org') === true;
+$tileRule  = static fn (array $g): bool => str_contains(imgSrc($g), 'tile.openstreetmap.org') === true;
+$sgTiles   = static fn (array $g): bool => $tileRule($g) === true || str_contains($g['body'], 'tile.openstreetmap.org') === true;
 $sgAddress = static fn (array $g): bool => str_contains($g['body'], '12 Host Lane') === true;
-$recorded  = static fn (): array => one('SELECT `placeEnteredByID` AS `by`, `placeMapAgreed` AS `ok` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
-
-/** The group's edit form as a browser would send it untouched; `$change` overrides fields, null removes one. */
-$formOf = static function (string $jar, array $change = []): array {
-    $page = req($jar, 'GET', '/small-groups/manage?id=' . SGROUP);
-    $dom  = new DOMDocument();
-    libxml_use_internal_errors(true);
-    $dom->loadHTML('<?xml encoding="UTF-8">' . $page['body']);
-    libxml_clear_errors();
-    $fields = [];
-    foreach ((new DOMXPath($dom))->query('//form[contains(@action, "small-groups/save")]//*[self::input or self::select or self::textarea]') as $el) {
-        $name = $el->getAttribute('name');
-        if ($name === '' || $el->hasAttribute('disabled') === true) {
-            continue;
-        }
-        if ($el->nodeName === 'select') {
-            $value = '';
-            foreach ($el->getElementsByTagName('option') as $i => $opt) {
-                if ($i === 0 || $opt->hasAttribute('selected') === true) {
-                    $value = $opt->getAttribute('value');
-                }
-            }
-            $fields[$name] = $value;
-        } elseif ($el->nodeName === 'textarea') {
-            $fields[$name] = $el->textContent;
-        } elseif ($el->getAttribute('type') === 'checkbox') {
-            if ($el->hasAttribute('checked') === true) {
-                $fields[$name] = $el->getAttribute('value');
-            }
-        } else {
-            $fields[$name] = $el->getAttribute('value');
-        }
-    }
-    $fields['_status'] = $page['status'];
-    $fields['_html']   = $page['body'];
-    foreach ($change as $k => $v) {
-        if ($v === null) {
-            unset($fields[$k]);
-        } else {
-            $fields[$k] = $v;
-        }
-    }
-
-    return $fields;
-};
-$saveForm = static function (string $jar, array $fields): array {
-    unset($fields['_status'], $fields['_html']);
-
-    return req($jar, 'POST', '/small-groups/save', $fields);
-};
-
-$g = $groupPage($jarV);
-check('P00 premise: the group page answers, and VIEWER (not in the group; the address is visible to the whole organisation) sees the written address',
-    $g['status'] === 200 && $sgAddress($g) === true, 'status ' . $g['status']);
-check('P01 an OLD group (nobody recorded, nothing agreed, as migration 275 leaves it): no map, no tile host, the written address still shown',
-    $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true && str_contains($g['body'], 'portal-place-no-map') === true, imgSrc($g));
-
-$f = $formOf($jarHost);
-check('P02 premise: the leader can open the edit form, and it draws the agreement box UNTICKED with its marker',
-    $f['_status'] === 200 && ($f['placeMapAsked'] ?? '') === '1' && isset($f['placeMapAgreed']) === false && ($f['addressLine1'] ?? '') === '12 Host Lane',
-    json_encode(['status' => $f['_status'], 'asked' => $f['placeMapAsked'] ?? null, 'line1' => $f['addressLine1'] ?? null]));
-$sv = $saveForm($jarHost, $formOf($jarHost, ['placeMapAgreed' => '1']));
-$r  = $recorded();
-check('P03 the leader ticks the box and saves WITHOUT changing the place: recorded as the person who entered it, agreed',
-    $sv['status'] === 302 && (int) ($r['by'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 1, json_encode($r) . ' status ' . $sv['status']);
-$g = $groupPage($jarV);
-check('P04 the person who entered it agreed and nobody objects: the map IS drawn and the page rule names the tile host',
-    $sgMap($g) === true && str_contains(imgSrc($g), 'tile.openstreetmap.org') === true && $sgAddress($g) === true, imgSrc($g));
-
-setChoice(VIEWER, 'memberMap', 'off');
-$g = $groupPage($jarV);
-check('P05 the VIEWER switched maps off: no map, no tile host, the written address still shown', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
-setChoice(VIEWER, 'memberMap', null);
-
-setChoice(HOSTP, 'memberMap', 'off');
-$g = $groupPage($jarV);
-check('P06 the person who entered it switched maps off for themselves: no map (the tick cannot loosen their own "off")', $sgMap($g) === false && $sgTiles($g) === false);
-$hostForm = (string) $formOf($jarHost)['_html'];
-check('P06b ...and their edit form says plainly that no map will be shown from their agreement', str_contains($hostForm, 'No map will be shown from your agreement') === true
-    && str_contains($hostForm, 'switched maps off for yourself') === true);
-setChoice(HOSTP, 'memberMap', null);
-
-setAt(K_MAP, ORG_A, 'no');
-$g = $groupPage($jarV);
-check('P07 the ORGANISATION says no: no map, no tile host, the written address still shown', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
-setAt(K_MAP, ORG_A, null);
-
-q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [HOSTP, ORG_B]);
-setAt(K_MAP, ORG_B, 'no');
-$g = $groupPage($jarV);
-check('P08 D-058 point 4 for the person who ENTERED it: another organisation of theirs says no, so no map on A\'s page', $sgMap($g) === false && $sgTiles($g) === false);
-setAt(K_MAP, ORG_B, null);
-q('DELETE FROM `tblUserSites` WHERE `userID` = ? AND `siteID` = ?', 'ii', [HOSTP, ORG_B]);
-
-setAt(K_MAP, null, 'no');
-$g = $groupPage($jarV);
-check('P09 the INSTALLATION says no: no map, whatever was agreed', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
-setAt(K_MAP, null, 'off');
-$g = $groupPage($jarV);
-check('P10 control: everything back, the map IS drawn again (so P05-P09 were each about their own change)', $sgMap($g) === true && $sgTiles($g) === true);
-
-// Who is recorded, through the real form, when somebody ELSE saves.
-$aaForm = $formOf($jarAA, ['groupName' => 'Selftest Host Group (renamed)']);
-$saveForm($jarAA, $aaForm);
-$r = $recorded();
-check('P11 an administrator saves the form untouched apart from the name (the box drawn unticked for them): the leader\'s agreement STANDS',
-    (int) ($r['by'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 1, json_encode($r));
-check('P11b ...and their form names whose agreement it is, and that they cannot change it without changing the place',
-    str_contains((string) $aaForm['_html'], 'Selftest Outside hostp') === true && str_contains((string) $aaForm['_html'], 'Only they can change') === true);
-$saveForm($jarAA, $formOf($jarAA, ['placeMapAgreed' => '1']));
-$hostUntouched = $formOf($jarHost);
-check('P11c the leader\'s own form draws the box TICKED, so their untouched Save keeps their agreement', ($hostUntouched['placeMapAgreed'] ?? '') === '1');
-$saveForm($jarHost, $formOf($jarHost, ['placeMapAgreed' => null]));
-$r = $recorded();
-check('P12 the leader saves with the box drawn and now UNTICKED: their agreement is withdrawn (an administrator\'s tick just before changed nothing)',
-    (int) ($r['by'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 0, json_encode($r));
-$g = $groupPage($jarV);
-check('P12b ...and the map is gone', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
-$saveForm($jarAA, $formOf($jarAA, ['placeMapAgreed' => '1']));
-$r = $recorded();
-$g = $groupPage($jarV);
-check('P12c with the leader\'s agreement WITHDRAWN, an administrator ticks the box without changing the place: still the leader, still NOT agreed, still no map',
-    (int) ($r['by'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 0 && $sgMap($g) === false && $sgTiles($g) === false, json_encode($r));
-$saveForm($jarHost, $formOf($jarHost, ['placeMapAgreed' => '1']));
-$saveForm($jarHost, $formOf($jarHost, ['placeMapAsked' => null]));
-$r = $recorded();
-check('P13 the leader agrees again, then saves from a form that did NOT draw the box (no marker): their agreement is kept, not withdrawn (#677)',
-    (int) ($r['by'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 1, json_encode($r));
-$saveForm($jarAA, $formOf($jarAA, ['addressLine1' => '40 Other Road']));
-$r = $recorded();
-check('P14 an administrator CHANGES the place without ticking: THEY are now recorded as having entered it, NOT agreed; the leader\'s agreement does not follow the place',
-    (int) ($r['by'] ?? 0) === AADMIN && (int) ($r['ok'] ?? -1) === 0, json_encode($r));
-$g = $groupPage($jarV);
-check('P14b ...so there is no map of the new place, and its written address is shown', $sgMap($g) === false && $sgTiles($g) === false
-    && str_contains($g['body'], '40 Other Road') === true);
-
-// The person who entered it stops counting.
-q("UPDATE `tblSmallGroups` SET `addressLine1` = '12 Host Lane', `placeEnteredByID` = ?, `placeMapAgreed` = 1 WHERE `groupID` = ?", 'ii', [HOSTP, SGROUP]);
-$g = $groupPage($jarV);
-check('P15 premise for P16-P17: with the leader recorded and agreed, the map is drawn', $sgMap($g) === true);
-q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [HOSTP]);
-$g = $groupPage($jarV);
-check('P16 the account of the person who entered it is switched off (as an erasure leaves it): no map, though the row still says agreed',
-    $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
-q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [HOSTP]);
-q('UPDATE `tblUserSites` SET `isActive` = 0 WHERE `userID` = ? AND `siteID` = ?', 'ii', [HOSTP, ORG_A]);
-$g = $groupPage($jarV);
-check('P17 the person who entered it is no longer a member of the group\'s organisation: no map', $sgMap($g) === false && $sgTiles($g) === false);
-q('UPDATE `tblUserSites` SET `isActive` = 1 WHERE `userID` = ? AND `siteID` = ?', 'ii', [HOSTP, ORG_A]);
-$g = $groupPage($jarV);
-check('P18 control: the person counts again, the map is drawn again', $sgMap($g) === true && $sgTiles($g) === true);
-
-// Clear the place altogether.
-$saveForm($jarHost, $formOf($jarHost, ['addressLine1' => '', 'city' => '', 'postcode' => '', 'latitude' => '', 'longitude' => '', 'placeMapAgreed' => '1']));
-$r = $recorded();
-check('P19 the place is emptied: nobody is recorded and nothing is agreed, whatever was ticked',
-    array_key_exists('by', $r) === true && $r['by'] === null && (int) ($r['ok'] ?? -1) === 0, json_encode($r));
-
-// =============================================================================
-// R. #809, D-123: A GROUP THAT TAKES TURNS IN SEVERAL HOSTS' HOMES
-//    Each home is its OWN host's: its map needs THAT host's agreement, and one
-//    host's agreement or withdrawal never touches another host's home.
-// =============================================================================
-head('R. Several hosts\' homes: each map by its own host, and each meeting\'s own place');
-q("INSERT INTO `tblSmallGroupMembers` (`siteID`, `groupID`, `userID`, `memberRole`, `status`, `joinedAt`) VALUES (?, ?, ?, 'co-leader', 'active', NOW())",
-    'iii', [ORG_A, SGROUP, HOST2]);
-$jarHost2 = signIn('host2', ORG_A);
+$recorded  = static fn (): array => one('SELECT `hostUserID` AS `host`, `placeEnteredByID` AS `by`, `placeMapAgreed` AS `ok` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
 
 /** Any form on a page, as a browser would send it untouched; `$change` overrides fields, null removes one. */
 $formAt = static function (string $jar, string $url, string $actionHas, array $change = []): array {
@@ -1771,135 +1623,314 @@ $postTo = static function (string $jar, string $to, array $fields): array {
 
     return req($jar, 'POST', $to, $fields);
 };
-$placeUrl  = static fn (int $placeId = 0): string => '/small-groups/place?id=' . SGROUP . ($placeId > 0 ? '&placeID=' . $placeId : '');
-$placeRow  = static fn (int $placeId): array => one('SELECT * FROM `tblSmallGroupPlaces` WHERE `placeID` = ?', 'i', [$placeId]) ?? [];
-$placeMap  = static fn (array $g, int $placeId): bool => str_contains($g['body'], 'id="sgPlaceMap' . $placeId . '"') === true;
-$tileRule  = static fn (array $g): bool => str_contains(imgSrc($g), 'tile.openstreetmap.org') === true;
-
-// ---- R-A. Adding two hosts' homes through the real page ------------------
-$fNew = $formAt($jarHost, $placeUrl(), 'small-groups/place-save');
-check('R00 premise: the leader can open "Add a host\'s home", drawn with the agreement box unticked and its marker',
-    $fNew['_status'] === 200 && ($fNew['placeMapAsked'] ?? '') === '1' && isset($fNew['placeMapAgreed']) === false && ($fNew['action'] ?? '') === 'create',
-    json_encode(['status' => $fNew['_status'], 'action' => $fNew['action'] ?? null]));
-$postTo($jarHost, '/small-groups/place-save', $formAt($jarHost, $placeUrl(), 'small-groups/place-save', [
-    'placeLabel' => 'Alpha home', 'addressLine1' => '1 Alpha Road', 'city' => 'Cambridge', 'countryCode' => 'GB',
-    'latitude' => '52.30', 'longitude' => '0.20', 'placeMapAgreed' => '1',
-]));
-$placeA = (int) (one("SELECT `placeID` FROM `tblSmallGroupPlaces` WHERE `groupID` = ? AND `placeLabel` = 'Alpha home'", 'i', [SGROUP])['placeID'] ?? 0);
-$postTo($jarHost2, '/small-groups/place-save', $formAt($jarHost2, $placeUrl(), 'small-groups/place-save', [
-    'placeLabel' => 'Beta home', 'addressLine1' => '2 Beta Road', 'city' => 'Cambridge', 'countryCode' => 'GB',
-    'latitude' => '52.40', 'longitude' => '0.25',
-]));
-$placeB = (int) (one("SELECT `placeID` FROM `tblSmallGroupPlaces` WHERE `groupID` = ? AND `placeLabel` = 'Beta home'", 'i', [SGROUP])['placeID'] ?? 0);
-$rowA = $placeRow($placeA);
-$rowB = $placeRow($placeB);
-check('R01 the first host adds their home, ticked: recorded on THAT home\'s row as entered by them, agreed',
-    $placeA > 0 && (int) ($rowA['placeEnteredByID'] ?? 0) === HOSTP && (int) ($rowA['placeMapAgreed'] ?? -1) === 1 && (int) ($rowA['siteID'] ?? 0) === ORG_A,
-    json_encode($rowA));
-check('R02 the second host adds their home, not ticked: entered by them, NOT agreed',
-    $placeB > 0 && (int) ($rowB['placeEnteredByID'] ?? 0) === HOST2 && (int) ($rowB['placeMapAgreed'] ?? -1) === 0, json_encode($rowB));
+$manageUrl  = '/small-groups/manage?id=' . SGROUP;
+$groupForm  = static fn (string $jar, array $change = []): array => $formAt($jar, $manageUrl, 'small-groups/save', $change);
+$saveGroup  = static fn (string $jar, array $fields): array => $postTo($jar, '/small-groups/save', $fields);
 
 $g = $groupPage($jarV);
-check('R03 the group page lists BOTH homes\' written addresses; the agreed home\'s map IS drawn, the other\'s is NOT, and the page rule names the tile host',
-    str_contains($g['body'], '1 Alpha Road') === true && str_contains($g['body'], '2 Beta Road') === true
-    && $placeMap($g, $placeA) === true && $placeMap($g, $placeB) === false && $tileRule($g) === true, imgSrc($g));
+check('P00 premise: the group page answers, and VIEWER (not in the group; the address is visible to the whole organisation) sees the written address',
+    $g['status'] === 200 && $sgAddress($g) === true, 'status ' . $g['status']);
+check('P01 an OLD group (no host named, nothing agreed, as migration 275 leaves it): no map, no tile host, the written address still shown',
+    $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true && str_contains($g['body'], 'portal-place-no-map') === true, imgSrc($g));
 
-// ---- R-B. One host's agreement never touches another's -------------------
-$postTo($jarHost, '/small-groups/place-save', $formAt($jarHost, $placeUrl($placeA), 'small-groups/place-save', ['placeMapAgreed' => null]));
+$fA = $groupForm($jarAA);
+check('P02 premise: an administrator\'s edit form offers a host chooser (with the group\'s members) and NO agreement box — it is not their home',
+    $fA['_status'] === 200 && array_key_exists('hostUserID', $fA) === true && str_contains((string) $fA['_html'], '>Selftest Outside hostp</option>') === true
+    && array_key_exists('placeMapAsked', $fA) === false && str_contains((string) $fA['_html'], 'No host is named for this place yet') === true);
+$sv = $saveGroup($jarAA, $groupForm($jarAA, ['hostUserID' => (string) HOSTP, 'placeMapAsked' => '1', 'placeMapAgreed' => '1']));
+$r  = $recorded();
+check('P03 D-124: the administrator names the leader as host AND posts a forged tick: the host is recorded, the tick counts for NOTHING',
+    $sv['status'] === 302 && (int) ($r['host'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 0, json_encode($r) . ' status ' . $sv['status']);
 $g = $groupPage($jarV);
-$rowB = $placeRow($placeB);
-check('R04 the first host withdraws on their home: its map goes, the other home\'s row is untouched, and with no map left the page rule names no tile host',
-    (int) ($placeRow($placeA)['placeMapAgreed'] ?? -1) === 0 && $placeMap($g, $placeA) === false && $tileRule($g) === false
-    && (int) ($rowB['placeEnteredByID'] ?? 0) === HOST2 && (int) ($rowB['placeMapAgreed'] ?? -1) === 0, json_encode($rowB));
-$postTo($jarHost2, '/small-groups/place-save', $formAt($jarHost2, $placeUrl($placeB), 'small-groups/place-save', ['placeMapAgreed' => '1']));
+check('P04 a named host who has not agreed: no map', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
+$fH = $groupForm($jarHost);
+check('P05 premise: the HOST\'s own form draws the agreement box, unticked, with its marker', ($fH['placeMapAsked'] ?? '') === '1'
+    && isset($fH['placeMapAgreed']) === false && str_contains((string) $fH['_html'], 'This is my home') === true);
+$saveGroup($jarHost, $groupForm($jarHost, ['placeMapAgreed' => '1']));
+$r = $recorded();
+check('P06 the host ticks it on their own form: agreed', (int) ($r['host'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 1, json_encode($r));
 $g = $groupPage($jarV);
-check('R05 the second host agrees on THEIR home: its map is drawn; the first host\'s home still has none',
-    $placeMap($g, $placeB) === true && $placeMap($g, $placeA) === false);
-$postTo($jarHost, '/small-groups/place-save', $formAt($jarHost, $placeUrl($placeA), 'small-groups/place-save', ['placeMapAgreed' => '1']));
+check('P07 the host agreed and nobody objects: the map IS drawn and the page rule names the tile host',
+    $sgMap($g) === true && $tileRule($g) === true && $sgAddress($g) === true, imgSrc($g));
+
+setChoice(VIEWER, 'memberMap', 'off');
 $g = $groupPage($jarV);
-check('R06 the first host agrees again: both maps are drawn', $placeMap($g, $placeA) === true && $placeMap($g, $placeB) === true);
-$postTo($jarHost, '/small-groups/place-save', $formAt($jarHost, $placeUrl($placeA), 'small-groups/place-save', ['placeMapAgreed' => null]));
+check('P08 the VIEWER switched maps off: no map, no tile host, the written address still shown', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
+setChoice(VIEWER, 'memberMap', null);
+setChoice(HOSTP, 'memberMap', 'off');
 $g = $groupPage($jarV);
-check('R07 ONE HOST WITHDRAWING DOES NOT AFFECT THE OTHER: the first host withdraws, the second host\'s map stays',
-    $placeMap($g, $placeA) === false && $placeMap($g, $placeB) === true && $tileRule($g) === true);
-$fB = $formAt($jarHost, $placeUrl($placeB), 'small-groups/place-save');
-$postTo($jarHost, '/small-groups/place-save', $formAt($jarHost, $placeUrl($placeB), 'small-groups/place-save', ['placeMapAgreed' => null]));
-$rowB = $placeRow($placeB);
-check('R08 the FIRST host saves the second host\'s home untouched (the box drawn unticked for them): that home stays the second host\'s, agreed',
-    isset($fB['placeMapAgreed']) === false && str_contains((string) $fB['_html'], 'Selftest Outside host2') === true
-    && (int) ($rowB['placeEnteredByID'] ?? 0) === HOST2 && (int) ($rowB['placeMapAgreed'] ?? -1) === 1, json_encode($rowB));
-$postTo($jarHost, '/small-groups/place-save', $formAt($jarHost, $placeUrl($placeA), 'small-groups/place-save', ['placeMapAgreed' => '1']));
+check('P09 the HOST switched maps off for themselves: no map (their tick cannot loosen their own "off")', $sgMap($g) === false && $sgTiles($g) === false);
+$hostForm = (string) $groupForm($jarHost)['_html'];
+check('P09b ...and their own form says plainly that no map will be shown from their agreement', str_contains($hostForm, 'No map will be shown from your agreement') === true
+    && str_contains($hostForm, 'switched maps off for yourself') === true);
+setChoice(HOSTP, 'memberMap', null);
+setAt(K_MAP, ORG_A, 'no');
+$g = $groupPage($jarV);
+check('P10 the ORGANISATION says no: no map, no tile host, the written address still shown', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
+setAt(K_MAP, ORG_A, null);
+q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [HOSTP, ORG_B]);
+setAt(K_MAP, ORG_B, 'no');
+$g = $groupPage($jarV);
+check('P11 D-058 point 4 for the HOST: another organisation of theirs says no, so no map on A\'s page', $sgMap($g) === false && $sgTiles($g) === false);
+setAt(K_MAP, ORG_B, null);
+q('DELETE FROM `tblUserSites` WHERE `userID` = ? AND `siteID` = ?', 'ii', [HOSTP, ORG_B]);
+setAt(K_MAP, null, 'no');
+$g = $groupPage($jarV);
+check('P12 the INSTALLATION says no: no map, whatever was agreed', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
+setAt(K_MAP, null, 'off');
+$g = $groupPage($jarV);
+check('P13 control: everything back, the map IS drawn again (so P08-P12 were each about their own change)', $sgMap($g) === true && $tileRule($g) === true);
+
+// Saves by the host and by somebody else.
+$saveGroup($jarAA, $groupForm($jarAA, ['groupName' => 'Selftest Host Group (renamed)']));
+$r = $recorded();
+check('P14 an administrator saves the form untouched apart from the name: the host and their agreement STAND',
+    (int) ($r['host'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 1, json_encode($r));
+$aaHtml = (string) $groupForm($jarAA)['_html'];
+check('P14b ...and their form says whose home it is, that they have agreed, and that only they can change it',
+    str_contains($aaHtml, "This is Selftest Outside hostp's home") === true && str_contains($aaHtml, 'has agreed') === true
+    && str_contains($aaHtml, 'Only Selftest Outside hostp can change that') === true);
+$saveGroup($jarAA, $groupForm($jarAA, ['placeMapAsked' => '1']));
+$r = $recorded();
+check('P15 an administrator posts the box UNTICKED (forged marker): the host\'s agreement still stands — not theirs to withdraw',
+    (int) ($r['ok'] ?? -1) === 1, json_encode($r));
+$hostUntouched = $groupForm($jarHost);
+check('P16 the host\'s own form draws the box TICKED, so their untouched Save keeps their agreement', ($hostUntouched['placeMapAgreed'] ?? '') === '1');
+$saveGroup($jarHost, $groupForm($jarHost, ['placeMapAgreed' => null]));
+$r = $recorded();
+$g = $groupPage($jarV);
+check('P17 the host unticks: withdrawn, and the map is gone', (int) ($r['ok'] ?? -1) === 0 && $sgMap($g) === false && $sgTiles($g) === false, json_encode($r));
+$saveGroup($jarHost, $groupForm($jarHost, ['placeMapAgreed' => '1']));
+$saveGroup($jarHost, $groupForm($jarHost, ['placeMapAsked' => null, 'placeMapAgreed' => null]));
+$r = $recorded();
+check('P18 the host agrees again, then saves from a form that did NOT draw the box: kept, not withdrawn (#677)', (int) ($r['ok'] ?? -1) === 1, json_encode($r));
+$saveGroup($jarAA, $groupForm($jarAA, ['addressLine1' => '40 Other Road']));
+$r = $recorded();
+$g = $groupPage($jarV);
+check('P19 an administrator CHANGES the address: the host stays named, but their agreement is GONE (it was about another address); they typed it',
+    (int) ($r['host'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 0 && (int) ($r['by'] ?? 0) === AADMIN && $sgMap($g) === false, json_encode($r));
+q("UPDATE `tblSmallGroups` SET `addressLine1` = '12 Host Lane', `placeMapAgreed` = 1 WHERE `groupID` = ?", 'i', [SGROUP]);
+$saveGroup($jarAA, $groupForm($jarAA, ['hostUserID' => (string) HOST2]));
+$r = $recorded();
+check('P20 an administrator names a DIFFERENT host: the first host\'s agreement does NOT pass to the new one',
+    (int) ($r['host'] ?? 0) === HOST2 && (int) ($r['ok'] ?? -1) === 0, json_encode($r));
+$refused = $saveGroup($jarAA, $groupForm($jarAA, ['hostUserID' => (string) VIEWER]));
+$r = $recorded();
+check('P21 naming somebody who is NOT a member of the group is refused, and nothing is saved', (int) ($r['host'] ?? 0) === HOST2, json_encode($r));
+q("UPDATE `tblSmallGroups` SET `hostUserID` = ?, `placeMapAgreed` = 1 WHERE `groupID` = ?", 'ii', [HOSTP, SGROUP]);
+$g = $groupPage($jarV);
+check('P22 premise for P23-P25: with the leader named and agreed, the map is drawn', $sgMap($g) === true);
+q("UPDATE `tblSmallGroupMembers` SET `status` = 'ended' WHERE `groupID` = ? AND `userID` = ?", 'ii', [SGROUP, HOSTP]);
+$g = $groupPage($jarV);
+check('P23 the host LEAVES THE GROUP: no map, though the row still says agreed', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
+q("UPDATE `tblSmallGroupMembers` SET `status` = 'active' WHERE `groupID` = ? AND `userID` = ?", 'ii', [SGROUP, HOSTP]);
 q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [HOSTP]);
 $g = $groupPage($jarV);
-check('R09 the first host\'s account is switched off (as an erasure leaves it): THEIR home\'s map goes, the second host\'s stays',
-    $placeMap($g, $placeA) === false && $placeMap($g, $placeB) === true && str_contains($g['body'], '1 Alpha Road') === true);
+check('P24 the host\'s account is switched off (as an erasure leaves it): no map', $sgMap($g) === false && $sgTiles($g) === false && $sgAddress($g) === true);
 q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [HOSTP]);
+q('UPDATE `tblUserSites` SET `isActive` = 0 WHERE `userID` = ? AND `siteID` = ?', 'ii', [HOSTP, ORG_A]);
+$g = $groupPage($jarV);
+check('P25 the host is no longer a member of the ORGANISATION: no map', $sgMap($g) === false && $sgTiles($g) === false);
+q('UPDATE `tblUserSites` SET `isActive` = 1 WHERE `userID` = ? AND `siteID` = ?', 'ii', [HOSTP, ORG_A]);
+$g = $groupPage($jarV);
+check('P26 control: the host counts again, the map is drawn again', $sgMap($g) === true && $tileRule($g) === true);
+$saveGroup($jarHost, $groupForm($jarHost, ['addressLine1' => '', 'city' => '', 'postcode' => '', 'latitude' => '', 'longitude' => '', 'placeMapAgreed' => '1']));
+$r = $recorded();
+check('P27 the place is emptied: no host, nobody, nothing agreed, whatever was ticked',
+    array_key_exists('host', $r) === true && $r['host'] === null && $r['by'] === null && (int) ($r['ok'] ?? -1) === 0, json_encode($r));
+
+// =============================================================================
+// R. #809, D-123 + D-124 + D-125: A GROUP THAT TAKES TURNS IN SEVERAL HOMES
+//    Each home names its HOST; only that host can agree to a map of it; one
+//    host's agreement never touches another's; a member may add only their own.
+// =============================================================================
+head('R. Several hosts\' homes: each named host decides their own home\'s map');
+$placeUrl = static fn (int $placeId = 0): string => '/small-groups/place?id=' . SGROUP . ($placeId > 0 ? '&placeID=' . $placeId : '');
+$homeForm = static fn (string $jar, int $placeId = 0, array $change = []): array => $formAt($jar, $placeUrl($placeId), 'small-groups/place-save', $change);
+$saveHome = static fn (string $jar, array $fields): array => $postTo($jar, '/small-groups/place-save', $fields);
+$placeRow = static fn (int $placeId): array => one('SELECT * FROM `tblSmallGroupPlaces` WHERE `placeID` = ?', 'i', [$placeId]) ?? [];
+$placeMap = static fn (array $g, int $placeId): bool => str_contains($g['body'], 'id="sgPlaceMap' . $placeId . '"') === true;
+$placeBy  = static fn (string $label): int => (int) (one('SELECT `placeID` FROM `tblSmallGroupPlaces` WHERE `groupID` = ? AND `placeLabel` = ?', 'is', [SGROUP, $label])['placeID'] ?? 0);
+
+// ---- R-A. Adding homes, D-124 and D-125 ----------------------------------
+$fNew = $homeForm($jarHost);
+check('R00 premise: a leader opens "Add a host\'s home" — a host chooser, and no agreement box until a host is named',
+    $fNew['_status'] === 200 && array_key_exists('hostUserID', $fNew) === true && array_key_exists('placeMapAsked', $fNew) === false && ($fNew['action'] ?? '') === 'create',
+    json_encode(['status' => $fNew['_status']]));
+// The leader types in the SECOND host's home, names them, and forges a tick.
+$saveHome($jarHost, $homeForm($jarHost, 0, [
+    'hostUserID' => (string) HOST2, 'placeLabel' => 'Beta home', 'addressLine1' => '2 Beta Road', 'city' => 'Cambridge', 'countryCode' => 'GB',
+    'latitude' => '52.40', 'longitude' => '0.25', 'placeMapAsked' => '1', 'placeMapAgreed' => '1',
+]));
+$placeB = $placeBy('Beta home');
+$rowB = $placeRow($placeB);
+check('R01 D-124: a leader types in another member\'s home and names them: THEY are the host, the leader only typed it, and the leader\'s forged tick counts for NOTHING',
+    $placeB > 0 && (int) ($rowB['hostUserID'] ?? 0) === HOST2 && (int) ($rowB['placeEnteredByID'] ?? 0) === HOSTP && (int) ($rowB['placeMapAgreed'] ?? -1) === 0,
+    json_encode($rowB));
+$g = $groupPage($jarV);
+check('R02 so that home shows its written address and NO map', str_contains($g['body'], '2 Beta Road') === true && $placeMap($g, $placeB) === false);
+$fB = $homeForm($jarHost2, $placeB);
+check('R03 the named host opens THEIR home: the agreement box is drawn for them', $fB['_status'] === 200 && ($fB['placeMapAsked'] ?? '') === '1');
+$saveHome($jarHost2, $homeForm($jarHost2, $placeB, ['placeMapAgreed' => '1']));
+$g = $groupPage($jarV);
+check('R04 the host agrees on their own form: their home\'s map is drawn', (int) ($placeRow($placeB)['placeMapAgreed'] ?? -1) === 1
+    && $placeMap($g, $placeB) === true && $tileRule($g) === true);
+// The leader adds their OWN home, as its host, ticked.
+$saveHome($jarHost, $homeForm($jarHost, 0, [
+    'hostUserID' => (string) HOSTP, 'placeLabel' => 'Alpha home', 'addressLine1' => '1 Alpha Road', 'city' => 'Cambridge', 'countryCode' => 'GB',
+    'latitude' => '52.30', 'longitude' => '0.20',
+]));
+$placeA = $placeBy('Alpha home');
+$saveHome($jarHost, $homeForm($jarHost, $placeA, ['placeMapAgreed' => '1']));
+$g = $groupPage($jarV);
+check('R05 two homes, each agreed by its own host: both maps drawn', $placeMap($g, $placeA) === true && $placeMap($g, $placeB) === true);
+$saveHome($jarHost, $homeForm($jarHost, $placeA, ['placeMapAgreed' => null]));
+$g = $groupPage($jarV);
+check('R06 ONE HOST WITHDRAWING DOES NOT AFFECT THE OTHER: the first host withdraws, the second\'s map stays',
+    $placeMap($g, $placeA) === false && $placeMap($g, $placeB) === true && (int) ($placeRow($placeB)['placeMapAgreed'] ?? -1) === 1);
+$saveHome($jarHost, $homeForm($jarHost, $placeB, ['placeMapAsked' => '1']));
+check('R07 the first host (a leader) posts an unticked box on the SECOND host\'s home: that host\'s agreement stands',
+    (int) ($placeRow($placeB)['placeMapAgreed'] ?? -1) === 1 && (int) ($placeRow($placeB)['hostUserID'] ?? 0) === HOST2);
+$saveHome($jarHost, $homeForm($jarHost, $placeA, ['placeMapAgreed' => '1']));
+q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [HOST2]);
+$g = $groupPage($jarV);
+check('R08 the second host\'s account is switched off: THEIR home\'s map goes, the first host\'s stays',
+    $placeMap($g, $placeB) === false && $placeMap($g, $placeA) === true && str_contains($g['body'], '2 Beta Road') === true);
+q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [HOST2]);
+q("UPDATE `tblSmallGroupMembers` SET `status` = 'ended' WHERE `groupID` = ? AND `userID` = ?", 'ii', [SGROUP, HOST2]);
+$g = $groupPage($jarV);
+check('R09 the second host LEAVES THE GROUP: their home\'s map goes, the first host\'s stays', $placeMap($g, $placeB) === false && $placeMap($g, $placeA) === true);
+q("UPDATE `tblSmallGroupMembers` SET `status` = 'active' WHERE `groupID` = ? AND `userID` = ?", 'ii', [SGROUP, HOST2]);
 setChoice(VIEWER, 'memberMap', 'off');
 $g = $groupPage($jarV);
 check('R10 the viewer switched maps off: neither home\'s map, no tile host, both written addresses shown',
     $placeMap($g, $placeA) === false && $placeMap($g, $placeB) === false && $tileRule($g) === false
     && str_contains($g['body'], '1 Alpha Road') === true && str_contains($g['body'], '2 Beta Road') === true);
 setChoice(VIEWER, 'memberMap', null);
-$postTo($jarHost, '/small-groups/place-save', $formAt($jarHost, $placeUrl($placeA), 'small-groups/place-save', ['addressLine1' => '9 Changed Road']));
-$rowA = $placeRow($placeA);
-check('R10b the second host is not involved when the FIRST host changes their own home: that row is still theirs (the changed place, their own untouched tick)',
-    (int) ($rowA['placeEnteredByID'] ?? 0) === HOSTP && (int) ($rowA['placeMapAgreed'] ?? -1) === 1 && (int) ($placeRow($placeB)['placeMapAgreed'] ?? -1) === 1,
-    json_encode($rowA));
-$postTo($jarHost2, '/small-groups/place-save', $formAt($jarHost2, $placeUrl($placeA), 'small-groups/place-save', ['addressLine1' => '3 Gamma Road']));
-$rowA = $placeRow($placeA);
-check('R10c the SECOND host changes the first host\'s home without ticking: they now entered it, NOT agreed; the first host\'s agreement does not follow it',
-    (int) ($rowA['placeEnteredByID'] ?? 0) === HOST2 && (int) ($rowA['placeMapAgreed'] ?? -1) === 0, json_encode($rowA));
-q("UPDATE `tblSmallGroupPlaces` SET `addressLine1` = '1 Alpha Road', `placeEnteredByID` = ?, `placeMapAgreed` = 0 WHERE `placeID` = ?", 'ii', [HOSTP, $placeA]);
+$saveHome($jarHost, $homeForm($jarHost, $placeB, ['addressLine1' => '3 Gamma Road']));
+$rowB = $placeRow($placeB);
+check('R11 a leader CHANGES the second host\'s address: still THEIR home, but their agreement is gone (it was about another address)',
+    (int) ($rowB['hostUserID'] ?? 0) === HOST2 && (int) ($rowB['placeMapAgreed'] ?? -1) === 0 && (int) ($placeRow($placeA)['placeMapAgreed'] ?? -1) === 1, json_encode($rowB));
+q("UPDATE `tblSmallGroupPlaces` SET `addressLine1` = '2 Beta Road', `placeMapAgreed` = 1 WHERE `placeID` = ?", 'i', [$placeB]);
 
-// ---- R-C. Each meeting's own place ---------------------------------------
+// D-125: a plain member.
+$fM = $homeForm($jarMember);
+check('R12 D-125: a plain member may open "add a home", is told it is THEIR home, and gets no host chooser',
+    $fM['_status'] === 200 && array_key_exists('hostUserID', $fM) === false && str_contains((string) $fM['_html'], 'Yours: you are its host') === true);
+$saveHome($jarMember, $homeForm($jarMember, 0, [
+    'hostUserID' => (string) HOST2, 'placeLabel' => 'Member home', 'addressLine1' => '7 Member Way', 'city' => 'Cambridge', 'countryCode' => 'GB',
+    'latitude' => '52.50', 'longitude' => '0.30',
+]));
+$placeM = $placeBy('Member home');
+check('R13 ...and a member who posts SOMEBODY ELSE as the host still adds only their OWN home', $placeM > 0 && (int) ($placeRow($placeM)['hostUserID'] ?? 0) === MEMBERP,
+    json_encode($placeRow($placeM)));
+check('R14 a member may NOT open somebody else\'s home', req($jarMember, 'GET', $placeUrl($placeB))['status'] === 403);
+$before = $placeRow($placeB);
+$saveHome($jarMember, ['csrf_token' => token(req($jarMember, 'GET', $placeUrl($placeM))['body']), 'action' => 'update', 'groupID' => (string) SGROUP,
+    'placeID' => (string) $placeB, 'addressLine1' => '66 Hijack Street', 'placeMapAsked' => '1', 'placeMapAgreed' => '1']);
+$saveHome($jarMember, ['csrf_token' => token(req($jarMember, 'GET', $placeUrl($placeM))['body']), 'action' => 'remove', 'groupID' => (string) SGROUP,
+    'placeID' => (string) $placeB]);
+check('R15 ...nor change or remove it by posting directly', $placeRow($placeB) === $before);
+check('R16 somebody who is NOT a member of the group may not add a home at all', req($jarV, 'GET', $placeUrl())['status'] === 403);
+
+// ---- R-B. Each meeting's own place ---------------------------------------
 $meetingUrl = '/small-groups/meeting?id=' . SGROUP;
 $mForm = $formAt($jarHost, $meetingUrl, 'small-groups/meeting-save');
-check('R11 premise: the meeting form offers the usual place and both homes', $mForm['_status'] === 200
+check('R17 premise: the meeting form offers the usual place and the homes', $mForm['_status'] === 200
     && str_contains((string) $mForm['_html'], '>Alpha home</option>') === true && str_contains((string) $mForm['_html'], '>Beta home</option>') === true);
-$postTo($jarHost, '/small-groups/meeting-save', $formAt($jarHost, $meetingUrl, 'small-groups/meeting-save', ['meetingDate' => '2026-11-02', 'placeID' => (string) $placeB]));
-$postTo($jarHost, '/small-groups/meeting-save', $formAt($jarHost, $meetingUrl, 'small-groups/meeting-save', ['meetingDate' => '2026-11-03', 'placeID' => (string) $placeA]));
-$postTo($jarHost, '/small-groups/meeting-save', $formAt($jarHost, $meetingUrl, 'small-groups/meeting-save', ['meetingDate' => '2026-11-04', 'placeID' => '']));
+$saveMeeting = static fn (array $change, string $url = ''): array => $postTo($jarHost, '/small-groups/meeting-save', $formAt($jarHost, $url !== '' ? $url : $meetingUrl, 'small-groups/meeting-save', $change));
+$saveMeeting(['meetingDate' => '2026-11-02', 'placeID' => (string) $placeB]);
+q('UPDATE `tblSmallGroupPlaces` SET `placeMapAgreed` = 0 WHERE `placeID` = ?', 'i', [$placeA]);
+$saveMeeting(['meetingDate' => '2026-11-03', 'placeID' => (string) $placeA]);
+$saveMeeting(['meetingDate' => '2026-11-04', 'placeID' => '']);
 $meetAt = static fn (string $date): array => one('SELECT `meetingID`, `placeID` FROM `tblSmallGroupMeetings` WHERE `groupID` = ? AND `meetingDate` = ?', 'is', [SGROUP, $date]) ?? [];
 $mB = $meetAt('2026-11-02');
 $mA = $meetAt('2026-11-03');
 $mU = $meetAt('2026-11-04');
-check('R12 three meetings, each stored with its own place: the second host\'s home, the first host\'s home, and the usual place',
-    (int) ($mB['placeID'] ?? 0) === $placeB && (int) ($mA['placeID'] ?? 0) === $placeA && array_key_exists('placeID', $mU) === true && $mU['placeID'] === null,
-    json_encode([$mB, $mA, $mU]));
+check('R18 three meetings, each stored with its own place', (int) ($mB['placeID'] ?? 0) === $placeB && (int) ($mA['placeID'] ?? 0) === $placeA
+    && array_key_exists('placeID', $mU) === true && $mU['placeID'] === null, json_encode([$mB, $mA, $mU]));
 $pageB = req($jarHost, 'GET', $meetingUrl . '&meetingID=' . (int) ($mB['meetingID'] ?? 0));
-check('R13 the meeting held in the second host\'s home shows THAT home\'s address and its map (that host agreed), and the page rule names the tile host',
-    str_contains($pageB['body'], '2 Beta Road') === true && str_contains($pageB['body'], 'id="sgMeetingMap"') === true && $tileRule($pageB) === true
-    && preg_match('#<option value="' . $placeB . '" selected>#', $pageB['body']) === 1);
+check('R19 the meeting held in the second host\'s home (agreed) shows that home\'s address and its map', str_contains($pageB['body'], '2 Beta Road') === true
+    && str_contains($pageB['body'], 'id="sgMeetingMap"') === true && $tileRule($pageB) === true && preg_match('#<option value="' . $placeB . '" selected>#', $pageB['body']) === 1);
 $pageA = req($jarHost2, 'GET', $meetingUrl . '&meetingID=' . (int) ($mA['meetingID'] ?? 0));
-check('R14 the meeting held in the first host\'s home (not agreed) shows that home\'s written address and NO map, no tile host',
-    str_contains($pageA['body'], '1 Alpha Road') === true && str_contains($pageA['body'], 'id="sgMeetingMap"') === false && $tileRule($pageA) === false
-    && str_contains($pageA['body'], 'portal-place-no-map') === true);
+check('R20 the meeting held in the first host\'s home (not agreed) shows that address and NO map', str_contains($pageA['body'], '1 Alpha Road') === true
+    && str_contains($pageA['body'], 'id="sgMeetingMap"') === false && $tileRule($pageA) === false);
 $gm = req($jarHost, 'GET', '/small-groups/group?id=' . SGROUP);
-check('R15 the group page\'s recent meetings name each meeting\'s own place', preg_match('#Beta home</div>#', $gm['body']) === 1
-    && preg_match('#Alpha home</div>#', $gm['body']) === 1 && str_contains($gm['body'], 'The usual place</div>') === true);
-
-// A place of ANOTHER group may not be named.
+check('R21 the recent meetings name each meeting\'s own place', str_contains($gm['body'], 'Beta home</div>') === true
+    && str_contains($gm['body'], 'Alpha home</div>') === true && str_contains($gm['body'], 'The usual place</div>') === true);
 q("INSERT INTO `tblSmallGroups` (`groupID`, `siteID`, `groupName`, `groupSlug`, `isActive`) VALUES (?, ?, 'Selftest Other Group', 'selftest-other-group', 1)", 'ii', [SGROUP + 1, ORG_A]);
 q("INSERT INTO `tblSmallGroupPlaces` (`siteID`, `groupID`, `placeLabel`, `addressLine1`) VALUES (?, ?, 'Elsewhere', '5 Elsewhere Road')", 'ii', [ORG_A, SGROUP + 1]);
-$foreign = (int) (one("SELECT `placeID` FROM `tblSmallGroupPlaces` WHERE `groupID` = ?", 'i', [SGROUP + 1])['placeID'] ?? 0);
-$postTo($jarHost, '/small-groups/meeting-save', $formAt($jarHost, $meetingUrl . '&meetingID=' . (int) ($mB['meetingID'] ?? 0), 'small-groups/meeting-save', ['placeID' => (string) $foreign]));
-check('R16 a posted place of ANOTHER group is refused: the meeting keeps its own place', (int) ($meetAt('2026-11-02')['placeID'] ?? 0) === $placeB);
-$postTo($jarHost, '/small-groups/meeting-save', $formAt($jarHost, $meetingUrl . '&meetingID=' . (int) ($mB['meetingID'] ?? 0), 'small-groups/meeting-save', ['placeID' => null]));
-check('R17 a form that did not send the place at all leaves the meeting\'s place as it was (#677)', (int) ($meetAt('2026-11-02')['placeID'] ?? 0) === $placeB);
+$foreign = (int) (one('SELECT `placeID` FROM `tblSmallGroupPlaces` WHERE `groupID` = ?', 'i', [SGROUP + 1])['placeID'] ?? 0);
+$bUrl = $meetingUrl . '&meetingID=' . (int) ($mB['meetingID'] ?? 0);
+$saveMeeting(['placeID' => (string) $foreign], $bUrl);
+check('R22 a posted home of ANOTHER group is refused: the meeting keeps its own place', (int) ($meetAt('2026-11-02')['placeID'] ?? 0) === $placeB);
+$saveMeeting(['placeID' => null], $bUrl);
+check('R23 a form that did not send the place leaves the meeting\'s place as it was (#677)', (int) ($meetAt('2026-11-02')['placeID'] ?? 0) === $placeB);
+q('DELETE FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP + 1]);
 
-// Removing a home.
-$postTo($jarHost, '/small-groups/place-save', ['action' => 'remove', 'groupID' => (string) SGROUP, 'placeID' => (string) $placeB,
+// =============================================================================
+// S. #809, D-127: MEMBERS SEE WHERE THEIR GROUP MEETS NEXT
+// =============================================================================
+head('S. The next meeting, for the group\'s members');
+$future1 = '2099-01-05';
+$future2 = '2099-02-01';
+$saveMeeting(['meetingDate' => $future2, 'placeID' => '']);
+$saveMeeting(['meetingDate' => $future1, 'placeID' => (string) $placeB, 'topic' => 'Selftest planned topic']);
+$planned = $meetAt($future1);
+check('S00 premise: two planned meetings stored, the earlier one at the second host\'s home', (int) ($planned['placeID'] ?? 0) === $placeB);
+$nextWords = (new DateTimeImmutable($future1, new DateTimeZone('UTC')))->format('l j F Y');
+$gMember = $groupPage($jarMember);
+$nextPanel = static function (array $page): string {
+    $at = strpos($page['body'], 'portal-next-meeting');
+    if ($at === false) {
+        return '';
+    }
+    $end = strpos($page['body'], 'card-header">About', $at);
+
+    return substr($page['body'], $at, ($end === false ? 4000 : $end - $at));
+};
+$panel = $nextPanel($gMember);
+check('S01 a MEMBER sees the next meeting: the EARLIER planned date, its topic, and the second host\'s address',
+    $panel !== '' && str_contains($panel, $nextWords) === true && str_contains($panel, 'Selftest planned topic') === true
+    && str_contains($panel, '2 Beta Road') === true && str_contains($panel, (new DateTimeImmutable($future2))->format('l j F Y')) === false, mb_substr($panel, 0, 300));
+check('S02 ...with its map, because THAT home\'s host agreed', str_contains($panel, 'id="sgNextMap"') === true && $tileRule($gMember) === true);
+q('UPDATE `tblSmallGroupPlaces` SET `placeMapAgreed` = 0 WHERE `placeID` = ?', 'i', [$placeB]);
+$panel = $nextPanel($groupPage($jarMember));
+check('S03 the host withdraws: the member still sees where, as text, and no map', str_contains($panel, '2 Beta Road') === true && str_contains($panel, 'id="sgNextMap"') === false);
+q('UPDATE `tblSmallGroupPlaces` SET `placeMapAgreed` = 1 WHERE `placeID` = ?', 'i', [$placeB]);
+q("UPDATE `tblSmallGroups` SET `locationVisibility` = 'leaders' WHERE `groupID` = ?", 'i', [SGROUP]);
+$gMember = $groupPage($jarMember);
+$panel = $nextPanel($gMember);
+check('S04 the group\'s setting hides addresses from members: the member sees the date but NOT where, and no map anywhere on the page',
+    str_contains($panel, $nextWords) === true && str_contains($panel, 'portal-next-meeting-hidden') === true && str_contains($gMember['body'], '2 Beta Road') === false
+    && str_contains($gMember['body'], 'sgNextMap') === false && $tileRule($gMember) === false);
+q("UPDATE `tblSmallGroups` SET `locationVisibility` = 'site' WHERE `groupID` = ?", 'i', [SGROUP]);
+$gV = $groupPage($jarV);
+check('S05 somebody who is NOT in the group sees no next meeting at all, even where addresses are shown to the whole organisation',
+    $gV['status'] === 200 && str_contains($gV['body'], 'portal-next-meeting') === false && str_contains($gV['body'], $nextWords) === false);
+$saveMeeting(['meetingDate' => $future1, 'placeID' => (string) $placeB, 'present[]' => (string) MEMBERP, 'pushAttendance' => '1'], $meetingUrl . '&meetingID=' . (int) ($planned['meetingID'] ?? 0));
+$marks = (int) (one('SELECT COUNT(*) AS `n` FROM `tblSmallGroupMeetingAttendance` WHERE `meetingID` = ?', 'i', [(int) ($planned['meetingID'] ?? 0)])['n'] ?? -1);
+$pushed = one('SELECT `attendanceSessionID` FROM `tblSmallGroupMeetings` WHERE `meetingID` = ?', 'i', [(int) ($planned['meetingID'] ?? 0)]);
+check('S06 a PLANNED meeting takes no roll and pushes nothing to Attendance, whatever is posted', $marks === 0
+    && is_array($pushed) === true && array_key_exists('attendanceSessionID', $pushed) === true && $pushed['attendanceSessionID'] === null,
+    'marks ' . $marks . ' ' . json_encode($pushed));
+$report = req($jarHost, 'GET', '/small-groups/report?id=' . SGROUP . '&from=2026-01-01&to=2099-12-31');
+check('S07 the attendance report counts held meetings only: the planned one is not in it, the held one is', $report['status'] === 200
+    && str_contains($report['body'], 'Mon, 5 Jan 2099') === false && str_contains($report['body'], 'Mon, 2 Nov 2026') === true);
+$gm = req($jarHost, 'GET', '/small-groups/group?id=' . SGROUP);
+check('S08 the leaders\' recent meetings mark the planned ones', substr_count($gm['body'], '>planned</span>') === 2);
+
+// Removing a home (D-126): a manager removes the second host's.
+$saveHome($jarHost, ['action' => 'remove', 'groupID' => (string) SGROUP, 'placeID' => (string) $placeB,
     'csrf_token' => token(req($jarHost, 'GET', $placeUrl($placeB))['body'])]);
 $rowB = $placeRow($placeB);
-$g = $groupPage($jarV);
+$g  = $groupPage($jarV);
 $gm = req($jarHost, 'GET', '/small-groups/group?id=' . SGROUP);
-check('R18 removing a home empties its address, who entered it and the agreement, and takes it off the list',
-    (int) ($rowB['isActive'] ?? -1) === 0 && $rowB['addressLine1'] === null && $rowB['latitude'] === null && $rowB['placeEnteredByID'] === null
+check('S09 D-126: removing a home deletes its address, host and agreement at once, and takes it off the list',
+    (int) ($rowB['isActive'] ?? -1) === 0 && $rowB['addressLine1'] === null && $rowB['latitude'] === null && $rowB['hostUserID'] === null
     && (int) $rowB['placeMapAgreed'] === 0 && str_contains($g['body'], '2 Beta Road') === false, json_encode($rowB));
-check('R18b ...the meeting held there still points at it and says it met somewhere no longer recorded, never "the usual place"',
-    (int) ($meetAt('2026-11-02')['placeID'] ?? 0) === $placeB && str_contains($gm['body'], 'A place no longer recorded</div>') === true);
-check('R18c ...and the first host\'s home is untouched', str_contains($g['body'], '1 Alpha Road') === true && (int) ($placeRow($placeA)['isActive'] ?? 0) === 1);
-q('DELETE FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP + 1]);
+check('S10 ...meetings held or planned there say "a place no longer recorded", never "the usual place"',
+    str_contains($gm['body'], 'A place no longer recorded</div>') === true && str_contains($nextPanel($groupPage($jarMember)), 'a place no longer recorded') === true);
 
 q('DELETE FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]);
 if ($sgEnabledBefore === null) {

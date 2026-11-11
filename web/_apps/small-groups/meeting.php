@@ -13,7 +13,11 @@
  * 🔁 #809, D-123: a meeting says WHERE it was held — the group's usual place,
  * or one of the hosts' homes the group takes turns in. In edit mode the page
  * shows that place, and its map only where `OutsideServices` says yes for
- * THAT place's own host (D-120); otherwise the written address.
+ * THAT place's own named host (D-124); otherwise the written address.
+ *
+ * 🗓️ #809, D-127: a meeting given a date still to come is a PLANNED meeting.
+ * The group's members see the next one on the group's page. It has no roll
+ * yet, so its roll and the Attendance push are left alone until the day.
  *
  * @package   Portal\SmallGroups
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -117,7 +121,8 @@ if ($editMeeting !== null) {
     if ($shownPlace !== null && $shownPlace['latitude'] !== null && $shownPlace['longitude'] !== null) {
         $showPlaceMap = OutsideServices::allowsMeetingPlaceMap(
             $siteId,
-            (int) ($shownPlace['placeEnteredByID'] ?? 0),
+            $groupId,
+            (int) ($shownPlace['hostUserID'] ?? 0),
             (int) ($shownPlace['placeMapAgreed'] ?? 0) === 1
         ) === true;
     }
@@ -155,6 +160,9 @@ $esc = static fn (mixed $s): string => htmlspecialchars((string) $s, ENT_QUOTES,
     <h1 class="mb-0"><i class="fa-solid fa-clipboard-check me-2"></i><?php echo $editMeeting !== null ? 'Edit Meeting' : 'Record Meeting'; ?> — <?php echo $esc($group['groupName']); ?></h1>
     <a href="<?php echo htmlspecialchars(Site::url('small-groups/group'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo $groupId; ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i>Back</a>
 </div>
+
+<p class="text-secondary small">Give a date still to come to plan a meeting: the group's members then see where and
+    when it meets next. Its roll is recorded once it has happened.</p>
 
 <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/meeting-save'), ENT_QUOTES, 'UTF-8'); ?>">
     <input type="hidden" name="csrf_token" value="<?php echo $esc(Auth::csrfToken()); ?>">

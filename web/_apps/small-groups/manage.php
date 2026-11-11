@@ -90,17 +90,18 @@ if ($stmtTypes !== false) {
     $stmtTypes->close();
 }
 
-// 🏠 #809, D-120 — who entered the meeting place, and whether they agreed to
-//    a map of it. A map is shown only where that person agreed, so the form
-//    says whose agreement stands and what a tick from THIS person would do.
-//    The rule for what a save does with the tick is
-//    `SmallGroups::placeAgreementAfterSave()`; the shared partial
-//    `portal_place_map_agreement()` only describes it, in the same words the
-//    rotating hosts' places use (D-123).
-$viewerId       = (int) (App::user()['userID'] ?? 0);
-$placeEnteredBy = $editGroup !== null ? (int) ($editGroup['placeEnteredByID'] ?? 0) : 0;
-$placeAgreed    = $editGroup !== null && (int) ($editGroup['placeMapAgreed'] ?? 0) === 1;
-$placeEntererName = $placeEnteredBy > 0 && $placeEnteredBy !== $viewerId ? SmallGroups::entererName($placeEnteredBy) : '';
+// 🏠 #809, D-120, D-124 — WHOSE HOME the usual meeting place is, and whether
+//    THAT member agreed to a map of it. The form names the host (an active
+//    member of the group, or nobody yet); only the host is offered the
+//    agreement box, so a leader filling in a member's address cannot agree
+//    for them. The rule for what a save does is
+//    `SmallGroups::placeAgreementAfterSave()`; the shared partials only draw
+//    and describe it, in the same words the listed homes use (D-123).
+$viewerId    = (int) (App::user()['userID'] ?? 0);
+$placeHost   = $editGroup !== null ? (int) ($editGroup['hostUserID'] ?? 0) : 0;
+$placeAgreed = $editGroup !== null && (int) ($editGroup['placeMapAgreed'] ?? 0) === 1;
+$placeHostName = $placeHost > 0 ? SmallGroups::personName($placeHost) : '';
+$groupMembersForHost = $editGroup !== null ? SmallGroups::membersOf($siteId, $groupId, 'active') : [];
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
@@ -287,16 +288,23 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
             ]); ?>
 
             <?php
-            // 🗺️ #809, D-120 — "a map of this place may be shown", for the
-            //    group's USUAL place. The rotating hosts' homes (D-123) are
-            //    listed on the group's page and entered one at a time.
+            // 🗺️ #809, D-124 — whose home the USUAL place is, and that host's
+            //    own "a map may be shown". The homes a group takes turns in
+            //    (D-123) are listed on the group's page and entered one at a time.
+            //    A group being CREATED has no members yet, so no host can be
+            //    named until its members are added.
+            portal_place_host_select([
+                'canChoose' => true,
+                'members'   => $groupMembersForHost,
+                'hostId'    => $placeHost,
+                'hostName'  => $placeHostName,
+            ]);
             portal_place_map_agreement([
-                'isNew'       => $isCreate,
-                'enteredBy'   => $placeEnteredBy,
-                'agreed'      => $placeAgreed,
-                'viewerId'    => $viewerId,
-                'entererName' => $placeEntererName,
-                'what'        => 'this meeting place',
+                'hostId'   => $placeHost,
+                'hostName' => $placeHostName,
+                'agreed'   => $placeAgreed,
+                'viewerId' => $viewerId,
+                'what'     => 'this meeting place',
             ]);
             ?>
         </div>

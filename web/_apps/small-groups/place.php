@@ -4,18 +4,20 @@
  * -----------------------------------------------------------------------------
  * Small Groups — Add / Edit a host's home the group takes turns in 🏠
  * -----------------------------------------------------------------------------
- * `?id=` (groupID) + optional `?placeID=` for edit mode. Gate:
- * `SmallGroups::canManage()` — the same people who may change the group's usual
- * meeting place (its administrators, whoever the organisation points "Manage
- * every small group" at, and the group's own leaders).
+ * `?id=` (groupID) + optional `?placeID=` for edit mode.
+ *
+ * WHO MAY USE IT (the owner, D-125), decided by `SmallGroups::mayEditHome()`:
+ * an administrator, whoever manages small groups and the group's own leaders
+ * may add or change ANY home; any other active member of the group may add
+ * their OWN home, as its host, and change only a home whose host they are.
  *
  * WHY THIS PAGE EXISTS (#809, D-123). The owner, 11 November 2026: "Small
  * Groups could also rotate who's home they meet in". So a group keeps a list
  * of hosts' homes beside its usual place, and each meeting can say which one
- * it was held in. Each home is its OWN host's (D-120): its map is shown only
- * where the person who entered THAT home agreed, and one host's agreement
- * never stands for another's. That is why the agreement box here is about
- * this one place, and why the record lives on this place's own row.
+ * it was held in. Each home NAMES ITS HOST, a member of the group (D-124): only
+ * that member can agree to a map of it, so the agreement box is drawn for the
+ * host alone and a leader filling in a member's address cannot agree for them.
+ * One host's agreement never stands for another's home.
  *
  * The address fields are the shared #456 partial with its canonical names, so
  * `place-save.php` reads them back exactly as `save.php` does for the usual
@@ -56,10 +58,9 @@ if ($group === null) {
     Router::renderError(404);
     return;
 }
-if (SmallGroups::canManage($siteId, $groupId) === false) {
-    Router::renderError(403);
-    return;
-}
+$viewerId  = (int) (App::user()['userID'] ?? 0);
+$canManage = SmallGroups::canManage($siteId, $groupId);
+$isMember  = SmallGroups::isActiveMemberOf($siteId, $groupId, $viewerId);
 
 $placeId = (int) ($_GET['placeID'] ?? 0);
 $place   = $placeId > 0 ? SmallGroups::getPlace($siteId, $groupId, $placeId) : null;
@@ -69,11 +70,15 @@ if ($placeId > 0 && ($place === null || (int) $place['isActive'] !== 1)) {
     Router::renderError(404);
     return;
 }
+if (SmallGroups::mayEditHome($canManage, $isMember, $place, $viewerId) === false) {
+    Router::renderError(403);
+    return;
+}
 $isNew = $place === null;
 
-$viewerId  = (int) (App::user()['userID'] ?? 0);
-$enteredBy = $place !== null ? (int) ($place['placeEnteredByID'] ?? 0) : 0;
-$agreed    = $place !== null && (int) ($place['placeMapAgreed'] ?? 0) === 1;
+$hostId   = $place !== null ? (int) ($place['hostUserID'] ?? 0) : ($canManage === true ? 0 : $viewerId);
+$hostName = $hostId > 0 ? SmallGroups::personName($hostId) : '';
+$agreed   = $place !== null && (int) ($place['placeMapAgreed'] ?? 0) === 1;
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
@@ -107,9 +112,9 @@ $values = $place ?? [];
 </div>
 
 <p class="text-secondary small">
-    For a group that takes turns meeting in different members' homes. Each home here is its own host's: its map is
-    shown only where the person who entered it agreed, and nobody else's agreement counts for it. Who can see the
-    address follows the group's own setting, "Who can see the meeting address?".
+    For a group that takes turns meeting in different members' homes. Each home here is its host's: its map is shown
+    only where that member has agreed, and nobody else can agree for them. Who can see the address follows the
+    group's own setting, "Who can see the meeting address?".
 </p>
 
 <form method="post" action="<?php echo htmlspecialchars(Site::url('small-groups/place-save'), ENT_QUOTES, 'UTF-8'); ?>">
@@ -123,6 +128,14 @@ $values = $place ?? [];
     <div class="card mb-4">
         <div class="card-header"><h5 class="mb-0">The home</h5></div>
         <div class="card-body">
+            <?php
+            portal_place_host_select([
+                'canChoose' => $canManage,
+                'members'   => $canManage === true ? SmallGroups::membersOf($siteId, $groupId, 'active') : [],
+                'hostId'    => $hostId,
+                'hostName'  => $hostName,
+            ]);
+            ?>
             <div class="row g-3 mb-3">
                 <div class="col-12 col-md-6">
                     <label for="placeLabel" class="form-label">Short name <small class="text-muted">(optional, to choose it by)</small></label>
@@ -147,12 +160,11 @@ $values = $place ?? [];
                 'w3wSuggest' => true,
             ]);
             portal_place_map_agreement([
-                'isNew'       => $isNew,
-                'enteredBy'   => $enteredBy,
-                'agreed'      => $agreed,
-                'viewerId'    => $viewerId,
-                'entererName' => $enteredBy > 0 && $enteredBy !== $viewerId ? SmallGroups::entererName($enteredBy) : '',
-                'what'        => 'this home',
+                'hostId'   => $hostId,
+                'hostName' => $hostName,
+                'agreed'   => $agreed,
+                'viewerId' => $viewerId,
+                'what'     => 'this home',
             ]);
             ?>
         </div>
