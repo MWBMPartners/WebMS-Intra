@@ -1,7 +1,8 @@
 # D-130 · Looking at expense records is written to the activity log
 
 **Date:** 2026-11-11  
-**Status:** in force
+**Status:** in force  
+**Superseded in part by:** D-132 (a look that showed no claim is not recorded)
 
 **Question:** with #867, an expense claim's receipts can be opened by its claimant, the approvers for that
 department, treasurers and administrators. The activity log records changes (a claim submitted, approved, paid)
