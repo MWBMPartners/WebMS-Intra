@@ -13,9 +13,9 @@ Last whole suite (with #703): 104/104 green; e2e harness all phases. Decisions t
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, b82a4c00 | Check round 3: no realistic cell wrong (416,317 swept); but a misreported date rule plus cancelling arithmetic fools the comparison (untrue guarantees), and two test gaps. Round 4 = CONVERGE: restore round 2's reported-relative-time clause, state the limit honestly, close the gaps. #946 widened |
-| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 3b971faf | Check round 2: windows a DAY LATE near the date line (Tonga, Samoa, Fiji, Kiribati; old since #231); offset zones break round 2's global-zone fix. Round 3: noon-timestamp sunsets kept within the date's local noon-to-noon, nothing global touched; held-texts path pinned. Raised #942, #943, #945 |
-| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | worktree agent (p940-build) | Building |
+| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, b8d67707 | Round 4 built (both tests; limit stated; 0 wrong beyond #946; 36/36 constructs pinned; arrow functions now read). Check round 4 running |
+| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 81e23793 | Round 3 built (sunset taken from instants every 6h, kept within local noon-to-noon; skipped-day halfway rule; polar 18:00; nothing global; date-line, offset and held-texts paths pinned). Check round 3 running (with an independent sunset algorithm). Raised #942, #943, #945 |
+| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, 5e221309 | Check round 1: figure code right in 100 pairings; one sentence (many copies) wrong when the installation is 'never' but an organisation chose days; 'could not be read' unguarded. Round 2 building. Raised #947 |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703, if needed), 273 (#782, landed), 274 (#935). Next free: 275.
