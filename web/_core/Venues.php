@@ -3196,9 +3196,31 @@ class Venues
      * @return array{id: int, errors: string[]}
      */
     /**
+     * 🔒 Lock an invoice row (FOR UPDATE) and answer its currency, or null when
+     * there is no such invoice here. Only meaningful INSIDE a transaction: a lock
+     * outside one is released at once (#697). Every write of an invoice's
+     * currency and every line or payment insert takes it first (#966 round 5).
+     */
+    private static function lockInvoiceCurrency(\mysqli $db, int $invoiceId, int $siteId): ?string
+    {
+        $stmt = $db->prepare('SELECT `currency` FROM `tblVenueInvoices` WHERE `invoiceID` = ? AND `siteID` = ? FOR UPDATE');
+        $stmt->bind_param('ii', $invoiceId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return is_array($row) === true ? (string) $row['currency'] : null;
+    }
+
+    /**
      * 💷 Why an invoice's currency may NOT change to $newCurrency, or '' when
-     * it may (#966, D-139): refused once the invoice has a line or a payment in
-     * its current currency. Unreadable answers refuse, never allow.
+     * it may (#966, D-139): refused while ANY of its lines or payments is in
+     * another currency than $newCurrency — an unrecorded ('') one included,
+     * so an unrecorded invoice with unrecorded payments cannot be given a
+     * currency its payments do not have. (Round 3 counted only children in
+     * the invoice's CURRENT currency and let an unrecorded invoice change
+     * freely.) Unreadable answers refuse, never allow. Asked once before the
+     * write and again under the invoice's lock (lockInvoiceCurrency()).
      */
     public static function whyInvoiceCurrencyCannotChange(int $invoiceId, int $siteId, string $newCurrency): string
     {
@@ -3226,7 +3248,7 @@ class Venues
         }
 
         return $n > 0
-            ? 'This invoice has ' . $n . ' line(s) or payment(s) in ' . ($was !== '' ? $was : 'no recorded currency') . ', so its currency cannot change to ' . $new . '.'
+            ? 'This invoice has ' . $n . ' line(s) or payment(s) in another currency than ' . $new . ', so its currency cannot change to ' . $new . '.'
             : '';
     }
 
@@ -3271,6 +3293,7 @@ class Venues
         if ($currency !== '' && Currency::isChoosable($currency) === false) {
             $errors[] = 'The currency is not one the portal can use.';
         }
+        $postedCurrency = $currency; // asked again under the invoice's lock below
         $kept = $invoiceId > 0 ? self::getInvoice($invoiceId, $siteId) : null;
         if (is_array($kept) === true) {
             $currency = Currency::onEdit((string) ($kept['currency'] ?? ''), $currency);
@@ -3326,8 +3349,27 @@ class Venues
 
         try {
             if ($invoiceId > 0) {
+                // 🔒 #647's rule for money (#966 round 5): the invoice row is LOCKED
+                //    first, and its currency and its lines and payments are read again
+                //    UNDER that lock, so a payment recorded between the check above
+                //    and this write cannot leave the invoice in a currency its own
+                //    payments disagree with. Child writers take the same lock.
+                $db->begin_transaction();
+                $lockedCurrency = self::lockInvoiceCurrency($db, $invoiceId, $siteId);
+                if ($lockedCurrency === null) {
+                    $db->rollback();
+                    return ['id' => 0, 'errors' => ['Invoice not found.']];
+                }
+                $currency = Currency::onEdit($lockedCurrency, $postedCurrency);
+                $lockedRefusal = self::whyInvoiceCurrencyCannotChange($invoiceId, $siteId, $currency);
+                if ($lockedRefusal !== '') {
+                    $db->rollback();
+                    return ['id' => $invoiceId, 'errors' => [$lockedRefusal]];
+                }
+                $newData['currency'] = $currency;
                 $old = self::getInvoice($invoiceId, $siteId);
                 if ($old === null) {
+                    $db->rollback();
                     return ['id' => 0, 'errors' => ['Invoice not found.']];
                 }
                 $oldFilePath = $old['filePath'] ?? null;
@@ -3345,6 +3387,7 @@ class Venues
                     );
                 }
                 if ($stmt === false) {
+                    $db->rollback();
                     return ['id' => 0, 'errors' => ['Could not save invoice.']];
                 }
                 if ($filePath !== null) {
@@ -3364,8 +3407,10 @@ class Venues
                 $ok = $stmt->execute();
                 $stmt->close();
                 if ($ok === false) {
+                    $db->rollback();
                     return ['id' => 0, 'errors' => ['Could not save invoice.']];
                 }
+                $db->commit();
                 if ($filePath !== null && $oldFilePath !== null) {
                     $oldFull = rtrim(PORTAL_ROOT, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR
                         . 'venues' . DIRECTORY_SEPARATOR . 'invoices' . DIRECTORY_SEPARATOR . basename((string) $oldFilePath);
@@ -3400,6 +3445,10 @@ class Venues
             self::audit('tblVenueInvoices', $newId, 'create', null, $newData, $actorUserId);
             return ['id' => $newId, 'errors' => []];
         } catch (\mysqli_sql_exception $e) {
+            try {
+                $db->rollback(); // harmless when no transaction is open
+            } catch (\Throwable $ignored) {
+            }
             error_log('Venues::saveInvoice() failed: ' . $e->getMessage());
             return ['id' => $invoiceId, 'errors' => ['Could not save invoice.']];
         }
@@ -3484,10 +3533,18 @@ class Venues
         }
 
         try {
+            // 🔒 The invoice row is locked first (#966 round 5), so its currency
+            //    cannot change between reading it and writing the line.
+            $db->begin_transaction();
+            if (self::lockInvoiceCurrency($db, $invoiceId, $siteId) === null) {
+                $db->rollback();
+                return ['lineID' => 0, 'error' => 'Invoice not found.'];
+            }
             // 💷 A line is in its INVOICE's currency, kept on the row (D-139).
             $stmt = $db->prepare('INSERT INTO tblVenueInvoiceLines (siteID, invoiceID, bookingID, amountPence, `currency`) '
                 . 'VALUES (?, ?, ?, ?, (SELECT `i`.`currency` FROM `tblVenueInvoices` `i` WHERE `i`.`invoiceID` = ?))');
             if ($stmt === false) {
+                $db->rollback();
                 return ['lineID' => 0, 'error' => 'Could not allocate line.'];
             }
             $stmt->bind_param('iiiii', $siteId, $invoiceId, $bookingId, $amountPence, $invoiceId);
@@ -3495,11 +3552,17 @@ class Venues
             $newId = (int) $stmt->insert_id;
             $stmt->close();
             if ($ok === false || $newId <= 0) {
+                $db->rollback();
                 return ['lineID' => 0, 'error' => 'Could not allocate line.'];
             }
+            $db->commit();
             self::audit('tblVenueInvoiceLines', $newId, 'create', null, ['invoiceID' => $invoiceId, 'bookingID' => $bookingId], $actorUserId);
             return ['lineID' => $newId, 'error' => null];
         } catch (\mysqli_sql_exception $e) {
+            try {
+                $db->rollback();
+            } catch (\Throwable $ignored) {
+            }
             return ['lineID' => 0, 'error' => 'That booking is already allocated to this invoice.'];
         }
     }
@@ -3569,19 +3632,38 @@ class Venues
             return ['payID' => 0, 'errors' => $errors];
         }
 
-        $stmt = $db->prepare(
-            // 💷 A payment is in its INVOICE's currency, kept on the row (D-139).
-            'INSERT INTO tblVenueInvoicePayments (siteID, invoiceID, paidDate, amountPence, method, reference, notes, recordedByID, `currency`) '
-            . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT `i`.`currency` FROM `tblVenueInvoices` `i` WHERE `i`.`invoiceID` = ?))'
-        );
-        if ($stmt === false) {
-            return ['payID' => 0, 'errors' => ['Could not record payment.']];
-        }
-        $stmt->bind_param('iisisssii', $siteId, $invoiceId, $paidDate, $amountPence, $method, $reference, $notes, $actorUserId, $invoiceId);
-        $ok = $stmt->execute();
-        $newId = (int) $stmt->insert_id;
-        $stmt->close();
-        if ($ok === false || $newId <= 0) {
+        // 🔒 The invoice row is locked first (#966 round 5), so its currency
+        //    cannot change between reading it and writing the payment.
+        $db->begin_transaction();
+        try {
+            if (self::lockInvoiceCurrency($db, $invoiceId, $siteId) === null) {
+                $db->rollback();
+                return ['payID' => 0, 'errors' => ['Invoice not found.']];
+            }
+            $stmt = $db->prepare(
+                // 💷 A payment is in its INVOICE's currency, kept on the row (D-139).
+                'INSERT INTO tblVenueInvoicePayments (siteID, invoiceID, paidDate, amountPence, method, reference, notes, recordedByID, `currency`) '
+                . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT `i`.`currency` FROM `tblVenueInvoices` `i` WHERE `i`.`invoiceID` = ?))'
+            );
+            if ($stmt === false) {
+                $db->rollback();
+                return ['payID' => 0, 'errors' => ['Could not record payment.']];
+            }
+            $stmt->bind_param('iisisssii', $siteId, $invoiceId, $paidDate, $amountPence, $method, $reference, $notes, $actorUserId, $invoiceId);
+            $ok = $stmt->execute();
+            $newId = (int) $stmt->insert_id;
+            $stmt->close();
+            if ($ok === false || $newId <= 0) {
+                $db->rollback();
+                return ['payID' => 0, 'errors' => ['Could not record payment.']];
+            }
+            $db->commit();
+        } catch (\Throwable $e) {
+            try {
+                $db->rollback();
+            } catch (\Throwable $ignored) {
+            }
+            error_log('Venues::recordPayment() failed: ' . $e->getMessage());
             return ['payID' => 0, 'errors' => ['Could not record payment.']];
         }
         self::audit('tblVenueInvoicePayments', $newId, 'create', null, ['amountPence' => $amountPence, 'paidDate' => $paidDate], $actorUserId);

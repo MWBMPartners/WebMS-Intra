@@ -712,8 +712,10 @@ class Giving
         if (count($rows) === 0) {
             return [];
         }
-        // The ceiling the query used to hold, now on DONORS (insertion order is
-        // the query's name order, so the same donors are kept as before).
+        // The ceiling the query used to hold, now on DONORS: the first 2,000 in
+        // name order (the order rows arrive in), each with every currency. This
+        // is NOT always the same donors as before: the old LIMIT counted rows,
+        // so a donor giving in two currencies used up two places.
         $rows = array_slice($rows, 0, 2000, true);
 
         // 🔗 Keyed lookup against this period's log rows rather than a SQL

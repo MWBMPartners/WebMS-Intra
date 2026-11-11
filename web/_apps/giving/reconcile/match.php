@@ -171,6 +171,13 @@ if ($action === 'match-session') {
         backToView((int) $txn['importID'], 'This line is already matched — unmatch it first.', 'warning');
     }
 
+    // 💷 A statement with NO recorded currency matches no count (#966 round 5):
+    //    the automatic match skips counts for it and the statement's page says
+    //    so, and a hand-made post must not do what neither offers. (Before,
+    //    '' = '' let an unrecorded count be matched to it.)
+    if ((string) $txn['importCurrency'] === '') {
+        backToView((int) $txn['importID'], 'This statement has no currency recorded, so no count can be matched to it.', 'danger');
+    }
     $sessionValid = false;
     $stmt = $db->prepare(
         // 💷 The count must be in the IMPORT's currency, as a gift must above

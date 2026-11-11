@@ -453,6 +453,7 @@ $removeAll = static function () use ($db, &$made, $site): void {
         run($db, 'DELETE FROM `tblBankImports` WHERE `importID` = ?', 'i', [$id]);
     }
     foreach ($made['counts'] as $id) {
+        run($db, "DELETE FROM `tblGivingEntry` WHERE `reference` = CONCAT('Count #', ?)", 'i', [$id]);
         run($db, 'DELETE FROM `tblCountSessions` WHERE `countSessionID` = ?', 'i', [$id]);
     }
     foreach ($made['campaigns'] as $id) {
@@ -986,12 +987,29 @@ run($db, "INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `cost
 $http('POST', '/assets/save', $assetPost($piano, 'Currency selftest piano', 'USD'));
 $usdFlash = $http('GET', '/assets/edit?id=' . $piano)['body'];
 check('H6 with a repair recorded in EUR the piano\'s currency cannot change to USD: still EUR, and the page says why',
-    $assetCurrency($piano) === 'EUR' && str_contains($usdFlash, 'repair or valuation record(s) in EUR') === true);
+    $assetCurrency($piano) === 'EUR' && str_contains($usdFlash, 'repair or valuation record(s) in another currency than USD') === true);
 run($db, "INSERT INTO `tblAssets` (`siteID`, `name`, `currency`, `publicToken`, `purchaseCostPence`) VALUES (?, 'Currency selftest chair', 'EUR', ?, 1000)", 'is', [$site, bin2hex(random_bytes(16))]);
 $chair = (int) $db->insert_id;
 $made['assets'][] = $chair;
 $http('POST', '/assets/save', $assetPost($chair, 'Currency selftest chair', 'USD'));
 check('H7 ...while an asset with no repairs or valuations CAN change (so H6 refused for the repair, not for another reason)', $assetCurrency($chair) === 'USD', $assetCurrency($chair));
+// The parent rule counts a child in ANY other currency, an UNRECORDED one included
+// (round 5 of the check: reverting the rule to round 3's "children in the CURRENT
+// currency" left 68 of 68 green, because every child above was in EUR).
+$assetWith = static function (string $name, string $own, string $childCurrency) use ($db, $site, &$made): int {
+    run($db, "INSERT INTO `tblAssets` (`siteID`, `name`, `currency`, `publicToken`) VALUES (?, ?, ?, ?)", 'isss', [$site, $name, $own, bin2hex(random_bytes(16))]);
+    $id = (int) $db->insert_id;
+    $made['assets'][] = $id;
+    run($db, "INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `costPence`, `currency`) VALUES (?, ?, 'Currency selftest service', 1500, ?)", 'iis', [$site, $id, $childCurrency]);
+    return $id;
+};
+$recordedOverUnrecorded = $assetWith('Currency selftest lectern', 'EUR', '');
+$http('POST', '/assets/save', $assetPost($recordedOverUnrecorded, 'Currency selftest lectern', 'USD'));
+$unrecordedOverUnrecorded = $assetWith('Currency selftest hymn board', '', '');
+$http('POST', '/assets/save', $assetPost($unrecordedOverUnrecorded, 'Currency selftest hymn board', 'EUR'));
+check('H7b an asset in EUR with an UNRECORDED repair cannot change to USD, and an UNRECORDED asset with an unrecorded repair cannot be given EUR: in both, a child would disagree with its parent',
+    $assetCurrency($recordedOverUnrecorded) === 'EUR' && $assetCurrency($unrecordedOverUnrecorded) === '',
+    var_export([$assetCurrency($recordedOverUnrecorded), $assetCurrency($unrecordedOverUnrecorded)], true));
 
 // A venue invoice: its currency cannot change once a payment is recorded in it.
 $paidInvoice = (int) $made['invoices'][0];
@@ -1003,6 +1021,13 @@ check('H8 an invoice with a payment recorded in EUR cannot change to USD', $invo
 $unpaidInvoice = (int) $made['invoices'][1];
 $http('POST', '/venues/invoice-save', $invoicePost($unpaidInvoice, 'EUR'));
 check('H9 ...while an invoice with no lines or payments CAN (so H8 refused for the payment)', $invoiceCurrency($unpaidInvoice) === 'EUR', $invoiceCurrency($unpaidInvoice));
+run($db, "INSERT INTO `tblVenueInvoices` (`siteID`, `venueID`, `issueDate`, `amountPence`, `currency`, `status`) VALUES (?, ?, CURDATE(), 3000, 'EUR', 'part-paid')", 'ii', [$site, $venue]);
+$eurOverUnrecorded = (int) $db->insert_id;
+$made['invoices'][] = $eurOverUnrecorded;
+run($db, "INSERT INTO `tblVenueInvoicePayments` (`siteID`, `invoiceID`, `paidDate`, `amountPence`, `currency`) VALUES (?, ?, CURDATE(), 500, '')", 'ii', [$site, $eurOverUnrecorded]);
+$http('POST', '/venues/invoice-save', array_merge($invoicePost($eurOverUnrecorded, 'USD'), ['amount' => '30.00']));
+check('H9b an invoice in EUR with an UNRECORDED payment cannot change to USD (round 3 counted only payments in EUR and let it)',
+    $invoiceCurrency($eurOverUnrecorded) === 'EUR', $invoiceCurrency($eurOverUnrecorded));
 // The organisation moves to dollars first, so "keep" and "take today's" give different answers.
 $setting('org.currency', 'USD', $site);
 // The UNPAID one, now EUR: a paid invoice would be held by H8's refusal anyway,
@@ -1022,6 +1047,10 @@ $http('POST', '/venues/invoice-save', ['csrf_token' => $freshToken('/venues/invo
 $oldAfter = rows($db, "SELECT `i`.`invoiceRef`, `i`.`currency` AS `inv`, `p`.`currency` AS `pay` FROM `tblVenueInvoices` `i` JOIN `tblVenueInvoicePayments` `p` ON `p`.`invoiceID` = `i`.`invoiceID` WHERE `i`.`invoiceID` = ?", 'i', [$oldInvoice]);
 check('H10b an UNRECORDED invoice edited with no currency is saved (reference set) and STAYS unrecorded, agreeing with its unrecorded payment — never today\'s USD',
     ($oldAfter[0]['invoiceRef'] ?? '') === 'SELFTEST-OLD' && ($oldAfter[0]['inv'] ?? 'x') === '' && ($oldAfter[0]['pay'] ?? 'x') === '', json_encode($oldAfter));
+$http('POST', '/venues/invoice-save', ['csrf_token' => $freshToken('/venues/invoice?id=' . $oldInvoice), 'invoiceID' => (string) $oldInvoice,
+    'venueID' => (string) $venue, 'issueDate' => date('Y-m-d'), 'amount' => '60.00', 'currency' => 'EUR']);
+check('H10c and that unrecorded invoice, POSTED a currency (EUR), is refused: its unrecorded payment would then disagree with it (round 3 let an unrecorded invoice change freely)',
+    $invoiceCurrency($oldInvoice) === '', var_export($invoiceCurrency($oldInvoice), true));
 
 // A venue booking and agreement recorded in EUR, edited while the organisation is in
 // USD: each must keep EUR. The booking form DOES carry a currency box (booking.php,
@@ -1094,6 +1123,129 @@ $agreementAfter = rows($db, 'SELECT `title`, `rateAmountPence`, `currency` FROM 
 check('H13 a venue agreement EDITED the same way (no currency posted) is saved — renamed — and is STILL EUR',
     ($agreementAfter[0]['title'] ?? '') === 'Currency selftest hire terms, renamed' && (int) ($agreementAfter[0]['rateAmountPence'] ?? 0) === 10000 && ($agreementAfter[0]['currency'] ?? '') === 'EUR',
     json_encode($agreementAfter));
+
+// UNRECORDED records stay unrecorded on edit (round 5: "stored ?: today" in the
+// booking, agreement and asset edits stayed green, because every record above had a
+// currency). The organisation is in USD here.
+run($db, "INSERT INTO `tblVenueBookings` (`siteID`, `venueID`, `bookingDate`, `usageTypeID`, `statusID`, `costPence`, `currency`, `notes`) VALUES (?, ?, CURDATE(), ?, ?, 900, '', 'old')",
+    'iiii', [$site, $venue, $bookUsage, $bookStatus]);
+$oldBooking = (int) $db->insert_id;
+$oldBookingForm = $formPost($http('GET', '/venues/booking?id=' . $oldBooking)['body'], 'venues/booking-save');
+$oldBookingForm['notes'] = 'old, edited through the real form';
+$http('POST', '/venues/booking-save', $oldBookingForm);
+$http('POST', '/venues/booking-save', ['csrf_token' => $freshToken('/venues/booking?id=' . $oldBooking), 'action' => 'save', 'bookingID' => (string) $oldBooking,
+    'venueID' => (string) $venue, 'bookingDate' => date('Y-m-d'), 'statusID' => (string) $bookStatus, 'usageTypeID' => (string) $bookUsage,
+    'costPence' => '9.00', 'notes' => 'old, edited by hand']);
+$oldBookingAfter = rows($db, 'SELECT `notes`, `currency` FROM `tblVenueBookings` WHERE `bookingID` = ?', 'i', [$oldBooking]);
+run($db, "INSERT INTO `tblVenueAgreements` (`siteID`, `venueID`, `title`, `rateAmountPence`, `currency`, `status`) VALUES (?, ?, 'Currency selftest old terms', 5000, '', 'active')", 'ii', [$site, $venue]);
+$oldAgreement = (int) $db->insert_id;
+$http('POST', '/venues/agreement-save', ['csrf_token' => $freshToken('/venues/agreements?edit=' . $oldAgreement), 'action' => 'save', 'agreementID' => (string) $oldAgreement,
+    'venueID' => (string) $venue, 'agreementType' => 'standing', 'title' => 'Currency selftest old terms, renamed', 'rateAmount' => '50.00', 'status' => 'active']);
+$oldAgreementAfter = rows($db, 'SELECT `title`, `currency` FROM `tblVenueAgreements` WHERE `agreementID` = ?', 'i', [$oldAgreement]);
+run($db, "INSERT INTO `tblAssets` (`siteID`, `name`, `currency`, `publicToken`) VALUES (?, 'Currency selftest old organ', '', ?)", 'is', [$site, bin2hex(random_bytes(16))]);
+$oldAsset = (int) $db->insert_id;
+$made['assets'][] = $oldAsset;
+$http('POST', '/assets/save', $assetPost($oldAsset, 'Currency selftest old organ, renamed', ''));
+$oldAssetAfter = rows($db, 'SELECT `name`, `currency` FROM `tblAssets` WHERE `assetID` = ?', 'i', [$oldAsset]);
+check('H13b an UNRECORDED booking (through its real form, which carries its empty currency box, and by hand), agreement and asset, each EDITED and saved while the organisation is in USD, all STAY unrecorded — never today\'s USD',
+    ($oldBookingForm['currency'] ?? null) === '' && ($oldBookingAfter[0]['notes'] ?? '') === 'old, edited by hand' && ($oldBookingAfter[0]['currency'] ?? 'x') === ''
+    && ($oldAgreementAfter[0]['title'] ?? '') === 'Currency selftest old terms, renamed' && ($oldAgreementAfter[0]['currency'] ?? 'x') === ''
+    && ($oldAssetAfter[0]['name'] ?? '') === 'Currency selftest old organ, renamed' && ($oldAssetAfter[0]['currency'] ?? 'x') === '',
+    json_encode([$oldBookingForm['currency'] ?? null, $oldBookingAfter, $oldAgreementAfter, $oldAssetAfter]));
+
+// A count with NO recorded currency, CLOSED over HTTP: its gifts are written with no
+// currency either, agreeing with the count (round 4 changed this; round 5 found
+// nothing drove it).
+run($db, "INSERT INTO `tblCountSessions` (`siteID`, `serviceDate`, `categoryID`, `currency`, `status`, `cashTotal`, `chequeTotal`, `envelopeTotal`) VALUES (?, CURDATE(), ?, '', 'counting', 12.34, 0, 0)",
+    'ii', [$site, $category]);
+$oldCount = (int) $db->insert_id;
+$made['counts'][] = $oldCount;
+$http('POST', '/giving/count/close', ['csrf_token' => $freshToken('/giving/count/session?id=' . $oldCount), 'countSessionID' => (string) $oldCount]);
+$countGifts = rows($db, "SELECT `amountPence`, `currency` FROM `tblGivingEntry` WHERE `reference` = ?", 's', ['Count #' . $oldCount]);
+$countStatus = rows($db, 'SELECT `status` FROM `tblCountSessions` WHERE `countSessionID` = ?', 'i', [$oldCount]);
+check('H13c an UNRECORDED count closed over HTTP writes its gifts (12.34) with NO currency, agreeing with the count — never today\'s USD',
+    ($countStatus[0]['status'] ?? '') === 'closed' && $countGifts !== [] && array_unique(array_column($countGifts, 'currency')) === ['']
+    && array_sum(array_map('intval', array_column($countGifts, 'amountPence'))) === 1234,
+    json_encode([$countStatus, $countGifts]));
+
+// A bank statement with NO recorded currency: its page says no count can be matched
+// to it (round 4 made that message reachable; nothing showed it).
+run($db, "INSERT INTO `tblBankImports` (`siteID`, `filename`, `currency`, `fileHash`) VALUES (?, 'selftest-old.csv', '', ?)", 'is', [$site, bin2hex(random_bytes(32))]);
+$oldImport = (int) $db->insert_id;
+$made['imports'][] = $oldImport;
+run($db, "INSERT INTO `tblBankTxns` (`importID`, `siteID`, `txnDate`, `amountPence`, `currency`, `description`) VALUES (?, ?, CURDATE(), 1234, '', 'Currency selftest old line')", 'ii', [$oldImport, $site]);
+$oldTxn = (int) $db->insert_id;
+$oldImportPage = $http('GET', '/giving/reconcile/view?id=' . $oldImport)['body'];
+$http('POST', '/giving/reconcile/match', ['csrf_token' => $freshToken('/giving/reconcile/view?id=' . $oldImport), 'action' => 'match-session', 'txnID' => (string) $oldTxn, 'countSessionID' => (string) $oldCount]);
+$oldTxnAfter = rows($db, 'SELECT `matchStatus` FROM `tblBankTxns` WHERE `txnID` = ?', 'i', [$oldTxn]);
+check('H13d a statement with NO recorded currency says on its page that no count can be matched to it, and a posted match to an unrecorded count is REFUSED',
+    str_contains($oldImportPage, 'this statement has no currency recorded, so no count can be matched to it') === true && ($oldTxnAfter[0]['matchStatus'] ?? '') === 'unmatched',
+    json_encode($oldTxnAfter));
+
+// The refusal an UNRECORDED claim's claimant meets names the CLAIM, not the
+// organisation (which has a currency, USD, here).
+run($db, "INSERT INTO `tblExpenseClaims` (`siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`, `currency`) VALUES (?, ?, ?, 'Currency selftest old claim', CURDATE(), 10.00, 'Pending', '')",
+    'iii', [$site, CU_ADMIN, $dept]);
+$oldClaim = (int) $db->insert_id;
+$http('POST', '/expenses/edit/save', ['csrf_token' => $freshToken('/expenses/edit?id=' . $oldClaim), 'claimID' => (string) $oldClaim,
+    'claimTitle' => 'Currency selftest old claim', 'deptID' => (string) $dept,
+    'itemDesc' => ['Taxi in Boston'], 'itemQty' => ['1'], 'itemUnit' => ['10.00'], 'itemCurrency' => ['USD'], 'itemConverted' => ['8.00']]);
+$oldClaimPage = html_entity_decode($http('GET', '/expenses/edit?id=' . $oldClaim)['body'], ENT_QUOTES, 'UTF-8');
+check('H13e editing an UNRECORDED claim with a line in dollars is refused in words that name the CLAIM ("this claim has no currency recorded"), not the organisation, which has one',
+    str_contains($oldClaimPage, 'this claim has no currency recorded') === true && str_contains($oldClaimPage, 'this organisation has no currency chosen') === false);
+
+// 🔒 THE LOCK (#647's rule for money, round 5): this test HOLDS the asset row's lock
+// in its own connection while the real edit (EUR -> USD) runs in the web server, waits
+// until the database reports that edit WAITING on the lock (asserted, not slept on),
+// then records a repair in EUR and lets go. The edit must then see the repair under
+// its own lock and refuse. Without the lock and the re-read under it, the edit's own
+// early check saw no repair and its UPDATE simply waited, then wrote USD.
+run($db, "INSERT INTO `tblAssets` (`siteID`, `name`, `currency`, `publicToken`) VALUES (?, 'Currency selftest stand', 'EUR', ?)", 'is', [$site, bin2hex(random_bytes(16))]);
+$stand = (int) $db->insert_id;
+$made['assets'][] = $stand;
+$standPost = $assetPost($stand, 'Currency selftest stand', 'USD');
+$holder = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+$holder->set_charset('utf8mb4');
+$holder->begin_transaction();
+$hold = $holder->prepare('SELECT `currency` FROM `tblAssets` WHERE `assetID` = ? FOR UPDATE');
+$hold->bind_param('i', $stand);
+$hold->execute();
+$hold->get_result()->fetch_all();
+$hold->close();
+$multi = curl_multi_init();
+$edit = curl_init('http://127.0.0.1:' . $port . '/assets/save');
+curl_setopt_array($edit, [CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query($standPost),
+    CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar, CURLOPT_TIMEOUT => 60, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*']);
+curl_multi_add_handle($multi, $edit);
+$waiting = false;
+$running = 0;
+for ($i = 0; $i < 100 && $waiting === false; $i++) {
+    curl_multi_exec($multi, $running);
+    // A waiting transaction whose statement reads THIS asset table (the server
+    // may hold other databases; a wait elsewhere must not satisfy the premise).
+    $waiting = (int) (rows($db, "SELECT COUNT(*) AS `n` FROM `information_schema`.`INNODB_TRX` WHERE `trx_state` = 'LOCK WAIT' AND `trx_query` LIKE '%tblAssets%'")[0]['n'] ?? 0) > 0;
+    if ($waiting === false) {
+        usleep(100000);
+    }
+}
+check('T1 the premise: the real edit is WAITING on the asset row this test holds (the database says so), and has not finished',
+    $waiting === true && $running > 0, 'waiting ' . var_export($waiting, true) . ', running ' . $running);
+$child = $holder->prepare("INSERT INTO `tblAssetMaintenance` (`siteID`, `assetID`, `title`, `costPence`, `currency`) VALUES (?, ?, 'Currency selftest race repair', 700, 'EUR')");
+$child->bind_param('ii', $site, $stand);
+$child->execute();
+$child->close();
+$holder->commit();
+$holder->close();
+do {
+    curl_multi_exec($multi, $running);
+    if ($running > 0) {
+        curl_multi_select($multi, 1.0);
+    }
+} while ($running > 0);
+curl_multi_remove_handle($multi, $edit);
+curl_multi_close($multi);
+check('T2 a repair in EUR recorded WHILE the edit waited makes the edit refuse once it gets the lock: the asset is still EUR, agreeing with its repair',
+    $assetCurrency($stand) === 'EUR', var_export($assetCurrency($stand), true));
 
 // A giving statement for a donor who gave in several currencies (EUR, USD and GBP here,
 // and one gift with none). The unrecorded GIFT is unlabelled; the statement must not be.

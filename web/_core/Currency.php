@@ -356,14 +356,15 @@ final class Currency
      *
      * $posted: null or '' when no currency was posted; otherwise a code the
      * caller has ALREADY checked with isChoosable() (an unusable code is the
-     * caller's refusal, in its own words). $mayChange: false when the record
-     * may not change currency now (it has child rows in another currency);
-     * the caller says why, and the stored currency is kept.
+     * caller's refusal, in its own words). Whether the record MAY change
+     * (no child in another currency) is the caller's refusal too, asked again
+     * under the parent row's lock: a refused change never reaches this. (A
+     * third parameter for it was passed by nobody and is removed, round 5.)
      */
-    public static function onEdit(string $stored, ?string $posted, bool $mayChange = true): string
+    public static function onEdit(string $stored, ?string $posted): string
     {
         $wanted = strtoupper(trim((string) $posted));
-        if ($wanted === '' || $mayChange === false) {
+        if ($wanted === '') {
             return $stored;
         }
 

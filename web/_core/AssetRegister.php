@@ -2629,13 +2629,33 @@ class AssetRegister
     }
 
     /**
+     * 🔒 Lock an asset row (FOR UPDATE) and answer its currency, or null when
+     * there is no such asset here. Only meaningful INSIDE a transaction (#697).
+     * Every write of an asset's currency and every repair or valuation insert
+     * takes it first (#966 round 5).
+     */
+    private static function lockAssetCurrency(\mysqli $db, int $assetId, int $siteId): ?string
+    {
+        $stmt = $db->prepare('SELECT `currency` FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? FOR UPDATE');
+        $stmt->bind_param('ii', $assetId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return is_array($row) === true ? (string) $row['currency'] : null;
+    }
+
+    /**
      * 💷 Why an asset's currency may NOT change to $newCurrency, or '' when it
-     * may (#966, D-139). Refused once a repair or a valuation is recorded in
-     * the asset's current currency: those rows keep their own currency, so
-     * relabelling the asset would leave it disagreeing with its own history,
-     * and its value report would read the old figures as the new money. A
-     * refusal can be lifted later; a relabel cannot be undone. Unreadable
-     * answers refuse, never allow.
+     * may (#966, D-139). Refused while ANY repair or valuation is in another
+     * currency than $newCurrency — an unrecorded ('') one included: those rows
+     * keep their own currency, so relabelling the asset would leave it
+     * disagreeing with its own history, and its value report would read the
+     * old figures as the new money. (Round 3 counted only rows in the asset's
+     * CURRENT currency, so an unrecorded repair, or an unrecorded asset, let a
+     * change through.) A refusal can be lifted later; a relabel cannot be
+     * undone. Unreadable answers refuse, never allow. Asked by both callers
+     * and again under the asset's lock in updateAsset().
      */
     public static function whyCurrencyCannotChange(int $assetId, string $newCurrency): string
     {
@@ -2665,7 +2685,7 @@ class AssetRegister
         }
 
         return $n > 0
-            ? 'This asset has ' . $n . ' repair or valuation record(s) in ' . ($was !== '' ? $was : 'no recorded currency') . ', so its currency cannot change to ' . $new . '.'
+            ? 'This asset has ' . $n . ' repair or valuation record(s) in another currency than ' . $new . ', so its currency cannot change to ' . $new . '.'
             : '';
     }
 
@@ -2692,9 +2712,22 @@ class AssetRegister
         if ($old === null || (int) $old['siteID'] !== $siteId) {
             return false;
         }
-        // 💷 The backstop for whyCurrencyCannotChange(), which both callers ask
-        //    first so they can say why (#966, D-139).
+        // 🔒 #647's rule for money (#966 round 5): the asset row is LOCKED first,
+        //    and its currency and its repairs and valuations are read again UNDER
+        //    that lock, so a repair recorded between the callers' own check and
+        //    this write cannot leave the asset in a currency its own history
+        //    disagrees with. addMaintenance() and recordValueSnapshot() take the
+        //    same lock. whyCurrencyCannotChange() is asked first by both callers,
+        //    so they can say why; this is the authoritative second ask.
+        $db->begin_transaction();
+        $lockedCurrency = self::lockAssetCurrency($db, $assetId, $siteId);
+        if ($lockedCurrency === null) {
+            $db->rollback();
+            return false;
+        }
+        $old['currency'] = $lockedCurrency;
         if (isset($data['currency']) === true && self::whyCurrencyCannotChange($assetId, (string) $data['currency']) !== '') {
+            $db->rollback();
             return false;
         }
 
@@ -2752,6 +2785,7 @@ class AssetRegister
         $stmt = $db->prepare('UPDATE tblAssets SET ' . $setClause . ' WHERE assetID = ? AND siteID = ?');
         if ($stmt === false) {
             error_log('AssetRegister::updateAsset() prepare failed: ' . $db->error);
+            $db->rollback();
             return false;
         }
 
@@ -2763,13 +2797,16 @@ class AssetRegister
             // site (uq_asset_tag) — see createAsset()'s matching comment.
             error_log('AssetRegister::updateAsset() update failed: ' . $e->getMessage());
             $stmt->close();
+            $db->rollback();
             return false;
         }
         $stmt->close();
 
         if ($ok === false) {
+            $db->rollback();
             return false;
         }
+        $db->commit();
 
         // 📜 Audit — restrict the diff to just the editable fields we
         // touched (avoids a misleading "cleared" diff against columns like
@@ -5651,27 +5688,6 @@ class AssetRegister
      *
      * @return int New maintID, or 0 on validation failure or insert failure
      */
-    /**
-     * 💷 The currency an asset's money is in ('' when it cannot be read), for a
-     * child row — a repair — that must carry its asset's currency (D-139).
-     */
-    private static function currencyOfAsset(\mysqli $db, int $assetId, int $siteId): string
-    {
-        try {
-            $stmt = $db->prepare('SELECT `currency` FROM `tblAssets` WHERE `assetID` = ? AND `siteID` = ? LIMIT 1');
-            if ($stmt === false) {
-                return '';
-            }
-            $stmt->bind_param('ii', $assetId, $siteId);
-            $stmt->execute();
-            $row = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
-        } catch (\Throwable $e) {
-            return '';
-        }
-
-        return is_array($row) === true ? (string) $row['currency'] : '';
-    }
 
     public static function addMaintenance(int $assetId, array $data, int $actorUserId): int
     {
@@ -5749,20 +5765,32 @@ class AssetRegister
             'performedByUserID' => [$performedByUserId, 'i'],
             'performedByName'   => [$performedByName, 's'],
             'costPence'         => [$costPence, 'i'],
-            // 💷 A repair is in its ASSET's currency, kept on the row (D-139).
-            'currency'          => [self::currencyOfAsset($db, $assetId, $siteId), 's'],
+            // 💷 A repair is in its ASSET's currency, kept on the row (D-139),
+            //    read under the asset's lock just below the field list.
+            'currency'          => ['', 's'],
             'performedAt'       => [$performedAt, 's'],
             'nextDueDate'       => [$nextDueDate, 's'],
             'status'            => [$status, 's'],
             'createdByID'       => [$actorUserId, 'i'],
         ];
 
+        // 🔒 The asset row is locked first (#966 round 5), and the repair takes
+        //    the currency that locked read answers, so the asset's currency
+        //    cannot change between reading it and writing the repair.
+        $db->begin_transaction();
+        $assetCurrency = self::lockAssetCurrency($db, $assetId, $siteId);
+        if ($assetCurrency === null) {
+            $db->rollback();
+            return 0;
+        }
+        $fields['currency'] = [$assetCurrency, 's'];
         ['columns' => $columns, 'types' => $types, 'params' => $params] = self::splitFields($fields);
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
 
         $stmt = $db->prepare('INSERT INTO tblAssetMaintenance (`' . implode('`, `', $columns) . '`) VALUES (' . $placeholders . ')');
         if ($stmt === false) {
             error_log('AssetRegister::addMaintenance() prepare failed: ' . $db->error);
+            $db->rollback();
             return 0;
         }
 
@@ -5772,14 +5800,17 @@ class AssetRegister
         } catch (\mysqli_sql_exception $e) {
             error_log('AssetRegister::addMaintenance() insert failed: ' . $e->getMessage());
             $stmt->close();
+            $db->rollback();
             return 0;
         }
         $newId = (int) $stmt->insert_id;
         $stmt->close();
 
         if ($newId <= 0) {
+            $db->rollback();
             return 0;
         }
+        $db->commit();
 
         $auditNew = [];
         foreach ($fields as $col => $pair) {
@@ -8911,6 +8942,13 @@ class AssetRegister
             return true;
         }
 
+        // 🔒 The asset row is locked first (#966 round 5), so its currency cannot
+        //    change between the subquery below reading it and the row landing.
+        $db->begin_transaction();
+        if (self::lockAssetCurrency($db, $assetId, $siteId) === null) {
+            $db->rollback();
+            return false;
+        }
         $ins = $db->prepare(
             // 💷 A valuation is in its ASSET's currency, kept on the row (D-139).
             'INSERT INTO tblAssetValueHistory '
@@ -8921,14 +8959,23 @@ class AssetRegister
         );
         if ($ins === false) {
             error_log('AssetRegister::recordValueSnapshot() insert prepare failed: ' . $db->error);
+            $db->rollback();
             return false;
         }
-        $ins->bind_param('iisissii', $siteId, $assetId, $valueDate, $valuePence, $method, $source, $recordedById, $assetId);
-        $success = $ins->execute();
+        try {
+            $ins->bind_param('iisissii', $siteId, $assetId, $valueDate, $valuePence, $method, $source, $recordedById, $assetId);
+            $success = $ins->execute();
+        } catch (\mysqli_sql_exception $e) {
+            $success = false;
+        }
         if ($success === false) {
             error_log('AssetRegister::recordValueSnapshot() insert execute failed: ' . $ins->error);
+            $ins->close();
+            $db->rollback();
+            return false;
         }
         $ins->close();
+        $db->commit();
 
         return $success;
     }

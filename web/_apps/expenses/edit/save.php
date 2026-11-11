@@ -317,7 +317,7 @@ try {
     //    treasury/save.php (#647). All four money writers now lock and
     //    re-check.
     $lockStmt = $mysqli->prepare(
-        'SELECT claimID, userID, status FROM tblExpenseClaims '
+        'SELECT claimID, userID, status, `currency` FROM tblExpenseClaims '
         . 'WHERE claimID = ? AND siteID = ? FOR UPDATE'
     );
     if ($lockStmt === false) {
@@ -346,6 +346,17 @@ try {
             $refuse($notFound, 0, 'warning');
         }
         $refuse(ExpenseRules::editRefusalWords($lockedReason), $claimID, 'warning');
+    }
+
+    // 💷 The claim's currency, read UNDER the lock (#966 round 5, #647's rule):
+    //    the lines above were judged in the currency read before the lock, so
+    //    if the claim was given a currency in between (an administrator
+    //    labelling unrecorded amounts), the lines are not written in the old
+    //    answer; the claimant is asked to look again.
+    $lockedCurrency = \Portal\Core\Currency::onEdit((string) $locked['currency'], null);
+    if ($lockedCurrency !== $claimCurrency) {
+        $mysqli->rollback();
+        $refuse('This claim\'s currency was recorded a moment ago, so its lines need checking again. Nothing has been changed.', $claimID, 'warning');
     }
 
     // 1. 🗂️ What it used to say, for the audit trail. Read before anything is

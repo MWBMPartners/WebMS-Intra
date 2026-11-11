@@ -29,22 +29,32 @@ from web/_core/Currency.php, never typed here):
   2. An INSERT into a CHILD table that names `currency` must take the
      PARENT's value: a subquery reading the parent table inside the statement.
      A writer that takes it another way (the parent's value read just above,
-     or the parent row it has just written) is named in ON_PURPOSE with the
-     reason, and that list fails BOTH ways: an entry that no longer matches a
-     write is reported, because a stale exception reads as a guarantee.
+     or the parent row it has just written) is named in ON_PURPOSE — by FILE,
+     FUNCTION and TABLE — with the reason, and that list fails BOTH ways: an
+     entry that no longer matches a write is reported, because a stale
+     exception reads as a guarantee.
+
+SQL keywords are matched in any capitals (`update`, `Set`, `where`).
 
 An INSERT of a NEW own-table record is not judged: a new record takes the
 currency posted for it or the organisation's, which is right. A WHERE clause
 comparing `currency` is not a write and is not judged.
 
-WHAT IT CANNOT SEE, said plainly
---------------------------------
-  - whether the helper's answer is the value actually bound (it checks the
-    helper is CALLED in the function, not that its result reaches the `?`);
-  - SQL built from a table name held in a variable (Currency::labelUnlabelled()
-    is one, and is the deliberate labelling of '' rows: it is not an edit);
+WHAT IT CANNOT SEE, said plainly (D-065: a static check tests PRESENCE; the
+behaviour is DRIVEN by tools/currency-selftest.php, sections D3b, D3c, H5-H14
+and the lock test, and those are the real guard). Measured blind spots:
+  - whether the helper's answer is the value actually bound: it checks that
+    Currency::onEdit( is CALLED in the function, not that its result reaches
+    the `?` — and a STRING LITERAL that mentions it counts as a call;
+  - a table written through an alias or a join (`UPDATE tblX AS x JOIN …`
+    beyond one alias word), or named from a variable;
+  - `ON DUPLICATE KEY UPDATE currency = …`, `REPLACE INTO`, and
+    `INSERT … SELECT` that binds its own value instead of the parent's;
+  - a SET clause built in a variable, sprintf() or a helper, unless a
+    `'currency' =>` field map sits beside a dynamic SET in the same function;
   - a write in a file outside web/_apps, web/_core and web/_install.
-  The behaviour is driven by tools/currency-selftest.php (D3b, D3c, H10-H13).
+Currency::labelUnlabelled() is skipped by NAME (only that function): it names
+its tables from a variable and is the deliberate labelling of '' rows.
 
 It asks PHP's own tokeniser (currency-writes-scopes.php) for each function's
 code with comments removed; without `php` it REFUSES loudly, never passes.
@@ -63,25 +73,27 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCOPES = os.path.join(HERE, 'currency-writes-scopes.php')
 
-# (path under the repository, child table) -> why the parent's value is taken
-# another way than a subquery. Fails BOTH ways.
+# (path under the repository, function — "<file>" for page code outside any
+# function — child table) -> why the parent's value is taken another way than a
+# subquery. Fails BOTH ways.
 ON_PURPOSE = {
-    ('web/_apps/expenses/submit/save.php', 'tblExpenseClaimItems'):
+    ('web/_apps/expenses/submit/save.php', '<file>', 'tblExpenseClaimItems'):
         'the claim row was INSERTed a few lines above with $claimCurrency, and every line is bound with that same value through ExpenseRules::expenseLine()',
-    ('web/_apps/expenses/edit/save.php', 'tblExpenseClaimItems'):
+    ('web/_apps/expenses/edit/save.php', '<file>', 'tblExpenseClaimItems'):
         "the lines are rebuilt with $claimCurrency, which is Currency::onEdit() of the claim's own stored currency",
-    ('web/_apps/expenses/api/create.php', 'tblExpenseClaimItems'):
+    ('web/_apps/expenses/api/create.php', '<file>', 'tblExpenseClaimItems'):
         'the claim row was INSERTed just above with $claimCurrency, and every line carries that value from ExpenseRules::expenseLine()',
-    ('web/_apps/giving/reconcile/import.php', 'tblBankTxns'):
+    ('web/_apps/giving/reconcile/import.php', '<file>', 'tblBankTxns'):
         "the import row was INSERTed just above with $currency, and every bank line is bound with it",
-    ('web/_core/AssetRegister.php', 'tblAssetMaintenance'):
-        "the repair's currency is self::currencyOfAsset(), the asset row's own value read in the same function",
+    ('web/_core/AssetRegister.php', 'addMaintenance', 'tblAssetMaintenance'):
+        "the repair's currency is the asset row's own value, read by lockAssetCurrency() under the asset's lock in the same function",
 }
 
-IGNORED_FILES = {
+IGNORED_FUNCTIONS = {
     # Currency::labelUnlabelled() names its tables from a variable: it is the
-    # deliberate labelling of rows with NO currency, never an edit.
-    'web/_core/Currency.php',
+    # deliberate labelling of rows with NO currency, never an edit. Only that
+    # ONE function is skipped; the rest of Currency.php is read like any file.
+    ('web/_core/Currency.php', 'labelUnlabelled'),
 }
 
 
@@ -109,7 +121,7 @@ def scopes_of(path: str) -> list[dict]:
     return json.loads(out.stdout)
 
 
-SET_CURRENCY = re.compile(r'\bcurrency`?\s*=(?!=)')
+SET_CURRENCY = re.compile(r'\bcurrency`?\s*=(?!=)', re.I)
 FIELD_CURRENCY = re.compile(r"""['"]currency['"]\s*=>""")
 
 
@@ -117,7 +129,7 @@ def findings(root: str, on_purpose: dict) -> tuple[list[str], list[tuple[str, st
     own, child = money_tables(root)
     tables = sorted(set(own) | set(child))
     problems: list[str] = []
-    used: set[tuple[str, str]] = set()
+    used: set[tuple[str, str, str]] = set()
     for base in ('web/_apps', 'web/_core', 'web/_install'):
         top = os.path.join(root, base)
         for d, _, files in os.walk(top):
@@ -126,24 +138,30 @@ def findings(root: str, on_purpose: dict) -> tuple[list[str], list[tuple[str, st
                     continue
                 full = os.path.join(d, f)
                 rel = os.path.relpath(full, root).replace(os.sep, '/')
-                if rel in IGNORED_FILES:
-                    continue
                 raw = open(full, encoding='utf-8', errors='replace').read()
                 if 'currency' not in raw:
                     continue
                 for sc in scopes_of(full):
+                    if (rel, sc['name']) in IGNORED_FUNCTIONS:
+                        continue
                     code = sc['code']
                     where = f"{rel}: {sc['name']}() (line {sc['line']})"
                     for t in tables:
                         # Rule 1: an UPDATE that sets the currency.
                         # A statement is often built in pieces ('UPDATE tblX ' . 'SET …'),
                         # so the gap between the table and SET may hold quotes and dots.
-                        for m in re.finditer(r'\bUPDATE\s+`?' + t + r'`?(\s+`?\w+`?)?[\s\'".]+SET\b', code):
+                        for m in re.finditer(r'\bUPDATE\s+`?' + t + r'`?(\s+`?\w+`?)?[\s\'".]+SET\b', code, re.I):
                             window = code[m.end():m.end() + 1500]
-                            cut = window.find('WHERE')
-                            set_part = window if cut < 0 else window[:cut]
+                            cut = re.search(r'\bWHERE\b|;', window, re.I)
+                            set_part = window if cut is None else window[:cut.start()]
                             sets = SET_CURRENCY.search(set_part) is not None
-                            fielded = FIELD_CURRENCY.search(code) is not None and re.search(r"\bUPDATE\s+`?" + t + r"`?\s+SET\s+['\"]?\s*\.", code) is not None
+                            # A field map is judged only beside a DYNAMIC SET (the SET
+                            # string ends and code follows), never beside a literal
+                            # one: 'UPDATE tblX SET ' . 'status = ?' in a function that
+                            # also holds a 'currency' => map is a status-only UPDATE,
+                            # and the first version reported it (round 5).
+                            dynamic = re.match(r"""\s*['"]\s*\.\s*(?=[^\s'"])""", window) is not None
+                            fielded = dynamic and FIELD_CURRENCY.search(code) is not None
                             if (sets or fielded) and 'Currency::onEdit(' not in code:
                                 problems.append(f'{where}: an UPDATE of {t} writes `currency` without Currency::onEdit() in the same function — an edit would relabel the record')
                         # Rule 2: an INSERT into a child table that names the currency.
@@ -152,17 +170,17 @@ def findings(root: str, on_purpose: dict) -> tuple[list[str], list[tuple[str, st
                         # The column list may start in the NEXT piece of the string
                         # ('INSERT INTO tblX ' . '(…)'): the first version needed the
                         # bracket straight after the name and missed such a writer.
-                        for m in re.finditer(r'\bINSERT\s+(?:IGNORE\s+)?INTO\s+`?' + t + r'`?(?=[\s\'".(])', code):
+                        for m in re.finditer(r'\bINSERT\s+(?:IGNORE\s+)?INTO\s+`?' + t + r'`?(?=[\s\'".(])', code, re.I):
                             window = code[m.end():m.end() + 1200]
-                            values_at = window.find('VALUES')
-                            columns = window if values_at < 0 else window[:values_at]
-                            named = re.search(r'\bcurrency\b', columns) is not None or FIELD_CURRENCY.search(code) is not None
+                            values_at = re.search(r'\bVALUES\b', window, re.I)
+                            columns = window if values_at is None else window[:values_at.start()]
+                            named = re.search(r'\bcurrency\b', columns, re.I) is not None or FIELD_CURRENCY.search(code) is not None
                             if named is False:
                                 continue
-                            takes_parent = re.search(r'\bFROM\s+`?' + child[t] + r'`?\b', window) is not None
+                            takes_parent = re.search(r'\bFROM\s+`?' + child[t] + r'`?\b', window, re.I) is not None
                             if takes_parent:
                                 continue
-                            key = (rel, t)
+                            key = (rel, sc['name'], t)
                             if key in on_purpose:
                                 used.add(key)
                                 continue
@@ -175,12 +193,13 @@ def run(root: str, on_purpose: dict) -> int:
     problems, stale = findings(root, on_purpose)
     for p in problems:
         print('  • ' + p)
-    for rel, t in stale:
-        print(f'  • ON_PURPOSE names {rel} writing {t}, which no longer writes it that way — remove the entry (a stale exception reads as a guarantee)')
+    for rel, fn, t in stale:
+        print(f'  • ON_PURPOSE names {rel}, {fn}(), writing {t}, which no longer writes it that way — remove the entry (a stale exception reads as a guarantee)')
     if problems or stale:
         print(f'\nA money record\'s currency: {len(problems)} write(s) outside the one rule, {len(stale)} stale exception(s).')
         return 1
-    print('✓ Every UPDATE that writes a money record\'s currency goes through Currency::onEdit(), and every child row takes its parent\'s currency.')
+    print('✓ No UPDATE this check can read writes a money record\'s currency without Currency::onEdit() in its function, and no child INSERT it can read skips its parent\'s currency. '
+          'It reads PRESENCE only, and its blind spots are listed in its header; the behaviour is driven by tools/currency-selftest.php.')
     return 0
 
 
@@ -243,12 +262,12 @@ function add($db, $cur) {
 function add($db, $cur) {
     $s = $db->prepare('INSERT INTO tblKid (parentID, amount, `currency`) VALUES (?, ?, ?)');
 }
-""", False, {('web/_apps/x/a.php', 'tblKid'): 'reason'}),
+""", False, {('web/_apps/x/a.php', 'add', 'tblKid'): 'reason'}),
     ('a stale ON_PURPOSE entry', """<?php
 function add($db) {
     $s = $db->prepare('INSERT INTO tblKid (parentID, amount) VALUES (?, ?)');
 }
-""", True, {('web/_apps/x/a.php', 'tblKid'): 'reason'}),
+""", True, {('web/_apps/x/a.php', 'add', 'tblKid'): 'reason'}),
     ('a new OWN record is not judged', """<?php
 function create($db, $cur) {
     $s = $db->prepare('INSERT INTO tblParent (name, `currency`) VALUES (?, ?)');
@@ -264,6 +283,27 @@ function add($db) {
 function save($db) {
     $s = $db->prepare('UPDATE tblParent '
         . 'SET `currency` = ? WHERE parentID = ?');
+}
+""", True, {}),
+    ('ON_PURPOSE for ANOTHER function does not cover this one', """<?php
+function addOther($db, $cur) {
+    $s = $db->prepare('INSERT INTO tblKid (parentID, amount, `currency`) VALUES (?, ?, ?)');
+}
+""", True, {('web/_apps/x/a.php', 'add', 'tblKid'): 'reason'}),
+    ('lower-case SQL is read too', """<?php
+function save($db) {
+    $s = $db->prepare('update tblParent set name = ?, currency = ? where parentID = ?');
+}
+""", True, {}),
+    ('a status-only UPDATE beside a currency field map is not a currency write', """<?php
+function setStatus($db, $data) {
+    $fields = ['currency' => [$data['currency'], 's']];
+    $s = $db->prepare('UPDATE tblParent SET ' . 'status = ? WHERE parentID = ?');
+}
+""", False, {}),
+    ('a function NAMED like the ignored one, in another file, is read', """<?php
+function labelUnlabelled($db) {
+    $s = $db->prepare('UPDATE tblParent SET currency = ? WHERE parentID = ?');
 }
 """, True, {}),
     ('an UPDATE at file level, outside any function', """<?php

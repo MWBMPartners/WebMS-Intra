@@ -126,8 +126,12 @@ $tolDays      = max(0, (int) (App::settings('giving.reconcile.toleranceDays') ??
 // 💷 Count deposits in this statement's OWN currency are offered (#966,
 //    D-139): each count keeps the currency it was counted in.
 //    A statement with NO currency recorded matches no count (the automatic
-//    match skips it too), and the page says so — round 4 of #966's check
-//    found this flag always true, so the message below could never show.
+//    match skips it, and match.php refuses a posted one), and the page says
+//    so — round 4 of #966's check found this flag always true, so the
+//    message below could never show. GIFTS are different, said plainly: an
+//    unrecorded statement is still offered, and matched to, gifts that are
+//    unrecorded too ('' = '', both the same unknown), by the page, the
+//    automatic match and a posted match alike.
 $siteCurrency       = $currency;
 $depositsApplicable = $currency !== '';
 
