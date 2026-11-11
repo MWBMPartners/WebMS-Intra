@@ -197,8 +197,10 @@ $isPublic   = EventVisibility::isPublicSelect('e', $ruleMode);
 //    script under web/ calls this endpoint for them; and a key holding
 //    `events:write` is a connected service, not a person moderating, so
 //    giving it the address would be using it for something else, which D-134
-//    rules out. `submittedByID` (a member's own account number, when a
-//    signed-in member suggested it) and `submissionStatus` stay, as before.
+//    rules out. `submissionStatus` stays for everybody. `submittedByID` (a
+//    member's own account number, when a signed-in member suggested it) is
+//    still selected, but since #968 it reaches only a caller who may manage
+//    events — see "#968" below the lookup.
 //    `(e.externalFeedID IS NOT NULL) AS imported` gives the yes/no the reply
 //    needs without selecting the calendar number itself.
 //
@@ -269,6 +271,73 @@ if ($event === null) {
 $event = EventVisibility::redact($event, (int) $event['canSeeFull'] === 1);
 $event['imported'] = (int) $event['imported'] === 1;
 unset($event['canSeeFull']);
+
+// 🔒 #968 — THE ORGANISATION'S OWN WORKING NOTES ABOUT AN EVENT GO ONLY TO
+//    WHOEVER MAY MANAGE EVENTS. Until #968 every caller allowed to see the
+//    event was sent all of these, so any signed-in member and any key holding
+//    only `events:read` could read them (measured over HTTP with
+//    tools/event-suggester-privacy-selftest.php, section M, against f9197eb9):
+//
+//      moderationNote     an administrator's free text about the event or
+//                         the person who suggested it. Nothing under web/
+//                         writes it today (`git grep -n moderationNote
+//                         f9197eb9 -- web/_apps web/_core web/public_html`
+//                         finds only this file and a "do not copy" list in
+//                         calendar/manage/series-repattern.php), but a
+//                         restored backup or a future moderation page can
+//                         fill it, and it is exactly the kind of text that
+//                         must never reach the people it may be about.
+//      createdByID,       the account numbers of whoever made the event, last
+//      updatedByID,       edited it, approved or rejected it, last changed
+//      moderatedByID,     its status, and — for a suggestion a signed-in
+//      statusChangedByID, member sent — who suggested it. They say which
+//      submittedByID      member did what inside the organisation; a member
+//                         reading the calendar, or a service holding only a
+//                         read key, has no use for that.
+//      deletedAt          always empty here, because the lookup above keeps
+//                         `e.isDeleted = 0` for EVERY caller, a manager
+//                         included — a deleted event is not returned at all.
+//                         It is in this list only because it is part of the
+//                         "how this record was handled" trail and tells a
+//                         member nothing; a manager still gets it, unchanged,
+//                         so no existing integration loses a field.
+//
+//    WHO counts as "may manage events" is `$canManageEvents`, decided at the
+//    top of this file and NOT a new rule: for a session it is App::isAdmin(),
+//    the same check calendar/manage/ and the moderation page
+//    (admin/calendar/moderation.php, moderate.php) make; for a key it is the
+//    `events:write` scope, which already lets the key create, edit, change the
+//    status of and delete any of the organisation's events and read its
+//    drafts. A write key therefore keeps these fields; it already holds the
+//    events these notes are about. (The visitor's NAME and ADDRESS are a
+//    different matter and go to nobody here, write key included — #963 above.)
+//
+//    Left for everybody, on purpose: the times (`createdAt`, `updatedAt`,
+//    `submittedAt`, `moderatedAt`, `statusChangedAt`), `submissionStatus`,
+//    `cancelReason` (shown to every viewer on the event's own page, which is
+//    how a member learns why it is off) and `isDeleted` (always 0 here).
+//
+//    Removed AFTER the lookup rather than left out of the statement, so the
+//    statement text still depends only on the caller's mode and on id-or-slug,
+//    never on the event (the #503 rule at the top of this file). A field is
+//    removed outright rather than set to null, so a member's answer does not
+//    even say the field exists. A plain variable, not a `const`: a page file
+//    is `require`d by the router, and a `const` declared in it would raise
+//    "already defined" if the file were ever loaded twice in one request.
+$forManagersOnly = [
+    'moderationNote',
+    'createdByID',
+    'updatedByID',
+    'submittedByID',
+    'moderatedByID',
+    'statusChangedByID',
+    'deletedAt',
+];
+if ($canManageEvents === false) {
+    foreach ($forManagersOnly as $managersOnly) {
+        unset($event[$managersOnly]);
+    }
+}
 
 // 📍 #456 Chunk A — canonical `location` object (cross-repo contract §2),
 // additive alongside the existing legacy location* columns already

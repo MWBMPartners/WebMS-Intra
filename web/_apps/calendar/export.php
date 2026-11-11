@@ -127,11 +127,30 @@ if ($eventId > 0) {
     //    is read and its own columns are checked again. The text put in by
     //    sprintf() is SQL built by EventVisibility itself, never anything a
     //    visitor sent; every value is still bound.
+    //
+    // 🔒 #968 — ALL THREE LOOKUPS IN THIS FILE NAME THEIR COLUMNS instead of
+    //    `e.*`. This is a public download (the whole-calendar subscription is
+    //    fetched by calendar apps with nobody signed in), and `e.*` brought
+    //    the whole row into memory, including the name and e-mail address of
+    //    a member of the public who suggested the event (#963, D-134) and the
+    //    moderation note. Nothing wrote them into the file, but nothing but
+    //    habit stopped a later change doing so. The list is exactly what the
+    //    entry builder at the foot of this file reads from a row — the
+    //    columns `Ical::emit()` is given (SUMMARY, DESCRIPTION, LOCATION,
+    //    GEO, STATUS, the dates, zone and all-day shape, UID, URL,
+    //    LAST-MODIFIED) plus `seriesID`, which decides whether a series is
+    //    collapsed — and it is the same in all three statements. Section R of
+    //    tools/event-suggester-privacy-selftest.php downloads the file before
+    //    and after (it puts `e.*` back as a plant) and requires it unchanged.
+    //    ⚠️ Adding a field to the file? Add its column to all three lists.
     $visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
     $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
     $row  = null;
     $stmt = $db->prepare(sprintf(
-        'SELECT e.*, %s FROM tblEvents e WHERE e.eventID = ? AND e.isDeleted = 0 AND e.siteID = ?',
+        'SELECT `e`.`eventID`, `e`.`seriesID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
+        . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, `e`.`locationName`, '
+        . '`e`.`locationAddress`, `e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`status`, `e`.`updatedAt`, %s '
+        . 'FROM `tblEvents` `e` WHERE `e`.`eventID` = ? AND `e`.`isDeleted` = 0 AND `e`.`siteID` = ?',
         $fullDetail['sql']
     ) . $visibility['sql'] . ' LIMIT 1');
     if ($stmt !== false) {
@@ -239,7 +258,10 @@ if ($eventId > 0) {
     //    (The canSeeFull expression goes in through sprintf()'s `%s` for the
     //    same reason as in the single-event branch above.)
     $stmt = $db->prepare(sprintf(
-        'SELECT e.*, %s FROM tblEvents e WHERE e.seriesID = ? AND e.isDeleted = 0 AND e.siteID = ? AND e.status = \'published\'',
+        'SELECT `e`.`eventID`, `e`.`seriesID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
+        . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, `e`.`locationName`, '
+        . '`e`.`locationAddress`, `e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`status`, `e`.`updatedAt`, %s '
+        . 'FROM `tblEvents` `e` WHERE `e`.`seriesID` = ? AND `e`.`isDeleted` = 0 AND `e`.`siteID` = ? AND `e`.`status` = \'published\'',
         $fullDetail['sql']
     ) . $visibility['sql'] . ' ORDER BY e.startDateTime');
     if ($stmt !== false) {
@@ -298,8 +320,13 @@ if ($eventId > 0) {
     //    200-event `LIMIT` is filled from the right rows; the loose bound is
     //    only for the `startDateTime` index.
     $nowOnClock = Events::nowOnItsOwnClock($db, 'e', $siteId);
+    // The rule from EventVisibility::where() above (anonymous mode) is
+    // appended to this statement as `$visibility['sql']`.
     $stmt = $db->prepare(sprintf(
-        'SELECT e.*, %s FROM tblEvents e WHERE e.isDeleted = 0 AND `e`.`startDateTime` >= ? AND `e`.`startDateTime` >= %s AND e.siteID = ? AND e.status = \'published\'',
+        'SELECT `e`.`eventID`, `e`.`seriesID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
+        . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, `e`.`locationName`, '
+        . '`e`.`locationAddress`, `e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`status`, `e`.`updatedAt`, %s '
+        . 'FROM `tblEvents` `e` WHERE `e`.`isDeleted` = 0 AND `e`.`startDateTime` >= ? AND `e`.`startDateTime` >= %s AND `e`.`siteID` = ? AND `e`.`status` = \'published\'',
         $fullDetail['sql'],
         $nowOnClock['sql']
     ) . $visibility['sql'] . ' ORDER BY e.startDateTime LIMIT 200');

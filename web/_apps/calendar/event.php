@@ -98,8 +98,35 @@ $today     = date('Y-m-d');
 //    plan, section 1.4: a limited event says "Imported event" instead). The
 //    join is on the calendar number AND the organisation, so another
 //    organisation's calendar can never lend this page its name.
-$visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
-$fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
+//
+// 🔒 #968 — THE COLUMNS ARE NAMED, NOT `e.*`. This is a public page: a
+//    signed-out visitor reaches it for any public event. With `e.*` the whole
+//    row came into memory here, including `submitterName` and
+//    `submitterEmail` — the name and e-mail address of a member of the public
+//    who suggested the event (#963, D-134), which only the moderation page may
+//    show — and the moderation note and the "who did what" account numbers.
+//    Nothing on this page printed them, but one careless `$event['…']` added
+//    later would have, and a column added to tblEvents later would have
+//    arrived here unasked. Now a column reaches this page only when somebody
+//    names it below.
+//
+//    The list is exactly the event columns this page reads (every
+//    `$event['…']` in this file; nothing else is handed the whole row except
+//    EventVisibility::redact(), which only empties columns that are present).
+//    `externalFeedID` and `externalUidHash` are read only to decide whether
+//    the "Manage who sees this" link is drawn and are never printed.
+//    Checked by rendering the page before and after this change for a public,
+//    a members-only, two imported, an all-day, a repeating and a cancelled
+//    event, with an address, map position, host and partners, to each kind
+//    of viewer: section R of tools/event-suggester-privacy-selftest.php,
+//    which also puts `e.*` back as a plant and requires the page to come out
+//    identical.
+//
+//    ⚠️ ADDING SOMETHING TO THIS PAGE THAT SHOWS ANOTHER EVENT COLUMN? Add the
+//       column to the list in the statement below, or `$event['…']` reads
+//       nothing (PHP gives a warning and null, and the page quietly shows a
+//       blank).
+//
 // 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
 //    joining it in with `.`: tools/audit-checks/check_sql_columns.py does
 //    not recognise a statement at all when PHP code sits between SELECT
@@ -107,15 +134,23 @@ $fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSI
 //    column names included — from it (measured while building #514 part
 //    P2). The text sprintf() puts in is SQL built by EventVisibility
 //    itself, never anything a visitor sent; every value is still bound.
+$visibility = EventVisibility::where('e', EventVisibility::MODE_SESSION, $viewerId, $today);
+$fullDetail = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_SESSION, $viewerId, $today, 'canSeeFull');
 $event = null;
 $stmt = $mysqli->prepare(sprintf(
-    'SELECT e.*, c.categoryName, t.typeName, s.seriesName, s.seriesSlug, ef.name AS importedFrom, %s '
-    . 'FROM tblEvents e '
-    . 'LEFT JOIN tblEventCategories c ON c.categoryID = e.categoryID '
-    . 'LEFT JOIN tblEventTypes t ON t.typeID = e.typeID '
-    . 'LEFT JOIN tblEventSeries s ON s.seriesID = e.seriesID '
-    . 'LEFT JOIN tblExternalFeeds ef ON ef.feedID = e.externalFeedID AND ef.siteID = e.siteID '
-    . 'WHERE e.eventSlug = ? AND e.isDeleted = 0 AND e.siteID = ?',
+    'SELECT `e`.`eventID`, `e`.`siteID`, `e`.`eventName`, `e`.`eventSlug`, `e`.`description`, '
+    . '`e`.`startDateTime`, `e`.`endDateTime`, `e`.`timezone`, `e`.`isAllDay`, '
+    . '`e`.`locationName`, `e`.`locationAddress`, `e`.`locationWebURL`, `e`.`locationPhone`, '
+    . '`e`.`locationGeoLat`, `e`.`locationGeoLng`, `e`.`hostOrgName`, `e`.`partnerOrgs`, `e`.`heroImage`, '
+    . '`e`.`status`, `e`.`isPublic`, `e`.`isFeatured`, `e`.`capacity`, `e`.`cancelReason`, `e`.`statusChangedAt`, '
+    . '`e`.`externalFeedID`, `e`.`externalUidHash`, '
+    . '`c`.`categoryName`, `t`.`typeName`, `s`.`seriesName`, `s`.`seriesSlug`, `ef`.`name` AS `importedFrom`, %s '
+    . 'FROM `tblEvents` `e` '
+    . 'LEFT JOIN `tblEventCategories` `c` ON `c`.`categoryID` = `e`.`categoryID` '
+    . 'LEFT JOIN `tblEventTypes` `t` ON `t`.`typeID` = `e`.`typeID` '
+    . 'LEFT JOIN `tblEventSeries` `s` ON `s`.`seriesID` = `e`.`seriesID` '
+    . 'LEFT JOIN `tblExternalFeeds` `ef` ON `ef`.`feedID` = `e`.`externalFeedID` AND `ef`.`siteID` = `e`.`siteID` '
+    . 'WHERE `e`.`eventSlug` = ? AND `e`.`isDeleted` = 0 AND `e`.`siteID` = ?',
     $fullDetail['sql']
 ) . $visibility['sql'] . ' LIMIT 1');
 if ($stmt !== false) {

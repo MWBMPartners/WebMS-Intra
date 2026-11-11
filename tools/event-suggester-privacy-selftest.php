@@ -47,6 +47,35 @@
  *      check goes red), the old `submittedBy` put back (A's webhook check
  *      goes red); then everything taken out again and green.
  *
+ * #968 ADDED TWO SECTIONS AND THEIR PLANTS
+ *   M  the detail answer's working notes: `moderationNote` and the account
+ *      numbers of whoever created, edited, suggested, moderated and last
+ *      changed the status of the event, and `deletedAt`. A published,
+ *      members-only event with every one filled in by hand (nothing in the
+ *      portal writes `moderationNote` today) is read by an ordinary member, a
+ *      key holding only `events:read` (both addresses), a key holding
+ *      `events:write`, a global administrator and an administrator of this
+ *      organisation only. The first three get NONE of the seven fields and
+ *      the note nowhere in the answer; the last three get all seven, with the
+ *      note as written and every account number the right one. Measured
+ *      against f9197eb9 (the code before #968): six red — the member and the
+ *      read-only key at both addresses were sent all seven, the note included.
+ *   R  the event page (`/calendar/event`) and the calendar download
+ *      (`/calendar/export`: one event, a series, the whole calendar) now
+ *      name their columns instead of reading the whole row with `e.*`. Each
+ *      is fetched for a public, a members-only, an all-day, a cancelled, a
+ *      fully-shown imported, a briefly-shown imported and a repeating event,
+ *      by a visitor, a member and an administrator; the right words must be
+ *      there, the visitor's name and address and the note must be nowhere,
+ *      and the same code fetched twice must come out identical once the
+ *      random tokens are taken out (R8 — without it P13 would prove nothing).
+ *   P9-P16  each of the seven field names taken off the detail handler's
+ *      list, one at a time (the member and the read-only key are then sent
+ *      exactly that field); the gate switched off both ways; `e.*` put back
+ *      in the page and all three download lookups — every page and file must
+ *      come out IDENTICAL to section R's, which is the before-and-after
+ *      comparison; and a list one column too short, on each page, must show.
+ *
  * WHAT IT CANNOT DO, said plainly
  *   - The webhook body is read from `tblWebhookDeliveries.payload`, not caught
  *     at a receiver. `WebhookDispatcher::emit()` builds the body ONCE and
@@ -57,6 +86,12 @@
  *     recorded before the send is tried.
  *   - It runs ONE web worker and one organisation.
  *   - It does not cover erasure of the stored name and address (#964).
+ *   - Section R compares what the pages SHOW. It cannot see what a page holds
+ *     in memory and does not print, which is the whole point of naming the
+ *     columns; that half is guarded only by the column lists being written
+ *     out in the source, which tools/audit-checks/check_sql_columns.py reads.
+ *   - Section R's "identical" covers the events it makes. A page branch that
+ *     needs a column none of them exercises would not be caught by P13.
  *
  * MEASURING THE CODE BEFORE #963. Set SELFTEST_WEB_FROM to a folder holding an
  * older `web/` (for example `git archive <commit> web | tar -x -C <dir>`); the
@@ -87,7 +122,7 @@ $repo = dirname(__DIR__);
 
 $passed = 0;
 $failed = 0;
-$state  = ['proc' => null, 'child' => null, 'db' => null, 'users' => [], 'key' => 0, 'hook' => 0, 'events' => []];
+$state  = ['proc' => null, 'child' => null, 'db' => null, 'users' => [], 'key' => 0, 'writeKey' => 0, 'hook' => 0, 'events' => []];
 
 function refuse(string $why): never
 {
@@ -184,6 +219,15 @@ $clearEvents = static function () use (&$state): void {
 $child = sys_get_temp_dir() . $sep . 'event-suggester-' . bin2hex(random_bytes(6));
 $state['child'] = $child;
 
+/** #968: remove every event, series, rule and outside calendar sections M and R make. */
+$clearP968 = static function () use (&$state): void {
+    $db = $state['db'];
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P968 %'");
+    // The rules go with their series (ON DELETE CASCADE).
+    $db->query("DELETE FROM `tblEventSeries` WHERE `seriesSlug` LIKE 'p968-%'");
+    $db->query("DELETE FROM `tblExternalFeeds` WHERE `name` LIKE 'P968 %'");
+};
+
 /** Remove an account and every row that names it (an earlier run's, or this one's). */
 $removeUser = static function (int $who) use (&$state): void {
     $db = $state['db'];
@@ -203,7 +247,7 @@ $removeUser = static function (int $who) use (&$state): void {
     $db->query("DELETE FROM `tblUsers` WHERE `userID` = {$who}");
 };
 
-register_shutdown_function(static function () use (&$state, $clearEvents, $removeUser): void {
+register_shutdown_function(static function () use (&$state, $clearEvents, $removeUser, $clearP968): void {
     if (is_resource($state['proc']) === true) {
         proc_terminate($state['proc']);
         proc_close($state['proc']);
@@ -218,6 +262,10 @@ register_shutdown_function(static function () use (&$state, $clearEvents, $remov
             if ($state['key'] > 0) {
                 $state['db']->query('DELETE FROM `tblApiKeys` WHERE `keyID` = ' . (int) $state['key']);
             }
+            if ($state['writeKey'] > 0) {
+                $state['db']->query('DELETE FROM `tblApiKeys` WHERE `keyID` = ' . (int) $state['writeKey']);
+            }
+            $clearP968();
             foreach ($state['users'] as $who) {
                 $removeUser((int) $who);
             }
@@ -412,6 +460,11 @@ $waitForServer();
 $people = [
     'admin'  => ['email' => 'p963.admin@selftest.invalid',  'login' => 'selftest-p963-admin',  'admin' => 1],
     'member' => ['email' => 'p963.member@selftest.invalid', 'login' => 'selftest-p963-member', 'admin' => 0],
+    // #968: an administrator of THIS organisation only — no portal-wide flag,
+    // not a global administrator. App::isAdmin() says yes to them, so the
+    // moderation page and Manage Events let them in; the detail answer must
+    // treat them the same.
+    'siteadmin' => ['email' => 'p968.siteadmin@selftest.invalid', 'login' => 'selftest-p968-siteadmin', 'admin' => 0, 'siteAdmin' => 1],
 ];
 foreach ($people as $who => $p) {
     $old = $db->prepare('SELECT `userID` FROM `tblUsers` WHERE `emailAddress` = ?');
@@ -422,7 +475,7 @@ foreach ($people as $who => $p) {
     }
     $old->close();
 }
-$db->query("DELETE FROM `tblApiKeys` WHERE `name` = 'P963 read-only key'");
+$db->query("DELETE FROM `tblApiKeys` WHERE `name` IN ('P963 read-only key', 'P968 write key')");
 $db->query("DELETE FROM `tblWebhooks` WHERE `name` = 'P963 suggestion listener'");
 $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'P963 %'");
 
@@ -441,7 +494,8 @@ foreach ($people as $who => $p) {
     $mem = $db->prepare(
         'INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, ?, ?)'
     );
-    $mem->bind_param('iiii', $siteId, $uid, $p['admin'], $p['admin']);
+    $siteAdmin = (int) ($p['siteAdmin'] ?? $p['admin']);
+    $mem->bind_param('iiii', $siteId, $uid, $siteAdmin, $siteAdmin);
     $mem->execute();
     $mem->close();
     $people[$who]['password'] = 'Sel' . bin2hex(random_bytes(8)) . '!9x';
@@ -464,6 +518,22 @@ $keyPrefix = substr($apiKey, 0, 12);
 $keyIns->bind_param('iss', $siteId, $keyHash, $keyPrefix);
 $keyIns->execute();
 $state['key'] = (int) $db->insert_id;
+$keyIns->close();
+
+// #968: a key that may also WRITE events. `events:write` is what the detail
+// handler treats as "may manage events" for a key (it can already create,
+// edit, delete and read the drafts of every event), so it is the one key
+// that should still be sent the moderation fields.
+$writeKey = 'wbms_' . bin2hex(random_bytes(16));
+$keyIns   = $db->prepare(
+    'INSERT INTO `tblApiKeys` (`siteID`, `name`, `keyHash`, `keyPrefix`, `scopes`, `isActive`, `createdByID`) '
+    . "VALUES (?, 'P968 write key', ?, ?, 'events:read,events:write', 1, NULL)"
+);
+$keyHash   = hash('sha256', $writeKey);
+$keyPrefix = substr($writeKey, 0, 12);
+$keyIns->bind_param('iss', $siteId, $keyHash, $keyPrefix);
+$keyIns->execute();
+$state['writeKey'] = (int) $db->insert_id;
 $keyIns->close();
 
 // The send will fail (`.invalid` never resolves, and #615 refuses this
@@ -658,6 +728,323 @@ $clean = $scenario('clean');
 $checkAll('A', $clean);
 $clearEvents();
 
+// ── M. The organisation's working notes about an event (#968) ───────────────
+// The detail answer used to send, to every caller allowed to see the event,
+// the moderation note and the account numbers of whoever created, edited,
+// moderated and last changed the status of the event (and who suggested it).
+// The event below is an ordinary published, members-only event of the
+// organisation with EVERY one of those columns filled in by hand — nothing in
+// the portal writes `moderationNote` today, so the test writes it, which is
+// the only way to know where it would go if something did.
+const P968_NOTE = 'P968 moderation note: the person who suggested this was rude on the telephone';
+
+/** The fields only a caller who may manage events is sent (detail.php, #968). */
+const P968_MANAGERS_ONLY = [
+    'moderationNote', 'createdByID', 'updatedByID', 'submittedByID',
+    'moderatedByID', 'statusChangedByID', 'deletedAt',
+];
+
+$siteZone = (string) ($db->query('SELECT `timezone` FROM `tblSites` WHERE `siteID` = ' . $siteId)->fetch_assoc()['timezone'] ?? 'UTC');
+
+/**
+ * Make one event for sections M and R. Every name in `$fields` is a column
+ * this test chose, never input; the values are bound.
+ *
+ * @param array<string,int|float|string|null> $fields
+ */
+$p968Event = static function (array $fields) use ($db, $siteId, $siteZone): int {
+    static $n = 0;
+    $n++;
+    $fields += [
+        'siteID'      => $siteId,
+        'eventSlug'   => 'p968-' . $n . '-' . bin2hex(random_bytes(3)),
+        'timezone'    => $siteZone,
+        'status'      => 'published',
+        'isPublic'    => 0,
+        'endDateTime' => null,
+    ];
+    $cols  = array_keys($fields);
+    $marks = implode(', ', array_fill(0, count($cols), '?'));
+    $ins   = $db->prepare('INSERT INTO `tblEvents` (`' . implode('`, `', $cols) . '`) VALUES (' . $marks . ')');
+    $vals  = array_map(static fn ($v) => $v === null ? null : (string) $v, array_values($fields));
+    $ins->bind_param(str_repeat('s', count($vals)), ...$vals);
+    $ins->execute();
+    $id = (int) $db->insert_id;
+    $ins->close();
+    return $id;
+};
+
+$clearP968();
+$moderated = $p968Event([
+    'eventName'         => 'P968 moderated event',
+    'startDateTime'     => '2031-07-05 10:00:00',
+    'endDateTime'       => '2031-07-05 12:00:00',
+    'description'       => 'An ordinary members-only event.',
+    'createdByID'       => $people['admin']['id'],
+    'updatedByID'       => $people['siteadmin']['id'],
+    'submittedByID'     => $people['member']['id'],
+    'submittedAt'       => '2031-06-01 09:00:00',
+    'submissionStatus'  => 'approved',
+    'moderatedByID'     => $people['admin']['id'],
+    'moderatedAt'       => '2031-06-02 09:00:00',
+    'moderationNote'    => P968_NOTE,
+    'statusChangedByID' => $people['siteadmin']['id'],
+    'statusChangedAt'   => '2031-06-03 09:00:00',
+]);
+
+/** Which of the managers-only fields one answer carries, and whether it is the event. */
+$fieldsSeen = static function (array $r) use ($moderated): array {
+    $j     = json_decode($r['body'], true);
+    $event = is_array($j) === true ? ($j['data']['event'] ?? null) : null;
+    if ($r['status'] !== 200 || is_array($event) === false || (int) ($event['eventID'] ?? 0) !== $moderated) {
+        return ['isTheEvent' => false, 'fields' => ['(not this event: ' . $r['status'] . ')'], 'note' => null, 'ids' => null, 'noteAnywhere' => null];
+    }
+    return [
+        'isTheEvent'   => true,
+        'fields'       => array_values(array_intersect(P968_MANAGERS_ONLY, array_keys($event))),
+        'note'         => $event['moderationNote'] ?? null,
+        'ids'          => array_map(
+            static fn (string $k) => array_key_exists($k, $event) === true && $event[$k] !== null ? (int) $event[$k] : null,
+            ['createdByID', 'updatedByID', 'submittedByID', 'moderatedByID', 'statusChangedByID']
+        ),
+        'noteAnywhere' => str_contains($r['body'], 'rude on the telephone'),
+    ];
+};
+
+/** Every caller reads the moderated event. */
+$readModerated = static function () use ($http, $signIn, $apiKey, $writeKey, $moderated, $fieldsSeen): array {
+    $signIn('member');
+    $signIn('admin');
+    $signIn('siteadmin');
+    return [
+        'member'    => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['jar' => 'member'])),
+        'readKey'   => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['bearer' => $apiKey])),
+        'readKeyV1' => $fieldsSeen($http('GET', '/api/v1/events/' . $moderated, [], ['bearer' => $apiKey])),
+        'writeKey'  => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['bearer' => $writeKey])),
+        'admin'     => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['jar' => 'admin'])),
+        'siteadmin' => $fieldsSeen($http('GET', '/api/events/detail?id=' . $moderated, [], ['jar' => 'siteadmin'])),
+    ];
+};
+
+$wantIds = [
+    $people['admin']['id'], $people['siteadmin']['id'], $people['member']['id'],
+    $people['admin']['id'], $people['siteadmin']['id'],
+];
+$checkModerated = static function (string $prefix, array $m) use ($wantIds): void {
+    echo "{$prefix}. The moderation note and the \"who did what\" numbers (#968)\n";
+    foreach (['member' => 'an ordinary member, signed in', 'readKey' => 'a key holding only events:read',
+              'readKeyV1' => 'the same key at /api/v1/events/{id}'] as $k => $who) {
+        echo "      ({$who} was sent: " . json_encode($m[$k]['fields']) . ")\n";
+        check("{$prefix}1-{$k} {$who} reads THIS event", $m[$k]['isTheEvent'], true);
+        check("{$prefix}2-{$k} ...with none of the seven fields", $m[$k]['fields'], []);
+        check("{$prefix}3-{$k} ...and the note nowhere in the answer", $m[$k]['noteAnywhere'], false);
+    }
+    foreach (['admin' => 'a global administrator, signed in', 'siteadmin' => 'an administrator of this organisation only',
+              'writeKey' => 'a key holding events:write'] as $k => $who) {
+        check("{$prefix}4-{$k} {$who} reads THIS event", $m[$k]['isTheEvent'], true);
+        check("{$prefix}5-{$k} ...with all seven fields", $m[$k]['fields'], P968_MANAGERS_ONLY);
+        check("{$prefix}6-{$k} ...the note as written, and each account number the right one",
+            [$m[$k]['note'], $m[$k]['ids']], [P968_NOTE, $wantIds]);
+    }
+};
+
+$mClean = $readModerated();
+$checkModerated('M', $mClean);
+
+// ── R. The event page and the calendar download lose nothing (#968) ──────────
+// calendar/event.php and calendar/export.php used to read the whole event row
+// (`e.*`), so a visitor's name and address (#963) and the moderation note were
+// in memory on two public pages. They now name their columns. A named list can
+// be too SHORT, which shows only as a blank on the page, so this renders both
+// for a spread of events, to a visitor, a member and an administrator — and
+// section P renders them again with `e.*` put back and requires every answer
+// to be identical. Every event below also carries a visitor's name and
+// address and a moderation note, which must appear in none of the answers.
+$r0 = new DateTimeImmutable('2031-08-05 00:00:00', new DateTimeZone('UTC')); // a Tuesday
+$db->query("INSERT INTO `tblEventSeries` (`siteID`, `seriesName`, `seriesSlug`) VALUES ({$siteId}, 'P968 Tuesday study', 'p968-tuesday-study')");
+$series = (int) $db->insert_id;
+$db->query("INSERT INTO `tblRecurrenceRules` (`siteID`, `seriesID`, `frequency`, `intervalVal`, `dayOfWeek`, `startDate`, `maxOccurrences`) "
+    . "VALUES ({$siteId}, {$series}, 'weekly', 1, '2', '2031-08-05', 3)");
+$db->query("INSERT INTO `tblExternalFeeds` (`siteID`, `name`, `url`, `audienceLevel`, `websiteOptIn`, `isActive`) "
+    . "VALUES ({$siteId}, 'P968 outside calendar', 'https://calendar.selftest.invalid/p968.ics', 'public', 0, 1)");
+$feed    = (int) $db->insert_id;
+// A second outside calendar whose own audience is members, so its 'basic'
+// event shows a visitor the title, date and time only (#514 section 1.4).
+$db->query("INSERT INTO `tblExternalFeeds` (`siteID`, `name`, `url`, `audienceLevel`, `websiteOptIn`, `isActive`) "
+    . "VALUES ({$siteId}, 'P968 members calendar', 'https://calendar.selftest.invalid/p968-members.ics', 'members', 0, 1)");
+$feedMembers = (int) $db->insert_id;
+$private = [
+    'submitterName'  => VISITOR_NAME,
+    'submitterEmail' => VISITOR_EMAIL,
+    'moderationNote' => P968_NOTE,
+];
+$day = static fn (int $plus, string $time): string => $r0->modify('+' . $plus . ' days')->format('Y-m-d') . ' ' . $time;
+$rEvents = [
+    'public' => $p968Event($private + [
+        'eventName' => 'P968 public open day', 'isPublic' => 1, 'isFeatured' => 1,
+        'startDateTime' => $day(1, '10:00:00'), 'endDateTime' => $day(1, '16:00:00'),
+        'description' => "Come and see.\nBring a friend.", 'categoryID' => 1, 'typeID' => 1,
+        'locationName' => 'P968 Hall', 'locationAddress' => "1 Test Street\nTestville TE1 1ST",
+        'locationWebURL' => 'https://hall.selftest.invalid/', 'locationPhone' => '01234 567890',
+        'locationGeoLat' => '52.2053000', 'locationGeoLng' => '0.1218000',
+        'hostOrgName' => 'P968 Host Trust', 'partnerOrgs' => '["P968 Partner A","P968 Partner B"]', 'capacity' => 40,
+    ]),
+    'members' => $p968Event($private + [
+        'eventName' => 'P968 members meeting', 'isPublic' => 0,
+        'startDateTime' => $day(2, '19:30:00'), 'endDateTime' => $day(2, '21:00:00'),
+        'description' => 'For members.', 'locationName' => 'P968 Vestry',
+    ]),
+    'allday' => $p968Event($private + [
+        'eventName' => 'P968 all day retreat', 'isPublic' => 1, 'isAllDay' => 1,
+        'startDateTime' => $day(3, '00:00:00'), 'endDateTime' => $day(3, '23:59:59'), 'timezone' => 'Europe/London',
+    ]),
+    'cancelled' => $p968Event($private + [
+        'eventName' => 'P968 cancelled concert', 'isPublic' => 1, 'status' => 'cancelled',
+        'cancelReason' => 'P968 the roof leaks', 'statusChangedAt' => '2031-07-30 12:00:00',
+        'startDateTime' => $day(4, '18:00:00'), 'endDateTime' => $day(4, '20:00:00'),
+    ]),
+    'imported' => $p968Event($private + [
+        'eventName' => 'P968 copied in', 'isPublic' => 0,
+        'startDateTime' => $day(5, '09:00:00'), 'endDateTime' => $day(5, '10:00:00'),
+        'description' => 'From an outside calendar.', 'locationName' => 'P968 Elsewhere',
+        'externalFeedID' => $feed, 'externalUid' => 'p968-full@selftest.invalid',
+        'importLevel' => 'public', 'importDetail' => 'full', 'importSource' => 'calendar', 'importApiOptOut' => 0,
+    ]),
+    'importedBasic' => $p968Event($private + [
+        'eventName' => 'P968 copied in briefly', 'isPublic' => 0,
+        'startDateTime' => $day(6, '09:00:00'), 'endDateTime' => $day(6, '10:00:00'),
+        'description' => 'Only its audience sees this.', 'locationName' => 'P968 Somewhere',
+        'externalFeedID' => $feedMembers, 'externalUid' => 'p968-basic@selftest.invalid',
+        'importLevel' => 'public', 'importDetail' => 'basic', 'importSource' => 'calendar', 'importApiOptOut' => 0,
+    ]),
+];
+// The identity of an imported row is the SHA-256 of its UID, stored as bytes.
+$db->query("UPDATE `tblEvents` SET `externalUidHash` = UNHEX(SHA2(`externalUid`, 256)) WHERE `externalFeedID` IN ({$feed}, {$feedMembers})");
+for ($w = 0; $w < 3; $w++) {
+    $rEvents['series' . $w] = $p968Event($private + [
+        'eventName' => 'P968 Tuesday study', 'isPublic' => 1, 'seriesID' => $series,
+        'startDateTime' => $r0->modify('+' . (7 * $w) . ' days')->format('Y-m-d') . ' 19:00:00',
+        'endDateTime'   => $r0->modify('+' . (7 * $w) . ' days')->format('Y-m-d') . ' 20:00:00',
+        'description'   => 'Weekly.', 'locationName' => 'P968 Library',
+    ]);
+}
+$slugOf = [];
+$q = $db->query("SELECT `eventID`, `eventSlug` FROM `tblEvents` WHERE `eventName` LIKE 'P968 %'");
+while ($row = $q->fetch_assoc()) {
+    $slugOf[(int) $row['eventID']] = (string) $row['eventSlug'];
+}
+
+/**
+ * Take out what differs between two renders of the SAME code: the form token
+ * and the script nonce (random on every answer, #625), and the moment a
+ * calendar file was made (DTSTAMP). Nothing else is touched, so any other
+ * difference is a real one.
+ */
+$normalise = static function (string $body): string {
+    $body = (string) preg_replace('/\bnonce="[^"]*"/', 'nonce="N"', $body);
+    $body = (string) preg_replace('/(name="csrf_token"\s+value=")[^"]*"/', '$1T"', $body);
+    $body = (string) preg_replace('/(<meta\s+name="csrf-token"\s+content=")[^"]*"/i', '$1T"', $body);
+    $body = (string) preg_replace('/\bdata-csrf="[^"]*"/', 'data-csrf="T"', $body);
+    // The cookie banner's script (templates/footer.php) carries the form token too.
+    $body = (string) preg_replace('/(\bvar csrf = ")[0-9a-f]*"/', '$1T"', $body);
+    return (string) preg_replace('/^DTSTAMP:.*$/m', 'DTSTAMP:X', $body);
+};
+
+/** Every page and download in section R, to every kind of viewer. */
+$renderAll = static function () use ($http, $signIn, $rEvents, $slugOf, $series, $normalise): array {
+    $signIn('member');
+    $signIn('admin');
+    $out = [];
+    foreach (['visitor' => 'r-visitor', 'member' => 'member', 'admin' => 'admin'] as $who => $jar) {
+        foreach ($rEvents as $label => $id) {
+            $page = $http('GET', '/calendar/event?slug=' . urlencode($slugOf[$id]), [], ['jar' => $jar]);
+            $out["{$who} page {$label}"] = [$page['status'], $normalise($page['body'])];
+            $ics = $http('GET', '/calendar/export?id=' . $id, [], ['jar' => $jar]);
+            $out["{$who} file {$label}"] = [$ics['status'], $normalise($ics['body'])];
+        }
+        $s = $http('GET', '/calendar/export?series=' . $series, [], ['jar' => $jar]);
+        $out["{$who} file series"] = [$s['status'], $normalise($s['body'])];
+        $a = $http('GET', '/calendar/export?all=1', [], ['jar' => $jar]);
+        $out["{$who} file all"] = [$a['status'], $normalise($a['body'])];
+    }
+    return $out;
+};
+
+/** Which renders differ between two runs (by key), so a failure names them. */
+$rendersDiffer = static function (array $a, array $b): array {
+    $diff = [];
+    foreach ($a as $key => $render) {
+        if (($b[$key] ?? null) !== $render) {
+            $diff[] = $key;
+        }
+    }
+    return $diff;
+};
+
+/** The first line where two renders of one key differ, so a red check says WHAT differs. */
+$firstDifference = static function (array $a, array $b, array $keys): string {
+    foreach ($keys as $key) {
+        $x = explode("\n", (string) ($a[$key][1] ?? ''));
+        $y = explode("\n", (string) ($b[$key][1] ?? ''));
+        if (($a[$key][0] ?? null) !== ($b[$key][0] ?? null)) {
+            return "{$key}: status " . var_export($a[$key][0] ?? null, true) . ' then ' . var_export($b[$key][0] ?? null, true);
+        }
+        foreach ($x as $i => $line) {
+            if (($y[$i] ?? null) !== $line) {
+                return "{$key}, line " . ($i + 1) . ":\n        was: " . trim($line) . "\n        now: " . trim((string) ($y[$i] ?? '(nothing)'));
+            }
+        }
+        if (count($y) !== count($x)) {
+            return "{$key}: " . count($x) . ' lines then ' . count($y);
+        }
+    }
+    return '(no difference)';
+};
+
+// A render is only worth comparing if it IS the thing: status 200 and the
+// expected words in it (a refusal page would compare equal to a refusal page).
+$shown = static function (array $renders, string $key, string $text): bool {
+    return ($renders[$key][0] ?? 0) === 200 && str_contains($renders[$key][1] ?? '', $text) === true;
+};
+$checkRenders = static function (string $prefix, array $r) use ($shown): void {
+    echo "{$prefix}. The event page and the calendar download, with their columns named (#968)\n";
+    check("{$prefix}1 a visitor sees the public event, with its address, host, partners, telephone and web link",
+        [$shown($r, 'visitor page public', 'P968 public open day'), $shown($r, 'visitor page public', 'Testville TE1 1ST'),
+         $shown($r, 'visitor page public', 'P968 Host Trust'), $shown($r, 'visitor page public', 'P968 Partner B'),
+         $shown($r, 'visitor page public', '01234 567890'), $shown($r, 'visitor page public', 'hall.selftest.invalid')],
+        [true, true, true, true, true, true]);
+    check("{$prefix}2 the cancelled event says why, to a visitor", $shown($r, 'visitor page cancelled', 'P968 the roof leaks'), true);
+    check("{$prefix}3 a member sees the members-only event; a visitor is refused it",
+        [$shown($r, 'member page members', 'P968 members meeting'), $r['visitor page members'][0]], [true, 404]);
+    check("{$prefix}4 the imported event shows in full; the brief one shows its title to a visitor but not its details",
+        [$shown($r, 'visitor page imported', 'From an outside calendar.'), $shown($r, 'visitor page importedBasic', 'P968 copied in briefly'),
+         str_contains($r['visitor page importedBasic'][1], 'Only its audience sees this.')],
+        [true, true, false]);
+    check("{$prefix}5 the all-day and repeating events show", [$shown($r, 'member page allday', 'P968 all day retreat'),
+        $shown($r, 'member page series1', 'P968 Tuesday study')], [true, true]);
+    check("{$prefix}6 the calendar files carry the events: one entry with its map position, the series as one repeating entry, the public whole calendar",
+        [$shown($r, 'visitor file public', 'SUMMARY:P968 public open day'), $shown($r, 'visitor file public', 'GEO:'),
+         $shown($r, 'visitor file series', 'RRULE:'), $shown($r, 'visitor file all', 'SUMMARY:P968 public open day')],
+        [true, true, true, true]);
+    $leaks = [];
+    foreach ($r as $key => [$status, $body]) {
+        if (holdsVisitor($body) === true || str_contains($body, 'rude on the telephone') === true) {
+            $leaks[] = $key;
+        }
+    }
+    check("{$prefix}7 no page or file carries the visitor's name or address, or the moderation note", $leaks, []);
+};
+
+$rClean = $renderAll();
+$checkRenders('R', $rClean);
+$rAgain = $renderAll();
+check('R8 the same code rendered twice comes out identical once tokens are taken out (so a difference in section P is real)',
+    $rendersDiffer($rClean, $rAgain), []);
+if ($rendersDiffer($rClean, $rAgain) !== []) {
+    echo '      first difference: ' . $firstDifference($rClean, $rAgain, $rendersDiffer($rClean, $rAgain)) . "\n";
+}
+
+
 // ── P. The plants ───────────────────────────────────────────────────────────
 if ($measuring === true) {
     echo "P. Skipped: measuring an older web/ (SELFTEST_WEB_FROM), whose lines the plants do not match.\n";
@@ -739,6 +1126,112 @@ if ($measuring === true) {
         [$after['logLeaks'], $after['hookLeaks'], $after['member']['leaks'], $after['key']['leaks'], $after['keyV1']['leaks']],
         [false, false, false, false, false]);
     $clearEvents();
+
+    // ── The #968 plants: sections M and R ──────────────────────────────────
+    $eventPath  = $child . $sep . 'web' . $sep . '_apps' . $sep . 'calendar' . $sep . 'event.php';
+    $exportPath = $child . $sep . 'web' . $sep . '_apps' . $sep . 'calendar' . $sep . 'export.php';
+    $originals968 = [
+        $detailPath => (string) file_get_contents($detailPath),
+        $eventPath  => (string) file_get_contents($eventPath),
+        $exportPath => (string) file_get_contents($exportPath),
+    ];
+    /**
+     * Rewrite ONE copied file with a regular expression that must match
+     * exactly `$times` times, and prove the new text is on disk.
+     */
+    $plant968 = static function (string $path, string $pattern, string $with, int $times, string $what) use ($originals968, $startServer, $waitForServer): void {
+        $count = 0;
+        $new   = (string) preg_replace($pattern, $with, $originals968[$path], -1, $count);
+        if ($count !== $times) {
+            refuse("section P (#968) found {$count} copies of {$what} where it expected {$times}");
+        }
+        file_put_contents($path, $new);
+        clearstatcache(true, $path);
+        if ((string) file_get_contents($path) !== $new || $new === $originals968[$path]) {
+            refuse("section P (#968) wrote {$what} and could not read it back");
+        }
+        $startServer();
+        $waitForServer();
+    };
+    $restore968 = static function () use ($originals968, $startServer, $waitForServer): void {
+        foreach ($originals968 as $path => $text) {
+            file_put_contents($path, $text);
+            clearstatcache(true, $path);
+        }
+        $startServer();
+        $waitForServer();
+    };
+
+    // (d) Each field put back, one at a time: the member and the read-only key
+    //     must then be sent exactly that field (M2 would have gone red).
+    foreach (P968_MANAGERS_ONLY as $field) {
+        $plant968($detailPath, '/^    \'' . preg_quote($field, '/') . '\',\n/m', '', 1, "the {$field} line of the managers-only list");
+        $m = $readModerated();
+        check("P9-{$field} with {$field} left off the list, the member and the read-only key are sent it",
+            [$m['member']['fields'], $m['readKey']['fields'], $m['readKeyV1']['fields']], [[$field], [$field], [$field]]);
+        $restore968();
+    }
+
+    // (e) The gate itself switched off, both ways.
+    $plant968($detailPath, '/if \(\$canManageEvents === false\) \{\n    foreach \(\$forManagersOnly/', "if (false) {\n    foreach (\$forManagersOnly", 1, 'the managers-only gate');
+    $m = $readModerated();
+    check('P10 with the gate never applied, the member and the read-only key are sent all seven, and the note',
+        [$m['member']['fields'], $m['readKey']['fields'], $m['member']['noteAnywhere']], [P968_MANAGERS_ONLY, P968_MANAGERS_ONLY, true]);
+    $restore968();
+    $plant968($detailPath, '/if \(\$canManageEvents === false\) \{\n    foreach \(\$forManagersOnly/', "if (true) {\n    foreach (\$forManagersOnly", 1, 'the managers-only gate');
+    $m = $readModerated();
+    check('P11 with the gate applied to everybody, the administrators and the write key lose all seven (M5 would have gone red)',
+        [$m['admin']['fields'], $m['siteadmin']['fields'], $m['writeKey']['fields']], [[], [], []]);
+    $restore968();
+
+    // (f) `e.*` put back in the event page and all three download lookups:
+    //     the code as it was before #968. Every page and file must come out
+    //     IDENTICAL to section R's — the named lists lost nothing. (Each
+    //     plant rewrites only its own file, so the page's stays planted while
+    //     the download's is planted.)
+    $plant968(
+        $eventPath,
+        '/\'SELECT `e`\.`eventID`, `e`\.`siteID`,.*?`ef`\.`name` AS `importedFrom`, %s \'/s',
+        "'SELECT e.*, c.categoryName, t.typeName, s.seriesName, s.seriesSlug, ef.name AS importedFrom, %s '",
+        1,
+        'the event page\'s column list'
+    );
+    $plant968(
+        $exportPath,
+        '/\'SELECT `e`\.`eventID`, `e`\.`seriesID`,.*?`e`\.`updatedAt`, %s \'\s*\. /s',
+        "'SELECT e.*, %s ' . ",
+        3,
+        'the download\'s three column lists'
+    );
+    $before = $renderAll();
+    $checkRenders('P12-', $before);
+    check('P13 with `e.*` back (the code before #968), every page and file is identical to the named-column version',
+        $rendersDiffer($rClean, $before), []);
+    if ($rendersDiffer($rClean, $before) !== []) {
+        echo '      first difference: ' . $firstDifference($rClean, $before, $rendersDiffer($rClean, $before)) . "\n";
+    }
+    $restore968();
+
+    // (g) A list one column too SHORT must show: the telephone left off the
+    //     page's list, the description off the download's.
+    $plant968($eventPath, '/`e`\.`locationPhone`, /', '', 1, 'the event page\'s telephone column');
+    $short = $renderAll();
+    check('P14 with the telephone left off the page\'s list, the public event\'s page differs (and nothing else)',
+        [in_array('visitor page public', $rendersDiffer($rClean, $short), true), $shown($short, 'visitor page public', '01234 567890'),
+         array_values(array_filter($rendersDiffer($rClean, $short), static fn (string $k): bool => str_contains($k, ' file ')))],
+        [true, false, []]);
+    $restore968();
+    $plant968($exportPath, '/`e`\.`description`, /', '', 3, 'the download\'s description column');
+    $short = $renderAll();
+    check('P15 with the description left off the download\'s lists, the files differ (and no page does)',
+        [in_array('visitor file public', $rendersDiffer($rClean, $short), true),
+         array_values(array_filter($rendersDiffer($rClean, $short), static fn (string $k): bool => str_contains($k, ' page ')))],
+        [true, []]);
+    $restore968();
+
+    $mAfter = $readModerated();
+    check('P16 with every #968 plant taken out, the member and the read-only key are sent none of the seven again',
+        [$mAfter['member']['fields'], $mAfter['readKey']['fields'], $mAfter['admin']['fields']], [[], [], P968_MANAGERS_ONLY]);
 }
 
 echo "\n" . ($failed === 0 ? 'PASS' : 'FAIL') . ": {$passed} passed, {$failed} failed\n";
