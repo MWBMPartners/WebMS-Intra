@@ -41,6 +41,12 @@
  *      send the stored values back; a signed-in administrator can; a bad date
  *      is 422.
  *   B  the public submission form ignores the fields whatever it is sent.
+ *   E  the e-mail to the person who suggested an event (#859, D-134): a
+ *      visitor suggests one on the real form and an administrator approves it
+ *      on the real moderation page; exactly one message to their address is
+ *      in the send log, with the right words; a second press sends none; a
+ *      rejection, no address, a bad address and a signed-in member's
+ *      suggestion send none; a route that THROWS still approves.
  *   K  who may publish, asked of the real `PublicWebsite::mayPublish()` in the
  *      copy (a separate process): an administrator made on Admin → Users with
  *      the portal-wide flag counts where they BELONG, and nowhere else.
@@ -132,7 +138,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 241; // 240, then Z1 (#493 P4b: every read of the door's feed answered)
+const PWT_EXPECTED_CHECKS = 260; // 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1589,6 +1595,251 @@ $scnApprove = static function () use ($makeEvent, $siteOne, $signIn, $http, $tok
     return [$row['submissionStatus'] ?? null, $row['status'] ?? null, (int) ($row['isPublic'] ?? -1)];
 };
 check('N5 approving a suggested event publishes it to members only: approved, published, isPublic still 0 (D-092)', $scnApprove(), ['approved', 'published', 0]);
+
+// =============================================================================
+echo "E. The e-mail to the person who suggested an event (#859, D-134)\n";
+// =============================================================================
+// D-134: when an administrator approves a suggestion, the person who made it
+// is e-mailed once, at the address they gave, and their address is used for
+// nothing else. Rejecting sends nothing; a suggestion with no usable address
+// sends nothing; a broken mail route still approves.
+//
+// HOW WHAT WAS SENT IS READ, two ways, because each sees what the other cannot:
+//   - THE SEND LOG (`tblEmailLog`), the portal's own record: the mail route
+//     for these checks is the SMTP mailbox with nothing filled in, so every
+//     attempt is written there as "not set up" with its subject and its
+//     recipient, and no connection is made to anything (the same arrangement
+//     as part T of tools/time-zones-selftest.php). That is what "exactly one
+//     e-mail to that address" is counted from.
+//   - THE WORDS. The send log keeps no body, so the copy's `Mailer::send()` is
+//     given one added line, for this section only, that writes what it was
+//     HANDED to a file of this run's own. It changes nothing the method does;
+//     it is taken out again at the end of the section.
+$mailerPath  = $child . $sep . 'web' . $sep . '_core' . $sep . 'Mailer.php';
+$mailerWas   = (string) file_get_contents($mailerPath);
+$capturePath = $child . $sep . 'mail-capture.jsonl';
+$sendHead    = "    public static function send(string|array \$to, string \$subj, string \$body, array \$files = [], array \$options = []): bool\n    {\n";
+check('E0 the copy\'s Mailer::send() can be watched (its first line was found exactly once)', substr_count($mailerWas, $sendHead), 1);
+file_put_contents($mailerPath, str_replace($sendHead, $sendHead
+    . '        @file_put_contents(' . var_export($capturePath, true) . ', json_encode([\'to\' => $to, \'subject\' => $subj, \'body\' => $body, \'options\' => $options]) . "\n", FILE_APPEND);' . "\n",
+    $mailerWas));
+
+/** The installation-wide mail route, read and written as a row (no page sets it to "nothing filled in"). */
+$mailSetting = static function (string $key, ?string $value = null) use ($db): string {
+    if ($value !== null) {
+        $u = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+        $u->bind_param('ss', $value, $key);
+        $u->execute();
+        $u->close();
+    }
+    $r = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL');
+    $r->bind_param('s', $key);
+    $r->execute();
+    $got = (string) ($r->get_result()->fetch_assoc()['settingValue'] ?? '');
+    $r->close();
+    return $got;
+};
+$providerWas = $mailSetting('mail.provider');
+$smtpHostWas = $mailSetting('mail.smtp.host');
+$approvedSubject = 'Your event suggestion has been approved';
+
+/** Rows in the send log for one address and the approval subject. */
+$sentTo = static function (string $address) use ($db, $approvedSubject): int {
+    $s = $db->prepare('SELECT COUNT(*) AS `n` FROM `tblEmailLog` WHERE `toRecipients` = ? AND `subject` = ?');
+    $s->bind_param('ss', $address, $approvedSubject);
+    $s->execute();
+    $n = (int) ($s->get_result()->fetch_assoc()['n'] ?? 0);
+    $s->close();
+    return $n;
+};
+/** How many messages have been watched so far: a scenario counts only what comes after its own start. */
+$capturedSoFar = static fn (): int => is_file($capturePath) === true ? count(file($capturePath) ?: []) : 0;
+/** What Mailer::send() was handed for one address, in order, from line $from on. */
+$handedTo = static function (string $address, int $from = 0) use ($capturePath): array {
+    $out = [];
+    foreach (array_slice(is_file($capturePath) === true ? (file($capturePath, FILE_IGNORE_NEW_LINES) ?: []) : [], $from) as $line) {
+        $one = json_decode($line, true);
+        if (is_array($one) === true && ($one['to'] ?? null) === $address) {
+            $out[] = $one;
+        }
+    }
+    return $out;
+};
+/** The moderation page's result message, read by loading the page the handler sent us back to. */
+$moderationSays = static function () use ($http): ?string {
+    $page = $http('GET', '/admin/calendar/moderation')['body'];
+    return preg_match('/<div class="alert alert-[a-z]+" data-moderation-result>([^<]*)<\/div>/', $page, $m) === 1
+        ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : null;
+};
+/** Press Approve or Reject on the moderation page as the organisation's administrator. */
+$moderate = static function (int $id, string $action) use ($signIn, $http, $tokenOn): array {
+    $signIn('orgadmin');
+    $page = $http('GET', '/admin/calendar/moderation')['body'];
+    return $http('POST', '/admin/calendar/moderate', ['csrf_token' => $tokenOn($page), 'eventID' => (string) $id, 'action' => $action]);
+};
+$wentBack = static fn (array $answer): bool => $answer['status'] === 302 && str_contains($answer['location'], 'admin/calendar/moderation');
+
+/**
+ * The whole journey, over HTTP: a visitor who is NOT signed in suggests an
+ * event on the real form, then an administrator presses the given buttons.
+ *
+ * @param list<string> $presses 'approve' or 'reject', in order.
+ */
+$scnSuggestion = static function (string $name, string $address, array $presses, string $route = 'smtp-empty')
+    use ($db, $http, $tokenOn, $jar, $moderate, $wentBack, $sentTo, $handedTo, $capturedSoFar, $moderationSays, $mailSetting): array {
+    // A clean start, so a run under a plant counts only its own messages.
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = '" . $db->real_escape_string($name) . "'");
+    $db->query("DELETE FROM `tblEmailLog` WHERE `toRecipients` = '" . $db->real_escape_string($address) . "'");
+    $from = $capturedSoFar();
+    $mailSetting('mail.provider', $route === 'smtp-empty' ? 'smtp' : 'ms365');
+    $mailSetting('mail.smtp.host', '');
+    @unlink($jar); // signed out: this is the visitor the form's promise is made to
+    $form = $http('GET', '/calendar/submit')['body'];
+    $http('POST', '/calendar/submit-save', [
+        'csrf_token' => $tokenOn($form), 'eventName' => $name, 'startDateTime' => '2030-08-03T10:30',
+        'submitterName' => 'Pat Suggester', 'submitterEmail' => $address,
+    ]);
+    $s = $db->prepare('SELECT `eventID`, `submitterEmail` FROM `tblEvents` WHERE `eventName` = ?');
+    $s->bind_param('s', $name);
+    $s->execute();
+    $row = $s->get_result()->fetch_assoc();
+    $s->close();
+    if ($row === null) {
+        return ['the suggestion was not stored' => true];
+    }
+    $id = (int) $row['eventID'];
+    $answers = [];
+    $said    = [];
+    foreach ($presses as $press) {
+        $answers[] = $wentBack($moderate($id, $press));
+        $said[]    = $moderationSays();
+    }
+    $state  = $db->query("SELECT `submissionStatus`, `status`, `isPublic` FROM `tblEvents` WHERE `eventID` = {$id}")->fetch_assoc();
+    $handed = $handedTo($address, $from);
+    return [
+        'stored address'   => (string) $row['submitterEmail'] === $address,
+        'went back'        => $answers,
+        'state'            => [(string) $state['submissionStatus'], (string) $state['status'], (int) $state['isPublic']],
+        'send log rows'    => $sentTo($address),
+        'handed to Mailer' => count($handed),
+        'first message'    => $handed[0] ?? null,
+        'page said'        => $said,
+        'id'               => $id,
+    ];
+};
+
+$e1 = $scnSuggestion('PWT E approved', 'pat.suggester@selftest.invalid', ['approve']);
+check('E1 a visitor\'s suggestion approved over HTTP: stored with their address, approved, published, still members-only (D-092), and the page went back to the queue',
+    [$e1['stored address'] ?? null, $e1['went back'] ?? null, $e1['state'] ?? null], [true, [true], ['approved', 'published', 0]]);
+check('E2 ...EXACTLY ONE message to that address is in the send log, under the approval subject', $e1['send log rows'] ?? null, 1);
+$msg  = $e1['first message'] ?? [];
+$body = (string) ($msg['body'] ?? '');
+check('E3 ...and the message handed to Mailer: to that address alone, the approval subject (which names nothing), in the EVENT\'s organisation\'s name for the footer (#683)',
+    [$e1['handed to Mailer'] ?? null, $msg['to'] ?? null, $msg['subject'] ?? null, $msg['options']['siteId'] ?? null],
+    [1, 'pat.suggester@selftest.invalid', $approvedSubject, $siteOne]);
+check('E4 ...whose words greet them, name the event and its date and time on the event\'s own clock, say it was approved, and say plainly it is shown to members only (D-092)',
+    [
+        str_starts_with($body, "Hello Pat Suggester,\n\n"),
+        str_contains($body, '"PWT E approved", on Saturday 3 August 2030 at 10:30'),
+        str_contains($body, 'has approved it, and it is now on their calendar.'),
+        str_contains($body, '\'s members, who see it when they sign in. It will not appear on the calendar for anybody who is not signed in unless '),
+        str_contains($body, 'We will not send you any other e-mail about this suggestion.'),
+        str_contains($body, 'pat.suggester@selftest.invalid'),
+    ],
+    [true, true, true, true, true, false]);
+check('E5 ...the moderation page says what became of the e-mail, in the words for one that did NOT go because this route is not set up (never "sent" of a message that was not)',
+    $e1['page said'] ?? null, ['Approved, but the e-mail telling the person who suggested it could not be sent. Admin, Integrations, Email shows whether e-mail is set up.']);
+check('E6 ...and the activity log records the e-mail\'s outcome for that event WITHOUT the address',
+    [
+        (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `activityType` = 'EventSuggesterTold' AND `activityDescription` LIKE 'Event #" . (int) ($e1['id'] ?? 0) . ":%'")->fetch_assoc()['n'] ?? 0),
+        (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblActivityLogs` WHERE `activityType` IN ('EventSuggesterTold', 'EventModerated') AND `activityDescription` LIKE '%pat.suggester@%'")->fetch_assoc()['n'] ?? 0),
+    ],
+    [1, 0]);
+
+$scnTwice = static fn (): array => $scnSuggestion('PWT E twice', 'twice.suggester@selftest.invalid', ['approve', 'approve']);
+$e7 = $scnTwice();
+check('E7 approving the same suggestion TWICE (a double click, or a stale page) sends ONE e-mail: one send-log row, one message handed to Mailer',
+    [$e7['went back'] ?? null, $e7['send log rows'] ?? null, $e7['handed to Mailer'] ?? null], [[true, true], 1, 1]);
+
+$e8 = $scnSuggestion('PWT E rejected', 'rejected.suggester@selftest.invalid', ['reject']);
+check('E8 REJECTING a suggestion sends nothing (D-134 covers approval only): rejected, nothing in the send log, nothing handed to Mailer, and the page says so',
+    [$e8['state'][0] ?? null, $e8['send log rows'] ?? null, $e8['handed to Mailer'] ?? null, $e8['page said'] ?? null],
+    ['rejected', 0, 0, ['Rejected. Nothing was sent to the person who suggested it.']]);
+$e8b = (static function () use ($moderate, $wentBack, $sentTo, $handedTo, $db, $e8): array {
+    $id = (int) ($e8['id'] ?? 0);
+    $back = $wentBack($moderate($id, 'approve'));
+    $state = (string) ($db->query("SELECT `submissionStatus` FROM `tblEvents` WHERE `eventID` = {$id}")->fetch_assoc()['submissionStatus'] ?? '');
+    return [$back, $state, $sentTo('rejected.suggester@selftest.invalid'), count($handedTo('rejected.suggester@selftest.invalid'))];
+})();
+check('E8b ...and pressing Approve on it afterwards (a stale page) neither approves it nor sends anything', $e8b, [true, 'rejected', 0, 0]);
+
+/** A suggestion with no usable address, made straight in the database (the form refuses both). */
+$scnNoAddress = static function (?string $stored) use ($makeEvent, $siteOne, $moderate, $wentBack, $moderationSays, $db, $capturePath, $mailSetting): array {
+    $mailSetting('mail.provider', 'smtp');
+    $mailSetting('mail.smtp.host', '');
+    $set = ['status' => 'draft', 'isPublic' => '0', 'submissionStatus' => 'pending', 'submitterName' => 'No Address'];
+    if ($stored !== null) {
+        $set['submitterEmail'] = $stored;
+    }
+    $id     = $makeEvent('PWT E no address', $siteOne, '2030-08-04 10:00:00', $set);
+    $before = is_file($capturePath) === true ? count(file($capturePath) ?: []) : 0;
+    $logBefore = (int) ($db->query('SELECT COUNT(*) AS `n` FROM `tblEmailLog`')->fetch_assoc()['n'] ?? 0);
+    $back   = $wentBack($moderate($id, 'approve'));
+    $said   = $moderationSays();
+    $after  = is_file($capturePath) === true ? count(file($capturePath) ?: []) : 0;
+    $logAfter = (int) ($db->query('SELECT COUNT(*) AS `n` FROM `tblEmailLog`')->fetch_assoc()['n'] ?? 0);
+    $state  = (string) ($db->query("SELECT `submissionStatus` FROM `tblEvents` WHERE `eventID` = {$id}")->fetch_assoc()['submissionStatus'] ?? '');
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    return [$back, $state, $after - $before, $logAfter - $logBefore, $said];
+};
+$noneWords = 'Approved. Nobody was e-mailed: the suggestion holds no e-mail address to write to.';
+check('E9 a suggestion holding NO address is approved and nothing is sent or logged', $scnNoAddress(null), [true, 'approved', 0, 0, $noneWords]);
+check('E10 one holding something that is NOT an address is approved and nothing is sent or logged', $scnNoAddress('not-an-address'), [true, 'approved', 0, 0, $noneWords]);
+
+// A member who was SIGNED IN gives no address: the form stores none, and they
+// are not e-mailed (they were never told they would be).
+$e11 = (static function () use ($signIn, $http, $tokenOn, $db, $moderate, $wentBack, $capturePath): array {
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT E member'");
+    $signIn('member');
+    $http('POST', '/calendar/submit-save', ['csrf_token' => $tokenOn($http('GET', '/calendar/submit')['body']), 'eventName' => 'PWT E member', 'startDateTime' => '2030-08-05T10:00',
+        'submitterEmail' => 'smuggled@selftest.invalid']);
+    $row = $db->query("SELECT `eventID`, `submitterEmail` FROM `tblEvents` WHERE `eventName` = 'PWT E member'")->fetch_assoc();
+    $before = is_file($capturePath) === true ? count(file($capturePath) ?: []) : 0;
+    $back = $row === null ? null : $wentBack($moderate((int) $row['eventID'], 'approve'));
+    $after = is_file($capturePath) === true ? count(file($capturePath) ?: []) : 0;
+    return [$row === null ? 'not stored' : $row['submitterEmail'], $back, $after - $before];
+})();
+check('E11 a SIGNED-IN member\'s suggestion stores no address (even one posted by hand) and its approval e-mails nobody', $e11, [null, true, 0]);
+
+// THE BROKEN ROUTE. The Microsoft 365 route with nothing set up THROWS, which
+// is how this portal ships. The approval must still be stored, the page must
+// still go back to the queue (not a 500), and the page says the e-mail failed.
+$scnBroken = static fn (): array => $scnSuggestion('PWT E broken route', 'broken.route@selftest.invalid', ['approve'], 'ms365-empty');
+$e12 = $scnBroken();
+check('E12 with a mail route that THROWS, the suggestion is still approved, the page still goes back to the queue, Mailer WAS asked (so the throw was met), and the page says the e-mail could not be sent',
+    [$e12['state'][0] ?? null, $e12['went back'] ?? null, $e12['handed to Mailer'] ?? null, $e12['page said'] ?? null],
+    ['approved', [true], 1, ['Approved, but the e-mail telling the person who suggested it could not be sent. Admin, Integrations, Email shows whether e-mail is set up.']]);
+
+// The words when an administrator had ALREADY ticked "Public" on the
+// suggestion before approving it: the members-only sentence would be untrue.
+$e13 = (static function () use ($makeEvent, $siteOne, $moderate, $handedTo, $db, $mailSetting): array {
+    $mailSetting('mail.provider', 'smtp');
+    $mailSetting('mail.smtp.host', '');
+    $id = $makeEvent('PWT E public', $siteOne, '2030-08-06 00:00:00', ['status' => 'draft', 'isPublic' => '1', 'isAllDay' => '1', 'submissionStatus' => 'pending',
+        'submitterName' => '', 'submitterEmail' => 'public.suggester@selftest.invalid']);
+    $moderate($id, 'approve');
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    $body = (string) (($handedTo('public.suggester@selftest.invalid')[0] ?? [])['body'] ?? '');
+    return [str_starts_with($body, "Hello,\n\n"), str_contains($body, 'on Tuesday 6 August 2030. '), str_contains($body, 'Anyone can see it on the calendar, without signing in.'),
+        str_contains($body, 'members')];
+})();
+check('E13 one already ticked "Public" (and all day, with no name given) is told anyone can see it — never "members only" — with the date and no time, and a plain "Hello,"', $e13, [true, true, true, false]);
+
+// Put the copy's Mailer back and the route as it was; the plants below
+// re-plant it themselves through $plant().
+file_put_contents($mailerPath, $mailerWas);
+$mailSetting('mail.provider', $providerWas);
+$mailSetting('mail.smtp.host', $smtpHostWas);
 
 // =============================================================================
 echo "Q. Noticeboard posters on the public website (#493 P2a)\n";
@@ -3237,6 +3488,30 @@ $p = $plant('_apps/calendar/manage/import.php',
 check('P41 with the CSV import treating an empty cell as public again, the imported event is public', [$p['applied'], $p['result']], [true, 1]);
 $p = $plant('_apps/admin/calendar/moderate.php', "'UPDATE tblEvents SET status = \"published\", '", "'UPDATE tblEvents SET status = \"published\", isPublic = 1, '", $scnApprove);
 check('P42 with Approve setting isPublic = 1 again, an approved suggestion is public with nobody choosing it', [$p['applied'], $p['result'][2] ?? null], [true, 1]);
+// #859 (D-134): the approval e-mail. Each plant takes one guard out of the
+// COPY and re-runs the section E scenario that should catch it. The send log
+// is what they read: the words-watching line in the copy's Mailer was taken
+// out at the end of section E, so 'handed to Mailer' is not asked here.
+$p = $plant('_apps/admin/calendar/moderate.php',
+    'EventSuggestions::tellSuggesterApproved($mysqli, $eventId, $siteId)',
+    'EventSuggestions::TOLD_NO_ADDRESS', static fn (): array => $scnSuggestion('PWT E approved', 'pat.suggester@selftest.invalid', ['approve']));
+check('P120 with the send taken out of Approve, the suggestion is approved and NOTHING is in the send log (E2 goes red)',
+    [$p['applied'], $p['result']['state'][0] ?? null, $p['result']['send log rows'] ?? null], [true, 'approved', 0]);
+$p = $plant('_apps/admin/calendar/moderate.php', 'if ($affected > 0) {', 'if (true) {', $scnTwice);
+check('P121 with the send no longer limited to the request that CHANGED the row, approving twice sends TWO e-mails (E7 goes red)',
+    [$p['applied'], $p['result']['send log rows'] ?? null], [true, 2]);
+$p = $plant('_core/EventSuggestions.php',
+    "        } catch (\\Throwable \$e) {\n            Logger::errorPlatform('Mailer', 'Warning', 'SUGGESTION_MAIL_FAIL'",
+    "        } catch (\\DivisionByZeroError \$e) {\n            Logger::errorPlatform('Mailer', 'Warning', 'SUGGESTION_MAIL_FAIL'", $scnBroken);
+check('P122 with the send\'s own catch narrowed so a throwing route escapes, the approval is still stored (it came first) but the page is no longer sent back to the queue (E12 goes red)',
+    [$p['applied'], $p['result']['state'][0] ?? null, $p['result']['went back'] ?? null], [true, 'approved', [false]]);
+$p = $plant('_core/EventSuggestions.php',
+    "if (\$row === null || \$address === '' || filter_var(\$address, FILTER_VALIDATE_EMAIL) === false) {",
+    "if (\$row === null || \$address === '') {", static fn (): array => $scnNoAddress('not-an-address'));
+check('P123 with the address no longer checked, something that is not an address is handed to the mail route (E10 goes red)',
+    [$p['applied'], $p['result'][3] ?? null], [true, 1]);
+$mailSetting('mail.provider', $providerWas);
+$mailSetting('mail.smtp.host', $smtpHostWas);
 // #493 P2a: the poster rule, the page's permission, and the editor's save.
 $p = $plant('_core/PublicWebsite.php', "'sql'    => \" AND {\$a}.isDeleted = 0 AND {\$a}.showOnWebsite = 1\"", "'sql'    => \" AND {\$a}.isDeleted = 0\"", $scnPosterRule);
 check('P43 with the switch dropped from the poster rule, an unticked poster reaches the public website', [$p['applied'], in_array('PWT Q off', (array) $p['result'], true)], [true, true]);
@@ -3579,6 +3854,8 @@ if ($indexOwn !== null) {
 $pwClean();
 $db->query("DELETE FROM `tblRoles` WHERE `siteID` = {$siteOne} AND `roleKey` = 'pwt_custom'");
 $db->query("DELETE FROM `tblEvents` WHERE `eventName` LIKE 'PWT %' OR `siteID` = {$siteTwo}");
+// Section E's send-log rows (#859): only this test's own made-up addresses.
+$db->query("DELETE FROM `tblEmailLog` WHERE (`toRecipients` LIKE '%@selftest.invalid' OR `toRecipients` = 'not-an-address') AND `subject` = 'Your event suggestion has been approved'");
 $db->query("DELETE FROM `tblExternalEventApprovals` WHERE `snapTitle` LIKE 'PWT approval %'");
 $db->query("DELETE FROM `tblExternalFeedRules` WHERE `name` = 'PWT rule'");
 $db->query("DELETE FROM `tblExternalFeeds` WHERE `name` = 'PWT outside calendar'");

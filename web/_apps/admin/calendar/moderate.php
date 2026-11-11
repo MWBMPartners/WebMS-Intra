@@ -11,6 +11,23 @@
  * made it public with nobody ever seeing a "Public" choice). Reject =
  * status='draft', isPublic=0, submissionStatus='rejected'. Stamps moderatedBy/At.
  *
+ * ✉️ APPROVING E-MAILS THE PERSON WHO SUGGESTED IT (#859, D-134), at the
+ *    address they gave on the public form, through
+ *    `EventSuggestions::tellSuggesterApproved()`. Rejecting sends nothing.
+ *    Three things decide how it is done, and each is load-bearing:
+ *    - ONCE ONLY. The approval is ONE conditional statement (`WHERE ...
+ *      submissionStatus = "pending"`), so of two presses, a double click or a
+ *      stale page only the request that really changed the row is told
+ *      "1 row", and only that one sends. A second e-mail would need the row
+ *      to go back to `pending`, which nothing in the portal does.
+ *    - AFTER THE APPROVAL IS STORED. Nothing here opens a transaction, so the
+ *      statement is its own and is stored when `execute()` returns. The send
+ *      comes after it, so a broken or missing mail route can never undo or
+ *      block an approval.
+ *    - NEVER THROWS. The send is in its own try/catch inside that method: the
+ *      Microsoft 365 route throws when it has no sender, which is how this
+ *      portal ships.
+ *
  * ⚠️ This used to say "Reject = status='archived'", which was never true: the
  *    code has always written 'draft' (see the UPDATE below), and the column has
  *    never had an 'archived' value at all, so had it done what the comment
@@ -29,6 +46,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\EventSuggestions;
 use Portal\Core\Logger;
 use Portal\Core\Site;
 
@@ -82,6 +100,19 @@ if ($stmt !== false) {
 
     if ($affected > 0) {
         Logger::activity('EventModerated', 'Event #' . $eventId . ' action=' . $action);
+
+        // ✉️ D-134: tell the person who suggested it, ONLY here, inside "this
+        //    request changed the row", which is what makes it once only. The
+        //    page says what became of the e-mail; it never names the address.
+        if ($action === 'approve') {
+            $told = EventSuggestions::tellSuggesterApproved($mysqli, $eventId, $siteId);
+            $_SESSION['flash_msg']  = EventSuggestions::approvedWords($told);
+            // A warning, not a green tick, when the promised e-mail did not go.
+            $_SESSION['flash_type'] = $told === EventSuggestions::TOLD_NOT_SENT ? 'warning' : 'success';
+        } else {
+            $_SESSION['flash_msg']  = 'Rejected. Nothing was sent to the person who suggested it.';
+            $_SESSION['flash_type'] = 'info';
+        }
 
         // 🪝 Webhook on moderation (#324).
         if (class_exists(\Portal\Core\WebhookDispatcher::class) === true) {

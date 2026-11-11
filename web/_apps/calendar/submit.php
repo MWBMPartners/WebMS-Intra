@@ -96,7 +96,9 @@ $success     = isset($_GET['submitted']) === true;
 $errorCodes = [
     'required' => 'Please give the event a name and a start date and time.',
     'date'     => 'Please check the dates. Give a real date and time, and make sure the end is not before the start.',
-    'contact'  => 'Please give your name and email address so we can tell you what happens to your event.',
+    // #859: "what happens to your event" promised word of a rejection too, and
+    //    only an approval is e-mailed (D-134).
+    'contact'  => 'Please give your name and email address so we can e-mail you if your event is approved.',
     'email'    => 'That email address does not look right. Please check it.',
     'captcha'  => 'The anti-robot check did not pass. Please try again.',
     'csrf'     => 'The form expired while you were filling it in. Please try again.',
@@ -135,8 +137,15 @@ if ($captchaOn === true) {
         <div class="alert alert-success">
             <i class="fa-solid fa-check-circle me-1"></i>
             Thank you — your event has been submitted. We'll review it shortly.
-            <?php if ($isLoggedIn === false): ?>
-                You'll receive an email at the address you provided when it's approved.
+            <?php
+            // ✉️ #859, D-134. This promised an e-mail on approval for years
+            //    and nothing sent one. Approving now e-mails the address given
+            //    here (`EventSuggestions::tellSuggesterApproved()`), once, and
+            //    nothing on a rejection, so the sentence says exactly that.
+            //    Shown only to somebody not signed in: a member gives no
+            //    address and is not e-mailed.
+            if ($isLoggedIn === false): ?>
+                If it is approved, we will e-mail you at the address you gave to say so. We will not e-mail you if it is not approved.
             <?php endif; ?>
         </div>
         <a href="<?php echo htmlspecialchars(Site::url('calendar'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary"><i class="fa-solid fa-arrow-left me-1"></i> Back to calendar</a>
@@ -186,7 +195,7 @@ if ($captchaOn === true) {
                     <div class="col-md-6">
                         <label for="submitterEmail" class="form-label">Your email <span class="text-danger">*</span></label>
                         <input type="email" id="submitterEmail" name="submitterEmail" required maxlength="255" class="form-control">
-                        <div class="form-text">We'll email you when the submission is reviewed.</div>
+                        <div class="form-text">We'll email you at this address once, if your event is approved, and not otherwise.</div>
                     </div>
 
                     <?php

@@ -71,6 +71,17 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// 💬 What the last approve or reject did (#859). This page printed no message
+//    at all, so the handler had no way to say whether the person who suggested
+//    an event was e-mailed. The words are the handler's own, from a fixed list
+//    (`EventSuggestions::approvedWords()`); they never name the address.
+$flashMsg  = (string) ($_SESSION['flash_msg']  ?? '');
+$flashType = (string) ($_SESSION['flash_type'] ?? '');
+unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+if (in_array($flashType, ['success', 'info', 'warning', 'danger'], true) === false) {
+    $flashType = 'info';
+}
+
 $pageTitle   = 'Moderate Calendar Submissions';
 $pageSection = 'admin';
 $csrf        = htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8');
@@ -79,7 +90,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 ?>
 <div class="container py-4">
     <h1 class="h3 mb-3"><i class="fa-solid fa-calendar-check me-2 text-primary"></i>Moderate Calendar Submissions</h1>
-    <p class="text-muted">Public event submissions from <a href="<?php echo htmlspecialchars(Site::url('calendar/submit'), ENT_QUOTES, 'UTF-8'); ?>">/calendar/submit</a> wait here until an admin approves them. Approving does not make an event public: a suggestion arrives members-only and stays so, unless <strong>Public</strong> is ticked on the event in Manage Events.</p>
+    <p class="text-muted">Public event submissions from <a href="<?php echo htmlspecialchars(Site::url('calendar/submit'), ENT_QUOTES, 'UTF-8'); ?>">/calendar/submit</a> wait here until an admin approves them. Approving does not make an event public: a suggestion arrives members-only and stays so, unless <strong>Public</strong> is ticked on the event in Manage Events. Approving also e-mails the person who suggested it to say so, at the address they gave when they were not signed in (a member who was signed in gives none and is not e-mailed); rejecting sends nothing.</p>
+
+    <?php if ($flashMsg !== ''): ?>
+        <div class="alert alert-<?php echo htmlspecialchars($flashType, ENT_QUOTES, 'UTF-8'); ?>" data-moderation-result><?php echo htmlspecialchars($flashMsg, ENT_QUOTES, 'UTF-8'); ?></div>
+    <?php endif; ?>
 
     <ul class="nav nav-pills mb-3">
         <?php foreach (['pending' => 'fa-clock', 'approved' => 'fa-check', 'rejected' => 'fa-xmark'] as $s => $ico): ?>

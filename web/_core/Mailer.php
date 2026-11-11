@@ -1019,6 +1019,24 @@ class Mailer
     }
 
     /**
+     * 🏷️ The organisation's name as the footer of its e-mail prints it, for a
+     * message whose BODY names the organisation too (#859: the e-mail telling
+     * somebody their event suggestion was approved).
+     *
+     * WHY THIS EXISTS RATHER THAN A SECOND READ. The body and the footer of one
+     * message must name the same organisation in the same words, so the body
+     * asks the one rule the footer uses (footerFactsFor(), #683) instead of
+     * keeping its own copy of "this organisation's `site.name`, else the
+     * installation's". Two copies of one rule drift (#668).
+     *
+     * It never throws, for the same reason the footer does not.
+     */
+    public static function organisationNameFor(int $siteId): string
+    {
+        return self::footerFactsFor($siteId)['name'];
+    }
+
+    /**
      * The organisation's name and support address for the footer (#683).
      *
      * WHY THIS EXISTS. `renderBase()` read `global $SETTINGS`, which the
