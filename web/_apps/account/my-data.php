@@ -73,8 +73,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                               //    account number on purpose (D-113). It prints the same words as Request
                               //    erasure now, from GdprEraser::inventoryWords(), which asks whether the
                               //    number stays. `text-wrap`: a badge does not wrap by default, and these
-                              //    words are longer than the old one. ?>
-                        <div class="col-md-2"><span class="badge text-wrap text-start bg-<?php echo $row['action'] === 'delete' ? 'danger' : 'secondary'; ?>"><?php echo htmlspecialchars(GdprEraser::inventoryWords($row), ENT_QUOTES, 'UTF-8'); ?></span></div>
+                              //    words are longer than the old one. `true` frames them as what WOULD
+                              //    happen: this page lists what is held NOW, and bare words ("deleted")
+                              //    told a member something untrue about the present (#927 check round 1). ?>
+                        <div class="col-md-2"><span class="badge text-wrap text-start bg-<?php echo $row['action'] === 'delete' ? 'danger' : 'secondary'; ?>"><?php echo htmlspecialchars(GdprEraser::inventoryWords($row, true), ENT_QUOTES, 'UTF-8'); ?></span></div>
                         <div class="col-md-5 text-muted"><?php echo htmlspecialchars((string) ($row['reason'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></div>
                     </div>
                 <?php endforeach; ?>

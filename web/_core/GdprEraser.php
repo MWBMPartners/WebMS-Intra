@@ -3422,11 +3422,20 @@ class GdprEraser
      * details about you removed" came to sit beside an expense claim that
      * keeps the claimant's number on purpose (D-113).
      *
+     * FRAMING (#927 check round 1). Request erasure prints these words after
+     * "row(s) will be", which makes them about the future. My data printed
+     * them bare, under "What we hold", so a record the portal still holds read
+     * as "deleted" and an un-erased expense claim as "kept, with some details
+     * about you removed" - untrue about the PRESENT, in the reassuring
+     * direction. `$ifErased` asks for the words framed as what WOULD happen
+     * ("would be deleted if you ask to be erased"). One word list, two frames:
+     * a page that lists what is held now must pass true.
+     *
      * @param array{action: string, keepsNumber?: bool} $row
      */
-    public static function inventoryWords(array $row): string
+    public static function inventoryWords(array $row, bool $ifErased = false): string
     {
-        return match ((string) $row['action']) {
+        $words = match ((string) $row['action']) {
             'delete'    => 'deleted',
             'anonymise' => ($row['keepsNumber'] ?? true) === true
                 ? 'kept, with some details about you removed but still carrying your account number'
@@ -3436,6 +3445,14 @@ class GdprEraser
             'retain'    => 'kept',
             default     => 'dealt with as set out beside it',
         };
+        if ($ifErased === false) {
+            return $words;
+        }
+
+        // A comma before "if" when the words hold one, so the condition does
+        // not read as part of the last clause ("...your account number if you
+        // ask...").
+        return 'would be ' . $words . (str_contains($words, ',') === true ? ',' : '') . ' if you ask to be erased';
     }
 
     /**
@@ -5912,15 +5929,26 @@ class GdprEraser
         if ($rule['hold'] !== false) {
             $line .= ' A hold is switched on (an audit or enquiry is open), so nothing will be cleared until it is switched off.';
         }
+        // 🗣️ WHERE THE NAME AND THE ADDRESS REALLY COME FROM (#941 check round 1).
+        //    Both sentences below said the name AND ADDRESS were "read from the
+        //    account". Only the name is: the address is the newest tax
+        //    declaration's at this organisation when one holds one (step 6),
+        //    and the account's only otherwise - so on the usual case, a donor
+        //    with a declaration, the line was untrue. Said from the same facts
+        //    step 6 used, so the line and the row cannot disagree.
+        $addressFrom = $declared !== null
+            ? 'the home address from the newest tax declaration there'
+            : ($address !== null ? 'the home address from the account' : 'no home address, because none is held');
         if ($reopenKeptDonorId !== null) {
             $line .= ' An earlier run had kept a name and address here and later emptied them, while the account still named '
                 . 'the person; that run then stopped before the account was emptied. Its clearing was about the records held '
-                . 'then, so this run worked them out again from the start, as a first run does, and kept the name and address '
-                . 'again, read from the account, for what has to be kept now.';
+                . 'then, so this run worked them out again from the start, as a first run does, and kept the name again, '
+                . 'read from the account, with ' . $addressFrom . ', for what has to be kept now.';
         } elseif ($earlierRun === true) {
             $line .= $emptiedAlready === true
                 ? ' The account had already been emptied, so the name and address kept by the earlier run were left as they are: what was kept was not overwritten.'
-                : ' The earlier run stopped before the account was emptied, so the name and address held were read again from the account.';
+                : ' The earlier run stopped before the account was emptied, so the name was read again from the account, with '
+                    . $addressFrom . '.';
         } elseif ($emptiedAlready === true) {
             $line .= ' This account had ALREADY been emptied before this run, so no name could be recorded: the record kept holds '
                 . ($address !== null ? 'the address from the tax declaration and no name.' : 'no name and no address.');

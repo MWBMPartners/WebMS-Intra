@@ -187,7 +187,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 114; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 116; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -230,6 +230,11 @@ const EXPECTED_CHECKS = 114; // 80 until #703 (D-016) added two: the two writers
                             // #927 added one: an expense claim that keeps the
                             // account number says so in its LABEL, on Request
                             // erasure and on My data, both pinned as rendered. 114.
+                            // Its check round 1 added two: no My data badge
+                            // states a removal as done (they say what WOULD
+                            // happen), and the claim's label follows the
+                            // database's own answer, measured by making the
+                            // column emptiable for one request. 116.
 
 function refuse(string $why): never
 {
@@ -1088,6 +1093,64 @@ ok('AN EXPENSE CLAIM THAT KEEPS THE ACCOUNT NUMBER SAYS SO IN ITS LABEL: Cal\'s 
     && str_contains($askClaimRow, 'kept, with some details about you removed but still carrying your account number')
     && str_contains($dataClaimRow, 'kept, with some details about you removed but still carrying your account number'),
     mb_substr($askClaimRow, 0, 400) . ' | ' . mb_substr($dataClaimRow, 0, 400));
+
+// 🕰️ #927 check round 1: My data lists what is held NOW. Its badge printed the
+//    erasure's words bare, so a record still held read "deleted" and an
+//    un-erased claim "kept, with some details about you removed" - untrue about
+//    the present, in the reassuring direction. Every badge must be framed as
+//    what WOULD happen. Read from two members' pages (Cal's and, before her
+//    erasure, Mel's), and each must have badges, so the check cannot pass on
+//    a page that drew none.
+$badgesOf = static function (string $html): array {
+    $doc = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $out = [];
+    foreach ($doc->querySelectorAll('.portal-data-list > .row .badge') as $badge) {
+        $out[] = trim((string) preg_replace('/\s+/', ' ', (string) $badge->textContent));
+    }
+
+    return $out;
+};
+$badgesCal = $badgesOf($calDataHtml);
+$badgesMel = $badgesOf((string) req($jar['mel'], 'GET', '/account/my-data')['body']);
+$unframed  = array_values(array_filter(array_merge($badgesCal, $badgesMel),
+    static fn (string $b): bool => preg_match('/^would be .+ if you ask to be erased$/', $b) !== 1));
+ok('NO MY DATA BADGE STATES A REMOVAL AS DONE: every one, on two members\' pages, says what WOULD happen "if you ask to be erased" (#927 check round 1)',
+    count($badgesCal) > 0 && count($badgesMel) > 0 && $unframed === [],
+    count($badgesCal) . ' and ' . count($badgesMel) . ' badges; not framed: ' . json_encode($unframed));
+
+// 🔢 #927 check round 1: THE LABEL FOLLOWS THE DATABASE'S OWN ANSWER, not a
+//    list of tables. On a fresh schema "the claim keeps the number" and
+//    "the table is tblExpenseClaims" agree, so only a changed column can tell
+//    a rule from a hard-coded answer. The claim's `userID` is made NULLABLE
+//    for one request (the erasure would then really drop the number, so the
+//    label must stop saying it stays), then put back exactly as it was, and
+//    the label must say it again. Each page load is its own PHP process, so
+//    nothing remembered from an earlier request can answer for the database.
+$claimColumn = static fn (): ?array => one(
+    "SELECT `IS_NULLABLE`, `COLUMN_TYPE`, `COLUMN_DEFAULT`, `COLUMN_COMMENT` FROM `information_schema`.`COLUMNS` "
+    . "WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblExpenseClaims' AND `COLUMN_NAME` = 'userID'"
+);
+$claimLabel = static function () use (&$jar): string {
+    $doc = \Dom\HTMLDocument::createFromString((string) req($jar['cal'], 'GET', '/account/erasure-request')['body'], LIBXML_NOERROR);
+    foreach ($doc->querySelectorAll('li') as $li) {
+        $code = $li->querySelector('code');
+        if ($code !== null && trim((string) $code->textContent) === 'tblExpenseClaims') {
+            return trim((string) $li->querySelectorAll('strong')->item(1)?->textContent);
+        }
+    }
+
+    return '(no claim row)';
+};
+$claimWas = $claimColumn();
+q('ALTER TABLE `tblExpenseClaims` MODIFY `userID` INT NULL');
+$labelWhenNullable = $claimLabel();
+q('ALTER TABLE `tblExpenseClaims` MODIFY `userID` INT NOT NULL');
+$labelWhenBack = $claimLabel();
+ok('THE CLAIM\'S LABEL FOLLOWS THE DATABASE, NOT A LIST OF TABLES: with its account-number column made emptiable it says only "some details about you removed"; put back exactly as it was (checked), it says the number stays again (#927 check round 1)',
+    ($claimWas['IS_NULLABLE'] ?? '') === 'NO' && $claimColumn() === $claimWas
+    && $labelWhenNullable === 'kept, with some details about you removed'
+    && $labelWhenBack === 'kept, with some details about you removed but still carrying your account number',
+    json_encode(['column before' => $claimWas, 'column after' => $claimColumn(), 'emptiable' => $labelWhenNullable, 'put back' => $labelWhenBack]));
 ok('the page says in words what happens to each kind of record: "kept" for a Gift Aid declaration, and never "retaind"',
     $askPage['status'] === 200 && preg_match('/tblGiftAidDeclaration — 1 row\(s\) will be kept\s*\./', $askText) === 1
     && str_contains($askText, 'retaind') === false, mb_substr($askText, 0, 700));
@@ -2473,7 +2536,11 @@ $givingShown = static function (string $html): array {
         foreach ($row->children as $cell) {
             $cells[] = trim((string) preg_replace('/\s+/', ' ', (string) $cell->textContent));
         }
-        $cells[2] = $asWord[$cells[2] ?? ''] ?? ($cells[2] ?? '');
+        // #927 check round 1: the badge is framed as what WOULD happen
+        // ("would be ... if you ask to be erased"). The frame is required here,
+        // so a bare badge is left as printed and fails the checks below.
+        $inside   = preg_match('/^would be (.+?),? if you ask to be erased$/', $cells[2] ?? '', $framed) === 1 ? $framed[1] : ($cells[2] ?? '');
+        $cells[2] = $asWord[$inside] ?? ($cells[2] ?? '');
         if (isset($shown[$cells[0] ?? '']) === true && $cells[0] !== 'reasons') {
             $shown[$cells[0]][]  = ($cells[2] ?? '') . ':' . ($cells[1] ?? '');
             $shown['reasons'][] = $cells[0] . ' ' . ($cells[2] ?? '') . ': ' . ($cells[3] ?? '');
