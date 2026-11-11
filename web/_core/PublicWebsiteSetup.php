@@ -2911,7 +2911,8 @@ final class PublicWebsiteSetup
      *    winner's name in its own log). So the record says "this
      *    organisation's" when it is the organisation's own address and
      *    "another organisation's" otherwise, and `$logged` (when given) is the
-     *    refusal's words with nothing about any other organisation in them.
+     *    refusal's words with nothing IDENTIFYING any other organisation in
+     *    them (they may still say that another organisation holds it).
      *    `$shown` is what the person who pressed the button sees.
      *
      *    The cost, said plainly: an approval decision about organisation B,

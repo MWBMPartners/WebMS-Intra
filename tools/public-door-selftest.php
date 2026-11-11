@@ -138,7 +138,9 @@
  *      ask and never the backstop (Q12), the approver HOLDS its lock from
  *      its read to its write even with the key in place (Q13), and neither
  *      organisation's own administrator reads the other's name, number or
- *      address in its own activity log (Q14).
+ *      address in its own activity log or its export, a third organisation
+ *      holding the address included (Q14), and a losing organisation saving
+ *      its address again is told it is taken (Q15).
  *   P  the plants: each gate and each header taken out of a COPY of the
  *      portal, and the scenario that should catch it re-run. The expected
  *      value of a plant check is the value UNDER the fault, as
@@ -190,7 +192,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 337; // #895 (D-121) adds Q01-Q14 and PQ1-PQ14 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
+const PDS_EXPECTED_CHECKS = 341; // #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1613,8 +1615,20 @@ check('Q13 between its locking read and its write, the approver still holds the 
  * A fresh name, set straight into the database, so no line any organisation
  * wrote itself mentions it: here the address IS another organisation's
  * information, and any sight of it in A's log is a leak.
+ *
+ * Round 2 of #895's check added two things, each because a plant got past:
+ *   - A THIRD organisation holding the address. With only A and B, a refusal
+ *     about B made while A is open can only have A as the holder, so a
+ *     recorder that wrote the SHOWN words (naming the holder) whenever the
+ *     refusal was about another organisation (plant M2) left everything
+ *     green. Here C (the inactive organisation, which has a public-address
+ *     row) holds it, B asks for it, and the installation's administrator,
+ *     with A open, tries to approve B.
+ *   - The EXPORT (/admin/activity/export), which round 2's privacy argument
+ *     rests on — its filter `siteID = ? OR siteID IS NULL` — and which no
+ *     test read. Each ordinary administrator reads it as well as the page.
  */
-$scnQLogs = static function () use ($db, $siteA, $siteB, $nameTest, $cardAs, $http, $tokenOn, $people, $signIn, $instroot, $qPutBack): array {
+$scnQLogs = static function () use ($db, $siteA, $siteB, $siteC, $hostC, $nameTest, $cardAs, $http, $tokenOn, $people, $signIn, $instroot, $qPutBack): array {
     $name = 'privacy-895.selftest.test';
     $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$name}', `approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` IN ({$siteA}, {$siteB})");
     $look = static function (string $page, string $pattern): bool {
@@ -1650,11 +1664,60 @@ $scnQLogs = static function () use ($db, $siteA, $siteB, $nameTest, $cardAs, $ht
     // The installation's administrator goes back to A for every later section.
     $instroot();
     $qPutBack();
+
+    // A THIRD organisation holds the address: C approved for it, B asking, and
+    // the installation's administrator, with A open, tries to approve B.
+    $third = 'held-by-c-895.selftest.test';
+    $cNumber = '/organisation #' . $siteC . '(?![0-9])/i';
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$third}', `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteC}");
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$third}', `approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` = {$siteB}");
+    $refused = $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteB, 'host' => $third]);
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$hostC}', `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteC}");
+    $qPutBack();
+    /** What an ordinary administrator's EXPORT of their own activity log holds (the link on the page carries its token). */
+    $export = static function (string $role) use ($http, $people): string {
+        $page = $http('GET', '/admin/activity', ['jar' => $people[$role]['jar']])['body'];
+        if (preg_match('#activity/export\?csrf_token=([0-9A-Za-z]+)#', $page, $m) !== 1) {
+            return 'no export link';
+        }
+        $r = $http('GET', '/admin/activity/export?csrf_token=' . $m[1], ['jar' => $people[$role]['jar']]);
+        return $r['status'] === 200 ? $r['body'] : 'export answered ' . $r['status'];
+    };
+    $aLog    = $http('GET', '/admin/activity', ['jar' => $people['tester']['jar']])['body'];
+    $aExport = $export('tester');
+    $out['the holder named to the installation\'s administrator, on screen'] = str_contains($refused['page'], 'approved for another organisation (Selftest Door C)');
+    $out['A after a refusal about B while C holds it: page'] = [$look($aLog, '/Selftest Door C/'), $look($aLog, $cNumber), str_contains($aLog, $third),
+        $look($aLog, $bNumber), str_contains($aLog, 'another organisation&#039;s public address approval. That address is already approved for another organisation. Only one')];
+    $out['A after a refusal about B while C holds it: export'] = [str_contains($aExport, 'Selftest Door C'), $look($aExport, $cNumber), str_contains($aExport, $third),
+        $look($aExport, $bNumber), str_contains($aExport, 'another organisation\'s public address approval. That address is already approved for another organisation. Only one')];
+    // The whole of each export: nothing of the other organisations in it.
+    $out['A\'s export: B\'s name, number, the shared address'] = [str_contains($aExport, 'Selftest Door B'), $look($aExport, $bNumber), str_contains($aExport, $name)];
+    $bExport = $export('adminB');
+    $out['B\'s export: A\'s name, number; C\'s name'] = [str_contains($bExport, $nameTest), $look($bExport, $aNumber), str_contains($bExport, 'Selftest Door C'),
+        str_contains($bExport, 'public address')];
+    return $out;
+};
+
+/** Q15: an organisation whose request has LOST, saving the same address again unchanged, is told it is taken. */
+$scnQResave = static function () use ($db, $siteA, $siteB, $qName, $cardAs, $qCardState, $qPutBack): array {
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$qName}', `approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` = {$siteA}");
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$qName}', `approvedAtUtc` = UTC_TIMESTAMP() WHERE `siteID` = {$siteB}");
+    $r = $cardAs('setup', 'public_host', ['value' => $qName]);
+    $out = [$qCardState($r['page']), str_contains($r['page'], 'That public address is taken'), str_contains($r['page'], 'Saved. Nothing was different.'),
+        $db->query("SELECT `hostName` FROM `tblPublicHosts` WHERE `siteID` = {$siteA}")->fetch_assoc()['hostName'] ?? null];
+    $qPutBack();
     return $out;
 };
 check('Q14 neither organisation\'s own administrator reads the other\'s name, number or address in its own activity log — after the approval, after the refusal, and from the winning side — while each still sees that a decision was made',
     $scnQLogs(), ['A after the approval' => [false, false, false, true], 'A after the refusal' => [false, false, false, true],
-        'B after A\'s refusal and approval' => [false, false, true, true], 'A approved in the end' => true]);
+        'B after A\'s refusal and approval' => [false, false, true, true], 'A approved in the end' => true,
+        'the holder named to the installation\'s administrator, on screen' => true,
+        'A after a refusal about B while C holds it: page' => [false, false, false, false, true],
+        'A after a refusal about B while C holds it: export' => [false, false, false, false, true],
+        'A\'s export: B\'s name, number, the shared address' => [false, false, false],
+        'B\'s export: A\'s name, number; C\'s name' => [false, false, false, true]]);
+check('Q15 an organisation whose request has lost, saving the same address again unchanged, is told it is taken — never "Saved. Nothing was different." — and its card says taken',
+    $scnQResave(), ['taken', true, false, 'shared-895.selftest.test']);
 
 // ── Round 8 of P4a's check: two publicHostInEffect() callers were pinned by
 // nothing (reverting either left 164/164). Each is driven in the three states
@@ -4860,6 +4923,19 @@ check('PQ13 with an approval recorded in its own words whichever organisation is
 $p = $plant('_core/PublicWebsiteSetup.php', ". ' public address approval. ' . (\$logged ?? \$shown),", ". ' public address approval. ' . \$shown,", $scnQLogs);
 check('PQ14 with the refusal recorded in the words SHOWN, the losing organisation\'s log names the winner (Q14 catches it)',
     [$p['applied'], $p['result']['A after the refusal'][0] ?? null], [true, true]);
+
+$p = $plant('_core/PublicWebsiteSetup.php', ". ' public address approval. ' . (\$logged ?? \$shown),",
+    ". ' public address approval. ' . (Site::id() === \$siteId ? (\$logged ?? \$shown) : \$shown),", $scnQLogs);
+check('PQ15 (round 2\'s M2) with the refusal recorded in the words SHOWN whenever it is about another organisation, A\'s log and export name C, the third organisation holding the address (Q14 catches it; with only two organisations nothing could)',
+    [$p['applied'], $p['result']['A after a refusal about B while C holds it: page'][0] ?? null, $p['result']['A after a refusal about B while C holds it: export'][0] ?? null], [true, true, true]);
+$p = $plant('_apps/admin/activity/export.php', 'WHERE (l.siteID = ? OR l.siteID IS NULL)', 'WHERE (l.siteID = ? OR 1 = 1)', $scnQLogs);
+check('PQ16 (round 2\'s M4) with the activity export left unfiltered, A\'s ordinary administrator downloads B\'s records, with B\'s number and the address (Q14 catches it)',
+    [$p['applied'], array_slice($p['result']['A\'s export: B\'s name, number, the shared address'] ?? [], 1, 2)], [true, [true, true]]);
+$p = $plant('_core/PublicWebsiteSetup.php', "                \$others = self::otherRequestsFor(\$db, \$siteId, \$host);\n                if (\$others === null) {",
+    "                if (\$host === \$was) {\n                    return ['saved' => true, 'type' => 'info', 'message' => 'Saved. Nothing was different.'];\n                }\n"
+    . "                \$others = self::otherRequestsFor(\$db, \$siteId, \$host);\n                if (\$others === null) {", $scnQResave);
+check('PQ17 (round 2\'s M6) with "nothing was different" asked before "taken", a losing organisation saving its address again is told "Saved" while its card says taken (Q15 catches it)',
+    [$p['applied'], $p['result'] ?? null], [true, ['taken', false, true, 'shared-895.selftest.test']]);
 
 $qKeyBack = $db->query("SHOW INDEX FROM `tblPublicHosts` WHERE `Key_name` = 'uq_public_host_approved' AND `Non_unique` = 0 AND `Column_name` = 'approvedHost'")->num_rows;
 check('PQ11 after the key plants, the unique key on approvedHost is back exactly as migration 276 makes it', $qKeyBack, 1);
