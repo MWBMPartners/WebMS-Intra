@@ -25,7 +25,8 @@
 # longer it stays the harder it is to work out who caused it.
 #
 # WHY NOT IN THE PRE-PUSH HOOK (offered to the owner and deliberately not
-# chosen). `.githooks/pre-push` is about nine seconds. This is about fifteen
+# chosen). `.githooks/pre-push` was about nine seconds then; measured on
+# 11 November 2026 it took two minutes (#919). This is about fifteen
 # minutes with three database servers. A push gate that slow gets bypassed with
 # `git push --no-verify`, which is worse than not having one.
 #
@@ -35,9 +36,18 @@
 #     takes longer than everything here put together. Run it separately when the
 #     database changes.
 #   - It does NOT run the audit scripts. `.githooks/pre-push` already runs every
-#     one of them on every push, in about nine seconds, so they are covered
-#     where it matters. Run them by hand with:
+#     one of them on every push, so they are covered where it matters. Run
+#     them by hand with:
 #         for c in tools/audit-checks/check_*.py; do python3 "$c" || echo "RED $c"; done
+#     It DOES run each audit script's OWN SELF-TEST (#919), one row each,
+#     named `audit:<check>`. Those rows are not written in this file: they are
+#     FOUND, every run, by `tools/audit-check-selftests.py --rows`, which reads
+#     the checks and lists the ones that take `--self-test` or `--selftest`.
+#     A hand-written list is how this file came to miss five tests before
+#     (see the list's own note below). `audit:finder` is that finder judging
+#     its own finding — red for a flag spelled some third way, or a self-test
+#     function nothing can reach. `--only audit:` runs just these, with no
+#     database and no Docker (see NEED_DB below).
 #   - It runs ONE database version, 8.0.36 by default (SELFTEST_MYSQL_IMAGE
 #     changes it). The workflows run the set twice, on 8.0.36 and 8.4.11. This
 #     is a local smoke test of the whole set, not a replacement for them.
@@ -46,7 +56,8 @@
 #
 # WHAT IT NEEDS, and what it does when something is missing. Two different
 # answers, because they have different costs:
-#   - docker, php, python3 — a REFUSAL. Nothing runs at all.
+#   - docker, php, python3 — a REFUSAL. Nothing runs at all. (Docker only when
+#     something selected needs a database: `--only audit:` needs none, #919.)
 #   - node, openssl, tar, rclone, qrencode — a WARNING naming the test that
 #     suffers, and the run goes on. This is a reduced set, so the warning says
 #     what it costs: without node the site-addresses test FAILS, while the
@@ -290,19 +301,53 @@ brand-colour-browser|node tools/brand-colour-selftest.mjs
 passkey-address-browser|node tools/passkey-address-browser-selftest.mjs
 package|bash tools/package/package-selftest.sh'
 
+# 🔎 Every audit check's own self-test (#919), FOUND rather than listed: the
+#    finder reads `tools/audit-checks/*.py` with Python's parser and prints one
+#    `audit:<check>|<command>` row for each that takes `--self-test` or
+#    `--selftest`. Before #919 nothing on this machine ran them, and one stayed
+#    red on correct code until somebody happened to run it by hand.
+#
+#    `audit:finder` is NOT generated, on purpose. If the finder breaks, or
+#    meets a self-test spelled in a way it does not know, `--rows` may print
+#    fewer rows than it should — and a missing row looks exactly like a test
+#    that passed. The fixed row runs the finder's own judgement (`--list`),
+#    which exits 1 for any such problem, so a broken finding shows RED here.
+#    Its stderr is dropped from `--rows` only because `audit:finder` repeats
+#    it where the summary can show it.
+AUDIT_ROWS="$(python3 -I tools/audit-check-selftests.py --rows 2>/dev/null)"
+EXTRA_SHELL="$EXTRA_SHELL
+audit:finder|python3 -I tools/audit-check-selftests.py --list
+$AUDIT_ROWS"
+
 if [ "$LIST_ONLY" -eq 1 ]; then
     echo "$TESTS" | sed '/^$/d' | cut -d'|' -f1
-    echo "$EXTRA_SHELL" | cut -d'|' -f1
+    echo "$EXTRA_SHELL" | sed '/^$/d' | cut -d'|' -f1
     rm -rf "$WORK"
     exit 0
 fi
+
+# 🐳 Does anything selected need a database? Only rows in the PHP table do —
+#    even its '-' rows, because `installer` and `db-strict-mode` reach the
+#    second and third servers by port. The shell rows below it (the audit
+#    self-tests, the Python and node tests, the package test) touch none.
+#    So when `--only` picks no PHP-table row, Docker is neither required nor
+#    started: `--only audit:` then runs in seconds on a machine with Docker
+#    stopped, and starts nothing on 33306-33308 that another run might be
+#    using. Before #919 every run started all three servers, whatever it ran.
+NEED_DB=0
+while IFS='|' read -r name _rest <&3; do
+    [ -z "${name:-}" ] && continue
+    case "$name" in *"${ONLY}"*) NEED_DB=1; break ;; esac
+done 3<<< "$TESTS"
 
 # -----------------------------------------------------------------------------
 # 🧰 What this machine has. A missing program is a REFUSAL, never a quietly
 #    reduced run (#646's lesson: ask what a test needs, do not discover it).
 # -----------------------------------------------------------------------------
 missing=''
-for program in docker php python3; do
+required='php python3'
+[ "$NEED_DB" -eq 1 ] && required="docker $required"
+for program in $required; do
     command -v "$program" > /dev/null 2>&1 || missing="$missing $program"
 done
 if [ -n "$missing" ]; then
@@ -323,7 +368,7 @@ for program in openssl tar rclone qrencode; do
                   echo "         REFUSE (exit 2) and show as red. Everything else is unaffected." >&2 ;;
     esac
 done
-if ! docker info > /dev/null 2>&1; then
+if [ "$NEED_DB" -eq 1 ] && ! docker info > /dev/null 2>&1; then
     echo "REFUSED: docker is installed but not running. Nothing was run." >&2
     rm -rf "$WORK"
     exit 2
@@ -331,8 +376,12 @@ fi
 # Every port the table names, not just the database ones: a stale server left on
 # an app port is answered by the test as though it were this run's (see the
 # PHP_CLI_SERVER_WORKERS note further down).
+# Every one of those ports belongs to a PHP-table row or to a database server,
+# so a run that selects no such row (NEED_DB=0) has none to check.
 TABLE_PORTS="$(printf '%s\n' "$TESTS" | grep -oE '_PORT[_0-9]*=[0-9]+' | grep -oE '[0-9]+$' | sort -u | tr '\n' ' ')9055"
-for port in "$PORT_MAIN" "$PORT_SECOND" "$PORT_LOOSE" $TABLE_PORTS; do
+PORTS_TO_CHECK=''
+[ "$NEED_DB" -eq 1 ] && PORTS_TO_CHECK="$PORT_MAIN $PORT_SECOND $PORT_LOOSE $TABLE_PORTS"
+for port in $PORTS_TO_CHECK; do
     if (command -v lsof > /dev/null 2>&1) && [ -n "$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)" ]; then
         echo "REFUSED: something is already listening on port $port. Nothing was run." >&2
         echo "         A database port (33306-33308) usually means containers a previous run left" >&2
@@ -344,26 +393,34 @@ for port in "$PORT_MAIN" "$PORT_SECOND" "$PORT_LOOSE" $TABLE_PORTS; do
     fi
 done
 
-VOLUMES_BEFORE="$(docker volume ls -q -f dangling=true 2>/dev/null | wc -l | tr -d ' ')"
+VOLUMES_BEFORE=0
+[ "$NEED_DB" -eq 1 ] && VOLUMES_BEFORE="$(docker volume ls -q -f dangling=true 2>/dev/null | wc -l | tr -d ' ')"
 
 # 🧹 Whatever happens from here — finished, failed, or interrupted — the
 #    containers go, WITH their data (`-v`: a plain `docker rm` leaves the
 #    volume behind, which is how this machine once came to hold 415 of them
 #    taking 101 GB while every agent reported clean-up as done).
+# shellcheck disable=SC2329  # it IS called: by `trap cleanup EXIT` just below
 cleanup() {
     if [ "$KEEP" -eq 1 ]; then
         echo
-        echo "--keep: leaving $MAIN, $SECOND and $LOOSE running, and $WORK in place."
-        echo "        Remove them with: docker rm -vf $MAIN $SECOND $LOOSE"
+        if [ "$NEED_DB" -eq 1 ]; then
+            echo "--keep: leaving $MAIN, $SECOND and $LOOSE running, and $WORK in place."
+            echo "        Remove them with: docker rm -vf $MAIN $SECOND $LOOSE"
+        else
+            echo "--keep: leaving $WORK in place. No database server was started."
+        fi
         return
     fi
-    docker rm -vf "$MAIN" "$SECOND" "$LOOSE" > /dev/null 2>&1
+    [ "$NEED_DB" -eq 1 ] && docker rm -vf "$MAIN" "$SECOND" "$LOOSE" > /dev/null 2>&1
     if [ "${red:-1}" -eq 0 ]; then
         rm -rf "$WORK"
     else
         echo
         echo "The logs of everything that ran are in $LOGS"
     fi
+    # Nothing touched Docker, so there is no volume count to report.
+    [ "$NEED_DB" -eq 1 ] || return 0
     local after
     after="$(docker volume ls -q -f dangling=true 2>/dev/null | wc -l | tr -d ' ')"
     echo
@@ -386,68 +443,72 @@ ask() {
     docker exec -i -e MYSQL_PWD="$DB_PASS" "$container" mysql -uroot -h 127.0.0.1 --protocol=TCP "$@"
 }
 
-echo "▶ Starting three database servers ($IMAGE)."
-for spec in "$MAIN $PORT_MAIN" "$SECOND $PORT_SECOND" "$LOOSE $PORT_LOOSE"; do
-    # shellcheck disable=SC2086
-    set -- $spec
-    docker rm -vf "$1" > /dev/null 2>&1
-    if ! docker run -d --rm --name "$1" -e MYSQL_ROOT_PASSWORD="$DB_PASS" -p "$2:3306" \
-            --tmpfs /var/lib/mysql "$IMAGE" > /dev/null; then
-        echo "REFUSED: could not start $1." >&2
-        exit 2
-    fi
-done
-for container in "$MAIN" "$SECOND" "$LOOSE"; do
-    ready=0
-    for _ in $(seq 1 120); do
-        if ask "$container" -e 'SELECT 1' > /dev/null 2>&1; then ready=1; break; fi
-        sleep 1
+if [ "$NEED_DB" -eq 1 ]; then
+    echo "▶ Starting three database servers ($IMAGE)."
+    for spec in "$MAIN $PORT_MAIN" "$SECOND $PORT_SECOND" "$LOOSE $PORT_LOOSE"; do
+        # shellcheck disable=SC2086
+        set -- $spec
+        docker rm -vf "$1" > /dev/null 2>&1
+        if ! docker run -d --rm --name "$1" -e MYSQL_ROOT_PASSWORD="$DB_PASS" -p "$2:3306" \
+                --tmpfs /var/lib/mysql "$IMAGE" > /dev/null; then
+            echo "REFUSED: could not start $1." >&2
+            exit 2
+        fi
     done
-    if [ "$ready" -eq 0 ]; then
-        echo "REFUSED: $container did not accept a query within two minutes." >&2
-        docker logs "$container" 2>&1 | tail -20 >&2
-        exit 2
-    fi
-done
-# 🪢 One server's own setting is deliberately LOOSE, because that is what the
-#    strict-mode test needs: it proves DbServer::connect() makes the connection
-#    strict whatever the server was set to.
-ask "$LOOSE" -e "SET GLOBAL sql_mode = ''" > /dev/null
-ask "$MAIN" -e 'SELECT VERSION() AS server, @@GLOBAL.sql_mode AS sql_mode' 2>/dev/null | sed 's/^/  /'
+    for container in "$MAIN" "$SECOND" "$LOOSE"; do
+        ready=0
+        for _ in $(seq 1 120); do
+            if ask "$container" -e 'SELECT 1' > /dev/null 2>&1; then ready=1; break; fi
+            sleep 1
+        done
+        if [ "$ready" -eq 0 ]; then
+            echo "REFUSED: $container did not accept a query within two minutes." >&2
+            docker logs "$container" 2>&1 | tail -20 >&2
+            exit 2
+        fi
+    done
+    # 🪢 One server's own setting is deliberately LOOSE, because that is what the
+    #    strict-mode test needs: it proves DbServer::connect() makes the connection
+    #    strict whatever the server was set to.
+    ask "$LOOSE" -e "SET GLOBAL sql_mode = ''" > /dev/null
+    ask "$MAIN" -e 'SELECT VERSION() AS server, @@GLOBAL.sql_mode AS sql_mode' 2>/dev/null | sed 's/^/  /'
 
-# 🪤 EVERY loop over this table reads it on file descriptor 3, NOT on stdin.
-#    Loading the schema uses `docker exec -i`, which reads stdin — and if the
-#    loop is fed by `<<< "$TESTS"` on stdin, the FIRST schema load swallows the
-#    rest of the test list. The first run of this script built exactly one
-#    database and then reported 37 red tests, every one of them "Unknown
-#    database". Nothing about the message points at the cause.
-echo "▶ Building a throwaway database per test."
-built=0
-while IFS='|' read -r name script db extra <&3; do
-    [ -z "${name:-}" ] && continue
-    case "$name" in *"${ONLY}"*) ;; *) [ -n "$ONLY" ] && continue ;; esac
-    case "$db" in
-        '-'|'') continue ;;
-        BACKUPUSER:*)
-            # 🔐 The backup tests connect as a user of their own with a
-            #    password, because what they prove includes what a restore may
-            #    and may not do as that user.
-            who="backup_${db#BACKUPUSER:}"
-            database="selftest_backup_${db#BACKUPUSER:}"
-            ask "$MAIN" -e "DROP DATABASE IF EXISTS \`$database\`; CREATE DATABASE \`$database\`;
-                CREATE USER IF NOT EXISTS '$who'@'%' IDENTIFIED BY 'selftest-user';
-                GRANT ALL PRIVILEGES ON \`$database\`.* TO '$who'@'%';" > /dev/null || exit 2
-            docker exec -i -e MYSQL_PWD='selftest-user' "$MAIN" mysql -u"$who" \
-                -h 127.0.0.1 --protocol=TCP "$database" < web/_sql/full_schema.sql > /dev/null || exit 2
-            ;;
-        *)
-            ask "$MAIN" -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\`" > /dev/null || exit 2
-            ask "$MAIN" "$db" < web/_sql/full_schema.sql > /dev/null || exit 2
-            ;;
-    esac
-    built=$((built + 1))
-done 3<<< "$TESTS"
-echo "  $built database$([ "$built" -eq 1 ] || echo s) built from web/_sql/full_schema.sql."
+    # 🪤 EVERY loop over this table reads it on file descriptor 3, NOT on stdin.
+    #    Loading the schema uses `docker exec -i`, which reads stdin — and if the
+    #    loop is fed by `<<< "$TESTS"` on stdin, the FIRST schema load swallows the
+    #    rest of the test list. The first run of this script built exactly one
+    #    database and then reported 37 red tests, every one of them "Unknown
+    #    database". Nothing about the message points at the cause.
+    echo "▶ Building a throwaway database per test."
+    built=0
+    while IFS='|' read -r name script db extra <&3; do
+        [ -z "${name:-}" ] && continue
+        case "$name" in *"${ONLY}"*) ;; *) [ -n "$ONLY" ] && continue ;; esac
+        case "$db" in
+            '-'|'') continue ;;
+            BACKUPUSER:*)
+                # 🔐 The backup tests connect as a user of their own with a
+                #    password, because what they prove includes what a restore may
+                #    and may not do as that user.
+                who="backup_${db#BACKUPUSER:}"
+                database="selftest_backup_${db#BACKUPUSER:}"
+                ask "$MAIN" -e "DROP DATABASE IF EXISTS \`$database\`; CREATE DATABASE \`$database\`;
+                    CREATE USER IF NOT EXISTS '$who'@'%' IDENTIFIED BY 'selftest-user';
+                    GRANT ALL PRIVILEGES ON \`$database\`.* TO '$who'@'%';" > /dev/null || exit 2
+                docker exec -i -e MYSQL_PWD='selftest-user' "$MAIN" mysql -u"$who" \
+                    -h 127.0.0.1 --protocol=TCP "$database" < web/_sql/full_schema.sql > /dev/null || exit 2
+                ;;
+            *)
+                ask "$MAIN" -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\`" > /dev/null || exit 2
+                ask "$MAIN" "$db" < web/_sql/full_schema.sql > /dev/null || exit 2
+                ;;
+        esac
+        built=$((built + 1))
+    done 3<<< "$TESTS"
+    echo "  $built database$([ "$built" -eq 1 ] || echo s) built from web/_sql/full_schema.sql."
+else
+    echo "▶ Nothing selected needs a database, so no server was started (and Docker was not asked)."
+fi
 
 # -----------------------------------------------------------------------------
 # 🏃 Run them
@@ -461,10 +522,10 @@ ran=0
 red=0
 record() {                               # record <name> <exit code> <seconds> <log>
     local name="$1" code="$2" seconds="$3" log="$4"
-    printf '%-22s %-6s %4ds  %s\n' "$name" \
+    printf '%-34s %-6s %4ds  %s\n' "$name" \
         "$([ "$code" -eq 0 ] && echo 'green' || echo "RED($code)")" \
         "$seconds" "$(tail -2 "$log" | tr '\n' ' ' | cut -c1-90)" >> "$SUMMARY"
-    printf '  %-22s %s (%ds)\n' "$name" \
+    printf '  %-34s %s (%ds)\n' "$name" \
         "$([ "$code" -eq 0 ] && echo '✓' || echo "✗ exit $code")" "$seconds"
     ran=$((ran + 1))
     [ "$code" -eq 0 ] || red=$((red + 1))

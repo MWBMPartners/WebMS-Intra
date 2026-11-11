@@ -8,11 +8,26 @@
 # than remembered. This is that gate.
 #
 # WHAT IT RUNS, and why only these
-#   1. Every script in tools/audit-checks/. Together they take about eight
-#      seconds, which is short enough to run on every push including a
-#      one-line note. Each one guards something that was found broken at
-#      least once.
-#   2. `php -l` on the PHP files the push RANGE touches, as they stand in the
+#   1. Every script in tools/audit-checks/. Each one guards something that
+#      was found broken at least once.
+#
+#      HOW LONG: this said "about eight seconds" when the hook was written. It
+#      is no longer true. Measured on 11 November 2026 (#919), the same loop
+#      over the 78 scripts took 124 seconds on this Mac, three of them taking
+#      76 of those seconds (check_limit_settings_capped.py 38 s,
+#      check_event_status_matches_column.py 28 s, check_install_wide_prefill.py
+#      10 s). Whether that is still short enough for every push is an open
+#      question, not settled here.
+#   2. Every audit check's OWN SELF-TEST (#919): the planted faults each check
+#      must report and the correct code it must not. These are found, not
+#      listed, by tools/audit-check-selftests.py, which reads the checks and
+#      runs each that takes `--self-test` or `--selftest`. Nine did on
+#      11 November 2026, and all nine together took 6.6 seconds — about 5% on
+#      top of step 1 — which is why they are here rather than left to the
+#      pull-request checks. Before this, one of them stayed RED on correct code
+#      on a pushed branch, because only GitHub ran it, after the push; and one
+#      (check_inline_scripts_have_nonce.py --self-test) ran nowhere at all.
+#   3. `php -l` on the PHP files the push RANGE touches, as they stand in the
 #      working tree. A file that does not parse is the one fault that breaks
 #      every page at once.
 #
@@ -28,7 +43,8 @@
 #      is about to be pushed, and this is a guard against forgetting.
 #
 # WHAT IT DELIBERATELY DOES NOT RUN
-#   The *-selftest.php files and the end-to-end migration harness. They need a
+#   The *-selftest.php files, the other tools/*-selftest.* files, and the
+#   end-to-end migration harness. They need a
 #   database, Docker and minutes rather than seconds. A gate slow enough to be
 #   resented is a gate that gets turned off, and those run in the pull-request
 #   checks instead. So a green push does NOT mean the self-tests pass.
@@ -151,9 +167,26 @@ else
 fi
 
 # -----------------------------------------------------------------------------
-# 3. 🚦 Verdict
+# 3. 🧪 Every audit check's own self-test (#919)
+# -----------------------------------------------------------------------------
+# The finder decides which checks have one, every run, so a new check with a
+# self-test is covered without editing this file. It exits non-zero when any
+# self-test is not green, and also when it cannot trust its own finding (a flag
+# spelled some third way, or a self-test function nothing can reach), so a
+# broken finding refuses the push rather than quietly running fewer.
+if ! SELFTEST_OUTPUT="$(python3 -I tools/audit-check-selftests.py 2>&1)"; then
+    FAILED=1
+    printf '\n✗ tools/audit-check-selftests.py — the self-tests of the audit checks\n'
+    printf '%s\n' "${SELFTEST_OUTPUT}" | sed 's/^/    /'
+else
+    printf '   self-tests  — %s\n' "$(printf '%s\n' "${SELFTEST_OUTPUT}" | tail -1)"
+fi
+
+# -----------------------------------------------------------------------------
+# 4. 🚦 Verdict
 # -----------------------------------------------------------------------------
 if [ "${FAILED}" -ne 0 ]; then
+    # shellcheck disable=SC2016  # the backticks are meant literally, as text
     printf '\n🛑 Push refused: fix the above, or use `git push --no-verify` if you\n'
     printf '   have a reason to push anyway (and say so where it is recorded).\n'
     exit 1
