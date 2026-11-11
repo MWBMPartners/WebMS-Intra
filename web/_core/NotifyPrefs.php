@@ -131,6 +131,9 @@ final class NotifyPrefs
         'givingStatements',
         'taskReminders',
         'rotaReminders',
+        // #657: an e-mail when somebody asks you to take a duty, and when
+        // somebody answers a swap you asked for (Portal\Core\RotaSwaps).
+        'rotaSwaps',
         'approvalRequests',
         'pushLivestream',
         'pushServiceReminders',

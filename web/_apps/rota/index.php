@@ -19,6 +19,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\RotaSwaps;
 use Portal\Core\Site;
 
 Auth::ensureSession();
@@ -72,10 +73,42 @@ if ($stmt !== false) {
     $stmt->close();
 }
 
+// 🔁 Swap requests (#657): those waiting for ME to answer, open ones anybody
+//    may take, and the ones I made. Until #657 nothing drew a screen from
+//    `tblRotaSwapRequest`, so a request could never be answered. Which
+//    requests may be answered, and how, is `RotaSwaps::whyNotAllowed()`; the
+//    buttons below are drawn from the same lists `respond()` judges, and
+//    `respond()` asks again under a lock, so a stale page cannot do harm.
+$swaps = RotaSwaps::forPage($db, $siteId, $userId);
+
+// The answer to the last thing this person did here (set by swap.php and
+// swap-respond.php, which redirect back to this page).
+$rotaFlash     = is_string($_SESSION['rota_flash'] ?? null) === true ? $_SESSION['rota_flash'] : '';
+$rotaFlashType = is_string($_SESSION['rota_flash_type'] ?? null) === true ? $_SESSION['rota_flash_type'] : 'info';
+unset($_SESSION['rota_flash'], $_SESSION['rota_flash_type']);
+if (in_array($rotaFlashType, ['success', 'warning', 'danger', 'info'], true) === false) {
+    $rotaFlashType = 'info';
+}
+
+/** One duty in words: "Sound desk — Sunday 15 November 2026, 10:00–12:00". */
+$dutyText = static function (array $w): string {
+    $text = (string) $w['roleName'] . ' — ' . RotaSwaps::dateWords((string) $w['slotDate']);
+    if ($w['startTime'] !== null) {
+        $text .= ', ' . substr((string) $w['startTime'], 0, 5);
+        if ($w['endTime'] !== null) {
+            $text .= '–' . substr((string) $w['endTime'], 0, 5);
+        }
+    }
+
+    return $text;
+};
+
 $pageTitle   = 'Duty Roster';
 $pageSection = 'rota';
 $breadcrumbs = ['Dashboard' => Site::url(''), 'Duty Roster' => ''];
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
+$csrf       = Auth::csrfToken();
+$respondUrl = Site::url('rota/swap-respond');
 ?>
 
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4">
@@ -87,6 +120,108 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <a href="<?php echo htmlspecialchars(Site::url('rota/manage'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary btn-sm"><i class="fa-solid fa-screwdriver-wrench me-1"></i>Manage</a>
     <?php endif; ?>
 </div>
+
+<?php if ($rotaFlash !== ''): ?>
+    <div class="alert alert-<?php echo htmlspecialchars($rotaFlashType, ENT_QUOTES, 'UTF-8'); ?>" role="status"><?php echo htmlspecialchars($rotaFlash, ENT_QUOTES, 'UTF-8'); ?></div>
+<?php endif; ?>
+
+<?php if (count($swaps['forMe']) > 0 || count($swaps['open']) > 0): ?>
+<div class="card mb-4" id="swap-requests-for-me">
+    <div class="card-body">
+        <h2 class="h5"><i class="fa-solid fa-arrows-rotate me-1"></i>Swap requests for you</h2>
+        <p class="small text-muted">Nothing changes unless you accept. If you accept, the duty becomes yours and the person who asked is told.</p>
+        <div class="portal-data-list">
+            <?php foreach ($swaps['forMe'] as $w): ?>
+                <div class="row py-2 align-items-center border-bottom" data-swap-for-me="<?php echo (int) $w['swapID']; ?>">
+                    <div class="col-md-5">
+                        <strong><?php echo htmlspecialchars($dutyText($w), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <div class="small text-muted">Asked by <?php echo htmlspecialchars((string) ($w['askerName'] ?? 'a member'), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php if (trim((string) ($w['requestMessage'] ?? '')) !== ''): ?>
+                            <div class="small">“<?php echo htmlspecialchars((string) $w['requestMessage'], ENT_QUOTES, 'UTF-8'); ?>”</div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-7">
+                        <form method="post" action="<?php echo htmlspecialchars($respondUrl, ENT_QUOTES, 'UTF-8'); ?>" class="d-flex flex-wrap gap-2 align-items-center">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="swapID" value="<?php echo (int) $w['swapID']; ?>">
+                            <label class="visually-hidden" for="swap-reply-<?php echo (int) $w['swapID']; ?>">Reply (optional)</label>
+                            <input type="text" name="responseMessage" id="swap-reply-<?php echo (int) $w['swapID']; ?>" class="form-control form-control-sm w-auto flex-grow-1" maxlength="500" placeholder="Reply (optional)">
+                            <button type="submit" name="action" value="accept" class="btn btn-sm btn-success">Accept</button>
+                            <button type="submit" name="action" value="decline" class="btn btn-sm btn-outline-secondary">Decline</button>
+                        </form>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+            <?php foreach ($swaps['open'] as $w): ?>
+                <div class="row py-2 align-items-center border-bottom" data-swap-open="<?php echo (int) $w['swapID']; ?>">
+                    <div class="col-md-5">
+                        <strong><?php echo htmlspecialchars($dutyText($w), ENT_QUOTES, 'UTF-8'); ?></strong>
+                        <div class="small text-muted">Open request from <?php echo htmlspecialchars((string) ($w['askerName'] ?? 'a member'), ENT_QUOTES, 'UTF-8'); ?> — anyone can cover</div>
+                        <?php if (trim((string) ($w['requestMessage'] ?? '')) !== ''): ?>
+                            <div class="small">“<?php echo htmlspecialchars((string) $w['requestMessage'], ENT_QUOTES, 'UTF-8'); ?>”</div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-7">
+                        <form method="post" action="<?php echo htmlspecialchars($respondUrl, ENT_QUOTES, 'UTF-8'); ?>" class="d-flex flex-wrap gap-2 align-items-center">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="swapID" value="<?php echo (int) $w['swapID']; ?>">
+                            <button type="submit" name="action" value="accept" class="btn btn-sm btn-success">Take this duty</button>
+                        </form>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if (count($swaps['mine']) > 0): ?>
+<div class="card mb-4" id="swap-requests-mine">
+    <div class="card-body">
+        <h2 class="h5"><i class="fa-solid fa-paper-plane me-1"></i>Swap requests you made</h2>
+        <div class="portal-data-list">
+            <?php foreach ($swaps['mine'] as $w): ?>
+                <?php
+                // 🗣️ What happened, in words. For an accepted request the
+                //    duty's CURRENT holder is named, which is the true answer
+                //    to "who has it now" even if an administrator has moved it
+                //    again since; an open request records nobody else.
+                $status = (string) $w['status'];
+                if ($status === 'pending') {
+                    $statusWords = $w['targetUserID'] === null
+                        ? 'Waiting — open to anyone'
+                        : 'Waiting for ' . (string) ($w['targetName'] ?? 'the member you asked') . ' to answer';
+                } elseif ($status === 'accepted') {
+                    $statusWords = 'Accepted — the duty is now with ' . (string) ($w['holderName'] ?? 'somebody else');
+                } elseif ($status === 'declined') {
+                    $statusWords = 'Declined by ' . (string) ($w['targetName'] ?? 'the member you asked') . ' — the duty is still yours';
+                } else {
+                    $statusWords = 'Withdrawn or no longer needed';
+                }
+                ?>
+                <div class="row py-2 align-items-center border-bottom" data-swap-mine="<?php echo (int) $w['swapID']; ?>" data-swap-status="<?php echo htmlspecialchars($status, ENT_QUOTES, 'UTF-8'); ?>">
+                    <div class="col-md-5"><strong><?php echo htmlspecialchars($dutyText($w), ENT_QUOTES, 'UTF-8'); ?></strong></div>
+                    <div class="col-md-5 small">
+                        <?php echo htmlspecialchars($statusWords, ENT_QUOTES, 'UTF-8'); ?>
+                        <?php if (trim((string) ($w['responseMessage'] ?? '')) !== ''): ?>
+                            <div>“<?php echo htmlspecialchars((string) $w['responseMessage'], ENT_QUOTES, 'UTF-8'); ?>”</div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-2 text-end">
+                        <?php if ($status === 'pending'): ?>
+                            <form method="post" action="<?php echo htmlspecialchars($respondUrl, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="swapID" value="<?php echo (int) $w['swapID']; ?>">
+                                <button type="submit" name="action" value="withdraw" class="btn btn-sm btn-outline-secondary">Withdraw</button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="card mb-4">
     <div class="card-body">

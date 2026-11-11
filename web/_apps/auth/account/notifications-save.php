@@ -65,6 +65,10 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 //    those, under a row lock inside its own transaction, keeping
 //    every other key exactly as stored. The list of keys a member can set is
 //    `NotifyPrefs::SETTABLE`; there is no second list here to keep in step.
+//    (So adding a switch — `rotaSwaps` for #657, read by
+//    `Portal\Core\RotaSwaps` — needs NO change to this handler: the key on
+//    that list and the switch drawn on the page are the whole change, and
+//    `tools/rota-swaps-selftest.php` saves it through this page to prove it.)
 //
 //    A post that carries NO `prefsShown` at all — a page left open from before
 //    this change, or a request made by hand — or whose markers name only keys

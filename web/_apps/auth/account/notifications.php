@@ -12,6 +12,8 @@
  *   • Prayer-request moderation (for moderators)
  *   • Announcement notifications
  *   • Task reminders / Rota duty reminders (gap #439, cron/user-reminders)
+ *   • Rota swap requests (#657, Portal\Core\RotaSwaps) — asked to take a
+ *     duty, and an answer to a swap you asked for
  *   • Workflow approval requests (#443, Portal\Core\Workflow)
  *   • Web Push master prefs (#322) — pushLivestream / pushServiceReminders.
  *     These gate the NOTIFICATION content only; per-DEVICE opt-in (which
@@ -109,6 +111,7 @@ $defaults = [
     'givingStatements'      => true,
     'taskReminders'         => true,
     'rotaReminders'         => true,
+    'rotaSwaps'             => true,
     'approvalRequests'      => true,
     'pushLivestream'        => true,
     'pushServiceReminders'  => true,
@@ -269,6 +272,14 @@ $switchRow = static function (string $key, string $label, string $helpText) use 
         <div class="card-body">
             <?php echo $switchRow('taskReminders', 'Task reminders', 'Get notified when a task you\'re assigned to reaches its reminder time.'); ?>
             <?php echo $switchRow('rotaReminders', 'Rota reminders', 'Get notified ahead of duties you\'re rostered on for.'); ?>
+            <?php
+            // 🔁 #657. Read by Portal\Core\RotaSwaps::whyNotTold() at the moment
+            //    each e-mail would go, through WebPush::notifyPrefAllows() (a
+            //    choice never made counts as ON). It covers BOTH e-mails the
+            //    rota sends about swaps, and nothing else: an open request
+            //    e-mails nobody, and a withdrawal tells nobody.
+            ?>
+            <?php echo $switchRow('rotaSwaps', 'Rota swap requests', 'An e-mail when somebody asks you to take one of their duties, and when somebody accepts or declines a swap you asked for.'); ?>
         </div>
     </div>
 
