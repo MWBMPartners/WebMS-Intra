@@ -679,6 +679,32 @@ final class OutsideServices
     }
 
     /**
+     * ✅ THE RULE for a place MARKED "not anybody's home" (the owner, D-128,
+     * superseding D-120 in part), on FACTS. A church hall or a café has no host
+     * to agree, so its map is decided by the tiers alone: the installation,
+     * EVERY organisation the viewer belongs to, and the viewer's own switch —
+     * the same `doesNotObject` question D-072 asks of a person looking at
+     * somebody's home. Two things are never enough on their own:
+     *
+     *   - the mark on a place that ALSO has a host: that place is somebody's
+     *     home, and only that host's agreement counts (a row holding both,
+     *     written by hand or brought back by a restore, is read as a home);
+     *   - a place with no host and NO mark: nobody has said it is not a home,
+     *     so it is treated as one nobody has agreed for.
+     *
+     * @param array<string,mixed> $viewerDecision From decide(MEMBER_MAP, …) for the viewer.
+     */
+    public static function markedPlaceMapFrom(bool $notAHome, bool $hasHost, array $viewerDecision): bool
+    {
+        if ($notAHome === false || $hasHost === true) {
+            return false;
+        }
+
+        return ($viewerDecision['readable'] ?? false) === true
+            && ($viewerDecision['doesNotObject'] ?? false) === true;
+    }
+
+    /**
      * 🚦 May a small group's page draw a map of where the group meets?
      *
      * The ONE place this is decided (#809); `small-groups/group.php` and
@@ -694,13 +720,22 @@ final class OutsideServices
      * @param int  $groupId     The group, so the host can be asked whether they still belong to it.
      * @param ?int $hostId      The place's `hostUserID`: the member whose home it is (D-124), or null.
      * @param bool $agreed      The place's `placeMapAgreed` = 1: THAT host ticked "a map may be shown".
+     * @param bool $notAHome    The place's `notAHome` = 1: marked "not anybody's home" (D-128). Counts
+     *                          ONLY when no host is named (`markedPlaceMapFrom()`).
      *
      * ANY read that fails is a no, as everywhere in this class: a permission
      * that cannot be read must never read as granted.
      */
-    public static function allowsMeetingPlaceMap(int $groupSiteId, int $groupId, ?int $hostId, bool $agreed): bool
+    public static function allowsMeetingPlaceMap(int $groupSiteId, int $groupId, ?int $hostId, bool $agreed, bool $notAHome = false): bool
     {
-        if ($agreed === false || $hostId === null || $hostId <= 0 || $groupSiteId <= 0 || $groupId <= 0) {
+        if ($groupSiteId <= 0 || $groupId <= 0) {
+            return false;
+        }
+        $hasHost = $hostId !== null && $hostId > 0;
+        if ($hasHost === false && $notAHome === false) {
+            return false;
+        }
+        if ($hasHost === true && $agreed === false) {
             return false;
         }
         try {
@@ -709,6 +744,12 @@ final class OutsideServices
             self::logOnce('no database connection, so every outside service is treated as not allowed: ' . $e->getMessage());
 
             return false;
+        }
+        if ($hasHost === false) {
+            // 🏛️ D-128: a place marked "not anybody's home", with no host.
+            $viewerDecision = self::decide(self::MEMBER_MAP, self::factsFor($db, self::viewerId(), Site::id()));
+
+            return self::markedPlaceMapFrom($notAHome, false, $viewerDecision);
         }
         try {
             $stillCounts = self::hostStillCounts($db, $hostId, $groupSiteId, $groupId);

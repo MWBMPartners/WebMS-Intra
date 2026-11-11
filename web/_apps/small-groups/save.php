@@ -19,9 +19,14 @@
  * an exact matching bound-argument count, verified against
  * check_bind_param_arity.py (the audit check is the source of truth, per
  * the #150 build spec):
- *   create INSERT               — 29 placeholders ('issssiissssssssssddssiiiiiiii')
- *   manage-all UPDATE           — 26 SET + 2 WHERE = 28 ('sssiisssssssssddsssiiiiiiiii')
- *   leader-tier UPDATE          — 23 SET + 2 WHERE = 25 ('sssisssssssssddsssiiiiiii')
+ *   create INSERT               — 30 placeholders ('issssiissssssssssddssiiiiiiiii')
+ *   manage-all UPDATE           — 27 SET + 2 WHERE = 29 ('sssiisssssssssddsssiiiiiiiiii')
+ *   leader-tier UPDATE          — 24 SET + 2 WHERE = 26 ('sssisssssssssddsssiiiiiiii')
+ *
+ * 🏛️ #809, D-128 — "NOT ANYBODY'S HOME". Whoever may set the place (everybody
+ * who reaches this handler may) can mark it as nobody's home instead of naming
+ * a host; a save asking for both is refused. The mark is worked out by the same
+ * rule as the agreement and written in the same statement (`notAHome`).
  *   optional geocode follow-up  — 6  ('ddssii')
  *
  * 🏠 #809, D-120, D-124 — WHOSE HOME THE MEETING PLACE IS, AND WHETHER THEY
@@ -197,6 +202,20 @@ if (in_array($locationVisibility, ['leaders', 'members', 'site'], true) === fals
 // posted by anybody who is not the host counts for nothing in the rule.
 $placeBoxDrawn = array_key_exists('placeMapAsked', $_POST) === true;
 $placeTicked   = ($_POST['placeMapAgreed'] ?? '') === '1';
+$markDrawn     = array_key_exists('notAHomeAsked', $_POST) === true;
+$markTicked    = $markDrawn === true && ($_POST['notAHome'] ?? '') === '1';
+$refuseBoth    = static function () use (&$db, $backUrl): never {
+    if ($db instanceof \mysqli) {
+        try {
+            $db->rollback();
+        } catch (\Throwable $ignored) {
+        }
+    }
+    $_SESSION['flash_msg']  = 'A place cannot be somebody\'s home and "not anybody\'s home" at once: name a host OR tick the box, not both. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $backUrl);
+    exit();
+};
 $postedPlace   = [
     'addressLine1' => $addressLine1, 'addressLine2' => $addressLine2, 'city' => $city, 'region' => $region,
     'postcode' => $postcode, 'countryCode' => $countryCode, 'latitude' => $latitude, 'longitude' => $longitude,
@@ -272,8 +291,8 @@ if ($isCreate === true) {
         . '(siteID, groupName, groupSlug, groupType, description, serviceTypeID, meetingDay, meetingTime, '
         . 'meetingFrequency, meetingNotes, addressLine1, addressLine2, city, region, postcode, countryCode, '
         . 'latitude, longitude, what3words, locationVisibility, resourcesURL, isOpenEnrolment, capacity, '
-        . 'isActive, sortOrder, createdByID, `placeEnteredByID`, `hostUserID`, `placeMapAgreed`) '
-        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        . 'isActive, sortOrder, createdByID, `placeEnteredByID`, `hostUserID`, `placeMapAgreed`, `notAHome`) '
+        . 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     if ($stmt === false) {
         $_SESSION['flash_msg']  = 'Could not save the group.';
@@ -292,17 +311,21 @@ if ($isCreate === true) {
         header('Location: ' . $backUrl);
         exit();
     }
-    $place = SmallGroups::placeAgreementAfterSave(null, $postedPlace, $hostPick['host'], $userId, $placeBoxDrawn, $placeTicked);
+    if ($markTicked === true && $hostPick['host'] !== null) {
+        $refuseBoth();
+    }
+    $place = SmallGroups::placeAgreementAfterSave(null, $postedPlace, $hostPick['host'], $userId, $placeBoxDrawn, $placeTicked, $markDrawn, $markTicked);
     $placeEnteredBy = $place['enteredBy'];
     $placeHost      = $place['host'];
     $placeAgreed    = $place['agreed'];
-    // 29 placeholders: i s s s s i i s s s s s s s s s d d s s s i i i i i i i i
+    $placeNotAHome  = $place['notAHome'];
+    // 30 placeholders: i s s s s i i s s s s s s s s s d d s s s i i i i i i i i i
     $stmt->bind_param(
-        'issssiissssssssssddssiiiiiiii',
+        'issssiissssssssssddssiiiiiiiii',
         $siteId, $groupName, $slug, $groupType, $description, $serviceTypeId, $meetingDay, $meetingTime,
         $meetingFrequency, $meetingNotes, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode,
         $latitude, $longitude, $w3w, $locationVisibility, $resourcesURL, $isOpenEnrolment, $capacity,
-        $isActive, $sortOrder, $createdByID, $placeEnteredBy, $placeHost, $placeAgreed
+        $isActive, $sortOrder, $createdByID, $placeEnteredBy, $placeHost, $placeAgreed, $placeNotAHome
     );
     $stmt->execute();
     $groupId = (int) $stmt->insert_id;
@@ -315,7 +338,7 @@ if ($isCreate === true) {
     try {
         $lock = $db->prepare(
             'SELECT `addressLine1`, `addressLine2`, `city`, `region`, `postcode`, `countryCode`, `latitude`, '
-            . '`longitude`, `what3words`, `placeEnteredByID`, `hostUserID`, `placeMapAgreed` '
+            . '`longitude`, `what3words`, `placeEnteredByID`, `hostUserID`, `placeMapAgreed`, `notAHome` '
             . 'FROM `tblSmallGroups` WHERE `groupID` = ? AND `siteID` = ? FOR UPDATE'
         );
         $lock->bind_param('ii', $groupId, $siteId);
@@ -342,21 +365,25 @@ if ($isCreate === true) {
         header('Location: ' . $backUrl);
         exit();
     }
-    $place = SmallGroups::placeAgreementAfterSave($lockedRow, $postedPlace, $hostPick['host'], $userId, $placeBoxDrawn, $placeTicked);
+    if ($markTicked === true && $hostPick['host'] !== null) {
+        $refuseBoth();
+    }
+    $place = SmallGroups::placeAgreementAfterSave($lockedRow, $postedPlace, $hostPick['host'], $userId, $placeBoxDrawn, $placeTicked, $markDrawn, $markTicked);
     $placeEnteredBy = $place['enteredBy'];
     $placeHost      = $place['host'];
     $placeAgreed    = $place['agreed'];
+    $placeNotAHome  = $place['notAHome'];
 }
 
 if ($isCreate === false && $isManageAll === true) {
-    // 26 SET + 2 WHERE = 28 placeholders.
+    // 27 SET + 2 WHERE = 29 placeholders.
     $stmt = $db->prepare(
         'UPDATE tblSmallGroups SET '
         . 'groupName = ?, groupType = ?, description = ?, serviceTypeID = ?, meetingDay = ?, meetingTime = ?, '
         . 'meetingFrequency = ?, meetingNotes = ?, addressLine1 = ?, addressLine2 = ?, city = ?, region = ?, '
         . 'postcode = ?, countryCode = ?, latitude = ?, longitude = ?, what3words = ?, locationVisibility = ?, '
         . 'resourcesURL = ?, isOpenEnrolment = ?, capacity = ?, isActive = ?, sortOrder = ?, '
-        . '`placeEnteredByID` = ?, `hostUserID` = ?, `placeMapAgreed` = ? '
+        . '`placeEnteredByID` = ?, `hostUserID` = ?, `placeMapAgreed` = ?, `notAHome` = ? '
         . 'WHERE groupID = ? AND siteID = ?'
     );
     if ($stmt === false) {
@@ -367,12 +394,12 @@ if ($isCreate === false && $isManageAll === true) {
         exit();
     }
     $stmt->bind_param(
-        'sssiisssssssssddsssiiiiiiiii',
+        'sssiisssssssssddsssiiiiiiiiii',
         $groupName, $groupType, $description, $serviceTypeId, $meetingDay, $meetingTime,
         $meetingFrequency, $meetingNotes, $addressLine1, $addressLine2, $city, $region,
         $postcode, $countryCode, $latitude, $longitude, $w3w, $locationVisibility,
         $resourcesURL, $isOpenEnrolment, $capacity, $isActive, $sortOrder,
-        $placeEnteredBy, $placeHost, $placeAgreed,
+        $placeEnteredBy, $placeHost, $placeAgreed, $placeNotAHome,
         $groupId, $siteId
     );
     try {
@@ -385,14 +412,14 @@ if ($isCreate === false && $isManageAll === true) {
     }
 } elseif ($isCreate === false) {
     // 🚫 Leader tier — serviceTypeID/isActive/sortOrder OMITTED entirely
-    // (not merely re-set to their old value): 23 SET + 2 WHERE = 25.
+    // (not merely re-set to their old value): 24 SET + 2 WHERE = 26.
     $stmt = $db->prepare(
         'UPDATE tblSmallGroups SET '
         . 'groupName = ?, groupType = ?, description = ?, meetingDay = ?, meetingTime = ?, '
         . 'meetingFrequency = ?, meetingNotes = ?, addressLine1 = ?, addressLine2 = ?, city = ?, region = ?, '
         . 'postcode = ?, countryCode = ?, latitude = ?, longitude = ?, what3words = ?, locationVisibility = ?, '
         . 'resourcesURL = ?, isOpenEnrolment = ?, capacity = ?, '
-        . '`placeEnteredByID` = ?, `hostUserID` = ?, `placeMapAgreed` = ? '
+        . '`placeEnteredByID` = ?, `hostUserID` = ?, `placeMapAgreed` = ?, `notAHome` = ? '
         . 'WHERE groupID = ? AND siteID = ?'
     );
     if ($stmt === false) {
@@ -403,12 +430,12 @@ if ($isCreate === false && $isManageAll === true) {
         exit();
     }
     $stmt->bind_param(
-        'sssisssssssssddsssiiiiiii',
+        'sssisssssssssddsssiiiiiiii',
         $groupName, $groupType, $description, $meetingDay, $meetingTime,
         $meetingFrequency, $meetingNotes, $addressLine1, $addressLine2, $city, $region,
         $postcode, $countryCode, $latitude, $longitude, $w3w, $locationVisibility,
         $resourcesURL, $isOpenEnrolment, $capacity,
-        $placeEnteredBy, $placeHost, $placeAgreed,
+        $placeEnteredBy, $placeHost, $placeAgreed, $placeNotAHome,
         $groupId, $siteId
     );
     try {

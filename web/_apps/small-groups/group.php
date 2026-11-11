@@ -83,7 +83,9 @@ $locVisible = $canManageHere === true
 // on the form (D-124) — agreed, on the same terms as a member's own home map
 // (D-072): the strictest of the installation and every organisation the host
 // belongs to, the host's own choice, and the viewer's own switch; and only
-// while the host is still an active member of the group.
+// while the host is still an active member of the group. A place MARKED "not
+// anybody's home" (D-128, a church hall) has no host and is decided by the
+// installation's, the organisation's and the viewer's own map settings alone.
 // `OutsideServices::allowsMeetingPlaceMap()` is the ONE place that is decided. Otherwise the written address is still shown — to
 // whoever the group's own "who can see the meeting address" allows — with no
 // map.
@@ -93,7 +95,7 @@ $locVisible = $canManageHere === true
 // host again (`tools/audit-checks/check_outside_services_gated.py`).
 $hasPin  = $locVisible === true && $group['latitude'] !== null && $group['longitude'] !== null;
 $showMap = $hasPin === true
-    && OutsideServices::allowsMeetingPlaceMap($siteId, $groupId, (int) ($group['hostUserID'] ?? 0), (int) ($group['placeMapAgreed'] ?? 0) === 1) === true;
+    && OutsideServices::allowsMeetingPlaceMap($siteId, $groupId, (int) ($group['hostUserID'] ?? 0), (int) ($group['placeMapAgreed'] ?? 0) === 1, (int) ($group['notAHome'] ?? 0) === 1) === true;
 
 // 🔁 #809, D-123 — THE HOMES THE GROUP TAKES TURNS IN. Each is its OWN host's,
 //    so each is decided on its own row: one host's agreement never stands for
@@ -104,7 +106,7 @@ $placeMapShown = [];
 foreach ($places as $pl) {
     $plId = (int) $pl['placeID'];
     $placeMapShown[$plId] = $pl['latitude'] !== null && $pl['longitude'] !== null
-        && OutsideServices::allowsMeetingPlaceMap($siteId, $groupId, (int) ($pl['hostUserID'] ?? 0), (int) ($pl['placeMapAgreed'] ?? 0) === 1) === true;
+        && OutsideServices::allowsMeetingPlaceMap($siteId, $groupId, (int) ($pl['hostUserID'] ?? 0), (int) ($pl['placeMapAgreed'] ?? 0) === 1, (int) ($pl['notAHome'] ?? 0) === 1) === true;
 }
 
 // 🗓️ #809, D-127 — WHERE THE GROUP MEETS NEXT, for its MEMBERS (and the people
@@ -330,7 +332,7 @@ $dayNames = [1 => 'Monday', 2 => 'Tuesday', 3 => 'Wednesday', 4 => 'Thursday', 5
                 <?php if ($hasPin === true && $showMap === false): ?>
                     <p class="small text-secondary mb-1 portal-place-no-map">No map is shown: a map is drawn by
                         OpenStreetMap, an outside company, and appears only when the member whose home this meeting
-                        place is has agreed to it and you allow maps.
+                        place is has agreed to it (or it is marked as not anybody's home) and you allow maps.
                         <a href="<?php echo htmlspecialchars(Site::url('account/outside-services'), ENT_QUOTES, 'UTF-8'); ?>">Your choice</a>.</p>
                 <?php endif; ?>
                 <?php if ($locVisible === false): ?>

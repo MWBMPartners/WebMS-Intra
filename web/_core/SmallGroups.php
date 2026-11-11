@@ -715,18 +715,46 @@ final class SmallGroups
      * when it is new or changed). It decides nothing any more; it is the record
      * of who did it.
      *
+     * "NOT ANYBODY'S HOME" (the owner, D-128, superseding D-120 in part). A
+     * place that is nobody's home — a church hall, a café — may be MARKED so,
+     * and may then show a map with no host. The mark and a host are mutually
+     * exclusive (the handler refuses a save asking for both), and:
+     *
+     *   6. a place WITH a host is never marked: it is somebody's home;
+     *   7. a NEW place — or one that held no address before — is marked only if
+     *      the box was drawn and ticked;
+     *   8. a CHANGED ADDRESS clears the mark, whatever is posted — exactly as
+     *      it clears a host's agreement — because a mark about one address must
+     *      never carry to another, and a home address ticked by mistake would be
+     *      shown. Whoever sets it ticks it again on a later save;
+     *   9. otherwise a drawn box decides, and a form that did not draw it keeps
+     *      what is stored (#677).
+     *
+     * Who may draw that box at all is the handler's business: only somebody who
+     * may choose a host (D-125) — a member adding their own home is its host.
+     *
      * @param ?array<string,mixed> $existing  The stored row, or null for a new one.
      * @param array<string,mixed>  $posted    The place as it will be stored, keyed by PLACE_COLUMNS.
      * @param ?int                 $host      The host it will be stored with (the handler has
      *                                        already checked who may be named), or null for none.
+     * @param bool                 $markDrawn  The form drew "not anybody's home" (its marker arrived).
+     * @param bool                 $markTicked ...and it was ticked.
      *
-     * @return array{enteredBy:?int, host:?int, agreed:int}
+     * @return array{enteredBy:?int, host:?int, agreed:int, notAHome:int}
      */
-    public static function placeAgreementAfterSave(?array $existing, array $posted, ?int $host, int $saverId, bool $boxDrawn, bool $ticked): array
-    {
+    public static function placeAgreementAfterSave(
+        ?array $existing,
+        array $posted,
+        ?int $host,
+        int $saverId,
+        bool $boxDrawn,
+        bool $ticked,
+        bool $markDrawn = false,
+        bool $markTicked = false
+    ): array {
         $after = self::placeOf($posted);
         if (self::placeIsEmpty($after) === true) {
-            return ['enteredBy' => null, 'host' => null, 'agreed' => 0];
+            return ['enteredBy' => null, 'host' => null, 'agreed' => 0, 'notAHome' => 0];
         }
         $host = $host !== null && $host > 0 ? $host : null;
 
@@ -737,14 +765,27 @@ final class SmallGroups
         $enteredBy    = $placeChanged === true ? ($saverId > 0 ? $saverId : null) : ($hadEnterer > 0 ? $hadEnterer : null);
 
         if ($host === null) {
-            return ['enteredBy' => $enteredBy, 'host' => null, 'agreed' => 0];
+            // A place that held NO address before counts as new here: the
+            // group's usual place has a row even while it is empty, and typing
+            // a hall's address into it is entering it, not "changing" it.
+            if ($existing === null || self::placeIsEmpty(self::placeOf($existing)) === true) {
+                $notAHome = ($markDrawn === true && $markTicked === true) ? 1 : 0;
+            } elseif ($placeChanged === true) {
+                $notAHome = 0;
+            } elseif ($markDrawn === true) {
+                $notAHome = $markTicked === true ? 1 : 0;
+            } else {
+                $notAHome = (int) ($existing['notAHome'] ?? 0) === 1 ? 1 : 0;
+            }
+
+            return ['enteredBy' => $enteredBy, 'host' => null, 'agreed' => 0, 'notAHome' => $notAHome];
         }
         $agreed = ($placeChanged === true || $hostChanged === true) ? 0 : ((int) ($existing['placeMapAgreed'] ?? 0) === 1 ? 1 : 0);
         if ($saverId > 0 && $saverId === $host && $boxDrawn === true) {
             $agreed = $ticked === true ? 1 : 0;
         }
 
-        return ['enteredBy' => $enteredBy, 'host' => $host, 'agreed' => $agreed];
+        return ['enteredBy' => $enteredBy, 'host' => $host, 'agreed' => $agreed, 'notAHome' => 0];
     }
 
     /**

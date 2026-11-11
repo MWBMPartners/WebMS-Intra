@@ -79,6 +79,7 @@ $isNew = $place === null;
 $hostId   = $place !== null ? (int) ($place['hostUserID'] ?? 0) : ($canManage === true ? 0 : $viewerId);
 $hostName = $hostId > 0 ? SmallGroups::personName($hostId) : '';
 $agreed   = $place !== null && (int) ($place['placeMapAgreed'] ?? 0) === 1;
+$notAHome = $place !== null && (int) ($place['notAHome'] ?? 0) === 1;
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? 'info';
@@ -134,6 +135,7 @@ $values = $place ?? [];
                 'members'   => $canManage === true ? SmallGroups::membersOf($siteId, $groupId, 'active') : [],
                 'hostId'    => $hostId,
                 'hostName'  => $hostName,
+                'notAHome'  => $notAHome,
             ]);
             ?>
             <div class="row g-3 mb-3">
@@ -165,6 +167,7 @@ $values = $place ?? [];
                 'agreed'   => $agreed,
                 'viewerId' => $viewerId,
                 'what'     => 'this home',
+                'notAHome' => $notAHome,
             ]);
             ?>
         </div>

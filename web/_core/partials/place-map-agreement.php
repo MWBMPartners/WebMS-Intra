@@ -49,9 +49,11 @@ if (function_exists('portal_place_map_agreement') === false) {
      *     hostName: string,
      *     agreed: bool,
      *     viewerId: int,
-     *     what: string
+     *     what: string,
+     *     notAHome?: bool
      * } $cfg  `what` names the place, e.g. "this meeting place" or "this home".
-     *          `hostId` is the host as STORED (0 = none yet).
+     *          `hostId` is the host as STORED (0 = none yet). `notAHome` is the
+     *          stored "not anybody's home" mark (D-128).
      */
     function portal_place_map_agreement(array $cfg): void
     {
@@ -81,6 +83,9 @@ if (function_exists('portal_place_map_agreement') === false) {
                 echo '<p class="small text-secondary mb-0"><strong>No map will be shown from your agreement:</strong> '
                     . $esc($blocked) . '</p>';
             }
+        } elseif ($hostId === 0 && ($cfg['notAHome'] ?? false) === true) {
+            echo '<p class="small text-secondary mb-0 portal-place-host-status">This place is marked as not anybody\'s '
+                . 'home, so a map of it may be shown to members whose own map settings allow it.</p>';
         } elseif ($hostId === 0) {
             echo '<p class="small text-secondary mb-0 portal-place-host-status">No host is named for this place yet, '
                 . 'so no map of it is shown. Once a host is named, only they can agree to one.</p>';
@@ -108,11 +113,21 @@ if (function_exists('portal_place_host_select') === false) {
      * marked as no longer a member, so an untouched Save does not silently
      * change who the host is.
      *
+     * 🏛️ "NOT ANYBODY'S HOME" (D-128). Somebody who may choose the host may
+     * instead mark the place as nobody's home — a church hall, a café — and a
+     * map of it may then be shown with no host. The two cannot go together: the
+     * handler refuses a save that names a host AND ticks the mark. The words say
+     * plainly what ticking means, because a home address ticked by mistake
+     * would be shown. Somebody adding their OWN home is its host, so they are
+     * never offered the mark. A hidden `notAHomeAsked` says the box was drawn
+     * (#677).
+     *
      * @param array{
      *     canChoose: bool,
      *     members: list<array<string,mixed>>,
      *     hostId: int,
-     *     hostName: string
+     *     hostName: string,
+     *     notAHome?: bool
      * } $cfg
      */
     function portal_place_host_select(array $cfg): void
@@ -144,6 +159,16 @@ if (function_exists('portal_place_host_select') === false) {
         }
         echo '</select>';
         echo '<small class="text-muted">A member of the group. Only they can agree to a map of their home.</small>';
+        echo '<input type="hidden" name="notAHomeAsked" value="1">';
+        echo '<div class="form-check mt-2">';
+        echo '<input type="checkbox" class="form-check-input" name="notAHome" id="notAHome" value="1"'
+            . (($cfg['notAHome'] ?? false) === true ? ' checked' : '') . '>';
+        echo '<label class="form-check-label" for="notAHome">This is not anybody\'s home (for example, a church hall). '
+            . 'A map of it may be shown to members.</label>';
+        echo '</div>';
+        echo '<small class="text-muted">Only tick this if nobody lives here: a home address ticked by mistake would be '
+            . 'shown on a map. A place with a host named cannot be marked, and changing the address clears the mark '
+            . '(tick it again afterwards).</small>';
         echo '</div>';
     }
 }

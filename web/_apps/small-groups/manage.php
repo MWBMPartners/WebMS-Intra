@@ -101,6 +101,7 @@ $viewerId    = (int) (App::user()['userID'] ?? 0);
 $placeHost   = $editGroup !== null ? (int) ($editGroup['hostUserID'] ?? 0) : 0;
 $placeAgreed = $editGroup !== null && (int) ($editGroup['placeMapAgreed'] ?? 0) === 1;
 $placeHostName = $placeHost > 0 ? SmallGroups::personName($placeHost) : '';
+$placeNotAHome = $editGroup !== null && (int) ($editGroup['notAHome'] ?? 0) === 1;
 $groupMembersForHost = $editGroup !== null ? SmallGroups::membersOf($siteId, $groupId, 'active') : [];
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
@@ -298,6 +299,7 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
                 'members'   => $groupMembersForHost,
                 'hostId'    => $placeHost,
                 'hostName'  => $placeHostName,
+                'notAHome'  => $placeNotAHome,
             ]);
             portal_place_map_agreement([
                 'hostId'   => $placeHost,
@@ -305,6 +307,7 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
                 'agreed'   => $placeAgreed,
                 'viewerId' => $viewerId,
                 'what'     => 'this meeting place',
+                'notAHome' => $placeNotAHome,
             ]);
             ?>
         </div>

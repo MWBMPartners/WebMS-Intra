@@ -46,6 +46,11 @@
  *      each naming its own host. One host's agreement, withdrawal, departure or
  *      switched-off account never touches another's; a member may add only
  *      their own home; each meeting records and shows its own place
+ *   N  #809, D-128: a place marked "not anybody's home" (a church hall) shows
+ *      its map with no host, and is still hidden by the viewer's, the
+ *      organisation's or the installation's own map setting; an unmarked place
+ *      with no host shows none; a changed address clears the mark; a host and
+ *      the mark together are refused; a plain member cannot mark anything
  *   S  #809, D-126, D-127: members see where the group meets next (the place
  *      following the group's address setting, a map only with that home's
  *      host's agreement), a non-member sees nothing, a planned meeting takes no
@@ -1512,19 +1517,19 @@ $rowBy   = static fn (?int $host, int $agreed, ?int $by = 9): array => $storedA 
 $after   = static fn (?array $existing, array $posted, ?int $host, int $saver, bool $drawn, bool $ticked): array
     => \Portal\Core\SmallGroups::placeAgreementAfterSave($existing, $posted, $host, $saver, $drawn, $ticked);
 $pinned = [
-    'PA01 a new place whose HOST saves it, ticked: agreed'                                       => [$after(null, $placeA, 7, 7, true, true), ['enteredBy' => 7, 'host' => 7, 'agreed' => 1]],
-    'PA02 a new place named for host 5 by a LEADER (7) who ticks: NOT agreed (only the host can)' => [$after(null, $placeA, 5, 7, true, true), ['enteredBy' => 7, 'host' => 5, 'agreed' => 0]],
-    'PA03 a new place with NO host, ticked by whoever: not agreed'                               => [$after(null, $placeA, null, 7, true, true), ['enteredBy' => 7, 'host' => null, 'agreed' => 0]],
-    'PA04 an EMPTY place: nobody, no host, not agreed'                                            => [$after($rowBy(5, 1), $emptyPl, 5, 5, true, true), ['enteredBy' => null, 'host' => null, 'agreed' => 0]],
-    'PA05 unchanged, host 5 agreed, a LEADER saves (no box): the agreement STANDS'               => [$after($rowBy(5, 1), $placeA, 5, 7, false, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1]],
-    'PA06 unchanged, host 5 agreed, a leader POSTS an unticked box: still stands (not theirs)'  => [$after($rowBy(5, 1), $placeA, 5, 7, true, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1]],
-    'PA07 unchanged, host 5 not agreed, a leader POSTS a tick: still NOT agreed'                => [$after($rowBy(5, 0), $placeA, 5, 7, true, true), ['enteredBy' => 9, 'host' => 5, 'agreed' => 0]],
-    'PA08 unchanged, the HOST unticks: withdrawn (stored 52.2100000, typed 52.21: unchanged)'    => [$after($rowBy(5, 1), $placeA, 5, 5, true, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 0]],
-    'PA09 unchanged, the host saves a form that did NOT draw the box: kept (#677)'              => [$after($rowBy(5, 1), $placeA, 5, 5, false, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1]],
-    'PA10 the ADDRESS changed by a leader: the host\'s agreement is gone, the leader typed it'  => [$after($rowBy(5, 1), $placeB, 5, 7, false, false), ['enteredBy' => 7, 'host' => 5, 'agreed' => 0]],
-    'PA11 the address changed by the HOST, ticked: agreed to the NEW address'                   => [$after($rowBy(5, 1), $placeB, 5, 5, true, true), ['enteredBy' => 5, 'host' => 5, 'agreed' => 1]],
-    'PA12 the HOST changed (5 to 6), place unchanged: the old agreement does NOT move to 6'     => [$after($rowBy(5, 1), $placeA, 6, 7, false, false), ['enteredBy' => 9, 'host' => 6, 'agreed' => 0]],
-    'PA13 the host named is removed (to nobody): not agreed'                                     => [$after($rowBy(5, 1), $placeA, null, 7, false, false), ['enteredBy' => 9, 'host' => null, 'agreed' => 0]],
+    'PA01 a new place whose HOST saves it, ticked: agreed'                                       => [$after(null, $placeA, 7, 7, true, true), ['enteredBy' => 7, 'host' => 7, 'agreed' => 1, 'notAHome' => 0]],
+    'PA02 a new place named for host 5 by a LEADER (7) who ticks: NOT agreed (only the host can)' => [$after(null, $placeA, 5, 7, true, true), ['enteredBy' => 7, 'host' => 5, 'agreed' => 0, 'notAHome' => 0]],
+    'PA03 a new place with NO host, ticked by whoever: not agreed'                               => [$after(null, $placeA, null, 7, true, true), ['enteredBy' => 7, 'host' => null, 'agreed' => 0, 'notAHome' => 0]],
+    'PA04 an EMPTY place: nobody, no host, not agreed'                                            => [$after($rowBy(5, 1), $emptyPl, 5, 5, true, true), ['enteredBy' => null, 'host' => null, 'agreed' => 0, 'notAHome' => 0]],
+    'PA05 unchanged, host 5 agreed, a LEADER saves (no box): the agreement STANDS'               => [$after($rowBy(5, 1), $placeA, 5, 7, false, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1, 'notAHome' => 0]],
+    'PA06 unchanged, host 5 agreed, a leader POSTS an unticked box: still stands (not theirs)'  => [$after($rowBy(5, 1), $placeA, 5, 7, true, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1, 'notAHome' => 0]],
+    'PA07 unchanged, host 5 not agreed, a leader POSTS a tick: still NOT agreed'                => [$after($rowBy(5, 0), $placeA, 5, 7, true, true), ['enteredBy' => 9, 'host' => 5, 'agreed' => 0, 'notAHome' => 0]],
+    'PA08 unchanged, the HOST unticks: withdrawn (stored 52.2100000, typed 52.21: unchanged)'    => [$after($rowBy(5, 1), $placeA, 5, 5, true, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 0, 'notAHome' => 0]],
+    'PA09 unchanged, the host saves a form that did NOT draw the box: kept (#677)'              => [$after($rowBy(5, 1), $placeA, 5, 5, false, false), ['enteredBy' => 9, 'host' => 5, 'agreed' => 1, 'notAHome' => 0]],
+    'PA10 the ADDRESS changed by a leader: the host\'s agreement is gone, the leader typed it'  => [$after($rowBy(5, 1), $placeB, 5, 7, false, false), ['enteredBy' => 7, 'host' => 5, 'agreed' => 0, 'notAHome' => 0]],
+    'PA11 the address changed by the HOST, ticked: agreed to the NEW address'                   => [$after($rowBy(5, 1), $placeB, 5, 5, true, true), ['enteredBy' => 5, 'host' => 5, 'agreed' => 1, 'notAHome' => 0]],
+    'PA12 the HOST changed (5 to 6), place unchanged: the old agreement does NOT move to 6'     => [$after($rowBy(5, 1), $placeA, 6, 7, false, false), ['enteredBy' => 9, 'host' => 6, 'agreed' => 0, 'notAHome' => 0]],
+    'PA13 the host named is removed (to nobody): not agreed'                                     => [$after($rowBy(5, 1), $placeA, null, 7, false, false), ['enteredBy' => 9, 'host' => null, 'agreed' => 0, 'notAHome' => 0]],
 ];
 foreach ($pinned as $name => [$got, $want]) {
     check($name, $got === $want, 'got ' . json_encode($got));
@@ -1544,6 +1549,23 @@ check('PA20 D-125 on facts: a leader may add or change ANY home', $may(true, tru
 check('PA21 ...a member may add a home (their own) and change one whose host they are', $may(false, true, null, 7) === true && $may(false, true, ['hostUserID' => 7], 7) === true);
 check('PA22 ...a member may NOT change somebody else\'s home', $may(false, true, ['hostUserID' => 5], 7) === false);
 check('PA23 ...somebody who is not an active member may do neither', $may(false, false, null, 7) === false && $may(false, false, ['hostUserID' => 7], 7) === false);
+// D-128: the "not anybody's home" mark.
+$markAfter = static fn (?array $existing, array $posted, ?int $host, bool $drawn, bool $ticked): int
+    => \Portal\Core\SmallGroups::placeAgreementAfterSave($existing, $posted, $host, 7, false, false, $drawn, $ticked)['notAHome'];
+$hall = static fn (int $mark, ?int $host = null): array => $storedA + ['hostUserID' => $host, 'placeMapAgreed' => 0, 'placeEnteredByID' => 7, 'notAHome' => $mark];
+check('PA24 D-128 on facts: a NEW place with no host, marked: marked', $markAfter(null, $placeA, null, true, true) === 1);
+check('PA25 ...a place WITH a host is never marked, whatever is posted', $markAfter(null, $placeA, 5, true, true) === 0 && $markAfter($hall(1), $placeA, 5, true, true) === 0);
+check('PA26 ...a CHANGED address clears the mark even with the box still ticked', $markAfter($hall(1), $placeB, null, true, true) === 0);
+check('PA27 ...unchanged: the drawn box decides; a form without it keeps the mark (#677)', $markAfter($hall(1), $placeA, null, true, false) === 0
+    && $markAfter($hall(1), $placeA, null, false, false) === 1 && $markAfter($hall(0), $placeA, null, true, true) === 1);
+check('PA28 ...an EMPTY place is never marked', $markAfter($hall(1), $emptyPl, null, true, true) === 0);
+check('PA28b ...but a place that held NO address before and is now entered counts as NEW: a ticked mark is kept',
+    $markAfter(array_merge($emptyPl, ['hostUserID' => null, 'notAHome' => 0]), $placeA, null, true, true) === 1);
+check('PA29 the hall rule: marked, no host, viewer allows -> yes', OutsideServices::markedPlaceMapFrom(true, false, $yes) === true);
+check('PA30 ...UNMARKED with no host -> no', OutsideServices::markedPlaceMapFrom(false, false, $yes) === false);
+check('PA31 ...marked but WITH a host -> no (it is somebody\'s home)', OutsideServices::markedPlaceMapFrom(true, true, $yes) === false);
+check('PA32 ...the viewer objects, or it cannot be read -> no', OutsideServices::markedPlaceMapFrom(true, false, $no) === false
+    && OutsideServices::markedPlaceMapFrom(true, false, $bad) === false);
 
 // ---- P-B. The real pages --------------------------------------------------
 $sgEnabledBefore = $state['settings']['small-groups.enabled'];
@@ -1942,6 +1964,91 @@ check('S09 D-126: removing a home deletes its address, host and agreement at onc
     && (int) $rowB['placeMapAgreed'] === 0 && str_contains($g['body'], '2 Beta Road') === false, json_encode($rowB));
 check('S10 ...meetings held or planned there say "a place no longer recorded", never "the usual place"',
     str_contains($gm['body'], 'A place no longer recorded</div>') === true && str_contains($nextPanel($groupPage($jarMember)), 'a place no longer recorded') === true);
+
+// =============================================================================
+// N. #809, D-128: A PLACE MARKED "NOT ANYBODY'S HOME" (A CHURCH HALL)
+//    May show a map with no host, subject only to the installation's, the
+//    organisation's and the viewer's own map settings. Never with a host;
+//    a changed address clears the mark; only whoever may set the place marks it.
+// =============================================================================
+head('N. A place marked "not anybody\'s home"');
+$hallFields = ['addressLine1' => '1 Church Street', 'city' => 'Cambridge', 'postcode' => 'CB2 2BB', 'countryCode' => 'GB',
+               'latitude' => '52.20', 'longitude' => '0.11', 'hostUserID' => ''];
+$fHall = $groupForm($jarAA);
+check('N00 premise: the administrator\'s form draws the "not anybody\'s home" box, with its marker and its plain words',
+    ($fHall['notAHomeAsked'] ?? '') === '1' && str_contains((string) $fHall['_html'], "This is not anybody's home (for example, a church hall). A map of it may be shown to members.") === true);
+$saveGroup($jarAA, $groupForm($jarAA, $hallFields + ['notAHome' => '1']));
+$r = one('SELECT `hostUserID`, `notAHome` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
+$g = $groupPage($jarV);
+check('N01 an administrator marks the usual place as a hall, with no host: stored marked, and its map IS drawn with no host anywhere',
+    $r['hostUserID'] === null && (int) ($r['notAHome'] ?? -1) === 1 && $sgMap($g) === true && $tileRule($g) === true, json_encode($r) . ' ' . imgSrc($g));
+setChoice(VIEWER, 'memberMap', 'off');
+$g = $groupPage($jarV);
+check('N02 the VIEWER switched maps off: the hall\'s map is hidden, its address still shown', $sgMap($g) === false && $tileRule($g) === false
+    && str_contains($g['body'], '1 Church Street') === true);
+setChoice(VIEWER, 'memberMap', null);
+setAt(K_MAP, ORG_A, 'no');
+$g = $groupPage($jarV);
+check('N03 the ORGANISATION says no: the hall\'s map is hidden', $sgMap($g) === false && $tileRule($g) === false);
+setAt(K_MAP, ORG_A, null);
+setAt(K_MAP, null, 'no');
+$g = $groupPage($jarV);
+check('N04 the INSTALLATION says no: the hall\'s map is hidden', $sgMap($g) === false && $tileRule($g) === false);
+setAt(K_MAP, null, 'off');
+$g = $groupPage($jarV);
+check('N05 control: the hall\'s map is back', $sgMap($g) === true);
+$saveGroup($jarAA, $groupForm($jarAA, ['notAHome' => null]));
+$g = $groupPage($jarV);
+check('N06 UNMARKED, with no host: no map (nobody has said it is not a home, and nobody has agreed)',
+    (int) (one('SELECT `notAHome` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP])['notAHome'] ?? -1) === 0 && $sgMap($g) === false && $tileRule($g) === false);
+$saveGroup($jarAA, $groupForm($jarAA, ['notAHome' => '1']));
+$fMarked = $groupForm($jarAA, ['addressLine1' => '9 Moved Street']);
+check('N07 premise: the marked place\'s form draws the box TICKED, so an address change is sent with the tick on', ($fMarked['notAHome'] ?? '') === '1');
+$saveGroup($jarAA, $fMarked);
+$r = one('SELECT `addressLine1`, `notAHome` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
+$g = $groupPage($jarV);
+check('N08 CHANGING THE ADDRESS CLEARS THE MARK, even with the box still ticked, and the map goes',
+    ($r['addressLine1'] ?? '') === '9 Moved Street' && (int) ($r['notAHome'] ?? -1) === 0 && $sgMap($g) === false, json_encode($r));
+$saveGroup($jarAA, $groupForm($jarAA, ['notAHome' => '1']));
+check('N09 ...and ticking it again on a later save marks it again', (int) (one('SELECT `notAHome` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP])['notAHome'] ?? -1) === 1);
+$saveGroup($jarAA, $groupForm($jarAA, ['hostUserID' => (string) HOSTP, 'notAHome' => '1', 'groupName' => 'Selftest Both At Once']));
+$r = one('SELECT `groupName`, `hostUserID`, `notAHome` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
+check('N10 naming a host AND ticking "not anybody\'s home" is refused, and NOTHING is saved',
+    $r['hostUserID'] === null && (int) ($r['notAHome'] ?? -1) === 1 && ($r['groupName'] ?? '') !== 'Selftest Both At Once', json_encode($r));
+$saveGroup($jarAA, $groupForm($jarAA, ['hostUserID' => (string) HOSTP, 'notAHome' => null]));
+$r = one('SELECT `hostUserID`, `notAHome` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
+check('N11 naming a host (and unticking) makes it somebody\'s home: unmarked, and needing that host\'s agreement',
+    (int) ($r['hostUserID'] ?? 0) === HOSTP && (int) ($r['notAHome'] ?? -1) === 0 && $sgMap($groupPage($jarV)) === false, json_encode($r));
+q('UPDATE `tblSmallGroups` SET `hostUserID` = ?, `notAHome` = 1, `placeMapAgreed` = 0 WHERE `groupID` = ?', 'ii', [HOSTP, SGROUP]);
+check('N12 a row holding BOTH a host and the mark (written by hand) is read as a HOME: no map without that host\'s agreement',
+    $sgMap($groupPage($jarV)) === false);
+q('UPDATE `tblSmallGroups` SET `hostUserID` = NULL, `notAHome` = 0 WHERE `groupID` = ?', 'i', [SGROUP]);
+
+// A listed home marked as a hall, and who may mark.
+$saveHome($jarHost, $homeForm($jarHost, 0, [
+    'hostUserID' => '', 'notAHome' => '1', 'placeLabel' => 'Parish hall', 'addressLine1' => '4 Hall Lane', 'city' => 'Cambridge',
+    'countryCode' => 'GB', 'latitude' => '52.60', 'longitude' => '0.35',
+]));
+$placeH = $placeBy('Parish hall');
+$g = $groupPage($jarV);
+check('N13 a LEADER adds a listed place marked as a hall, with no host: its map is drawn', $placeH > 0
+    && (int) ($placeRow($placeH)['notAHome'] ?? -1) === 1 && $placeRow($placeH)['hostUserID'] === null && $placeMap($g, $placeH) === true);
+setChoice(VIEWER, 'memberMap', 'off');
+check('N14 ...and the viewer\'s own switch still hides it', $placeMap($groupPage($jarV), $placeH) === false);
+setChoice(VIEWER, 'memberMap', null);
+$fOwn = $homeForm($jarMember, $placeM);
+check('N15 a plain member\'s form for their OWN home offers no "not anybody\'s home" box', $fOwn['_status'] === 200
+    && array_key_exists('notAHomeAsked', $fOwn) === false && str_contains((string) $fOwn['_html'], "not anybody's home (for example") === false);
+$saveHome($jarMember, $homeForm($jarMember, $placeM, ['notAHomeAsked' => '1', 'notAHome' => '1']));
+$rowM = $placeRow($placeM);
+check('N16 ...and a forged mark posted for it is ignored: still their home, still unmarked', (int) ($rowM['hostUserID'] ?? 0) === MEMBERP
+    && (int) ($rowM['notAHome'] ?? -1) === 0, json_encode($rowM));
+$hallBefore = $placeRow($placeH);
+$saveHome($jarMember, ['csrf_token' => token(req($jarMember, 'GET', $placeUrl($placeM))['body']), 'action' => 'update', 'groupID' => (string) SGROUP,
+    'placeID' => (string) $placeH, 'addressLine1' => '4 Hall Lane', 'notAHomeAsked' => '1']);
+$fUsual = req($jarMember, 'GET', $manageUrl);
+check('N17 a member who is not a leader cannot unmark (or otherwise change) a place that is not theirs, nor reach the group\'s own form',
+    $placeRow($placeH) === $hallBefore && $fUsual['status'] === 403);
 
 q('UPDATE `tblSmallGroupMeetings` SET `attendanceSessionID` = NULL WHERE `groupID` = ?', 'i', [SGROUP]);
 q('DELETE FROM `tblAttendanceSessions` WHERE `siteID` = ? AND `serviceTypeID` = ?', 'ii', [ORG_A, $serviceType]);

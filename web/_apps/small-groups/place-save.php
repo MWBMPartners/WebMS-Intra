@@ -14,6 +14,11 @@
  * member only their OWN, as its host — and the host is then forced to them,
  * whatever is posted.
  *
+ * "NOT ANYBODY'S HOME" (D-128). Somebody who may choose a host may instead
+ * mark the place as nobody's home; a save asking for both is refused. A member
+ * adding or changing their OWN home is its host, so the mark is never read from
+ * their post at all.
+ *
  * WHOSE HOME, AND THEIR AGREEMENT (D-124). Each home names its host, a member
  * of the group; only THAT member can agree to a map of it. The host is
  * resolved by `SmallGroups::hostFromPost()` and the agreement by
@@ -115,7 +120,7 @@ if ($action === 'remove') {
         'UPDATE `tblSmallGroupPlaces` SET `placeLabel` = NULL, `addressLine1` = NULL, `addressLine2` = NULL, '
         . '`city` = NULL, `region` = NULL, `postcode` = NULL, `countryCode` = NULL, `latitude` = NULL, '
         . '`longitude` = NULL, `what3words` = NULL, `placeEnteredByID` = NULL, `hostUserID` = NULL, '
-        . '`placeMapAgreed` = 0, `isActive` = 0 '
+        . '`placeMapAgreed` = 0, `notAHome` = 0, `isActive` = 0 '
         . 'WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ? AND `isActive` = 1'
         . ($canManage === true ? '' : ' AND `hostUserID` = ?')
     );
@@ -182,6 +187,19 @@ if (SmallGroups::placeIsEmpty(SmallGroups::placeOf($postedPlace)) === true) {
 // 🏠 The agreement box (#677: the hidden marker says it was drawn).
 $boxDrawn = array_key_exists('placeMapAsked', $_POST) === true;
 $ticked   = ($_POST['placeMapAgreed'] ?? '') === '1';
+// 🏛️ The mark is offered only to somebody who may choose the host (D-128, D-125).
+$markDrawn  = $canManage === true && array_key_exists('notAHomeAsked', $_POST) === true;
+$markTicked = $markDrawn === true && ($_POST['notAHome'] ?? '') === '1';
+$refuseBoth = static function () use ($db, $formUrl): never {
+    try {
+        $db->rollback();
+    } catch (\Throwable $ignored) {
+    }
+    $_SESSION['flash_msg']  = 'A place cannot be somebody\'s home and "not anybody\'s home" at once: name a host OR tick the box, not both. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $formUrl);
+    exit();
+};
 
 $refuseHost = static function () use ($formUrl): never {
     $_SESSION['flash_msg']  = 'The host must be an active member of this group. Nothing was saved.';
@@ -195,20 +213,24 @@ if ($action === 'create') {
     if ($hostPick['ok'] === false) {
         $refuseHost();
     }
-    $agreement = SmallGroups::placeAgreementAfterSave(null, $postedPlace, $hostPick['host'], $userId, $boxDrawn, $ticked);
+    if ($markTicked === true && $hostPick['host'] !== null) {
+        $refuseBoth();
+    }
+    $agreement = SmallGroups::placeAgreementAfterSave(null, $postedPlace, $hostPick['host'], $userId, $boxDrawn, $ticked, $markDrawn, $markTicked);
     $enteredBy = $agreement['enteredBy'];
     $host      = $agreement['host'];
     $agreed    = $agreement['agreed'];
+    $notAHome  = $agreement['notAHome'];
     $stmt = $db->prepare(
         'INSERT INTO `tblSmallGroupPlaces` (`siteID`, `groupID`, `placeLabel`, `addressLine1`, `addressLine2`, `city`, '
         . '`region`, `postcode`, `countryCode`, `latitude`, `longitude`, `what3words`, `hostUserID`, `placeEnteredByID`, '
-        . '`placeMapAgreed`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        . '`placeMapAgreed`, `notAHome`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    // 15 placeholders: i i s s s s s s s d d s i i i
+    // 16 placeholders: i i s s s s s s s d d s i i i i
     $stmt->bind_param(
-        'iisssssssddsiii',
+        'iisssssssddsiiii',
         $siteId, $groupId, $label, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode,
-        $latitude, $longitude, $w3w, $host, $enteredBy, $agreed
+        $latitude, $longitude, $w3w, $host, $enteredBy, $agreed, $notAHome
     );
     $stmt->execute();
     $stmt->close();
@@ -227,7 +249,7 @@ $db->begin_transaction();
 try {
     $lock = $db->prepare(
         'SELECT `addressLine1`, `addressLine2`, `city`, `region`, `postcode`, `countryCode`, `latitude`, `longitude`, '
-        . '`what3words`, `placeEnteredByID`, `hostUserID`, `placeMapAgreed` FROM `tblSmallGroupPlaces` '
+        . '`what3words`, `placeEnteredByID`, `hostUserID`, `placeMapAgreed`, `notAHome` FROM `tblSmallGroupPlaces` '
         . 'WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ? AND `isActive` = 1 FOR UPDATE'
     );
     $lock->bind_param('iii', $placeId, $groupId, $siteId);
@@ -254,21 +276,25 @@ try {
         $db->rollback();
         $refuseHost();
     }
-    $agreement = SmallGroups::placeAgreementAfterSave($locked, $postedPlace, $hostPick['host'], $userId, $boxDrawn, $ticked);
+    if ($markTicked === true && $hostPick['host'] !== null) {
+        $refuseBoth();
+    }
+    $agreement = SmallGroups::placeAgreementAfterSave($locked, $postedPlace, $hostPick['host'], $userId, $boxDrawn, $ticked, $markDrawn, $markTicked);
     $enteredBy = $agreement['enteredBy'];
     $host      = $agreement['host'];
     $agreed    = $agreement['agreed'];
+    $notAHome  = $agreement['notAHome'];
     $stmt = $db->prepare(
         'UPDATE `tblSmallGroupPlaces` SET `placeLabel` = ?, `addressLine1` = ?, `addressLine2` = ?, `city` = ?, '
         . '`region` = ?, `postcode` = ?, `countryCode` = ?, `latitude` = ?, `longitude` = ?, `what3words` = ?, '
-        . '`hostUserID` = ?, `placeEnteredByID` = ?, `placeMapAgreed` = ? '
+        . '`hostUserID` = ?, `placeEnteredByID` = ?, `placeMapAgreed` = ?, `notAHome` = ? '
         . 'WHERE `placeID` = ? AND `groupID` = ? AND `siteID` = ?'
     );
-    // 16 placeholders: s s s s s s s d d s i i i i i i
+    // 17 placeholders: s s s s s s s d d s i i i i i i i
     $stmt->bind_param(
-        'sssssssddsiiiiii',
+        'sssssssddsiiiiiii',
         $label, $addressLine1, $addressLine2, $city, $region, $postcode, $countryCode, $latitude, $longitude, $w3w,
-        $host, $enteredBy, $agreed, $placeId, $groupId, $siteId
+        $host, $enteredBy, $agreed, $notAHome, $placeId, $groupId, $siteId
     );
     $stmt->execute();
     $stmt->close();

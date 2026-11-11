@@ -8,6 +8,7 @@
 --   tblSmallGroups.placeEnteredByID   who last typed in or changed the USUAL place
 --   tblSmallGroups.hostUserID         the member whose home it is (D-124)
 --   tblSmallGroups.placeMapAgreed     1 = THAT host agreed to a map of it
+--   tblSmallGroups.notAHome           1 = marked "not anybody's home" (D-128)
 --   fk_sg_place_enterer, fk_sg_host   -> tblUsers, SET NULL
 --   tblSmallGroupPlaces (new)         the hosts' homes a group rotates between,
 --                                     each with its OWN named host (hostUserID)
@@ -23,6 +24,13 @@
 -- member's address names that member and cannot agree on their behalf. So the
 -- agreement means "the named host agreed", and placeEnteredByID is only a
 -- record of who typed it.
+--
+-- D-128 (11 November 2026, superseding D-120 in part): a place that is nobody's
+-- home (a church hall) may be MARKED so by whoever sets it, and may then show a
+-- map with no host, subject only to the installation, organisation and viewer
+-- map settings. The mark and a host never go together; a changed address
+-- clears it. Every existing row starts unmarked: nobody has said it is not a
+-- home.
 --
 -- D-123 (11 November 2026): a group may meet in a different host's home from
 -- one meeting to the next, and each place belongs to its own host: its map
@@ -136,6 +144,19 @@ SET @sql := IF(@fk_exists = 0,
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- ── tblSmallGroups.notAHome (D-128) ─────────────────────────────────────────
+SET @col_exists := (
+    SELECT COUNT(*) FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME   = 'tblSmallGroups'
+      AND COLUMN_NAME  = 'notAHome'
+);
+SET @sql := IF(@col_exists = 0,
+    'ALTER TABLE `tblSmallGroups` ADD COLUMN `notAHome` TINYINT(1) NOT NULL DEFAULT 0 COMMENT ''1 = marked as not a home (for example a church hall) by whoever set the place, so a map of it may be shown with no host, subject to the installation, organisation and viewer map settings (D-128). Never set together with a host; a changed address clears it. 0 = a home, or not said'' AFTER `placeMapAgreed`',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- ── tblSmallGroupPlaces (D-123) ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS `tblSmallGroupPlaces` (
     `placeID`          INT           NOT NULL AUTO_INCREMENT,
@@ -154,6 +175,7 @@ CREATE TABLE IF NOT EXISTS `tblSmallGroupPlaces` (
     `hostUserID`       INT           DEFAULT NULL COMMENT 'FK to tblUsers: the member whose home this is (D-124). Only that member can agree to a map of it, and erasing them removes it (D-122). Empty = no host, so no map',
     `placeEnteredByID` INT           DEFAULT NULL COMMENT 'FK to tblUsers: who last typed in or changed this home (#809, migration 275). A record of who did it; it decides nothing (D-124)',
     `placeMapAgreed`   TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = the host in hostUserID agreed that a map of this home may be shown (D-120, D-124). 0 = not agreed',
+    `notAHome`         TINYINT(1)    NOT NULL DEFAULT 0 COMMENT '1 = marked as not a home (for example a church hall) by whoever set the place, so a map of it may be shown with no host, subject to the installation, organisation and viewer map settings (D-128). Never set together with a host; a changed address clears it. 0 = a home, or not said',
     `isActive`         TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = removed from the group''s list. A removed place keeps its row so a past meeting can say it met somewhere no longer recorded, but its address, who entered it and the agreement are emptied',
     `createdAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updatedAt`        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

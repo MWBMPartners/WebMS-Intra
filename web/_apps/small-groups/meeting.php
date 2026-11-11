@@ -123,7 +123,8 @@ if ($editMeeting !== null) {
             $siteId,
             $groupId,
             (int) ($shownPlace['hostUserID'] ?? 0),
-            (int) ($shownPlace['placeMapAgreed'] ?? 0) === 1
+            (int) ($shownPlace['placeMapAgreed'] ?? 0) === 1,
+            (int) ($shownPlace['notAHome'] ?? 0) === 1
         ) === true;
     }
 }
