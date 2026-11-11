@@ -199,8 +199,8 @@ $isPublic   = EventVisibility::isPublicSelect('e', $ruleMode);
 //    giving it the address would be using it for something else, which D-134
 //    rules out. `submissionStatus` stays for everybody. `submittedByID` (a
 //    member's own account number, when a signed-in member suggested it) is
-//    still selected, but since #968 it reaches only a caller who may manage
-//    events — see "#968" below the lookup.
+//    still selected, but since #968 it reaches only an administrator signed
+//    in to the portal, never an API key (D-136) — see "#968" below the lookup.
 //    `(e.externalFeedID IS NOT NULL) AS imported` gives the yes/no the reply
 //    needs without selecting the calendar number itself.
 //
@@ -333,7 +333,7 @@ unset($event['canSeeFull']);
 //    even say the field exists. A plain variable, not a `const`: a page file
 //    is `require`d by the router, and a `const` declared in it would raise
 //    "already defined" if the file were ever loaded twice in one request.
-$forManagersOnly = [
+$forSignedInAdministratorsOnly = [
     'moderationNote',
     'createdByID',
     'updatedByID',
@@ -344,8 +344,8 @@ $forManagersOnly = [
 ];
 $seesWorkingNotes = $apiKeyRow === null && $canManageEvents === true;
 if ($seesWorkingNotes === false) {
-    foreach ($forManagersOnly as $managersOnly) {
-        unset($event[$managersOnly]);
+    foreach ($forSignedInAdministratorsOnly as $workingNote) {
+        unset($event[$workingNote]);
     }
 }
 

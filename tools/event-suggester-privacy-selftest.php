@@ -68,33 +68,41 @@
  *      note included.
  *   R  the event page (`/calendar/event`) and the calendar download
  *      (`/calendar/export`: one event, a series, the whole calendar) now
- *      name their columns instead of reading the whole row with `e.*`. Each
- *      is fetched for a public (with a what3words address), a members-only,
- *      an all-day, a cancelled, a fully-shown imported, a briefly-shown
- *      imported, a what3words-only and a repeating event, by a visitor, a
- *      member and an administrator; the right words must be there, the
- *      visitor's name and address and the note must be nowhere, and the same
- *      code fetched twice must come out identical once the random tokens are
- *      taken out (R8 — without it P13 would prove nothing).
- *      WHAT R PROVES IS NARROWER THAN IT LOOKS, and round 1 of #968's check
- *      showed it: the first version had no what3words address in any event,
- *      so P13 ("identical with `e.*` put back") passed while the page's list
- *      left out `locationW3W` and every what3words link and one whole
- *      "Where" card were gone. R proves the named lists lose nothing FOR ITS
- *      OWN EVENTS. Section C is what checks the lists themselves.
- *   C  the column lists, checked against the SOURCE with PHP's tokeniser
- *      (no database, no server): every `$event['…']` the page reads, and every
+ *      name their columns instead of reading the whole row with `e.*`. THIS
+ *      IS THE GUARANTEE that the lists are complete (round 4): EVERY column of
+ *      tblEvents is filled with a distinct value, the columns read from
+ *      information_schema while the test runs (R0 fails if one is left empty
+ *      that has something to point at), across a public (with a what3words
+ *      address), a members-only, an all-day, a cancelled, a fully-shown
+ *      imported, a briefly-shown imported, a what3words-only, a
+ *      website-ticked and a repeating event. Each is fetched by a visitor, a
+ *      member and an administrator, with the three downloads; the right words
+ *      must be there, the visitor's name and address and the note must be
+ *      nowhere, and the same code fetched twice must come out identical (R8).
+ *      P13 then fetches everything again with `e.*` put back and requires it
+ *      IDENTICAL — so a column the code reads but the list leaves out shows,
+ *      whatever spelling reaches it. The first version filled only a few
+ *      columns, and round 1 of the check found `locationW3W` missing from the
+ *      list with P13 green; rounds 2 and 3 found spellings past section C.
+ *      P26 and P27 take every listed column off one at a time and require R
+ *      to see each go. What R still cannot see: a column read but not
+ *      listed that no event here makes show.
+ *   C  a cheap TRIPWIRE on the column lists, read from the SOURCE with PHP's
+ *      tokeniser (no database, no server) — not the guarantee, which is R:
+ *      every `$event['…']` the page reads, and every
  *      `$row`/`$r`/`$ev`/`$events[0]` key the download reads, must be in that
  *      page's SELECT list, every listed column must be read, the download's
  *      three lists must agree, each list must hold NOTHING but backticked
  *      columns (no `e.*`, no un-backticked column — round 2 of the check), and
  *      every other use of the row (a key built at run time, the row passed to
  *      a function or copied) is pinned WITH ITS COUNT, so a new one or a
- *      second copy fails until a person has looked at it. Reaching a variable
- *      without naming it (`$$`, `${…}`, `compact()`, `extract()`,
- *      `get_defined_vars()`, `$GLOBALS`, `eval`) is refused in both files. Its
- *      own header says what it still cannot see.
- *   P8b-P25  a gate that lets a signed-in member through at v1 alone (P8b);
+ *      second copy fails until a person has looked at it. The spellings it
+ *      knows of reaching a variable without naming it (`$$`, `${…}`,
+ *      `compact()` by any form of the name, `extract()`, `get_defined_vars()`,
+ *      those names as strings, `call_user_func()`, `$GLOBALS`, `eval`) trip it
+ *      in both files; PHP has more, which is why R is the guarantee. Its own
+ *      header says what it cannot see.
+ *   P8b-P25, P14c-P14d  a gate that lets a signed-in member through at v1 alone (P8b);
  *      each of the seven field names taken off the detail handler's list, one
  *      at a time (the member and the read-only key are then sent exactly that
  *      field); the gate switched off both ways, and put back to round 1's
@@ -557,9 +565,10 @@ $state['key'] = (int) $db->insert_id;
 $keyIns->close();
 
 // #968: a key that may also WRITE events. `events:write` is what the detail
-// handler treats as "may manage events" for a key (it can already create,
-// edit, delete and read the drafts of every event), so it is the one key
-// that should still be sent the moderation fields.
+// handler treats as "may manage events" for a key — for the DRAFT rule only.
+// Since D-136 it must NOT be sent the moderation fields: no API key is,
+// whatever its scope. Section M requires them absent for it, at both
+// addresses, and plant P11b puts round 1's "write key gets them" back.
 $writeKey = 'wbms_' . bin2hex(random_bytes(16));
 $keyIns   = $db->prepare(
     'INSERT INTO `tblApiKeys` (`siteID`, `name`, `keyHash`, `keyPrefix`, `scopes`, `isActive`, `createdByID`) '
@@ -774,7 +783,7 @@ $clearEvents();
 // the only way to know where it would go if something did.
 const P968_NOTE = 'P968 moderation note: the person who suggested this was rude on the telephone';
 
-/** The fields only a caller who may manage events is sent (detail.php, #968). */
+/** The fields only an administrator signed in to the portal is sent (detail.php, #968, D-136). */
 const P968_MANAGERS_ONLY = [
     'moderationNote', 'createdByID', 'updatedByID', 'submittedByID',
     'moderatedByID', 'statusChangedByID', 'deletedAt',
@@ -904,11 +913,41 @@ $checkModerated('M', $mClean);
 // calendar/event.php and calendar/export.php used to read the whole event row
 // (`e.*`), so a visitor's name and address (#963) and the moderation note were
 // in memory on two public pages. They now name their columns. A named list can
-// be too SHORT, which shows only as a blank on the page, so this renders both
-// for a spread of events, to a visitor, a member and an administrator — and
-// section P renders them again with `e.*` put back and requires every answer
-// to be identical. Every event below also carries a visitor's name and
+// be too SHORT, which shows only as a blank on the page — and nothing reading
+// the source can promise to see every way a page reaches a column (round 3 of
+// the check: `call_user_func('compact', 'event')` and `namespace\compact()`
+// walked past section C). So THIS section is the guarantee, and it asks the
+// question by behaviour (D-065):
+//
+//   EVERY column of tblEvents is filled with a distinct, recognisable value,
+//   the column list being read from information_schema WHILE THE TEST RUNS,
+//   so a column added later is filled without anybody remembering to. Then
+//   the event page (to a visitor, a member, a global administrator and an
+//   administrator of this organisation only) and the three downloads are
+//   rendered with the named lists, and section P renders them
+//   again with `e.*` put back and requires every answer to be IDENTICAL. A
+//   column the code reads but the list leaves out holds a real value under
+//   `e.*` and nothing under the named list, so the two renders differ —
+//   whatever spelling the code uses to reach it.
+//
+// Where columns conflict, there is more than one event: timed and all-day,
+// public and members-only, published and cancelled, imported in full and
+// imported briefly, ticked for the website, a what3words-only location, and a
+// three-date repeating series. Every event also carries a visitor's name and
 // address and a moderation note, which must appear in none of the answers.
+//
+// AND SECTION P MEASURES THAT THIS IS TRUE (P26, P27): every column in each
+// list is taken off on its own and R must see the difference. The first run of
+// that sweep found two R could not see — `siteID` (read only to ask whether
+// the viewer administers that organisation, which a GLOBAL administrator
+// passes whatever it holds: hence the organisation-only administrator) and
+// the download's `timezone` (it falls back to the organisation's zone, and
+// every timed event was in that zone: hence the website event in Auckland).
+//
+// WHAT IT CANNOT SEE: a column the code reads but no event here makes matter
+// (a page branch none of them reaches). The sweep proves every LISTED column
+// matters here; a column read and NOT listed is caught only if one of these
+// events makes it show.
 $r0 = new DateTimeImmutable('2031-08-05 00:00:00', new DateTimeZone('UTC')); // a Tuesday
 $db->query("INSERT INTO `tblEventSeries` (`siteID`, `seriesName`, `seriesSlug`) VALUES ({$siteId}, 'P968 Tuesday study', 'p968-tuesday-study')");
 $series = (int) $db->insert_id;
@@ -922,75 +961,191 @@ $feed    = (int) $db->insert_id;
 $db->query("INSERT INTO `tblExternalFeeds` (`siteID`, `name`, `url`, `audienceLevel`, `websiteOptIn`, `isActive`) "
     . "VALUES ({$siteId}, 'P968 members calendar', 'https://calendar.selftest.invalid/p968-members.ics', 'members', 0, 1)");
 $feedMembers = (int) $db->insert_id;
-$private = [
-    'submitterName'  => VISITOR_NAME,
-    'submitterEmail' => VISITOR_EMAIL,
-    'moderationNote' => P968_NOTE,
-];
+
+// 🧾 Every column of tblEvents, as the database says it is NOW.
+$eventColumns = $db->query(
+    "SELECT `COLUMN_NAME`, `DATA_TYPE`, `COLUMN_TYPE`, `CHARACTER_MAXIMUM_LENGTH`, `EXTRA` "
+    . "FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblEvents' "
+    . 'ORDER BY `ORDINAL_POSITION`'
+)->fetch_all(MYSQLI_ASSOC);
+$eventLinks = [];
+$rs = $db->query(
+    "SELECT `COLUMN_NAME`, `REFERENCED_TABLE_NAME`, `REFERENCED_COLUMN_NAME` FROM `information_schema`.`KEY_COLUMN_USAGE` "
+    . "WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblEvents' AND `REFERENCED_TABLE_NAME` IS NOT NULL"
+);
+while ($row = $rs->fetch_assoc()) {
+    $eventLinks[$row['COLUMN_NAME']] = [$row['REFERENCED_TABLE_NAME'], $row['REFERENCED_COLUMN_NAME']];
+}
+if (count($eventColumns) < 60) {
+    refuse('information_schema lists only ' . count($eventColumns) . ' columns for tblEvents');
+}
+
+/**
+ * A distinct, recognisable value for EVERY column, by its type, for one
+ * event. `$seed` makes them distinct between events; the three dates of the
+ * series share one seed, so their shown fields agree and the series is still
+ * sent as one repeating entry.
+ *
+ * Columns that decide whether the row is the kind of event it is meant to
+ * be are then set safely (not deleted, not imported unless meant to be, a
+ * real zone, an address of its own); each scenario sets the rest.
+ *
+ * @return array<string,int|string|null>
+ */
+$fullRow = static function (int $seed) use ($eventColumns, $eventLinks, $db, $siteId, $siteZone): array {
+    $row = [];
+    foreach ($eventColumns as $i => $c) {
+        $name  = (string) $c['COLUMN_NAME'];
+        $extra = strtolower((string) $c['EXTRA']);
+        if (str_contains($extra, 'auto_increment') === true
+            || (str_contains($extra, 'generated') === true && str_contains($extra, 'default_generated') === false)) {
+            continue; // the database fills these
+        }
+        if (isset($eventLinks[$name]) === true) {
+            // A linked column needs a row that exists; the first one there is.
+            [$table, $column] = $eventLinks[$name];
+            $row[$name] = $db->query("SELECT MIN(`{$column}`) AS `v` FROM `{$table}`")->fetch_assoc()['v'];
+            continue;
+        }
+        $tag  = $seed * 100 + $i;
+        $type = strtolower((string) $c['DATA_TYPE']);
+        if (in_array($type, ['varchar', 'char', 'text', 'mediumtext', 'longtext', 'tinytext'], true) === true) {
+            $max        = (int) ($c['CHARACTER_MAXIMUM_LENGTH'] ?? 255);
+            $row[$name] = substr('P968v' . $seed . ' ' . $name, 0, min($max, 200));
+        } elseif ($type === 'tinyint') {
+            $row[$name] = 1;
+        } elseif (in_array($type, ['int', 'smallint', 'mediumint', 'bigint'], true) === true) {
+            $row[$name] = 7000 + $tag;
+        } elseif ($type === 'decimal') {
+            $row[$name] = sprintf('%d.%07d', 10 + ($i % 40), $tag);
+        } elseif ($type === 'datetime' || $type === 'timestamp') {
+            $row[$name] = (new DateTimeImmutable('2031-09-01 00:00:00'))->modify('+' . $tag . ' minutes')->format('Y-m-d H:i:s');
+        } elseif ($type === 'date') {
+            $row[$name] = (new DateTimeImmutable('2031-09-01'))->modify('+' . ($i % 300) . ' days')->format('Y-m-d');
+        } elseif ($type === 'enum') {
+            preg_match("/^enum\\('([^']*)'/", (string) $c['COLUMN_TYPE'], $m);
+            $row[$name] = $m[1] ?? null;
+        } elseif ($type === 'binary' || $type === 'varbinary') {
+            $row[$name] = random_bytes((int) ($c['CHARACTER_MAXIMUM_LENGTH'] ?? 32));
+        } else {
+            // A type this section does not know: say so, rather than leave a
+            // new column empty and the comparison blind to it.
+            refuse("section R does not know how to fill tblEvents.{$name} ({$type}); teach \$fullRow");
+        }
+    }
+    // Safe settings for what the row IS. Each scenario overrides as it needs.
+    return array_merge($row, [
+        'siteID'          => $siteId,
+        'seriesID'        => null,
+        'eventSlug'       => 'p968-' . $seed . '-' . bin2hex(random_bytes(4)),
+        'timezone'        => $siteZone,
+        'status'          => 'published',
+        'isAllDay'        => 0,
+        'isPublic'        => 0,
+        'isDeleted'       => 0,
+        'externalFeedID'  => null,
+        'externalPrivate' => 0,
+        'externalDuplicate' => 0,
+        'partnerOrgs'     => '["P968v' . $seed . ' partner"]',
+        'locationGeoLat'  => sprintf('51.%07d', $seed),
+        'locationGeoLng'  => sprintf('0.%07d', $seed),
+        'submitterName'   => VISITOR_NAME,
+        'submitterEmail'  => VISITOR_EMAIL,
+        'moderationNote'  => P968_NOTE,
+    ]);
+};
 $day = static fn (int $plus, string $time): string => $r0->modify('+' . $plus . ' days')->format('Y-m-d') . ' ' . $time;
+$imported = static fn (int $feedId, string $uid, string $detail): array => [
+    'externalFeedID' => $feedId, 'externalUid' => $uid, 'externalUidHash' => hash('sha256', $uid, true),
+    'externalRecurrenceKey' => '', 'importLevel' => 'public', 'importDetail' => $detail,
+    'importSource' => 'calendar', 'importApiOptOut' => 0, 'importAudienceType' => null, 'importAudienceID' => null,
+];
 $rEvents = [
-    'public' => $p968Event($private + [
-        'eventName' => 'P968 public open day', 'isPublic' => 1, 'isFeatured' => 1,
+    'public' => $p968Event(array_merge($fullRow(1), [
+        'eventName' => 'P968 public open day', 'isPublic' => 1,
         'startDateTime' => $day(1, '10:00:00'), 'endDateTime' => $day(1, '16:00:00'),
-        'description' => "Come and see.\nBring a friend.", 'categoryID' => 1, 'typeID' => 1,
+        'description' => "Come and see.\nBring a friend.",
         'locationName' => 'P968 Hall', 'locationAddress' => "1 Test Street\nTestville TE1 1ST",
         'locationWebURL' => 'https://hall.selftest.invalid/', 'locationPhone' => '01234 567890',
         'locationGeoLat' => '52.2053000', 'locationGeoLng' => '0.1218000',
         'hostOrgName' => 'P968 Host Trust', 'partnerOrgs' => '["P968 Partner A","P968 Partner B"]', 'capacity' => 40,
         'locationW3W' => 'filled.count.soap',
-    ]),
+    ])),
     // Round 1 of #968's check: an event whose ONLY location is a what3words
     // address. With `locationW3W` left off the page's list, its whole "Where"
     // card disappeared and nothing warned.
-    'w3wOnly' => $p968Event($private + [
+    'w3wOnly' => $p968Event(array_merge($fullRow(2), [
         'eventName' => 'P968 meet at the gate', 'isPublic' => 1,
         'startDateTime' => $day(7, '08:00:00'), 'endDateTime' => $day(7, '09:00:00'),
+        'locationName' => null, 'locationAddress' => null, 'locationGeoLat' => null, 'locationGeoLng' => null,
         'locationW3W' => 'index.home.raft',
-    ]),
-    'members' => $p968Event($private + [
+    ])),
+    'members' => $p968Event(array_merge($fullRow(3), [
         'eventName' => 'P968 members meeting', 'isPublic' => 0,
         'startDateTime' => $day(2, '19:30:00'), 'endDateTime' => $day(2, '21:00:00'),
         'description' => 'For members.', 'locationName' => 'P968 Vestry',
-    ]),
-    'allday' => $p968Event($private + [
+    ])),
+    'allday' => $p968Event(array_merge($fullRow(4), [
         'eventName' => 'P968 all day retreat', 'isPublic' => 1, 'isAllDay' => 1,
         'startDateTime' => $day(3, '00:00:00'), 'endDateTime' => $day(3, '23:59:59'), 'timezone' => 'Europe/London',
-    ]),
-    'cancelled' => $p968Event($private + [
+    ])),
+    'cancelled' => $p968Event(array_merge($fullRow(5), [
         'eventName' => 'P968 cancelled concert', 'isPublic' => 1, 'status' => 'cancelled',
         'cancelReason' => 'P968 the roof leaks', 'statusChangedAt' => '2031-07-30 12:00:00',
         'startDateTime' => $day(4, '18:00:00'), 'endDateTime' => $day(4, '20:00:00'),
-    ]),
-    'imported' => $p968Event($private + [
+    ])),
+    'imported' => $p968Event(array_merge($fullRow(6), $imported($feed, 'p968-full@selftest.invalid', 'full'), [
         'eventName' => 'P968 copied in', 'isPublic' => 0,
         'startDateTime' => $day(5, '09:00:00'), 'endDateTime' => $day(5, '10:00:00'),
         'description' => 'From an outside calendar.', 'locationName' => 'P968 Elsewhere',
-        'externalFeedID' => $feed, 'externalUid' => 'p968-full@selftest.invalid',
-        'importLevel' => 'public', 'importDetail' => 'full', 'importSource' => 'calendar', 'importApiOptOut' => 0,
-    ]),
-    'importedBasic' => $p968Event($private + [
+    ])),
+    'importedBasic' => $p968Event(array_merge($fullRow(7), $imported($feedMembers, 'p968-basic@selftest.invalid', 'basic'), [
         'eventName' => 'P968 copied in briefly', 'isPublic' => 0,
         'startDateTime' => $day(6, '09:00:00'), 'endDateTime' => $day(6, '10:00:00'),
         'description' => 'Only its audience sees this.', 'locationName' => 'P968 Somewhere',
-        'externalFeedID' => $feedMembers, 'externalUid' => 'p968-basic@selftest.invalid',
-        'importLevel' => 'public', 'importDetail' => 'basic', 'importSource' => 'calendar', 'importApiOptOut' => 0,
-    ]),
+    ])),
+    // Ticked for the public website with no date limits, so the page's
+    // search-engine markup (D-089) is drawn for it. In a zone that is NOT the
+    // organisation's: the download falls back to the organisation's zone when
+    // `timezone` is missing, so with every timed event in that zone a list
+    // without `timezone` was invisible (the P27 sweep measured exactly that).
+    'website' => $p968Event(array_merge($fullRow(8), [
+        'eventName' => 'P968 on the website', 'isPublic' => 1, 'showOnWebsite' => 1,
+        'timezone' => 'Pacific/Auckland',
+        'websiteFrom' => null, 'websiteUntil' => null,
+        'startDateTime' => $day(8, '11:00:00'), 'endDateTime' => $day(8, '12:00:00'),
+    ])),
 ];
-// The identity of an imported row is the SHA-256 of its UID, stored as bytes.
-$db->query("UPDATE `tblEvents` SET `externalUidHash` = UNHEX(SHA2(`externalUid`, 256)) WHERE `externalFeedID` IN ({$feed}, {$feedMembers})");
 for ($w = 0; $w < 3; $w++) {
-    $rEvents['series' . $w] = $p968Event($private + [
+    $rEvents['series' . $w] = $p968Event(array_merge($fullRow(9), [
         'eventName' => 'P968 Tuesday study', 'isPublic' => 1, 'seriesID' => $series,
         'startDateTime' => $r0->modify('+' . (7 * $w) . ' days')->format('Y-m-d') . ' 19:00:00',
         'endDateTime'   => $r0->modify('+' . (7 * $w) . ' days')->format('Y-m-d') . ' 20:00:00',
         'description'   => 'Weekly.', 'locationName' => 'P968 Library',
-    ]);
+    ]));
 }
 $slugOf = [];
 $q = $db->query("SELECT `eventID`, `eventSlug` FROM `tblEvents` WHERE `eventName` LIKE 'P968 %'");
 while ($row = $q->fetch_assoc()) {
     $slugOf[(int) $row['eventID']] = (string) $row['eventSlug'];
 }
+
+// Which columns ended up empty in EVERY one of section R's events. Only the
+// ones that have nothing to point at may stay empty: a venue and a room (no
+// venue exists in this database, and neither page reads them).
+$emptyEverywhere = [];
+$ids = implode(', ', array_map('intval', array_values($rEvents)));
+foreach ($eventColumns as $c) {
+    $name = (string) $c['COLUMN_NAME'];
+    $n    = (int) $db->query("SELECT COUNT(`{$name}`) AS `n` FROM `tblEvents` WHERE `eventID` IN ({$ids})")->fetch_assoc()['n'];
+    if ($n === 0) {
+        $emptyEverywhere[] = $name;
+    }
+}
+$mayStayEmpty = array_values(array_filter(['venueID', 'roomID'], static function (string $col) use ($db, $eventLinks): bool {
+    [$table, $column] = $eventLinks[$col] ?? ['', ''];
+    return $table !== '' && $db->query("SELECT MIN(`{$column}`) AS `v` FROM `{$table}`")->fetch_assoc()['v'] === null;
+}));
 
 /**
  * Take out what differs between two renders of the SAME code: the form token
@@ -1012,8 +1167,15 @@ $normalise = static function (string $body): string {
 $renderAll = static function () use ($http, $signIn, $rEvents, $slugOf, $series, $normalise): array {
     $signIn('member');
     $signIn('admin');
+    $signIn('siteadmin');
     $out = [];
-    foreach (['visitor' => 'r-visitor', 'member' => 'member', 'admin' => 'admin'] as $who => $jar) {
+    // The organisation's own administrator as well as a global one: the page
+    // reads `siteID` only to ask whether the viewer administers THAT
+    // organisation (the "Manage who sees this" link on an imported event),
+    // and a global administrator passes that question whatever `siteID` holds
+    // — so without this viewer, `siteID` could leave the list unseen (the P26
+    // sweep measured exactly that).
+    foreach (['visitor' => 'r-visitor', 'member' => 'member', 'admin' => 'admin', 'siteadmin' => 'siteadmin'] as $who => $jar) {
         foreach ($rEvents as $label => $id) {
             $page = $http('GET', '/calendar/event?slug=' . urlencode($slugOf[$id]), [], ['jar' => $jar]);
             $out["{$who} page {$label}"] = [$page['status'], $normalise($page['body'])];
@@ -1099,6 +1261,10 @@ $checkRenders = static function (string $prefix, array $r) use ($shown): void {
 
 $rClean = $renderAll();
 $checkRenders('R', $rClean);
+echo '      (' . count($eventColumns) . ' columns of tblEvents read from information_schema; left empty in every event: '
+    . json_encode($emptyEverywhere) . ")\n";
+check('R0 every column of tblEvents holds a value in at least one of these events, except a link with nothing to point at',
+    $emptyEverywhere, $mayStayEmpty);
 $rAgain = $renderAll();
 check('R8 the same code rendered twice comes out identical once tokens are taken out (so a difference in section P is real)',
     $rendersDiffer($rClean, $rAgain), []);
@@ -1126,11 +1292,18 @@ if ($rendersDiffer($rClean, $rAgain) !== []) {
 //     an old one (a second fetch into `$event`), fails here until a person has
 //     looked at it (round 2 of the check: the shapes were de-duplicated, so a
 //     second identical fetch was invisible);
-//   - any way of reaching a variable WITHOUT naming it: `$$name`, `${'…'}`,
-//     `compact()`, `extract()`, `get_defined_vars()`, `$GLOBALS`, `eval` —
-//     refused outright in these two files (neither uses any of them; round 2
-//     of the check showed `$$nm[...]`, `${'event'}[...]` and `compact('event')`
-//     walked straight past the pins, because no `$event` token appears).
+//   - the spellings it KNOWS of reaching a variable without naming it:
+//     `$$name`, `${'…'}`, `compact()`, `extract()`, `get_defined_vars()` (by
+//     any form of the name, `namespace\compact` included), any of those
+//     three names as a string, `call_user_func()`, `call_user_func_array()`,
+//     `$GLOBALS` and `eval` — neither file uses any of them. This is a
+//     TRIPWIRE for known spellings, not a proof: round 2 of the check found
+//     `$$nm`, `${'event'}` and `compact('event')` past it, and round 3 found
+//     `namespace\compact('event')` and `call_user_func('compact', 'event')`
+//     past the round-2 version. PHP has more ways than any list. THE
+//     GUARANTEE IS SECTION R, which fills every column and compares the
+//     rendered pages with `e.*` put back, so a column reached by any spelling
+//     shows up there.
 //
 // and requires each page's SELECT list and those reads to match in BOTH
 // directions. The select list is read from the statement's text: each
@@ -1143,6 +1316,11 @@ if ($rendersDiffer($rClean, $rAgain) !== []) {
 // backticked form was collected).
 //
 // WHAT IT CANNOT SEE, said plainly, and checked by hand on 11 November 2026:
+//   - Any spelling of reaching the row that is not on its list (above).
+//   - The columns of the `%s` argument: the visibility rule's own SQL
+//     (EventVisibility's `canSeeFull` expression) is put into the list at run
+//     time, so its text is not in the source this reads. It hands the page
+//     one value, `canSeeFull`, which is allowed by name.
 //   - A key built at run time. The one there is (`$row[$rendered]` in
 //     export.php's `$patternStillTrue`) walks a literal list of nine names, all
 //     in the list, and reads the SERIES-RUN query's rows (`$seriesRunForViewer`,
@@ -1192,11 +1370,23 @@ function p968RowReads(string $source, array $rowVars): array
             $indirect[] = 'line ' . $t[2] . ': ' . $t[1];
             continue;
         }
-        if (is_array($t) === true && in_array($t[0], [T_STRING, T_NAME_FULLY_QUALIFIED], true) === true
-            && in_array(strtolower(ltrim($t[1], '\\')), ['compact', 'extract', 'get_defined_vars'], true) === true
+        // A call by any spelling of the name: plain, `\compact`,
+        // `namespace\compact` (T_NAME_RELATIVE — round 3 of the check), or a
+        // qualified name; and the two functions that call another by a
+        // string (`call_user_func('compact', …)`, round 3).
+        if (is_array($t) === true
+            && in_array($t[0], [T_STRING, T_NAME_FULLY_QUALIFIED, T_NAME_QUALIFIED, T_NAME_RELATIVE], true) === true
+            && in_array(strtolower((string) substr((string) strrchr('\\' . $t[1], '\\'), 1)), P968_INDIRECT_CALLS, true) === true
             && $text($tokens[$i + 1] ?? '') === '('
             && in_array($text($tokens[$i - 1] ?? ''), ['->', '?->', '::', 'function', 'new'], true) === false) {
             $indirect[] = 'line ' . $t[2] . ': ' . $t[1] . '(';
+            continue;
+        }
+        // The name of one of them as a string, wherever it is: the way it is
+        // handed to call_user_func(), array_map() or anything else.
+        if (is_array($t) === true && $t[0] === T_CONSTANT_ENCAPSED_STRING
+            && in_array(strtolower(ltrim(substr($t[1], 1, -1), '\\')), ['compact', 'extract', 'get_defined_vars'], true) === true) {
+            $indirect[] = 'line ' . $t[2] . ': the string ' . $t[1];
             continue;
         }
         if (is_array($t) === false || $t[0] !== T_VARIABLE || in_array($t[1], $rowVars, true) === false) {
@@ -1270,6 +1460,9 @@ function p968SelectLists(string $source, string $startsWith): array
     }
     return $lists;
 }
+
+/** Functions that reach variables without naming them, or call another function by a string. */
+const P968_INDIRECT_CALLS = ['compact', 'extract', 'get_defined_vars', 'call_user_func', 'call_user_func_array'];
 
 /** Names the code reads that come from no column: the `%s` alias, and what redact() adds. */
 const P968_NOT_COLUMNS = ['canSeeFull', 'detailsLimited'];
@@ -1381,7 +1574,7 @@ $checkColumns = static function (string $prefix, array $c): void {
     check("{$prefix}3 ...and every column in its list is read (so the list stays the page's, not a copy of the table)", $c['pageUnread'], []);
     check("{$prefix}4 ...no key built at run time, and every other use of the row is one a person has looked at, as many times as pinned",
         [$c['pageRuntime'], $c['pageBare']], [[], []]);
-    check("{$prefix}4b ...and nothing reaches a variable without naming it (\$\$, \${, compact, extract, get_defined_vars, \$GLOBALS, eval)",
+    check("{$prefix}4b ...and none of the spellings this tripwire knows for reaching a variable without naming it (section R is the guarantee)",
         $c['pageIndirect'], []);
     check("{$prefix}5 the download has THREE such statements, all with the same list",
         [$c['fileStatements'], $c['fileSame']], [3, true]);
@@ -1390,7 +1583,7 @@ $checkColumns = static function (string $prefix, array $c): void {
         [$c['fileMissing'], $c['fileUnread']], [[], []]);
     check("{$prefix}7 ...and its run-time key and every other use of a row are ones a person has looked at, as many times as pinned",
         [$c['fileRuntime'], $c['fileBare']], [P968_EXPORT_RUNTIME, []]);
-    check("{$prefix}7b ...and nothing in it reaches a variable without naming it", $c['fileIndirect'], []);
+    check("{$prefix}7b ...and none of the spellings this tripwire knows for reaching a variable without naming it", $c['fileIndirect'], []);
 };
 
 $eventFile  = $webFrom . $sep . '_apps' . $sep . 'calendar' . $sep . 'event.php';
@@ -1583,7 +1776,7 @@ if ($measuring === true) {
     );
     $before = $renderAll();
     $checkRenders('P12-', $before);
-    check('P13 with `e.*` back (the code before #968), every page and file of section R\'s events is identical to the named-column version (section C, not this, checks the lists themselves)',
+    check('P13 with `e.*` back (the code before #968), every page and file is identical to the named-column version — with every column filled, a column read but not listed would differ here, however the code reaches it',
         $rendersDiffer($rClean, $before), []);
     if ($rendersDiffer($rClean, $before) !== []) {
         echo '      first difference: ' . $firstDifference($rClean, $before, $rendersDiffer($rClean, $before)) . "\n";
@@ -1599,6 +1792,80 @@ if ($measuring === true) {
          array_values(array_filter($rendersDiffer($rClean, $short), static fn (string $k): bool => str_contains($k, ' file ')))],
         [true, false, []]);
     $restore968();
+    // (g3) Round 3 of the check: the phone taken off the page's list AND read
+    //      by a spelling section C's round-2 tripwire did not know —
+    //      `call_user_func('compact', 'event')`, then `namespace\compact()`.
+    //      Section R must go red whatever the spelling, because it compares
+    //      what the page SHOWS with `e.*` put back. (Section C now trips on
+    //      both too, but it is the tripwire; R is the guarantee.)
+    $plantMany = static function (string $path, array $edits) use ($originals968, $startServer, $waitForServer): void {
+        $text = $originals968[$path];
+        foreach ($edits as [$find, $with, $times]) {
+            if (substr_count($text, $find) !== $times) {
+                refuse('section P (#968, R) found ' . substr_count($text, $find) . " copies of '{$find}' where it expected {$times}");
+            }
+            $text = str_replace($find, $with, $text);
+        }
+        file_put_contents($path, $text);
+        clearstatcache(true, $path);
+        if ((string) file_get_contents($path) !== $text) {
+            refuse('section P (#968, R) could not read back a plant');
+        }
+        $startServer();
+        $waitForServer();
+    };
+    foreach (["call_user_func('compact', 'event')" => 'P14c', "namespace\\compact('event')" => 'P14d'] as $spelling => $label) {
+        $edits = [
+            ['`e`.`locationPhone`, ', '', 1],
+            ["\$hasLocationInfo = (\$event['locationName'] ?? '') !== ''", "\$p968c = {$spelling}; \$hasLocationInfo = (\$event['locationName'] ?? '') !== ''", 1],
+            ["\$event['locationPhone']", "\$p968c['event']['locationPhone']", 3],
+        ];
+        $plantMany($eventPath, $edits);
+        $short = $renderAll();
+        check("{$label} with the phone off the page's list and read through {$spelling}, section R sees the page change (the phone is gone)",
+            [in_array('visitor page public', $rendersDiffer($rClean, $short), true), $shown($short, 'visitor page public', '01234 567890')],
+            [true, false]);
+        $planted = $originals968[$eventPath];
+        foreach ($edits as [$find, $with]) {
+            $planted = str_replace($find, $with, $planted);
+        }
+        $c = $columnsCheck($planted, $originals968[$exportPath]);
+        check("{$label}-C ...and section C's tripwire now names that spelling too", $c['pageIndirect'] !== [], true);
+        $restore968();
+    }
+
+    // (g4) EVERY column in each list, taken off ONE AT A TIME: section R must
+    //      see each one go. This is what makes "R is the guarantee" a measured
+    //      statement rather than a hope: a listed column whose absence R cannot
+    //      see is one R could not see missing either. The page's list is
+    //      planted once per column; the download's three lists together.
+    $sweep = static function (string $path, string $listStart, string $listEnd, int $lists) use ($originals968, $plantMany, $renderAll, $rendersDiffer, $rClean, $restore968): array {
+        $text  = $originals968[$path];
+        $at    = strpos($text, $listStart);
+        $end   = $at === false ? false : strpos($text, $listEnd, $at);
+        if ($at === false || $end === false) {
+            refuse('section P (#968, sweep) could not find a column list');
+        }
+        preg_match_all('/`e`\.`(\w+)`, /', substr($text, $at, $end - $at), $m);
+        $unseen = [];
+        foreach (array_unique($m[1]) as $column) {
+            $plantMany($path, [['`e`.`' . $column . '`, ', '', $lists]]);
+            if ($rendersDiffer($rClean, $renderAll()) === []) {
+                $unseen[] = $column;
+            }
+            $restore968();
+        }
+        return ['tried' => count(array_unique($m[1])), 'unseen' => $unseen];
+    };
+    $pageSweep = $sweep($eventPath, "'SELECT `e`.`eventID`, `e`.`siteID`", 'FROM `tblEvents`', 1);
+    echo '      (the page: ' . $pageSweep['tried'] . ' columns tried, not seen when missing: ' . json_encode($pageSweep['unseen']) . ")\n";
+    check('P26 every column of the event page\'s list, taken off on its own, changes what section R sees',
+        [$pageSweep['tried'] >= 25, $pageSweep['unseen']], [true, []]);
+    $fileSweep = $sweep($exportPath, "'SELECT `e`.`eventID`, `e`.`seriesID`", 'FROM `tblEvents`', 3);
+    echo '      (the download: ' . $fileSweep['tried'] . ' columns tried, not seen when missing: ' . json_encode($fileSweep['unseen']) . ")\n";
+    check('P27 every column of the download\'s lists, taken off all three at once, changes what section R sees',
+        [$fileSweep['tried'] >= 14, $fileSweep['unseen']], [true, []]);
+
     // (g2) The round-1 fault itself: `locationW3W` off the page's list. R2b
     //      must go red — the link gone from the public event, and the
     //      what3words-only event's whole "Where" card gone.

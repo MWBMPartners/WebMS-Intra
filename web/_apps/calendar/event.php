@@ -122,22 +122,25 @@ $today     = date('Y-m-d');
 //    with a what3words address lost its link, and an event whose only
 //    location was a what3words address lost its whole "Where" card. It was
 //    missed because the reads were collected with a pattern of letters only,
-//    and `W3W` holds a digit. So the list is now checked MECHANICALLY: section
-//    C of tools/event-suggester-privacy-selftest.php reads this file with
-//    PHP's own tokeniser, collects every `$event['…']`, and requires the list
-//    below and those reads to match in both directions (a column read but not
-//    selected, or selected but never read). It also pins every other use of
-//    `$event` (passed to a function, copied to another name, a key built at
-//    run time) so a new one is looked at by a person. Section R renders the
-//    page for a spread of events, and puts `e.*` back as a plant to compare;
-//    that shows only what its own events exercise, which is why C exists.
+//    and `W3W` holds a digit. Two checks in
+//    tools/event-suggester-privacy-selftest.php now stand guard:
+//      - Section R is the guarantee. It fills EVERY column of tblEvents with a
+//        distinct value (the column list read from the database as it runs),
+//        renders this page for a spread of events and viewers, and compares
+//        it with `e.*` put back: a column read but not listed shows up there
+//        whatever spelling reaches it. Its plants take every listed column
+//        off in turn and require R to see each go.
+//      - Section C is a cheap tripwire: PHP's own tokeniser collects every
+//        `$event['…']` and requires this list and those reads to match both
+//        ways, and trips on the spellings it knows for reaching the row
+//        without naming it. It cannot know every spelling; R does not need to.
 //    `isPublic` and `seriesSlug` were in `e.*`'s day but are read by nothing
 //    here (an `isPublic` test was removed by D-089), so they are not selected.
 //
 //    ⚠️ ADDING SOMETHING TO THIS PAGE THAT SHOWS ANOTHER EVENT COLUMN? Add the
 //       column to the list in the statement below, or `$event['…']` reads
 //       nothing (PHP gives a warning and null, and the page quietly shows a
-//       blank). Section C of the test fails until you do.
+//       blank). Both sections of the test go red until you do.
 //
 // 🧩 The canSeeFull expression goes in through sprintf()'s `%s`, not by
 //    joining it in with `.`: tools/audit-checks/check_sql_columns.py does
