@@ -154,7 +154,16 @@ class Giving
      *   - when a kept row joins, its name is used and NOTHING else, empty or
      *     not;
      *   - with no kept row, an account still reading "[Deleted User]" gives
-     *     an empty name, never the made-up one;
+     *     an empty name, never the made-up one. This keys on the made-up NAME
+     *     ALONE, on purpose, and never on `isActive` (#941 check round 4): a
+     *     global administrator can save an erased account with Active ticked
+     *     (admin/users/save.php), which leaves it reading "[Deleted User]"
+     *     while it is switched on - and that also stops the kept row joining
+     *     above, because the join asks emptiedAccountSql(), which requires
+     *     the account to be switched off. A rule that let a switched-on
+     *     account through would put "[Deleted User]" back in the file
+     *     (measured: `WHEN u.isActive = 1 THEN u.fullName` did exactly that).
+     *     The name is the one fact that says "made up";
      *   - otherwise the account's own name.
      * An empty name is the behaviour this file has always had for a nameless
      * donor: the row is written with an empty first and last name, which

@@ -187,7 +187,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 116; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 117; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -235,6 +235,10 @@ const EXPECTED_CHECKS = 116; // 80 until #703 (D-016) added two: the two writers
                             // happen), and the claim's label follows the
                             // database's own answer, measured by making the
                             // column emptiable for one request. 116.
+                            // #941's check round 4 added one: the giving-records
+                            // page says "No name was kept" for a nameless kept
+                            // row beside a LIVE account, never that the account
+                            // "had already been emptied". 117.
 
 function refuse(string $why): never
 {
@@ -1643,6 +1647,24 @@ ok('...it has ONE top heading, a label for every field, no address ending in ".p
     preg_match_all('/<h1\b/', $page['body']) === 1 && count($fields[1]) >= 7 && $unlabelled === [] && $bareFiles[1] === []
     && str_contains($page['body'], 'action="' . ADDR_A . $givingPath . '/save"') === true,
     'h1: ' . preg_match_all('/<h1\b/', $page['body']) . '; fields with no label: ' . implode(', ', $unlabelled) . '; bare files: ' . implode(', ', $bareFiles[1]));
+
+// 🗣️ #941 check round 4: a kept row with NO name beside an account that was
+//    NOT emptied - what an account name of '' (written by the Microsoft and
+//    Google sign-ins when the provider sends none) now leaves, because a blank
+//    is stored as NULL. The page said "No name was recorded: the account had
+//    already been emptied" for every nameless row, which is untrue here. The
+//    row is put beside Cal's live account and removed again straight away.
+q("INSERT INTO `tblGivingKeptDonors` (`siteID`, `donorID`, `fullName`, `address`, `postcode`, `scope`, `lastGiftDate`, `keptGiftCount`, `createdAt`) "
+    . "VALUES (?, ?, NULL, NULL, NULL, 'receipted', CURDATE(), 0, UTC_TIMESTAMP())", 'ii', [ORG_A, CAL]);
+try {
+    $namelessPage = req($jar['adm'], 'GET', $givingPath);
+} finally {
+    q('DELETE FROM `tblGivingKeptDonors` WHERE `siteID` = ? AND `donorID` = ?', 'ii', [ORG_A, CAL]);
+}
+ok('A KEPT ROW WITH NO NAME beside a live account is shown as "No name was kept", and the page never claims the account "had already been emptied" (#941 check round 4)',
+    $namelessPage['status'] === 200 && str_contains($namelessPage['body'], '<em>No name was kept</em>')
+    && str_contains($namelessPage['body'], 'had already been emptied') === false,
+    'HTTP ' . $namelessPage['status'] . '; ' . mb_substr(text($namelessPage['body']), 0, 600));
 
 $noToken = req($jar['adm'], 'POST', $givingPath . '/save', $givingForm(['countryCode' => $plain['code']]));
 $told    = $givingSaid(req($jar['adm'], 'GET', $givingPath)['body']);

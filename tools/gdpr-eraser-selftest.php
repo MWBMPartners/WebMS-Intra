@@ -226,7 +226,10 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 310; // 309 until a ninth: a declaration whose address is only a tab
+const EXPECTED_CHECKS = 311; // 310 until #941's check round 4 added one: an erased account
+                             // switched back ON, so no kept row joins, still gives an empty
+                             // name in the claim file and never "[Deleted User]".
+                             // 309 until a ninth: a declaration whose address is only a tab
                              // is no declaration address, so the account's address is kept
                              // and the declaration's postcode is not.
                              // 301 until #941's check round 3 added eight: a home address kept
@@ -7031,6 +7034,29 @@ ge_ok('...and for a donor whose account was ALREADY EMPTIED before the run (no n
     $ranOk($runG) && $kept4(P_K_G) !== null && $kept4(P_K_G)['fullName'] === null && $nameCells('11.07') === ['', '']
     && str_contains($line4(REQ_K_G, SITE_C3), 'Kept on this record: no name and a home address.'),
     json_encode(['row' => $kept4(P_K_G), 'claim row' => $claimRowsK['11.07'] ?? null, 'line' => $line4(REQ_K_G, SITE_C3)]));
+// 🔌 #941 check round 4: AN ERASED ACCOUNT SWITCHED BACK ON. A global
+//    administrator can save an erased account with Active ticked
+//    (admin/users/save.php - read, not driven: this test has no web server, so
+//    the switch is made in SQL). The account still reads "[Deleted User]", and
+//    the kept row no longer joins, because the join asks for an account that is
+//    switched OFF. So the claim file's name comes from the account rule alone,
+//    and that rule must key on the made-up name and never on `isActive`: a
+//    branch letting a switched-on account through put "[Deleted,User]" back.
+ge_q('UPDATE `tblUsers` SET `isActive` = 1 WHERE `userID` = ?', 'i', [P_K_G]);
+$claimOn   = Giving::buildHmrcCsv(SITE_C3, $ago(400), $todayG1);
+$claimOnG  = null;
+foreach (array_filter(explode("\n", $claimOn)) as $csvLine) {
+    $cells = str_getcsv($csvLine, ',', '"', '');
+    if (($cells[8] ?? '') === '11.07') {
+        $claimOnG = $cells;
+    }
+}
+$stillTomb = ge_one('SELECT `fullName`, `isActive` FROM `tblUsers` WHERE `userID` = ?', 'i', [P_K_G]);
+ge_ok('AN ERASED ACCOUNT SWITCHED BACK ON (so no kept row joins) still gives an EMPTY name in the claim file, and "Deleted" appears nowhere in it',
+    $stillTomb !== null && $stillTomb['fullName'] === GdprEraser::TOMBSTONE_NAME && (int) $stillTomb['isActive'] === 1
+    && GdprEraser::accountIsEmptied($mysqli, P_K_G) === false
+    && $claimOnG !== null && $claimOnG[1] === '' && $claimOnG[2] === '' && stripos($claimOn, 'Deleted') === false,
+    json_encode(['account' => $stillTomb, 'claim row' => $claimOnG]) . ' | ' . $claimOn);
 
 // H: a row an OLDER version wrote, holding '' rather than NULL, beside an
 // emptied account. Written by hand, said plainly: no version of the code in

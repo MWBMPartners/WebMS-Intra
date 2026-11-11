@@ -627,9 +627,17 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="portal-data-row d-flex flex-wrap flex-md-nowrap">
                         <div class="col-12 col-md-3 text-break">
                             <span class="d-md-none text-muted small">Donor: </span>
-                            <?php echo $row['fullName'] !== null && $row['fullName'] !== ''
+                            <?php // 🗣️ #941 check round 4: this said "No name was recorded: the account had
+                                  //    already been emptied" for EVERY kept row with no name. Since #941 a
+                                  //    blank account name is stored as NULL, and the Microsoft and Google
+                                  //    sign-ins write a blank name when the provider sends none - so a
+                                  //    nameless row now also stands beside an account that was NOT emptied.
+                                  //    Nothing on this page tells the two causes apart, so the sentence
+                                  //    says what is true of both and asserts no reason. A name of only
+                                  //    white space (a row an older version wrote) is no name either. ?>
+                            <?php echo trim((string) ($row['fullName'] ?? '')) !== ''
                                 ? $e((string) $row['fullName'])
-                                : '<em>No name was recorded: the account had already been emptied</em>'; ?>
+                                : '<em>No name was kept</em>'; ?>
                         </div>
                         <div class="col-12 col-md-2">
                             <span class="d-md-none text-muted small">Last kept gift: </span>
