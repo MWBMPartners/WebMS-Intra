@@ -178,7 +178,8 @@ appended with its real date and a note that it was added later.
 | [D-120](120-a-group-meeting-place-map-is-the-hosts-home.md) | 2026-11-11 | A small group's meeting-place map is treated as the host's home (gated like D-072) | in force |
 | [D-121](121-a-public-address-may-be-requested-by-several-until-approved.md) | 2026-11-11 | A public address may be requested by several organisations until one is approved | in force |
 | [D-122](122-erasing-the-person-who-entered-a-group-meeting-place-removes-it.md) | 2026-11-11 | Erasing the person who entered a group's meeting place empties the address | in force |
+| [D-123](123-a-small-group-may-rotate-the-home-it-meets-in.md) | 2026-11-11 | A small group may rotate the home it meets in; each place is its own host's | in force |
 
-*122 decisions. This index is checked against the folder by
+*123 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
