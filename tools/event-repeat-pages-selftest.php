@@ -41,6 +41,11 @@
  *   • Two people creating the same series at once. The built-in server runs
  *     with one worker here (PHP_CLI_SERVER_WORKERS is unset), so two requests
  *     never overlap and such a test would pass on broken code.
+ *   • Section T (#691) drives the hidden-dates restore on the bulk edit page,
+ *     INCLUDING one genuine race: this run holds the series' row lock on its own
+ *     connection while the real restore waits on it over HTTP. That needs no
+ *     second worker, because the two events that must be ordered are this
+ *     connection's commit and the page's read, not two requests.
  *   • An imported event being copied. `FeedImporter` is the only thing that
  *     creates one and the form cannot reach that path; the `externalFeedID IS
  *     NULL` guard on both new statements is what states the rule, and
@@ -216,6 +221,18 @@ function removeWorld(): void
     q('DELETE FROM tblSettings WHERE siteID IN (?, ?)', 'ii', [ORG, OTHER]);
     q('DELETE FROM tblSites WHERE siteID IN (?, ?)', 'ii', [ORG, OTHER]);
     $db->query('SET FOREIGN_KEY_CHECKS = 1');
+    // ♻️ Section T removes `uq_event_site_slug` for a moment to reach the one
+    //    case the key otherwise makes impossible, and puts it back in a
+    //    `finally`. A run killed in between would leave the database without
+    //    it, so the key is put back here too — AFTER this run's rows are gone,
+    //    because the planted duplicate address would stop it being re-added.
+    $hasKey = one(
+        "SELECT COUNT(*) AS n FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() "
+        . "AND TABLE_NAME = 'tblEvents' AND INDEX_NAME = 'uq_event_site_slug'"
+    );
+    if ((int) ($hasKey['n'] ?? 1) === 0) {
+        $db->query('ALTER TABLE `tblEvents` ADD UNIQUE KEY `uq_event_site_slug` (`siteID`, `eventSlug`)');
+    }
 }
 
 /** Put back everything this run changed, ONCE. Also registered as a shutdown function. */
@@ -3535,6 +3552,422 @@ ok('S23 and it does NOT use the name that page ignores',
 //    pass because the whole block is missing. The #645 shape in a check.
 ok('S24 the link is really there to be checked',
     str_contains($keepPage['body'], 'change this one by hand'));
+
+// =============================================================================
+// T. Bringing a hidden date back (#691)
+// =============================================================================
+// Until #691 a date hidden by a pattern change could not be brought back by
+// anything in the portal. `Portal\Core\HiddenSeriesDates` now lists a series'
+// hidden dates on its bulk edit page and brings one back AS A DRAFT. Every check
+// here hides dates through the REAL pattern page, presses the REAL button, and
+// reads the rows back out of the database, because the page's own message is
+// not evidence of what happened (D-065).
+head('T. Bringing a hidden date back (#691)');
+
+/** One row of tblEvents, read fresh. */
+function restRow(int $eventId): ?array
+{
+    return one(
+        'SELECT eventID, siteID, seriesID, eventSlug, startDateTime, isDeleted, deletedAt, status, updatedByID '
+        . 'FROM tblEvents WHERE eventID = ?',
+        'i',
+        [$eventId]
+    );
+}
+
+/** The bulk edit page of one series, as the person in `$jar` sees it. */
+function restPage(string $jar, int $seriesId): array
+{
+    return req($jar, 'GET', '/calendar/manage/series-edit?seriesID=' . $seriesId);
+}
+
+/**
+ * Press "Bring back as a draft" for one date, the way the page's own form does,
+ * with a fresh form token unless `$token` says otherwise. Hands back the answer
+ * AND the message the page then shows, read from the page it redirects to.
+ */
+function restPress(string $jar, int $seriesId, int $eventId, ?string $token = null): array
+{
+    // The token from the Manage Events page: one token serves the whole
+    // session, and this page answers even when the series named has gone, so
+    // a refusal below is never just a missing token.
+    $fresh = managePage($jar)['token'];
+    $post  = ['seriesID' => (string) $seriesId, 'action' => 'restore', 'restoreEventID' => (string) $eventId];
+    if ($token !== '') {
+        $post['csrf_token'] = $token ?? $fresh;
+    }
+    $sent  = req($jar, 'POST', '/calendar/manage/series-edit', $post);
+    $after = req($jar, 'GET', $sent['location'] === '' ? '/calendar/manage/series' : (string) preg_replace('#^.*?' . preg_quote(ADDR, '#') . '#', '', $sent['location']));
+
+    return ['status' => $sent['status'], 'location' => $sent['location'], 'message' => flashOn($after['body'])];
+}
+
+/**
+ * The form token a signed-in person's page carries in its `<meta>` tag, for a
+ * person who cannot open Manage Events. A REAL token, so a refusal of their
+ * post is the gate's doing and not a missing token's.
+ */
+function restMetaToken(string $jar): string
+{
+    $page = req($jar, 'GET', '/calendar')['body'];
+
+    return preg_match('/<meta name="csrf-token" content="([0-9a-f]{64})"/', $page, $m) === 1 ? $m[1] : '';
+}
+
+/** Hidden rows of a named series, earliest first. */
+function restHidden(string $name): array
+{
+    return array_values(array_filter(repatRows($name), static fn (array $r): bool => (int) $r['isDeleted'] === 1));
+}
+
+$restFields = [
+    'patternStart'    => '2029-10-07T10:00',
+    'patternEnd'      => '2029-10-07T11:00',
+    'repeatFrequency' => 'weekly',
+];
+/** Apply a count to the T series through the real pattern page: preview, then confirm. */
+$restApply = static function (int $seriesId, array $fields, string $count) use ($jar): array {
+    $prev = repatPost($jar['admin'], $seriesId, $fields + ['repeatCount' => $count]);
+
+    return repatPost($jar['admin'], $seriesId, $fields + ['repeatCount' => $count], true, $prev['digest']);
+};
+
+// -----------------------------------------------------------------------------
+// T1 — hide two dates by a real pattern change.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Restore', '2029-10-07T10:00', '2029-10-07T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '4',
+]);
+$restSeries = repatSeries('EVREP Restore');
+ok('T01 the series for the restore checks has four live dates',
+    repatLiveStarts('EVREP Restore') === ['2029-10-07 10:00:00', '2029-10-14 10:00:00', '2029-10-21 10:00:00', '2029-10-28 10:00:00'],
+    implode(', ', repatLiveStarts('EVREP Restore')));
+$restApply($restSeries, $restFields, '2');
+$restHiddenRows = restHidden('EVREP Restore');
+ok('T02 shortening it to two dates HID the last two (read back from the database)',
+    count($restHiddenRows) === 2
+    && (string) $restHiddenRows[0]['startDateTime'] === '2029-10-21 10:00:00'
+    && (string) $restHiddenRows[1]['startDateTime'] === '2029-10-28 10:00:00',
+    json_encode($restHiddenRows));
+$restThird  = (int) ($restHiddenRows[0]['eventID'] ?? 0);
+$restFourth = (int) ($restHiddenRows[1]['eventID'] ?? 0);
+$restThirdSlug = (string) ($restHiddenRows[0]['eventSlug'] ?? '');
+
+// -----------------------------------------------------------------------------
+// T3 — the bulk edit page lists them, with the button.
+// -----------------------------------------------------------------------------
+$restOpen = restPage($jar['admin'], $restSeries);
+ok('T03 the bulk edit page opens for an administrator', $restOpen['status'] === 200, 'HTTP ' . $restOpen['status']);
+ok('T04 it lists BOTH hidden dates under "Hidden dates"',
+    str_contains($restOpen['body'], 'Hidden dates')
+    && str_contains($restOpen['body'], 'data-hidden-event="' . $restThird . '"')
+    && str_contains($restOpen['body'], 'data-hidden-event="' . $restFourth . '"'));
+ok('T05 each has a button that posts that date to this page',
+    preg_match('/name="restoreEventID" value="' . $restThird . '"/', $restOpen['body']) === 1
+    && preg_match('/name="restoreEventID" value="' . $restFourth . '"/', $restOpen['body']) === 1);
+ok('T06 the page says a date comes back as a draft',
+    str_contains(text($restOpen['body']), 'A date you bring back arrives as a draft'));
+// 🧠 The live dates are NOT offered back: a check that "the two hidden ones are
+//    listed" would pass on a page listing every date of the series.
+$restLive = array_values(array_filter(repatRows('EVREP Restore'), static fn (array $r): bool => (int) $r['isDeleted'] === 0));
+ok('T07 a LIVE date is not listed as hidden',
+    str_contains($restOpen['body'], 'data-hidden-event="' . (int) $restLive[0]['eventID'] . '"') === false);
+
+// -----------------------------------------------------------------------------
+// T8 — refused for somebody who is not an administrator, and without a token.
+// -----------------------------------------------------------------------------
+$restMemberPage = restPage($jar['member'], $restSeries);
+ok('T08 a member who is not an administrator is refused the page (403)',
+    $restMemberPage['status'] === 403, 'HTTP ' . $restMemberPage['status']);
+$restMemberPost = req($jar['member'], 'POST', '/calendar/manage/series-edit', [
+    'csrf_token'     => restMetaToken($jar['member']),
+    'seriesID'       => (string) $restSeries,
+    'action'         => 'restore',
+    'restoreEventID' => (string) $restThird,
+]);
+ok('T09 ...and a post from them straight at the handler is refused too (403)',
+    $restMemberPost['status'] === 403, 'HTTP ' . $restMemberPost['status']);
+ok('T09b (premise) the member really did send a valid-looking form token, so T10 is about the gate',
+    restMetaToken($jar['member']) !== '');
+ok('T10 ...and the date is STILL HIDDEN (read back)',
+    (int) (restRow($restThird)['isDeleted'] ?? -1) === 1);
+
+$restNoToken = restPress($jar['admin'], $restSeries, $restThird, '');
+ok('T11 a press with NO form token changes nothing: the date is still hidden',
+    (int) (restRow($restThird)['isDeleted'] ?? -1) === 1, json_encode($restNoToken));
+$restBadToken = restPress($jar['admin'], $restSeries, $restThird, str_repeat('0', 64));
+ok('T12 a press with a WRONG form token changes nothing either',
+    (int) (restRow($restThird)['isDeleted'] ?? -1) === 1, json_encode($restBadToken));
+
+// -----------------------------------------------------------------------------
+// T13 — bringing one back.
+// -----------------------------------------------------------------------------
+$restBefore = restRow($restThird);
+$restDone   = restPress($jar['admin'], $restSeries, $restThird);
+$restAfter  = restRow($restThird);
+ok('T13 the press answers with a redirect back to the bulk edit page',
+    $restDone['status'] === 302 && str_contains($restDone['location'], 'calendar/manage/series-edit?seriesID=' . $restSeries),
+    json_encode($restDone));
+ok('T14 THE DATE IS LIVE AGAIN (isDeleted = 0, read back)', (int) ($restAfter['isDeleted'] ?? -1) === 0, json_encode($restAfter));
+ok('T15 its deletion time is emptied', $restAfter !== null && $restAfter['deletedAt'] === null);
+ok('T16 it comes back as a DRAFT, though it was published when it was hidden',
+    (string) ($restBefore['status'] ?? '') === 'published' && (string) ($restAfter['status'] ?? '') === 'draft',
+    (string) ($restBefore['status'] ?? '') . ' → ' . (string) ($restAfter['status'] ?? ''));
+ok('T17 it is the SAME row: same number, same address, same series, same time',
+    $restAfter !== null
+    && (string) $restAfter['eventSlug'] === $restThirdSlug
+    && (int) $restAfter['seriesID'] === $restSeries
+    && (string) $restAfter['startDateTime'] === '2029-10-21 10:00:00');
+ok('T18 it records who brought it back', (int) ($restAfter['updatedByID'] ?? 0) === ADMIN);
+ok('T19 the message says it is back as a draft', str_contains($restDone['message'], 'back in the series as a draft'), $restDone['message']);
+ok('T20 the OTHER hidden date was not touched', (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1);
+ok('T21 the activity log records it, by number only',
+    one(
+        "SELECT logID FROM tblActivityLogs WHERE siteID = ? AND activityType = 'SeriesDateRestored' AND activityDescription LIKE ?",
+        'is',
+        [ORG, '%#' . $restThird . ' of series #' . $restSeries . '%']
+    ) !== null);
+ok('T22 the page no longer lists it as hidden',
+    str_contains(restPage($jar['admin'], $restSeries)['body'], 'data-hidden-event="' . $restThird . '"') === false);
+
+$restAgain = restPress($jar['admin'], $restSeries, $restThird);
+ok('T23 pressing it again (a second administrator a moment later) says it is already back, and changes nothing',
+    str_contains($restAgain['message'], 'already back') && restRow($restThird) === $restAfter, $restAgain['message']);
+
+// -----------------------------------------------------------------------------
+// T24 — another organisation's date, and a number that does not exist, get the
+//       SAME answer, and the other organisation's row is untouched.
+// -----------------------------------------------------------------------------
+q(
+    "INSERT INTO tblEvents (siteID, seriesID, eventName, eventSlug, startDateTime, endDateTime, timezone, status, isDeleted, deletedAt) "
+    // 🧠 ON A DAY THIS SERIES DOES NOT USE. On 21 October (live again by now)
+    //    it would be refused as "day taken" whatever the organisation scope
+    //    said, so the check could pass for a reason that has nothing to do
+    //    with what it is about.
+    . "VALUES (?, ?, 'EVREP Other org hidden', 'evrep-other-org-hidden', '2029-12-30 10:00:00', '2029-12-30 11:00:00', ?, 'published', 1, NOW())",
+    'iis',
+    [OTHER, OTHER_SERIES, ZONE]
+);
+$restOtherId = (int) $db->insert_id;
+$restMissing = (int) one('SELECT COALESCE(MAX(eventID), 0) + 1000 AS n FROM tblEvents')['n'];
+$restTheirs  = restPress($jar['admin'], $restSeries, $restOtherId);
+$restNone    = restPress($jar['admin'], $restSeries, $restMissing);
+ok('T24 ANOTHER ORGANISATION\'S hidden date is not brought back (read back)',
+    (int) (restRow($restOtherId)['isDeleted'] ?? -1) === 1 && (string) (restRow($restOtherId)['status'] ?? '') === 'published');
+ok('T25 and the answer is WORD FOR WORD the answer for a number that does not exist',
+    $restTheirs['message'] === $restNone['message'] && $restTheirs['status'] === $restNone['status']
+    && str_contains($restNone['message'], 'not a hidden date of this series'),
+    $restTheirs['message'] . ' | ' . $restNone['message']);
+// The other organisation's series cannot even be opened from here: the page's
+// own gate, which the restore sits behind.
+$restOtherSeries = req($jar['admin'], 'POST', '/calendar/manage/series-edit', [
+    'csrf_token' => managePage($jar['admin'])['token'],
+    'seriesID' => (string) OTHER_SERIES, 'action' => 'restore', 'restoreEventID' => (string) $restOtherId,
+]);
+ok('T26 naming the other organisation\'s SERIES as well changes nothing either',
+    (int) (restRow($restOtherId)['isDeleted'] ?? -1) === 1, json_encode($restOtherSeries['status']));
+
+// -----------------------------------------------------------------------------
+// T27 — THE DAY IS TAKEN: extend the series over the same weeks again.
+// -----------------------------------------------------------------------------
+// The case that really happens. The pattern page makes a NEW row for 28 October
+// (the hidden one keeps its address for ever), so bringing the hidden one back
+// would put that service in the diary twice.
+$restApply($restSeries, $restFields, '4');
+ok('T27 extending to four dates again re-added 28 October as a NEW row',
+    repatLiveStarts('EVREP Restore') === ['2029-10-07 10:00:00', '2029-10-14 10:00:00', '2029-10-21 10:00:00', '2029-10-28 10:00:00']
+    && (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1,
+    implode(', ', repatLiveStarts('EVREP Restore')));
+$restDayPage = restPage($jar['admin'], $restSeries);
+ok('T28 the page lists the hidden 28 October but offers NO button for it, and says why',
+    str_contains($restDayPage['body'], 'data-hidden-event="' . $restFourth . '"')
+    && preg_match('/name="restoreEventID" value="' . $restFourth . '"/', $restDayPage['body']) !== 1
+    && str_contains(text($restDayPage['body']), 'already has a date on that day'));
+// A post straight at the handler, as a page drawn a moment earlier would send.
+$restDay = restPress($jar['admin'], $restSeries, $restFourth);
+ok('T29 a press anyway is REFUSED: the hidden date stays hidden (read back)',
+    (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1);
+ok('T30 and only ONE live date sits on 28 October',
+    count(array_filter(repatLiveStarts('EVREP Restore'), static fn (string $s): bool => str_starts_with($s, '2029-10-28'))) === 1);
+ok('T31 and the message says plainly why', str_contains($restDay['message'], 'already has a date on that day'), $restDay['message']);
+
+// -----------------------------------------------------------------------------
+// T32 — TWO ADMINISTRATORS: the restore waits for the series' lock and then
+//       sees what the other committed.
+// -----------------------------------------------------------------------------
+// This connection holds the SERIES row (the lock every restore must pass
+// through) and, while holding it, gives the series a live date on the hidden
+// date's day — what a second administrator's restore or pattern change would
+// do. The real restore runs over HTTP meanwhile. With the lock it WAITS, then
+// reads the committed day and refuses; without it it would run straight
+// through on the old world and put two dates on one day.
+createEvent($jar['admin'], 'EVREP Restore race', '2029-11-04T10:00', '2029-11-04T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$raceSeries = repatSeries('EVREP Restore race');
+$restApply($raceSeries, ['patternStart' => '2029-11-04T10:00', 'patternEnd' => '2029-11-04T11:00', 'repeatFrequency' => 'weekly'], '1');
+$raceHidden = restHidden('EVREP Restore race');
+$raceId     = (int) ($raceHidden[0]['eventID'] ?? 0);
+ok('T32 the race series has one hidden date to bring back', count($raceHidden) === 1, json_encode($raceHidden));
+
+$raceToken = token(restPage($jar['admin'], $raceSeries)['body']);
+$db->begin_transaction();
+q('SELECT seriesID FROM tblEventSeries WHERE seriesID = ? FOR UPDATE', 'i', [$raceSeries]);
+
+$raceHandle = curl_init('http://127.0.0.1:' . $port . ADDR . '/calendar/manage/series-edit');
+curl_setopt_array($raceHandle, [
+    CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false,
+    CURLOPT_TIMEOUT => 120, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_HTTPHEADER => ['Expect:'],
+    CURLOPT_COOKIEJAR => $jar['admin'], CURLOPT_COOKIEFILE => $jar['admin'], CURLOPT_POST => true,
+    CURLOPT_POSTFIELDS => http_build_query([
+        'csrf_token' => $raceToken, 'seriesID' => (string) $raceSeries, 'action' => 'restore', 'restoreEventID' => (string) $raceId,
+    ]),
+]);
+$raceMulti = curl_multi_init();
+curl_multi_add_handle($raceMulti, $raceHandle);
+$raceRunning = 1;
+$raceUntil   = microtime(true) + 2.0;
+while (microtime(true) < $raceUntil && $raceRunning > 0) {
+    curl_multi_exec($raceMulti, $raceRunning);
+    curl_multi_select($raceMulti, 0.1);
+}
+// 🧠 THE PREMISE, ASSERTED: two seconds on, the request must still be waiting.
+//    A sleep is a hope; this is the state the sleep was meant to produce. If it
+//    has already finished, the restore did not wait for the series, and every
+//    check below would be about a race that never happened.
+ok('T33 the restore is WAITING for the series while another writer holds it', $raceRunning > 0);
+q(
+    "INSERT INTO tblEvents (siteID, seriesID, eventName, eventSlug, startDateTime, endDateTime, timezone, status, isDeleted) "
+    . "VALUES (?, ?, 'EVREP Restore race', 'evrep-restore-race-second-writer', '2029-11-11 10:00:00', '2029-11-11 11:00:00', ?, 'draft', 0)",
+    'iis',
+    [ORG, $raceSeries, ZONE]
+);
+$db->commit();
+$raceUntil = microtime(true) + 60;
+while ($raceRunning > 0 && microtime(true) < $raceUntil) {
+    curl_multi_exec($raceMulti, $raceRunning);
+    curl_multi_select($raceMulti, 0.2);
+}
+$raceStatus = (int) curl_getinfo($raceHandle, CURLINFO_HTTP_CODE);
+curl_multi_remove_handle($raceMulti, $raceHandle);
+curl_multi_close($raceMulti);
+$raceAfter = req($jar['admin'], 'GET', '/calendar/manage/series-edit?seriesID=' . $raceSeries);
+ok('T34 once the other writer commits, the restore REFUSES: the date is still hidden (read back)',
+    (int) (restRow($raceId)['isDeleted'] ?? -1) === 1, 'HTTP ' . $raceStatus);
+ok('T35 ...one live date on 11 November, not two',
+    count(array_filter(repatLiveStarts('EVREP Restore race'), static fn (string $s): bool => str_starts_with($s, '2029-11-11'))) === 1);
+ok('T36 ...and the message says the day is taken', str_contains(flashOn($raceAfter['body']), 'already has a date on that day'),
+    flashOn($raceAfter['body']));
+
+// -----------------------------------------------------------------------------
+// T37 — THE ADDRESS IS TAKEN. Unreachable while the unique key exists; proved,
+//       then reached by removing the key, which the portal never does.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Restore slug', '2029-12-02T10:00', '2029-12-02T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$slugRestSeries = repatSeries('EVREP Restore slug');
+$restApply($slugRestSeries, ['patternStart' => '2029-12-02T10:00', 'patternEnd' => '2029-12-02T11:00', 'repeatFrequency' => 'weekly'], '1');
+$slugHidden   = restHidden('EVREP Restore slug');
+$slugHiddenId = (int) ($slugHidden[0]['eventID'] ?? 0);
+$slugAddress  = (string) ($slugHidden[0]['eventSlug'] ?? '');
+ok('T37 the address series has one hidden date', count($slugHidden) === 1 && $slugAddress !== '', json_encode($slugHidden));
+
+// 🧠 THE PREMISE THAT MAKES THIS CASE UNREACHABLE, MEASURED: the database will
+//    not give a second row the hidden date's address. If this ever stops being
+//    true, the check below is no longer about a lost key.
+$slugRefused = false;
+try {
+    q(
+        "INSERT INTO tblEvents (siteID, eventName, eventSlug, startDateTime, timezone, status) VALUES (?, 'EVREP Slug thief', ?, '2030-01-01 10:00:00', ?, 'draft')",
+        'iss',
+        [ORG, $slugAddress, ZONE]
+    );
+} catch (mysqli_sql_exception $e) {
+    $slugRefused = (int) $e->getCode() === 1062;
+}
+ok('T38 PREMISE: while uq_event_site_slug exists the database REFUSES a second holder of a hidden date\'s address',
+    $slugRefused);
+
+$db->query('ALTER TABLE `tblEvents` DROP INDEX `uq_event_site_slug`');
+try {
+    q(
+        "INSERT INTO tblEvents (siteID, eventName, eventSlug, startDateTime, timezone, status) VALUES (?, 'EVREP Slug thief', ?, '2030-01-01 10:00:00', ?, 'draft')",
+        'iss',
+        [ORG, $slugAddress, ZONE]
+    );
+    $slugThief = (int) $db->insert_id;
+    $slugPress = restPress($jar['admin'], $slugRestSeries, $slugHiddenId);
+    ok('T39 with the key lost and the address taken, the date is NOT brought back (read back)',
+        (int) (restRow($slugHiddenId)['isDeleted'] ?? -1) === 1);
+    ok('T40 ...and the message says the address is in use', str_contains($slugPress['message'], 'web address'), $slugPress['message']);
+    q('DELETE FROM tblEvents WHERE eventID = ?', 'i', [$slugThief]);
+} finally {
+    q("DELETE FROM tblEvents WHERE eventName = 'EVREP Slug thief'");
+    $db->query('ALTER TABLE `tblEvents` ADD UNIQUE KEY `uq_event_site_slug` (`siteID`, `eventSlug`)');
+}
+// 🧠 NOT VACUOUS: with the thief gone the same press succeeds, so T39 was
+//    refused for the ADDRESS and for nothing else about that date.
+$slugOk = restPress($jar['admin'], $slugRestSeries, $slugHiddenId);
+ok('T41 with the address free again the same date IS brought back, as a draft',
+    (int) (restRow($slugHiddenId)['isDeleted'] ?? -1) === 0 && (string) (restRow($slugHiddenId)['status'] ?? '') === 'draft',
+    $slugOk['message']);
+
+// -----------------------------------------------------------------------------
+// T42 — a series that has GONE: its hidden dates stay hidden.
+// -----------------------------------------------------------------------------
+createEvent($jar['admin'], 'EVREP Restore gone', '2030-02-03T10:00', '2030-02-03T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$goneSeries = repatSeries('EVREP Restore gone');
+$restApply($goneSeries, ['patternStart' => '2030-02-03T10:00', 'patternEnd' => '2030-02-03T11:00', 'repeatFrequency' => 'weekly'], '1');
+$goneHidden = restHidden('EVREP Restore gone');
+$goneId     = (int) ($goneHidden[0]['eventID'] ?? 0);
+ok('T42 the series to delete has one hidden date', count($goneHidden) === 1);
+// Deleted through the real Series page, which unlinks its dates first.
+$seriesListPage = req($jar['admin'], 'GET', '/calendar/manage/series');
+req($jar['admin'], 'POST', '/calendar/manage/series', [
+    'csrf_token' => token($seriesListPage['body']), 'action' => 'delete', 'seriesID' => (string) $goneSeries,
+]);
+ok('T43 the series really is gone', one('SELECT seriesID FROM tblEventSeries WHERE seriesID = ?', 'i', [$goneSeries]) === null);
+restPress($jar['admin'], $goneSeries, $goneId);
+ok('T44 its hidden date is NOT brought back by naming the gone series (read back)',
+    (int) (restRow($goneId)['isDeleted'] ?? -1) === 1);
+restPress($jar['admin'], $restSeries, $goneId);
+ok('T45 ...nor by naming another series of the organisation',
+    (int) (restRow($goneId)['isDeleted'] ?? -1) === 1);
+
+// -----------------------------------------------------------------------------
+// T46 — an organisation that has been SWITCHED OFF: nothing comes back into it.
+// -----------------------------------------------------------------------------
+// The token is taken while the organisation is still on, so a refusal below is
+// not merely a missing token. Be exact about what this proves: the portal turns
+// a switched-off organisation away before any page runs (`Site`, `SiteGate`),
+// so this checks the BEHAVIOUR, and `HiddenSeriesDates::restore()`'s own test
+// of `tblSites.isActive` is a second line behind it that this check cannot
+// reach on its own.
+createEvent($jar['admin'], 'EVREP Restore org', '2030-03-03T10:00', '2030-03-03T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$orgSeries = repatSeries('EVREP Restore org');
+$restApply($orgSeries, ['patternStart' => '2030-03-03T10:00', 'patternEnd' => '2030-03-03T11:00', 'repeatFrequency' => 'weekly'], '1');
+$orgHidden = restHidden('EVREP Restore org');
+$orgId     = (int) ($orgHidden[0]['eventID'] ?? 0);
+ok('T46 the organisation check has one hidden date', count($orgHidden) === 1);
+$orgToken = managePage($jar['admin'])['token'];
+q('UPDATE tblSites SET isActive = 0 WHERE siteID = ?', 'i', [ORG]);
+try {
+    restPress($jar['admin'], $orgSeries, $orgId, $orgToken);
+} finally {
+    q('UPDATE tblSites SET isActive = 1 WHERE siteID = ?', 'i', [ORG]);
+}
+ok('T47 with the organisation switched off, its hidden date is NOT brought back (read back)',
+    (int) (restRow($orgId)['isDeleted'] ?? -1) === 1);
 
 // =============================================================================
 // J. Nothing fell over on the way

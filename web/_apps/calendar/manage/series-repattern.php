@@ -33,15 +33,16 @@
  *   • A date that GOES is soft-deleted (`isDeleted = 1`), never removed from
  *     the table, so nothing attached to it is destroyed.
  *
- *     DO NOT SAY "AND AN ADMINISTRATOR CAN PUT IT BACK", which this comment
- *     and two user-facing sentences all used to. There is NO restore path in
- *     this repository: searched on 31 October 2026, the only code that ever
- *     clears `isDeleted` on an event is inside `FeedImporter`, for imported
- *     rows. Undoing one of these needs direct database access, which a
- *     customer on shared hosting may not have. Soft-deleting is still right —
- *     it is what stops the attached records being destroyed — but offering a
- *     restore that does not exist, at the moment somebody presses a
- *     destructive button, is a false reassurance. Tracked as its own issue.
+ *     IT CAN BE BROUGHT BACK, AS A DRAFT, from the series' bulk edit page
+ *     (`calendar/manage/series-edit`), since #691. `Portal\Core\HiddenSeriesDates`
+ *     is the one place that decides it. Say exactly that and no more: it comes
+ *     back as a DRAFT whatever it was, and it is REFUSED onto a day the series
+ *     already has a live date on — which is the ordinary case after a series is
+ *     shortened and extended over the same weeks again, because this page then
+ *     makes NEW rows for those days. Until #691 these sentences had to say
+ *     there was no way back at all: an earlier "an administrator can put it
+ *     back" was written when nothing could, and was corrected on 31 October
+ *     2026 before the restore existed.
  *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -800,11 +801,16 @@ if ($confirmed === true && $plan !== null && $problem === '') {
                             //    moment somebody presses the button.
                             //
                             //    A draft is one click from being right. A
-                            //    wrongly published service is not, and there is
-                            //    NO WAY in this repository to bring back a date
-                            //    that has been hidden (#691) — only
-                            //    FeedImporter ever clears `isDeleted`. So the
+                            //    wrongly published service is already in front
+                            //    of members by the time anybody notices. So the
                             //    recoverable mistake is the one to make.
+                            //
+                            //    (D-033 also gave as a reason that a hidden date
+                            //    could not be brought back. Since #691 one can —
+                            //    as a draft, from the bulk edit page — so that
+                            //    half of the reason has lapsed. The decision
+                            //    stands on the half above, and nothing here
+                            //    changed because of it.)
                             //
                             //    WHAT WAS HERE BEFORE, so nobody puts it back
                             //    believing it was an oversight: the added date
@@ -1251,7 +1257,8 @@ $showReading = static function (?string $reading): string {
         <li>A date that stays keeps everything about it except its time — its name, venue and description are not touched.</li>
         <li>A date is <strong>left exactly as it is</strong> if anything is attached to it (attendance, bookings, registrations, invitations), or if somebody has moved it by hand.</li>
         <li>A date that goes is <strong>hidden rather than deleted</strong>, so nothing attached to it is
-            destroyed. There is no button to bring one back, so treat removing a date as final.</li>
+            destroyed. You can bring it back afterwards from this series' bulk edit page, where it returns as a
+            draft — unless the series has since been given another date on that same day.</li>
     </ul>
     <p class="mb-0 small text-muted">Nothing is written until you have seen exactly what will change and confirmed it.</p>
 </div>
@@ -1435,9 +1442,9 @@ $showReading = static function (?string $reading): string {
                     <p class="small text-muted">
                         <strong>Each new date arrives as a draft, so members will not see it yet.</strong> That is
                         deliberate: a new date has no registration window of its own and nothing beyond this series'
-                        description, so it is not ready to be read by anybody until you have looked at it. A date
-                        that has been hidden cannot be brought back, so this way round the mistake is the
-                        recoverable one.
+                        description, so it is not ready to be read by anybody until you have looked at it. A draft
+                        is one step from right, whereas a date published too soon is already in front of members,
+                        so this way round the mistake is the recoverable one.
                     </p>
                     <p class="small text-muted">
                         <strong>You will land on this series' bulk edit page, where you can publish them all at
@@ -1459,8 +1466,9 @@ $showReading = static function (?string $reading): string {
                     <p class="small text-muted">
                         These are hidden rather than deleted, so nothing attached to them is destroyed. Nothing is
                         attached to any of them in any case — a date carrying attendance, a booking or a
-                        registration is in the list below instead. <strong>There is no button to bring a hidden date
-                        back</strong>, so treat this as final.
+                        registration is in the list below instead. <strong>You can bring a hidden date back</strong>
+                        from this series' bulk edit page, where it returns as a draft &mdash; but not onto a day the
+                        series has since been given another date on.
                     </p>
                 <?php endif; ?>
 

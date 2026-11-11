@@ -226,8 +226,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>A date the pattern <em>adds</em> arrives as a draft, so nobody can see it yet.</strong>
             This is deliberate: a new date has no registration window of its own and nothing beyond the
             series' own description, so it is not ready to be read by anybody until you have looked at
-            it. A date that has been hidden cannot be brought back, so this way round the mistake is
-            the one you can undo.
+            it. A draft is one step from right, whereas a date published too soon is already in front of
+            members, so this way round the mistake is the one you can undo.
             <br>
             <strong>Publishing them is one step, not one per date.</strong> After the change you land on
             that series' bulk edit page: tick the new dates and set <em>Status</em> to Published. Until
@@ -240,8 +240,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </li>
         <li>
             A date that is removed is <strong>hidden rather than deleted</strong>, so nothing attached to it
-            is destroyed. <strong>There is no button to bring one back</strong>, though, so treat removing a
-            date as final.
+            is destroyed, and <strong>you can bring it back</strong>: the series' bulk edit page lists its
+            hidden dates under <em>Hidden dates</em>, each with a <em>Bring back as a draft</em> button. It
+            returns as a draft whatever it was before, so members do not see it until you publish it. It
+            cannot come back onto a day the series has since been given another date on &mdash; which is
+            what happens if you shorten a series and then extend it over the same weeks again &mdash; so
+            hide or move that date first. The list also shows dates deleted one at a time, because the
+            portal does not record which way a date was hidden.
         </li>
     </ul>
     <p class="text-muted small">

@@ -8,6 +8,15 @@
  * fields (status, category, type, visibility, featured). Admins can select
  * individual events or use "select all" to apply changes in one operation.
  *
+ * ♻️ HIDDEN DATES (#691). Below the list, the page shows every HIDDEN date of
+ * the series — a date a pattern change removed, or one deleted on its own —
+ * with a button to bring each back AS A DRAFT. `Portal\Core\HiddenSeriesDates`
+ * decides everything about it (which dates are listed, whether one may come
+ * back, and the words for each answer); this page only draws the list and
+ * posts the button. It lives here, not on the pattern page, because this is
+ * where the pattern page sends people afterwards and where a draft is
+ * published. No new address was needed, so no route and no migration.
+ *
  * @package   Portal\Calendar
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
@@ -21,6 +30,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\HiddenSeriesDates;
 use Portal\Core\I18n;
 use Portal\Core\Logger;
 use Portal\Core\Router;
@@ -101,6 +111,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['flash_msg']  = 'Invalid or expired form token. Please try again.';
         $_SESSION['flash_type'] = 'danger';
         header('Location: ' . Site::url('calendar/manage/series'));
+        exit();
+    }
+
+    // ♻️ BRINGING A HIDDEN DATE BACK (#691). Its own form, told apart by
+    //    `action`, and answered before the bulk update is even looked at, so
+    //    one press can never do both. Everything that matters — the
+    //    organisation, the series, the lock, the day and the address — is
+    //    decided by `HiddenSeriesDates::restore()`; this branch only passes it
+    //    the numbers and shows its answer. The gate in front of it is the one
+    //    in front of the whole page (`App::isAdmin()`, above) and the form
+    //    token just checked, so it is gated exactly as the rest of the series
+    //    pages are, with no second rule of its own.
+    if ((string) ($_POST['action'] ?? '') === 'restore') {
+        $outcome = HiddenSeriesDates::restore(
+            $mysqli,
+            $siteId,
+            $seriesID,
+            (int) ($_POST['restoreEventID'] ?? 0),
+            $userId === null ? null : (int) $userId
+        );
+        $said                   = HiddenSeriesDates::words($outcome);
+        $_SESSION['flash_msg']  = $said['words'];
+        $_SESSION['flash_type'] = $said['type'];
+        header('Location: ' . Site::url('calendar/manage/series-edit') . '?seriesID=' . $seriesID);
         exit();
     }
 
@@ -241,6 +275,9 @@ if ($stmt !== false) {
     }
     $stmt->close();
 }
+
+// ♻️ The series' hidden dates, for the card at the foot of the page (#691).
+$hiddenDates = HiddenSeriesDates::listFor($mysqli, $siteId, $seriesID);
 
 // 📋 Fetch categories and types for dropdowns
 $categories = [];
@@ -471,6 +508,78 @@ checkboxes.forEach(function (cb) {
 });
 </script>
 
+<?php endif; ?>
+
+<?php if ($hiddenDates !== []): ?>
+<!-- ♻️ Hidden dates (#691). OUTSIDE the bulk form above on purpose: a <form>
+     inside a <form> is dropped by the browser's parser, and its button would
+     then submit the OUTER form — the bulk update — instead of this one. Each
+     date has its own small form. -->
+<div class="card mt-4">
+    <div class="card-header">
+        <h5 class="mb-0"><i class="fa-solid fa-eye-slash me-1"></i> Hidden dates
+            <span class="badge bg-secondary"><?php echo count($hiddenDates); ?></span></h5>
+        <small class="text-muted">
+            Dates of this series that were removed by a pattern change or deleted one at a time. They were
+            hidden rather than deleted, so nothing attached to them was lost. The portal does not record which
+            way a date was hidden, so both kinds are listed here.
+        </small>
+    </div>
+    <div class="card-body">
+        <p class="small mb-3">
+            <strong>A date you bring back arrives as a draft</strong>, whatever it was before it was hidden, so
+            members do not see it until you have looked at it and published it (tick it in the list above and set
+            <em>Status</em> to Published). A date cannot come back onto a day this series already has a date on.
+            A later pattern change may hide it again if the new pattern does not include its day.
+        </p>
+        <div class="portal-data-list">
+            <div class="portal-data-row portal-data-header d-none d-md-flex">
+                <div class="col-md-4">Event</div>
+                <div class="col-md-3">Date</div>
+                <div class="col-md-2">Was</div>
+                <div class="col-md-3"></div>
+            </div>
+            <?php foreach ($hiddenDates as $hd): ?>
+                <div class="portal-data-row" data-hidden-event="<?php echo (int) $hd['eventID']; ?>">
+                    <div class="col-12 col-md-4">
+                        <span class="d-md-none fw-semibold">Event: </span>
+                        <?php echo htmlspecialchars($hd['eventName'], ENT_QUOTES, 'UTF-8'); ?>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <span class="d-md-none fw-semibold">Date: </span>
+                        <?php
+                        // 🕰️ A wall-clock reading shown as one: never through
+                        //    strtotime(), which would move a time in the hour the
+                        //    clocks skip (#777).
+                        echo htmlspecialchars(I18n::formatClockDateTime($hd['startDateTime'], 'D j M Y, H:i'), ENT_QUOTES, 'UTF-8');
+                        ?>
+                    </div>
+                    <div class="col-12 col-md-2">
+                        <span class="d-md-none fw-semibold">Was: </span>
+                        <span class="badge bg-<?php echo htmlspecialchars($statusBadges[$hd['status']] ?? 'secondary', ENT_QUOTES, 'UTF-8'); ?>">
+                            <?php echo htmlspecialchars(ucfirst($hd['status']), ENT_QUOTES, 'UTF-8'); ?>
+                        </span>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <?php if ($hd['dayTaken'] === true): ?>
+                            <span class="small text-muted">This series already has a date on that day, so this one cannot come back.</span>
+                        <?php else: ?>
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series-edit'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
+                                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                                <input type="hidden" name="seriesID" value="<?php echo (int) $seriesID; ?>">
+                                <input type="hidden" name="action" value="restore">
+                                <input type="hidden" name="restoreEventID" value="<?php echo (int) $hd['eventID']; ?>">
+                                <button type="submit" class="btn btn-sm btn-outline-primary">
+                                    <i class="fa-solid fa-rotate-left me-1"></i> Bring back as a draft
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <?php
