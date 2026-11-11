@@ -171,7 +171,7 @@ class Sabbath
      * when the sunset method is in use and at least one edge is at 18:00 because
      * the sun does not set that day (polar day or night, sunsetAt()). The
      * settings page uses it to SAY so beside the preview, rather than show 18:00
-     * as if it were a sunset (#935 round 3).
+     * as if it were a sunset (#935 round 4).
      *
      * @param int|null   $siteId  As computeWindow().
      * @param array|null $sabbath As computeWindow().
@@ -393,15 +393,25 @@ class Sabbath
      *     not set that day (polar day) or does not rise (polar night). Null is
      *     returned, and computeWindow() uses 18:00 on that date instead, on the
      *     window's clock, as the fixed method does. The settings page says so.
-     *     At the very edge of midnight sun PHP and an independent NOAA-style
-     *     calculation can disagree about whether the sun dips below the horizon
-     *     for a few minutes; those days are counted in the notes for #935.
+     *     At the very edge of midnight sun AND at the very edge of polar night
+     *     (for example Kiruna, 11 December 2027), PHP and an independent
+     *     NOAA-style calculation can disagree about whether the sun crosses the
+     *     horizon at all that day, for a few minutes either way; those days are
+     *     counted in the notes for #935.
      *   - No transit on `$date` at all: PHP's calculation can SKIP a day
      *     (measured: Anadyr, Friday 1 October 2027). Then the time halfway
      *     between the day before's sunset and the day after's is used. Against
      *     the independent calculation, over ten years and 51 places, it was used
      *     50 times and was at most 167 seconds out. With either neighbour's
      *     sunset missing too, null (18:00).
+     *
+     * ONE KNOWN IMPRECISION, left on purpose. About once a year at a few places
+     * (Anadyr, Suva, Chatham, Adak), two of the samples give answers whose
+     * transit is on the same date but whose sunsets differ by some seconds,
+     * because PHP worked them out for different days. The FIRST sample in the
+     * order asked wins, which is sometimes the less accurate of the two. The
+     * difference measured was seconds, never the day, and no simple rule picks
+     * the better one without a second calculation to compare against.
      */
     private static function sunsetAt(\DateTimeImmutable $date, float $lat, float $lng): ?int
     {

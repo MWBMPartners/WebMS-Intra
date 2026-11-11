@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 248;  // + forty-four in part P (#935, #936: P00-P07, six P08, P09-P38) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 251;  // + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -224,10 +224,26 @@ if (($argv[1] ?? '') === '--child') {
                         . ' / ' . (new DateTimeImmutable('@' . $details['end']))->setTimezone($clock)->format('D Y-m-d H:i');
                     $out['noSunset'][$name] = $details['noSunset'];
                 }
+                // #935 round 5: an 18:00 that is NOT "the sun does not set" — the fixed
+                // method, and sunset with no place known — must never be marked as one.
+                $firstCase = (array) reset($job['cases']);
+                $out['noSunsetFixed'] = \Portal\Core\Sabbath::windowDetails((int) $firstCase[3], null, [
+                    'method' => 'fixed', 'location_lat' => '', 'location_lng' => '', 'timezone' => (string) $firstCase[0],
+                ])['noSunset'];
+                $noPlace = ['method' => 'sunset_calc', 'location_lat' => '', 'location_lng' => '', 'timezone' => (string) $firstCase[0]];
+                $out['placeNoPlace']    = \Portal\Core\Sabbath::place(null, $noPlace);
+                $out['noSunsetNoPlace'] = \Portal\Core\Sabbath::windowDetails((int) $firstCase[3], null, $noPlace)['noSunset'];
                 // And a window worked out for ANOTHER organisation, as the held-texts job does.
                 \Portal\Core\Sabbath::computeWindow((int) $job['otherAt'], (int) $job['otherSite']);
                 $out['zoneAfter']   = date_default_timezone_get();
                 $out['errorsAdded'] = (int) $mysqli->query('SELECT COUNT(*) AS n FROM `tblErrors`')->fetch_assoc()['n'] - $errorsBefore;
+                break;
+            case 'noSunsetNow': // #935 round 5: is THIS week's window, as the page draws it now, without a sunset at each place given?
+                foreach ((array) $job['places'] as $name => [$lat, $lng]) {
+                    $out['noSunset'][$name] = \Portal\Core\Sabbath::windowDetails(time(), null, [
+                        'method' => 'sunset_calc', 'location_lat' => (string) $lat, 'location_lng' => (string) $lng, 'timezone' => '',
+                    ])['noSunset'];
+                }
                 break;
             case 'sabbathOther': // #935 round 3: another organisation's place and quiet answer WITHOUT forcing the context (the held-texts job)
                 $out['siteNow'] = \Portal\Core\Site::id();
@@ -4014,6 +4030,49 @@ foreach (['Vardo' => ['2026-11-20', '11:47'], 'Tromso' => ['2026-11-27', '11:46'
         json_encode($seen)
     );
 }
+
+// ---- round 5: "the sun does not set" is said ONLY when it is true (#935) ----------------
+// P34 held the mark TRUE for polar night and FALSE for a place with sunsets, but
+// nothing held it false for the other two ways an edge is 18:00 — so a mark set on
+// EVERY 18:00 edge passed all 248 checks, and the page would have told every
+// installation on the fixed method that the sun does not set (round 4's check, M3).
+ok(
+    'P39 an 18:00 that is NOT a missing sunset is never marked as one: the fixed method, and sunset with no place known, both say "noSunset" false',
+    array_filter($runs935, static fn (array $run): bool => ($run['noSunsetFixed'] ?? null) !== false
+        || ($run['noSunsetNoPlace'] ?? null) !== false || array_key_exists('placeNoPlace', $run) === false || $run['placeNoPlace'] !== null) === [],
+    json_encode(array_map(static fn (array $run): array => [$run['noSunsetFixed'] ?? 'missing', $run['noSunsetNoPlace'] ?? 'missing', $run['placeNoPlace'] ?? 'missing'], $runs935))
+);
+// The PAGE's note, read from the drawn page. The preview is this week's window, from
+// time(), so a place without a sunset NOW is chosen at run time: 89.9° north or south,
+// where the sun is either up all day or down all day except for a few hours around an
+// equinox, and never at both poles at once. The child says which, by asking the same
+// method the page asks; a run where it says neither fails rather than passing empty.
+setting('portal.sabbath.enabled', '1');
+setting('portal.sabbath.timezone', '');
+setting('portal.sabbath.method', 'sunset_calc');
+setting('portal.sabbath.location_lat', '-33.87');
+setting('portal.sabbath.location_lng', '151.21');
+$withSunsets = req($adminJar, 'GET', '/admin/settings/sabbath');
+setting('portal.sabbath.method', 'fixed');
+$fixedPage = req($adminJar, 'GET', '/admin/settings/sabbath');
+ok(
+    'P40 the Sabbath page does NOT say "the sun does not set" when the window has real sunsets (Sydney), nor on the fixed method',
+    str_contains($withSunsets['body'], 'Current window (your settings)') === true && str_contains($withSunsets['body'], 'data-sabbath-no-sunset') === false
+        && str_contains($fixedPage['body'], 'Current window (your settings)') === true && str_contains($fixedPage['body'], 'data-sabbath-no-sunset') === false,
+    said($withSunsets) . ' / ' . said($fixedPage)
+);
+$poles = child(['task' => 'noSunsetNow', 'places' => ['north' => [89.9, 0.0], 'south' => [-89.9, 0.0]]]);
+$pole  = ($poles['noSunset']['north'] ?? false) === true ? 'north' : (($poles['noSunset']['south'] ?? false) === true ? 'south' : '');
+setting('portal.sabbath.method', 'sunset_calc');
+setting('portal.sabbath.location_lat', $pole === 'south' ? '-89.9' : '89.9');
+setting('portal.sabbath.location_lng', '0');
+$polarPage = req($adminJar, 'GET', '/admin/settings/sabbath');
+ok(
+    'P41 the Sabbath page DOES say "the sun does not set" under the preview at a place where it really does not this week (' . ($pole === '' ? 'neither pole, which should not happen' : 'the ' . $pole . ' pole') . ')',
+    $pole !== '' && str_contains($polarPage['body'], 'data-sabbath-no-sunset') === true
+        && str_contains(words($polarPage['body']), 'The sun does not set that Friday or Saturday at this place, so 18:00 is used') === true,
+    json_encode($poles) . '; ' . said($polarPage)
+);
 
 // ---- put everything back as part P found it ------------------------------------------
 q('DELETE FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND siteID IN (1, ' . ORG_TWO . ')');
