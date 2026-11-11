@@ -1550,29 +1550,45 @@ $tiny = array_merge($placeA, ['latitude' => 52.2100001]);
 check('PA13g ...a CHANGED address does NOT let somebody else change the host: a new street, a tiny move of the position, a changed country',
     $takeOver($rowBy(5, 1), $placeB, 7, false, 7) === true && $takeOver($rowBy(5, 1), $tiny, null, false, 7) === true
     && $takeOver($rowBy(5, 1), array_merge($placeA, ['countryCode' => 'IE']), null, true, 7) === true);
-// Check round 3 of #809: "empty" means EVERY part but the country. A place with any one part left is not empty.
-$partly = [
-    'only the map position'    => ['latitude' => 52.21, 'longitude' => 0.13],
-    'only the postcode'        => ['postcode' => 'CB1 1AA'],
-    'only the what3words'      => ['what3words' => 'filled.count.soap'],
-    'only the region'          => ['region' => 'Cambridgeshire'],
-    'only the town'            => ['city' => 'Cambridge'],
-];
-$partlyRefused = [];
-foreach ($partly as $label => $left) {
+// Check rounds 3 and 4 of #809: "empty" means EVERY part but the country. The
+//    "keep only this part" cases are GENERATED from SmallGroups::PLACE_COLUMNS —
+//    one per column except the country, the two coordinates as one pair — so a
+//    column added there later gets its case here, and in P20h and R07f5, with
+//    nobody having to remember. Round 4 listed five by hand and missed both
+//    address lines; three plants then left everything green.
+$placeParts    = array_values(array_diff(\Portal\Core\SmallGroups::PLACE_COLUMNS, ['countryCode']));
+$keepOnlyCases = [];
+foreach ($placeParts as $col) {
+    if ($col === 'longitude' && in_array('latitude', $placeParts, true) === true) {
+        continue;
+    }
+    $keepOnlyCases[$col] = $col === 'latitude' ? ['latitude', 'longitude'] : [$col];
+}
+$partSample = static fn (string $col): string|float => match ($col) {
+    'latitude' => 52.21, 'longitude' => 0.13, 'what3words' => 'filled.count.soap', default => 'Kept ' . $col,
+};
+check('PA13g3a premise: one "keep only this part" case for every place column except the country, the position as one pair',
+    count($keepOnlyCases) === count(\Portal\Core\SmallGroups::PLACE_COLUMNS) - 2 && isset($keepOnlyCases['addressLine1'], $keepOnlyCases['addressLine2']) === true,
+    implode(', ', array_keys($keepOnlyCases)));
+$partlyLetThrough = [];
+foreach ($keepOnlyCases as $label => $keep) {
+    $left = [];
+    foreach ($keep as $col) {
+        $left[$col] = $partSample($col);
+    }
     if ($takeOver($rowBy(5, 1), array_merge($emptyPl, $left), null, false, 7) === false
         || $takeOver($rowBy(5, 1), array_merge($emptyPl, $left), null, true, 7) === false) {
-        $partlyRefused[] = $label;
+        $partlyLetThrough[] = $label;
     }
 }
-check('PA13g3 ...a PARTLY emptied place is not empty: with only the position, the postcode, the what3words, the region or the town left, '
-    . 'a non-host still cannot drop the host or mark it', $partlyRefused === [], 'let through: ' . implode(', ', $partlyRefused));
+check('PA13g3 ...a PARTLY emptied place is not empty: with any ONE part left, a non-host still cannot drop the host or mark it ('
+    . implode(', ', array_keys($keepOnlyCases)) . ')', $partlyLetThrough === [], 'let through: ' . implode(', ', $partlyLetThrough));
 check('PA13g2 ...a non-host may still CORRECT the address with the host kept, and EMPTYING the place is the one way to start again',
     $takeOver($rowBy(5, 1), $placeB, 5, false, 7) === false && $takeOver($rowBy(5, 1), $emptyPl, null, false, 7) === false);
 check('PA13h ...the host left as it is, nothing marked: allowed; a place with NO host, or a NEW one: allowed', $takeOver($rowBy(5, 1), $placeA, 5, false, 7) === false
     && $takeOver($rowBy(null, 0), $placeA, 7, false, 7) === false && $takeOver(null, $placeA, 7, false, 7) === false);
 $takeOverWords = \Portal\Core\SmallGroups::whyHostChangeRefused($rowBy(5, 1), $placeA, 7, false, 7, 'remove this home from the group\'s list');
-check('PA13i ...and the refusal says plainly what to do instead, and that nothing was saved', str_contains($takeOverWords, 'remove this home from the group\'s list and enter the new place afresh') === true
+check('PA13i ...and the refusal says plainly what to do instead, and that nothing was saved', str_contains($takeOverWords, 'remove this home from the group\'s list, then enter the new place afresh; that deletes this address') === true
     && str_contains($takeOverWords, 'Nothing was saved') === true, $takeOverWords);
 $yes = ['readable' => true, 'doesNotObject' => true];
 $no  = ['readable' => true, 'doesNotObject' => false];
@@ -1780,7 +1796,9 @@ check('P19 an administrator CHANGES the address: the host stays named, but their
 //    The host's agreement is set to 0 first, so an attack that got through would
 //    show a map nobody agreed to — which is the harm being refused.
 q("UPDATE `tblSmallGroups` SET `addressLine1` = '12 Host Lane', `placeMapAgreed` = 0 WHERE `groupID` = ?", 'i', [SGROUP]);
-$takeOverSays = static fn (array $page): bool => str_contains((string) ($page['_html'] ?? ''), 'Only they can name a different host') === true;
+$pageText     = static fn (array $page): string => html_entity_decode((string) ($page['_html'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+$takeOverSays = static fn (array $page): bool => str_contains($pageText($page), 'Only they can name a different host') === true
+    && str_contains($pageText($page), "To meet somewhere else, clear every part of the meeting place except the country (both address lines, the town, the region, the postcode, the map position and the what3words address) and save, then enter the new place afresh; that deletes this address. Nothing was saved.") === true;
 $x1 = $saveGroup($jarHost2, $groupForm($jarHost2, ['hostUserID' => (string) HOST2]));
 $r  = $recorded();
 $fx = $groupForm($jarHost2);
@@ -1865,7 +1883,8 @@ $runTakeovers = static function (string $prefix, callable $snap, callable $mapSh
         }
     }
 };
-$usualSnap = static fn (): array => one('SELECT `addressLine1`, `addressLine2`, `city`, `region`, `postcode`, `countryCode`, `latitude`, `longitude`, `what3words`, `hostUserID`, `placeMapAgreed`, `notAHome`, '
+$placeColsSql = '`' . implode('`, `', \Portal\Core\SmallGroups::PLACE_COLUMNS) . '`';
+$usualSnap = static fn (): array => one('SELECT ' . $placeColsSql . ', `hostUserID`, `placeMapAgreed`, `notAHome`, '
     . '`placeEnteredByID` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
 $usualReset = $rowWriter('tblSmallGroups', 'groupID', SGROUP, $usualSnap());
 $runTakeovers('P20e', $usualSnap, static fn (): bool => $sgMap($groupPage($jarV)) === true || $tileRule($groupPage($jarV)) === true,
@@ -1876,19 +1895,11 @@ $usualReset();
 //    BUT ONE PART of the place while dropping the host — then the second marks
 //    it "not anybody's home". "Empty" means every part except the country, so
 //    each must be refused like any other change.
-$partialAttacks = static function (): array {
-    $parts = ['addressLine1', 'addressLine2', 'city', 'region', 'postcode', 'latitude', 'longitude', 'what3words'];
-    $cases = [
-        'E1 the written address cleared, the map position kept' => ['latitude', 'longitude'],
-        'E2 the map position cleared, the postcode kept'         => ['postcode'],
-        'E3 everything cleared but the what3words address'       => ['what3words'],
-        'E4 everything cleared but the region'                   => ['region'],
-        'E5 everything cleared but the town'                     => ['city'],
-    ];
+$partialAttacks = static function () use ($placeParts, $keepOnlyCases): array {
     $out = [];
-    foreach ($cases as $name => $keep) {
-        $clear = array_fill_keys(array_values(array_diff($parts, $keep)), '');
-        $out[$name . ', with nobody named, then marked "not anybody\'s home"'] = [
+    foreach ($keepOnlyCases as $label => $keep) {
+        $clear = array_fill_keys(array_values(array_diff($placeParts, $keep)), '');
+        $out['K-' . $label . ' everything cleared but ' . implode(' and ', $keep) . ', with nobody named, then marked "not anybody\'s home"'] = [
             $clear + ['hostUserID' => ''],
             $clear + ['hostUserID' => '', 'notAHome' => '1'],
             ['notAHomeAsked' => '1'],
@@ -1897,13 +1908,30 @@ $partialAttacks = static function (): array {
 
     return $out;
 };
-$usualParts = one('SELECT `region`, `what3words` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]) ?? [];
-q("UPDATE `tblSmallGroups` SET `region` = 'Cambridgeshire', `what3words` = 'filled.count.soap' WHERE `groupID` = ?", 'i', [SGROUP]);
+// Every part must HOLD something before the attacks, or keeping it would keep
+// nothing: a part that is empty is filled with its sample, and put back after.
+$fillParts = static function (string $table, string $keyCol, int $id) use ($placeParts, $partSample): callable {
+    $was  = one('SELECT `' . implode('`, `', $placeParts) . '` FROM `' . $table . '` WHERE `' . $keyCol . '` = ?', 'i', [$id]) ?? [];
+    foreach ($placeParts as $col) {
+        if (($was[$col] ?? null) === null || (string) $was[$col] === '') {
+            q('UPDATE `' . $table . '` SET `' . $col . '` = ? WHERE `' . $keyCol . '` = ?', 'si', [(string) $partSample($col), $id]);
+        }
+    }
+
+    return static function () use ($table, $keyCol, $id, $was): void {
+        foreach ($was as $col => $value) {
+            q('UPDATE `' . $table . '` SET `' . $col . '` = ? WHERE `' . $keyCol . '` = ?', 'si', [$value, $id]);
+        }
+    };
+};
+$usualPutBack = $fillParts('tblSmallGroups', 'groupID', SGROUP);
+check('P20h0 premise: before the "keep only this part" attacks, EVERY part of the usual place holds something',
+    in_array(null, array_intersect_key($usualSnap(), array_flip($placeParts)), true) === false, json_encode($usualSnap()));
 $usualResetParts = $rowWriter('tblSmallGroups', 'groupID', SGROUP, $usualSnap());
 $runTakeovers('P20h', $usualSnap, static fn (): bool => $sgMap($groupPage($jarV)) === true || $tileRule($groupPage($jarV)) === true,
     static fn (string $jar, array $change): array => $groupForm($jar, $change), $saveGroup, $jarHost2, $jarAA, $partialAttacks(), $usualResetParts);
 $usualResetParts();
-q('UPDATE `tblSmallGroups` SET `region` = ?, `what3words` = ? WHERE `groupID` = ?', 'ssi', [$usualParts['region'] ?? null, $usualParts['what3words'] ?? null, SGROUP]);
+$usualPutBack();
 // The ONE way past for somebody who is not the host: EMPTY the place. That
 // deletes the address with the host (D-126); a new place is then entered afresh.
 $beforeEmpty = $usualSnap();
@@ -2012,13 +2040,28 @@ check('R07 the first host (a leader) posts an unticked box on the SECOND host\'s
 //    unchanged, only its named host may change who lives there or mark it
 //    "not anybody's home". The agreement is set to 0 first, so a take-over
 //    that got through would put a map up that its host never agreed to.
+$usualRoute  = "To meet somewhere else, clear every part of this place except the country (both address lines, the town, the region, the postcode, the map position and the what3words address) and save, then enter the new place.";
+$listedRoute = "To meet somewhere else, remove this home from the group's list, then add the new one.";
+$routeOnly = static fn (array $form, string $mine, string $other): bool
+    => str_contains($pageText($form), $mine) === true && str_contains($pageText($form), $other) === false
+    && str_contains($pageText($form), $mine === $usualRoute ? 'remove this home from the group' : 'clear every part of this place') === false;
+$fUsual = $groupForm($jarAA);
+$fNewHome = $homeForm($jarHost);
+$fEditHome = $homeForm($jarHost, $placeB);
+check('R07c0 each form offers ONLY the route that works on it: the group\'s own form says to clear every part and save (it has no "remove")',
+    $routeOnly($fUsual, $usualRoute, $listedRoute) === true);
+check('R07c0b ...the add-a-home form says to remove a home from the list (a listed home cannot be saved emptied)',
+    $routeOnly($fNewHome, $listedRoute, $usualRoute) === true);
+check('R07c0c ...and so does the edit-a-home form, in the chooser\'s hint AND under the host\'s name',
+    $routeOnly($fEditHome, $listedRoute, $usualRoute) === true && substr_count($pageText($fEditHome), $listedRoute) === 2);
 q('UPDATE `tblSmallGroupPlaces` SET `placeMapAgreed` = 0 WHERE `placeID` = ?', 'i', [$placeB]);
 $rx = $saveHome($jarHost, $homeForm($jarHost, $placeB, ['hostUserID' => (string) HOSTP]));
 $rowB = $placeRow($placeB);
 $fx   = $homeForm($jarHost, $placeB);
 check('R07c X1 THROUGH THE FORM: the leader names THEMSELVES as host of the second host\'s home (address unchanged): refused, still the second host\'s, and the form says why',
     $rx['status'] === 302 && (int) ($rowB['hostUserID'] ?? 0) === HOST2 && (int) ($rowB['placeMapAgreed'] ?? -1) === 0
-    && str_contains((string) $fx['_html'], 'Only they can name a different host') === true, json_encode($rowB) . ' status ' . $rx['status']);
+    && str_contains($pageText($fx), 'Only they can name a different host') === true
+    && str_contains($pageText($fx), "To meet somewhere else, remove this home from the group's list, then enter the new place afresh; that deletes this address. Nothing was saved.") === true, json_encode($rowB) . ' status ' . $rx['status']);
 $saveHome($jarHost, array_merge($homeForm($jarHost, $placeB), ['hostUserID' => (string) HOSTP, 'placeMapAsked' => '1', 'placeMapAgreed' => '1']));
 $rowB = $placeRow($placeB);
 $g    = $groupPage($jarV);
@@ -2034,7 +2077,7 @@ $rowB = $placeRow($placeB);
 $g    = $groupPage($jarV);
 check('R07f X2 AS A FORGED POST by an administrator: refused the same way, NO map',
     (int) ($rowB['hostUserID'] ?? 0) === HOST2 && (int) ($rowB['notAHome'] ?? -1) === 0 && $placeMap($g, $placeB) === false, json_encode($rowB));
-$listedSnap = static fn (): array => one('SELECT `addressLine1`, `addressLine2`, `city`, `region`, `postcode`, `countryCode`, `latitude`, `longitude`, `what3words`, `hostUserID`, `placeMapAgreed`, `notAHome`, '
+$listedSnap = static fn (): array => one('SELECT ' . $placeColsSql . ', `hostUserID`, `placeMapAgreed`, `notAHome`, '
     . '`placeEnteredByID`, `isActive` FROM `tblSmallGroupPlaces` WHERE `placeID` = ?', 'i', [$placeB]) ?? [];
 $listedReset = $rowWriter('tblSmallGroupPlaces', 'placeID', $placeB, $listedSnap());
 $runTakeovers('R07f2', $listedSnap, static fn (): bool => $placeMap($groupPage($jarV), $placeB) === true,
@@ -2044,15 +2087,15 @@ $listedReset();
 // A listed home's update that empties EVERY part is refused by place-save.php
 // before the rule is asked ("Enter at least part of the address…": a home
 // with no address is not a home; removing it is the way). A PARTLY emptied
-// one does reach the rule, so the same five run here.
-$listedParts = one('SELECT `region`, `postcode`, `what3words` FROM `tblSmallGroupPlaces` WHERE `placeID` = ?', 'i', [$placeB]) ?? [];
-q("UPDATE `tblSmallGroupPlaces` SET `region` = 'Cambridgeshire', `postcode` = 'CB4 4BB', `what3words` = 'filled.count.soap' WHERE `placeID` = ?", 'i', [$placeB]);
+// one does reach the rule, so the same generated cases run here.
+$listedPutBack = $fillParts('tblSmallGroupPlaces', 'placeID', $placeB);
+check('R07f5a premise: before the "keep only this part" attacks, EVERY part of the listed home holds something',
+    in_array(null, array_intersect_key($listedSnap(), array_flip($placeParts)), true) === false, json_encode($listedSnap()));
 $listedResetParts = $rowWriter('tblSmallGroupPlaces', 'placeID', $placeB, $listedSnap());
 $runTakeovers('R07f5', $listedSnap, static fn (): bool => $placeMap($groupPage($jarV), $placeB) === true,
     static fn (string $jar, array $change): array => $homeForm($jar, $placeB, $change), $saveHome, $jarHost, $jarAA, $partialAttacks(), $listedResetParts);
 $listedResetParts();
-q('UPDATE `tblSmallGroupPlaces` SET `region` = ?, `postcode` = ?, `what3words` = ? WHERE `placeID` = ?', 'sssi',
-    [$listedParts['region'] ?? null, $listedParts['postcode'] ?? null, $listedParts['what3words'] ?? null, $placeB]);
+$listedPutBack();
 // Legitimate: the listed home's own host hands it over, then it is handed back.
 $saveHome($jarHost2, $homeForm($jarHost2, $placeB, ['hostUserID' => (string) HOSTP]));
 $rowB = $placeRow($placeB);

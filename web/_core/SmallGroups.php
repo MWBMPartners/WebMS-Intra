@@ -877,8 +877,8 @@ final class SmallGroups
 
         return 'This place is the home of the member named as its host. Only they can name a different host, remove '
             . 'themselves as host, or mark it as not anybody\'s home. You can still correct its address, but they will '
-            . 'then need to agree to a map again. To meet somewhere else, ' . $how . ' and enter the new place afresh: '
-            . 'that deletes this address. Nothing was saved.';
+            . 'then need to agree to a map again. To meet somewhere else, ' . $how . ', then enter the new place '
+            . 'afresh; that deletes this address. Nothing was saved.';
     }
 
     /**

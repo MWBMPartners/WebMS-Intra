@@ -135,6 +135,7 @@ $values = $place ?? [];
                 'members'   => $canManage === true ? SmallGroups::membersOf($siteId, $groupId, 'active') : [],
                 'hostId'    => $hostId,
                 'hostName'  => $hostName,
+                'listedHome' => true,
                 'notAHome'  => $notAHome,
             ]);
             ?>
@@ -167,6 +168,7 @@ $values = $place ?? [];
                 'agreed'   => $agreed,
                 'viewerId' => $viewerId,
                 'what'     => 'this home',
+                'listedHome' => true,
                 'notAHome' => $notAHome,
             ]);
             ?>

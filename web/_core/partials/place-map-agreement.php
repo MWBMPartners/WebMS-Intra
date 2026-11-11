@@ -42,6 +42,49 @@ declare(strict_types=1);
 
 use Portal\Core\OutsideServices;
 
+if (function_exists('portal_place_start_again') === false) {
+    /**
+     * 🧭 How somebody who is NOT a place's host can make the group meet
+     * somewhere else (#809, check round 4). It differs by FORM, because each
+     * form offers a different route and the other one does not work there:
+     *   - the USUAL place has no "remove" control, so the way is to clear
+     *     every part of it except the country and save (`whyHostChangeRefused()`
+     *     lets an emptied place through);
+     *   - a LISTED home cannot be saved with every part cleared
+     *     (`place-save.php` refuses "Enter at least part of the address…"
+     *     before the rule), so the way is to remove it from the list.
+     * One sentence was drawn on both forms before, and each form offered a
+     * route that does not work on it.
+     *
+     * @param bool $listedHome True on the listed-home form, false on the group's own form.
+     */
+    function portal_place_start_again(bool $listedHome): string
+    {
+        return $listedHome === true
+            ? 'To meet somewhere else, remove this home from the group\'s list, then add the new one.'
+            : 'To meet somewhere else, clear every part of this place except the country (both address lines, the '
+                . 'town, the region, the postcode, the map position and the what3words address) and save, then '
+                . 'enter the new place.';
+    }
+}
+
+if (function_exists('portal_place_listed_home') === false) {
+    /**
+     * The form's `listedHome` setting, which MUST be given: a missing one would
+     * silently draw the other form's route, which is the fault this replaces.
+     *
+     * @param array<string,mixed> $cfg
+     */
+    function portal_place_listed_home(array $cfg): bool
+    {
+        if (is_bool($cfg['listedHome'] ?? null) === false) {
+            throw new \InvalidArgumentException('listedHome must be given as true or false');
+        }
+
+        return $cfg['listedHome'];
+    }
+}
+
 if (function_exists('portal_place_map_agreement') === false) {
     /**
      * @param array{
@@ -50,8 +93,10 @@ if (function_exists('portal_place_map_agreement') === false) {
      *     agreed: bool,
      *     viewerId: int,
      *     what: string,
+     *     listedHome: bool,
      *     notAHome?: bool
      * } $cfg  `what` names the place, e.g. "this meeting place" or "this home".
+     *          `listedHome` says which form this is (see portal_place_start_again()).
      *          `hostId` is the host as STORED (0 = none yet). `notAHome` is the
      *          stored "not anybody's home" mark (D-128).
      */
@@ -94,8 +139,8 @@ if (function_exists('portal_place_map_agreement') === false) {
                 . $esc($name) . ' has ' . ($agreed === true ? 'agreed' : 'not agreed') . ' to a map of it. Only '
                 . $esc($name) . ' can change that, by opening this form themselves. Only ' . $esc($name)
                 . ' can name a different host or mark it as not anybody\'s home. You may correct the address, but '
-                . 'then any agreement given so far no longer counts. To meet somewhere else, remove this place, or '
-                . 'clear every part of it except the country (both address lines, the town, the region, the postcode, the map position and the what3words address), and enter the new one afresh.</p>';
+                . 'then any agreement given so far no longer counts. ' . $esc(portal_place_start_again(portal_place_listed_home($cfg)))
+                . '</p>';
         }
         echo '</div>';
     }
@@ -129,6 +174,7 @@ if (function_exists('portal_place_host_select') === false) {
      *     members: list<array<string,mixed>>,
      *     hostId: int,
      *     hostName: string,
+     *     listedHome: bool,
      *     notAHome?: bool
      * } $cfg
      */
@@ -164,8 +210,8 @@ if (function_exists('portal_place_host_select') === false) {
         echo '</select>';
         echo '<small class="text-muted">A member of the group. Only they can agree to a map of their home. With nobody '
             . 'named, no map is shown unless the place is marked as not anybody\'s home below. Once a host is named, only '
-            . 'they can name somebody else or mark it; anybody else must first remove the place, or clear '
-            . 'every part of it except the country (both address lines, the town, the region, the postcode, the map position and the what3words address).</small>';
+            . 'they can name somebody else or mark it. ' . $esc(portal_place_start_again(portal_place_listed_home($cfg)))
+            . '</small>';
         echo '<input type="hidden" name="notAHomeAsked" value="1">';
         echo '<div class="form-check mt-2">';
         echo '<input type="checkbox" class="form-check-input" name="notAHome" id="notAHome" value="1"'

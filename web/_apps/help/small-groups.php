@@ -154,7 +154,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <h2 class="h4 mb-3"><i class="fa-solid fa-house-user me-2"></i>Hosts, Homes and Maps</h2>
     <p>
         A group has its usual meeting place, and can also keep a list of members' homes it takes turns
-        meeting in. Each place names its <strong>host</strong>: the member of the group whose home it is.
+        meeting in. A place that is somebody's home names its <strong>host</strong>: the member of the group who
+        lives there. A place can also have no host named yet, or be marked as not anybody's home (see below).
         When a leader records or plans a meeting, they choose which of these places it is at.
     </p>
     <ul>

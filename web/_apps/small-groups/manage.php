@@ -299,6 +299,7 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
                 'members'   => $groupMembersForHost,
                 'hostId'    => $placeHost,
                 'hostName'  => $placeHostName,
+                'listedHome' => false,
                 'notAHome'  => $placeNotAHome,
             ]);
             portal_place_map_agreement([
@@ -307,6 +308,7 @@ $val = static fn (string $k, string $default = ''): string => $editGroup !== nul
                 'agreed'   => $placeAgreed,
                 'viewerId' => $viewerId,
                 'what'     => 'this meeting place',
+                'listedHome' => false,
                 'notAHome' => $placeNotAHome,
             ]);
             ?>
