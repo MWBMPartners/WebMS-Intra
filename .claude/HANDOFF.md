@@ -6,26 +6,25 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859.
-Last whole suite (with #859): 107/107 green. Decisions D-129 to D-134 recorded on 11 November.
+#493 (P4a-P4d), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936, #940, #895, #947 (+ #937, #894, #911), #923, #943, #809, #867, #891 (+ #892, #951), #882 (+ #898), #963, #859, #919, #907, #942, #941 (+ #927).
+Last whole suite (with #941/#942/#907): 118/118 green. Decisions D-129 to D-136 recorded on 11 November (D-135 is the
+owner's 2 November no-live-install statement, found unrecorded).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #942 — no country built in (D-133; migration 279) | `p942-build`, f1130748 | Round 4 check running (protected). Round 4 pinned the suggestion script as text after three rounds of a behavioural "sends nothing" check failing |
-| #941 + #927 — erasure: cleared kept-gifts row; labels that reassure falsely | `p941-build`, 2d83c94f | Round 4 check running (protected). Round 3 found "[Deleted User]" reaching the Gift Aid file; fixed in `buildHmrcCsv()` |
-| #968 — events detail API moderation fields; `SELECT e.*` on public pages | `p968-build` | Building (protected) |
-| #919 — audit checks' self-tests run locally | `p919-build` | Building (tooling) |
-| #907 — passkey behaviours unpinned (item 3 deferred: it collides with #942's pages) | `p907-build` | Building (protected) |
+| #968 — events detail keeps moderators' notes for signed-in admins (D-136); public pages name their columns | integrated locally (dce78b0e), unpushed | Four check rounds; last finding wording only, corrected by me. Whole suite running, then push |
+| #977 — an erased account cannot be changed through any page | `p977-build`, 1b5020d8 | Check round 1 running (protected) |
+| #966 — currency not built in (D-133; migration 282 if needed) | `p966-build` | Building: plan first, may raise an owner question about changing currency once money is recorded |
 
-**Migration numbers taken:** 269-278 landed; 279 (#942). 280 and 281 were assigned to #859 and #941 and unused. Next free: 282.
-**The migration harness takes `E2E_NAME_SUFFIX` and `E2E_HOST_PORT` (#923).** Keep each agent's scripts in its own `/tmp/claude-501/<pkg>/`.
+**Migration numbers taken:** 269-279 landed. Next free: 282 (#966). 280/281 assigned and unused.
+**The migration harness takes `E2E_NAME_SUFFIX` and `E2E_HOST_PORT` (#923); the whole-suite runner does not yet (#983).**
 
 ## Next, in this order
 
-1. Finish the five in flight (check → integrate → whole suite → push).
-2. The rest of the backlog (D-055), highest priority first; #966 (currency, decided by D-133) after #941 lands (both touch Giving).
+1. Finish the three in flight.
+2. The rest of the backlog (D-055), highest priority first.
 3. #821 items 4-8. 4. #754 (waits on the merge). 5. The Codex review (D-007), then the merge.
 
 ## Working pattern that is paying off
@@ -72,4 +71,4 @@ them from the folder. **Codex has reviewed none of this work.**
 ## What is open
 
 The issue tracker is the record (`gh issue list --state open`); by D-055 every open issue is cleared before the
-first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#972.
+first release. Raised this stretch: #892-#899, #901, #904-#911, #913, #914, #916-#919, #941-#983.
