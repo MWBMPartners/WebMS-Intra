@@ -13,7 +13,7 @@ Last whole suite (with #703): 104/104 green; e2e harness all phases. Decisions t
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, af861384 | Behaviour settled (0 wrong beyond #946 over 330,727 + 4.6M cells). Round 6 narrow check: one untrue sentence ('ago ago' Mon-Sat passes the guard). Comment fix + one K cell in progress, then I review and integrate |
+| #785 — a guard for write paths that store a wall-clock reading as a moment | `agent-a93270803fddd9768` / `p785-build`, 4fef9b8d | Clean (last fix comment-only, reviewed by me). Cherry-picked (02eb9c23..cbe479cd) with docs; whole suite running, then push and close. Limit tracked on #946 |
 | #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 49dc1411 | Check round 4: sunset right (independent USNO model, 69 places x 10 years, 0 wrong days); one test gap (the page's no-sunset note unpinned). Round 5 building. Raised #942, #943, #945 |
 | #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, f96459b7 | Check round 3: one untrue refusal (the 0-days message offers 'Never delete' on the organisation's form where it is not offered). Round 4 building. Raised #947 |
 

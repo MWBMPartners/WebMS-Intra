@@ -22295,6 +22295,285 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
 
+### Following a value to the column it fills (#785)
+
+**What it is.** `check_wall_clock_writes_not_moments.py` (Python: the schema, the
+judgement, the exemptions) and `wall-clock-writes-probe.php` (PHP: reads every
+file with `token_get_all($src, TOKEN_PARSE)` in ONE process and answers which
+values went through a moment and which `?` they fill). About half a second for
+934 files.
+
+**Why a value, not an idiom.** #785 opened with a same-line idiom,
+`date('Y-m-d H:i:s', … strtotime …)`, as its specification. Its own comments
+measured that wrong in all three parts: it matched four files, not seven; it
+would have caught NEITHER real fault (the conversion and the format are seven
+and fifteen lines apart); and one of its matches was a real fault. The check
+follows the value instead.
+
+**How far it follows, and where it stops (D-065).** Inside one function, by
+variable name, flow-insensitively, through `=`, the compound operators and
+writes into an array; through operators, casts, ternaries, string joining,
+array literals, `foreach`, arrow functions, a moment handed to another moment
+function or to a constructor (including one returned by a call, and formatted
+text re-read), and a short list of pass-through functions (`PASS_THROUGH`);
+through a `return`, one hop, within the file -- a closure in a variable, a
+named function, `$this->m()` or `self::m()`; through a closure's `use` list
+into the function it is written in. NOT into the arguments of any other call,
+not through parameters, not across files, not through `$this->x`,
+destructuring, `extract()`, references or variable variables.
+
+**Every construct it claims has a case that fails without it.** 40 in all: 22
+ways a value is followed, 6 ways a statement is found (SQL in a variable, SQL
+built with `.=`, `mysqli_prepare()`, `execute_query()`, `query()` with the
+value in the SQL, `mysqli_query()`), 10 ways a value is matched to its column
+(INSERT column list against VALUES, UPDATE SET, INSERT SET, ON DUPLICATE KEY
+UPDATE, a table alias, INSERT ... SELECT judged whole, a run-time column list,
+a pushed value paired with its SET literal, an unpaired spread judged whole, a
+WHERE value not counted), `TOKEN_PARSE`, and the generated-count pin. Each
+handling was switched off alone in a scratch copy and the named case went
+red: **40 of 40** (round 6). Round 5 claimed "39 of 39" while the
+"formatted text re-read" branch it had just added for `createFromFormat()` --
+beside the one for `new` -- had no case at all: deleting it left the self-test
+green. Plant P34 (`createFromFormat('Y-m-d H:i:s', postedStart())`) closes it.
+What doing that found:
+- **Arrow functions were never read**, although the header said they were:
+  `=>` ended the expression. Fixed in `expressionEnd()` (round 4).
+- **The "carried moment" branch for a constructor and `createFromFormat()` IS
+  reachable** -- round 4 deleted it as unreachable, and that was wrong: a
+  moment returned by a call with no variable in it (`new
+  \DateTimeImmutable('@' . postedTs())`, `createFromFormat('U', (string)
+  postedTs())`) reaches only that branch. Round 3 reported both; round 4
+  reported neither. Restored in round 5 with plants P31 and P32, P33 for a
+  formatted moment re-read by a constructor (`new
+  \DateTimeImmutable(postedStart())`), which was missed before round 4 too,
+  and -- in round 6 -- P34 for the same re-read through `createFromFormat()`.
+  **"Measured unreachable" meant only that no case I had written reached it.**
+
+**Four pieces of the design, each forced by a measurement:**
+
+| Piece | What happened without it |
+|---|---|
+| Matching each value to its `?` and column | `attendance/api/create.php` and `update.php` reported: their DATE value shares a statement with a TIME column it does not fill; two date-only values in `_core/Venues.php` likewise |
+| A wall at every non-pass-through call | 26 false reports in `import.php`: `Events::alreadyInCalendar($db, …, $storedStart)` returns a ROW |
+| Reading a column list built at run time, pairing each `$params[] = …` with the `'<col> = ?'` before it | the events API's update endpoint before round 6 of #777 — a real fault — was invisible |
+| Following a closure's `use` list | the three places that create an event bind inside `static function (…) use ($stmt, $values)`, so none was readable |
+
+**Measured on history** (each faulty file put back into today's tree with
+`git show <commit>^:<path>`): `resources/book.php` before `04a6226e` RED
+(startAt, endAt); `calendar/submit-save.php` before `05a8097e` RED
+(startDateTime, endDateTime); before `5ca77426`, `events/api/create.php` RED
+(WITH the correct zone passed), `events/api/update.php` RED, and
+`calendar/manage/import.php` RED. The independent check repeated this under PHP
+8.3. On today's tree: 38 clock-column writes judged, and 12 bind calls whose SQL
+could not be read (SQL handed in as a parameter). Each of the 12 was read by
+eye: none STORES a clock column through a moment. That is not "none writes a
+clock column" -- `DbBackup.php`'s restore writes every table, but copies stored
+values and builds no moment. ONE live fault was found -- the import's fallback
+-- now fixed.
+
+**`date_parse()` is not a moment function here**, though the reader check's
+`MOMENT_BUILDERS` lists it: it returns the parts as written (measured,
+`date_parse('2026-03-29 01:30')['hour']` is 1). Every entry of
+`MOMENT_BUILDERS` must be classified in this check's `CLASSIFIED`, or it fails.
+
+**Exemptions name a PLACE and carry GUARDS.** The key is
+`path::$variable::table.column::function-the-moment-was-built-in`. The function
+is in the key because a variable name is not a place: the CSV import before
+round 6 stored its round trip under the SAME names as today's deliberate
+fallback. Each entry also names the statements that make it safe, each pinned
+WHOLE (`&& false` defeats a substring pin) and required EXACTLY ONCE in live
+code, because the test that drives them runs in `portal-selftests.yml`, which
+GitHub has never registered (#754), and not in the pre-push hook. **A pin pins
+whatever is there; it is never evidence that what is there is right** -- five
+successive versions of the import's step were pinned here, each wrong.
+
+**The test of the check** (`tools/wall-clock-writes-selftest.py`, 98 checks):
+- **38 GENERATED cases, one per entry of every list** (the probe's
+  `CONSTRUCTED`, `SETTERS`, `FORMATTERS`, `PASS_THROUGH`, `BINDERS` and the
+  check's classified moment functions), generated from a PINNED COPY held to
+  the real lists both ways by six LIST checks, with the generated COUNT pinned
+  too. The first version generated from the real lists, so removing an entry
+  removed its own case (0 of 38 caught). Now each removal turns the case named
+  after it red, **38 of 38**; and removing an entry from BOTH lists trips the
+  count.
+- 34 plants (covering every construct and write shape, plus the history), 11
+  must-stay-green cases, 9 refusal cases.
+- **The lesson, five times over:** a case proves a defence only if removing
+  that defence turns it red, and the set of defences must come from the code
+  -- hand-picked plants missed `PASS_THROUGH` (round 1), single list entries
+  (round 2), `foreach` (round 3), "unreachable" was a claim about my plants
+  (round 4), and a branch added in round 5 had no case at all (round 5's
+  check). **A new branch is a new defence: add its case in the same edit.**
+
+**The fault it found, and how it is fixed** (import step 3, fixed in step (d)).
+For a cell with no zone or offset and a full written date, step (d) stores
+PHP's own reading of the cell in UTC, where nothing moves, when ALL hold:
+1. `date_parse()` reports no relative hours, minutes or seconds, and any
+   relative weekday it reports is a day of the week (0-6);
+2. that reading equals, to the microsecond, PHP's reading (also in UTC) of a
+   CANONICAL cell built from only what `date_parse()` says was WRITTEN -- the
+   date and time fields and the fraction, plus the relative DATE parts it
+   reports (years, months, days, a weekday, weekdays, first/last day of), the
+   weekday first (after the time a day name resets it to 00:00, measured);
+3. `EventRecurrence::readingIsReal()` says the reading is in the hour the zone
+   skipped, in the zone `strtotime()` used.
+
+Test 1 alone missed msec/usec, which `date_parse()` reports nowhere (round 2).
+Test 2 alone was fooled by date rules `date_parse()` MISREPORTS, cancelled by
+reported hours (round 3): measured with my sweep against round 3's reader, 278
+`next ... -168 hours` cells and 148 `last ... of ... -672 hours` cells were
+stored an hour early; test 1 refuses both. (An earlier version of this note
+said "676 such cells, test 1 refuses those", citing the independent check --
+but its 676 was 338 `-168 hours` cells plus 338 `-604800000 msec` cells, and
+the msec half is the limit below, which test 1 does NOT refuse.)
+
+**The weekday range guard** (round 5): for `<weekday> N weeks ago` with ONE
+`ago`, `date_parse()` reports a weekday of -1 (monday) to -7 (sunday), always
+outside 0-6; with `ago ago` it reports the weekday's own number, +1 (monday)
+to +6 (saturday), and +7 only for sunday (measured; earlier versions of this
+note said "-7, -6 or -1" and then "+7 for `ago ago`"). Round 4 looked an
+out-of-range value up in the day-name list -- "Undefined array key -7",
+logged to `tblErrors` on every such row and visible on dev and beta. Round 4's
+reader printed 13,426 such warnings over my sweep; round 5 prints none, and
+such a cell keeps the old answer. Pinned by K07g (no warning raised) and
+K07g2; the `monday` (-1), `tuesday` (-2) and sunday `ago ago` (+7) cells test
+the two bounds, and loosening either bound alone, even by one step (`>= -1`),
+turns K07g red. (Before the monday cell was added, `>= -1` left section K green
+and only the gate's text pin caught it.)
+
+**The limit that remains -- a CLASS, on #946:** any date rule `date_parse()`
+misreports, combined with HIDDEN time arithmetic (msec or usec) that exactly
+cancels the misreport, passes both tests and is stored as the reading written
+where an exact count gives an hour later. Known members, as EXAMPLES and not a
+complete list: `next <weekday>`, `last <weekday> of <month>`, `<weekday> next
+week`, a bare `next`/`last`/`this`/`previous week`, and `<ordinal> <weekday> of
+next/this/last month`. Measured instances: `next sunday 2026-03-29 01:30
+-604800000 msec` in London stores 01:30, and `first sunday of next month
+2026-02-08 02:30 +604800000 msec` in New York stores 02:30. Nobody writes such
+a cell in a spreadsheet.
+
+**`<weekday> N weeks ago` with ONE `ago` is not a member:** its weekday is
+always -1 to -7, so the weekday range guard sends it to the old answer before
+the comparison, and cancelling msec cannot make it match -- the independent
+check's round 5 measured 0 of 245,616 such cells stored as written (round 4
+stored 114), and K07g2's msec cell asserts it. **With `ago ago` it CAN be a
+member** -- round 6's notes said every "ago" cell was kept, which was untrue:
+monday to saturday `ago ago` report +1 to +6, inside 0-6, so such a cell passes
+the guard and is an ordinary cell, and with a misreported rule plus cancelling
+msec it matches. Measured: in Asia/Jerusalem (clocks forward on Friday 27
+March 2026 at 02:00), `next friday 1 week ago ago 2026-03-20 02:30 -604800000
+msec` stores `2026-03-27 02:30:00` where the old answer was `03:30:00`.
+
+**Also known and left, in the safe direction** (the answer this reader gave
+before #785): a misreported rule WITHOUT cancelling arithmetic, in the skipped
+hour -- `next sunday 2026-03-22 01:30`, `last sunday of march 2026 01:30`,
+`sunday 1 week ago 2026-04-05 01:30` -- keeps the old, moved answer; and a
+mixed zero such as `+1 hour -3600000 msec`, refused by test 1. **A correction:**
+an earlier note said a fraction such as `01:30:00.9999995` "rounds up and falls
+back"; that was false -- `date_parse()` truncates it to six digits (0.999999),
+so it matches and is stored as written. Pinned in K07b.
+
+**Deliberate:** arithmetic that adds up to nothing within one test's sight is
+no arithmetic -- `+0 hours`, `+1 hour -1 hour` (test 1 sees a net zero) and
+`+3600000 msec -3600000 msec` (the readings match) store the reading they name.
+
+**Every part of step (d), removed alone** (round 5; each must turn a section-K
+check red):
+
+| Part removed | Red on |
+|---|---|
+| written field: year, month, day, hour, minute, second, fraction (each alone) | K07b |
+| relative rule: year, month, day (each alone) | K07b |
+| relative rule: weekdays, first day of, last day of (each alone) | K07b |
+| the weekday; the weekday written first | K07b |
+| gate: no zone or offset | K07d |
+| gate: test 1, no reported relative time | K07c |
+| gate: the weekday range guard | K07g, K07g2 |
+| gate: its lower bound loosened to -7 (round 6) | K07g, K07g2 |
+| gate: its upper bound loosened to 7 (round 6) | K07g |
+| gate: test 2, the comparison | K07f2 |
+| gate: `$relative` read at all | K07b, K07c |
+| gate: `readingIsReal()` in the zone `strtotime()` used | K07b |
+| what is stored: seconds kept | K07b |
+| gate: a full written date | **nothing** -- every cell without a year is refused earlier by #797's two-reference rule, and `date_parse()` gives a month-and-year cell day 1 (measured), so no cell reaching step (d) lacks one; it stays to keep `false` out of `setDate()` |
+| gate: `readingIsReal()` at all | **nothing** -- the UTC reading agrees with the zone on every reading that exists, so removing it changes no cell in the sweep |
+
+**24 of 26** (22 of 24 in round 5, plus the guard's two bounds in round 6). The
+year rule and `first day of` left section K green until round
+5 (cells `2025-03-29 01:30 +1 year` in London and `first day of next month
+2014-07-15 00:30` in Cairo now pin them); d1, d5 and d7 did until round 4.
+
+**Six versions, and what each got wrong:**
+- Round 0 REFUSED such a cell: a refusal by SPELLING, which round 14 of #777
+  rules out.
+- Round 1 rebuilt the reading from `date_parse()`'s FIELDS and STORED it: the
+  wrong DATE for `+1 weekday`, `first/last day of` and an ordinal `+1 month`.
+- Round 2 had test 1 alone: msec/usec stored an hour early.
+- Round 3 had test 2 alone: misreported rules cancelled by reported hours
+  stored an hour early.
+- Round 4 had both, but raised a PHP warning for a weekday outside 0-6, and
+  had deleted a reachable branch of the gate.
+- Round 5 adds the range guard, restores the branch, states the limit as a
+  class, and drives every part of the step it can.
+
+**The sweep** (`sweep3.php` in the session scratchpad, not committed). 51
+spellings, each tagged by meaning so the expected answer comes from the tag,
+never from the code under test (`reading`; `exact` arithmetic; `instant`;
+`kept`, a reading knowingly left on the old line; `limit`, the stated class),
+across 23 zones that all change their clocks in 2025-2027, every 15 minutes for
+six hours either side of every change. Every row run with the same script, and
+each cell that differs from its tag split by WHY it differs (round 6 -- an
+earlier version of this table counted both kinds as "WRONG"):
+
+| Reader | cells | wrong value | a deliberate choice, not a wrong value |
+|---|---|---|---|
+| round 5 (this) | 330,727 | **0** | 0 |
+| round 4 (`b8d67707`) | 330,727 | 0 | 218 |
+| round 2 (`aa074a09`) | 330,727 | 2,224 | 660 |
+| round 1 (`4fe9b574`) | 330,727 | 3,917 | 0 |
+| the reader before #785 | 330,727 | 5,762 | 0 |
+| round 5 without `readingIsReal()` | 330,727 | 0 | 0 |
+
+"Wrong value" means a stored value that is wrong by the cell's own meaning: an
+hour moved, msec/usec arithmetic stored an hour early, or (round 1) the wrong
+date. "A deliberate choice" means a cell that is ALSO correct either way: round
+5 deliberately keeps some misreported-rule cells -- `<weekday> N weeks ago`,
+`next <weekday>`, `last <weekday> of` -- on the old, pre-#785 answer, in the
+safe direction, where an earlier round stored the cell's own UTC reading as
+written. Round 4's 218 are "ago" cells; round 2's 660 are `next <weekday>`
+(278), `last <weekday> of` (164) and "ago" (218). The sweep tags those
+spellings `kept` to match round 5, so the script itself counts them as
+differences; neither answer is a wrong value. So "0 wrong for round 5" means:
+no wrong value, and its chosen answer for every `kept` cell. Round 5's
+"as before / as written" split is 323,853 / 6,874, including 278 `limit`
+cells. Round 4 also printed 13,426 PHP warnings over the run; round 5, none.
+The independent
+check's own sweep of round 4 -- 1,265,400 cells -- found no stored value wrong
+outside the stated class, and confirmed that the 435 "time then weekday" cells
+storing 00:00 is right (`date_parse()` reports hour 0).
+
+**Driven by section K of `tools/clock-change-selftest.php`** -- 20 checks in
+section K (the file runs 186):
+- K07: the premise, that PHP really moves each gap cell in its zone.
+- K07b: each stores the reading it wrote -- a fraction (including
+  `.9999995`), a weekday before the date, `+1 weekday` (Cairo), `+1 year`,
+  `first day of next month` (Cairo), seconds, `+1 day`, an ordinal `+1 month`,
+  `last day of`, `tomorrow`, ISO week and net zeros.
+- K07c: nothing outside the skipped hour changes, and reported time arithmetic
+  -- `+1 hour`, `+24 hours`, the mixed zero, `next sunday … -168 hours`, `last
+  sunday of april … -672 hours` -- keeps its old answer.
+- K07d: a zone or offset cell in the gap is still converted as an instant.
+- K07e: `+1 weekday`, `first/last day of` and ordinal `+1 month` outside the
+  gap match the original reader.
+- K07f / K07f2: msec, ms, milliseconds, usec, microseconds, a whole day of msec
+  and `+1 day +3600000 msec` keep their exact answer.
+- K07g / K07g2: a weekday outside 0-6 raises no PHP warning and keeps the old
+  answer -- `monday` (-1) and `tuesday` (-2) with one `ago`, and sunday `ago
+  ago` (+7), which test the range guard's two bounds behaviourally, and a
+  one-`ago` cell with cancelling msec, which shows a one-`ago` cell is not a
+  member of the limit. (A monday-to-saturday `ago ago` cell is in range and
+  ordinary, so K07g says nothing about it.)
+
 ### Keeping a worker's name on a safeguarding record, and saying what an erasure leaves (#703)
 
 - **Keeping the NUMBER is not keeping the NAME.** `GdprEraser` empties the person's own `tblUsers` row

@@ -584,6 +584,15 @@ Events, series, RSVP, exports, and seven view modes.
 - Events copied in from somebody else's calendar, with their own audience, choices, rules and approvals: see "Outside calendars" below (#514).
 - Crews (#343), volunteer job board (#344), multi-day attendance grid (#345), segment broadcast (#119), registrations (#347) — per-event coordinator tools at `/calendar/event/{crews,jobs,attendance,broadcast}` + `/admin/calendar/registrations`.
 - **Event Team Hub (#386 Phase 1)** — per-event staff/volunteer/organiser landing page at `/calendar/event/hub`, gathering the above tools plus a Resources list and a YouTube/Vimeo/Cloudflare Stream video grid. See the dedicated section below.
+- **Clock readings are not stored through a moment** (#785) —
+  `check_wall_clock_writes_not_moments.py` follows a posted value through
+  `strtotime()`, a DateTime constructor, `createFromFormat()`, `mktime()` or
+  `setTime()` to the column it is stored in, and fails when that column holds a
+  clock reading. Tested by `tools/wall-clock-writes-selftest.py` (98 checks:
+  one generated case per entry of every list the probe uses; plants covering
+  every construct it follows and every write shape it reads, each measured to
+  go red when that construct's handling is switched off; must-stay-green
+  cases, refusal cases and list pins).
 
 **Shipped (PR #137, closed #136):**
 - Seven view modes — `/calendar?view=day|week|weekdays|weekend|month|year|list`.

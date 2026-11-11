@@ -4,6 +4,49 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A clock reading is never stored after going through a moment; the CSV import's skipped-hour fault fixed (#785)
+
+- **The CSV event import stored a loose spreadsheet time an hour out on the
+  morning the clocks go forward (#785).** A cell such as `Sun, 29 Mar 2026
+  01:30` (Excel's long date) or `03/29/2026 01:30` went through `strtotime()`
+  and was stored as 02:30; in New York `Sun, 8 Mar 2026 2:30am` became 03:30,
+  and in Nuuk `28 March 2026 11:30pm` was stored on the NEXT DAY at 00:30. The
+  same reading written `2026-03-29 01:30` was always stored as typed, so the
+  stored time depended on how the spreadsheet spelled the date. Such a cell is
+  now stored as the reading it WROTE (`2026-03-29 01:30:00`, `2026-03-08
+  02:30:00`, `2026-03-28 23:30:00`), exactly as the ISO spelling always was.
+  Cells naming their own zone (`… GMT`) or carrying an offset are still
+  converted as instants, and time arithmetic (`… +1 hour`, `… +3600000 msec`)
+  still means an exact amount of time. Measured against the reader as it was
+  before #785, over 330,727 generated cells (51 spellings, 23 zones that all
+  change their clocks in 2025-2027, every 15 minutes for six hours either side
+  of every change), and by an independent sweep of 1,265,400 cells: no cell is
+  newly refused or newly accepted, and the only change is readings in the hour
+  the zone skipped, now stored as written -- with one class of exception that
+  nobody types, recorded on #946: any date rule PHP's parser misreports, used
+  together with millisecond or microsecond arithmetic that exactly cancels the
+  misreport, can still be stored as the written reading. `next <weekday>`,
+  `last <weekday> of <month>` and `<ordinal> <weekday> of next month` are
+  examples of such rules, not a complete list. (A `<weekday> N weeks ago` cell
+  with ONE `ago` is not: it always keeps the answer this reader gave before
+  #785. One with `ago ago` on a monday to saturday is an ordinary cell and can
+  be.)
+- **Visible in zones whose clocks go forward at MIDNIGHT** (Santiago, Havana,
+  Beirut and others): a loose date with no time on that day -- `6 September
+  2026` in Santiago -- now stores `2026-09-06 00:00:00` where it stored
+  `01:00:00`, matching the ISO spelling `2026-09-06`, which always stored
+  00:00. The same holds for a time followed by a weekday name (`2026-09-06
+  00:30 sunday`), which PHP itself reads as midnight.
+- **A check that a clock reading is never STORED after going through a moment
+  (#785).** `tools/audit-checks/check_wall_clock_writes_not_moments.py`, a hard
+  gate in `pr-security.yml`, with its own test `tools/wall-clock-writes-selftest.py`
+  (also a hard gate, and in `tools/run-all-selftests.sh`). It follows a value
+  with PHP's tokeniser from a moment function to the `?` it fills in an INSERT,
+  REPLACE or UPDATE of a clock column (every `TIME` column and every `DATETIME`
+  declared WALL-CLOCK, read from the schema). It goes red on all five
+  write-path faults #777 found by eye, put back into today's tree.
+- Open: #946.
+
 ### Erasure keeps the worker's name on the records they made, and says plainly what stays (#703; D-016, D-110 to D-113, D-116; migration 272)
 
 - **An erased worker's NAME and account number stay on the safeguarding records they made**:
