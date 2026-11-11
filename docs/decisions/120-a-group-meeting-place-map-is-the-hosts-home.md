@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-11  
 **Status:** in force, in part superseded  
-**Superseded in part by:** D-124 (the host is the named member, not whoever entered the place)
+**Superseded in part by:** D-124 (the host is the named member, not whoever entered the place); D-128 (a place marked "not anybody's home" may show a map without a host)
 
 **Question:** a small group's page can show an OpenStreetMap map of where the group meets, and small groups often
 meet in a member's home. Showing the map sends that address, and the viewer's internet address, to an outside
