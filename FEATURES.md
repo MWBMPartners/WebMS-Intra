@@ -1479,7 +1479,7 @@ setting seeds.
 | ↳ **Click counting (#620, migration 268):** a counted link carries a random token for an address recorded with that newsletter when it is sent, and the counter forwards only to that address; anything else gets "this link is no longer valid". Links from newsletters sent before #620 stop working. Click counting ships switched off. | #620 | 268 | ✅ |
 | ↳ **Only the portal's own mailer is implemented.** `newsletter.provider` accepts `mailermatt` and `mailchimp`, but there is no adapter behind either: both fall back to the internal mailer, so newsletters still go out. No admin page offers them — reaching that state means typing the value into the general Settings editor — and since 29 October 2026 the Newsletter page SAYS so when it happens. | #269 | 093 | ⚠️ slot empty |
 | Giving (tithe log, Gift Aid digital declaration, HMRC schedule CSV, year-end PDF; online give-online checkout added later, see "PayPal payment adapter" section below; treasurer bulk year-end statements added later, see "Giving — Bulk year-end statements" section below) | #266 | 094 | ✅ |
-| SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours, on each organisation's own clock unless a zone is named (#782): a text that is not a critical alert or an emergency notice is held and sent by `/cron/mail-queue` when they end, or recorded as not sent once its use-by moment has passed, #610) | #272, #610 | 095, 219 | ✅ |
+| SMS (Twilio + MessageBird + SigV4-signed AWS SNS; verification + per-category opt-in + Sabbath quiet hours, on each organisation's own clock unless a zone is named (#782), with sunset at the typed place or each organisation's own map position, and the fixed times where neither is known or the sun does not set (#935): a text that is not a critical alert or an emergency notice is held and sent by `/cron/mail-queue` when they end, or recorded as not sent once its use-by moment has passed, #610) | #272, #610 | 095, 219 | ✅ |
 | Projects (public fundraising page, pledge thermometer, captcha-gated anonymous pledges; member "Pay now" pledge checkout added later, see "PayPal payment adapter" section below) | #267 | 096 | ✅ |
 | Payments (Stripe Checkout + PayPal Orders v2 + v1 HMAC/verified webhooks + refund; side-effects into Giving/Projects — PayPal + online checkout UI added later, see "PayPal payment adapter" section below) | #268 | 097 | ✅ |
 
@@ -1782,6 +1782,9 @@ The Payments app's `paypal` branch was previously stubbed ("not-implemented" —
 
 **Time zone (#782).** A venue's time zone starts on the organisation's own (Admin → Organisations),
 and left empty it is the organisation's. A zone the portal does not know is refused.
+
+**Country (#935).** A new venue's country starts as the organisation's own; left empty it takes the
+organisation's, and with none set there the save is refused with the reason.
 
 Tenant-side register for congregations that RENT their building from another
 organisation — the mirror-image of Resources (rooms you own) and Assets

@@ -22295,6 +22295,172 @@ and the script are. `renderPage()` is pure (given what `events()` and `posters()
   sentence. `check_schema_seed_parity.py` lists 269 among "not marked in the seed block", as it
   already lists 262, 263, 264 and 268, which use the same per-block mark — informational, exit 0.
 
+### No place is built in, and the Sabbath page (#935, #936)
+
+**`Sabbath::place()` is the ONE answer to where sunset is worked out**:
+the typed `portal.sabbath.location_lat` / `location_lng` when both are usable,
+else the organisation's `org.latitude` / `org.longitude`, else null.
+`computeWindow()` uses the fixed method when it is null. This is the reasoning
+#782 used for the zone (empty means each organisation's own), and it follows the
+class's own promise since #231 ("falls back to a fixed 18:00").
+**The map position is ALWAYS read through `App::settingForSite()`, for the
+organisation given, or `Site::id()` when none is given, never from the merged
+settings.** The merged settings belong to the organisation the ADDRESS resolved
+to, and `Site::forceContext()` (an API key of another organisation, `ApiAuth`)
+changes `Site::id()` without merging again, so a prayer request sent that way had
+its window opened at the address organisation's sunset on the key organisation's
+clock (round 1 of the independent check; P15/P16). The held-texts job passes each
+text's own organisation while `Site::id()` stays the job's (P22). With no
+organisation given, the place and the clock (`zone(null)`) are now always the same
+organisation's.
+
+**`Sabbath::sunsetAt()` does not trust `date_sun_info()` to pick the day.** That
+function chooses the day by PHP's DEFAULT time zone, and near the date line gets
+it wrong even on the place's own zone (measured by the independent check: Tonga,
+Samoa, Kiritimati and Fiji got Saturday's sunset for Friday 13 November 2026,
+every week in Apia and Tongatapu; Adak sometimes got the day before; since #231).
+Round 2 first tried setting the default zone around the call, which did not cure
+the date line, could not handle a zone written as an offset (`+10:00`, which
+`date_default_timezone_set()` refuses with a notice, logged to `tblErrors` twice a
+window), and touched a global. Round 3 then took "the sunset between local noon
+and noon the next day", which is untrue in the Arctic: on Central European Time
+well east of 15°E (Vardø, Kirkenes, Hammerfest, Alta, Kiruna, Tromsø) and at
+Scoresbysund the sun sets BEFORE local noon for a few days around the start and
+end of polar night, so round 3 took the next day's sunset (Vardø, Friday 20
+November 2026: Saturday's 11:36 instead of Friday's 11:47) or none at all
+(Tromsø, 27 November 2026: 18:00 instead of 11:46). Two rounds running, picking
+the day by a rule about clock hours failed, so the rule was simplified.
+
+**The final rule: pair each sunset with its own solar transit.** `date_sun_info()`
+returns the transit (the sun's highest point) together with the sunset of the same
+solar day. `sunsetAt()` asks for instants every six hours from two days before
+local noon to two days after, reads each answer's TRANSIT on the window's own clock
+to decide which date it belongs to, and uses the sunset paired with the transit on
+the Friday (or Saturday). Nothing global is touched and no range of hours is
+assumed. Three outcomes: that sunset; the sun does not set or does not rise that
+day (polar day or night), so `sunsetAt()` answers null and the window uses 18:00
+on that date, flagged by `Sabbath::windowDetails()['noSunset']` so the settings
+page says so under the preview (it also says it beside the sunset choice); or no
+transit falls on that date because PHP's calculation skipped the day (Anadyr,
+Friday 1 October 2027), and the time halfway between the day before's and the day
+after's sunset is used.
+
+**Measured against the independent check's NOAA-style calculation** (its scripts
+in `/tmp/claude-501/p935-check3/work/`, run on this code through a copy whose
+`route.php` follows the final rule, and `sweep.php` through the real class):
+- Ten Nordic towns, every day for ten years (`nordic.php`, default zone UTC and
+  Kiritimati): **0 wrong days** in every town. "Real sunset replaced by 18:00":
+  Alta 2, Hammerfest 2, Bodø 2, Kiruna 1, the rest 0 — each a day at the very edge
+  of midnight sun where PHP says the sun does not set and the NOAA-style
+  calculation has it dip just after midnight for a few minutes.
+- Below 60°, every day for two years, four default zones (`acc.php`): **0 wrong
+  days**, largest error 96 seconds (Adak, 31 January 2027); the halfway rule used
+  8 times in each.
+- The halfway rule over ten years and 51 places (`halfway.php`): used 50 times,
+  largest error 167 seconds (Anadyr, 1 October 2027), never on a day with no real
+  sunset.
+- 45 places every day for two years, four default zones (`daily.php`): **0 wrong
+  days** among 28,939 days with a transit AND a sunset (the 3,946 polar days below
+  have transits too, and no sunset); 10 halfway days, largest 167 seconds;
+  3,946 polar days of which 2 had a NOAA-style sunset (Qaanaaq 22 August 2027,
+  Troll 1 February 2028); 21 days where PHP gives a sunset and the NOAA-style
+  calculation says none. All of those are at the edge of polar day or night. The
+  largest error on an ordinary day was 1,856 seconds, at Alert (82.5°N) on 5 April
+  2028, next to the start of midnight sun.
+- 45 places, every Friday and Saturday for 106 weeks, four default zones, through
+  the real `Sabbath::sunsetAt()` (`sweep.php`): 38,160 cases, **0 wrong days**,
+  **0 real sunsets replaced by 18:00**, 24 cases (6 dates in four default zones)
+  where PHP gives a sunset and the NOAA-style calculation says none, largest error
+  1,697 seconds (Vostok, 78°S). Every error over five minutes was at a place above
+  66° of latitude.
+The honest summary: the DAY is right everywhere it can be computed; the MINUTE is
+as good as `date_sun_info()` is, which is within two minutes below 60° and can be
+half an hour out right beside polar day or night.
+
+Checks: P23-P31 (Tongatapu, Apia, Chatham, Adak, Auckland in January, Kiritimati,
+Fiji, `+10:00`, Anadyr), each with PHP's default zone set three ways; P32 (the
+default zone is the same afterwards); P33 (nothing written to `tblErrors`); P34
+(polar night at Longyearbyen, flagged as no sunset); P35-P37 (Vardø, Tromsø and
+Kirkenes, whose sun sets before noon); P38 (`place(null)` and `isQuietNow(…, null)`
+after a forced context use the forced organisation); P39 (an 18:00 from the fixed
+method, or from sunset with no place known, is never marked "no sunset"); P40 and
+P41 (the drawn Sabbath page shows the "sun does not set" note ONLY when it is true:
+absent for Sydney and for the fixed method, present for whichever pole has no
+sunset this week, chosen at run time because the preview uses today's date).
+Round 4's check found that the mark set on every 18:00 edge, or the note never or
+always shown, left all 248 checks green; P39-P41 make each go red.
+
+At the edge of polar night as well as midnight sun (Kiruna, 11 December 2027),
+PHP and the NOAA-style calculation can disagree about whether the sun crosses the
+horizon at all. And about once a year at Anadyr, Suva, Chatham and Adak two
+samples give a sunset for the same date that differ by seconds; the first sample
+wins, which is sometimes the less accurate one, and that is left on purpose.
+`Sabbath::coordinate()` is the ONE test of what a coordinate is, asked by the
+window and by the page's save, so the page cannot store what the window ignores.
+It accepts an exponent ('4.0E-5'), because the organisation page used to store a
+near-zero coordinate that way (`(string)` on a float); refusing it made a place
+near the equator or the Greenwich meridian silently fall back to the fixed times.
+The organisation page now stores a plain decimal (seven places, trailing zeros
+trimmed, never "-0"). Exactly 0 is a real coordinate.
+`GeoLocation::validateCoords()` (not changed) casts with `(float)`, so a word
+reads as 0 there; it is shared by many pages and is noted under #942's area.
+`computeWindow()`, `place()` and `zone()` take an optional settings array so the
+settings page can preview what it has JUST saved: start-up read the settings
+before the save, so the page used to show the old window beside "saved".
+
+**`Venues::countryToStore()` is the ONE rule for a venue's country** (the shape
+of `zoneToStore()`), asked by the save handler, so a refusal is worded, and again
+by `saveVenue()`. `Venues::organisationCountry()` reads `org.address.countryCode`
+for the organisation, own row first. Known limit, #942: that setting is still
+seeded 'GB', the shared address form fills an empty country with 'GB', and
+`GeoLocation::normaliseAddress()` turns an empty country into 'GB', so on an
+installation where nobody set the organisation's country a new venue still comes
+out GB, now as one visible value rather than a default in every venue.
+`tblSmallGroups.countryCode` has the same default.
+
+**The Sabbath page and #674.** Its boxes come from `InstallationSettings::layer()`;
+"is this already stored?" (the zone, the method, the place, the offsets) is asked
+of that layer, never of the merged settings. A field is written only when it
+ARRIVED (#677). A tick-box sends nothing when unticked, so the form sends a
+`switches_shown` marker and the two switches are written only when it arrived.
+
+**Why `check_install_wide_prefill.py` missed the page — two reasons, both
+already written in its own list of limits:** the page is its OWN saver (limit 7:
+the walk skipped pairing a file with itself), and it read its boxes through
+`$settings = App::settings();` then `$settings['portal']…` (limit 6: only
+`App::settings()[…]` was matched). The fix examines a self-saving page KEY BY
+KEY: a dotted key it WRITES and reads from the merged settings through
+`App::settings()`, `App::settings('a.b')` or `App::settings("a.b")`, `$SETTINGS`
+or a variable assigned `App::settings()`. "Writes" means exactly three shapes:
+an array entry's key (`'a.b' => …`), an element assignment (`$values['a.b'] =`),
+or a literal inside an `INSERT INTO tblSettings` statement. The first version
+counted every dotted literal, so a display-only named read
+(`App::settings('org.name')`) matched itself and the check failed on a page with
+no fault (round 1 of the independent check; planted, now green). Exact keys, not
+groups, because the group rule would report any page writing one `portal.*` key
+that showed another. Widening the
+SIBLING-page branch to variables was measured and cried wolf on
+`admin/integrations/email.php` (it reads the Microsoft 365 mailbox only to show
+the sending address), so that branch is unchanged and the limit stays written
+down. Measured over every page under `admin/`: the widened rule reports exactly
+three pages, all real (Sabbath, backup, QR).
+
+**A stated blind spot is a place to go looking, not a place to stop.** Limit 7
+had been written down since 30 October and still hid the Sabbath page.
+
+**Test fixtures.** Removing the column default means every `INSERT INTO tblVenues`
+must name `countryCode`. Eight fixture inserts in five self-tests were updated
+(`git show 7f4e784f --format= | grep -cE "^-.*INSERT INTO tblVenues"` answers 8:
+time-zones four, access-pages, page-scripts, feed-admin and backup-restore one
+each), and part P adds a ninth. An earlier draft of these notes and the first
+commit message said "seven", which was wrong. The only portal writer,
+`Venues::saveVenue()`, has named the column since 37bf418.
+
+**The venue form's two-letter `pattern`** is left off when editing a venue whose
+stored country is not two letters (only SQL can put one there), because
+`countryToStore()` accepts such a stored value unchanged and the pattern would
+stop the browser saving the venue at all.
+
 ### Following a value to the column it fills (#785)
 
 **What it is.** `check_wall_clock_writes_not_moments.py` (Python: the schema, the

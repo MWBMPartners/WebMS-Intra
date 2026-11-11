@@ -417,6 +417,14 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   helpers; never write a second copy of that rule. Member-facing pages are pinned as RENDERED
   (`tools/erasure-pages-selftest.rendered-pins.txt`); whether a sentence is TRUE is a person's job at review,
   not a phrase list's. The record is DEV_NOTES.md, "Keeping a worker's name on a safeguarding record (#703)".
+- **No place is built in either (#935, migration 274).** `Sabbath::place()` is the
+  ONE answer to where sunset is worked out (typed place, else the organisation's
+  map position, else none and the fixed times, said on the page);
+  `Venues::countryToStore()` the ONE rule for a venue's country (organisation's
+  own, else refused). The organisation's own country is still seeded GB (#942).
+- **The Sabbath page fills its boxes from `InstallationSettings::layer()` and
+  writes only fields that ARRIVED (#936).** `check_install_wide_prefill.py`
+  now examines a page that is its own saver, key by key; the pending list is #943.
 - **The activity log's period: `Portal\Core\ActivityLogRetention` is the ONE place (#932; D-117, D-118,
   D-119).** 0 = never delete, the largest value; set on Admin → Maintenance → Retention only (an organisation's
   figure by its own administrator, the installation's by a global administrator); an installation figure below

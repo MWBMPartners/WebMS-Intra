@@ -4,6 +4,69 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### No place is built in, Sabbath sunsets fall on the right day, and the Sabbath page saves only what it is sent (#935, #936, migration 274)
+
+- **No place is built in any more (#935, migration 274).** The Sabbath quiet
+  window's place for working out sunset shipped as Cambridge's latitude and
+  longitude, and fell back to them, for every customer anywhere. It now ships
+  empty, and empty means each organisation's own map position (Admin, Settings,
+  Organisation). With no place known at all, quiet hours use the fixed times
+  (Friday 18:00 to Saturday 18:00, with the offsets), and the Sabbath page says
+  so in words. A stored value that is not a usable number no longer reads as 0,0
+  (a point in the Gulf of Guinea).
+- **Sunset-based quiet hours take that day's sunset (#935).** Since #231 the
+  sunset was taken from PHP's `date_sun_info()`, which chooses the day by PHP's
+  own default time zone and, near the date line, chooses the wrong one even on
+  the place's own clock: in Tonga, Samoa, Kiribati and Fiji the window ran
+  Saturday to Sunday every week, and in Adak it sometimes ran Thursday to
+  Friday. When one request or scheduled job dealt with several organisations,
+  another organisation's window could also open a day late. Each sunset is now
+  paired with that day's solar noon (the sun's highest point), and the sunset
+  belonging to the solar noon that falls on the Friday (or Saturday) on the
+  window's own clock is used. That is also right in Arctic towns where the sun
+  sets before noon on the clock. Where PHP's calculation skips that day, the
+  time halfway between the day before's and the day after's sunset is used (at
+  most 167 seconds out where it could be compared). In polar day or night there
+  is no sunset; 18:00 is used for that edge, and the Sabbath page says so both
+  beside the sunset choice and under the preview. Measured against an
+  independent calculation: no wrong days anywhere it could be computed (below
+  60°, at the date line and in ten Nordic towns over ten years); at the very edge
+  of midnight sun and polar night the two calculations sometimes disagree about
+  whether the sun dips below the horizon for a few minutes (see DEV_NOTES).
+- **Another organisation's sunset is at its own place (#935).** A message sent
+  for an organisation other than the one the web address belongs to (an API key
+  of another organisation, or the job that sends held texts) now has its window
+  worked out at that organisation's map position and on its clock.
+- **The organisation page stores a map position as a plain number (#935).** A
+  coordinate very close to 0 used to be stored as `4.0E-5`; it is now `0.00004`,
+  and the old form is still read.
+- **A venue's country no longer defaults to GB (#935).** A new venue starts with
+  the organisation's own country. Left empty, it takes the organisation's
+  country; with none set there, the save is refused with the reason. An edit
+  that does not send the country leaves the venue's own alone. The database
+  column has no default now, so any future writer must name a country.
+- **The Sabbath settings page shows and saves the installation's settings
+  (#936).** Its boxes were filled from the open organisation's settings while
+  Save wrote the installation's, so pressing Save untouched inside an
+  organisation with settings of its own made those everybody's. The boxes are
+  now filled from the installation's row, and the page says when the
+  organisation has settings of its own.
+- **A Sabbath save changes only what it was sent (#936).** A save that did not
+  send the latitude, the longitude or an offset stored 0, and one without the
+  method stored "fixed". Now a missing field leaves its setting alone; the two
+  switches are written only when the form says it drew them. A value the page
+  cannot use (a latitude past 90, half a place, an offset that is not a whole
+  number of minutes, an unknown method) is refused with its reason and nothing
+  is saved.
+- `check_install_wide_prefill.py` now examines a page that is its own saver,
+  key by key (#936). That is why it had missed the Sabbath page. It found two
+  more pages with the same fault, `admin/maintenance/backup.php` and
+  `admin/settings/qr/index.php`, now on its pending list (#943).
+- Upgrading does not change a stored Cambridge or a venue's stored GB: either may
+  be a real choice (migration 274 changes only the value to "reset to", as 273
+  did for the zone).
+- Open: #942, #943, #945.
+
 ### A clock reading is never stored after going through a moment; the CSV import's skipped-hour fault fixed (#785)
 
 - **The CSV event import stored a loose spreadsheet time an hour out on the
