@@ -421,6 +421,9 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   listing what is held now) and `anonymiseKeepsNumber()` the ONE rule for whether a record keeps the number (#927);
   `Giving::buildHmrcCsv()` takes a kept row's name and nothing else when one joins, so the claim file never says
   "[Deleted User]" (#941).
+  **An erased account is never changed (#977):** `AccountGuard::decide()` row 3a refuses every reach but viewing for
+  an account `GdprEraser::emptiedAccountSql()` calls erased, a global administrator included; pages that change an
+  account without `check()` ask `AccountGuard::checkNotErased()`. Test: section M of `tools/erasure-pages-selftest.php`.
 - **No place is built in either (#935, migration 274).** `Sabbath::place()` is the
   ONE answer to where sunset is worked out (typed place, else the organisation's
   map position, else none and the fixed times, said on the page);

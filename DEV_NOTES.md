@@ -23489,3 +23489,37 @@ statement early: a reader that blanks or splits SQL must track strings and comme
   back; plants take each listed column off in turn. **Its limit, stated rather than hidden:** it fills every
   column, not every VALUE, so a show-or-hide read on a value no event holds is unseen (#981). Section C stays as a
   cheap tripwire.
+
+### An erased account cannot be changed (#977)
+
+- **The rule lives in `AccountGuard`.** `AccountGuard::decide()` row 3a refuses every reach except `REACH_VIEW`
+  for an erased account, with its own verdict `ERASED`, and for a global administrator too — the one row a global
+  administrator is subject to. The fact comes from `AccountGuard::facts()`, which reads
+  `GdprEraser::emptiedAccountSql('u') AS isErased` in the same statement (a failure throws, so "could not tell" is
+  never "not erased"). The definition of "erased" is still ONLY `emptiedAccountSql()`.
+- **Order matters: row 3 (membership) is asked before row 3a**, so an administrator of another organisation is
+  told "That account could not be found." and never learns an account was erased. The row numbers were kept (the
+  order is now 1, 3, 3a, 2, 4…10) so that references to "row 3" stay true. `tools/account-guard-selftest.php` pins
+  the order; swapping it turns four checks red.
+- **Three places change an account without `check()`** and ask `AccountGuard::checkNotErased()`:
+  `admin/sites/users.php` and `admin/users/unplaced-save.php` (global administrators only), and
+  `admin/users/save.php`, because a global administrator ticking ONLY "global administrator" reaches no `check()`
+  at all.
+- **The refusal is recorded in both #518 places, but only the security record says why.** The activity-log line,
+  which the open organisation's administrators read, says "That account cannot be changed." and never "erased".
+- **Nothing about an erased account may change through the pages** — not even removing it from an organisation;
+  the erasure already deleted every membership, role, sign-in and link. `GdprEraser` itself does not go through
+  `AccountGuard`, so a second run of an unfinished request still works.
+- **Paths traced** (on `219cb616`): Users save (refused, driven); users API update (404s any account with no
+  membership in the open organisation; row 3a also refuses); roles, group, department and DBS pages (row 3a);
+  offboarding (row 3a, driven) and undoing one; organisation member list and placing an unplaced account
+  (driven); imports, invitations and API create only INSERT; Microsoft/Google sign-in and password reset need
+  `isActive = 1` and links or sign-in rows the erasure deleted. `Auth::setPassword()` is deliberately NOT gated
+  (the installer has no autoloader, #728 section A); every caller that can reach an existing account is gated.
+- **Measured before the fix, over HTTP** (section M of `tools/erasure-pages-selftest.php` against `web/` from
+  `219cb616`): ticking Active dropped the kept name from the Gift Aid line and put the giver back on the
+  statements list; ticking only "global administrator" stored `isRootAdmin = 1`; the unplaced page listed and
+  placed the account; offboarding wrote a new record naming it.
+- **Not fixed:** an account re-saved before #977 stays as it was (#986), which is why `Giving::buildHmrcCsv()`
+  keeps its "[Deleted User]" → empty name rule. The offboarding page prints no flash message (#985).
+

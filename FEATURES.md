@@ -1306,6 +1306,7 @@ another repo, ever**.
   administrator is let in everywhere. Still open in #511: coordinator grants across organisations, and the older
   portal-wide administrator flag.
 - Erasure, giving records (#941, #927): a kept row cleared by an abandoned run is worked out again on the next run and tied to that run's request; Request erasure and My data say whether a record keeps your account number (My data as what WOULD happen); the Gift Aid claim file never names a donor "[Deleted User]".
+- Erasure, accounts (#977): an account erased on request shows on Admin → Users as "Erased on request, cannot be changed" and cannot be edited, switched back on, placed into an organisation, added to one or offboarded.
 - No country is built in (#942, D-133): the installer asks for the installation's country (suggested from the browser's time zone, sending nothing), and each organisation chooses its own on Admin, Settings, Organisation. Every installer answer sends a strict Content Security Policy.
 - Admin pages that save for the whole installation show the installation's values, and say (by setting name only) when the organisation you are in uses its own (#943).
 - Per-site `tblSites.primaryColor` + `tblSites.faviconPath` drive branding.

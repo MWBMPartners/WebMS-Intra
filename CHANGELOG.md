@@ -4,6 +4,19 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An account erased on request can no longer be changed or switched back on (#977)
+
+- A global administrator could open an erased account on Admin → Users, tick Active (or change its address, its
+  name, or the "global administrator" box) and press Save. The account then stopped reading as erased, so the name
+  kept for tax dropped out of the Gift Aid claim file and nothing stopped a new "[Deleted User]" statement being
+  written over the kept one. Measured before the fix: ticking only "global administrator" made the erased account a
+  global administrator.
+- Every page that can change an account now refuses an erased one, for everybody, with the reason: the Users
+  page's save, placing an account that belongs to no organisation, an organisation's own member list, and
+  offboarding. The Users list shows "Erased on request, cannot be changed" in place of the Edit button, and the
+  "belongs to no organisation" page no longer lists erased accounts.
+- An account already re-saved before this change stays as it was (#986). Codex has not reviewed this.
+
 ### The events detail answer keeps moderators' notes for signed-in administrators; public event pages read only their own columns (#968, D-136)
 
 - `GET /api/events/detail` and `GET /api/v1/events/{id}` used to send every caller allowed to see an event its
