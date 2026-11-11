@@ -454,6 +454,8 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   `SmallGroups::whyHostChangeRefused()` is the ONE rule that only the host may change the host or the mark.
   Expense receipts are opened only through `expenses/receipt` (#867), which asks the claim page's rule
   and holds none of its own; every look at expense records is logged as numbers only (D-130, D-132).
+  A visitor's event suggestion: `tblEvents.submitterName` / `submitterEmail` are read only by the moderation
+  page and the approval e-mail (D-134, #963); the events API, the activity log and webhooks carry neither.
   The technical record is DEV_NOTES.md, "Outside services in three tiers (#778)".
 - **The public website, for events (#493 P1; D-057, D-077, D-078, D-080, D-081).**
   `EventVisibility::where()` in "website" mode is the ONE rule for which events the public website lists

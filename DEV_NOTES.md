@@ -23246,3 +23246,17 @@ statement early: a reader that blanks or splits SQL must track strings and comme
   list. Remaining gaps: #961.
 - `listedUntil` is when the door stops LISTING an event, not when it ends; the countdown keeps its own rule,
   because using it made a 10:00 service "Happening now" until midnight.
+
+
+## A visitor's name and address go nowhere but the moderation page (#963)
+
+- `events/api/detail.php` lists its columns by name and leaves out `submitterName` / `submitterEmail` for every
+  caller, a key with `events:write` included (a connected service is not a person moderating; D-134 uses the
+  address for one thing). Nothing under `web/` read them from that endpoint.
+- `calendar/submit-save.php`: a visitor has no account, so the activity record names nobody and says "suggested by
+  a visitor who was not signed in"; the webhook's `submittedBy` is `visitor`. A member is unchanged (`user-N`).
+- Test: `tools/event-suggester-privacy-selftest.php` (31 checks, real HTTP). What it proves is narrower than
+  "the address reaches no log": it reads the suggestion's own activity record, the detail answer and the one
+  webhook it subscribes. A NEW leak elsewhere — a second activity record, `tblErrors`, the post-submit address, a
+  webhook of another type — would not turn it red (#969). The webhook body is read from
+  `tblWebhookDeliveries.payload`, the same string `emit()` sends; #615 refuses a receiver on this machine.

@@ -4,6 +4,17 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A visitor who suggests an event no longer has their name and e-mail address handed out (#963, D-134)
+
+- Measured before the fix: once a suggestion from somebody not signed in was approved, `GET /api/events/detail`
+  (and `/api/v1/events/{id}`) returned `submitterName` and `submitterEmail` to an ordinary signed-in member and to
+  a key holding only `events:read`; the activity record read "Event #N submitted by anonymous <address>"; and the
+  `calendar.event.submitted` webhook carried the address, with a copy on the delivery row. Now the detail answer
+  has neither field for anybody, the activity record reads "Event #N suggested by a visitor who was not signed
+  in", and the webhook says `"submittedBy": "visitor"`. The name and address stay on the event for the approval
+  e-mail (D-134), and the moderation page still shows them to an administrator. Records and delivery rows written
+  before this change still hold addresses; removing them belongs to erasure (#964).
+
 ### Small groups that meet in members' homes: the host decides about the map (#809; D-120, D-122 to D-128, D-131; migration 275)
 
 - **A meeting place names its host, and its map needs that host's own agreement.** A group's page used to draw
