@@ -177,7 +177,8 @@ appended with its real date and a note that it was added later.
 | [D-119](119-lowering-the-activity-log-ceiling-is-refused-below-an-organisation.md) | 2026-11-10 | Lowering the installation's activity-log period below an organisation's is refused, naming them | in force |
 | [D-120](120-a-group-meeting-place-map-is-the-hosts-home.md) | 2026-11-11 | A small group's meeting-place map is treated as the host's home (gated like D-072) | in force |
 | [D-121](121-a-public-address-may-be-requested-by-several-until-approved.md) | 2026-11-11 | A public address may be requested by several organisations until one is approved | in force |
+| [D-122](122-erasing-the-person-who-entered-a-group-meeting-place-removes-it.md) | 2026-11-11 | Erasing the person who entered a group's meeting place empties the address | in force |
 
-*121 decisions. This index is checked against the folder by
+*122 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
