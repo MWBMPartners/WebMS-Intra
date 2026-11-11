@@ -161,6 +161,25 @@ class Sabbath
      */
     public static function computeWindow(int $referenceTs, ?int $siteId = null, ?array $sabbath = null): array
     {
+        $details = self::windowDetails($referenceTs, $siteId, $sabbath);
+
+        return [$details['start'], $details['end']];
+    }
+
+    /**
+     * The window computeWindow() answers, with ONE more fact: `noSunset` is true
+     * when the sunset method is in use and at least one edge is at 18:00 because
+     * the sun does not set that day (polar day or night, sunsetAt()). The
+     * settings page uses it to SAY so beside the preview, rather than show 18:00
+     * as if it were a sunset (#935 round 3).
+     *
+     * @param int|null   $siteId  As computeWindow().
+     * @param array|null $sabbath As computeWindow().
+     *
+     * @return array{start: int, end: int, noSunset: bool}
+     */
+    public static function windowDetails(int $referenceTs, ?int $siteId = null, ?array $sabbath = null): array
+    {
         $sabbath ??= self::settingsNow();
         $method = (string) ($sabbath['method'] ?? 'fixed');
         $startOffsetMin = (int) ($sabbath['start_offset_minutes'] ?? 0);
@@ -186,17 +205,22 @@ class Sabbath
         //    ("falls back to a fixed 18:00"), and the one the settings page states.
         //    WHAT WAS WRONG: an empty setting fell back to Cambridge's latitude and
         //    longitude, for every customer anywhere, and a stored '' read as 0,0.
-        $place = $method === 'sunset_calc' ? self::place($siteId, $sabbath) : null;
-        if ($place !== null) {
-            $startTs = self::sunsetAt($fridayDate, $place['lat'], $place['lng']) + ($startOffsetMin * 60);
-            $endTs   = self::sunsetAt($saturdayDate, $place['lat'], $place['lng']) + ($endOffsetMin * 60);
-        } else {
-            // Fixed: 18:00 on both edges (also the answer when sunset has no place)
-            $startTs = $fridayDate->setTime(18, 0, 0)->getTimestamp() + ($startOffsetMin * 60);
-            $endTs   = $saturdayDate->setTime(18, 0, 0)->getTimestamp() + ($endOffsetMin * 60);
-        }
+        // 🌇 Each edge: the sunset (sunsetAt()), or 18:00 on that date when there is
+        //    no place, or when the sun does not set that day (polar day or night).
+        $place    = $method === 'sunset_calc' ? self::place($siteId, $sabbath) : null;
+        $noSunset = false;
+        $edge     = static function (\DateTimeImmutable $date) use ($place, &$noSunset): int {
+            $sunset = $place !== null ? self::sunsetAt($date, $place['lat'], $place['lng']) : null;
+            if ($place !== null && $sunset === null) {
+                $noSunset = true;
+            }
 
-        return [$startTs, $endTs];
+            return $sunset ?? $date->setTime(18, 0, 0)->getTimestamp();
+        };
+        $startTs = $edge($fridayDate) + ($startOffsetMin * 60);
+        $endTs   = $edge($saturdayDate) + ($endOffsetMin * 60);
+
+        return ['start' => $startTs, 'end' => $endTs, 'noSunset' => $noSunset];
     }
 
     /**
@@ -321,11 +345,24 @@ class Sabbath
     }
 
     /**
-     * 🌇 Sunset at a place, on the calendar date `$date` has on ITS OWN clock.
+     * 🌇 Sunset at a place, on the calendar date `$date` has on ITS OWN clock, or
+     * null when the sun does not set that day (polar day or night).
      *
-     * THE RULE: the sunset is the one that falls after local NOON on that date
-     * and before local noon the next day, on the window's own clock. Nothing
-     * global is touched.
+     * THE RULE: `date_sun_info()` gives a solar day's TRANSIT (the sun's highest
+     * point) together with that same day's sunset. The sunset used is the one
+     * paired with the transit that falls on `$date`, read on the window's own
+     * clock. Nothing global is touched, and no range of hours is assumed.
+     *
+     * WHY THE TRANSIT AND NOT A RANGE OF HOURS (round 3 of the independent
+     * check). Round 3 took "the sunset between local noon and noon the next
+     * day", and that is untrue in the Arctic: on Central European Time well east
+     * of 15°E (Vardø, Kirkenes, Hammerfest, Alta, Kiruna, Tromsø) and at
+     * Scoresbysund, the sun sets BEFORE local noon for a few days around the
+     * start and end of polar night. Vardø on Friday 20 November 2026 sets at
+     * 11:47, and round 3 took Saturday's 11:36 instead, a full day late; Tromsø
+     * on 27 November 2026 sets at 11:46 and round 3 gave 18:00. A sunset always
+     * belongs to the transit before it, so pairing them needs no assumption
+     * about the clock time at all.
      *
      * WHY IT HAS TO BE A RULE AND NOT ONE CALL. `date_sun_info()` decides which
      * day to answer for from PHP's DEFAULT time zone, not from anything it is
@@ -344,60 +381,61 @@ class Sabbath
      *   - And with a zone written as an offset ("+10:00", which Site::zoneFor()
      *     accepts) date_default_timezone_set() refuses with a notice, so round
      *     2's set-and-restore did nothing there and logged two notices a window.
-     * So every sunset `date_sun_info()` gives for instants every six hours from
-     * two days before local noon to two days after is collected, and the one
-     * inside the date's noon-to-noon is taken. Which day PHP thinks each
-     * instant is no longer matters.
+     * So `date_sun_info()` is asked for instants every six hours from two days
+     * before local noon to two days after; each answer's transit is read on the
+     * window's own clock to say which DATE it belongs to, and the answer whose
+     * transit is on `$date` gives the sunset. Which day PHP thinks each instant
+     * is no longer matters.
      *
-     * WHEN NONE FALLS INSIDE, two cases, said plainly:
-     *   - PHP's calculation can SKIP a day near a day boundary (measured: Anadyr,
-     *     Friday 1 October 2027, gives Thursday's and Saturday's sunsets from
-     *     every instant tried, never Friday's). When there is a sunset inside the
-     *     day before and the day after, the time halfway between is used. Where
-     *     that could be compared with a real answer across 19 places and 106
-     *     weeks, it was at most 682 seconds out, the largest near the polar
-     *     circles.
-     *   - POLAR DAY OR NIGHT: the sun does not set (or does not rise), so there
-     *     is no sunset at all. Then 18:00 on that date, on the window's clock,
-     *     as the fixed method uses. Measured at Longyearbyen.
+     * THREE OUTCOMES, said plainly:
+     *   - A transit on `$date` with a sunset time: that sunset.
+     *   - A transit on `$date` whose sunset is `true` or `false`: the sun does
+     *     not set that day (polar day) or does not rise (polar night). Null is
+     *     returned, and computeWindow() uses 18:00 on that date instead, on the
+     *     window's clock, as the fixed method does. The settings page says so.
+     *     At the very edge of midnight sun PHP and an independent NOAA-style
+     *     calculation can disagree about whether the sun dips below the horizon
+     *     for a few minutes; those days are counted in the notes for #935.
+     *   - No transit on `$date` at all: PHP's calculation can SKIP a day
+     *     (measured: Anadyr, Friday 1 October 2027). Then the time halfway
+     *     between the day before's sunset and the day after's is used. Against
+     *     the independent calculation, over ten years and 51 places, it was used
+     *     50 times and was at most 167 seconds out. With either neighbour's
+     *     sunset missing too, null (18:00).
      */
-    private static function sunsetAt(\DateTimeImmutable $date, float $lat, float $lng): int
+    private static function sunsetAt(\DateTimeImmutable $date, float $lat, float $lng): ?int
     {
         $zone = $date->getTimezone();
-        $noon = new \DateTimeImmutable($date->format('Y-m-d') . ' 12:00:00', $zone);
+        $day  = $date->format('Y-m-d');
+        $noon = new \DateTimeImmutable($day . ' 12:00:00', $zone);
         $from = $noon->getTimestamp();
-        $to   = $noon->modify('+1 day')->getTimestamp();
 
-        $found = [];
+        // 📅 Each solar day's sunset, filed under the date its TRANSIT has on the
+        //    window's own clock. `true`/`false` (no sunset) are kept as they are.
+        $sunsetByDate = [];
         for ($hours = -48; $hours <= 48; $hours += 6) {
-            $info   = date_sun_info($from + ($hours * 3600), $lat, $lng);
-            $sunset = is_array($info) === true ? ($info['sunset'] ?? null) : null;
-            if (is_int($sunset) === true) {
-                $found[$sunset] = true;
+            $info = date_sun_info($from + ($hours * 3600), $lat, $lng);
+            if (is_array($info) === false || is_int($info['transit'] ?? null) === false) {
+                continue;
+            }
+            $transitDate = (new \DateTimeImmutable('@' . $info['transit']))->setTimezone($zone)->format('Y-m-d');
+            if (array_key_exists($transitDate, $sunsetByDate) === false) {
+                $sunsetByDate[$transitDate] = $info['sunset'] ?? null;
             }
         }
-        $sunsets = array_keys($found);
-        sort($sunsets);
 
-        $before = null;
-        $after  = null;
-        foreach ($sunsets as $sunset) {
-            if ($sunset >= $from && $sunset < $to) {
-                return $sunset;
-            }
-            if ($sunset < $from) {
-                $before = $sunset;
-            } elseif ($after === null) {
-                $after = $sunset;
-            }
+        if (array_key_exists($day, $sunsetByDate) === true) {
+            return is_int($sunsetByDate[$day]) === true ? $sunsetByDate[$day] : null;
         }
-        // A skipped day: halfway between the day before's and the day after's.
-        if ($before !== null && $after !== null && ($after - $before) > 40 * 3600 && ($after - $before) < 56 * 3600) {
+
+        // ⏭️ A skipped day: halfway between the day before's and the day after's.
+        $before = $sunsetByDate[$noon->modify('-1 day')->format('Y-m-d')] ?? null;
+        $after  = $sunsetByDate[$noon->modify('+1 day')->format('Y-m-d')] ?? null;
+        if (is_int($before) === true && is_int($after) === true) {
             return intdiv($before + $after, 2);
         }
 
-        // 🪞 No sunset (polar day or night): 18:00 on the given date, on its own clock.
-        return $noon->setTime(18, 0, 0)->getTimestamp();
+        return null;
     }
 
     private static function userOverride(int $userId): string

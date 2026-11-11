@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 244;  // + forty in part P (#935, #936: P00-P07, six P08, P09-P34) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 248;  // + forty-four in part P (#935, #936: P00-P07, six P08, P09-P38) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -215,13 +215,14 @@ if (($argv[1] ?? '') === '--child') {
                 date_default_timezone_set((string) $job['phpZone']);
                 $out['zoneBefore'] = date_default_timezone_get();
                 foreach ((array) $job['cases'] as $name => [$zone, $lat, $lng, $at]) {
-                    [$start, $end] = \Portal\Core\Sabbath::computeWindow((int) $at, null, [
+                    $details = \Portal\Core\Sabbath::windowDetails((int) $at, null, [
                         'method' => 'sunset_calc', 'location_lat' => (string) $lat, 'location_lng' => (string) $lng,
                         'timezone' => (string) $zone, 'start_offset_minutes' => '0', 'end_offset_minutes' => '0',
                     ]);
                     $clock = new DateTimeZone((string) $zone);
-                    $out['windows'][$name] = (new DateTimeImmutable('@' . $start))->setTimezone($clock)->format('D Y-m-d H:i')
-                        . ' / ' . (new DateTimeImmutable('@' . $end))->setTimezone($clock)->format('D Y-m-d H:i');
+                    $out['windows'][$name] = (new DateTimeImmutable('@' . $details['start']))->setTimezone($clock)->format('D Y-m-d H:i')
+                        . ' / ' . (new DateTimeImmutable('@' . $details['end']))->setTimezone($clock)->format('D Y-m-d H:i');
+                    $out['noSunset'][$name] = $details['noSunset'];
                 }
                 // And a window worked out for ANOTHER organisation, as the held-texts job does.
                 \Portal\Core\Sabbath::computeWindow((int) $job['otherAt'], (int) $job['otherSite']);
@@ -241,6 +242,11 @@ if (($argv[1] ?? '') === '--child') {
                 $out['place']   = \Portal\Core\Sabbath::place((int) $job['site']);
                 foreach ((array) $job['moments'] as $moment) {
                     $out['quiet'][] = \Portal\Core\Sabbath::isQuietNow(null, (int) $moment, (int) $job['site']);
+                }
+                // #935 round 4: with NO organisation given, after the force: the forced one.
+                $out['placeNull'] = \Portal\Core\Sabbath::place(null);
+                foreach ((array) $job['moments'] as $moment) {
+                    $out['quietNull'][] = \Portal\Core\Sabbath::isQuietNow(null, (int) $moment, null);
                 }
                 break;
             default:
@@ -3832,6 +3838,11 @@ ok(
     $forced['threw'] === '' && ($forced['quiet'] ?? null) === [false, true],
     json_encode($forced['quiet'] ?? null)
 );
+ok(
+    'P38 after the force, NO organisation given means the FORCED one for the place as well as the clock: Santiago\'s position and quiet hours from place(null) and isQuietNow(…, null)',
+    $forced['threw'] === '' && abs((float) ($forced['placeNull']['lat'] ?? 0) - -33.45) < 0.0001 && ($forced['quietNull'] ?? null) === [false, true],
+    json_encode([$forced['placeNull'] ?? null, $forced['quietNull'] ?? null])
+);
 // P22: the same two organisations WITHOUT forcing the context, which is what the
 // held-texts job does: it passes each text's own organisation while Site::id()
 // stays the job's. P15/P16 cannot see a place() that asks about Site::id() rather
@@ -3924,6 +3935,10 @@ foreach ($places935 as $name => [$zone, $lat, $lng, $friday]) {
 // Polar night: the sun does not rise at Longyearbyen in mid-December, so there is no
 // sunset and the window falls back to 18:00 on its own clock, as the docblock says.
 $cases935['Longyearbyen'] = ['Arctic/Longyearbyen', 78.22, 15.65, $satNoon('Arctic/Longyearbyen', '2026-12-19')];
+// Arctic towns whose sun sets BEFORE local noon around the start of polar night.
+$cases935['Vardo']    = ['Europe/Oslo', 70.37, 31.11, $satNoon('Europe/Oslo', '2026-11-21')];
+$cases935['Tromso']   = ['Europe/Oslo', 69.65, 18.96, $satNoon('Europe/Oslo', '2026-11-28')];
+$cases935['Kirkenes'] = ['Europe/Oslo', 69.73, 30.05, $satNoon('Europe/Oslo', '2027-11-27')];
 setting('portal.sabbath.method', 'sunset_calc');
 setting('portal.sabbath.location_lat', '-33.45');
 setting('portal.sabbath.location_lng', '-70.66');
@@ -3968,11 +3983,37 @@ ok(
     json_encode(array_map(static fn (array $run): mixed => $run['errorsAdded'] ?? null, $runs935))
 );
 $polar = array_map(static fn (array $run): string => (string) ($run['windows']['Longyearbyen'] ?? ''), $runs935);
+$polarSaid = array_map(static fn (array $run): mixed => $run['noSunset']['Longyearbyen'] ?? null, $runs935);
+$otherSaid = array_map(static fn (array $run): mixed => $run['noSunset']['Tongatapu'] ?? null, $runs935);
 ok(
-    'P' . $pNo++ . ' in POLAR NIGHT (Longyearbyen, December) there is no sunset, and the window says so by using 18:00 on Friday to 18:00 on Saturday on its own clock',
-    array_unique($polar) === ['UTC' => 'Fri 2026-12-18 18:00 / Sat 2026-12-19 18:00'],
-    json_encode($polar)
+    'P' . $pNo++ . ' in POLAR NIGHT (Longyearbyen, December) there is no sunset, and the window says so: 18:00 Friday to 18:00 Saturday on its own clock, marked as "no sunset" (and Tongatapu, which has one, is not)',
+    array_unique($polar) === ['UTC' => 'Fri 2026-12-18 18:00 / Sat 2026-12-19 18:00']
+        && array_unique($polarSaid) === ['UTC' => true] && array_unique($otherSaid) === ['UTC' => false],
+    json_encode([$polar, $polarSaid, $otherSaid])
 );
+// ARCTIC towns where the sun sets BEFORE local noon for a few days around the start of
+// polar night (#935 round 3: round 3's "between noon and noon" rule took the NEXT day's
+// sunset, or none). Each Friday window must open on that Friday, within ten minutes of
+// the sunset the independent check calculated.
+foreach (['Vardo' => ['2026-11-20', '11:47'], 'Tromso' => ['2026-11-27', '11:46'], 'Kirkenes' => ['2027-11-26', '11:20']] as $name => [$friday, $expected]) {
+    $zone = $cases935[$name][0];
+    $want = (new DateTimeImmutable($friday . ' ' . $expected . ':00', new DateTimeZone($zone)))->getTimestamp();
+    $seen = [];
+    $right = true;
+    foreach ($runs935 as $phpZone => $run) {
+        $window = (string) ($run['windows'][$name] ?? '');
+        $seen[$phpZone] = $window;
+        $opens = DateTimeImmutable::createFromFormat('D Y-m-d H:i', substr($window, 0, 20), new DateTimeZone($zone));
+        // Only the FRIDAY edge is held here: at Tromsø the Saturday is the first day of
+        // polar night, so that edge is rightly 18:00 and marked "no sunset".
+        $right = $right && $run['threw'] === '' && $opens !== false && abs($opens->getTimestamp() - $want) <= 600;
+    }
+    ok(
+        'P' . $pNo++ . ' in the ARCTIC, where the sun sets before noon, ' . $name . '\'s window opens on FRIDAY ' . $friday . ' at about ' . $expected . ' (round 3 gave the next day\'s sunset, or 18:00)',
+        $right,
+        json_encode($seen)
+    );
+}
 
 // ---- put everything back as part P found it ------------------------------------------
 q('DELETE FROM tblSettings WHERE settingKey IN ' . P_KEYS . ' AND siteID IN (1, ' . ORG_TWO . ')');

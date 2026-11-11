@@ -332,7 +332,11 @@ $enabledInForce = is_scalar($inForce['enabled'] ?? null) === true && (string) $i
 $zoneInUse     = Sabbath::zone(null, $inForce);
 
 // 🪞 Preview: current/next window, from what is in force NOW (including a save just made).
-[$winStart, $winEnd] = Sabbath::computeWindow(time(), null, $inForce);
+//    windowDetails() also says when an edge is 18:00 because the sun does not set (#935).
+$winDetails  = Sabbath::windowDetails(time(), null, $inForce);
+$winStart    = $winDetails['start'];
+$winEnd      = $winDetails['end'];
+$winNoSunset = $winDetails['noSunset'];
 
 $pageTitle   = 'Sabbath quiet hours';
 $pageSection = 'admin';
@@ -421,6 +425,13 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
         <?php echo htmlspecialchars((new \DateTimeImmutable('@' . $winStart))->setTimezone($zoneInUse)->format('D j M H:i'), ENT_QUOTES, 'UTF-8'); ?>
         → <?php echo htmlspecialchars((new \DateTimeImmutable('@' . $winEnd))->setTimezone($zoneInUse)->format('D j M H:i'), ENT_QUOTES, 'UTF-8'); ?>
         (<?php echo htmlspecialchars($zoneInUse->getName(), ENT_QUOTES, 'UTF-8'); ?>)
+        <?php if ($winNoSunset === true): ?>
+            <?php // 🌌 #935 round 3: an 18:00 here is not a sunset, and the preview says so. ?>
+            <div class="mt-1" data-sabbath-no-sunset>
+                The sun does not set that Friday or Saturday at this place, so 18:00 is used for that edge
+                of the window.
+            </div>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 
@@ -450,6 +461,11 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
             <div class="form-check">
                 <input class="form-check-input" type="radio" id="m_sunset" name="method" value="sunset_calc" <?php echo $method === 'sunset_calc' ? 'checked' : ''; ?><?php echo $readOnlyAttr; ?>>
                 <label class="form-check-label" for="m_sunset">Sunset calculation from latitude / longitude</label>
+                <?php // 🌌 #935 round 3: said BEFORE anybody chooses it, not only when it happens. ?>
+                <div class="form-text">
+                    Where the sun does not set on a Friday or a Saturday (polar day or night, far north or
+                    south), that edge of the window uses 18:00 on that day instead, with the offsets.
+                </div>
             </div>
 
             <div class="row g-2 mt-3">
