@@ -6078,19 +6078,15 @@ class GdprEraser
         }
         $prefix = 'statement-' . $donorId . '-';
         $period = substr($fileName, strlen($prefix), -4);
-        // A period whose days do not EXIST gives no period either (#891,
-        // #892). Its two ends are handed to `donatedAt BETWEEN ? AND ?` below,
-        // and BETWEEN answers an impossible day differently by engine: none of
-        // the donor's gifts on MySQL 8.0/8.4, so the file was DELETED; some on
-        // MySQL 9.7 and MariaDB, so it could be KEPT (measured). One file, two
-        // outcomes, decided by the server. It now takes the same answer as a
-        // name with no period at all -- kept, because keeping is the mistake
-        // that can be put right. (Giving::renderStatementPdf() refuses such a
-        // range since this change, so only a file written before it can
-        // carry one.)
+        // The month and day are held to 00-12 and 00-31 (#891, #892): that is
+        // every day the old statement pages could put in a name (they checked
+        // with strtotime(), which accepts 31 February and month 00 but refuses
+        // month 13 and day 32), and it is the range the comparison below is
+        // MEASURED to answer the same on every engine. Outside it the engines
+        // disagree again, so such a name -- which only a person could have
+        // typed -- takes the no-period answer below.
         if (str_starts_with($fileName, $prefix) === false
-            || preg_match('/^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/', $period, $m) !== 1
-            || Giving::isRealDay($m[1]) === false || Giving::isRealDay($m[2]) === false
+            || preg_match('/^(\d{4}-(?:0\d|1[0-2])-(?:[0-2]\d|3[01]))_(\d{4}-(?:0\d|1[0-2])-(?:[0-2]\d|3[01]))$/', $period, $m) !== 1
         ) {
             // The name does not give a period, so it cannot be matched to a
             // statement record. Kept: see eraseGivingStatementFiles().
@@ -6113,9 +6109,28 @@ class GdprEraser
         // statement record behind it. Kept when EVERY gift on it is a kept
         // gift: at least one gift in its period still carries the donor, and
         // none of the gifts this run took the donor off falls inside it.
+        //
+        // `>= ? AND <= ?`, NEVER `BETWEEN ? AND ?` (#891, #892). The period
+        // comes from a FILE NAME, and a file written before the statement
+        // pages checked their dates can name a day that does not exist
+        // ('2025-02-31'). BETWEEN answers that differently by engine -- none of
+        // the donor's gifts on MySQL 8.0/8.4, some on MySQL 9.7 and MariaDB
+        // (measured) -- so "is any gift on it still the donor's?" got two
+        // answers, and a file listing only kept gifts was DELETED on 8.0/8.4
+        // and kept elsewhere. Plain `>=` and `<=` give the same rows on all
+        // four (measured: 8.0.36, 8.4.11, 9.7.4, MariaDB 11.4.13, for every
+        // month 00-12 and day 00-31 tried: 29, 30 and 31 February, 31 April,
+        // 31 June, month 00, day 00), and they put an impossible day exactly
+        // where the text comparison of the unkept dates below puts it, so the
+        // two halves of this rule agree. (Month 13 or day 32 is where they stop
+        // agreeing -- the pattern above keeps those out.)
+        // REJECTED (round 2 of the check): treating such a period as "no
+        // period" and keeping the file. That KEPT a file listing a gift that
+        // had lost the donor's name -- and counted it as tax evidence --
+        // where every engine had deleted it before.
         [, $from, $to] = $m;
         $linked = 0;
-        $stmt   = $db->prepare('SELECT COUNT(*) FROM tblGivingEntry WHERE siteID = ? AND donorID = ? AND donatedAt BETWEEN ? AND ?');
+        $stmt   = $db->prepare('SELECT COUNT(*) FROM `tblGivingEntry` WHERE `siteID` = ? AND `donorID` = ? AND `donatedAt` >= ? AND `donatedAt` <= ?');
         if ($stmt === false) {
             throw new \RuntimeException((string) $db->error);
         }

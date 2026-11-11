@@ -88,7 +88,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED = 102; // 88, then 14 in part G (#891, #892)
+const EXPECTED = 107; // 88, then 19 in part G (#891, #892)
 
 /** Every row this test inserts has this number, or the next ones. */
 const BASE   = 925001;
@@ -603,6 +603,12 @@ foreach (['-02-15', '-03-02', '-03-10', '-06-01'] as $g => $day) {
     q('INSERT INTO `tblGivingEntry` (`entryID`, `siteID`, `donorName`, `categoryID`, `amountPence`, `donatedAt`, `method`) VALUES (?, ?, ?, ?, 1000, ?, \'cash\')',
         'iisis', [$n + $g, $site, 'Page Scripts Selftest Giver', $n, $giftYear . $day]);
 }
+// ...and one gift BY the member (it has a donor account), on 15 February: the statement pages only list gifts with a
+// donor, so without it a statement run finds nobody on any engine and part G's statement checks could not see the
+// difference that matters -- on MySQL 9.7 a range ending 31 February FINDS this donor and then tries to write
+// 31 February into a DATE column of the statement record.
+q('INSERT INTO `tblGivingEntry` (`entryID`, `siteID`, `donorID`, `categoryID`, `amountPence`, `donatedAt`, `method`) VALUES (?, ?, ?, ?, 1500, ?, \'cash\')',
+    'iiiis', [$n + 4, $site, MEMBER, $n, $giftYear . '-02-15']);
 q('INSERT INTO tblLivestreamChannel (channelID, siteID, name, platform, channelOrVideoId) VALUES (?, ?, ?, \'youtube\', \'selftestvideo\')', 'iis', [$n, $site, 'Page Scripts Selftest Channel']);
 q('INSERT INTO tblLivestreamSchedule (scheduleID, channelID, dayOfWeek, startTime, endTime, timezone, isActive) VALUES (?, ?, ?, \'10:00:00\', \'12:00:00\', ?, 1)', 'iiis', [$n, $n, $tomorrow, $zone]);
 
@@ -980,6 +986,31 @@ ok('G14 generating statements for a range starting 31 February stops at the gate
     $answer['status'] === 302 && str_contains($answer['location'], 'giving/statements') === true && $after === $before
     && str_contains($shown['body'], 'Invalid date range.') === true,
     'HTTP ' . $answer['status'] . ' ' . $answer['location'] . ', records ' . $before . ' -> ' . $after);
+// THE TO END, PAGE BY PAGE (round 2 of the check). G01-G14 tried an impossible TO on only two pages, so the TO
+// half of five pages' checks could be deleted with every check green. Each case below is FROM real, TO impossible.
+$answer = req($jar, 'GET', '/giving/manage?from=' . $real('-01-01') . '&to=' . $bad);
+ok('G15 /giving/manage refuses a TO of 31 February with 400', $answer['status'] === 400, 'HTTP ' . $answer['status']);
+$tok    = token(req($jar, 'GET', '/giving/statements')['body']);
+$before = (int) (one('SELECT COUNT(*) AS n FROM `tblGivingStatementLog` WHERE `siteID` = ?', 'i', [$site])['n'] ?? 0);
+$answer = req($jar, 'POST', '/giving/statements-generate', ['csrf_token' => $tok, 'action' => 'generate', 'from' => $real('-01-01'), 'to' => $bad]);
+$after  = (int) (one('SELECT COUNT(*) AS n FROM `tblGivingStatementLog` WHERE `siteID` = ?', 'i', [$site])['n'] ?? 0);
+$shown  = req($jar, 'GET', '/giving/statements');
+ok('G16 generating statements for a range ENDING 31 February stops at the gate with "Invalid date range." and writes no statement record (on MySQL 9.7 the old gate let it find the member\'s gift and reach the DATE write)',
+    $answer['status'] === 302 && str_contains($answer['location'], 'giving/statements') === true && $after === $before
+    && str_contains($shown['body'], 'Invalid date range.') === true,
+    'HTTP ' . $answer['status'] . ' ' . $answer['location'] . ', records ' . $before . ' -> ' . $after);
+$answer = req($jar, 'GET', '/giving/statements?from=' . $real('-01-01') . '&to=' . $bad);
+ok('G17 /giving/statements falls back to its default year for a TO of 31 February, and never draws the impossible day back',
+    $answer['status'] === 200 && str_contains($answer['body'], 'value="' . $bad . '"') === false && str_contains($answer['body'], 'value="' . $defaultYear . '-12-31"') === true,
+    'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/small-groups/report?id=' . BASE . '&from=' . $real('-01-01') . '&to=' . $bad);
+ok('G18 /small-groups/report puts its default in place of a TO of 31 February and keeps the real FROM',
+    $answer['status'] === 200 && str_contains($answer['body'], 'value="' . $bad . '"') === false && str_contains($answer['body'], 'value="' . $real('-01-01') . '"') === true,
+    'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/small-groups/export?type=attendance&id=' . BASE . '&from=' . $real('-01-01') . '&to=' . $bad);
+ok('G19 /small-groups/export does the same for a TO of 31 February: the file is named for the range it really used',
+    $answer['status'] === 200 && str_contains($answer['head'], $bad) === false && str_contains($answer['head'], $real('-01-01')) === true,
+    'HTTP ' . $answer['status'] . ', ' . (preg_match('/^Content-Disposition:.*$/mi', $answer['head'], $cd) === 1 ? $cd[0] : 'no Content-Disposition'));
 
 // =============================================================================
 // 🧹 Errors, and the clean-up

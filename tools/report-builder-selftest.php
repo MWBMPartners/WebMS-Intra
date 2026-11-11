@@ -279,20 +279,32 @@ foreach ([
     ['completedAt', 'gte', ['2027-00-10 10:00:00'], 'month 00 on a datetime'],
     ['completedAt', 'lt', ['2027-03-01 25:00:00'], 'hour 25 on a datetime'],
     ['dueDate', 'between', ['2027-02-29', '2027-12-31'], '29 February in a year that has none, on a date'],
+    // Refused before this work too, and must stay refused: a 'T' between date
+    // and time, and a date with no time, on a date-and-time column.
+    ['completedAt', 'gte', ['2027-06-01T10:00:00'], 'a "T" between the date and the time'],
+    ['completedAt', 'gte', ['2027-06-01'], 'a date with no time on a date-and-time column'],
 ] as [$col, $op, $vals, $what]) {
     expectThrows('Z: ' . $what . ' is refused', static function () use ($tasksWith, $col, $op, $vals): void {
         ReportBuilder::compile($tasksWith(['col' => $col, 'op' => $op, 'vals' => $vals]), 1);
     });
 }
 // ...and the over-reach direction: real values still compile, INCLUDING a
-// reading in the hour London's clocks skip. The check is made in UTC so that
-// reading is not mistaken for an impossible one; PHP's own zone is set to
-// London for this case on purpose, and put back afterwards.
+// reading in the hour London's clocks skip. The check reads the digits and no
+// time zone, so that reading cannot be mistaken for an impossible one; PHP's own
+// zone is set to London for these cases on purpose (round 2's version made a
+// moment and needed UTC to get this right), and put back afterwards.
 $zoneWas = date_default_timezone_get();
 date_default_timezone_set('Europe/London');
 foreach ([
     [['2028-02-29 10:00:00', '2028-03-26 01:30:00'], 'a leap day, and 01:30 on the morning London skips it'],
     [['2027-01-01 00:00', '2027-12-31 23:59'], 'minutes-only values'],
+    // UNPADDED parts were accepted by the old createFromFormat() check and
+    // every engine reads them correctly; round 2's "must give back exactly what
+    // was written" refused them (found by round 2 of the check). A saved
+    // report could hold one, so each must still compile.
+    [['2026-06-01 9:00', '2026-06-01 23:00'], 'a one-digit hour (9:00)'],
+    [['2026-01-01 00:00', '2026-6-1 10:00'], 'a one-digit month and day (2026-6-1)'],
+    [['2026-01-01 00:00', '2026-06-01 1:00:00'], 'a one-digit hour with seconds (1:00:00)'],
 ] as [$vals, $what]) {
     $compiled = null;
     try {

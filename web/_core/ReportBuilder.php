@@ -789,24 +789,29 @@ final class ReportBuilder
             //    by rolling it into 3 March, and the IMPOSSIBLE text was then
             //    bound into the filter -- where `col BETWEEN ? AND ?` answers it
             //    differently on MySQL 8.0/8.4 (no rows) and on 9.7 and MariaDB
-            //    (rows), measured. So the parse must give back EXACTLY what was
-            //    written, the same round-trip test AssetRegister's
-            //    parseOptionalDateTime() uses; a rolled date, or 25:00, comes
-            //    back different and is refused with this method's own message.
-            //    Read in UTC ON PURPOSE: UTC has no clock changes. In PHP's
-            //    default zone a real reading in the hour the clocks skip
-            //    (01:30 on the spring morning in London) would come back as
-            //    02:30 and be refused as if it did not exist (#777).
-            $s   = (string) $raw;
-            $utc = new \DateTimeZone('UTC');
-            $dt  = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $s, $utc);
-            if ($dt === false || $dt->format('Y-m-d H:i:s') !== $s) {
-                $dt = \DateTimeImmutable::createFromFormat('!Y-m-d H:i', $s, $utc);
-                if ($dt !== false && $dt->format('Y-m-d H:i') !== $s) {
-                    $dt = false;
-                }
-            }
-            if ($dt === false) {
+            //    (rows), measured.
+            //    The PARTS are checked, never the text against a reformatted
+            //    copy: round 2 required the parse to give back exactly what was
+            //    written, and that refused real values the old check accepted
+            //    and every engine reads correctly -- '2026-06-01 9:00',
+            //    '2026-6-1 10:00', '2026-06-01 1:00:00' -- which a saved report
+            //    could hold (found by round 2 of the check). So the pattern
+            //    takes what createFromFormat('Y-m-d H:i[:s]') took (a 4-digit
+            //    year, a 1- or 2-digit month, day and hour, 2-digit minutes and
+            //    seconds); checkdate() decides the day; the hour, minute and
+            //    second are range-checked. Compared with the old check over a
+            //    grid of written values (every mix of 1- and 2-digit parts, in
+            //    and out of range, with stray spaces, a 'T' and a date alone):
+            //    no real value it accepted is refused, and nothing it refused is
+            //    accepted (no count is given: it is a property of the grid, not
+            //    of the code). Built from the digits, so
+            //    no time zone is involved and a real reading in the hour the
+            //    clocks skip is accepted (#777).
+            $s    = (string) $raw;
+            $real = preg_match('/\A(\d{4})-(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{2})(?::(\d{2}))?\z/', $s, $part) === 1
+                && checkdate((int) $part[2], (int) $part[3], (int) $part[1]) === true
+                && (int) $part[4] <= 23 && (int) $part[5] <= 59 && (int) ($part[6] ?? '0') <= 59;
+            if ($real === false) {
                 throw new \InvalidArgumentException('Expected a date/time (YYYY-MM-DD HH:MM[:SS]).');
             }
             return [$s, 's'];
