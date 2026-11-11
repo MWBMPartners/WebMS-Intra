@@ -23558,3 +23558,33 @@ statement early: a reader that blanks or splits SQL must track strings and comme
 - Tests: F03, F03c-F03f and F12c of `tools/site-addresses-selftest.php`. F03f needs its own account because a plain
   member has no Admin menu, so a "shown to everyone" plant is invisible to a member-only check.
 
+### The attendance grid and a walk-in's capitals (#655)
+
+- **The database decides which walk-in a row is.** `Portal\Core\AttendanceWalkins` numbers each distinct walk-in name
+  with a `GROUP BY` and a join on the column, so MySQL's own collation decides sameness, and every grid key is built
+  from that number. The walk-in list and the tick map come from one query.
+- **Why not `mb_strtolower()` + `rtrim()`.** Measured on MySQL 8.0.36 (`utf8mb4_general_ci`): `e`=`é`, `a`=`Ä`,
+  `ß`=`s`, `σ`=`ς`, `i`=`İ` are EQUAL; `ß`=`ss`, `o`=`ø`, `æ`=`ae` are NOT; trailing spaces are ignored, a trailing
+  tab or non-breaking space is not, inner spaces count. A PHP fold would copy that table and drift. MariaDB 11.4.13
+  passes the same test.
+- **A cell posts a reference, never a name.** `walkinRef` is the group's oldest row number;
+  `AttendanceWalkins::storedName()` turns it back into the name exactly as stored (scoped to the event, the
+  organisation, not deleted, not imported) and the DELETE and INSERT use those bytes. The first version trimmed the
+  posted name, and since the database ignores trailing SPACES but not a leading space or a trailing tab, pressing
+  "Dave<TAB>" deleted Dave's row. Only a NEW name typed into the enrol form is trimmed.
+- **One refusal for every unusable reference** — another event's, another organisation's, one that never existed,
+  and a stale one — a 302 to the grid with "This list changed since you opened it…". The words are true for every
+  reference the page itself drew (it stops working only when its row is removed); a reference the page never drew
+  can only come from a hand-made request and gets the same words on purpose, so nothing is revealed about other
+  events. The stale case is reached only from a different session: a second tab or the back button carries a spent
+  form token and gets a 400 first. Two earlier wordings were untrue ("Event not found", then "no longer on this
+  event's list" when the walk-in still had other days).
+- `tools/audit-checks/check_event_visibility.py`'s marker pattern accepts a table prefix and backticks
+  (`` e.`externalFeedID` IS NULL ``), so backticked SQL satisfies it (386 matches before, 388 after, none lost).
+- Found, not fixed: a row with an EMPTY `walkinName` is drawn with a blank label and its press does nothing; only
+  hand-written SQL can create one.
+- Test: `tools/attendance-walkins-selftest.php` (real HTTP). `isRefusal()` demands exactly the 302 and flash: a 404
+  does not count, because a refusal that differed by case would tell a caller which references exist. Its plant list
+  is in the code. Lesson: the old comment said the grid and the removal "cannot disagree"; the check disproved it
+  twice. A guarantee about two halves needs ONE rule both use, and the handler is a half.
+

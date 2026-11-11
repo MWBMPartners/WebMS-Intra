@@ -794,6 +794,9 @@ Service-type-aware headcount tracker.
   was a duplicated "who marked this" trail and a table that would mislead the first reader to count records rather
   than people. Erased members are deliberately exempt: their rows
   keep the attendance and lose the name, and collapsing them would delete the counts erasure exists to preserve.
+- **One row per walk-in, however it was spelt (#655).** The database decides which spellings are the same
+  walk-in (capitals and trailing spaces ignored, as it compares them), every day attended shows ticked and can be
+  un-ticked, and a press acts on the stored name exactly.
 - **Taking a walk-in off the register works (29 October 2026).** It did not before, and the gap was
   invisible: the grid draws a walk-in's cell exactly like a member's, the page says "click a cell to
   toggle", and the form really posted the removal — the handler just had no branch for it and

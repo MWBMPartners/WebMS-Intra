@@ -4,6 +4,17 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A walk-in written in different capitals shows as attended on every day (#655)
+
+- On an event's attendance grid, a walk-in written in different capitals or with a trailing space on different days
+  (for example "Dave" and "dave") now shows as attended on every day, and a ticked cell can be removed. The grid used
+  to compare names byte for byte while the database compares them without regard to capitals or trailing spaces, so
+  the second day drew as empty and its cell could neither be seen nor removed.
+- A cell now posts a reference to the walk-in rather than the name, and the press acts on the name exactly as
+  stored, so a stored name with a leading space or a trailing tab can no longer change another walk-in's row.
+- A reference that can no longer be used gets one message, "This list changed since you opened it. It has been
+  reloaded; please try again. Nothing was changed.", the same whatever the cause. Codex has not reviewed this.
+
 ### An activity record names its person by number, not in its words (#933; D-137, D-138)
 
 - An erasure empties a record's account number and network address but keeps its description, and the log may be

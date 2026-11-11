@@ -450,6 +450,8 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   question for the totals AND each session's headcount (permission `attendance.reports`); `mayDeleteSession()`
   is the ONE delete rule, asked by both delete addresses. A refusal is the same 404 as an address that does
   not exist. The record is DEV_NOTES.md, "Who sees the attendance figures (#529)".
+  `AttendanceWalkins` is the ONE place that decides which walk-in a grid row is, by the database's own comparison;
+  never key a walk-in by its typed name in PHP (#655, test `tools/attendance-walkins-selftest.php`).
 - **Outside services (#778; D-058, D-072, D-073).** `Portal\Core\OutsideServices` is the ONE place
   that decides whether a member's details may go to an outside company (Gravatar, a sign-in
   provider's photo, an OpenStreetMap map of a member's home), and the ONLY file under `web/` that may

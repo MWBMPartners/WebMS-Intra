@@ -46,13 +46,16 @@
  *      Location as the foreign ones in F. Nothing is changed, and a reload
  *      gives a reference that works.
  *   D. PLANTED FAULTS, each in the scratch copy and each required to turn its
- *      named checks red (or, for one, to leave a named check GREEN): the grid
+ *      named checks red, and some to leave named checks GREEN: the grid
  *      grouping by exact bytes; the handler trimming the stored name; the grid
- *      and the reference lookup not scoped to the event; and the handler's own
- *      event-belongs-to-organisation check bypassed (F04 must stay green,
- *      because the lookup's own organisation test still holds) and then that
- *      test removed too (F04 must go red). A test that cannot see the fault it
- *      exists to catch proves nothing.
+ *      and the reference lookup not scoped to the event; the handler's own
+ *      event-belongs-to-organisation check bypassed (only F06 goes red; F03,
+ *      F04, F04b and F05 stay green, because the lookup's own organisation
+ *      test still holds); that bypass with the lookup's organisation test
+ *      removed too (F05 and F06 go red); and a handler that answers 404 when
+ *      the reference exists elsewhere (F03, F04 and G04 go red; F04b and G01
+ *      stay green). The plant list in the code is the record; count it there.
+ *      A test that cannot see the fault it exists to catch proves nothing.
  *
  * WHAT IT CANNOT DO. It runs as one made-up administrator on one engine (the
  * one SELFTEST_DB_* points at; run on MySQL 8.0.36 and MariaDB 11.4.13 when it

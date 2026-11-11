@@ -73,8 +73,11 @@ $redirect = Site::url('calendar/event/attendance') . '?eventID=' . $eventId;
 // answer for every reference that cannot be used — another event's, another
 // organisation's, one that never existed, and a stale one (the walk-in's
 // oldest row, which the reference names, has been removed since the page was
-// drawn). The words are true in each case, because all they claim is that the
-// list has changed, and they are the same for all four, so the answer reveals
+// drawn). The words are true for every reference the page itself drew: such
+// a reference stops working only when the row it names has been removed, so
+// the list really has changed. A reference the page never drew (another
+// event's, another organisation's, a made-up number) can only come from a
+// hand-made request, and gets the same words ON PURPOSE, so the answer reveals
 // nothing about other events. The press is not silently lost: the grid is
 // redrawn and says so.
 //
