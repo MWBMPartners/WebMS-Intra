@@ -108,7 +108,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 /** How many checks a full run makes; a different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 66; // #882 adds N05 and X08b; 39 in the first build; round 1 of P4b's check added E07-E09 and X14-X25; #493 P4c added F01-F05 and FX1-FX5
+const EXPECTED_CHECKS = 68; // #882 adds N05, N06, X08b and X08c; 39 in the first build; round 1 of P4b's check added E07-E09 and X14-X25; #493 P4c added F01-F05 and FX1-FX5
 
 /* Any Chromium-family browser (see tools/csrf-carriers-selftest.mjs for why). */
 const BROWSERS = [
@@ -285,7 +285,41 @@ function feeds() {
             ev('Morning service', now - 2 * 3600000, null, 'Europe/London', { listedUntil: stampIn(now + 10 * 3600000, 'Europe/London') }),
             ev('Evening service', now + (6 * 3600 + 30 * 60) * 1000, null, 'Europe/London', { listedUntil: stampIn(now + 20 * 3600000, 'Europe/London') }),
         ]),
+        // Round 2 of #882's check: no countdown fixture had an all-day event,
+        // so endOf()'s all-day branch was exercised by nothing. An all-day
+        // event TODAY is under way until the end of its day ("Happening now"),
+        // ahead of an ordinary event in three hours; without that branch it
+        // would end at its start (midnight) and the countdown would skip it.
+        ALLDAYGGGGGGGGGGGGGGGGGGG: events('Europe/London', [
+            (() => {
+                const start = midnightBefore(now, 'Europe/London');
+                return ev('All day today', start, null, 'Europe/London', {
+                    allDay: true, listedUntil: listedUntilOf(start, null, 'Europe/London', true),
+                });
+            })(),
+            ev('In three hours', now + 3 * 3600000, now + 4 * 3600000, 'Europe/London'),
+        ]),
     };
+}
+
+/** Midnight at the start of the day `ms` falls on, on `zone`'s clock (a 23- or 25-hour day needs a second step). */
+function midnightBefore(ms, zone) {
+    const day = stampIn(ms, zone).slice(0, 10);
+    const intoDay = (t) => (Number(t.slice(11, 13)) * 3600 + Number(t.slice(14, 16)) * 60 + Number(t.slice(17, 19))) * 1000;
+    let at = ms;
+    for (let i = 0; i < 4; i += 1) {
+        const t = stampIn(at, zone);
+        if (t.slice(0, 10) < day) {
+            // Stepped back into the day before (the night was shorter): forward to its end.
+            at += 86400000 - intoDay(t);
+            continue;
+        }
+        if (intoDay(t) === 0) {
+            break;
+        }
+        at -= intoDay(t);
+    }
+    return at;
 }
 
 /* ── The organisation's website: strict CSP, a nonce'd probe, the pasted lines ── */
@@ -588,6 +622,7 @@ async function main() {
                 '/site/next.html': `<script src="PORTAL/w/NEXTCCCCCCCCCCCCCCCCCCCCC/door.js" data-show="next" defer></script>
 <script src="PORTAL/w/NOWDDDDDDDDDDDDDDDDDDDDDD/door.js" data-show="next" defer></script>`,
                 '/site/noend.html': `<script src="PORTAL/w/NOENDFFFFFFFFFFFFFFFFFFFF/door.js" data-show="next" defer></script>`,
+                '/site/allday.html': `<script src="PORTAL/w/ALLDAYGGGGGGGGGGGGGGGGGGG/door.js" data-show="next" defer></script>`,
                 '/site/off.html': `<script src="PORTAL/w/OFFFFFFFFFFFFFFFFFFFFFFFF/door.js" data-show="events" defer></script>
 <script src="PORTAL/w/EMPTYEEEEEEEEEEEEEEEEEEEE/door.js" data-show="events" defer></script>`,
             };
@@ -725,6 +760,9 @@ async function main() {
             seen.length = 0;
             f.noEndReady = await browser.open(`${site}/noend.html`, READY);
             f.noEnd = (await browser.evaluate(READ)).map((one) => ({ titles: one.titles, text: one.text }));
+            seen.length = 0;
+            f.allDayReady = await browser.open(`${site}/allday.html`, READY);
+            f.allDay = (await browser.evaluate(READ)).map((one) => ({ titles: one.titles, text: one.text }));
 
             seen.length = 0;
             // The door-off copy draws nothing, so "ready" is: the empty one drew AND both asked for their feed.
@@ -784,6 +822,9 @@ async function main() {
         check('N05 (#882, round 1 of its check) a morning service with no end time that began two hours ago is still on the door\'s LIST, yet the countdown counts down to the EVENING service — as it did before #882 — and never calls the morning one "Happening now"',
             [base.noEndReady, base.noEnd.map((n) => n.titles), base.noEnd[0]?.text?.startsWith('Next')],
             [true, [['Evening service']], true]);
+        check('N06 (#882, round 2 of its check) an all-day event TODAY is "Happening now" until the end of its day, ahead of an ordinary event in three hours — endOf()\'s all-day branch, which no fixture reached before',
+            [base.allDayReady, base.allDay.map((n) => n.titles), base.allDay[0]?.text?.startsWith('Happening now')],
+            [true, [['All day today']], true]);
 
         console.log('O. The door off, and an empty feed');
         check('O01 a door that refuses its feed draws NOTHING; an empty feed says "No upcoming events."', [base.offReady, base.off], [true, [{ empty: true, text: '' }, { empty: false, text: 'No upcoming events.' }]]);
@@ -836,6 +877,9 @@ async function main() {
             "    function endOf(ev, start) {\n        if (ev.allDay === true) {",
             "    function endOf(ev, start) {\n        if (typeof ev.listedUntil === 'string' && !isNaN(Date.parse(ev.listedUntil))) {\n            return Date.parse(ev.listedUntil);\n        }\n        if (ev.allDay === true) {",
             (r) => JSON.stringify(r.noEnd.map((n) => n.titles)) !== JSON.stringify(base.noEnd.map((n) => n.titles)));
+        await plant('X08c (#882, round 2) the countdown\'s all-day rule taken out (an all-day event ends at its start): N06 notices',
+            "        if (ev.allDay === true) {\n            var basis", "        if (false) {\n            var basis",
+            (r) => JSON.stringify(r.allDay.map((n) => n.titles)) !== JSON.stringify(base.allDay.map((n) => n.titles)));
         await plant('X09 a global variable leaked (the wrapper taken away from one name): I04 notices', "(function () {\n    'use strict';", "window.webmsDoor = true;\n(function () {\n    'use strict';",
             (r) => r.evPage.newGlobals.length > 0);
         await plant('X10 the event\'s time taken from the instant rather than its own clock reading: E06 notices', 'var reading = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));',
@@ -893,6 +937,7 @@ async function main() {
             out.next = f.next.map((n) => n.titles);
             // #882: the no-end countdown's text holds a moving clock too.
             out.noEnd = f.noEnd.map((n) => n.titles);
+            out.allDay = f.allDay.map((n) => n.titles);
             return out;
         };
         const sb = steady(base);

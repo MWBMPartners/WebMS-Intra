@@ -128,6 +128,15 @@
         feedUrl = new URL(show === 'posters' ? 'posters.json' : 'events.json', mine);
         // "next" asks for the most the door gives: the soonest event is picked
         // here by its real instant, not by the feed's order.
+        // ⚠️ Since #882 (D-129) an event with no end time stays in the feed
+        //    until the end of its day, so on a busy day events that began
+        //    earlier take some of these 50 places although the countdown skips
+        //    them (endOf() below). It cannot ask for more: 50 is the most the
+        //    door gives, and a larger `limit` is refused, never shortened. It
+        //    would take more than 50 events already running or begun today
+        //    with no end time, all listed ahead of the next one, for that next
+        //    one to be pushed out; the countdown then shows the soonest it was
+        //    given. Accepted rather than solved (round 2 of #882's check).
         feedUrl.searchParams.set('limit', String(show === 'next' ? 50 : limit));
     } catch (e) {
         return;

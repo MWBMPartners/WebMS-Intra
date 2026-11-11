@@ -51,8 +51,10 @@
  *      chosen. N17-N18 read listedUntil where D-129 says nothing changes (an
  *      end time; all-day events of one day and of three) under both settings;
  *      N20 needs the window to reach a zone's HISTORIC highest offset
- *      (London 1941, +2), whatever the season. PN1-PN15 put the old or a
- *      wrong code back piece by piece.
+ *      (London 1941, +2, beside New York, whose whole history is at or below
+ *      -4), whatever the season; N21 needs it to read the WHOLE history (the
+ *      Azores' +1 of 1993, late in its list). PN1-PN18 put the old or a wrong
+ *      code back piece by piece.
  *   J  (#493 P4b) the script a website pastes in, /w/{name}/door.js and
  *      /door.js on a public address: the file kept outside the web root,
  *      byte for byte, as text/javascript with its headers; the same gate
@@ -209,7 +211,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 377; // #882 (D-129) and #898 add N01-N20, H06 and PN1-PN15 to the 341 below; #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
+const PDS_EXPECTED_CHECKS = 381; // #882 (D-129) and #898 add N01-N21, H06, PN1-PN18 to the 341 below; #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -2077,20 +2079,39 @@ $nAllDayThree = $nMake('PDS N all day, three days', 'Europe/London', $nLondonTom
     (new DateTimeImmutable($nLondonTomorrow))->modify('+2 days')->format('Y-m-d') . ' 00:00:00');
 $setEv($nAllDayOne, ['isAllDay' => '1']);
 $setEv($nAllDayThree, ['isAllDay' => '1']);
-// Round 1 of #882's check: the second read's window must reach a zone's
-// HIGHEST offset in its history, not only today's. Organisation C (UTC, and
-// its only other event in UTC) gets two events running since June 1941, when
-// London was on DOUBLE summer time (+2): 08:00 in Pago Pago (19:00 UTC) and
-// 20:30 in London (18:30 UTC, sooner, though its reading sorts later). With
-// `limit=1` the first read takes Pago Pago's, T = 19:00 UTC, and London's
-// reading is between T + 1 hour and T + 2 hours — inside the window only when
-// it reaches London's historic +2. Every zone involved has a CURRENT offset
-// of at most +1 in any season, so a window built from today's offsets misses
-// it all year round. Both end in 2099, so they are still listed.
+// Rounds 1 and 2 of #882's check: the second read's window must reach a
+// zone's HIGHEST offset in its history, not only today's. Organisation C
+// (UTC, and its only other event in UTC) gets two events running since June
+// 1941, when London was on DOUBLE summer time (+2): 15:00 in New York (EDT,
+// 19:00 UTC) and 20:30 in London (18:30 UTC, sooner, though its reading sorts
+// later). With `limit=1` the first read takes New York's, T = 19:00 UTC, and
+// London's reading is between T + 1 hour and T + 2 hours — inside the window
+// only when it reaches London's historic +2. Both end in 2099, so they are
+// still listed.
+// ⚠️ ROUND 2 FOUND THE FIRST VERSION HELD UP BY THE WRONG ZONE: its partner
+//    was Pacific/Pago_Pago, whose history begins with local mean time
+//    +12:37:12, so C's window was always 45,432 seconds and London's history
+//    decided nothing — three wrong windows stayed green. New York's whole
+//    history (local mean time -4:56:02 included) is at or below -4 hours, so
+//    with UTC as C's only other clock, London's +2 is the ONLY thing that can
+//    widen the window enough. N19 checks that premise.
 $nHistoricLondon = $makeEvent('PDS N historic London', $siteC, 'Europe/London', '1941-06-01 20:30:00', '2099-01-01 00:00:00', ['showOnWebsite' => '0']);
-$nHistoricPago   = $makeEvent('PDS N historic Pago Pago', $siteC, 'Pacific/Pago_Pago', '1941-06-01 08:00:00', '2099-01-01 00:00:00', ['showOnWebsite' => '0']);
-$nIds['PDS N historic London']    = $nHistoricLondon;
-$nIds['PDS N historic Pago Pago'] = $nHistoricPago;
+$nHistoricNy     = $makeEvent('PDS N historic New York', $siteC, 'America/New_York', '1941-06-01 15:00:00', '2099-01-01 00:00:00', ['showOnWebsite' => '0']);
+$nIds['PDS N historic London']   = $nHistoricLondon;
+$nIds['PDS N historic New York'] = $nHistoricNy;
+// Round 2: the same shape where the highest offset is LATE in a zone's
+// history, so a window that read only part of the history (say its first
+// half) cannot reach it either. Organisation C again gets Atlantic/Azores,
+// which was +1 only from 28 March to 17 June 1993 (entry 126 of its 217,
+// every entry before that at or below 0, and at or below 0 ever since), and
+// New York again: 15:00 on 1 May 1993 in New York is 19:00 UTC, 19:30 in the
+// Azores is 18:30 UTC. Only the Azores' 1993 +1 reaches it — while N21 runs,
+// the London event is put on UTC's clock, so London's +2 is not in C's zones
+// (the Azores' +1 is below what N20 needs, so it cannot carry N20 either).
+$nLateAzores = $makeEvent('PDS N late Azores', $siteC, 'Atlantic/Azores', '1993-05-01 19:30:00', '2099-01-01 00:00:00', ['showOnWebsite' => '0']);
+$nLateNy     = $makeEvent('PDS N late New York', $siteC, 'America/New_York', '1993-05-01 15:00:00', '2099-01-01 00:00:00', ['showOnWebsite' => '0']);
+$nIds['PDS N late Azores']   = $nLateAzores;
+$nIds['PDS N late New York'] = $nLateNy;
 $state['nIds'] = array_values($nIds);
 register_shutdown_function(static function () use (&$state, $db): void {
     foreach ($state['nIds'] ?? [] as $id) {
@@ -2316,14 +2337,35 @@ check('N17 (the default) listedUntil is the END for an event with an end time; m
 $setOwn($siteA, 'public.events.noEndListedFor', '120');
 check('N18 (2 hours chosen) exactly the same: the choice changes listedUntil for none of the three (D-129)', $nUntil(), $nUntilWant);
 $setOwn($siteA, 'public.events.noEndListedFor', null);
-$nHistoric = static fn (): mixed => $nShow(['PDS N historic London', 'PDS N historic Pago Pago'],
+$nHistoric = static fn (): mixed => $nShow(['PDS N historic London', 'PDS N historic New York'],
     static fn (): mixed => $nAskFor($siteC, gmdate('Y-m-d H:i:s'), 1, 'PDS N historic'));
-check('N19 the premise: in June 1941 London was two hours ahead of UTC, and today every clock organisation C uses is at most one hour ahead',
-    [(new DateTimeImmutable('1941-06-01 20:30:00', $nLondon))->format('P'),
-        max(array_map(static fn (string $z): int => (new DateTimeZone($z))->getOffset(new DateTimeImmutable('now')), ['UTC', 'Europe/London', 'Pacific/Pago_Pago'])) <= 3600],
-    ['+02:00', true]);
-check('N20 (#898) with limit=1, the sooner of two events whose reading lies between one and two hours past the first read\'s latest moment is the one given — the window reaches London\'s HISTORIC +2, not only today\'s offset',
+// N21: London's event is put on UTC's clock while it runs (see the fixture's
+// comment), so the Azores' late +1 is the only thing that can carry it.
+$nLate = static function () use ($nShow, $nAskFor, $siteC, $setEv, $nHistoricLondon): mixed {
+    $setEv($nHistoricLondon, ['timezone' => 'UTC']);
+    try {
+        return $nShow(['PDS N late Azores', 'PDS N late New York'],
+            static fn (): mixed => $nAskFor($siteC, gmdate('Y-m-d H:i:s'), 1, 'PDS N late'));
+    } finally {
+        $setEv($nHistoricLondon, ['timezone' => 'Europe/London']);
+    }
+};
+$nWindows = static fn (): array => [$nHistoric(), $nLate()];
+/** The highest offset a zone has EVER had, from PHP's whole list (local mean time included). */
+$nEverMax = static fn (string $z): int => max(array_column((new DateTimeZone($z))->getTransitions() ?: [['offset' => 0]], 'offset'));
+$nAzores = array_column((new DateTimeZone('Atlantic/Azores'))->getTransitions(), 'offset');
+$nAzoresHalf = intdiv(count($nAzores), 2);
+$nAzoresYear = array_column((new DateTimeZone('Atlantic/Azores'))->getTransitions(time(), time() + 366 * 86400) ?: [], 'offset');
+check('N19 the premises: in June 1941 London was +2 and in May 1993 the Azores +1; EXCLUDING London, the highest offset any of C\'s clocks (UTC, New York, Azores) has EVER had is at most +1 hour, so only London\'s history can carry N20; excluding London AND the Azores it is at most 0, so only the Azores\' history can carry N21; and the Azores\' +1 is in the LATER half of its history and above every offset it has in the coming year',
+    [(new DateTimeImmutable('1941-06-01 20:30:00', $nLondon))->format('P'), (new DateTimeImmutable('1993-05-01 19:30:00', new DateTimeZone('Atlantic/Azores')))->format('P'),
+        max($nEverMax('UTC'), $nEverMax('America/New_York'), $nEverMax('Atlantic/Azores')) <= 3600,
+        max($nEverMax('UTC'), $nEverMax('America/New_York')) <= 0,
+        max(array_slice($nAzores, 0, $nAzoresHalf)) <= 0, max($nAzores) === 3600, max($nAzoresYear !== [] ? $nAzoresYear : [0]) <= 0],
+    ['+02:00', '+01:00', true, true, true, true, true]);
+check('N20 (#898) with limit=1, the sooner of two events (London 20:30 and New York 15:00 on 1 June 1941) is the one given — London\'s reading lies between one and two hours past the first read\'s latest moment, so the window must reach London\'s HISTORIC +2',
     $nHistoric(), ['PDS N historic London']);
+check('N21 (#898) the same where the highest offset is LATE in a zone\'s history: the Azores at 19:30 on 1 May 1993 (+1, entry 126 of its history) is given ahead of New York\'s 15:00 — the window must read the WHOLE history, not its first part',
+    $nLate(), ['PDS N late Azores']);
 
 // =============================================================================
 echo "J. The script a website pastes in (#493 P4b; D-056, D-084)\n";
@@ -4668,10 +4710,23 @@ $p = $plant('_core/PublicDoor.php', "'(((e.`isAllDay` = 1 OR e.`endDateTime` IS 
 check('PN11 with the fixed time\'s rule forgetting all-day events, an all-day event with no end time vanishes while a fixed time is chosen (N06 catches it)',
     [$p['applied'], $p['result']], [true, []]);
 // Round 1 of #882's check: three faults that left every check above green.
-$p = $plant('_core/PublicDoor.php', "            if (is_array(\$states) === true) {\n                foreach (\$states as \$state) {\n                    \$max = max(\$max, (int) \$state['offset']);\n                }\n            }\n",
-    '', $nHistoric);
-check('PN12 (plant A) with the second read\'s window built from each zone\'s CURRENT offset only, the sooner event is never read and the later one is given (N20 catches it)',
-    [$p['applied'], $p['result']], [true, ['PDS N historic Pago Pago']]);
+$nLoop = "                foreach (\$states as \$state) {\n";
+$p = $plant('_core/PublicDoor.php', "            if (is_array(\$states) === true) {\n" . $nLoop . "                    \$max = max(\$max, (int) \$state['offset']);\n                }\n            }\n",
+    '', $nWindows);
+check('PN12 (plant A) with the second read\'s window built from each zone\'s CURRENT offset only, the sooner event is never read and the later one is given (N20 and N21 catch it)',
+    [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late New York']]]);
+// Round 2 of #882's check: three more wrong windows, which the first version
+// of N20 (held up by Pago Pago's +12:37 local mean time) let through.
+$p = $plant('_core/PublicDoor.php', $nLoop, "                foreach (array_slice(\$states, 0, 1) as \$state) {\n", $nWindows);
+check('PN16 (V1) with only the FIRST entry of each zone\'s history read (its local mean time), both sooner events are missed (N20 and N21 catch it)',
+    [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late New York']]]);
+$p = $plant('_core/PublicDoor.php', $nLoop, "                foreach (array_slice(\$states, 0, intdiv(count(\$states), 2)) as \$state) {\n", $nWindows);
+check('PN17 (V3) with only the FIRST HALF of each zone\'s history read: London\'s 1941 +2 is in its first half, so N20 rightly still passes; the Azores\' 1993 +1 is in its second half, so N21 catches it',
+    [$p['applied'], $p['result']], [true, [['PDS N historic London'], ['PDS N late New York']]]);
+$p = $plant('_core/PublicDoor.php', '            $states = $zone->getTransitions();',
+    "            \$states = \$zone->getName() === 'Europe/London' ? false : \$zone->getTransitions();", $nWindows);
+check('PN18 (V5) with London\'s history ignored (its offset today only), N20 catches it; N21, with no London in it, is rightly unaffected',
+    [$p['applied'], $p['result']], [true, [['PDS N historic New York'], ['PDS N late Azores']]]);
 $p = $plant('_core/PublicDoor.php', "\$basis = \$allDay === true && \$row['endDateTime'] !== null ? I18n::wallClockReading((string) \$row['endDateTime']) : \$start;",
     '$basis = $start;', $nUntil);
 check('PN13 (plant B) with an all-day event\'s listedUntil taken from its FIRST day, the three-day event leaves the list two days early (N17 catches it)',
