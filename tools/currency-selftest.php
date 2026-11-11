@@ -465,8 +465,12 @@ $removeAll = static function () use ($db, &$made, $site): void {
         run($db, 'DELETE FROM `tblVenueInvoices` WHERE `invoiceID` = ?', 'i', [$id]);
     }
     foreach ($made['venues'] as $id) {
+        run($db, 'DELETE FROM `tblVenueBookings` WHERE `venueID` = ?', 'i', [$id]);
+        run($db, 'DELETE FROM `tblVenueAgreements` WHERE `venueID` = ?', 'i', [$id]);
+        run($db, 'DELETE FROM `tblVenueUsageTypes` WHERE `venueID` = ?', 'i', [$id]);
         run($db, 'DELETE FROM `tblVenues` WHERE `venueID` = ?', 'i', [$id]);
     }
+    run($db, "DELETE FROM `tblVenueStatuses` WHERE `siteID` = ? AND `statusName` = 'Currency selftest booked'", 'i', [$site]);
     foreach ($made['assets'] as $id) {
         run($db, 'DELETE FROM `tblAssetMaintenance` WHERE `assetID` = ?', 'i', [$id]);
         run($db, 'DELETE FROM `tblAssets` WHERE `assetID` = ?', 'i', [$id]);
@@ -948,6 +952,33 @@ $setting('org.currency', 'USD', $site);
 // so it could not show whether "keep" itself works (planted, it did not).
 $http('POST', '/venues/invoice-save', array_diff_key($invoicePost($unpaidInvoice, ''), ['currency' => true]));
 check('H10 and an edit that posts NO currency keeps the invoice\'s own (EUR), not the organisation\'s (now USD)', $invoiceCurrency($unpaidInvoice) === 'EUR', $invoiceCurrency($unpaidInvoice));
+
+// A venue booking and agreement recorded in EUR, edited while the organisation is in
+// USD with NO currency posted (the booking form has no currency field): each must keep
+// EUR. Before this, nothing drove either edit, so a planted "take today's currency" in
+// Venues::saveBooking() stayed green (round 3's own report said so).
+run($db, "INSERT INTO `tblVenueStatuses` (`siteID`, `statusName`, `statusCategory`, `countsAsConfirmed`) VALUES (?, 'Currency selftest booked', 'agreed', 1)", 'i', [$site]);
+$bookStatus = (int) $db->insert_id;
+run($db, "INSERT INTO `tblVenueUsageTypes` (`siteID`, `venueID`, `typeName`) VALUES (?, ?, 'Currency selftest hire')", 'ii', [$site, $venue]);
+$bookUsage = (int) $db->insert_id;
+run($db, "INSERT INTO `tblVenueBookings` (`siteID`, `venueID`, `bookingDate`, `usageTypeID`, `statusID`, `costPence`, `currency`, `notes`) VALUES (?, ?, CURDATE(), ?, ?, 2500, 'EUR', 'before')",
+    'iiii', [$site, $venue, $bookUsage, $bookStatus]);
+$booking = (int) $db->insert_id;
+$http('POST', '/venues/booking-save', ['csrf_token' => $freshToken('/venues/booking?id=' . $booking), 'action' => 'save', 'bookingID' => (string) $booking,
+    'venueID' => (string) $venue, 'bookingDate' => date('Y-m-d'), 'statusID' => (string) $bookStatus, 'usageTypeID' => (string) $bookUsage,
+    'costPence' => '25.00', 'notes' => 'edited after the change']);
+$bookingAfter = rows($db, 'SELECT `notes`, `costPence`, `currency` FROM `tblVenueBookings` WHERE `bookingID` = ?', 'i', [$booking]);
+check('H12 a venue booking EDITED after the organisation moved to USD (no currency posted, as the form posts none) is saved — its notes changed — and is STILL EUR',
+    ($bookingAfter[0]['notes'] ?? '') === 'edited after the change' && (int) ($bookingAfter[0]['costPence'] ?? 0) === 2500 && ($bookingAfter[0]['currency'] ?? '') === 'EUR',
+    json_encode($bookingAfter) . '; flash: ' . (preg_match('/alert-danger[^>]*>([^<]*)/', $http('GET', '/venues/booking?id=' . $booking)['body'], $mm) === 1 ? $mm[1] : '(none)'));
+run($db, "INSERT INTO `tblVenueAgreements` (`siteID`, `venueID`, `title`, `rateAmountPence`, `currency`, `status`) VALUES (?, ?, 'Currency selftest hire terms', 10000, 'EUR', 'active')", 'ii', [$site, $venue]);
+$agreement = (int) $db->insert_id;
+$http('POST', '/venues/agreement-save', ['csrf_token' => $freshToken('/venues/agreements?edit=' . $agreement), 'action' => 'save', 'agreementID' => (string) $agreement,
+    'venueID' => (string) $venue, 'agreementType' => 'standing', 'title' => 'Currency selftest hire terms, renamed', 'rateAmount' => '100.00', 'status' => 'active']);
+$agreementAfter = rows($db, 'SELECT `title`, `rateAmountPence`, `currency` FROM `tblVenueAgreements` WHERE `agreementID` = ?', 'i', [$agreement]);
+check('H13 a venue agreement EDITED the same way (no currency posted) is saved — renamed — and is STILL EUR',
+    ($agreementAfter[0]['title'] ?? '') === 'Currency selftest hire terms, renamed' && (int) ($agreementAfter[0]['rateAmountPence'] ?? 0) === 10000 && ($agreementAfter[0]['currency'] ?? '') === 'EUR',
+    json_encode($agreementAfter));
 
 // A giving statement for a donor who gave in several currencies (EUR, USD and GBP here).
 $http('POST', '/giving/statements-generate', ['csrf_token' => $freshToken('/giving/statements'), 'from' => date('Y-01-01'), 'to' => date('Y-12-31')]);
