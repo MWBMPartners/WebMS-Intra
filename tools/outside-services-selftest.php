@@ -1694,6 +1694,10 @@ $saveGroup($jarAA, $groupForm($jarAA, ['placeMapAsked' => '1']));
 $r = $recorded();
 check('P15 an administrator posts the box UNTICKED (forged marker): the host\'s agreement still stands — not theirs to withdraw',
     (int) ($r['ok'] ?? -1) === 1, json_encode($r));
+$saveGroup($jarAA, $groupForm($jarAA, ['hostUserID' => null]));
+$r = $recorded();
+check('P15b an administrator\'s save that did not send the host field at all keeps the host (#677), never "nobody"',
+    (int) ($r['host'] ?? 0) === HOSTP && (int) ($r['ok'] ?? -1) === 1, json_encode($r));
 $hostUntouched = $groupForm($jarHost);
 check('P16 the host\'s own form draws the box TICKED, so their untouched Save keeps their agreement', ($hostUntouched['placeMapAgreed'] ?? '') === '1');
 $saveGroup($jarHost, $groupForm($jarHost, ['placeMapAgreed' => null]));
@@ -1908,6 +1912,13 @@ q("UPDATE `tblSmallGroups` SET `locationVisibility` = 'site' WHERE `groupID` = ?
 $gV = $groupPage($jarV);
 check('S05 somebody who is NOT in the group sees no next meeting at all, even where addresses are shown to the whole organisation',
     $gV['status'] === 200 && str_contains($gV['body'], 'portal-next-meeting') === false && str_contains($gV['body'], $nextWords) === false);
+q("INSERT INTO `tblAttendanceServiceTypes` (`siteID`, `typeName`, `typeSlug`) VALUES (?, 'Selftest Groups', 'selftest-groups')", 'i', [ORG_A]);
+$serviceType = (int) (one("SELECT `serviceTypeID` FROM `tblAttendanceServiceTypes` WHERE `siteID` = ? AND `typeSlug` = 'selftest-groups'", 'i', [ORG_A])['serviceTypeID'] ?? 0);
+q('UPDATE `tblSmallGroups` SET `serviceTypeID` = ? WHERE `groupID` = ?', 'ii', [$serviceType, SGROUP]);
+$saveMeeting(['meetingDate' => '2026-11-04', 'placeID' => '', 'pushAttendance' => '1'], $meetingUrl . '&meetingID=' . (int) ($mU['meetingID'] ?? 0));
+$heldPushed = one('SELECT `attendanceSessionID` FROM `tblSmallGroupMeetings` WHERE `meetingID` = ?', 'i', [(int) ($mU['meetingID'] ?? 0)]);
+check('S05b premise: with an attendance service type, a HELD meeting\'s headcount IS pushed (so S06 can tell)', $serviceType > 0
+    && is_array($heldPushed) === true && $heldPushed['attendanceSessionID'] !== null, json_encode($heldPushed));
 $saveMeeting(['meetingDate' => $future1, 'placeID' => (string) $placeB, 'present[]' => (string) MEMBERP, 'pushAttendance' => '1'], $meetingUrl . '&meetingID=' . (int) ($planned['meetingID'] ?? 0));
 $marks = (int) (one('SELECT COUNT(*) AS `n` FROM `tblSmallGroupMeetingAttendance` WHERE `meetingID` = ?', 'i', [(int) ($planned['meetingID'] ?? 0)])['n'] ?? -1);
 $pushed = one('SELECT `attendanceSessionID` FROM `tblSmallGroupMeetings` WHERE `meetingID` = ?', 'i', [(int) ($planned['meetingID'] ?? 0)]);
@@ -1932,7 +1943,10 @@ check('S09 D-126: removing a home deletes its address, host and agreement at onc
 check('S10 ...meetings held or planned there say "a place no longer recorded", never "the usual place"',
     str_contains($gm['body'], 'A place no longer recorded</div>') === true && str_contains($nextPanel($groupPage($jarMember)), 'a place no longer recorded') === true);
 
+q('UPDATE `tblSmallGroupMeetings` SET `attendanceSessionID` = NULL WHERE `groupID` = ?', 'i', [SGROUP]);
+q('DELETE FROM `tblAttendanceSessions` WHERE `siteID` = ? AND `serviceTypeID` = ?', 'ii', [ORG_A, $serviceType]);
 q('DELETE FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SGROUP]);
+q('DELETE FROM `tblAttendanceServiceTypes` WHERE `serviceTypeID` = ?', 'i', [$serviceType]);
 if ($sgEnabledBefore === null) {
     q("DELETE FROM `tblSettings` WHERE `settingKey` = 'small-groups.enabled' AND `siteID` IS NULL");
 } else {
