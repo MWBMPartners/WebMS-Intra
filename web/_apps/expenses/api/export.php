@@ -171,15 +171,18 @@ $stmt->close();
 //    rows are read and before the file is sent, so it records a download
 //    that is about to happen; `Logger::activity()` never throws. A refused
 //    request (no right to the file, or a form token that is no good) is
-//    answered above and records nothing.
-Logger::activity(
-    'ExpenseClaimsExport',
-    'Downloaded the expenses spreadsheet: '
-        . (($reachSee['all'] ?? false) === true
-            ? 'every department'
-            : (count($reachSee['depts'] ?? []) === 0 ? 'no department' : 'department(s) ' . implode(', ', $reachSee['depts'])))
-        . ', ' . count($rows) . ' claim(s)'
-);
+//    answered above and records nothing. The same rule as every other
+//    expense look: a file holding NO claim (the heading row alone, which is
+//    what somebody with the role and no department gets) showed nothing and
+//    records nothing.
+if (count($rows) > 0) {
+    Logger::activity(
+        'ExpenseClaimsExport',
+        'Downloaded the expenses spreadsheet: '
+            . (($reachSee['all'] ?? false) === true ? 'every department' : 'department(s) ' . implode(', ', $reachSee['depts'] ?? []))
+            . ', ' . count($rows) . ' claim(s)'
+    );
+}
 
 // 📥 Send CSV download.
 //

@@ -299,7 +299,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 509; // 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 521; // 509 until #867's round 4 added twelve (each kind of list, spreadsheet, API answer and preview showing exactly ONE claim and showing NONE, and the change form of a claim that can no longer be changed); 488 until #867's round 3 added twenty-one (the other organisation's people tried on a claim in EVERY status — ten in place of four — the API list's scope words, the claimant's own looks, the spreadsheet's second refusal, and D-130's lists, change form and reports); 474 until #867's round 2 added fourteen (the other organisation's administrator and treasurer at their own address, a label in another script, and D-130's activity records); 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -3251,9 +3251,12 @@ $keySeen = $l4ExpenseOf(static function () use (&$keyList, $l4Key): void {
     $keyList = req('', 'GET', ADDR_A . '/api/expenses/list', null, $l4Key);
 });
 ok(
-    'L4-41. a list asked for with an API KEY is recorded as "every claim of the organisation", naming no person (a key has none)',
+    'L4-41. a list asked for with an API KEY is recorded as "every claim of the organisation", naming no person (a key has none) but naming the KEY by its number — never its secret',
     $keyList['status'] === 200 && count($keySeen) === 1
-        && ap_find('/^\|\d*\|ExpenseClaimsListApi\|Listed expense claims through the API: every claim of the organisation, page 1 of \d+, ' . count(data($keyList)['claims'] ?? []) . ' claim\(s\)$/D', $keySeen[0]) === 1
+        && ap_find('/^\|\d*\|ExpenseClaimsListApi\|Listed expense claims through the API with API key #'
+            . (int) (one('SELECT `keyID` FROM `tblApiKeys` WHERE `keyHash` = ?', 's', [hash('sha256', $l4Key)])['keyID'] ?? -1)
+            . ': every claim of the organisation, page 1 of \d+, ' . count(data($keyList)['claims'] ?? []) . ' claim\(s\)$/D', $keySeen[0]) === 1
+        && str_contains($keySeen[0], $l4Key) === false && str_contains($keySeen[0], substr($l4Key, 5)) === false
         && count(data($keyList)['claims'] ?? []) > 0,
     'HTTP ' . $keyList['status'] . '; ' . implode(' || ', $keySeen)
 );
@@ -3385,6 +3388,162 @@ ok(
     implode(' || ', $runSeen) . '  ##  ' . implode(' || ', $expSeen)
 );
 q('DELETE FROM `tblReportDefinitions` WHERE `reportID` = ?', 'i', [L4_REPORT]);
+
+// --- round 4 of the check: EXACTLY ONE claim, and NONE ---------------------
+// Every look that lists claims records only when it showed at least one. The
+// fixtures above all showed several, so `> 0` changed to `> 1` (a ONE-claim
+// look recorded nothing — the missed-look direction D-130 cares about) or to
+// `>= 0` (an empty list recorded) left every check green. Each kind of list
+// is now tried showing exactly one claim, and showing none.
+//   L4_ONE1: a member of A, approver of L4_ONE_DEPT only (one claim there, by
+//            LEAD), and the owner of exactly one claim.
+//   L4_ONE2: a member of A who owns nothing and approves nothing.
+const L4_ONE1 = 916026;
+const L4_ONE2 = 916027;
+const L4_ONE_DEPT = 916107;
+const L4_ONE_CLAIM = 916379; // LEAD's claim in L4_ONE_DEPT
+const L4_ONE_OWN   = 916380; // L4_ONE1's own claim, in DEPT
+$l4OneTitle = 'ACCESS L4 THE ONE CLAIM';
+foreach ([L4_ONE1 => ['one1', 'One claim'], L4_ONE2 => ['one2', 'No claims']] as $id => [$who, $name]) {
+    q('INSERT INTO `tblUsers` (`userID`, `fullName`, `emailAddress`, `isActive`, `isAdmin`, `isRootAdmin`) VALUES (?, ?, ?, 1, 0, 0)', 'iss', [$id, 'Selftest access ' . $name, 'u' . $id . '.access@selftest.invalid']);
+    q('INSERT INTO `tblUserSites` (`userID`, `siteID`, `isActive`, `isSiteAdmin`, `isSiteRootAdmin`) VALUES (?, ?, 1, 0, 0)', 'ii', [$id, ORG_A]);
+    q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, 'selftest-access-' . $who, $hash]);
+}
+q("INSERT INTO `tblDepts` (`deptID`, `siteID`, `deptName`, `deptCode`, `isActive`) VALUES (?, ?, 'ACCESS L4 one-claim dept', 'L41', 1)", 'ii', [L4_ONE_DEPT, ORG_A]);
+q('INSERT INTO `tblUserDepts` (`userID`, `deptID`, `siteID`, `isDeptLead`, `isApprover`, `isMandatoryApprover`) VALUES (?, ?, ?, 0, 1, 0)', 'iii', [L4_ONE1, L4_ONE_DEPT, ORG_A]);
+q(
+    "INSERT INTO `tblExpenseClaims` (`claimID`, `siteID`, `userID`, `deptID`, `claimTitle`, `claimDate`, `totalAmount`, `status`) VALUES "
+    . "(?, ?, ?, ?, ?, CURDATE(), 3.00, 'Pending'), (?, ?, ?, ?, 'ACCESS L4 ONE1 OWN CLAIM', CURDATE(), 4.00, 'Pending')",
+    'iiiisiiii', [L4_ONE_CLAIM, ORG_A, LEAD, L4_ONE_DEPT, $l4OneTitle, L4_ONE_OWN, ORG_A, L4_ONE1, DEPT]
+);
+$jar['one1'] = signIn('one1', ADDR_A);
+$jar['one2'] = signIn('one2', ADDR_A);
+/** Load a page and return [answer, expense records it wrote]. */
+$l4Look = static function (string $who, string $path) use (&$jar, $l4ExpenseOf): array {
+    $answer = null;
+    $seen   = $l4ExpenseOf(static function () use (&$answer, &$jar, $who, $path): void {
+        $answer = req($jar[$who], 'GET', $path);
+    });
+
+    return [$answer, $seen];
+};
+
+// The approvals list (its empty case is L4-45).
+[$page, $seen] = $l4Look('one1', $approve);
+ok(
+    'L4-54. an APPROVALS LIST showing exactly ONE claim writes exactly one record saying 1',
+    $page['status'] === 200 && $l4Drawn($page['body']) === 1
+        && $seen === [L4_ONE1 . '|' . ORG_A . '|ExpenseApprovalsListView|Opened the expense approvals list: 1 claim(s) shown'],
+    'drawn ' . $l4Drawn($page['body']) . '; ' . implode(' || ', $seen)
+);
+// The treasury list: B's treasurer on B's address, where B has one claim; it
+// is made Approved for the one-claim case and Pending again for the empty one.
+q("UPDATE `tblExpenseClaims` SET `status` = 'Approved' WHERE `claimID` = ?", 'i', [L4_B_CLAIM]);
+$bOne = null;
+$bSeen = $l4ExpenseOf(static function () use (&$bOne, &$jar): void {
+    $bOne = req($jar['btrs'], 'GET', ADDR_B . '/expenses/treasury');
+});
+q("UPDATE `tblExpenseClaims` SET `status` = 'Pending' WHERE `claimID` = ?", 'i', [L4_B_CLAIM]);
+ok(
+    'L4-55. a TREASURY LIST showing exactly ONE claim writes exactly one record saying 1',
+    $bOne['status'] === 200 && $l4Drawn($bOne['body']) === 1
+        && $bSeen === [L4_BTRS . '|' . ORG_B . '|ExpenseTreasuryListView|Opened the expense treasury list: 1 claim(s) shown'],
+    'drawn ' . $l4Drawn($bOne['body']) . '; ' . implode(' || ', $bSeen)
+);
+$bNone = null;
+$bSeen = $l4ExpenseOf(static function () use (&$bNone, &$jar): void {
+    $bNone = req($jar['btrs'], 'GET', ADDR_B . '/expenses/treasury');
+});
+ok(
+    'L4-56. …and a treasury list showing NONE writes nothing',
+    $bNone['status'] === 200 && $l4Drawn($bNone['body']) === 0 && $bSeen === [],
+    'drawn ' . $l4Drawn($bNone['body']) . '; ' . implode(' || ', $bSeen)
+);
+// The claimant's own list on the Expenses page.
+$ownLinks = static fn (string $body): int => ap_findAll('#href="' . preg_quote(ADDR_A, '#') . '/expenses/view\?id=\d+"#', $body);
+[$page, $seen] = $l4Look('one1', ADDR_A . '/expenses/submit');
+ok(
+    'L4-57. the OWN LIST showing exactly ONE claim writes exactly one record saying page 1 and 1',
+    $page['status'] === 200 && $ownLinks($page['body']) === 1
+        && $seen === [L4_ONE1 . '|' . ORG_A . '|ExpenseOwnClaimsView|Opened their own expense claims list: page 1, 1 claim(s) shown'],
+    'shown ' . $ownLinks($page['body']) . '; ' . implode(' || ', $seen)
+);
+[$page, $seen] = $l4Look('one2', ADDR_A . '/expenses/submit');
+ok(
+    'L4-58. …and the Expenses page of somebody with NO claims writes nothing',
+    $page['status'] === 200 && $ownLinks($page['body']) === 0 && $seen === [],
+    implode(' || ', $seen)
+);
+// The report builder's preview.
+$filtered = static fn (string $title): string => (string) json_encode([
+    'v' => 1, 'source' => 'expenses', 'columns' => ['claimTitle', 'status'],
+    'filters' => ['conjunction' => 'AND', 'rows' => [['col' => 'claimTitle', 'op' => 'eq', 'vals' => [$title]]]],
+]);
+$tok  = $builderTok();
+$seen = $l4ExpenseOf(static function () use (&$prev, $preview, $tok, $filtered, $l4OneTitle): void {
+    $prev = $preview($filtered($l4OneTitle), $tok);
+});
+ok(
+    'L4-59. a PREVIEW of expense claims showing exactly ONE row writes exactly one record saying 1',
+    count(json_decode($prev['body'], true)['rows'] ?? []) === 1
+        && $seen === [ADM . '|' . ORG_A . '|ExpenseReportPreview|Previewed a report of expense claims: 1 row(s) shown'],
+    substr($prev['body'], 0, 120) . '; ' . implode(' || ', $seen)
+);
+$tok  = $builderTok();
+$seen = $l4ExpenseOf(static function () use (&$prev, $preview, $tok, $filtered): void {
+    $prev = $preview($filtered('ACCESS L4 NO SUCH CLAIM TITLE'), $tok);
+});
+ok(
+    'L4-60. …and a preview of expense claims showing NO row writes nothing',
+    (json_decode($prev['body'], true)['status'] ?? '') === 'ok' && count(json_decode($prev['body'], true)['rows'] ?? []) === 0 && $seen === [],
+    substr($prev['body'], 0, 120) . '; ' . implode(' || ', $seen)
+);
+// The API's list: the same rule (round 4 made it agree with the pages).
+[$page, $seen] = $l4Look('one1', ADDR_A . '/api/expenses/list');
+ok(
+    'L4-61. the API list returning exactly ONE claim writes exactly one record saying 1',
+    count(data($page)['claims'] ?? []) === 1
+        && $seen === [L4_ONE1 . '|' . ORG_A . '|ExpenseClaimsListApi|Listed expense claims through the API: own claims, page 1 of 1, 1 claim(s)'],
+    implode(' || ', $seen)
+);
+[$page, $seen] = $l4Look('one2', ADDR_A . '/api/expenses/list');
+ok(
+    'L4-62. …and the API list returning NO claim writes nothing',
+    $page['status'] === 200 && count(data($page)['claims'] ?? ['x']) === 0 && $seen === [],
+    'HTTP ' . $page['status'] . '; ' . implode(' || ', $seen)
+);
+// The spreadsheet: L4_ONE1 holding the Approver role reaches one department
+// with one claim in it; L4_ONE2 holding it reaches none (the heading row).
+$l3Role(L4_ONE1, true);
+$l3Role(L4_ONE2, true);
+[$oneCsv, $oneCsvSeen]   = $l4Csv('one1');
+[$noneCsv, $noneCsvSeen] = $l4Csv('one2');
+$l3Role(L4_ONE1, false);
+$l3Role(L4_ONE2, false);
+ok(
+    'L4-63. a SPREADSHEET holding exactly ONE claim writes exactly one record saying 1',
+    $oneCsv['status'] === 200 && substr_count(trim($oneCsv['body']), "\n") === 1
+        && $l4Expense($oneCsvSeen) === [L4_ONE1 . '|' . ORG_A . '|ExpenseClaimsExport|Downloaded the expenses spreadsheet: department(s) ' . L4_ONE_DEPT . ', 1 claim(s)'],
+    'HTTP ' . $oneCsv['status'] . '; ' . implode(' || ', $oneCsvSeen)
+);
+ok(
+    'L4-64. …and a spreadsheet holding NO claim (the heading row alone) writes nothing',
+    $noneCsv['status'] === 200 && substr_count(trim($noneCsv['body']), "\n") === 0 && $l4Expense($noneCsvSeen) === [],
+    'HTTP ' . $noneCsv['status'] . '; ' . implode(' || ', $noneCsvSeen)
+);
+// The change form of a claim its owner can NO LONGER change still records:
+// the help promises the claim's number whatever its state.
+[$page, $seen] = $l4Look('mem', ADDR_A . '/expenses/edit?id=916308');
+ok(
+    'L4-65. the CHANGE FORM of the person\'s own claim that can NO LONGER be changed (already decided) still writes one record with the claim number',
+    $page['status'] === 200 && str_contains($page['body'], 'name="claimTitle"') === false
+        && in_array((string) (one('SELECT `status` FROM `tblExpenseClaims` WHERE `claimID` = 916308')['status'] ?? ''), ['Approved', 'Reimbursed', 'Rejected'], true) === true
+        && $seen === [MEM . '|' . ORG_A . '|ExpenseClaimEditView|Opened the change form of expense claim #916308'],
+    'HTTP ' . $page['status'] . '; ' . implode(' || ', $seen)
+);
+q('DELETE FROM `tblExpenseClaims` WHERE `claimID` IN (?, ?)', 'ii', [L4_ONE_CLAIM, L4_ONE_OWN]);
+q('DELETE FROM `tblUserDepts` WHERE `deptID` = ?', 'i', [L4_ONE_DEPT]);
+q('DELETE FROM `tblDepts` WHERE `deptID` = ?', 'i', [L4_ONE_DEPT]);
 
 q('DELETE FROM `tblErrors` WHERE `errorCode` = ? AND `siteID` = ?', 'si', ['RECEIPT_UNAVAILABLE', ORG_A]);
 q('DELETE FROM `tblExpenseClaimFiles` WHERE `fileID` BETWEEN ? AND ?', 'ii', [L4_R_OWN, L4_NO_FILE]);

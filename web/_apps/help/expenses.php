@@ -278,14 +278,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
          (tools/access-pages-selftest.php, part L4, pins the records themselves). -->
     <p>Looking at expense claims is recorded in the portal's activity log, with who looked &mdash; you included &mdash; so your organisation can later see who has seen them. What each look records:</p>
     <ul>
-        <li><strong>Opening a claim</strong>, or the form to change one: the claim's number.</li>
+        <li><strong>Opening a claim</strong>, or the form to change one (whether or not the claim can still be changed): the claim's number.</li>
         <li><strong>Opening a receipt</strong>: the receipt's number and the claim's number.</li>
-        <li><strong>Your list of claims</strong> on the Expenses page, the <strong>approvals list</strong> and the <strong>treasury list</strong>: how many claims the list showed. A list that showed none records nothing.</li>
+        <li><strong>Your list of claims</strong> on the Expenses page: which page of the list it was and how many claims it showed.</li>
+        <li>The <strong>approvals list</strong> and the <strong>treasury list</strong>: how many claims the list showed.</li>
         <li><strong>The expenses spreadsheet</strong>: which departments it covered and how many claims were in it &mdash; not which claims.</li>
-        <li><strong>Listing claims through the portal's API</strong>: whether it was the person's own claims or the whole organisation's, the status asked for, the page, and how many claims came back.</li>
+        <li><strong>Listing claims through the portal's API</strong>: whether it was the person's own claims or the whole organisation's, the status asked for, the page, and how many claims came back; when an API key was used rather than a signed-in person, the key's number (never the key itself).</li>
         <li><strong>A report of expense claims</strong> in Admin, Reports: a preview records how many rows it showed; running or exporting a saved report records which report it was.</li>
     </ul>
-    <p>None of these records a claim's title, anybody's name, an amount or a file name. A look that is refused records nothing.</p>
+    <p>None of these records a claim's title, anybody's name, an amount or a file name. A look that is refused records nothing, and so does a list, spreadsheet, API answer or preview that showed no claim at all.</p>
+    <p>Two related things are recorded differently, or not at all. Downloading <strong>your own data</strong> from your account (Data Export), which includes your claims, is recorded under its own general record, not as a look at a claim. The organisation-wide <strong>totals and counts</strong> in Admin, Reports (how many claims there are in each state or month, and what they add up to), and the dashboard's count of claims waiting, are not a look at any one claim and are not recorded.</p>
 
     <div class="list-group list-group-flush mb-3">
         <div class="list-group-item d-flex gap-3 align-items-start">

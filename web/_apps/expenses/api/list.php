@@ -159,16 +159,25 @@ $totalPages = (int) ceil($totalCount / $limit);
 //    like the spreadsheet. One `ExpenseClaimsListApi` record saying WHAT was
 //    asked for (whose claims, the status filter, the page) and how many rows
 //    came back; never the rows. It names a person when a signed-in session
-//    asked; a request made with an API key has no person, and the record then
-//    names none (#626 — `Logger::activity()` never invents one). A refused
-//    request is answered above and records nothing.
-Logger::activity(
-    'ExpenseClaimsListApi',
-    'Listed expense claims through the API: '
-        . ($everyClaim === true ? 'every claim of the organisation' : 'own claims')
-        . ($status !== '' ? ', status ' . $status : '')
-        . ', page ' . $page . ' of ' . max(1, $totalPages) . ', ' . count($claims) . ' claim(s)'
-);
+//    asked. A request made with an API key has no person (#626 —
+//    `Logger::activity()` never invents one), so the record names the KEY by
+//    its number, as `AccountGuard` does ("API key #N", from
+//    `ApiAuth::apiKeyId()`) — never the key's secret. Without it the most
+//    sensitive look in Expenses (every claimant's name and e-mail address,
+//    through a key) said nothing about who looked (round 3 of the check).
+//    The same rule as every other expense look: a list that returned NO
+//    claim showed nothing and records nothing; a refused request is answered
+//    above and records nothing either.
+if (count($claims) > 0) {
+    Logger::activity(
+        'ExpenseClaimsListApi',
+        'Listed expense claims through the API'
+            . ($isBearer === true ? ' with API key #' . (ApiAuth::apiKeyId() ?? 0) : '')
+            . ': ' . ($everyClaim === true ? 'every claim of the organisation' : 'own claims')
+            . ($status !== '' ? ', status ' . $status : '')
+            . ', page ' . $page . ' of ' . max(1, $totalPages) . ', ' . count($claims) . ' claim(s)'
+    );
+}
 
 // ✅ Send successful response
 ApiResponse::success([

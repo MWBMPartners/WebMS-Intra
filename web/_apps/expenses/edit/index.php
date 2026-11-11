@@ -123,12 +123,18 @@ if ($reason === ExpenseRules::EDIT_NOT_YOURS) {
 $editable = ($reason === ExpenseRules::EDIT_ALLOWED);
 
 // 📝 D-130 (the owner, 11 November 2026): every look at expense records is
-//    recorded. This form shows the claim's title, department and lines, so
-//    opening it writes one `ExpenseClaimEditView` record naming the person
-//    (#626) and the claim NUMBER — nothing else of the claim. Both refusals
-//    above are a 404 identical to a made-up number and record nothing, so the
-//    log cannot tell them apart either. Written whether or not the claim can
-//    still be changed: either way the page shows it.
+//    recorded. Opening this page writes one `ExpenseClaimEditView` record
+//    naming the person (#626) and the claim NUMBER — nothing else of the
+//    claim. Both refusals above are a 404 identical to a made-up number and
+//    record nothing, so the log cannot tell them apart either.
+//    Written whether or not the claim can still be changed, and the reason is
+//    NOT that the page shows the claim either way — it does not: for a claim
+//    that can no longer be changed it shows only the claim's number, why it
+//    cannot be changed, and a link back. The reason is that the owner of a
+//    real claim was told something about it (that it exists and where it
+//    stands), and the help promises this page records the claim's number
+//    whatever the claim's state. (An earlier version of this comment said the
+//    page shows the title, department and lines in both cases; untrue.)
 Logger::activity('ExpenseClaimEditView', 'Opened the change form of expense claim #' . $claimID);
 
 // -----------------------------------------------------------------------------
