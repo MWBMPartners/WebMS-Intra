@@ -6,17 +6,16 @@ change of a package's state (the owner, 10 November 2026: "update our handoff do
 ## Branch
 
 `claude/alpha-wip`, pushed after every commit (D-088). Landed since 9 November, all pushed and closed: #887,
-#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785.
-Last whole suite (with #785): 105/105 green. Decisions taken this stretch: D-102 to D-121 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
+#493 (P4a-P4d, the whole public door), #869-#871, #900, #902, #903, #615, #620, #912, #648 (+ #915), #598, #529 (+ #917, #921), #782, #932, #703, #785, #935, #936.
+Last whole suite (with #935/#936): 105/105 green; e2e harness all phases (272-274). Decisions taken this stretch: D-102 to D-123 (D-116 change history kept for ever; D-117 activity log may be kept for ever; D-118 an organisation's admin sets its own log period; D-119 lowering the installation's below an organisation's is refused).
 
 ## In flight (side by side, no shared files — the 12 October 2026 rule)
 
 | Package | Worktree / branch | State |
 |---|---|---|
-| #935 + #936 — Sabbath location / venue country defaults; Sabbath page prefill and missing fields (migration 274) | `agent-af7f04e48a0225f17` / `p935-build`, 049190cd | CLEAN (round 5 was comments and tests; reviewed by me). Integrating now: cherry-pick, docs, whole suite, push. Raised #942, #943, #945 |
-| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, 1c91e797 | CLEAN (round 4's narrow check found the portal right; three test cases added, tests only). Integrating after #935. Raised #947 |
-| #809 — a group's meeting-place map treated as the host's home (D-120; migration 275 if needed) | worktree agent (p809-build) | Building |
-| #895 — a public address requested by several until one is approved (D-121; migration 276 if needed) | worktree agent (p895-build) | Building |
+| #940 — the activity log's 'never delete' wording on member-facing pages (D-117, D-118) | `agent-a0d4a17b4acfd53cb` / `p940-build`, 1c91e797 | CLEAN. Integrating now: cherry-pick, docs, whole suite, push. Then #809's erasure step (D-122/D-123) rebases onto it. Raised #947 |
+| #809 — group meeting-place maps, rotating host homes (D-120, D-122, D-123; migration 275) | `agent-a7b8ce76589cb7ec3` / `p809-build`, 260090bb | Single-place version built; extending for rotating homes (D-123); erasure step after #940 lands |
+| #895 — a public address requested by several until one is approved (D-121; migration 276) | `agent-ab2ee553b3ce8e110` / `p895-build`, 9de429e9 | Built (unique key on a generated 'approved' column; locked approval; two-process race 5/5). Check round 1 running |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703), 273 (#782), 274 (#935), 275 (#809, if needed), 276 (#895, if needed). Next free: 277.
