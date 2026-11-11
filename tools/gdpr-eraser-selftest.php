@@ -226,7 +226,15 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 282; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 290; // 276 before two packages landed together: #892 added six
+                             // (statement periods naming an impossible day, and both ends of
+                             // a period tried with a kept and an unkept gift), and section 22
+                             // (#809) added eight: two on erasing the leader who only TYPED
+                             // places in, and six on erasing ONE host (their usual place,
+                             // the group staying, their listed home, the other host's home
+                             // untouched, the hall untouched, and the meeting still pointing
+                             // at the emptied home).
+                             // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
@@ -281,7 +289,7 @@ const EXPECTED_CHECKS = 282; // 235 before section 19 (#709) added nine; the fix
                              // with a kept gift inside, is DELETED. 282.
 
 // The headings that must all be reached for a pass.
-const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
+const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22'];
 
 // 🗺️ The made-up people and requests. Every number is 920000 or higher, far
 //    above anything the fresh-install script seeds.
@@ -346,6 +354,13 @@ const REQ_HAND_A = 940501;
 const REQ_HAND_B = 940502;
 const REQ_HAND_C = 940503;
 const REQ_HAND_D = 940504;
+const P_HOST_A    = 920601; // section 22 (#809): the host of a group's usual place AND of a listed home
+const P_HOST_B    = 920602; // section 22: the host of another listed home, which must survive
+const P_LEADER_SG = 920603; // section 22: the leader who TYPED every place in, and hosts none
+const REQ_HOST_A    = 940601;
+const REQ_LEADER_SG = 940602;
+const SG_HOSTS = 960601;    // section 22: the group whose places those are
+const SG_HALL  = 960602;    // section 22: a group whose usual place is marked "not anybody's home"
 const P_AUDIT   = 920401; // erased in section 20: the change history ABOUT them is emptied (#707)
 const P_AUDIT_2 = 920402; // section 20: somebody else, whose history must survive untouched
 const REQ_AUDIT = 940401;
@@ -429,6 +444,12 @@ const MUST_BE_EMPTIED = [
     // limit is written down in the instruction's own reason instead (#708's
     // precedent), and section 3b's loan rows are shaped the way real ones are.
     'tblAssetLoans.counterpartyUserID' => ['counterpartyContact'],
+    // #809 (D-122, D-124): a small group's meeting place, on its HOST. Added
+    // in the same change as the instructions, for the reason above. Section 22
+    // checks the same thing on real-shaped rows, with two hosts and a leader.
+    'tblSmallGroups.hostUserID'      => ['addressLine1', 'addressLine2', 'city', 'region', 'postcode', 'latitude', 'longitude', 'what3words'],
+    'tblSmallGroupPlaces.hostUserID' => ['placeLabel', 'addressLine1', 'addressLine2', 'city', 'region', 'postcode', 'countryCode',
+                                         'latitude', 'longitude', 'what3words'],
 ];
 
 // Columns the database will not allow to be emptied, so the person's number
@@ -1972,7 +1993,26 @@ function ge_checkRows(array $world, array $before, array $expectStillNamed = [])
         }
 
         // anonymise
-        $listed = array_map('strval', (array) ($instruction['nullCols'] ?? []));
+        $listed  = array_map('strval', (array) ($instruction['nullCols'] ?? []));
+        $setsFor = (array) ($instruction['sqlSets'] ?? []);
+        // 🏠 #809: an R2 row names the person in EVERY person column at once,
+        //    so EVERY instruction on this table whose column holds them really
+        //    runs on it — and what each of those empties is expected here. The
+        //    first such pair is a small group whose creator is also the HOST
+        //    of its meeting place: the host instruction empties the address
+        //    (D-122, D-124). R1 rows stay strict: on a row naming the person in
+        //    ONE column, only that column's own instruction may change it, so
+        //    "erasing the creator must not empty the address" is still caught.
+        if (($tracked['kind'] ?? '') === 'R2') {
+            foreach ($world['instructions'] as $sibling) {
+                if ((string) $sibling['table'] === $table && (string) $sibling['action'] === 'anonymise'
+                    && in_array((string) $sibling['userCol'], (array) ($tracked['cols'] ?? []), true) === true
+                ) {
+                    $listed  = array_merge($listed, array_map('strval', (array) ($sibling['nullCols'] ?? [])));
+                    $setsFor = array_merge($setsFor, (array) ($sibling['sqlSets'] ?? []));
+                }
+            }
+        }
         $people = ge_personColumns($table);
         // A column an instruction changes ON PURPOSE with a fixed piece of
         // SQL (`sqlSets`): today only the status of a swap request, which is
@@ -1982,7 +2022,7 @@ function ge_checkRows(array $world, array $before, array $expectStillNamed = [])
         // accepted one. tools/gdpr-coverage-selftest.php holds the list of
         // such pieces to exactly that one.
         $changedOnPurpose = [];
-        foreach ((array) ($instruction['sqlSets'] ?? []) as $piece) {
+        foreach ($setsFor as $piece) {
             if (preg_match('/^`(\w+)`\s*=/', (string) $piece, $m) === 1) {
                 $changedOnPurpose[] = $m[1];
             }
@@ -6430,6 +6470,101 @@ ge_ok('an administrator closing THEIR OWN request is not named by number in the 
     && str_contains($handDDetails, 'they are the person being erased') === true
     && str_contains($handDDetails, 'tblCareVisit') === true,
     json_encode(['answer' => $handD, 'line' => $handDLine]));
+
+// =============================================================================
+ge_section('22', 'A small group\'s meeting places: erasing a HOST empties only their own home; erasing whoever typed it in empties nothing (#809; D-122, D-123, D-124, D-128)');
+// =============================================================================
+// 🏠 WHY THIS SECTION EXISTS. A small group's meeting place is its NAMED HOST's
+//    home (D-124). A leader usually types members' homes in, so the person who
+//    TYPED a place (`placeEnteredByID`) is often not the person whose home it
+//    is (`hostUserID`). Erasing the host must empty THAT host's place (D-122,
+//    as D-124 amends it) and nobody else's; erasing the leader who typed both
+//    homes in must empty NOTHING, because neither home is theirs; and a place
+//    marked "not anybody's home" (D-128) has no host, so no erasure touches it.
+//
+// 🛑 The easy mistake is to empty the address on `placeEnteredByID` — that
+//    would wipe two members' homes because a leader asked to be forgotten, and
+//    miss nobody's own. Step 1 below exists to fail if anybody ever does that.
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 0');
+ge_user(P_HOST_A, 'Hester Host', 'hester.host@selftest.invalid');
+ge_user(P_HOST_B, 'Bram Host', 'bram.host@selftest.invalid');
+ge_user(P_LEADER_SG, 'Lena Leader', 'lena.leader@selftest.invalid');
+$mysqli->query('SET FOREIGN_KEY_CHECKS = 1');
+ge_q("INSERT INTO `tblSmallGroups` (`groupID`, `siteID`, `groupName`, `groupSlug`, `addressLine1`, `city`, `postcode`, `countryCode`, "
+    . "`latitude`, `longitude`, `what3words`, `placeEnteredByID`, `hostUserID`, `placeMapAgreed`, `notAHome`) "
+    . "VALUES (?, 1, 'Selftest Hosts Group', 'selftest-hosts-group', '1 Usual Road', 'Cambridge', 'CB1 1UU', 'GB', 52.1, 0.1, "
+    . "'usual.road.home', ?, ?, 1, 0)", 'iii', [SG_HOSTS, P_LEADER_SG, P_HOST_A]);
+// A second group whose usual place is marked "not anybody's home": a hall.
+ge_q("INSERT INTO `tblSmallGroups` (`groupID`, `siteID`, `groupName`, `groupSlug`, `addressLine1`, `city`, `countryCode`, "
+    . "`latitude`, `longitude`, `placeEnteredByID`, `hostUserID`, `placeMapAgreed`, `notAHome`) "
+    . "VALUES (?, 1, 'Selftest Hall Group', 'selftest-hall-group', '9 Hall Square', 'Cambridge', 'GB', 52.2, 0.2, ?, NULL, 0, 1)",
+    'ii', [SG_HALL, P_LEADER_SG]);
+$addHome = static function (string $label, string $line1, ?int $host, int $mark) use ($mysqli): int {
+    ge_q("INSERT INTO `tblSmallGroupPlaces` (`siteID`, `groupID`, `placeLabel`, `addressLine1`, `city`, `postcode`, `countryCode`, "
+        . "`latitude`, `longitude`, `hostUserID`, `placeEnteredByID`, `placeMapAgreed`, `notAHome`) "
+        . "VALUES (1, ?, ?, ?, 'Cambridge', 'CB2 2HH', 'GB', 52.3, 0.3, ?, ?, ?, ?)",
+        'issiiii', [SG_HOSTS, $label, $line1, $host, P_LEADER_SG, $host !== null ? 1 : 0, $mark]);
+
+    return (int) $mysqli->insert_id;
+};
+$homeA = $addHome('Hester home', '2 Alpha Road', P_HOST_A, 0);
+$homeB = $addHome('Bram home', '3 Beta Road', P_HOST_B, 0);
+$hallP = $addHome('Parish hall', '4 Hall Lane', null, 1);
+ge_q("INSERT INTO `tblSmallGroupMeetings` (`siteID`, `groupID`, `meetingDate`, `placeID`) VALUES (1, ?, '2026-10-01', ?)", 'ii', [SG_HOSTS, $homeA]);
+$groupRow = static fn (int $id): ?array => ge_one('SELECT `addressLine1`, `city`, `postcode`, `countryCode`, `latitude`, `what3words`, '
+    . '`hostUserID`, `placeEnteredByID`, `placeMapAgreed`, `notAHome` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [$id]);
+$homeRow  = static fn (int $id): ?array => ge_one('SELECT `placeLabel`, `addressLine1`, `city`, `postcode`, `countryCode`, `latitude`, '
+    . '`hostUserID`, `placeEnteredByID`, `placeMapAgreed`, `notAHome`, `isActive` FROM `tblSmallGroupPlaces` WHERE `placeID` = ?', 'i', [$id]);
+$snapshot = static fn (): array => ['group' => $groupRow(SG_HOSTS), 'hall group' => $groupRow(SG_HALL),
+    'A' => $homeRow($homeA), 'B' => $homeRow($homeB), 'hall' => $homeRow($hallP)];
+$withoutTypist = static function (array $snap): array {
+    foreach ($snap as $k => $row) {
+        if (is_array($row) === true) {
+            unset($snap[$k]['placeEnteredByID']);
+        }
+    }
+
+    return $snap;
+};
+
+// ---- 1. The LEADER who typed every place in asks to be erased ---------------
+$beforeLeader = $snapshot();
+ge_request(REQ_LEADER_SG, P_LEADER_SG, 'lena.leader@selftest.invalid', 'Lena Leader', 'processing');
+$leaderRun   = ge_execute(REQ_LEADER_SG, P_LEADER_SG);
+$afterLeader = $snapshot();
+ge_ok('ERASING THE LEADER WHO TYPED BOTH HOMES IN EMPTIES NOTHING: every address, host and agreement is exactly as it was, on the usual place, both homes and the hall',
+    is_array($leaderRun) === true && $leaderRun['failed'] === 0 && $withoutTypist($afterLeader) === $withoutTypist($beforeLeader),
+    json_encode(['the run' => is_array($leaderRun) === true ? ['failed' => $leaderRun['failed']] : (string) $leaderRun,
+        'before' => $withoutTypist($beforeLeader), 'after' => $withoutTypist($afterLeader)]));
+ge_ok('...and the leader\'s link as the person who typed them in IS cut, everywhere',
+    $afterLeader['group']['placeEnteredByID'] === null && $afterLeader['hall group']['placeEnteredByID'] === null
+    && $afterLeader['A']['placeEnteredByID'] === null && $afterLeader['B']['placeEnteredByID'] === null
+    && $afterLeader['hall']['placeEnteredByID'] === null, json_encode($afterLeader));
+
+// ---- 2. ONE HOST asks to be erased -----------------------------------------
+ge_request(REQ_HOST_A, P_HOST_A, 'hester.host@selftest.invalid', 'Hester Host', 'processing');
+$hostRun   = ge_execute(REQ_HOST_A, P_HOST_A);
+$afterHost = $snapshot();
+$g = $afterHost['group'];
+ge_ok('ERASING A HOST EMPTIES THEIR USUAL MEETING PLACE: the address, map position and what3words are gone, the host and the agreement are cleared, and the country (which cannot be empty) stays',
+    is_array($hostRun) === true && $hostRun['failed'] === 0
+    && $g['addressLine1'] === null && $g['city'] === null && $g['postcode'] === null && $g['latitude'] === null && $g['what3words'] === null
+    && $g['hostUserID'] === null && (int) $g['placeMapAgreed'] === 0 && $g['countryCode'] === 'GB',
+    json_encode(['the run' => is_array($hostRun) === true ? ['failed' => $hostRun['failed']] : (string) $hostRun, 'group' => $g]));
+ge_ok('...the GROUP itself stays', ge_one('SELECT 1 AS `x` FROM `tblSmallGroups` WHERE `groupID` = ?', 'i', [SG_HOSTS]) !== null);
+$a = $afterHost['A'];
+ge_ok('...and THEIR listed home is emptied too — name, address, position, host and agreement — and taken off the group\'s list; the row stays',
+    is_array($a) === true && $a['placeLabel'] === null && $a['addressLine1'] === null && $a['city'] === null && $a['latitude'] === null
+    && $a['countryCode'] === null && $a['hostUserID'] === null && (int) $a['placeMapAgreed'] === 0 && (int) $a['isActive'] === 0, json_encode($a));
+ge_ok('ONE HOST\'S ERASURE NEVER TOUCHES ANOTHER\'S HOME: the other host\'s home is exactly as it was',
+    $afterHost['B'] === $afterLeader['B'] && $afterHost['B']['addressLine1'] === '3 Beta Road' && (int) $afterHost['B']['hostUserID'] === P_HOST_B
+    && (int) $afterHost['B']['placeMapAgreed'] === 1, json_encode($afterHost['B']));
+ge_ok('A PLACE MARKED "NOT ANYBODY\'S HOME" HAS NO HOST, SO NO ERASURE EMPTIES IT: the listed hall and the hall group\'s usual place are untouched, still marked',
+    $afterHost['hall'] === $afterLeader['hall'] && (int) $afterHost['hall']['notAHome'] === 1 && $afterHost['hall']['addressLine1'] === '4 Hall Lane'
+    && $afterHost['hall group'] === $afterLeader['hall group'] && (int) $afterHost['hall group']['notAHome'] === 1,
+    json_encode(['hall' => $afterHost['hall'], 'hall group' => $afterHost['hall group']]));
+ge_ok('a meeting held in the erased host\'s home still points at that (now empty) place, so it reads "a place no longer recorded", never "the usual place"',
+    (int) (ge_one('SELECT `placeID` FROM `tblSmallGroupMeetings` WHERE `groupID` = ? AND `meetingDate` = ?', 'is', [SG_HOSTS, '2026-10-01'])['placeID'] ?? 0) === $homeA);
 
 
 ge_finish();

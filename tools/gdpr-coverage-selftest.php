@@ -1683,9 +1683,21 @@ foreach ($instructions as $instruction) {
 }
 // Two since 12 October 2026: the same fixed piece, on the same table, once
 // for the person a request was aimed at and once for the person who asked.
+// Five more since #809 (D-122, D-124, D-128), all on the HOST of a small
+// group's meeting place, matched on `hostUserID`: an agreement to a map is
+// NOT NULL, so it is set back to 0 rather than emptied; the "not anybody's
+// home" mark is cleared too (a host's place is never marked); and a listed
+// home is taken off the group's list. None of them can reach a row whose host
+// is somebody else, and none touches a place marked "not anybody's home",
+// which has no host.
 check(
-    'the only extra change any instruction makes is cancelling a swap request that was still waiting',
+    'the only extra changes any instruction makes are cancelling a waiting swap request, and clearing an erased host\'s meeting place',
     $extraChanges === [
+        'tblSmallGroups.hostUserID (anonymise): `placeMapAgreed` = 0',
+        'tblSmallGroups.hostUserID (anonymise): `notAHome` = 0',
+        'tblSmallGroupPlaces.hostUserID (anonymise): `placeMapAgreed` = 0',
+        'tblSmallGroupPlaces.hostUserID (anonymise): `notAHome` = 0',
+        'tblSmallGroupPlaces.hostUserID (anonymise): `isActive` = 0',
         "tblRotaSwapRequest.targetUserID (anonymise): `status` = IF(`status` = 'pending', 'cancelled', `status`)",
         "tblRotaSwapRequest.requestedByID (anonymise): `status` = IF(`status` = 'pending', 'cancelled', `status`)",
     ],

@@ -879,6 +879,40 @@ class GdprEraser
             ['table' => 'tblSmallGroupMeetings',          'userCol' => 'recordedByID', 'action' => 'anonymise', 'nullCols' => [], 'reason' => 'meeting history retained; recorder identity detached'],
             ['table' => 'tblSmallGroups',                 'userCol' => 'createdByID',  'action' => 'anonymise', 'nullCols' => [], 'reason' => 'group retained for the congregation; creator identity detached'],
 
+            // 🏠 #809 — A GROUP'S MEETING PLACE IS ITS NAMED HOST'S HOME (D-120,
+            //    D-123, D-124), AND ERASING THAT HOST EMPTIES IT (D-122, as D-124
+            //    amends it). Matched on `hostUserID`, which says WHOSE HOME the
+            //    place is — the row's SUBJECT, a link column and never an actor
+            //    column — so emptying the address on it empties this person's
+            //    own home and nobody else's. A group or home with another host
+            //    is never matched; a place marked "not anybody's home" (D-128)
+            //    has no host, so no erasure ever reaches it. The rows stay: the
+            //    group goes on, and a past meeting held in a listed home still
+            //    points at it and says "a place no longer recorded".
+            //
+            //    `placeMapAgreed` is NOT NULL, so it cannot be "emptied"; the
+            //    agreement is set back to 0 by a fixed `sqlSets` piece, because
+            //    an agreement with nobody to have given it is not one. On the
+            //    usual place `countryCode` is NOT NULL too and stays: it is a
+            //    country, not an address.
+            //
+            //    `placeEnteredByID` only records who TYPED a place in — usually
+            //    a leader, for somebody else's home (D-124). It is an ACTOR
+            //    column: erasing that person removes the link and empties NOTHING,
+            //    because the home is not theirs.
+            ['table' => 'tblSmallGroups', 'userCol' => 'hostUserID', 'action' => 'anonymise',
+             'nullCols' => ['addressLine1', 'addressLine2', 'city', 'region', 'postcode', 'latitude', 'longitude', 'what3words'],
+             'sqlSets' => ['`placeMapAgreed` = 0', '`notAHome` = 0'],
+             'reason' => 'a small group that usually met in your home: the group is kept, and your home address and your agreement to a map of it are emptied from it (D-122, D-124)'],
+            ['table' => 'tblSmallGroups', 'userCol' => 'placeEnteredByID', 'action' => 'anonymise', 'nullCols' => [],
+             'reason' => 'a small group meeting place you typed in for a group: the place is somebody else\'s and stays; that you typed it in is detached'],
+            ['table' => 'tblSmallGroupPlaces', 'userCol' => 'hostUserID', 'action' => 'anonymise',
+             'nullCols' => ['placeLabel', 'addressLine1', 'addressLine2', 'city', 'region', 'postcode', 'countryCode', 'latitude', 'longitude', 'what3words'],
+             'sqlSets' => ['`placeMapAgreed` = 0', '`notAHome` = 0', '`isActive` = 0'],
+             'reason' => 'your home, listed as a place a small group takes turns meeting in: its address, its name and your agreement to a map of it are emptied and it is taken off the group\'s list; a meeting held there is kept and says it met somewhere no longer recorded (D-122, D-123, D-124)'],
+            ['table' => 'tblSmallGroupPlaces', 'userCol' => 'placeEnteredByID', 'action' => 'anonymise', 'nullCols' => [],
+             'reason' => 'a home you typed in for a small group: it is somebody else\'s and stays; that you typed it in is detached'],
+
             // 🔁 THE SECOND "WHO DID IT" COLUMN (#492; built 11 October 2026
             //    on Salem874's decision for every such column: keep the
             //    record, clear who did it).
@@ -1445,6 +1479,9 @@ class GdprEraser
         // columns by the SHAPE OF THEIR NAME, so a column the database does
         // not link can no longer hide.
         'submittedByID', 'statusChangedByID', 'resolvedByID', 'executedByID',
+        // #809 (D-124): whose HOME a small group's meeting place is — the
+        // row's subject — and who typed it in, an actor (ACTOR_COLUMNS).
+        'hostUserID', 'placeEnteredByID',
     ];
 
     /**
@@ -1534,6 +1571,11 @@ class GdprEraser
         'checkedInByID', 'checkedOutByID',
         'performedByUserID', 'assignedToUserID',
         'submittedByID', 'statusChangedByID', 'resolvedByID', 'executedByID',
+        // #809 (D-124): who TYPED a small group's meeting place in. Usually a
+        // leader, for a member's home; the home is the HOST's (`hostUserID`,
+        // a link column and NOT here), so erasing the typist must empty
+        // nothing of it — which this list's guard on `nullCols` enforces.
+        'placeEnteredByID',
     ];
 
     /**

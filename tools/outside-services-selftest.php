@@ -1817,6 +1817,26 @@ check('R06 ONE HOST WITHDRAWING DOES NOT AFFECT THE OTHER: the first host withdr
 $saveHome($jarHost, $homeForm($jarHost, $placeB, ['placeMapAsked' => '1']));
 check('R07 the first host (a leader) posts an unticked box on the SECOND host\'s home: that host\'s agreement stands',
     (int) ($placeRow($placeB)['placeMapAgreed'] ?? -1) === 1 && (int) ($placeRow($placeB)['hostUserID'] ?? 0) === HOST2);
+$exportOf = static function (string $jar): array {
+    $answer = req($jar, 'GET', '/account/data-export');
+    $json   = json_decode($answer['body'], true);
+
+    return is_array($json) === true ? $json : ['_status' => $answer['status']];
+};
+$findHome = static function (array $export, string $line1): bool {
+    foreach ((array) ($export['smallGroupListedHomesHosted'] ?? ($export['data']['smallGroupListedHomesHosted'] ?? [])) as $row) {
+        if (($row['addressLine1'] ?? '') === $line1) {
+            return true;
+        }
+    }
+
+    return false;
+};
+$exportHost2 = $exportOf($jarHost2);
+$exportLeader = $exportOf($jarHost);
+check('R07b a host\'s own data export lists THEIR home as the group holds it; the leader who only typed it in is not given it as theirs',
+    $findHome($exportHost2, '2 Beta Road') === true && $findHome($exportLeader, '2 Beta Road') === false && $findHome($exportLeader, '1 Alpha Road') === true,
+    json_encode(['host2 keys' => array_keys($exportHost2)]));
 $saveHome($jarHost, $homeForm($jarHost, $placeA, ['placeMapAgreed' => '1']));
 q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [HOST2]);
 $g = $groupPage($jarV);

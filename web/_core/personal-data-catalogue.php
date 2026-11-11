@@ -1153,30 +1153,37 @@ return [
     ],
     'tblSmallGroups' => [
         'decision' => 'unlink',
-        'reason'   => 'The group itself - its name, its purpose, its members. Deleting it because its founder left would dissolve the group and remove everybody else from it.',
-        'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'createdByID', 'addressLine1', 'addressLine2', 'description', 'meetingNotes'],
+        'reason'   => 'The group itself - its name, its purpose, its members. Deleting it because its founder left would dissolve the group and remove everybody else from it. Where it usually meets is its HOST\'s home (#809, D-124): erasing that host empties the address from the group (D-122), and the group stays.',
+        'columns'  => ['postcode', 'latitude', 'longitude', 'what3words', 'createdByID', 'addressLine1', 'addressLine2', 'city', 'region',
+                       'description', 'meetingNotes', 'hostUserID', 'placeEnteredByID'],
         // 🧑‍⚖️ #724: notes about a group's meetings, which may or may not be
-        //    about the erased person. Only `meetingNotes` is marked. The home
-        //    address columns beside it are NOT, and the difference matters:
-        //    they are unreachable because nothing records WHOSE home it is, so
-        //    there is no row a person could be shown and asked about. A review
-        //    cannot invent reachability.
+        //    about the erased person. Only `meetingNotes` is marked.
+        //
+        // 🏠 #809 (D-120, D-122, D-124, D-128): the address columns USED to be
+        //    explained here as "unreachable, because nothing records WHOSE home
+        //    it is". That stopped being true: the place now names its HOST
+        //    (`hostUserID`, a member chosen on the form), and GdprEraser's
+        //    hand-written `hostUserID` instruction empties the address, the
+        //    host and the agreement when that host is erased — so those
+        //    explanations are gone rather than reworded (a reason for a column
+        //    the routine does empty is an untruth, and the coverage test fails
+        //    on one). Who only TYPED the place in (`placeEnteredByID`) is an
+        //    actor: erasing them unlinks them and empties nothing. A place
+        //    marked "not anybody's home" has no host, so no erasure empties it.
         'needsReview' => ['meetingNotes'],
         'notEmptiedHere' => [
-            'addressLine1' => 'Where the group meets. A small group usually meets in somebody\'s HOME, so this is very '
-                . 'often a member\'s home address, and nothing empties it. The postcode beside it is kept '
-                . 'for the same reason — the organisation has to know where its groups meet',
-            'addressLine2' => 'The rest of that address, with the same reasoning',
             'description' => 'What the group is for, in the organisation\'s own words. It can name a leader in '
                 . 'passing; under the owner\'s rule of 1 November 2026 the organisation\'s own text about '
                 . 'its own group stays',
             'meetingNotes' => 'Notes about the group\'s meetings, written by its leaders. The organisation\'s record of '
                 . 'its own activity, not the member\'s own record',
-            'postcode' => 'PERSONAL IN SOME ROWS, AND UNREACHABLE. This column\'s own schema comment says groups often meet in a member\'s home, so a postcode here can be somebody\'s home address - but NO column records whose, and nothing links the location to an account. Emptying it would blank the meeting place of groups that have nothing to do with the erased person. Kept with the limit recorded (the owner, 1 November 2026). (description and meetingNotes are named in this entry now, with their own reasons - #706.)',
-            'latitude' => 'The same home address as postcode, to seven decimal places. Personal in some rows, unreachable for the same reason.',
-            'longitude' => 'The same home address as postcode. Personal in some rows, unreachable for the same reason.',
-            'what3words' => 'Pinpoints the same place as postcode in three words. Personal in some rows, unreachable for the same reason.',
         ],
+    ],
+    'tblSmallGroupPlaces' => [
+        'decision' => 'unlink',
+        'reason'   => 'The homes a small group takes turns meeting in (#809, D-123). Each is its named HOST\'s home (D-124): erasing that host empties its address, its name and the agreement to a map, and takes it off the group\'s list (D-122). The row stays so that a meeting held there still says it met somewhere no longer recorded. Who only typed a home in is unlinked, and their typing empties nothing. A place marked "not anybody\'s home" (D-128) has no host, so no erasure empties it.',
+        'columns'  => ['hostUserID', 'placeEnteredByID', 'placeLabel', 'addressLine1', 'addressLine2', 'city', 'region', 'postcode',
+                       'countryCode', 'latitude', 'longitude', 'what3words'],
     ],
     'tblSmsMessage' => [
         'decision' => 'erase',

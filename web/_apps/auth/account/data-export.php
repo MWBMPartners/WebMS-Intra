@@ -450,6 +450,23 @@ $payload = [
         'smallGroupMembersAdded' => $fetchUserRows(
             'SELECT membershipID, groupID, memberRole, status, createdAt FROM tblSmallGroupMembers WHERE addedByID = ?'
         ),
+        // 🏠 #809 (D-124): a small group's meeting place names its HOST, and it
+        //    is that host's home. So the person's own home address, as a group
+        //    holds it, is theirs to see — the group's usual place where they are
+        //    its host, and every listed home they host. Erasure empties exactly
+        //    these rows (GdprEraser's two `hostUserID` instructions), so the
+        //    export shows what an erasure would remove. Who TYPED a place in is
+        //    not exported for the typist: the home is somebody else's.
+        'smallGroupHomeHosted' => $fetchUserRows(
+            'SELECT groupID, siteID, groupName, addressLine1, addressLine2, city, region, postcode, countryCode, '
+            . 'latitude, longitude, what3words, placeMapAgreed '
+            . 'FROM tblSmallGroups WHERE `hostUserID` = ?'
+        ),
+        'smallGroupListedHomesHosted' => $fetchUserRows(
+            'SELECT placeID, groupID, siteID, placeLabel, addressLine1, addressLine2, city, region, postcode, countryCode, '
+            . 'latitude, longitude, what3words, placeMapAgreed, isActive, createdAt '
+            . 'FROM tblSmallGroupPlaces WHERE `hostUserID` = ?'
+        ),
         // 🧪 Demo Data list (#498) — entries on the Demo Data page's list of
         // rows it created (tblDemoDataRegister) that point at this person's
         // own account or at one of their memberships. Normally there are none.
