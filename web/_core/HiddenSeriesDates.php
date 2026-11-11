@@ -41,14 +41,20 @@
  *     unasked. A draft is one tick from right on the same page (Status →
  *     Published); a wrongly published service is already in front of
  *     everybody.
- *   • EXCEPT A DATE THAT WAS CANCELLED before it was hidden, which comes back
- *     STILL CANCELLED, with its reason untouched (the owner, 11 November 2026
- *     — D-146, superseding D-145 for that case). As a draft it would be one
- *     bulk "Publish" away from putting a cancelled service live again, and its
- *     cancellation reason would be sitting on a row that no longer says it is
- *     cancelled. Every other status — published, draft, postponed — comes back
- *     as a draft. The status is the one read UNDER THE LOCK in step 3, so it
- *     is the status the row really has at the moment of writing.
+ *   • EXCEPT A DATE THAT WAS CANCELLED OR POSTPONED before it was hidden,
+ *     which comes back STILL CANCELLED or STILL POSTPONED, with its reason
+ *     untouched (the owner, 11 November 2026 — D-146 for cancelled, D-147 for
+ *     postponed, each superseding D-145 for that case). As a draft it would be
+ *     one bulk "Publish" away from putting a service that is not happening
+ *     live again, and its reason would be sitting on a row that no longer says
+ *     why. `KEEPS_STATUS` is the one list of the statuses that survive; every
+ *     other status — published, draft — comes back as a draft. The status is
+ *     the one read UNDER THE LOCK in step 3, so it is the status the row
+ *     really has at the moment of writing.
+ *
+ *     "WITH ITS REASON" MEANS THE REASON IS LEFT ALONE, not that there is one:
+ *     nothing under web/ writes `cancelReason` today (#998), so the words say
+ *     "with its reason if it was given one".
  *   • The series' repeat rule (`tblRecurrenceRules`) is NOT touched. The
  *     calendar feed already re-checks that a rule matches the series' PUBLISHED
  *     dates before it collapses them into one entry (`calendar/export.php`), so
@@ -78,9 +84,11 @@
  *     legitimately hold two dates on one day (a morning and an evening
  *     service), so the first press is refused with the reason and the page
  *     then offers a separate "Bring it back anyway" button, whose form carries
- *     `confirmSameDay=1`. With that confirmation the date comes back (as a
- *     draft) and the answer is RESTORED_SAME_DAY, whose words say plainly that
- *     the series now has two dates on that day.
+ *     `confirmSameDay=1`. With that confirmation the date comes back — as a
+ *     draft, or still cancelled / still postponed (D-146, D-147) — and the
+ *     answer is RESTORED_SAME_DAY, RESTORED_SAME_DAY_CANCELLED or
+ *     RESTORED_SAME_DAY_POSTPONED, whose words say plainly that the series now
+ *     has two dates on that day.
  *
  *     THE CONFIRMATION IS JUDGED UNDER THE LOCK, never before it. Whether the
  *     day is taken is read inside the locked transaction, so it is the state
@@ -88,6 +96,18 @@
  *     that has since been freed is an ordinary restore (RESTORED), and a plain
  *     press for a day that became taken while it waited is refused. The
  *     confirmation only ever ANSWERS the refusal; it never skips the check.
+ *
+ *     SAID PLAINLY, SO NOBODY READS MORE INTO IT: THE FIRST PRESS CAN BE
+ *     SKIPPED. A post built by hand with `confirmSameDay=1` brings a date back
+ *     onto a taken day without ever having been refused. The session offer the
+ *     page keeps after a refusal only decides whether the "Bring it back
+ *     anyway" BUTTON is drawn; it is not checked here and is not a permission.
+ *     That is acceptable because the only person who can send such a post is
+ *     one who passed the page's administrator gate and form token — somebody
+ *     who could press the button anyway — and the day is still read under the
+ *     lock, so the answer and its words still say there are now two dates on
+ *     that day. What the two presses protect against is an ACCIDENT, not a
+ *     determined administrator.
  *   • ADDRESS_TAKEN — another event in the organisation holds this date's web
  *     address (`eventSlug`). BE PRECISE ABOUT HOW LIKELY THAT IS: while
  *     `uq_event_site_slug (siteID, eventSlug)` exists it CANNOT happen — the
@@ -162,6 +182,27 @@ final class HiddenSeriesDates
     // a draft, members cannot see it" would be untrue of them.
     public const RESTORED_CANCELLED          = 'restored-cancelled';
     public const RESTORED_SAME_DAY_CANCELLED = 'restored-same-day-cancelled';
+    // And for a date that was POSTPONED (D-147), each with its own complete
+    // sentence rather than a word slotted into a shared one.
+    public const RESTORED_POSTPONED          = 'restored-postponed';
+    public const RESTORED_SAME_DAY_POSTPONED = 'restored-same-day-postponed';
+
+    /**
+     * 🚦 The statuses a date KEEPS when it is brought back (D-146, D-147).
+     * Every other status comes back as a draft (D-145). The ONE list: the
+     * write, the answer, the log line and the page's button all ask it.
+     *
+     * @var list<string>
+     */
+    public const KEEPS_STATUS = ['cancelled', 'postponed'];
+
+    /**
+     * The status a hidden date with status `$was` comes back with.
+     */
+    public static function statusOnReturn(string $was): string
+    {
+        return in_array($was, self::KEEPS_STATUS, true) === true ? $was : 'draft';
+    }
     public const NOT_FOUND     = 'not-found';
     public const ALREADY_BACK  = 'already-back';
     public const DAY_TAKEN     = 'day-taken';
@@ -379,11 +420,10 @@ final class HiddenSeriesDates
             //    on the statement itself, so it changes this one row or none.
             //    `deletedAt` is emptied because the column means "when it was
             //    hidden", and a live row was not. Status: a DRAFT (D-145), or
-            //    still CANCELLED if it was cancelled before it was hidden
-            //    (D-146). Nothing else is written, so a cancelled date keeps its
-            //    `cancelReason` and who cancelled it, untouched.
-            $wasCancelled = (string) $row['status'] === 'cancelled';
-            $newStatus    = $wasCancelled === true ? 'cancelled' : 'draft';
+            //    still CANCELLED / still POSTPONED if it was before it was
+            //    hidden (D-146, D-147). Nothing else is written, so such a date
+            //    keeps its `cancelReason` and who changed its status, untouched.
+            $newStatus    = self::statusOnReturn((string) $row['status']);
             $write        = $db->prepare(
                 'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ? '
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `seriesID` = ? AND `isDeleted` = 1 AND `externalFeedID` IS NULL'
@@ -404,11 +444,11 @@ final class HiddenSeriesDates
             }
 
             $db->commit();
-            if ($wasCancelled === true) {
-                $answer = $dayTaken === true ? self::RESTORED_SAME_DAY_CANCELLED : self::RESTORED_CANCELLED;
-            } else {
-                $answer = $dayTaken === true ? self::RESTORED_SAME_DAY : self::RESTORED;
-            }
+            $answer = match ($newStatus) {
+                'cancelled' => $dayTaken === true ? self::RESTORED_SAME_DAY_CANCELLED : self::RESTORED_CANCELLED,
+                'postponed' => $dayTaken === true ? self::RESTORED_SAME_DAY_POSTPONED : self::RESTORED_POSTPONED,
+                default     => $dayTaken === true ? self::RESTORED_SAME_DAY : self::RESTORED,
+            };
         } catch (\Throwable $e) {
             try {
                 $db->rollback();
@@ -430,7 +470,7 @@ final class HiddenSeriesDates
         Logger::activity(
             'SeriesDateRestored',
             'Event #' . $eventId . ' of series #' . $seriesId . ' brought back '
-            . ($wasCancelled === true ? 'still cancelled' : 'as a draft')
+            . ($newStatus === 'draft' ? 'as a draft' : 'still ' . $newStatus)
             . ($dayTaken === true ? ', confirmed onto a day the series already had a date on' : ''),
             $userId
         );
@@ -461,13 +501,24 @@ final class HiddenSeriesDates
             self::RESTORED_CANCELLED => [
                 'type'  => 'success',
                 'words' => 'That date is back in the series, still cancelled, because it had been cancelled before it was '
-                    . 'hidden. Members see it as cancelled, with the reason it was given.',
+                    . 'hidden. Members see it as cancelled, with its reason if it was given one.',
             ],
             self::RESTORED_SAME_DAY_CANCELLED => [
                 'type'  => 'warning',
                 'words' => 'That date is back in the series, still cancelled, as you confirmed, because it had been '
-                    . 'cancelled before it was hidden. This series now has two dates on that day — hide or move one of '
-                    . 'them if that is not what you want.',
+                    . 'cancelled before it was hidden. Members see it as cancelled, with its reason if it was given one. '
+                    . 'This series now has two dates on that day — hide or move one of them if that is not what you want.',
+            ],
+            self::RESTORED_POSTPONED => [
+                'type'  => 'success',
+                'words' => 'That date is back in the series, still postponed, because it had been postponed before it was '
+                    . 'hidden. Members see it as postponed, with its reason if it was given one.',
+            ],
+            self::RESTORED_SAME_DAY_POSTPONED => [
+                'type'  => 'warning',
+                'words' => 'That date is back in the series, still postponed, as you confirmed, because it had been '
+                    . 'postponed before it was hidden. Members see it as postponed, with its reason if it was given one. '
+                    . 'This series now has two dates on that day — hide or move one of them if that is not what you want.',
             ],
             self::ALREADY_BACK => [
                 'type'  => 'info',

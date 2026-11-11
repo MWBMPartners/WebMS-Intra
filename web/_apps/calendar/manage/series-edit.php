@@ -8,9 +8,10 @@
  * fields (status, category, type, visibility, featured). Admins can select
  * individual events or use "select all" to apply changes in one operation.
  *
- * ♻️ HIDDEN DATES (#691; the owner's decisions D-143, D-144, D-145). Below the list, the page shows every HIDDEN date of
- * the series — a date a pattern change removed, or one deleted on its own —
- * with a button to bring each back AS A DRAFT. `Portal\Core\HiddenSeriesDates`
+ * ♻️ HIDDEN DATES (#691; the owner's decisions D-143 to D-147). Below the list, the page shows every
+ * HIDDEN date of the series — a date a pattern change removed, or one deleted on its own —
+ * with a button to bring each back: AS A DRAFT, or STILL CANCELLED / STILL POSTPONED if it
+ * was so before it was hidden (D-146, D-147). `Portal\Core\HiddenSeriesDates`
  * decides everything about it (which dates are listed, whether one may come
  * back, and the words for each answer); this page only draws the list and
  * posts the button. It lives here, not on the pattern page, because this is
@@ -562,9 +563,9 @@ checkboxes.forEach(function (cb) {
         <p class="small mb-3">
             <strong>A date you bring back arrives as a draft</strong>, so members do not see it until you have
             looked at it and published it (tick it in the list above and set <em>Status</em> to Published).
-            <strong>The one exception is a date that was cancelled before it was hidden:</strong> it comes back
-            still cancelled, with its reason, so members see it as cancelled rather than as a service that is
-            happening. If the series already has a date on that day, the first press is
+            <strong>The exception is a date that was cancelled or postponed before it was hidden:</strong> it comes
+            back still cancelled or still postponed (with its reason, if it had one), so members see it that way
+            rather than as a service that is happening. If the series already has a date on that day, the first press is
             refused and tells you so; you can then choose <em>Bring it back anyway</em>, which leaves the series
             with two dates on that day. A later pattern change may hide it again if the new pattern does not
             include its day.
@@ -607,9 +608,10 @@ checkboxes.forEach(function (cb) {
                             <input type="hidden" name="action" value="restore">
                             <input type="hidden" name="restoreEventID" value="<?php echo (int) $hd['eventID']; ?>">
                             <button type="submit" class="btn btn-sm btn-outline-primary">
-                                <?php if ($hd['status'] === 'cancelled'): ?>
-                                    <?php // 🚫 D-146: a cancelled date comes back cancelled, and the button says so. ?>
-                                    <i class="fa-solid fa-rotate-left me-1"></i> Bring back, still cancelled
+                                <?php $returnsAs = HiddenSeriesDates::statusOnReturn($hd['status']); ?>
+                                <?php if ($returnsAs !== 'draft'): ?>
+                                    <?php // 🚫 D-146, D-147: a cancelled or postponed date keeps that status, and the button says so. ?>
+                                    <i class="fa-solid fa-rotate-left me-1"></i> Bring back, still <?php echo htmlspecialchars($returnsAs, ENT_QUOTES, 'UTF-8'); ?>
                                 <?php else: ?>
                                     <i class="fa-solid fa-rotate-left me-1"></i> Bring back as a draft
                                 <?php endif; ?>

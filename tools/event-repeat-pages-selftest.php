@@ -3564,6 +3564,21 @@ ok('S24 the link is really there to be checked',
 // not evidence of what happened (D-065).
 head('T. Bringing a hidden date back (#691)');
 
+// 📝 The exact words each kept-status answer must show (D-146, D-147). Typed
+//    here on purpose, NOT read from `HiddenSeriesDates::words()`: a check that
+//    asks the class what to expect cannot notice the class saying the wrong
+//    thing, which is how a swapped message passed round 3.
+const RESTORE_WORDS_CANCELLED = 'That date is back in the series, still cancelled, because it had been cancelled before it was '
+    . 'hidden. Members see it as cancelled, with its reason if it was given one.';
+const RESTORE_WORDS_SAME_DAY_CANCELLED = 'That date is back in the series, still cancelled, as you confirmed, because it had been '
+    . 'cancelled before it was hidden. Members see it as cancelled, with its reason if it was given one. '
+    . 'This series now has two dates on that day — hide or move one of them if that is not what you want.';
+const RESTORE_WORDS_POSTPONED = 'That date is back in the series, still postponed, because it had been postponed before it was '
+    . 'hidden. Members see it as postponed, with its reason if it was given one.';
+const RESTORE_WORDS_SAME_DAY_POSTPONED = 'That date is back in the series, still postponed, as you confirmed, because it had been '
+    . 'postponed before it was hidden. Members see it as postponed, with its reason if it was given one. '
+    . 'This series now has two dates on that day — hide or move one of them if that is not what you want.';
+
 /** One row of tblEvents, read fresh. */
 function restRow(int $eventId): ?array
 {
@@ -4134,12 +4149,103 @@ $cancAfter = one('SELECT isDeleted, status, cancelReason FROM tblEvents WHERE ev
 ok('T36m IT COMES BACK STILL CANCELLED, WITH ITS REASON (read back)',
     (int) ($cancAfter['isDeleted'] ?? -1) === 0 && (string) ($cancAfter['status'] ?? '') === 'cancelled'
     && (string) ($cancAfter['cancelReason'] ?? '') === 'EVREP the hall is flooded', json_encode($cancAfter));
-ok('T36n ...and the message says so, not "as a draft"',
-    str_contains($cancPress['message'], 'still cancelled') && str_contains($cancPress['message'], 'as a draft') === false,
-    $cancPress['message']);
+ok('T36n ...and the message says so, word for word',
+    $cancPress['message'] === RESTORE_WORDS_CANCELLED, $cancPress['message']);
 ok('T36o ...and the activity log says so, compared exactly',
     restLogLines($cancId) === ['Event #' . $cancId . ' of series #' . $cancSeries . ' brought back still cancelled'],
     json_encode(restLogLines($cancId)));
+
+// -----------------------------------------------------------------------------
+// T36p — THE SAME RULE ON THE CONFIRMED PATH, AND FOR A POSTPONED DATE (D-146, D-147).
+// -----------------------------------------------------------------------------
+// The independent check of round 3 found the CONFIRMED path pinned by nothing:
+// making a cancelled date come back as a draft after "Bring it back anyway",
+// or giving it the ordinary same-day words, left every check green. And D-147
+// (postponed stays postponed) needs its own proof on both paths.
+//
+// One helper builds each world the same way: a weekly series of `$count`
+// dates; the dates after the first are given `$status` through the REAL bulk
+// update and a reason with SQL (nothing under web/ writes `cancelReason`,
+// #998); a real pattern change cuts the series to ONE date, hiding the rest.
+/** @return array{series:int, rows:list<array<string,mixed>>} */
+$keptWorld = static function (string $name, string $firstStart, string $firstEnd, int $count, string $status, string $reason) use ($jar, $restApply): array {
+    createEvent($jar['admin'], $name, $firstStart, $firstEnd, ['repeatFrequency' => 'weekly', 'repeatCount' => (string) $count]);
+    $series = repatSeries($name);
+    $rows   = repatRows($name);
+    $later  = array_map(static fn (array $r): string => (string) $r['eventID'], array_slice($rows, 1));
+    req($jar['admin'], 'POST', '/calendar/manage/series-edit', [
+        'csrf_token' => managePage($jar['admin'])['token'],
+        'seriesID'   => (string) $series,
+        'eventIDs'   => $later,
+        'bulkStatus' => $status,
+    ]);
+    foreach ($later as $id) {
+        q('UPDATE tblEvents SET cancelReason = ? WHERE eventID = ?', 'si', [$reason, (int) $id]);
+    }
+    $restApply($series, ['patternStart' => $firstStart, 'patternEnd' => $firstEnd, 'repeatFrequency' => 'weekly'], '1');
+
+    return ['series' => $series, 'rows' => repatRows($name)];
+};
+
+// -- A cancelled date, brought back onto a TAKEN day with the confirmation.
+$ccWorld = $keptWorld('EVREP Restore cancday', '2030-08-04T10:00', '2030-08-04T11:00', 2, 'cancelled', 'EVREP the roof leaks');
+$ccId    = (int) ($ccWorld['rows'][1]['eventID'] ?? 0);
+// Extend over the same week again: the pattern page makes a NEW row for 11 August.
+$restApply($ccWorld['series'], ['patternStart' => '2030-08-04T10:00', 'patternEnd' => '2030-08-04T11:00', 'repeatFrequency' => 'weekly'], '2');
+$ccBefore = one('SELECT isDeleted, status, cancelReason FROM tblEvents WHERE eventID = ?', 'i', [$ccId]);
+ok('T36p (premise) the cancelled date is hidden and its day now has a NEW live date',
+    (int) ($ccBefore['isDeleted'] ?? 0) === 1 && (string) ($ccBefore['status'] ?? '') === 'cancelled'
+    && count(array_filter(repatLiveStarts('EVREP Restore cancday'), static fn (string $x): bool => str_starts_with($x, '2030-08-11'))) === 1,
+    json_encode($ccBefore));
+$ccFirst = restPress($jar['admin'], $ccWorld['series'], $ccId);
+ok('T36q the first press is refused for the day', (int) (restRow($ccId)['isDeleted'] ?? -1) === 1, $ccFirst['message']);
+$ccPress = restPress($jar['admin'], $ccWorld['series'], $ccId, null, true);
+$ccAfter = one('SELECT isDeleted, status, cancelReason FROM tblEvents WHERE eventID = ?', 'i', [$ccId]);
+ok('T36r CONFIRMED onto the taken day, IT COMES BACK STILL CANCELLED WITH ITS REASON (read back)',
+    (int) ($ccAfter['isDeleted'] ?? -1) === 0 && (string) ($ccAfter['status'] ?? '') === 'cancelled'
+    && (string) ($ccAfter['cancelReason'] ?? '') === 'EVREP the roof leaks', json_encode($ccAfter));
+ok('T36s ...with the same-day CANCELLED words, word for word', $ccPress['message'] === RESTORE_WORDS_SAME_DAY_CANCELLED, $ccPress['message']);
+ok('T36t ...and the log line, compared exactly',
+    restLogLines($ccId) === ['Event #' . $ccId . ' of series #' . $ccWorld['series']
+        . ' brought back still cancelled, confirmed onto a day the series already had a date on'],
+    json_encode(restLogLines($ccId)));
+
+// -- Postponed (D-147): an ordinary restore, then a confirmed one onto a taken day.
+$ppWorld = $keptWorld('EVREP Restore postponed', '2030-09-01T10:00', '2030-09-01T11:00', 3, 'postponed', 'EVREP the minister is ill');
+$ppSecond = (int) ($ppWorld['rows'][1]['eventID'] ?? 0);
+$ppThird  = (int) ($ppWorld['rows'][2]['eventID'] ?? 0);
+ok('T36u (premise) two postponed dates, each with a reason, were hidden by the pattern change',
+    count(restHidden('EVREP Restore postponed')) === 2
+    && (string) (restRow($ppSecond)['status'] ?? '') === 'postponed' && (string) (restRow($ppThird)['status'] ?? '') === 'postponed');
+ok('T36v the button for a postponed date says it comes back still postponed',
+    str_contains(text(restPage($jar['admin'], $ppWorld['series'])['body']), 'Bring back, still postponed'));
+$ppPress = restPress($jar['admin'], $ppWorld['series'], $ppSecond);
+$ppAfter = one('SELECT isDeleted, status, cancelReason FROM tblEvents WHERE eventID = ?', 'i', [$ppSecond]);
+ok('T36w A POSTPONED DATE COMES BACK STILL POSTPONED, WITH ITS REASON (read back)',
+    (int) ($ppAfter['isDeleted'] ?? -1) === 0 && (string) ($ppAfter['status'] ?? '') === 'postponed'
+    && (string) ($ppAfter['cancelReason'] ?? '') === 'EVREP the minister is ill', json_encode($ppAfter));
+ok('T36x ...with the postponed words, word for word', $ppPress['message'] === RESTORE_WORDS_POSTPONED, $ppPress['message']);
+ok('T36y ...and the log line, compared exactly',
+    restLogLines($ppSecond) === ['Event #' . $ppSecond . ' of series #' . $ppWorld['series'] . ' brought back still postponed'],
+    json_encode(restLogLines($ppSecond)));
+// Extend to three again: the page makes a NEW row for 15 September, so the
+// hidden postponed third date's day is taken.
+$restApply($ppWorld['series'], ['patternStart' => '2030-09-01T10:00', 'patternEnd' => '2030-09-01T11:00', 'repeatFrequency' => 'weekly'], '3');
+ok('T36z (premise) the third date is still hidden and its day has a NEW live date',
+    (int) (restRow($ppThird)['isDeleted'] ?? 0) === 1
+    && count(array_filter(repatLiveStarts('EVREP Restore postponed'), static fn (string $x): bool => str_starts_with($x, '2030-09-15'))) === 1,
+    implode(', ', repatLiveStarts('EVREP Restore postponed')));
+restPress($jar['admin'], $ppWorld['series'], $ppThird);
+$ppConf      = restPress($jar['admin'], $ppWorld['series'], $ppThird, null, true);
+$ppConfAfter = one('SELECT isDeleted, status, cancelReason FROM tblEvents WHERE eventID = ?', 'i', [$ppThird]);
+ok('T36za CONFIRMED onto the taken day, A POSTPONED DATE COMES BACK STILL POSTPONED WITH ITS REASON (read back)',
+    (int) ($ppConfAfter['isDeleted'] ?? -1) === 0 && (string) ($ppConfAfter['status'] ?? '') === 'postponed'
+    && (string) ($ppConfAfter['cancelReason'] ?? '') === 'EVREP the minister is ill', json_encode($ppConfAfter));
+ok('T36zb ...with the same-day POSTPONED words, word for word', $ppConf['message'] === RESTORE_WORDS_SAME_DAY_POSTPONED, $ppConf['message']);
+ok('T36zc ...and the log line, compared exactly',
+    restLogLines($ppThird) === ['Event #' . $ppThird . ' of series #' . $ppWorld['series']
+        . ' brought back still postponed, confirmed onto a day the series already had a date on'],
+    json_encode(restLogLines($ppThird)));
 
 // -----------------------------------------------------------------------------
 // T37 — THE ADDRESS IS TAKEN. Unreachable while the unique key exists; proved,

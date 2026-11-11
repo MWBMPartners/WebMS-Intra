@@ -36,8 +36,8 @@
  *     IT CAN BE BROUGHT BACK, AS A DRAFT, from the series' bulk edit page
  *     (`calendar/manage/series-edit`), since #691. `Portal\Core\HiddenSeriesDates`
  *     is the one place that decides it. Say exactly that and no more: it comes
- *     back as a DRAFT (D-145) — or still CANCELLED if it had been cancelled
- *     before it was hidden (D-146) — and onto a day the series
+ *     back as a DRAFT (D-145) — or still CANCELLED or POSTPONED if it was so
+ *     before it was hidden (D-146, D-147) — and onto a day the series
  *     already has a live date on — the ordinary case after a series is
  *     shortened and extended over the same weeks again, because this page then
  *     makes NEW rows for those days — the first press is refused and a second,
@@ -1335,7 +1335,7 @@ $showReading = static function (?string $reading): string {
         <li>A date is <strong>left exactly as it is</strong> if anything is attached to it (attendance, bookings, registrations, invitations), or if somebody has moved it by hand.</li>
         <li>A date that goes is <strong>hidden rather than deleted</strong>, so nothing attached to it is
             destroyed. You can bring it back afterwards from this series' bulk edit page, where it returns as a
-            draft (or still cancelled, if it had been cancelled). If the series has since been given another date on that same day, you are asked to confirm
+            draft (or still cancelled or postponed, if it was). If the series has since been given another date on that same day, you are asked to confirm
             first, because the series would then have two dates on that day.</li>
     </ul>
     <p class="mb-0 small text-muted">Nothing is written until you have seen exactly what will change and confirmed it.</p>
@@ -1545,8 +1545,8 @@ $showReading = static function (?string $reading): string {
                         These are hidden rather than deleted, so nothing attached to them is destroyed. Nothing is
                         attached to any of them in any case — a date carrying attendance, a booking or a
                         registration is in the list below instead. <strong>You can bring a hidden date back</strong>
-                        from this series' bulk edit page, where it returns as a draft (or still cancelled, if it had
-                        been cancelled) &mdash; and if the series has
+                        from this series' bulk edit page, where it returns as a draft (or still cancelled or
+                        postponed, if it was) &mdash; and if the series has
                         since been given another date on that day, only after you confirm you want two.
                     </p>
                 <?php endif; ?>
