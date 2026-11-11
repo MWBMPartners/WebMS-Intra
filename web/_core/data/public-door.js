@@ -133,10 +133,11 @@
         //    earlier take some of these 50 places although the countdown skips
         //    them (endOf() below). It cannot ask for more: 50 is the most the
         //    door gives, and a larger `limit` is refused, never shortened. It
-        //    would take more than 50 events already running or begun today
-        //    with no end time, all listed ahead of the next one, for that next
-        //    one to be pushed out; the countdown then shows the soonest it was
-        //    given. Accepted rather than solved (round 2 of #882's check).
+        //    would take 50 or more events begun today with no end time, all
+        //    listed ahead of the next one, for that next one to be pushed out.
+        //    Then every event given has already begun, endOf() skips them all,
+        //    and the countdown says "No upcoming events." although one exists
+        //    (measured in #882's round 3 check). Accepted rather than solved.
         feedUrl.searchParams.set('limit', String(show === 'next' ? 50 : limit));
     } catch (e) {
         return;
