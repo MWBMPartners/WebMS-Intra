@@ -359,6 +359,21 @@ class Mailer
      *                                           because its merged settings
      *                                           are already the right
      *                                           organisation's (#683).
+     *                              `bodyIsText` true: the body is PLAIN
+     *                                           TEXT, whatever it contains.
+     *                                           It is escaped and wrapped in
+     *                                           the branded layout, and the
+     *                                           "does it look like HTML"
+     *                                           guess below is NOT made.
+     *                                           Required wherever the body
+     *                                           holds anything somebody
+     *                                           outside the organisation
+     *                                           typed (#859): without it, a
+     *                                           name like `<a href=…>` makes
+     *                                           the whole body "HTML" and it
+     *                                           is sent exactly as written,
+     *                                           working link and all, from
+     *                                           the organisation's mailbox.
      *
      * @return bool True when the message was SENT, or KEPT to be sent
      *              (queued, or held). False when it was neither. lastOutcome()
@@ -375,7 +390,13 @@ class Mailer
         //    email regardless of caller. Plain-text wrapper is generated
         //    automatically by sendTemplated()'s flow when used; callers
         //    using send() directly get the auto-wrap behaviour.
-        $looksLikeHtml = (bool) preg_match('/<[a-zA-Z][^>]*>/', $body);
+        // 🛡️ `bodyIsText` (#859): the caller KNOWS the body is plain text, so
+        //    no guess is made. The guess is a pattern, and a pattern is
+        //    satisfied by text a stranger typed ("Fish & Chips <Supper>", or
+        //    a name carrying `<a href=…>`), which would then be sent as
+        //    written. Callers who leave it out keep the guess unchanged.
+        $bodyIsText    = ($options['bodyIsText'] ?? false) === true;
+        $looksLikeHtml = $bodyIsText === false && (bool) preg_match('/<[a-zA-Z][^>]*>/', $body);
         // 🏷️ Which organisation's footer (#683). A scheduled job that walks
         //    several organisations must say which one each message belongs to,
         //    because the request's merged settings were fixed before the walk
@@ -389,7 +410,7 @@ class Mailer
             : null;
         $htmlBody = $looksLikeHtml === true
             ? $body
-            : self::renderBase($body, $siteIdForFooter);
+            : self::renderBase($body, $siteIdForFooter, $bodyIsText);
 
         // 🪞 Plain-text alternative (#254). Auto-derive from the HTML if the
         //    caller didn't supply one. This goes into the providers'
@@ -1120,8 +1141,13 @@ class Mailer
      * request's own merged settings answer — right for a web request, and
      * wrong for a scheduled job that walks several organisations. See
      * footerFactsFor() (#683).
+     *
+     * $contentIsText true (#859, send()'s `bodyIsText`): the content is plain
+     * text and is ALWAYS escaped. This method guesses too, with the same
+     * pattern as send(), so skipping send()'s guess alone was not enough:
+     * the text would have reached this one and been taken as HTML here.
      */
-    private static function renderBase(string $content, ?int $siteId = null): string
+    private static function renderBase(string $content, ?int $siteId = null, bool $contentIsText = false): string
     {
         global $SETTINGS;
         $base = PORTAL_CORE
@@ -1132,7 +1158,7 @@ class Mailer
             // 🪞 Base template missing — return the content as-is wrapped in
             //    a minimal HTML shell so the email still renders.
             return '<!doctype html><html><body style="font-family:system-ui">'
-                 . (preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
+                 . ($contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
                     ? $content
                     : '<pre style="white-space:pre-wrap">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</pre>')
                  . '</body></html>';
@@ -1155,7 +1181,7 @@ class Mailer
         $portalUrl     = PortalAddress::absolute('', $siteId);
         $supportEmail  = $footer['support'];
         // 🪞 Auto-wrap plain text in <p> tags so paragraphs render.
-        $contentHtml = preg_match('/<[a-zA-Z][^>]*>/', $content) === 1
+        $contentHtml = ($contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', $content) === 1)
             ? $content
             : '<p>' . nl2br(htmlspecialchars($content, ENT_QUOTES, 'UTF-8')) . '</p>';
 

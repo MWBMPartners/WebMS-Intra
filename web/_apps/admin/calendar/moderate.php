@@ -80,17 +80,22 @@ if ($eventId <= 0 || in_array($action, ['approve', 'reject'], true) === false) {
 
 if ($action === 'approve') {
     $stmt = $mysqli->prepare(
-        'UPDATE tblEvents SET status = "published", '
-        . '    submissionStatus = "approved", moderatedByID = ?, moderatedAt = NOW() '
-        . 'WHERE eventID = ? AND siteID = ? AND submissionStatus = "pending"'
+        'UPDATE `tblEvents` SET `status` = "published", '
+        . '    `submissionStatus` = "approved", `moderatedByID` = ?, `moderatedAt` = NOW() '
+        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" AND `isDeleted` = 0'
     );
 } else {
     $stmt = $mysqli->prepare(
-        'UPDATE tblEvents SET status = "draft", isPublic = 0, '
-        . '    submissionStatus = "rejected", moderatedByID = ?, moderatedAt = NOW() '
-        . 'WHERE eventID = ? AND siteID = ? AND submissionStatus = "pending"'
+        'UPDATE `tblEvents` SET `status` = "draft", `isPublic` = 0, '
+        . '    `submissionStatus` = "rejected", `moderatedByID` = ?, `moderatedAt` = NOW() '
+        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = "pending" AND `isDeleted` = 0'
     );
 }
+// 🗑️ `isDeleted = 0` on BOTH (round 1 of #859's check). A pending suggestion
+//    can be deleted on Manage Events, and this statement used to match it all
+//    the same: an Approve then published a row nobody could see and e-mailed
+//    the suggester that it was "now on their calendar". A deleted suggestion
+//    is no longer moderated at all; the moderation list leaves it out too.
 
 if ($stmt !== false) {
     $stmt->bind_param('iii', $modId, $eventId, $siteId);
@@ -104,14 +109,17 @@ if ($stmt !== false) {
         // ✉️ D-134: tell the person who suggested it, ONLY here, inside "this
         //    request changed the row", which is what makes it once only. The
         //    page says what became of the e-mail; it never names the address.
+        //    The result has a session key of its OWN (`moderation_result`), so
+        //    the moderation page never shows a message another page left.
         if ($action === 'approve') {
             $told = EventSuggestions::tellSuggesterApproved($mysqli, $eventId, $siteId);
-            $_SESSION['flash_msg']  = EventSuggestions::approvedWords($told);
             // A warning, not a green tick, when the promised e-mail did not go.
-            $_SESSION['flash_type'] = $told === EventSuggestions::TOLD_NOT_SENT ? 'warning' : 'success';
+            $_SESSION['moderation_result'] = [
+                'type'  => $told === EventSuggestions::TOLD_NOT_SENT ? 'warning' : 'success',
+                'words' => EventSuggestions::approvedWords($told),
+            ];
         } else {
-            $_SESSION['flash_msg']  = 'Rejected. Nothing was sent to the person who suggested it.';
-            $_SESSION['flash_type'] = 'info';
+            $_SESSION['moderation_result'] = ['type' => 'info', 'words' => 'Rejected. Nothing was sent to the person who suggested it.'];
         }
 
         // 🪝 Webhook on moderation (#324).
@@ -121,6 +129,11 @@ if ($stmt !== false) {
                 ['eventID' => $eventId]
             );
         }
+    } else {
+        // 🔁 Nothing changed: decided already (a second press, a stale page,
+        //    another administrator first) or deleted. Nothing is sent.
+        $_SESSION['moderation_result'] = ['type' => 'info',
+            'words' => 'Nothing changed: that suggestion has already been decided, or has been deleted. Nobody was e-mailed.'];
     }
 }
 

@@ -80,9 +80,19 @@ final class EventSuggestions
      * suggestion for members only, so the first is the usual one; the second
      * is for an administrator who ticked "Public" on it before approving.
      *
-     * The body is PLAIN TEXT: `Mailer::send()` escapes it and wraps it in the
-     * organisation's branded layout, so a name with `<` in it is shown, never
-     * read as markup.
+     * The body is PLAIN TEXT, and it holds two things a member of the public
+     * typed: the event's name and their own name. It is therefore sent with
+     * `Mailer::send()`'s `bodyIsText` option, which makes Mailer escape it and
+     * wrap it in the organisation's branded layout WHATEVER it contains.
+     *
+     * ⚠️ ROUND 1 OF THE CHECK FOUND THIS SENTENCE UNTRUE. It said "Mailer
+     *    escapes it", and without the option Mailer GUESSES: a body matching
+     *    `<[a-zA-Z][^>]*>` anywhere is taken as HTML and sent exactly as
+     *    written, with no escaping and no footer. So `Fish & Chips <Supper>`,
+     *    a name carrying `<a href="https://evil.example/…">`, or an
+     *    `<img src="https://tracker.example/…">` would have gone out from the
+     *    organisation's own mailbox as a working link or a tracking image.
+     *    Never drop the option from this send.
      *
      * @param string $eventName    The suggestion's title, as stored.
      * @param string $startReading `tblEvents.startDateTime`: a reading of the
@@ -153,6 +163,10 @@ final class EventSuggestions
                 // shows nothing to a viewer that the visibility rule decides.
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = \'approved\' AND `submittedByID` IS NULL '
                 . '  AND `externalFeedID` IS NULL '
+                // `isDeleted = 0` (round 1 of the check): a deleted suggestion
+                // must never be told "it is now on their calendar". The
+                // handler refuses to approve one too; this is the second ask.
+                . '  AND `isDeleted` = 0 '
                 . 'LIMIT 1'
             );
             if ($stmt === false) {
@@ -191,7 +205,9 @@ final class EventSuggestions
             //    which on this page is also the request's — said rather than
             //    left to the merged settings, so it stays right if the caller
             //    ever changes.
-            $kept = Mailer::send($address, $words['subject'], $words['body'], [], ['siteId' => $siteId]);
+            // 🛡️ `bodyIsText`: ALWAYS plain text, escaped, with the footer —
+            //    see approvalMessage(). This is the security half of this send.
+            $kept = Mailer::send($address, $words['subject'], $words['body'], [], ['siteId' => $siteId, 'bodyIsText' => true]);
             $outcome = $kept === false
                 ? self::TOLD_NOT_SENT
                 : (Mailer::lastIsWaiting() === true ? self::TOLD_WAITING : self::TOLD_SENT);
@@ -222,7 +238,7 @@ final class EventSuggestions
     {
         return match ($outcome) {
             self::TOLD_SENT       => 'Approved. The person who suggested it has been e-mailed to say so.',
-            self::TOLD_WAITING    => 'Approved. The e-mail telling the person who suggested it is waiting in the mail queue and will be sent shortly.',
+            self::TOLD_WAITING    => 'Approved. The e-mail telling the person who suggested it is kept in the mail queue to be tried again; Admin, Integrations, Email shows whether anything is holding it up.',
             self::TOLD_NO_ADDRESS => 'Approved. Nobody was e-mailed: the suggestion holds no e-mail address to write to.',
             default               => 'Approved, but the e-mail telling the person who suggested it could not be sent. Admin, Integrations, Email shows whether e-mail is set up.',
         };

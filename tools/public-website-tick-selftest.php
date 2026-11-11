@@ -138,7 +138,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PWT_EXPECTED_CHECKS = 260; // 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4)
+const PWT_EXPECTED_CHECKS = 277; // 240, then Z1 (#493 P4b: every read of the door's feed answered), then #859's E0-E13 with E8b (15) and P120-P123 (4), then #859 round 2's E14-E22 with E19b (10) and P124-P130 (7)
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1611,24 +1611,30 @@ echo "E. The e-mail to the person who suggested an event (#859, D-134)\n";
 //     recipient, and no connection is made to anything (the same arrangement
 //     as part T of tools/time-zones-selftest.php). That is what "exactly one
 //     e-mail to that address" is counted from.
-//   - THE WORDS. The send log keeps no body, so the copy's `Mailer::send()` is
-//     given one added line, for this section only, that writes what it was
-//     HANDED to a file of this run's own. It changes nothing the method does;
-//     it is taken out again at the end of the section.
+//   - THE WORDS, AND THE HTML THEY BECOME. The send log keeps no body, so the
+//     copy's `Mailer::send()` is given one added line, just after it has
+//     worked out the HTML it will send, that writes what it was HANDED and
+//     that HTML to a file of this run's own. It changes nothing the method
+//     does. It stays in until the end of the plants for this section, because
+//     plants P124/P125 read the HTML too (round 1 of #859's check: a stranger's
+//     typing was sent as HTML, and only the RENDERED body shows that).
+//   - ONE MESSAGE IS KEPT for real (E19): an SMTP route set up to a port
+//     nothing listens on, so the message is kept in the mail queue and its
+//     stored HTML read back from `tblMailQueue`.
 $mailerPath  = $child . $sep . 'web' . $sep . '_core' . $sep . 'Mailer.php';
 $mailerWas   = (string) file_get_contents($mailerPath);
 $capturePath = $child . $sep . 'mail-capture.jsonl';
-$sendHead    = "    public static function send(string|array \$to, string \$subj, string \$body, array \$files = [], array \$options = []): bool\n    {\n";
-check('E0 the copy\'s Mailer::send() can be watched (its first line was found exactly once)', substr_count($mailerWas, $sendHead), 1);
-file_put_contents($mailerPath, str_replace($sendHead, $sendHead
-    . '        @file_put_contents(' . var_export($capturePath, true) . ', json_encode([\'to\' => $to, \'subject\' => $subj, \'body\' => $body, \'options\' => $options]) . "\n", FILE_APPEND);' . "\n",
+$sendAfter   = "        \$plainBody = \$looksLikeHtml === true\n            ? self::htmlToPlain(\$body)\n            : \$body;\n";
+check('E0 the copy\'s Mailer::send() can be watched (the line after its HTML is worked out was found exactly once)', substr_count($mailerWas, $sendAfter), 1);
+file_put_contents($mailerPath, str_replace($sendAfter, $sendAfter
+    . '        @file_put_contents(' . var_export($capturePath, true) . ', json_encode([\'to\' => $to, \'subject\' => $subj, \'body\' => $body, \'options\' => $options, \'html\' => $htmlBody]) . "\n", FILE_APPEND);' . "\n",
     $mailerWas));
 
 /** The installation-wide mail route, read and written as a row (no page sets it to "nothing filled in"). */
-$mailSetting = static function (string $key, ?string $value = null) use ($db): string {
+$mailSetting = static function (string $key, ?string $value = null, int $sensitive = 0) use ($db): string {
     if ($value !== null) {
-        $u = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
-        $u->bind_param('ss', $value, $key);
+        $u = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ?, `isSensitive` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+        $u->bind_param('sis', $value, $sensitive, $key);
         $u->execute();
         $u->close();
     }
@@ -1639,8 +1645,26 @@ $mailSetting = static function (string $key, ?string $value = null) use ($db): s
     $r->close();
     return $got;
 };
-$providerWas = $mailSetting('mail.provider');
-$smtpHostWas = $mailSetting('mail.smtp.host');
+// Every installation-wide mail row as it was, so all of them go back however
+// many this section changes (round 1: E19 sets the whole SMTP route up).
+$mailRowsWas = $db->query("SELECT `settingKey`, `settingValue`, `isSensitive` FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` LIKE 'mail.%'")->fetch_all(MYSQLI_ASSOC);
+$putMailBack = static function () use ($db, $mailRowsWas): void {
+    foreach ($mailRowsWas as $was) {
+        $u = $db->prepare('UPDATE `tblSettings` SET `settingValue` = ?, `isSensitive` = ? WHERE `settingKey` = ? AND `siteID` IS NULL');
+        $v = (string) $was['settingValue'];
+        $f = (int) $was['isSensitive'];
+        $k = (string) $was['settingKey'];
+        $u->bind_param('sis', $v, $f, $k);
+        $u->execute();
+        $u->close();
+    }
+};
+/** The route every check here uses unless it says otherwise: SMTP with nothing filled in, so nothing connects anywhere. */
+$routeNotSetUp = static function () use ($putMailBack, $mailSetting): void {
+    $putMailBack();
+    $mailSetting('mail.provider', 'smtp');
+    $mailSetting('mail.smtp.host', '');
+};
 $approvedSubject = 'Your event suggestion has been approved';
 
 /** Rows in the send log for one address and the approval subject. */
@@ -1685,19 +1709,25 @@ $wentBack = static fn (array $answer): bool => $answer['status'] === 302 && str_
  *
  * @param list<string> $presses 'approve' or 'reject', in order.
  */
-$scnSuggestion = static function (string $name, string $address, array $presses, string $route = 'smtp-empty')
-    use ($db, $http, $tokenOn, $jar, $moderate, $wentBack, $sentTo, $handedTo, $capturedSoFar, $moderationSays, $mailSetting): array {
+$scnSuggestion = static function (string $name, string $address, array $presses, string $route = 'smtp-empty', string $submitterName = 'Pat Suggester')
+    use ($db, $http, $tokenOn, $jar, $moderate, $wentBack, $sentTo, $handedTo, $capturedSoFar, $moderationSays, $mailSetting, $routeNotSetUp): array {
     // A clean start, so a run under a plant counts only its own messages.
     $db->query("DELETE FROM `tblEvents` WHERE `eventName` = '" . $db->real_escape_string($name) . "'");
     $db->query("DELETE FROM `tblEmailLog` WHERE `toRecipients` = '" . $db->real_escape_string($address) . "'");
     $from = $capturedSoFar();
-    $mailSetting('mail.provider', $route === 'smtp-empty' ? 'smtp' : 'ms365');
-    $mailSetting('mail.smtp.host', '');
+    // 'smtp-closed': the CALLER has set the route up already (E19), so it is
+    // left exactly as it is; the other two are set here.
+    if ($route !== 'smtp-closed') {
+        $routeNotSetUp();
+    }
+    if ($route === 'ms365-empty') {
+        $mailSetting('mail.provider', 'ms365');
+    }
     @unlink($jar); // signed out: this is the visitor the form's promise is made to
     $form = $http('GET', '/calendar/submit')['body'];
     $http('POST', '/calendar/submit-save', [
         'csrf_token' => $tokenOn($form), 'eventName' => $name, 'startDateTime' => '2030-08-03T10:30',
-        'submitterName' => 'Pat Suggester', 'submitterEmail' => $address,
+        'submitterName' => $submitterName, 'submitterEmail' => $address,
     ]);
     $s = $db->prepare('SELECT `eventID`, `submitterEmail` FROM `tblEvents` WHERE `eventName` = ?');
     $s->bind_param('s', $name);
@@ -1835,11 +1865,175 @@ $e13 = (static function () use ($makeEvent, $siteOne, $moderate, $handedTo, $db,
 })();
 check('E13 one already ticked "Public" (and all day, with no name given) is told anyone can see it — never "members only" — with the date and no time, and a plain "Hello,"', $e13, [true, true, true, false]);
 
-// Put the copy's Mailer back and the route as it was; the plants below
-// re-plant it themselves through $plant().
-file_put_contents($mailerPath, $mailerWas);
-$mailSetting('mail.provider', $providerWas);
-$mailSetting('mail.smtp.host', $smtpHostWas);
+
+// ── ROUND 1 OF #859's CHECK: four things it found nothing pinned ─────────────
+
+// (1) A STRANGER'S TYPING MUST NEVER BE SENT AS HTML. Mailer guesses "HTML or
+//     text" from the body, and before round 2 a body holding `<Supper>`, an
+//     `<a href=…>` or an `<img src=…>` was sent AS WRITTEN — a working link or
+//     a tracking image from the organisation's own mailbox. Each input goes in
+//     through the real form; what Mailer was handed AND the HTML it built are
+//     read. "Escaped" means the raw markup is absent and its escaped form is
+//     present; the branded footer and the line breaks must be there too.
+$htmlSafe = static function (array $run, array $raw, array $escaped): array {
+    $m    = $run['first message'] ?? [];
+    $html = (string) ($m['html'] ?? '');
+    $out  = ['handed once' => $run['handed to Mailer'] ?? null, 'told it is text' => ($m['options']['bodyIsText'] ?? null)];
+    foreach ($raw as $piece) {
+        $out['raw absent: ' . $piece] = $html !== '' && str_contains($html, $piece) === false;
+    }
+    foreach ($escaped as $piece) {
+        $out['escaped present: ' . $piece] = str_contains($html, $piece);
+    }
+    $out['footer'] = str_contains($html, '<!-- Footer -->');
+    $out['line breaks'] = str_contains($html, '<br />');
+    return $out;
+};
+$wantSafe = static function (array $raw, array $escaped): array {
+    $out = ['handed once' => 1, 'told it is text' => true];
+    foreach ($raw as $piece) {
+        $out['raw absent: ' . $piece] = true;
+    }
+    foreach ($escaped as $piece) {
+        $out['escaped present: ' . $piece] = true;
+    }
+    return $out + ['footer' => true, 'line breaks' => true];
+};
+$fishRaw = ['<Supper>'];
+$fishEsc = ['Fish &amp; Chips &lt;Supper&gt;'];
+check('E14 an event named "Fish & Chips <Supper>" is sent as TEXT: escaped, with the footer and the line breaks',
+    $htmlSafe($scnSuggestion('PWT E Fish & Chips <Supper>', 'fish.suggester@selftest.invalid', ['approve']), $fishRaw, $fishEsc), $wantSafe($fishRaw, $fishEsc));
+$linkName = 'Pat <a href="https://evil.example/login">Confirm your membership</a>';
+$linkRaw  = ['<a href="https://evil.example/login">'];
+$linkEsc  = ['Hello Pat &lt;a href=&quot;https://evil.example/login&quot;&gt;Confirm your membership&lt;/a&gt;,'];
+$scnLinkName = static fn (): array => $scnSuggestion('PWT E link in name', 'link.suggester@selftest.invalid', ['approve'], 'smtp-empty', $linkName);
+check('E15 a suggester\'s NAME carrying a working link is sent as text: no live link, the name shown escaped, footer and line breaks kept',
+    $htmlSafe($scnLinkName(), $linkRaw, $linkEsc), $wantSafe($linkRaw, $linkEsc));
+$imgRaw = ['<img src="https://tracker.example/p.gif">'];
+$imgEsc = ['&lt;img src=&quot;https://tracker.example/p.gif&quot;&gt;Coffee'];
+check('E16 an event name carrying a tracking image is sent as text: no image, shown escaped',
+    $htmlSafe($scnSuggestion('PWT E <img src="https://tracker.example/p.gif">Coffee', 'img.suggester@selftest.invalid', ['approve']), $imgRaw, $imgEsc), $wantSafe($imgRaw, $imgEsc));
+$ltRaw = [];
+$ltEsc = ['Hello Sam &lt; Alex,'];
+check('E17 an ordinary "<" in a name is shown escaped, as written',
+    $htmlSafe($scnSuggestion('PWT E ordinary lt', 'lt.suggester@selftest.invalid', ['approve'], 'smtp-empty', 'Sam < Alex'), $ltRaw, $ltEsc), $wantSafe($ltRaw, $ltEsc));
+
+// (2) A DELETED SUGGESTION. A pending suggestion can be deleted on Manage
+//     Events; it used to stay on the moderation list, and Approve published it
+//     and told the suggester it was "now on their calendar".
+$scnDeleted = static function () use ($makeEvent, $siteOne, $moderate, $wentBack, $moderationSays, $sentTo, $db, $http, $routeNotSetUp): array {
+    $routeNotSetUp();
+    $db->query("DELETE FROM `tblEmailLog` WHERE `toRecipients` = 'deleted.suggester@selftest.invalid'");
+    $db->query("DELETE FROM `tblEvents` WHERE `eventName` = 'PWT E deleted suggestion'");
+    $id = $makeEvent('PWT E deleted suggestion', $siteOne, '2030-08-07 10:00:00', ['status' => 'draft', 'isPublic' => '0', 'submissionStatus' => 'pending',
+        'submitterName' => 'Del Eted', 'submitterEmail' => 'deleted.suggester@selftest.invalid', 'isDeleted' => '1']);
+    $back = $wentBack($moderate($id, 'approve'));
+    $said = $moderationSays();
+    $listed = str_contains($http('GET', '/admin/calendar/moderation?status=pending')['body'], 'PWT E deleted suggestion');
+    $state = $db->query("SELECT `submissionStatus`, `status` FROM `tblEvents` WHERE `eventID` = {$id}")->fetch_assoc();
+    return ['listed' => $listed, 'went back' => $back, 'state' => [(string) $state['submissionStatus'], (string) $state['status']],
+        'send log rows' => $sentTo('deleted.suggester@selftest.invalid'), 'page said' => $said];
+};
+check('E18 a DELETED pending suggestion is not on the moderation list, and pressing Approve on it (a stale page) approves nothing, publishes nothing and e-mails nobody',
+    $scnDeleted(), ['listed' => false, 'went back' => true, 'state' => ['pending', 'draft'], 'send log rows' => 0,
+        'page said' => 'Nothing changed: that suggestion has already been decided, or has been deleted. Nobody was e-mailed.']);
+
+// (4) "NEVER SAY SENT ABOUT A KEPT MESSAGE". A message really KEPT: the SMTP
+//     route set up in full, pointed at a port on this machine nothing listens
+//     on, so the attempt cannot connect and the message is kept in the mail
+//     queue. Its stored HTML is read back from the queue as well.
+$closedPort = (static function (): int {
+    $s = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+    $name = (string) stream_socket_get_name($s, false);
+    fclose($s);
+    return (int) substr($name, (int) strrpos($name, ':') + 1);
+})();
+$keyText = (string) file_get_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key');
+$routeClosedPort = static function () use ($routeNotSetUp, $mailSetting, $closedPort, $keyText): void {
+    $routeNotSetUp();
+    $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+    $mailSetting('mail.provider', 'smtp');
+    $mailSetting('mail.smtp.host', '127.0.0.1');
+    $mailSetting('mail.smtp.port', (string) $closedPort);
+    $mailSetting('mail.smtp.security', 'starttls');
+    $mailSetting('mail.smtp.username', 'pwt-mailbox');
+    // Sealed exactly as the e-mail page seals it, and marked secret, or the route reads "not set up".
+    $mailSetting('mail.smtp.password', base64_encode($nonce . sodium_crypto_secretbox('pwt-password', $nonce, sodium_hex2bin(hash('sha256', $keyText)))), 1);
+    $mailSetting('mail.defaultFromAddress', 'office@pwt.selftest.invalid');
+    $mailSetting('mail.defaultFromName', 'PWT Office');
+    $mailSetting('mail.defaultReplyTo', '');
+};
+$scnKept = static function () use ($scnSuggestion, $routeClosedPort, $db, $linkName, $keyText): array {
+    $db->query("DELETE FROM `tblMailQueue` WHERE `toRecipients` = 'kept.suggester@selftest.invalid'");
+    $routeClosedPort();
+    $run = $scnSuggestion('PWT E kept', 'kept.suggester@selftest.invalid', ['approve'], 'smtp-closed', $linkName);
+    $rows = $db->query("SELECT `bodyHtml` FROM `tblMailQueue` WHERE `toRecipients` = 'kept.suggester@selftest.invalid'")->fetch_all(MYSQLI_ASSOC);
+    $db->query("DELETE FROM `tblMailQueue` WHERE `toRecipients` = 'kept.suggester@selftest.invalid'");
+    // The queue SEALS a waiting body at rest (MailQueue::seal(), the
+    // installation's key), so it is opened here the way Auth::decrypt() does.
+    $bin  = (string) base64_decode((string) ($rows[0]['bodyHtml'] ?? ''), true);
+    $html = strlen($bin) > SODIUM_CRYPTO_SECRETBOX_NONCEBYTES
+        ? (string) sodium_crypto_secretbox_open(substr($bin, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), substr($bin, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), sodium_hex2bin(hash('sha256', $keyText)))
+        : '';
+    return ['page said' => $run['page said'] ?? null, 'kept in the queue' => count($rows),
+        'stored html escaped' => $html !== '' && str_contains($html, '<a href="https://evil.example') === false
+            && str_contains($html, 'Hello Pat &lt;a href=&quot;https://evil.example/login&quot;&gt;') && str_contains($html, '<!-- Footer -->')];
+};
+$e19 = $scnKept();
+check('E19 a message really KEPT in the mail queue is described as kept, never as sent, and is kept once',
+    [$e19['page said'] ?? null, $e19['kept in the queue'] ?? null],
+    [['Approved. The e-mail telling the person who suggested it is kept in the mail queue to be tried again; Admin, Integrations, Email shows whether anything is holding it up.'], 1]);
+check('E19b ...and the HTML stored in the queue is the escaped text with the footer, not the stranger\'s link', $e19['stored html escaped'] ?? null, true);
+
+// ...and every outcome's sentence, asked of the REAL `approvedWords()` in the
+// copy, so a sentence that claimed "e-mailed" for a kept or failed message
+// would show here even where no route can reach it.
+file_put_contents($child . $sep . 'ask-told-words.php', <<<'ASK'
+<?php
+// Written by tools/public-website-tick-selftest.php for ONE run. Test only.
+declare(strict_types=1);
+require_once __DIR__ . '/web/_core/EventSuggestions.php';
+use Portal\Core\EventSuggestions as S;
+$out = [];
+foreach ([S::TOLD_SENT, S::TOLD_WAITING, S::TOLD_NOT_SENT, S::TOLD_NO_ADDRESS] as $o) {
+    $out[$o] = S::approvedWords($o);
+}
+echo json_encode($out);
+ASK);
+$told = json_decode((string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($child . $sep . 'ask-told-words.php') . ' 2>&1'), true);
+check('E20 approvedWords(): only a SENT message is called "e-mailed"; a kept one is "kept", a failed one "could not be sent", and no address "Nobody was e-mailed"',
+    is_array($told) === true ? array_map(static fn (string $w): array => [str_contains($w, 'has been e-mailed'), str_contains($w, 'kept in the mail queue'),
+        str_contains($w, 'could not be sent'), str_contains($w, 'Nobody was e-mailed')], $told) : $told,
+    ['sent' => [true, false, false, false], 'waiting' => [false, true, false, false], 'not-sent' => [false, false, true, false], 'no-address' => [false, false, false, true]]);
+
+// (3) "ON THE EVENT'S OWN CLOCK" WAS PINNED BY NOTHING: every fixture's event
+//     shared the organisation's zone, so a conversion to Site::timezone() gave
+//     the same hour. The organisation is put on Europe/London for these two
+//     (and put back), so PHP's own clock in the request is London's too.
+$zoneOneWas = (string) ($db->query("SELECT `timezone` FROM `tblSites` WHERE `siteID` = {$siteOne}")->fetch_assoc()['timezone'] ?? 'UTC');
+$scnClock = static function (string $zone, string $reading) use ($makeEvent, $siteOne, $moderate, $handedTo, $capturedSoFar, $db, $routeNotSetUp, $zoneOneWas): string {
+    $routeNotSetUp();
+    $db->query("UPDATE `tblSites` SET `timezone` = 'Europe/London' WHERE `siteID` = {$siteOne}");
+    $address = 'clock.suggester@selftest.invalid';
+    $from = $capturedSoFar();
+    $id = $makeEvent('PWT E clock', $siteOne, $reading, ['timezone' => $zone, 'status' => 'draft', 'isPublic' => '0', 'submissionStatus' => 'pending',
+        'submitterName' => 'Clo Ck', 'submitterEmail' => $address]);
+    $moderate($id, 'approve');
+    $db->query("DELETE FROM `tblEvents` WHERE `eventID` = {$id}");
+    $z = $db->prepare('UPDATE `tblSites` SET `timezone` = ? WHERE `siteID` = ?');
+    $z->bind_param('si', $zoneOneWas, $siteOne);
+    $z->execute();
+    $z->close();
+    return (string) (($handedTo($address, $from)[0] ?? [])['body'] ?? '');
+};
+$scnNewYork = static fn (): bool => str_contains($scnClock('America/New_York', '2030-08-03 10:30:00'), 'on Saturday 3 August 2030 at 10:30. ');
+$scnGap     = static fn (): bool => str_contains($scnClock('Europe/London', '2030-03-31 01:30:00'), 'on Sunday 31 March 2030 at 01:30. ');
+check('E21 an event on New York\'s clock, in an organisation on London\'s, is told at 10:30 — its OWN reading, not converted to the organisation\'s clock', $scnNewYork(), true);
+check('E22 an event at 01:30 on the morning London\'s clocks go forward (an hour that does not exist) is told at 01:30, as stored, not moved to 02:30', $scnGap(), true);
+
+// The mail rows go back as they were. The words-watching line stays in the
+// copy's Mailer until the end of this section's plants (they read the HTML).
+$putMailBack();
 
 // =============================================================================
 echo "Q. Noticeboard posters on the public website (#493 P2a)\n";
@@ -3486,7 +3680,7 @@ $p = $plant('_apps/calendar/manage/import.php',
     "'isPublic'      => in_array(\$isPubStr,  ['1', 'true', 'yes', 'y'], true) ? 1 : 0,",
     "'isPublic'      => in_array(\$isPubStr,  ['', '1', 'true', 'yes', 'y'], true) ? 1 : 0,", $scnImportDefault);
 check('P41 with the CSV import treating an empty cell as public again, the imported event is public', [$p['applied'], $p['result']], [true, 1]);
-$p = $plant('_apps/admin/calendar/moderate.php', "'UPDATE tblEvents SET status = \"published\", '", "'UPDATE tblEvents SET status = \"published\", isPublic = 1, '", $scnApprove);
+$p = $plant('_apps/admin/calendar/moderate.php', "'UPDATE `tblEvents` SET `status` = \"published\", '", "'UPDATE `tblEvents` SET `status` = \"published\", `isPublic` = 1, '", $scnApprove);
 check('P42 with Approve setting isPublic = 1 again, an approved suggestion is public with nobody choosing it', [$p['applied'], $p['result'][2] ?? null], [true, 1]);
 // #859 (D-134): the approval e-mail. Each plant takes one guard out of the
 // COPY and re-runs the section E scenario that should catch it. The send log
@@ -3510,8 +3704,36 @@ $p = $plant('_core/EventSuggestions.php',
     "if (\$row === null || \$address === '') {", static fn (): array => $scnNoAddress('not-an-address'));
 check('P123 with the address no longer checked, something that is not an address is handed to the mail route (E10 goes red)',
     [$p['applied'], $p['result'][3] ?? null], [true, 1]);
-$mailSetting('mail.provider', $providerWas);
-$mailSetting('mail.smtp.host', $smtpHostWas);
+// #859 round 2: each finding of round 1's check, planted back in the copy.
+$p = $plant('_core/EventSuggestions.php', ", ['siteId' => \$siteId, 'bodyIsText' => true]);", ", ['siteId' => \$siteId]);", $scnLinkName);
+check('P124 with the e-mail no longer marked as plain text, a stranger\'s link in their name goes out as a WORKING link with no footer (E15 goes red)',
+    [$p['applied'], str_contains((string) (($p['result']['first message'] ?? [])['html'] ?? ''), '<a href="https://evil.example/login">')], [true, true]);
+$p = $plant('_core/Mailer.php', "\$contentHtml = (\$contentIsText === false && preg_match('/<[a-zA-Z][^>]*>/', \$content) === 1)",
+    "\$contentHtml = (preg_match('/<[a-zA-Z][^>]*>/', \$content) === 1)", $scnLinkName);
+check('P125 with the branded wrapper still guessing (only send() told), the link is still sent live: BOTH halves of the option are needed',
+    [$p['applied'], str_contains((string) (($p['result']['first message'] ?? [])['html'] ?? ''), '<a href="https://evil.example/login">')], [true, true]);
+$p = $plant('_apps/admin/calendar/moderate.php',
+    "        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = \"pending\" AND `isDeleted` = 0'\n    );\n} else {",
+    "        . 'WHERE `eventID` = ? AND `siteID` = ? AND `submissionStatus` = \"pending\"'\n    );\n} else {", $scnDeleted);
+check('P126 with Approve no longer refusing a deleted suggestion, pressing it publishes a row nobody can see (E18 goes red)',
+    [$p['applied'], $p['result']['state'] ?? null], [true, ['approved', 'published']]);
+$p = $plant('_apps/admin/calendar/moderation.php', "AND `e`.`submissionStatus` = ? AND `e`.`isDeleted` = 0 '", "AND `e`.`submissionStatus` = ? '", $scnDeleted);
+check('P127 with the moderation list no longer leaving deleted suggestions out, one is listed with live buttons (E18 goes red)',
+    [$p['applied'], $p['result']['listed'] ?? null], [true, true]);
+$whenLine = "\$when = I18n::formatClockDateTime(\$startReading, \$isAllDay === true ? 'l j F Y' : 'l j F Y \\a\\t H:i');";
+$p = $plant('_core/EventSuggestions.php', $whenLine,
+    "\$when = (new \\DateTimeImmutable(\$startReading, new \\DateTimeZone('UTC')))->setTimezone(new \\DateTimeZone(Site::timezone()))->format(\$isAllDay === true ? 'l j F Y' : 'l j F Y \\a\\t H:i');", $scnNewYork);
+check('P128 with the time converted to the organisation\'s clock, the New York event is told the wrong hour (E21 goes red)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/EventSuggestions.php', $whenLine,
+    "\$when = date(\$isAllDay === true ? 'l j F Y' : 'l j F Y \\a\\t H:i', (int) strtotime(\$startReading));", $scnGap);
+check('P129 with the reading put through strtotime() and date(), the event in the hour that does not exist is told 02:30 (E22 goes red)', [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/EventSuggestions.php', '(Mailer::lastIsWaiting() === true ? self::TOLD_WAITING : self::TOLD_SENT)', 'self::TOLD_SENT', $scnKept);
+check('P130 with a kept message counted as sent, the page tells the administrator a message still in the queue "has been e-mailed" (E19 goes red)',
+    [$p['applied'], $p['result']['page said'] ?? null], [true, ['Approved. The person who suggested it has been e-mailed to say so.']]);
+// The words-watching line comes out of the copy's Mailer now, and every mail
+// row goes back as it was.
+file_put_contents($mailerPath, $mailerWas);
+$putMailBack();
 // #493 P2a: the poster rule, the page's permission, and the editor's save.
 $p = $plant('_core/PublicWebsite.php', "'sql'    => \" AND {\$a}.isDeleted = 0 AND {\$a}.showOnWebsite = 1\"", "'sql'    => \" AND {\$a}.isDeleted = 0\"", $scnPosterRule);
 check('P43 with the switch dropped from the poster rule, an unticked poster reaches the public website', [$p['applied'], in_array('PWT Q off', (array) $p['result'], true)], [true, true]);

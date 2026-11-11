@@ -37,13 +37,15 @@ if (in_array($filter, ['pending', 'approved', 'rejected'], true) === false) {
 
 $rows = [];
 $stmt = $mysqli->prepare(
-    'SELECT e.eventID, e.eventName, e.startDateTime, e.endDateTime, e.locationName, e.description, '
-    . '       e.submitterName, e.submitterEmail, e.submittedAt, '
-    . '       COALESCE(u.fullName, e.submitterName, "Anonymous") AS submitterDisplay '
-    . 'FROM tblEvents e '
-    . 'LEFT JOIN tblUsers u ON u.userID = e.submittedByID '
-    . 'WHERE e.siteID = ? AND e.submissionStatus = ? '
-    . 'ORDER BY e.submittedAt DESC LIMIT 100'
+    'SELECT `e`.`eventID`, `e`.`eventName`, `e`.`startDateTime`, `e`.`endDateTime`, `e`.`locationName`, `e`.`description`, '
+    . '       `e`.`submitterName`, `e`.`submitterEmail`, `e`.`submittedAt`, '
+    . '       COALESCE(`u`.`fullName`, `e`.`submitterName`, "Anonymous") AS `submitterDisplay` '
+    . 'FROM `tblEvents` `e` '
+    . 'LEFT JOIN `tblUsers` `u` ON `u`.`userID` = `e`.`submittedByID` '
+    // 🗑️ #859 round 1: a deleted suggestion is left out. It used to be listed
+    //    with live Approve and Reject buttons, and Approve published it.
+    . 'WHERE `e`.`siteID` = ? AND `e`.`submissionStatus` = ? AND `e`.`isDeleted` = 0 '
+    . 'ORDER BY `e`.`submittedAt` DESC LIMIT 100'
 );
 if ($stmt !== false) {
     $stmt->bind_param('is', $siteId, $filter);
@@ -57,9 +59,9 @@ if ($stmt !== false) {
 
 $counts = ['pending' => 0, 'approved' => 0, 'rejected' => 0];
 $stmt = $mysqli->prepare(
-    'SELECT submissionStatus, COUNT(*) AS cnt FROM tblEvents '
-    . 'WHERE siteID = ? AND submissionStatus IS NOT NULL '
-    . 'GROUP BY submissionStatus'
+    'SELECT `submissionStatus`, COUNT(*) AS `cnt` FROM `tblEvents` '
+    . 'WHERE `siteID` = ? AND `submissionStatus` IS NOT NULL AND `isDeleted` = 0 '
+    . 'GROUP BY `submissionStatus`'
 );
 if ($stmt !== false) {
     $stmt->bind_param('i', $siteId);
@@ -75,9 +77,12 @@ if ($stmt !== false) {
 //    at all, so the handler had no way to say whether the person who suggested
 //    an event was e-mailed. The words are the handler's own, from a fixed list
 //    (`EventSuggestions::approvedWords()`); they never name the address.
-$flashMsg  = (string) ($_SESSION['flash_msg']  ?? '');
-$flashType = (string) ($_SESSION['flash_type'] ?? '');
-unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
+//    Its own session key (round 1 of the check): the shared `flash_msg` would
+//    also show a message some OTHER page had left behind.
+$result    = $_SESSION['moderation_result'] ?? null;
+unset($_SESSION['moderation_result']);
+$flashMsg  = is_array($result) === true ? (string) ($result['words'] ?? '') : '';
+$flashType = is_array($result) === true ? (string) ($result['type'] ?? '') : '';
 if (in_array($flashType, ['success', 'info', 'warning', 'danger'], true) === false) {
     $flashType = 'info';
 }
