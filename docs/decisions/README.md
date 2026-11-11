@@ -186,7 +186,8 @@ appended with its real date and a note that it was added later.
 | [D-128](128-a-place-marked-not-anybodys-home-may-show-a-map.md) | 2026-11-11 | A meeting place marked 'not anybody's home' may show a map without a host | in force |
 | [D-129](129-an-event-with-no-end-time-stays-listed-until-the-end-of-its-day.md) | 2026-11-11 | An event with no end time stays on the public website's list until the end of its day, or for a chosen time | in force |
 | [D-130](130-looking-at-expense-records-is-recorded.md) | 2026-11-11 | Looking at expense records is written to the activity log | in force |
+| [D-131](131-a-retyped-home-marked-not-anybodys-home-is-a-known-limit.md) | 2026-11-11 | A home emptied and typed back in as 'not anybody's home' is a known limit, with a warning | in force |
 
-*130 decisions. This index is checked against the folder by
+*131 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
