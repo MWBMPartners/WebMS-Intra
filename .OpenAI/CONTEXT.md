@@ -1800,6 +1800,9 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     one of those tables moved into `web/_core/personal-data-catalogue.php`, beside the column, as `notEmptiedHere`.
     Nothing may be added to the pinned list. Tests: `tools/activity-log-selftest.php`, section 17 of `tools/gdpr-eraser-selftest.php`,
     `tools/gdpr-coverage-selftest.php`, phases 1 and 7 of the migration harness.
+    **…and not in its words (#933; D-137, D-138).** A description is numbers and fixed words, except a failed sign-in's
+    typed name, a refused child-collection name, an organisation's labels and its support e-mail address. Hard gate
+    `check_activity_descriptions_personal.py` (presence only, with `--self-test`); test `activity-description-selftest.php`.
     *(`.claude/CLAUDE.md` → the erasure bullet.)*
 
 24. **The money pages, and when a claim may be changed (#647, #651; 28 October 2026).**
