@@ -19,8 +19,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/322
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -28,6 +29,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\WebPush;
@@ -42,7 +44,17 @@ if (App::isAdmin() === false) {
 $db     = App::db();
 $siteId = Site::id();
 
-$settings = App::settings()['push'] ?? [];
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes every field on this page installation-wide (`siteID IS NULL`), the key
+//    pair included, so every box and every key line shows THAT row. WHAT WAS WRONG:
+//    they were read from the merged settings, where the open organisation's own row
+//    has already won, so a global administrator who opened this page inside such an
+//    organisation saw ITS values, pressed Save untouched, and made them every
+//    organisation's. The banner below ($isConfigured) still says whether push works
+//    for THIS organisation, which is the merged answer and a different question.
+$settings = InstallationSettings::value('push') ?? [];
+$settings = is_array($settings) === true ? $settings : [];
+$installWideDiffering = InstallationSettings::differsHere('push');
 
 $enabled        = (string) ($settings['enabled'] ?? 'false') === 'true';
 $publicKey      = (string) ($settings['vapidPublicKey'] ?? '');
@@ -132,6 +144,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 <?php endif; ?>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <div class="card mb-4">
     <div class="card-header"><strong>VAPID key pair</strong></div>

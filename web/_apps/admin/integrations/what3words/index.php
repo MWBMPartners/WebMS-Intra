@@ -14,8 +14,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/456
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -23,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -33,8 +35,20 @@ if (App::isAdmin() === false) {
     return;
 }
 
-$enabled     = (string) (App::settings('w3w.enabled') ?? 'false') === 'true';
-$hasApiKey   = ((string) (App::settings('w3w.apiKey') ?? '')) !== '';
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes the switch and the key installation-wide (`siteID IS NULL`), so the box
+//    and the "configured" badge show THAT row. WHAT WAS WRONG: they were read from the
+//    merged settings, where the open organisation's own row has already won, so a
+//    global administrator who opened this page inside such an organisation saw ITS
+//    switch, pressed Save untouched, and made it every organisation's.
+$enabled     = (string) (InstallationSettings::value('w3w.enabled') ?? 'false') === 'true';
+$hasApiKey   = ((string) (InstallationSettings::value('w3w.apiKey') ?? '')) !== '';
+$installWideDiffering = InstallationSettings::differsHere('w3w');
+// 🔌 "Test connection" runs with what THIS organisation really uses (What3Words::testConnection()
+//    reads the merged settings), so whether it can be pressed is asked
+//    of those, not of the boxes above.
+$testCanRun  = (string) (App::settings('w3w.enabled') ?? 'false') === 'true'
+    && ((string) (App::settings('w3w.apiKey') ?? '')) !== '';
 
 $flashMsg  = $_SESSION['flash_msg']  ?? '';
 $flashType = $_SESSION['flash_type'] ?? '';
@@ -66,6 +80,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     working <code>///</code> link regardless of this setting — the API is a pure enhancement.
 </div>
 
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
+
 <div class="card mb-4">
     <div class="card-header"><strong>API</strong></div>
     <div class="card-body">
@@ -93,7 +109,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 
         <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/what3words/test'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3 pt-3 border-top">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
-            <button class="btn btn-outline-secondary" type="submit" <?php echo ($enabled === false || $hasApiKey === false) ? 'disabled' : ''; ?>>
+            <button class="btn btn-outline-secondary" type="submit" <?php echo $testCanRun === false ? 'disabled' : ''; ?>>
                 <i class="fa-solid fa-plug me-1"></i>Test connection
             </button>
             <small class="text-muted d-block mt-1">

@@ -5,12 +5,14 @@
  *
  * @package   Portal\Admin
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/272
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  */
 
 declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 use Portal\Core\Sms;
@@ -24,7 +26,23 @@ if (App::isAdmin() === false) {
 
 $db       = App::db();
 $siteId   = Site::id();
-$settings = App::settings()['sms'] ?? [];
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes every field on the provider form installation-wide (`siteID IS NULL`),
+//    the daily limit included, so every box and every "configured" badge shows THAT
+//    row. WHAT WAS WRONG: they were read from the merged settings, where the open
+//    organisation's own row has already won, so a global administrator who opened
+//    this page inside such an organisation saw ITS values, pressed Save untouched,
+//    and made them every organisation's — its daily limit among them.
+$settings = InstallationSettings::value('sms') ?? [];
+$settings = is_array($settings) === true ? $settings : [];
+$installWideDiffering = InstallationSettings::differsHere('sms');
+// 📊 The two summary cards say what THIS organisation is really held to and sending
+//    with, which is what Sms::send() reads: the merged settings. Kept apart from the
+//    boxes on purpose, and labelled as this organisation's.
+$inForce         = App::settings()['sms'] ?? [];
+$inForce         = is_array($inForce) === true ? $inForce : [];
+$dailyCapInForce = (int) ($inForce['dailyCap'] ?? 100);
+$providerInForce = (string) ($inForce['provider'] ?? 'twilio');
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
 $provider = (string) ($settings['provider'] ?? 'twilio');
 $dailyCap = (int) ($settings['dailyCap'] ?? 100);
@@ -78,7 +96,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="col-md-4">
         <div class="card"><div class="card-body">
             <div class="small text-muted">Sent today</div>
-            <div class="display-6"><?php echo (int) $sentToday; ?> <span class="fs-6 text-muted">/ <?php echo (int) $dailyCap; ?> cap</span></div>
+            <div class="display-6"><?php echo (int) $sentToday; ?> <span class="fs-6 text-muted">/ <?php echo (int) $dailyCapInForce; ?> cap</span></div>
         </div></div>
     </div>
     <div class="col-md-4">
@@ -89,11 +107,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
     <div class="col-md-4">
         <div class="card"><div class="card-body">
-            <div class="small text-muted">Provider</div>
-            <div class="display-6"><?php echo htmlspecialchars($provider, ENT_QUOTES, 'UTF-8'); ?></div>
+            <div class="small text-muted">Provider in use here</div>
+            <div class="display-6"><?php echo htmlspecialchars($providerInForce, ENT_QUOTES, 'UTF-8'); ?></div>
         </div></div>
     </div>
 </div>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <div class="card mb-3">
     <div class="card-header"><strong>Provider configuration</strong></div>

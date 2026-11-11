@@ -14,8 +14,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/456
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -23,6 +24,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -33,8 +35,18 @@ if (App::isAdmin() === false) {
     return;
 }
 
-$hasGoogleKey = ((string) (App::settings('geo.google.apiKey') ?? '')) !== '';
-$autoGeocode  = (string) (App::settings('geo.autoGeocode') ?? 'false') === 'true';
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes both of these installation-wide (`siteID IS NULL`), so the box and the
+//    "configured" badge must show THAT row. WHAT WAS WRONG: they were read from the
+//    merged settings, where the open organisation's own row has already won, so a
+//    global administrator who opened this page inside such an organisation saw ITS
+//    switch, pressed Save without touching anything, and made it every organisation's.
+$hasGoogleKey = ((string) (InstallationSettings::value('geo.google.apiKey') ?? '')) !== '';
+$autoGeocode  = (string) (InstallationSettings::value('geo.autoGeocode') ?? 'false') === 'true';
+// 🔎 Said on the page when this organisation uses something else (names only).
+$installWideDiffering = InstallationSettings::differsHere('geo');
+// 📮 The contact Nominatim is told is the EFFECTIVE one for this organisation:
+//    it is what the lookup really sends, and this page does not save it.
 $contactEmail = (string) (App::settings('privacy.contactEmail') ?? '');
 if ($contactEmail === '') {
     $contactEmail = (string) (App::settings('mail.defaultFromAddress') ?? '');
@@ -84,6 +96,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <code><?php echo $contactEmail !== '' ? htmlspecialchars($contactEmail, ENT_QUOTES, 'UTF-8') : 'not set'; ?></code>
     (<a href="<?php echo htmlspecialchars(Site::url('admin/settings'), ENT_QUOTES, 'UTF-8'); ?>">privacy.contactEmail</a>, falling back to <code>mail.defaultFromAddress</code>).
 </div>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <div class="card mb-4">
     <div class="card-header"><strong>Provider</strong></div>

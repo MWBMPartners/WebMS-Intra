@@ -41,9 +41,10 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.1.1
+ * @version   1.2.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/275
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * @link      https://github.com/MWBMPartners/CueRCode
  * -----------------------------------------------------------------------------
  */
@@ -52,6 +53,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
 use Portal\Core\PortalAddress;
 use Portal\Core\Qr;
@@ -120,11 +122,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // 💾 Only a global administrator with a valid token reaches this point.
         $db = App::db();
 
-        // The two ordinary, non-secret settings. Saved as before.
-        $values = [
-            'portal.qr.provider'              => in_array($_POST['provider'] ?? 'local', ['local','cuercode'], true) ? (string) $_POST['provider'] : 'local',
-            'portal.qr.cuercode.api_endpoint' => trim((string) ($_POST['endpoint'] ?? '')),
-        ];
+        // The two ordinary, non-secret settings.
+        //
+        // 📥 EACH IS WRITTEN ONLY WHEN ITS FIELD ARRIVED (#943, the #936/#677 rule).
+        //    WHAT WAS WRONG: a request without `provider` stored 'local' and one
+        //    without `endpoint` stored '' — so a form missing a field (an old copy of
+        //    the page, or the radio group with neither button ticked, which sends
+        //    nothing at all) quietly changed a setting nobody touched. A provider that
+        //    arrived but is not one of the two offered is still stored as 'local', as
+        //    before: that is a choice somebody made, of something this page offers.
+        $values = [];
+        if (array_key_exists('provider', $_POST) === true) {
+            $values['portal.qr.provider'] = in_array($_POST['provider'], ['local', 'cuercode'], true) === true
+                ? (string) $_POST['provider']
+                : 'local';
+        }
+        if (array_key_exists('endpoint', $_POST) === true) {
+            $values['portal.qr.cuercode.api_endpoint'] = is_string($_POST['endpoint']) === true ? trim($_POST['endpoint']) : '';
+        }
 
         // 🔐 The CueRCode API key is a secret, and is handled separately.
         //
@@ -201,6 +216,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ? 'QR settings saved, including the new API key.'
                 : 'QR settings saved. The API key was left as it was.';
             $flashType = 'success';
+            // 🪞 The boxes below are drawn from what is stored, and start-up read
+            //    that before this save; so what was just written is laid over it,
+            //    or the page would show the old values beside "saved".
+            $qrJustSaved = $values;
+            if ($encryptedApiKey !== null) {
+                $qrJustSaved['portal.qr.cuercode.api_key'] = 'set';
+            }
         } catch (\Throwable $e) {
             $flash = 'Save failed: ' . $e->getMessage();
             $flashType = 'danger';
@@ -208,10 +230,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$settings = App::settings();
-$provider = (string) ($settings['portal']['qr']['provider'] ?? 'local');
-$endpoint = (string) ($settings['portal']['qr']['cuercode']['api_endpoint'] ?? '');
-$apiKey   = (string) ($settings['portal']['qr']['cuercode']['api_key'] ?? '');
+// 🏢 FROM THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). The
+//    save above writes all three installation-wide (`siteID IS NULL`), so the boxes
+//    show THAT row. WHAT WAS WRONG: they were read from the merged settings, where the
+//    open organisation's own row has already won, so a global administrator who
+//    opened this page inside such an organisation saw ITS provider and address,
+//    pressed Save untouched, and made them every organisation's. The check found it
+//    only once it read a page that is its own saver (#936).
+$qrJustSaved = $qrJustSaved ?? [];
+$qrStored    = static fn (string $key): string => (string) ($qrJustSaved[$key] ?? InstallationSettings::value($key) ?? '');
+$provider = $qrStored('portal.qr.provider');
+$provider = $provider !== '' ? $provider : 'local';
+$endpoint = $qrStored('portal.qr.cuercode.api_endpoint');
+// 🔒 Read only to learn whether a key is SET, for the hint in the empty box; the box
+//    itself is never filled, so the key never reaches the page.
+$apiKey   = $qrStored('portal.qr.cuercode.api_key');
+$installWideDiffering = InstallationSettings::differsHere('portal.qr');
 // 🔒 Always eight dots. This used to print one dot per character of the key
 //    (between 8 and 24). For a key saved on this page that gave nothing away,
 //    but only because the portal never decrypted a stored secret (#497): the
@@ -261,6 +295,8 @@ $readOnlyAttr = $mayChangePortalWideSettings === false ? ' disabled' : '';
         them. You can see the current choice here.
     </div>
 <?php endif; ?>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <div class="row g-3">
     <div class="col-md-8">

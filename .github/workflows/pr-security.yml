@@ -1461,12 +1461,14 @@ jobs:
       # its own value, sees it, and presses Save without touching anything - it
       # is now everyone's. That is the wrong direction across a boundary between
       # two parties, which may be a hosting provider and its customers.
-      # Fifteen pages had this shape; the pending list beside the check names
-      # the fourteen still to fix, so no NEW page can join them.
+      # The pending list beside the check has been EMPTY since #943
+      # (11 November 2026), when the last thirteen pages were fixed, so this
+      # runs with --strict: a line added back to that list fails here too.
+      # tools/install-wide-prefill-selftest.php drives those pages over HTTP.
       - name: 'No form prefills an installation-wide setting from the merged array (hard gate, #674)'
         id: install_wide_prefill
         if: always()
-        run: python3 -I tools/audit-checks/check_install_wide_prefill.py
+        run: python3 -I tools/audit-checks/check_install_wide_prefill.py --strict
 
       # A LIMIT an organisation can set is capped by the installation (#668).
       # Same boundary as the check above and the opposite direction of travel:

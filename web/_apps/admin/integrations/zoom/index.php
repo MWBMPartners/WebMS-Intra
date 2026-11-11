@@ -5,12 +5,14 @@
  *
  * @package   Portal\Admin
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/274
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  */
 
 declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -23,7 +25,22 @@ if (App::isAdmin() === false) {
 
 $db       = App::db();
 $siteId   = Site::id();
-$settings = App::settings()['zoom'] ?? [];
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes every field on the credentials form installation-wide (`siteID IS NULL`),
+//    so every box and every "configured" badge shows THAT row. WHAT WAS WRONG: they
+//    were read from the merged settings, where the open organisation's own row has
+//    already won, so a global administrator who opened this page inside such an
+//    organisation saw ITS values, pressed Save untouched, and made them every
+//    organisation's.
+$settings = InstallationSettings::value('zoom') ?? [];
+$settings = is_array($settings) === true ? $settings : [];
+$installWideDiffering = InstallationSettings::differsHere('zoom');
+// 🔗 Connecting, and the per-user list, follow what THIS organisation really uses:
+//    connect.php reads the merged settings. Kept apart from the boxes on purpose.
+$merged       = App::settings()['zoom'] ?? [];
+$merged       = is_array($merged) === true ? $merged : [];
+$connectCanRun = ((string) ($merged['clientID'] ?? '')) !== '' && ((string) ($merged['clientSecret'] ?? '')) !== '';
+$modeInForce   = (string) ($merged['mode'] ?? 'org');
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
 $mode     = (string) ($settings['mode'] ?? 'org');
 $clientId = (string) ($settings['clientID'] ?? '');
@@ -90,6 +107,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </div>
 <p class="text-secondary">Create Zoom meetings from calendar events; auto-link recordings via webhook.</p>
 
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
+
 <div class="card mb-4">
     <div class="card-header"><strong>OAuth credentials</strong></div>
     <div class="card-body">
@@ -142,7 +161,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <input type="hidden" name="accountID" value="<?php echo (int) $orgAccount['accountID']; ?>">
                 <button type="submit" class="btn btn-outline-danger btn-sm" data-confirm="Disconnect the org Zoom account?">Disconnect</button>
             </form>
-        <?php elseif ($clientId === '' || $hasSecret === false): ?>
+        <?php elseif ($connectCanRun === false): ?>
             <p class="text-muted mb-0">Configure Client ID + Secret above before connecting.</p>
         <?php else: ?>
             <a href="<?php echo htmlspecialchars(Site::url('admin/integrations/zoom/connect'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-primary"><i class="fa-solid fa-link me-1"></i>Connect Zoom account</a>
@@ -150,7 +169,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 </div>
 
-<?php if ($mode === 'user' && count($userAccounts) > 0): ?>
+<?php if ($modeInForce === 'user' && count($userAccounts) > 0): ?>
     <div class="card mb-4">
         <div class="card-header"><strong>Connected user accounts</strong></div>
         <div class="card-body">

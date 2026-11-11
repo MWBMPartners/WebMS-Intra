@@ -5,6 +5,7 @@
  *
  * @package   Portal\Admin
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/143
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  */
 
 declare(strict_types=1);
@@ -12,6 +13,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\ErrorMonitor;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -22,9 +24,20 @@ if (App::isAdmin() === false) {
     return;
 }
 
-$settings = App::settings()['monitoring'] ?? [];
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes every field on this form installation-wide (`siteID IS NULL`), so every
+//    box shows THAT row. WHAT WAS WRONG: they were read from the merged settings,
+//    where the open organisation's own row has already won, so a global administrator
+//    who opened this page inside such an organisation saw ITS values, pressed Save
+//    untouched, and made them every organisation's.
+$settings = InstallationSettings::value('monitoring') ?? [];
+$settings = is_array($settings) === true ? $settings : [];
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
 $hasDsn   = ((string) ($settings['sentryDsn'] ?? '')) !== '';
+$installWideDiffering = InstallationSettings::differsHere('monitoring');
+// 📮 "Send test event" sends with the DSN THIS organisation really uses (the merged
+//    settings), so whether it is offered is asked of those, not of the boxes.
+$testCanRun = ((string) (App::settings('monitoring.sentryDsn') ?? '')) !== '';
 $env      = (string) ($settings['environment'] ?? App::env());
 $sample   = (string) ($settings['sampleRate'] ?? '1.0');
 
@@ -49,6 +62,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     service (Sentry / GlitchTip) so errors are captured even when the portal's
     own database is unreachable. Silent no-op when DSN is empty.
 </p>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <div class="card mb-3">
     <div class="card-header"><strong>Configuration</strong></div>
@@ -81,7 +96,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             </div>
         </form>
 
-        <?php if ($hasDsn === true): ?>
+        <?php if ($testCanRun === true): ?>
             <!-- 📮 A SEPARATE form, deliberately OUTSIDE the one above.
                  It used to sit inside it. A form cannot contain another form —
                  browsers do not nest them, they discard the inner one — so the

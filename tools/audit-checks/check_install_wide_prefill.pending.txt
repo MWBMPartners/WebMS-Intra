@@ -27,26 +27,22 @@
 # layer. The check FAILS on a line that no longer has the fault, so this list
 # cannot quietly go stale.
 
-web/_apps/admin/ai-assist/index.php                        # ai_assist — includes monthCapPence, a MONEY limit, so this one is also a live #668 instance
-web/_apps/admin/captcha/index.php                          # auth — the bot-check keys for the whole installation
-web/_apps/admin/hymns.php                                  # hymns, service_plans
-web/_apps/admin/integrations/cloudflare-stream/index.php   # cfstream — includes an API token
-web/_apps/admin/integrations/geocoding/index.php           # geo — includes an API key
-web/_apps/admin/integrations/monitoring/index.php          # monitoring — includes the error-reporting address
-web/_apps/admin/integrations/index.php                     # mail — the Microsoft 365 mailbox fields
-web/_apps/admin/integrations/push/index.php                # push
-web/_apps/admin/integrations/what3words/index.php          # w3w — includes an API key
-web/_apps/admin/integrations/zoom/index.php                # zoom — includes a client secret and a webhook secret
-web/_apps/admin/sms/index.php                              # sms — includes credentials and dailyCap, another limit
-
-# ── ADDED 10 NOVEMBER 2026, WHEN THE CHECK STARTED READING A PAGE THAT IS ITS OWN SAVER (#936) ──
+# ── EMPTIED 11 NOVEMBER 2026 (#943) ───────────────────────────────────────────
 #
-# Both had the fault before the check could see it; neither is new. They were
-# found the day the Sabbath page (#936) showed that "a page that is its own
-# saver is never examined" was hiding live instances, and the check was widened
-# to examine such a page key by key. The whole list is tracked as #943.
-web/_apps/admin/maintenance/backup.php                     # backup.schedule.frequency and keep, read through $SETTINGS (measured 30 October 2026; see the header's limit 7)
-web/_apps/admin/settings/qr/index.php                      # portal.qr.provider and the CueRCode address; the API key read is for the "currently set" hint only, the box itself is never prefilled
+# All thirteen pages that were listed here now fill every installation-wide box
+# from the installation's own rows, through `InstallationSettings::value()` (or
+# `::layer()`), and say so on the page when the open organisation holds a value
+# of its own (`InstallationSettings::differsHere()`, the one notice
+# `_core/templates/install-wide-notice.php`). The behaviour is driven over HTTP,
+# page by page, by `tools/install-wide-prefill-selftest.php`: an organisation is
+# given its own value, a global administrator opens the page inside it, presses
+# Save untouched, and the installation's row and the organisation's row must both
+# be unchanged. Nothing may be added to this list: `--strict` now passes, and a
+# NEW page with the fault fails the check outright.
+#
+# The header's warning stands for whoever reads a future finding: a page that
+# reads the layer for ONE field and the merged array for another is still not
+# reported by the check. The self-test above is what covers the thirteen.
 
 # ── STILL NOT SEEN ─────────────────────────────────────────────────────────────
 #

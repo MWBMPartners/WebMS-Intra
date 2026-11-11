@@ -16,8 +16,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026 MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.0.0
+ * @version   1.1.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/128
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -26,6 +27,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Hymnal;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -70,14 +72,23 @@ if ($viewHymnalId > 0) {
     }
 }
 
-$remote = (array) (App::settings('hymns') ?? []);
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). hymns-save.php
+//    writes the remote-lookup settings and the public Order-of-Service switch
+//    installation-wide (`siteID IS NULL`), so every box shows THAT row. WHAT WAS
+//    WRONG: they were read from the merged settings, where the open organisation's own
+//    row has already won, so a global administrator who opened this page inside such
+//    an organisation saw ITS values, pressed Save untouched, and made them every
+//    organisation's.
+$remote = InstallationSettings::value('hymns') ?? [];
+$remote = is_array($remote) === true ? $remote : [];
+$installWideDiffering = InstallationSettings::differsHere('hymns', 'service_plans.public_share');
 $remoteEnabled = (string) ($remote['remote']['enabled']  ?? 'false') === 'true';
 $remoteHost    = (string) ($remote['remote']['host']     ?? '');
 $remoteBaseUrl = (string) ($remote['remote']['baseUrl']  ?? '');
 $remoteHasKey  = (string) ($remote['remote']['apiKey']   ?? '') !== '';
 $remoteTtl     = (int) ($remote['remote']['cacheTtl']    ?? 86400);
 
-$publicShareEnabled = (string) (App::settings('service_plans.public_share.enabled') ?? 'false') === 'true';
+$publicShareEnabled = (string) (InstallationSettings::value('service_plans.public_share.enabled') ?? 'false') === 'true';
 
 $flashMsg  = (string) ($_SESSION['flash_msg']  ?? '');
 $flashType = (string) ($_SESSION['flash_type'] ?? '');
@@ -225,6 +236,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     </div>
 
     <!-- ═══════════════ Remote (Tier 2) provider settings ═══════════════ -->
+    <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
+
     <div class="card mb-3">
         <div class="card-header"><strong>Remote lookup (optional, off by default)</strong></div>
         <div class="card-body">
@@ -273,12 +286,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         </div>
     </div>
 
-    <!-- ═══════════════ Public Order of Service — site-level switch ═══════════════ -->
+    <!-- ═══════════════ Public Order of Service — installation-wide switch ═══════════════
+         It used to call itself "site-level" and "on this site", which was untrue:
+         hymns-save.php saves it with no organisation (`siteID IS NULL`), so it
+         applies to every organisation on the installation (#943). -->
     <div class="card mb-3">
         <div class="card-header"><strong>Public Order of Service</strong></div>
         <div class="card-body">
             <p class="small text-muted">
-                Site-level switch for the congregation-facing <code>/os/{token}</code> view.
+                Installation-wide switch (every organisation here) for the congregation-facing <code>/os/{token}</code> view.
                 Off by default — even when on here, a plan is only public once its own editor
                 enables sharing (see the Share panel on a service plan). Presenter names are
                 shown; internal notes/AV cues are never included.
@@ -288,7 +304,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <input type="hidden" name="action" value="public_share_toggle">
                 <div class="form-check">
                     <input type="checkbox" class="form-check-input" id="publicShareEnabled" name="enabled" value="1" <?php echo $publicShareEnabled === true ? 'checked' : ''; ?> data-portal-submit-on-change>
-                    <label class="form-check-label" for="publicShareEnabled">Allow public Order-of-Service sharing on this site</label>
+                    <label class="form-check-label" for="publicShareEnabled">Allow public Order-of-Service sharing (every organisation on this installation)</label>
                 </div>
             </form>
         </div>

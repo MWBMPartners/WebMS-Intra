@@ -27,6 +27,7 @@
  * @license   All Rights Reserved
  * @version   1.0.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/234
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -34,6 +35,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
 use Portal\Core\Mailer;
 use Portal\Core\MailerGoogle;
@@ -223,16 +225,35 @@ foreach ($ms365GraphSettings as $key => $label) {
 }
 
 // -- MS365 Graph shared-mailbox sending (#234) --
-$sharedMailboxAddr = trim((string) (App::settings('mail.ms365.sharedMailbox') ?? ''));
-$sharedMailboxName = trim((string) (App::settings('mail.ms365.sharedMailboxName') ?? ''));
-$saveToSentItems    = ((string) (App::settings('mail.ms365.saveToSentItems') ?? 'true')) === 'true';
-$fallbackProvider   = (string) (App::settings('mail.fallbackProvider') ?? '');
-$ms365Mode          = $sharedMailboxAddr !== '' ? 'ms365-shared' : 'ms365';
+//
+// 🏢 THE FOUR BOXES SHOW THE INSTALLATION'S OWN ROWS, never the merged settings
+//    (#943, #674). ms365-mail-save.php writes all four installation-wide
+//    (`siteID IS NULL`). WHAT WAS WRONG: they were read from the merged settings,
+//    where the open organisation's own row has already won, so a global
+//    administrator who opened this page inside such an organisation saw ITS mailbox,
+//    pressed Save untouched, and made it the mailbox every organisation's mail is
+//    sent from.
+$sharedMailboxAddr = trim((string) (InstallationSettings::value('mail.ms365.sharedMailbox') ?? ''));
+$sharedMailboxName = trim((string) (InstallationSettings::value('mail.ms365.sharedMailboxName') ?? ''));
+$saveToSentItems    = ((string) (InstallationSettings::value('mail.ms365.saveToSentItems') ?? 'true')) === 'true';
+$fallbackProvider   = (string) (InstallationSettings::value('mail.fallbackProvider') ?? '');
+$installWideDiffering = InstallationSettings::differsHere(
+    'mail.ms365.sharedMailbox',
+    'mail.ms365.sharedMailboxName',
+    'mail.ms365.saveToSentItems',
+    'mail.fallbackProvider'
+);
+// 📤 "Active mode" and the sender shown below say what THIS organisation's mail is
+//    really sent with, which is what Mailer reads: the merged settings. Kept apart
+//    from the boxes on purpose.
+$mailboxInForce     = trim((string) (App::settings('mail.ms365.sharedMailbox') ?? ''));
+$mailboxNameInForce = trim((string) (App::settings('mail.ms365.sharedMailboxName') ?? ''));
+$ms365Mode          = $mailboxInForce !== '' ? 'ms365-shared' : 'ms365';
 // 🔍 Display-only mirror of Mailer::effectiveSender() — read-only, never
 //    used to send; the real resolution lives in _core/Mailer.php.
-$effectiveFromAddr = $sharedMailboxAddr !== '' ? $sharedMailboxAddr : (string) (App::settings('mail.defaultFromAddress') ?? '');
-$effectiveFromName = $sharedMailboxAddr !== ''
-    ? ($sharedMailboxName !== '' ? $sharedMailboxName : (string) (App::settings('mail.defaultFromName') ?? ''))
+$effectiveFromAddr = $mailboxInForce !== '' ? $mailboxInForce : (string) (App::settings('mail.defaultFromAddress') ?? '');
+$effectiveFromName = $mailboxInForce !== ''
+    ? ($mailboxNameInForce !== '' ? $mailboxNameInForce : (string) (App::settings('mail.defaultFromName') ?? ''))
     : (string) (App::settings('mail.defaultFromName') ?? '');
 
 // -- Most recent tblEmailLog row — "last send" indicator (#234) --
@@ -503,6 +524,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 </div>
             <?php endif; ?>
         </div>
+
+        <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
         <form method="POST" action="<?php echo htmlspecialchars(Site::url('admin/integrations/ms365-mail-save'), ENT_QUOTES, 'UTF-8'); ?>" class="row g-2">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">

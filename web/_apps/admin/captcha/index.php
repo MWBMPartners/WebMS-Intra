@@ -74,6 +74,7 @@
  * @version   0.13.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/597
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -82,6 +83,7 @@ declare(strict_types=1);
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Captcha;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\SecretSettings;
 use Portal\Core\Site;
@@ -114,23 +116,35 @@ unset($_SESSION['flash_msg'], $_SESSION['flash_type']);
 // -----------------------------------------------------------------------------
 // 📋 Pull current config snapshot
 // -----------------------------------------------------------------------------
-$providers       = Captcha::listProviders();   // ordered per priority
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes the priority order and every key installation-wide (`siteID IS NULL`),
+//    so the order the priority form posts, every key box and every "configured"
+//    badge come from THAT layer. WHAT WAS WRONG: they were read from the merged
+//    settings, where the open organisation's own row has already won, so a global
+//    administrator who opened this page inside such an organisation saw ITS order and
+//    site keys, pressed Save untouched, and made them every organisation's.
+//    The "Active" badge is still the provider THIS organisation's forms really use
+//    (Captcha::activeProvider() reads the merged settings) — a different question.
+$providers       = Captcha::listProviders(InstallationSettings::layer());   // ordered per the installation's priority
 $activeProvider  = Captcha::activeProvider();  // '' if nothing configured
+$installWideDiffering = InstallationSettings::differsHere(
+    'auth.captcha', 'auth.turnstile', 'auth.recaptcha', 'auth.hcaptcha'
+);
 
 // 🔑 The secret keys are read ONLY to learn whether each is set. Their values
 //    are never kept in a variable here, so nothing below can print one. See
 //    "A SECRET KEY IS NEVER PUT INTO THIS PAGE" in the file header.
-$turnstileSite      = (string) (App::settings('auth.turnstile.siteKey')   ?? '');
-$turnstileHasSecret = ((string) (App::settings('auth.turnstile.secretKey') ?? '')) !== '';
+$turnstileSite      = (string) (InstallationSettings::value('auth.turnstile.siteKey')   ?? '');
+$turnstileHasSecret = ((string) (InstallationSettings::value('auth.turnstile.secretKey') ?? '')) !== '';
 
-$recaptchaSite      = (string) (App::settings('auth.recaptcha.siteKey')   ?? '');
-$recaptchaHasSecret = ((string) (App::settings('auth.recaptcha.secretKey') ?? '')) !== '';
-$recaptchaVer    = (string) (App::settings('auth.recaptcha.version')   ?? 'v2');
-$recaptchaV3Act  = (string) (App::settings('auth.recaptcha.v3.action')    ?? 'submit');
-$recaptchaV3Thr  = (string) (App::settings('auth.recaptcha.v3.threshold') ?? '0.5');
+$recaptchaSite      = (string) (InstallationSettings::value('auth.recaptcha.siteKey')   ?? '');
+$recaptchaHasSecret = ((string) (InstallationSettings::value('auth.recaptcha.secretKey') ?? '')) !== '';
+$recaptchaVer    = (string) (InstallationSettings::value('auth.recaptcha.version')   ?? 'v2');
+$recaptchaV3Act  = (string) (InstallationSettings::value('auth.recaptcha.v3.action')    ?? 'submit');
+$recaptchaV3Thr  = (string) (InstallationSettings::value('auth.recaptcha.v3.threshold') ?? '0.5');
 
-$hcaptchaSite       = (string) (App::settings('auth.hcaptcha.siteKey')   ?? '');
-$hcaptchaHasSecret  = ((string) (App::settings('auth.hcaptcha.secretKey') ?? '')) !== '';
+$hcaptchaSite       = (string) (InstallationSettings::value('auth.hcaptcha.siteKey')   ?? '');
+$hcaptchaHasSecret  = ((string) (InstallationSettings::value('auth.hcaptcha.secretKey') ?? '')) !== '';
 
 // 🚫 Stored keys that cannot be read (see the file header). The words for the
 //    notice come from Captcha, so this page and the health page say the same.
@@ -291,6 +305,8 @@ $providerIcon = static function (string $key): string {
         <strong>No provider is currently active.</strong>
     <?php endif; ?>
 </div>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <!-- ============================================================================ -->
 <!-- 🪜 Priority list (drag-and-drop) -->

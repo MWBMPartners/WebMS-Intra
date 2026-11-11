@@ -467,12 +467,23 @@ class Captcha
      * `unreadable` is true for a provider with a stored key that cannot be
      * read; `configured` is false for it, because it is not usable.
      *
+     * WHICH SETTINGS ARE JUDGED (#943). With no argument, the merged settings
+     * — what this organisation's forms really get. The admin page passes the
+     * INSTALLATION's own layer instead, because its priority form posts the
+     * order it draws and the save writes that order installation-wide: drawn
+     * from the merged settings, a global administrator inside an organisation
+     * with its own order who pressed Save Priority untouched made that order
+     * every organisation's (#674's shape).
+     *
+     * @param array<string,mixed>|null $from The settings to judge; null for the merged ones.
+     *
      * @return array<int,array{key:string,label:string,configured:bool,unreadable:bool}>
      */
-    public static function listProviders(): array
+    public static function listProviders(?array $from = null): array
     {
         global $SETTINGS;
-        $priority = self::resolvePriority($SETTINGS);
+        $judged   = $from ?? (is_array($SETTINGS) === true ? $SETTINGS : []);
+        $priority = self::resolvePriority($judged);
 
         // 🔍 Make sure every known provider appears in the list (in case the
         // stored priority drops one).  Known providers missing from priority
@@ -497,7 +508,7 @@ class Captcha
             $result[] = [
                 'key'        => $key,
                 'label'      => $all[$key],
-                'configured' => $unreadable === false && self::isProviderConfigured($key, $SETTINGS) === true,
+                'configured' => $unreadable === false && self::isProviderConfigured($key, $judged) === true,
                 'unreadable' => $unreadable,
             ];
         }

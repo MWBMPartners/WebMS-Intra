@@ -250,6 +250,7 @@ admin-password|tools/admin-password-selftest.php|selftest_adminpwd|web:admin-pas
 self-service-password|tools/self-service-password-selftest.php|selftest_sspwd|web:self-service-password SELFTEST_WEB_PORT=9088
 event-repeat-pages|tools/event-repeat-pages-selftest.php|selftest_evrep|web:event-repeat SELFTEST_WEB_PORT=9077
 transcription-pages|tools/transcription-pages-selftest.php|selftest_transcription|web:transcription SELFTEST_WEB_PORT=9081
+install-wide-prefill|tools/install-wide-prefill-selftest.php|selftest_installwide|web:install-wide-prefill SELFTEST_WEB_PORT=9943
 settings-secrets|tools/settings-secrets-selftest.php|selftest_settingssecrets|web:settings-secrets SELFTEST_WEB_PORT=9640 SELFTEST_MAIL_PORT=9641
 sign-in-limits|tools/sign-in-limits-selftest.php|selftest_signinlimits|web:sign-in-limits SELFTEST_WEB_PORT=9520 SELFTEST_MAIL_PORT=9521
 time-zones|tools/time-zones-selftest.php|selftest_timezones|web:time-zones SELFTEST_WEB_PORT=9861

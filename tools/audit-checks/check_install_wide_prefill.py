@@ -47,7 +47,9 @@ that reported that would be telling somebody to undo the fix.
 
 The cost of that term, stated plainly: **a page that reads the layer for one
 field and the merged array for another is NOT reported.** A half-done fix
-passes. The pending list is what covers the pages known to need one, and a
+passes. The pending list used to cover the pages known to need one; it has
+been empty since #943 (11 November 2026), when all thirteen were fixed and
+`tools/install-wide-prefill-selftest.php` began driving each one over HTTP. A
 reader of a finding still has to look at the page.
 
 **Why a `<form>` is required, and this is the whole reason the check is
@@ -120,7 +122,8 @@ than none
    pages, and all three really have the fault: the Sabbath page (fixed by
    #936), `admin/maintenance/backup.php` (`backup.schedule.frequency` and
    `keep`) and `admin/settings/qr/index.php` (`portal.qr.provider` and the
-   CueRCode address). The last two are on the pending list.
+   CueRCode address). The last two were on the pending list until #943 fixed
+   them.
    What it still cannot see: a key the page builds rather than writes out
    whole (`'backup.' . $part`), a key written through a helper whose argument
    is not one of the three shapes (`$save('a.b', $value)`), a box filled from a
@@ -212,9 +215,10 @@ WRITES_INSTALL_WIDE = re.compile(
 #    installation-wide went completely unnoticed.
 #
 #    That is the worst possible direction, because **passing the level in is
-#    exactly the pattern the fourteen pages still on the pending list should
-#    adopt.** Every one of them fixed that way would quietly leave this check's
-#    view, and the list would empty while the coverage emptied with it.
+#    exactly the pattern a page with the fault could adopt to be fixed.** Any
+#    page fixed that way would quietly leave this check's view, and a pending
+#    list would empty while the coverage emptied with it. (The thirteen that
+#    were on the list were fixed another way, by reading the layer, in #943.)
 #
 #    So such a file is NAMED here with the reason the fault cannot arise in it,
 #    and an unlisted one FAILS. This check cannot judge which of a run-time
@@ -347,7 +351,16 @@ def reads_layer(code: str) -> bool:
     #    mentions InstallationSettings by name. Without this, every page the
     #    sweep fixes would start being reported as a fault, which is the
     #    "telling somebody to undo the fix" failure this term exists to prevent.
-    return "InstallationSettings::layer" in code or "SettingLimit::" in code
+    #
+    # 🏢 `InstallationSettings::value(` counts too (#943). It walks the same
+    #    layer by dotted name, and it is how the thirteen pages that were on the
+    #    pending list read their boxes now. `InstallationSettings::differsHere(`
+    #    deliberately does NOT count on its own: it reports a difference and
+    #    fills no box, so a page calling only that would still be filling its
+    #    boxes from the merged array.
+    return ("InstallationSettings::layer" in code
+            or "InstallationSettings::value(" in code
+            or "SettingLimit::" in code)
 
 
 def findings() -> tuple[list[tuple[str, str, str]], str | None, list[str]]:

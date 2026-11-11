@@ -28,8 +28,9 @@
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2025-present MWBM Partners Ltd (t/a MWservices)
  * @license   All Rights Reserved
- * @version   1.4.0
+ * @version   1.5.0
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/386
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -37,6 +38,7 @@ declare(strict_types=1);
 
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -47,7 +49,19 @@ if (App::isAdmin() === false) {
     return;
 }
 
-$settings = App::settings()['cfstream'] ?? [];
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes every field on this form installation-wide (`siteID IS NULL`), so every
+//    box and every "configured" badge shows THAT row. WHAT WAS WRONG: they were read
+//    from the merged settings, where the open organisation's own row has already won,
+//    so a global administrator who opened this page inside such an organisation saw ITS
+//    values, pressed Save untouched, and made them every organisation's.
+$settings = InstallationSettings::value('cfstream') ?? [];
+$settings = is_array($settings) === true ? $settings : [];
+$installWideDiffering = InstallationSettings::differsHere('cfstream');
+// 🔌 "Test connection" runs with what THIS organisation really uses (the merged
+//    settings), so whether it can be pressed is asked of those, not of the boxes.
+$testCanRun = ((string) (App::settings('cfstream.apiToken') ?? '')) !== ''
+    && ((string) (App::settings('cfstream.accountID') ?? '')) !== '';
 
 $enabled                  = (string) ($settings['enabled'] ?? 'false') === 'true';
 $accountId                = (string) ($settings['accountID'] ?? '');
@@ -93,6 +107,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <li><strong>API token</strong> — reserved for the direct-upload feature (coming soon); not used by anything in this release.</li>
     </ul>
 </div>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <div class="card mb-4">
     <div class="card-header"><strong>Account</strong></div>
@@ -179,7 +195,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <form method="post" action="<?php echo htmlspecialchars(Site::url('admin/integrations/cloudflare-stream/test'), ENT_QUOTES, 'UTF-8'); ?>" class="mt-3 pt-3 border-top">
             <input type="hidden" name="csrf_token" value="<?php echo $csrf; ?>">
             <button class="btn btn-outline-secondary" type="submit"
-                    <?php echo ($hasApiToken === false || $accountId === '') ? 'disabled' : ''; ?>>
+                    <?php echo $testCanRun === false ? 'disabled' : ''; ?>>
                 <i class="fa-solid fa-plug me-1"></i>Test connection
             </button>
             <small class="text-muted d-block mt-1">

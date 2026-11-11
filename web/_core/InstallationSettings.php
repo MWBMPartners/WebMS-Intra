@@ -125,4 +125,96 @@ final class InstallationSettings
     {
         return self::$loaded;
     }
+
+    /**
+     * 🏢 One installation-wide setting by its dotted name, or null when the
+     *    installation holds no row for it (#943).
+     *
+     * The same walk `App::settings('a.b.c')` does over the MERGED settings,
+     * done over this layer instead. It exists because thirteen admin pages
+     * that SAVE installation-wide used to FILL their boxes from the merged
+     * settings (#674's shape): the open organisation's own row had already
+     * won there, so a global administrator who opened such a page inside an
+     * organisation with its own value, and pressed Save without touching
+     * anything, made that value every organisation's. A page that writes
+     * `siteID IS NULL` reads its boxes through this, so what it shows is what
+     * it would write back.
+     *
+     * Null for "no row" — never a default. The page supplies its own default,
+     * exactly as it did when it read `App::settings()`.
+     *
+     * @param string $dotKey 'geo.autoGeocode', 'push.ttl.golive', …
+     *
+     * @return mixed
+     */
+    public static function value(string $dotKey): mixed
+    {
+        $node = self::$layer;
+        foreach (explode('.', $dotKey) as $part) {
+            if (is_array($node) === false || array_key_exists($part, $node) === false) {
+                return null;
+            }
+            $node = $node[$part];
+        }
+
+        return $node;
+    }
+
+    /**
+     * 🏢 Which settings under the given prefixes the OPEN organisation holds a
+     *    value of its own for, different from the installation's (#943).
+     *
+     * Compares the merged settings with this layer, setting by setting, and
+     * answers the dotted NAMES that differ — never the values, because a value
+     * here may be an API key. A page that shows the installation's values (so
+     * that Save writes back what it showed) uses this to SAY so when this
+     * organisation is in fact using something else; hiding that difference is
+     * how the old fault stayed invisible. The same comparison
+     * `admin/transcription` has made since #674, written once.
+     *
+     * Both sides were read from the same rows at start-up and passed through
+     * the same secret-reading step, so an equal stored value compares equal.
+     * A setting the organisation has and the installation lacks counts as
+     * different; one the installation has and the organisation does not
+     * override cannot differ, because the merged value then IS the
+     * installation's.
+     *
+     * @param string ...$prefixes Dotted prefixes: 'sms', 'hymns.remote', …
+     *
+     * @return list<string> Dotted names, in the order the settings were read.
+     */
+    public static function differsHere(string ...$prefixes): array
+    {
+        $differing = [];
+        foreach ($prefixes as $prefix) {
+            $merged = App::settings($prefix);
+            $mine   = self::flatten(self::value($prefix), $prefix);
+            foreach (self::flatten($merged, $prefix) as $name => $value) {
+                if (($mine[$name] ?? null) !== $value) {
+                    $differing[] = $name;
+                }
+            }
+        }
+
+        return array_values(array_unique($differing));
+    }
+
+    /**
+     * A nested settings branch as dotted name => text. A leaf at the prefix
+     * itself comes back under the prefix's own name.
+     *
+     * @return array<string,string>
+     */
+    private static function flatten(mixed $branch, string $prefix): array
+    {
+        if (is_array($branch) === false) {
+            return $branch === null ? [] : [$prefix => is_scalar($branch) === true ? (string) $branch : ''];
+        }
+        $flat = [];
+        foreach ($branch as $key => $value) {
+            $flat += self::flatten($value, $prefix . '.' . (string) $key);
+        }
+
+        return $flat;
+    }
 }

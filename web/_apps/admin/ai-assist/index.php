@@ -5,6 +5,7 @@
  *
  * @package   Portal\Admin
  * @link      https://github.com/MWBMPartners/webMS-Intra/issues/277
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  */
 
 declare(strict_types=1);
@@ -12,6 +13,7 @@ declare(strict_types=1);
 use Portal\Core\AiAssistant;
 use Portal\Core\App;
 use Portal\Core\Auth;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Router;
 use Portal\Core\Site;
 
@@ -24,7 +26,23 @@ if (App::isAdmin() === false) {
 
 $db       = App::db();
 $siteId   = Site::id();
-$settings = App::settings()['ai_assist'] ?? [];
+// 🏢 THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). save.php
+//    writes every field on this form installation-wide (`siteID IS NULL`), the
+//    monthly spending limit included, so every box and every "set" badge shows THAT
+//    row. WHAT WAS WRONG: they were read from the merged settings, where the open
+//    organisation's own row has already won, so a global administrator who opened
+//    this page inside such an organisation saw ITS values, pressed Save untouched,
+//    and made them every organisation's — a MONEY limit among them (#668).
+$settings = InstallationSettings::value('ai_assist') ?? [];
+$settings = is_array($settings) === true ? $settings : [];
+$installWideDiffering = InstallationSettings::differsHere('ai_assist');
+// 💷 The summary cards say what THIS organisation is really held to and using,
+//    which is what AiAssistant::improve() reads: the merged settings. Kept apart
+//    from the boxes on purpose, and labelled as this organisation's.
+$inForce         = App::settings()['ai_assist'] ?? [];
+$inForce         = is_array($inForce) === true ? $inForce : [];
+$capInForce      = (int) ($inForce['monthCapPence'] ?? 5000);
+$providerInForce = (string) ($inForce['provider'] ?? 'anthropic');
 $enabled  = (string) ($settings['enabled'] ?? '0') === '1';
 $provider = (string) ($settings['provider'] ?? 'anthropic');
 $cap      = (int) ($settings['monthCapPence'] ?? 5000);
@@ -101,17 +119,19 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
     <div class="col-md-4"><div class="card"><div class="card-body">
         <div class="small text-muted">This month spend</div>
         <div class="display-6">£<?php echo number_format($spend / 100, 2); ?></div>
-        <div class="small text-muted">of £<?php echo number_format($cap / 100, 2); ?> cap</div>
+        <div class="small text-muted">of £<?php echo number_format($capInForce / 100, 2); ?> cap</div>
     </div></div></div>
     <div class="col-md-4"><div class="card"><div class="card-body">
         <div class="small text-muted">Calls today</div>
         <div class="display-6"><?php echo (int) $callsToday; ?></div>
     </div></div></div>
     <div class="col-md-4"><div class="card"><div class="card-body">
-        <div class="small text-muted">Active provider</div>
-        <div class="display-6"><?php echo htmlspecialchars($provider, ENT_QUOTES, 'UTF-8'); ?></div>
+        <div class="small text-muted">Provider in use here</div>
+        <div class="display-6"><?php echo htmlspecialchars($providerInForce, ENT_QUOTES, 'UTF-8'); ?></div>
     </div></div></div>
 </div>
+
+<?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
 <div class="card mb-3">
     <div class="card-header"><strong>Configuration</strong></div>

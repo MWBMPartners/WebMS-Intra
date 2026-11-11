@@ -97,6 +97,7 @@
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/495
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/578
  * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/579
+ * @link      https://github.com/MWBMPartners/WebMS-Intra/issues/943
  * -----------------------------------------------------------------------------
  */
 
@@ -106,6 +107,7 @@ use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\BackupArchive;
 use Portal\Core\DbBackup;
+use Portal\Core\InstallationSettings;
 use Portal\Core\Logger;
 use Portal\Core\Maintenance;
 use Portal\Core\Site;
@@ -390,6 +392,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $save->execute();
                     }
                     $save->close();
+                    // 🪞 The boxes below are drawn from what is stored, and start-up
+                    //    read that before this save; so what was just written is laid
+                    //    over it, or the page would show the old values beside "Saved".
+                    $scheduleJustSaved = ['frequency' => $frequency, 'keep' => (string) $keep];
                     Logger::activity(
                         'BackupScheduleSaved',
                         'Scheduled backups set to ' . $frequency . ', keeping ' . $keep,
@@ -966,8 +972,18 @@ $csrf = Auth::csrfToken();
 //    day" while the job was doing nothing — the page telling somebody something
 //    untrue about their backups. The seeded default IS daily; this is only
 //    about the row not existing yet.
-$scheduleFrequency = (string) ($SETTINGS['backup']['schedule']['frequency'] ?? 'off');
-$scheduleKeep      = (string) ($SETTINGS['backup']['schedule']['keep'] ?? '7');
+//
+// 🏢 FROM THE INSTALLATION'S OWN ROWS, never the merged settings (#943, #674). The
+//    "save_schedule" action above writes both rows installation-wide (`siteID
+//    IS NULL`), so the two boxes show THAT row. WHAT WAS WRONG: they were read from
+//    `$SETTINGS`, where the open organisation's own row has already won, so a global
+//    administrator who opened this page inside an organisation with its own schedule
+//    saw ITS schedule, pressed Save untouched, and made it the installation's. The
+//    check found it only once it read a page that is its own saver (#936).
+$scheduleJustSaved = $scheduleJustSaved ?? null;
+$scheduleFrequency = (string) ($scheduleJustSaved['frequency'] ?? InstallationSettings::value('backup.schedule.frequency') ?? 'off');
+$scheduleKeep      = (string) ($scheduleJustSaved['keep'] ?? InstallationSettings::value('backup.schedule.keep') ?? '7');
+$installWideDiffering = InstallationSettings::differsHere('backup.schedule');
 $frequencyChoices  = [
     'off'     => 'Never — only when somebody presses the button',
     'daily'   => 'Every day',
@@ -1018,6 +1034,8 @@ $scheduleBadge    = $scheduleFrequency === 'off'
             whatever you choose below &mdash; how often a backup is actually taken is decided here, not by
             how often the scheduler calls. Your token is on the Settings page.
         </div>
+
+        <?php require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'install-wide-notice.php'; ?>
 
         <form method="post" class="row g-3 align-items-end">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
