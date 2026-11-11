@@ -15,6 +15,7 @@ Last whole suite (with #940): 105/105 green.
 |---|---|---|
 | #809 — group meeting-place maps, rotating host homes (D-120, D-122 to D-128; migration 275) | `agent-a7b8ce76589cb7ec3` / `p809-build`, 697e72c2 | D-124 to D-127 built; D-128 (not anybody's home) building; erasure step unblocked now #940 has landed |
 | #895 — a public address requested by several until one is approved (D-121; migration 276) | `agent-ab2ee553b3ce8e110` / `p895-build`, 9de429e9 | Built (unique key on a generated 'approved' column; locked approval; two-process race 5/5). Check round 1 running |
+| #947 + #937 — retention-caps test restores settings; check.php array params; the seed-parity check's noise | worktree agent (p947-build) | Building (tooling and small fixes) |
 
 Each worktree's `.claude-work/evidence/<pkg>/notes.md` holds its doc entries and any workflow wiring.
 **Migration numbers taken:** 269 (#648, landed), 270 (#598), 271 (#529), 272 (#703), 273 (#782), 274 (#935), 275 (#809, if needed), 276 (#895, if needed). Next free: 277.
