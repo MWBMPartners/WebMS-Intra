@@ -197,6 +197,49 @@ class Giving
      */
     public static function buildHmrcCsv(int $siteId, string $fromDate, string $toDate): string
     {
+        // 💷 Gift Aid is a UK scheme claimed in POUNDS (#966, D-139): only gifts
+        //    recorded in GBP go into the claim file. A gift in another currency
+        //    is left out, never converted and never written as if it were
+        //    pounds; hmrcLeftOutCount() says how many, for the page to show.
+        $rows = array_values(array_filter(self::hmrcRows($siteId, $fromDate, $toDate),
+            static fn (array $r): bool => (string) $r['currency'] === self::GIFT_AID_CURRENCY));
+
+        return self::hmrcCsvFrom($rows);
+    }
+
+    /**
+     * 💷 What tblGivingStatementLog.currency holds for a statement covering
+     * SEVERAL currencies (its totals are then 0; the document lists one total
+     * per currency). Not a currency code, so nothing can format money in it,
+     * and not '' ("not recorded"), so Currency::unlabelledCount() never counts
+     * such a row and labelling never stamps one currency on it (#966, D-139).
+     */
+    public const STATEMENT_SEVERAL_CURRENCIES = '*';
+
+    /** 💷 The one currency Gift Aid is claimed in (a UK tax scheme, in pounds by law). */
+    public const GIFT_AID_CURRENCY = 'GBP';
+
+    /**
+     * 💷 How many gifts a claim file for this range would hold but for their
+     * currency: gifts by a donor with a Gift Aid declaration, in another
+     * currency than pounds (or none recorded). Shown beside the file's link,
+     * so leaving them out is never silent (#966, D-139).
+     */
+    public static function hmrcLeftOutCount(int $siteId, string $fromDate, string $toDate): int
+    {
+        return count(array_filter(self::hmrcRows($siteId, $fromDate, $toDate),
+            static fn (array $r): bool => (string) $r['currency'] !== self::GIFT_AID_CURRENCY));
+    }
+
+    /**
+     * Every gift in the range that a Gift Aid declaration covers, in ANY
+     * currency, with the gift's own currency: the ONE reader behind
+     * buildHmrcCsv() and hmrcLeftOutCount(), so the two cannot disagree.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function hmrcRows(int $siteId, string $fromDate, string $toDate): array
+    {
         $db = App::db();
         $rows = [];
         // FIXED TEXT: the tombstone is a constant in code, never input.
@@ -204,7 +247,7 @@ class Giving
             . "WHEN `u`.`fullName` = '" . GdprEraser::TOMBSTONE_NAME . "' THEN NULL ELSE `u`.`fullName` END";
         $stmt = $db->prepare(
             'SELECT `u`.`userID`, ' . $claimName . ' AS `fullName`, `u`.`emailAddress`, '
-            . '       `e`.`donatedAt`, `e`.`amountPence`, '
+            . '       `e`.`donatedAt`, `e`.`amountPence`, `e`.`currency`, '
             . '       `d`.`address`, `d`.`postcode` '
             . 'FROM `tblGivingEntry` `e` '
             . 'INNER JOIN `tblUsers` `u` ON `u`.`userID` = `e`.`donorID` '
@@ -232,6 +275,16 @@ class Giving
             $stmt->close();
         }
 
+        return $rows;
+    }
+
+    /**
+     * The claim file's text from rows hmrcRows() read (already only pounds).
+     *
+     * @param list<array<string, mixed>> $rows
+     */
+    private static function hmrcCsvFrom(array $rows): string
+    {
         $out = fopen('php://temp', 'w+');
         fputcsv($out, [
             'Title', 'First name', 'Last name', 'House name or number',
@@ -614,8 +667,12 @@ class Giving
         // 💷 One row per donor AND CURRENCY comes back (D-139); they are folded
         //    into one entry per donor carrying a total per currency. 'totalPence'
         //    and 'giftAidPence' are kept only when the donor gave in ONE currency
-        //    ('currency' names it); with two they are 0 and 'currency' is '', so no
-        //    caller can add currencies together by reading them.
+        //    ('currency' names it); with two they are 0 and 'currency' is
+        //    STATEMENT_SEVERAL_CURRENCIES, so no caller can add currencies
+        //    together by reading them. (It was '' until round 3 of #966's check,
+        //    and '' means "not recorded": the organisation page counted such
+        //    rows as unlabelled and labelling stamped ONE currency on a
+        //    statement that covered two.)
         while ($r = $rs->fetch_assoc()) {
             $did = (int) $r['donorID'];
             if (isset($rows[$did]) === true) {
@@ -624,7 +681,7 @@ class Giving
                 $rows[$did]['entryCount']  += (int) $r['entryCount'];
                 $rows[$did]['totalPence']   = 0;
                 $rows[$did]['giftAidPence'] = 0;
-                $rows[$did]['currency']     = '';
+                $rows[$did]['currency']     = self::STATEMENT_SEVERAL_CURRENCIES;
                 continue;
             }
             $rows[$did] = [
@@ -764,8 +821,9 @@ class Giving
             $giftAidPence = (int) $d['giftAidPence'];
             // 💷 One row per donor and period, one document (D-139): its totals are
             //    recorded with their currency when the donor gave in ONE currency.
-            //    With two, the row records '' and 0 — the statement itself lists
-            //    each currency's total, and this row never adds them together.
+            //    With two, the row records STATEMENT_SEVERAL_CURRENCIES ('*') and 0 —
+            //    the statement itself lists each currency's total, and this row
+            //    never adds them together. Never '': that means "not recorded".
             $logCurrency  = (string) $d['currency'];
             $stmt->bind_param(
                 'iisssiiis',

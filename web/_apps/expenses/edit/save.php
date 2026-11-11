@@ -263,9 +263,12 @@ if ($earlyReason !== ExpenseRules::EDIT_ALLOWED) {
 // 💷 The lines, judged now the claim's currency is known and only AFTER the
 //    not-found and not-yours refusals, so a line's message never tells a
 //    stranger anything about somebody else's claim (#648) (#966, D-139): the
-//    claim's own, or the organisation's for a claim that recorded none.
-$claimCurrency = is_array($claim) === true && (string) $claim['currency'] !== ''
-    ? (string) $claim['currency'] : \Portal\Core\Currency::ofSite();
+//    claim's OWN, and nothing else. A claim that recorded none stays "not
+//    recorded" ('') and so do its lines, so the claim and its lines always
+//    agree; an administrator labels both together on Organisation settings.
+//    (The first version used today's currency for the lines of such a claim
+//    while the claim itself stayed '', so the two disagreed.)
+$claimCurrency = is_array($claim) === true ? (string) $claim['currency'] : '';
 $items = [];
 $total = 0.0;
 foreach ($rawLines as $raw) {

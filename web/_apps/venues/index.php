@@ -111,7 +111,8 @@ if ($venueId > 0) {
     sort($years);
 }
 
-$currency = \Portal\Core\Currency::ofSite();
+// 💷 No page-wide currency: each booking's cost is shown in the booking's OWN
+//    currency (#966, D-139; this used to label every row with today's).
 $today    = date('Y-m-d');
 
 $pageTitle   = 'Venue Bookings';
@@ -315,7 +316,7 @@ $rowColor = static function (array $row): string {
                     </div>
                     <?php if ($isMgr === true): ?>
                         <div class="col-1 text-end small" data-label="Cost">
-                            <?php echo $row['costPence'] !== null ? $esc($currency) . ' ' . number_format((int) $row['costPence'] / 100, 2) : '—'; ?>
+                            <?php echo $row['costPence'] !== null ? $esc(\Portal\Core\Currency::format((int) $row['costPence'], (string) ($row['currency'] ?? ''))) : '—'; ?>
                             <br><a href="<?php echo htmlspecialchars(Site::url('venues/booking'), ENT_QUOTES, 'UTF-8'); ?>?id=<?php echo (int) $row['bookingID']; ?>" class="small">Edit</a>
                         </div>
                     <?php endif; ?>

@@ -107,7 +107,7 @@ $totalCount  = (int) ($countResult->fetch_assoc()['total'] ?? 0);
 $countStmt->close();
 
 // 📝 Fetch the claims with pagination
-$dataSql = 'SELECT EC.claimID, EC.claimTitle, EC.claimDate, EC.totalAmount, EC.status, '
+$dataSql = 'SELECT EC.claimID, EC.claimTitle, EC.claimDate, EC.totalAmount, EC.`currency`, EC.status, '
          . 'EC.createdAt, EC.updatedAt, '
          . 'U.fullName AS claimantName, U.emailAddress AS claimantEmail, '
          . 'D.deptName '
@@ -140,6 +140,9 @@ while ($row = $result->fetch_assoc()) {
         'title'         => $row['claimTitle'],
         'claimDate'     => $row['claimDate'],
         'totalAmount'   => (float) $row['totalAmount'],
+        // 💷 The claim's OWN currency (#966, D-139): two claims may be in two
+        //    currencies, so an amount is never sent without it. '' = not recorded.
+        'currency'      => (string) $row['currency'],
         'status'        => $row['status'],
         'claimantName'  => $row['claimantName'],
         'claimantEmail' => $row['claimantEmail'],

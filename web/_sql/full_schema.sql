@@ -4895,7 +4895,7 @@ CREATE TABLE IF NOT EXISTS `tblGivingStatementLog` (
     `toDate`       DATE         NOT NULL,
     `totalPence`   INT          NOT NULL DEFAULT 0,
     `giftAidPence` INT          NOT NULL DEFAULT 0,
-    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings',
+    `currency` CHAR(3) NOT NULL DEFAULT '' COMMENT 'ISO 4217 code of this row''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings. * = the statement covers several currencies (totals 0; the document lists each)',
     `pdfPath`      VARCHAR(500) DEFAULT NULL COMMENT 'NULL until generated',
     `queuedAt`     DATETIME     DEFAULT NULL COMMENT 'Set when treasurer starts an email run; cron sweeps queued rows',
     `emailedAt`    DATETIME     DEFAULT NULL COMMENT 'Dedupe fence: re-runs skip rows with this set',

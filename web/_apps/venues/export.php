@@ -108,6 +108,9 @@ foreach ($bookings as $b) {
     ];
     if ($isMgr === true) {
         $row['Cost'] = $b['costPence'] !== null ? number_format((int) $b['costPence'] / 100, 2) : '';
+        // 💷 The booking's OWN currency beside its cost (#966, D-139), so a
+        //    spreadsheet never adds two currencies into one column unawares.
+        $row['Currency'] = $b['costPence'] !== null ? (string) ($b['currency'] ?? '') : '';
     }
     $rows[] = $row;
 }

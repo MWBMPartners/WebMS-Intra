@@ -133,7 +133,7 @@ foreach ($bookings as $b) {
         <div><?php echo $esc($b['statusName']); ?></div>
         <div><?php echo $esc((string) ($b['notes'] ?? '')); ?></div>
         <?php if ($isMgr === true): ?>
-            <div><?php echo $b['costPence'] !== null ? number_format((int) $b['costPence'] / 100, 2) : '—'; ?></div>
+            <div><?php echo $b['costPence'] !== null ? $esc(\Portal\Core\Currency::format((int) $b['costPence'], (string) ($b['currency'] ?? ''))) : '—'; ?></div>
         <?php endif; ?>
     </div>
     <?php

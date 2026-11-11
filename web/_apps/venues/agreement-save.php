@@ -132,7 +132,7 @@ if ($action === 'supersede') {
         'noticePeriodDays' => (string) ($_POST['noticePeriodDays'] ?? ''),
         'rateAmountPence'  => $toPence((string) ($_POST['rateAmount'] ?? '')),
         'rateUnit'         => (string) ($_POST['rateUnit'] ?? ''),
-        'currency'         => (string) ($_POST['currency'] ?? \Portal\Core\Currency::ofSite()),
+        'currency'         => (string) ($_POST['currency'] ?? ''),
         'status'           => (string) ($_POST['status'] ?? 'active'),
         'notes'            => (string) ($_POST['notes'] ?? ''),
     ];
@@ -168,7 +168,8 @@ $data = [
     'noticePeriodDays' => (string) ($_POST['noticePeriodDays'] ?? ''),
     'rateAmountPence'  => $toPence((string) ($_POST['rateAmount'] ?? '')),
     'rateUnit'         => (string) ($_POST['rateUnit'] ?? ''),
-    'currency'         => (string) ($_POST['currency'] ?? \Portal\Core\Currency::ofSite()),
+    // Absent means "keep" on an edit (Venues::saveAgreement() decides), never today's currency (D-139).
+    'currency'         => (string) ($_POST['currency'] ?? ''),
     'status'           => (string) ($_POST['status'] ?? 'draft'),
     'notes'            => (string) ($_POST['notes'] ?? ''),
 ];

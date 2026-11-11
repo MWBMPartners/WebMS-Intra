@@ -182,7 +182,8 @@ $data = [
     'issueDate'    => (string) ($_POST['issueDate'] ?? ''),
     'dueDate'      => (string) ($_POST['dueDate'] ?? ''),
     'amountPence'  => $toPence((string) ($_POST['amount'] ?? '')) ?? -1,
-    'currency'     => (string) ($_POST['currency'] ?? \Portal\Core\Currency::ofSite()),
+    // Absent means "keep" on an edit (Venues::saveInvoice() decides), never today's currency (D-139).
+    'currency'     => (string) ($_POST['currency'] ?? ''),
     'notes'        => (string) ($_POST['notes'] ?? ''),
 ];
 

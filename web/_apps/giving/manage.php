@@ -43,6 +43,9 @@ if (Giving::isRealDay($from) === false || Giving::isRealDay($to) === false) {
     Router::renderError(400);
     return;
 }
+// 💷 Gifts the HMRC claim file leaves out because they are not in pounds
+//    (#966, D-139): said beside the link, so it is never silent.
+$hmrcLeftOut = Giving::hmrcLeftOutCount($siteId, $from, $to);
 $catId = (int)    ($_GET['cat']  ?? 0);
 $donorQ = trim((string) ($_GET['donor'] ?? ''));
 
@@ -142,6 +145,13 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <a href="<?php echo htmlspecialchars(Site::url('giving/statements'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-primary btn-sm"><i class="fa-solid fa-file-invoice me-1"></i>Statements</a>
     </div>
 </div>
+<?php if ($hmrcLeftOut > 0): ?>
+    <div class="alert alert-light border small" role="note" data-hmrc-left-out="<?php echo (int) $hmrcLeftOut; ?>">
+        The HMRC CSV for these dates leaves out <?php echo (int) $hmrcLeftOut; ?> gift(s) by Gift Aid donors that were
+        recorded in another currency than pounds, or with no currency recorded. Gift Aid is a UK scheme claimed in
+        pounds, and the portal does not convert a gift into pounds for a claim.
+    </div>
+<?php endif; ?>
 
 <div class="card mb-3">
     <div class="card-header"><strong>Record an entry</strong></div>

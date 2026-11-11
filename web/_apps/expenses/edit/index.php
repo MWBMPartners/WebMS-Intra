@@ -163,7 +163,9 @@ const BLANK_LINES = 5;
 //    (#966, D-139). A line quoted in another currency also keeps the cost in
 //    the claim's currency from the claimant's statement: that is what is
 //    approved and paid. ExpenseRules::expenseLine() is the rule.
-$claimCurrency = (string) ($claim['currency'] ?? '') !== '' ? (string) $claim['currency'] : \Portal\Core\Currency::ofSite();
+//    A claim with no recorded currency offers no choice: its lines stay
+//    unrecorded with it, as the save handler keeps them.
+$claimCurrency = (string) ($claim['currency'] ?? '');
 $quotedChoices = $claimCurrency !== '' ? array_values(array_unique(array_merge([$claimCurrency], array_keys(\Portal\Core\Currency::choices())))) : [];
 
 // 🏢 The live departments of this organisation, for the picker.

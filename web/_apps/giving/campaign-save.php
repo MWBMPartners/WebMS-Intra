@@ -70,19 +70,24 @@ if ($endDate !== null && (strtotime($endDate) === false || $endDate < $startDate
 }
 
 $settings   = App::settings()['giving'] ?? [];
+// 💷 A NEW campaign is in the organisation's currency. An existing one KEEPS its
+//    own (#966, D-139, round 3 of the check): the form has no currency field, so
+//    an update never names the column. Writing today's currency here used to
+//    relabel an old campaign's goal after the organisation changed currency,
+//    drop its own gifts from the goal and reshow its pledges in the new money.
 $currency   = \Portal\Core\Currency::ofSite();
 $descParam  = $description === '' ? null : $description;
 
 if ($campaignId > 0) {
     // ✏️ Update — siteID-scoped so a cross-site id can never be edited.
     $stmt = $db->prepare(
-        'UPDATE tblPledgeCampaigns SET name = ?, description = ?, goalAmountPence = ?, currency = ?, '
+        'UPDATE tblPledgeCampaigns SET name = ?, description = ?, goalAmountPence = ?, '
         . 'startDate = ?, endDate = ?, isActive = ? WHERE campaignID = ? AND siteID = ?'
     );
     if ($stmt !== false) {
         $stmt->bind_param(
-            'ssisssiii',
-            $name, $descParam, $goalAmount, $currency, $startDate, $endDate, $isActive, $campaignId, $siteId
+            'ssissiii',
+            $name, $descParam, $goalAmount, $startDate, $endDate, $isActive, $campaignId, $siteId
         );
         $stmt->execute();
         $stmt->close();

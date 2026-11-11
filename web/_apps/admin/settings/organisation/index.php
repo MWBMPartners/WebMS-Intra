@@ -335,7 +335,8 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                         <?php endforeach; ?>
                     </select>
                     <div class="form-text" id="currencyHelp">
-                        Every amount this organisation records, shows and takes in payments is in this currency.
+                        The currency new records take: a gift, a claim, a project or a payment is recorded in it unless
+                        the record says otherwise.
                         <?php if ($currencyPreselected === true): ?>
                             Suggested from the country, <?php echo $e(Countries::name($countryInForce)); ?>: <strong>check it, and save to keep it.</strong>
                         <?php elseif ($currencyInForce === ''): ?>

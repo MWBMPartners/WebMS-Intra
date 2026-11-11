@@ -173,18 +173,24 @@ if ($action === 'match-session') {
 
     $sessionValid = false;
     $stmt = $db->prepare(
+        // 💷 The count must be in the IMPORT's currency, as a gift must above
+        //    (#966, D-139, round 3 of the check): the list offers only those,
+        //    and this is the server-side half, so a posted count in another
+        //    currency is refused rather than matched to a bank line it cannot
+        //    equal.
         'SELECT cs.countSessionID FROM tblCountSessions cs '
-        . 'WHERE cs.countSessionID = ? AND cs.siteID = ? AND cs.status = \'closed\' '
+        . 'WHERE cs.countSessionID = ? AND cs.siteID = ? AND cs.status = \'closed\' AND cs.`currency` = ? '
         . 'AND NOT EXISTS (SELECT 1 FROM tblBankTxns bt2 WHERE bt2.matchedCountSessionID = cs.countSessionID) LIMIT 1'
     );
     if ($stmt !== false) {
-        $stmt->bind_param('ii', $countSessionId, $siteId);
+        $importCurrency = (string) $txn['importCurrency'];
+        $stmt->bind_param('iis', $countSessionId, $siteId, $importCurrency);
         $stmt->execute();
         $sessionValid = $stmt->get_result()->fetch_row() !== null;
         $stmt->close();
     }
     if ($sessionValid === false) {
-        backToView((int) $txn['importID'], 'That count session is not available to match (not closed, wrong site, or already matched).', 'danger');
+        backToView((int) $txn['importID'], 'That count session is not available to match (not closed, wrong site or currency, or already matched).', 'danger');
     }
 
     $stmt = $db->prepare(

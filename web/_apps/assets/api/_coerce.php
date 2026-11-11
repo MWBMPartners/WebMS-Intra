@@ -267,15 +267,21 @@ function assets_api_build_data(array $body, ?array $existing): array
     }
 
     // -------------------------------------------------------------------
-    // 💷 currency — a currency the portal can store in hundredths, else
-    // the organisation's (#966; it used to fall back to GBP). Never a hard
-    // 400, to match save.php's fallback rather than the stricter ENUM-list
-    // rule above.
+    // 💷 currency — a currency the portal can store in hundredths, or a
+    // 400 (#966 round 3, D-139: it used to be replaced quietly with the
+    // organisation's, and before that with GBP). A change is refused with
+    // a 409 once repairs or valuations are recorded in the old currency.
     // -------------------------------------------------------------------
     if ($has('currency') === true) {
         $currency = strtoupper(trim((string) $body['currency']));
         if (\Portal\Core\Currency::isChoosable($currency) === false) {
-            $currency = \Portal\Core\Currency::ofSite();
+            \Portal\Core\ApiResponse::error('currency must be an ISO 4217 code the portal can use (counted in hundredths)', 400);
+        }
+        if ($existing !== null) {
+            $currencyRefusal = \Portal\Core\AssetRegister::whyCurrencyCannotChange((int) $existing['assetID'], $currency);
+            if ($currencyRefusal !== '') {
+                \Portal\Core\ApiResponse::error($currencyRefusal, 409);
+            }
         }
     } else {
         $currency = $existing !== null ? (string) $was('currency') : null; // null ⇒ createAsset() uses the organisation's currency

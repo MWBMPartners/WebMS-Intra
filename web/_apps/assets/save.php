@@ -222,9 +222,23 @@ if ($parentAssetId !== null) {
 //    currency the portal can store in hundredths. It used to fall back to
 //    GBP silently whatever was typed.
 // -----------------------------------------------------------------------------
+// Round 3 of #966's check (D-139): an unusable currency is REFUSED, as the
+// venue pages refuse one, instead of being replaced by the organisation's
+// without a word; an empty box means "keep" on an edit (null: updateAsset()
+// keeps the stored one) and "the organisation's" on a new asset; and a change
+// is refused once repairs or valuations are recorded in the old currency,
+// because those rows keep theirs and the asset would then disagree with its
+// own history. A refusal can be lifted later; a relabel cannot be undone.
 $currency = strtoupper(trim((string) ($_POST['currency'] ?? '')));
-if ($currency === '' || \Portal\Core\Currency::isChoosable($currency) === false) {
-    $currency = \Portal\Core\Currency::ofSite();
+if ($currency === '') {
+    $currency = null;
+} elseif (\Portal\Core\Currency::isChoosable($currency) === false) {
+    $fail('The currency is not one the portal can use. Nothing was saved.');
+} elseif ($assetId > 0) {
+    $currencyRefusal = AssetRegister::whyCurrencyCannotChange($assetId, $currency);
+    if ($currencyRefusal !== '') {
+        $fail($currencyRefusal . ' Nothing was saved.');
+    }
 }
 
 // -----------------------------------------------------------------------------

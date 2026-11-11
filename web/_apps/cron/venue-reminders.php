@@ -266,7 +266,6 @@ foreach ($siteIds as $siteId) {
 
         $venue     = Venues::getVenue((int) $inv['venueID'], $siteId);
         $venueName = $venue !== null ? (string) $venue['venueName'] : ('venue #' . (int) $inv['venueID']);
-        $amountStr = number_format(((int) $inv['amountPence']) / 100, 2);
         $isOverdue = $dueDate < $today;
         $overdueNote = $isOverdue === true
             ? (', OVERDUE by ' . (int) ((new \DateTimeImmutable($today))->diff(new \DateTimeImmutable($dueDate))->days) . ' day(s)')

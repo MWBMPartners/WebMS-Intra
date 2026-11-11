@@ -99,7 +99,7 @@ SET @sql := IF(@needs = 0, 'ALTER TABLE `tblPledges` ADD COLUMN `currency` CHAR(
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @needs := (SELECT COUNT(*) FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblGivingStatementLog' AND `COLUMN_NAME` = 'currency');
-SET @sql := IF(@needs = 0, 'ALTER TABLE `tblGivingStatementLog` ADD COLUMN `currency` CHAR(3) NOT NULL DEFAULT '''' COMMENT ''ISO 4217 code of this row''''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings'' AFTER `giftAidPence`', 'SELECT 1');
+SET @sql := IF(@needs = 0, 'ALTER TABLE `tblGivingStatementLog` ADD COLUMN `currency` CHAR(3) NOT NULL DEFAULT '''' COMMENT ''ISO 4217 code of this row''''s money (D-139, #966). Empty = not recorded (an older row): an administrator labels such rows on Organisation settings. * = the statement covers several currencies (totals 0; the document lists each)'' AFTER `giftAidPence`', 'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @needs := (SELECT COUNT(*) FROM `information_schema`.`COLUMNS` WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblProjectPledge' AND `COLUMN_NAME` = 'currency');

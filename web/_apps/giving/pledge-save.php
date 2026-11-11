@@ -97,7 +97,7 @@ if ($amount <= 0) {
 $today    = date('Y-m-d');
 $campaign = null;
 $stmt = $db->prepare(
-    'SELECT campaignID FROM tblPledgeCampaigns '
+    'SELECT campaignID, `currency` FROM tblPledgeCampaigns '
     . 'WHERE campaignID = ? AND siteID = ? AND isActive = 1 '
     . '  AND (endDate IS NULL OR endDate >= ?) LIMIT 1'
 );
@@ -132,7 +132,8 @@ if ($stmt !== false) {
 
 Logger::activity(
     'GivingPledgeSaved',
-    'Pledged ' . Giving::formatAmount($amount) . ' (' . $schedule . ') to campaign #' . $campaignId,
+    // 💷 In the campaign's own currency, as the pledge row is (#966, D-139).
+    'Pledged ' . Giving::formatAmount($amount, (string) ($campaign['currency'] ?? '')) . ' (' . $schedule . ') to campaign #' . $campaignId,
     $userId
 );
 $_SESSION['flash_msg']  = 'Your pledge has been saved. Thank you!';

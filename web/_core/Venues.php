@@ -1601,10 +1601,15 @@ class Venues
         }
         // 💷 The organisation's currency unless one was chosen (#966). A
         //    currency the portal cannot store in hundredths, or does not know,
-        //    is REFUSED: it used to become GBP without a word.
+        //    is REFUSED: it used to become GBP without a word. With NO currency
+        //    posted, an existing booking KEEPS its own (D-139, round 3 of the
+        //    check): a record keeps the currency it was made in, so an edit after
+        //    the organisation changed currency must not relabel it.
         $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
         if ($currency === '') {
-            $currency = Currency::ofOrganisation($siteId);
+            $kept = $bookingId > 0 ? self::getBooking($bookingId, $siteId) : null;
+            $currency = is_array($kept) === true && (string) ($kept['currency'] ?? '') !== ''
+                ? (string) $kept['currency'] : Currency::ofOrganisation($siteId);
         } elseif (Currency::isChoosable($currency) === false) {
             $errors[] = 'The currency is not one the portal can use.';
         }
@@ -2892,10 +2897,15 @@ class Venues
         $rateUnitVal = in_array($rateUnit, self::RATE_UNITS, true) === true ? $rateUnit : null;
         // 💷 The organisation's currency unless one was chosen (#966). A
         //    currency the portal cannot store in hundredths, or does not know,
-        //    is REFUSED: it used to become GBP without a word.
+        //    is REFUSED: it used to become GBP without a word. With NO currency
+        //    posted, an existing agreement KEEPS its own (D-139, round 3 of the
+        //    check): a record keeps the currency it was made in, so an edit after
+        //    the organisation changed currency must not relabel it.
         $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
         if ($currency === '') {
-            $currency = Currency::ofOrganisation($siteId);
+            $kept = $agreementId > 0 ? self::getAgreement($agreementId, $siteId) : null;
+            $currency = is_array($kept) === true && (string) ($kept['currency'] ?? '') !== ''
+                ? (string) $kept['currency'] : Currency::ofOrganisation($siteId);
         } elseif (Currency::isChoosable($currency) === false) {
             $errors[] = 'The currency is not one the portal can use.';
         }
@@ -3179,6 +3189,37 @@ class Venues
      * @param array{tmp_name?: string, name?: string, size?: int, mime?: string} $data may include an optional single-file attachment already finfo-sniffed by the caller
      * @return array{id: int, errors: string[]}
      */
+    /**
+     * 💷 Why an invoice's currency may NOT change to $newCurrency, or '' when
+     * it may (#966, D-139): refused once the invoice has a line or a payment in
+     * its current currency. Unreadable answers refuse, never allow.
+     */
+    public static function whyInvoiceCurrencyCannotChange(int $invoiceId, int $siteId, string $newCurrency): string
+    {
+        $old = self::getInvoice($invoiceId, $siteId);
+        $was = is_array($old) === true ? (string) ($old['currency'] ?? '') : '';
+        if ($was === '' || strtoupper(trim($newCurrency)) === $was) {
+            return '';
+        }
+        try {
+            $db   = App::db();
+            $stmt = $db->prepare(
+                'SELECT (SELECT COUNT(*) FROM `tblVenueInvoiceLines` WHERE `invoiceID` = ? AND `currency` = ?)'
+                . ' + (SELECT COUNT(*) FROM `tblVenueInvoicePayments` WHERE `invoiceID` = ? AND `currency` = ?) AS `n`'
+            );
+            $stmt->bind_param('isis', $invoiceId, $was, $invoiceId, $was);
+            $stmt->execute();
+            $n = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
+            $stmt->close();
+        } catch (\Throwable $e) {
+            return 'The invoice\'s currency could not be checked, so it was not changed.';
+        }
+
+        return $n > 0
+            ? 'This invoice has ' . $n . ' line(s) or payment(s) in ' . $was . ', so its currency cannot change to ' . strtoupper(trim($newCurrency)) . '.'
+            : '';
+    }
+
     public static function saveInvoice(int $siteId, int $invoiceId, array $data, int $actorUserId): array
     {
         $db = self::db();
@@ -3211,12 +3252,27 @@ class Venues
         }
         // 💷 The organisation's currency unless one was chosen (#966). A
         //    currency the portal cannot store in hundredths, or does not know,
-        //    is REFUSED: it used to become GBP without a word.
+        //    is REFUSED: it used to become GBP without a word. With NO currency
+        //    posted, an existing invoice KEEPS its own (D-139, round 3 of the
+        //    check): a record keeps the currency it was made in, so an edit after
+        //    the organisation changed currency must not relabel it.
         $currency = strtoupper(trim((string) ($data['currency'] ?? '')));
         if ($currency === '') {
-            $currency = Currency::ofOrganisation($siteId);
+            $kept = $invoiceId > 0 ? self::getInvoice($invoiceId, $siteId) : null;
+            $currency = is_array($kept) === true && (string) ($kept['currency'] ?? '') !== ''
+                ? (string) $kept['currency'] : Currency::ofOrganisation($siteId);
         } elseif (Currency::isChoosable($currency) === false) {
             $errors[] = 'The currency is not one the portal can use.';
+        }
+        // 💷 An invoice with lines or payments in its currency keeps that
+        //    currency (#966, D-139): those rows keep theirs, so relabelling the
+        //    invoice would make it disagree with its own payments. Refused rather
+        //    than relabelled: a refusal can be lifted later, a relabel cannot.
+        if ($invoiceId > 0 && $errors === []) {
+            $currencyRefusal = self::whyInvoiceCurrencyCannotChange($invoiceId, $siteId, $currency);
+            if ($currencyRefusal !== '') {
+                $errors[] = $currencyRefusal;
+            }
         }
         $notes = self::nullableTrim($data['notes'] ?? null, 65000);
 

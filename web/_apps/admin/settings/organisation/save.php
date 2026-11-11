@@ -429,8 +429,8 @@ if ($countrySent === true) {
     }
 }
 // 💷 THE CURRENCY (#966, D-133), by the country's rules above:
-//    - it is touched only when the field ARRIVED (#677). The page disables the
-//      box while money is recorded, and a disabled control is not submitted;
+//    - it is touched only when the field ARRIVED (#677): a Save from a form
+//      that did not draw the box must leave the currency alone;
 //    - "Same as the installation" ('') deletes the organisation's own row;
 //    - a currency the portal can use is stored as the organisation's own;
 //    - text that is not one, sent back exactly as the row holds it, is kept

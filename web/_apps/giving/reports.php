@@ -115,7 +115,10 @@ $stmt = $db->prepare(
     . '       COUNT(e.entryID) AS n, SUM(e.amountPence) AS total, e.`currency` AS `currency` '
     . 'FROM tblGivingEntry e LEFT JOIN tblUsers u ON u.userID = e.donorID '
     . 'WHERE e.siteID = ? AND e.donatedAt BETWEEN ? AND ? '
-    . 'GROUP BY donor, e.`currency` ORDER BY total DESC LIMIT 50'
+    // 💷 NO LIMIT here (#966 round 3): a LIMIT on donor-and-currency rows could
+    //    cut one of a donor's currencies off while keeping another. The top 50
+    //    donors are chosen below, AFTER their currencies are folded together.
+    . 'GROUP BY donor, e.`currency` ORDER BY total DESC'
 );
 if ($stmt !== false) {
     $stmt->bind_param('iss', $siteId, $from, $to);
@@ -127,6 +130,12 @@ if ($stmt !== false) {
     $stmt->close();
 }
 $byDonor = $foldByCurrency($byDonor, 'donor');
+// 🏆 The top 50, ranked by each donor's LARGEST total in any one currency
+//    (amounts in two currencies cannot be added to rank them), then by name.
+usort($byDonor, static fn (array $a, array $b): int
+    => [max($b['totals'] !== [] ? $b['totals'] : [0]), (string) $a['donor']]
+    <=> [max($a['totals'] !== [] ? $a['totals'] : [0]), (string) $b['donor']]);
+$byDonor = array_slice($byDonor, 0, 50);
 
 $pageTitle   = 'Giving Reports';
 $pageSection = 'giving';

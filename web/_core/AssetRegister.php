@@ -2629,6 +2629,44 @@ class AssetRegister
     }
 
     /**
+     * 💷 Why an asset's currency may NOT change to $newCurrency, or '' when it
+     * may (#966, D-139). Refused once a repair or a valuation is recorded in
+     * the asset's current currency: those rows keep their own currency, so
+     * relabelling the asset would leave it disagreeing with its own history,
+     * and its value report would read the old figures as the new money. A
+     * refusal can be lifted later; a relabel cannot be undone. Unreadable
+     * answers refuse, never allow.
+     */
+    public static function whyCurrencyCannotChange(int $assetId, string $newCurrency): string
+    {
+        $old = self::get($assetId);
+        if ($old === null) {
+            return '';
+        }
+        $was = (string) ($old['currency'] ?? '');
+        if ($was === '' || strtoupper(trim($newCurrency)) === $was) {
+            return '';
+        }
+        try {
+            $db   = App::db();
+            $stmt = $db->prepare(
+                'SELECT (SELECT COUNT(*) FROM `tblAssetMaintenance` WHERE `assetID` = ? AND `currency` = ?)'
+                . ' + (SELECT COUNT(*) FROM `tblAssetValueHistory` WHERE `assetID` = ? AND `currency` = ?) AS `n`'
+            );
+            $stmt->bind_param('isis', $assetId, $was, $assetId, $was);
+            $stmt->execute();
+            $n = (int) ($stmt->get_result()->fetch_assoc()['n'] ?? 0);
+            $stmt->close();
+        } catch (\Throwable $e) {
+            return 'The asset\'s currency could not be checked, so it was not changed.';
+        }
+
+        return $n > 0
+            ? 'This asset has ' . $n . ' repair or valuation record(s) in ' . $was . ', so its currency cannot change to ' . strtoupper(trim($newCurrency)) . '.'
+            : '';
+    }
+
+    /**
      * Update an existing asset. `licenseKey` follows a "leave blank to
      * keep" convention — edit.php never pre-fills this field with the
      * decrypted value (it's write-only in the UI), so an empty submission
@@ -2649,6 +2687,11 @@ class AssetRegister
 
         $old = self::get($assetId);
         if ($old === null || (int) $old['siteID'] !== $siteId) {
+            return false;
+        }
+        // 💷 The backstop for whyCurrencyCannotChange(), which both callers ask
+        //    first so they can say why (#966, D-139).
+        if (isset($data['currency']) === true && self::whyCurrencyCannotChange($assetId, (string) $data['currency']) !== '') {
             return false;
         }
 

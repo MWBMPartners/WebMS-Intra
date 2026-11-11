@@ -1306,7 +1306,7 @@
           "currentValuePence": {
             "type": "integer",
             "nullable": true,
-            "description": "The book value as at the last valuation run, in pence (minor units) — 89999 means £899.99. **Read-only: no API call sets it**, and `readOnly` is declared here, so do not send it. Only the portal's own valuation job writes it, and only for assets written down evenly or by a share of the remainder. **Null therefore means \"never valued\", not \"worth nothing\"**, and an asset the job cannot work out is left untouched rather than zeroed.",
+            "description": "The book value as at the last valuation run, in pence (minor units) — 89999 means 899.99 in the asset's `currency`. **Read-only: no API call sets it**, and `readOnly` is declared here, so do not send it. Only the portal's own valuation job writes it, and only for assets written down evenly or by a share of the remainder. **Null therefore means \"never valued\", not \"worth nothing\"**, and an asset the job cannot work out is left untouched rather than zeroed.",
             "readOnly": true
           },
           "insurerName": {
@@ -1377,7 +1377,7 @@
         "required": [
           "name"
         ],
-        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not decimal strings such as \"899.99\"), and an invalid ENUM value (assetKind/conditionState/status/depreciationMethod/labelSymbology) 400s rather than silently defaulting — **`currency` is the exception and is NOT in that list: an unusable code is quietly replaced with the organisation's own currency** — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
+        "description": "Unlike the HTML `save.php` form this mirrors, money fields here are PENCE INTEGERS (not decimal strings such as \"899.99\"), and an invalid ENUM value (assetKind/conditionState/status/depreciationMethod/labelSymbology) 400s rather than silently defaulting, and so does an unusable `currency` (#966, D-139; it used to be quietly replaced with the organisation's). Changing an existing asset's `currency` is refused with 409 once a repair or valuation is recorded in its current one — see `_apps/assets/api/_coerce.php`. `licenseKey` travels as PLAINTEXT in the request body only — it is encrypted at rest and NEVER echoed back by any response. On update (PUT/PATCH), only fields present in the JSON body are touched; everything else keeps its current value.",
         "properties": {
           "name": {
             "type": "string",
@@ -1477,7 +1477,7 @@
           "currency": {
             "type": "string",
             "example": "EUR",
-            "description": "The ISO 4217 three-letter code the money fields are in; it is upper-cased for you. Left out, it is the organisation's own currency (chosen on Organisation settings; there is no built-in currency since #966). Only a currency counted in hundredths can be used. **An unusable value is silently replaced with the organisation's currency rather than refused** — this is the one field in this body that does not refuse a bad value, and the schema's own summary wrongly listed it among those that do until 30 October 2026."
+            "description": "The ISO 4217 three-letter code the money fields are in; it is upper-cased for you. Left out, it is the organisation's own currency (chosen on Organisation settings; there is no built-in currency since #966). Only a currency counted in hundredths can be used; **anything else is refused with 400** (until #966's third round it was silently replaced with the organisation's currency). Left out on an update, the asset keeps its own. A change is **refused with 409** once a repair or valuation is recorded in the asset's current currency, because those records keep theirs (D-139)."
           },
           "warrantyExpiry": {
             "type": "string",
@@ -7545,7 +7545,7 @@
           "Expenses"
         ],
         "summary": "List expense claims for the current site (v1)",
-        "description": "Requires scope `expenses:read` (bearer) or an authenticated session. **Legacy alias:** `GET /api/expenses/list`.",
+        "description": "Requires scope `expenses:read` (bearer) or an authenticated session. Each claim carries `totalAmount` (whole currency units and hundredths) and `currency`, the ISO 4217 code of the claim's OWN currency (empty for an older claim that recorded none): **two claims may be in two currencies, so never add `totalAmount` up without it** (#966, D-139). **Legacy alias:** `GET /api/expenses/list`.",
         "security": [
           {
             "bearerAuth": []
@@ -7654,7 +7654,7 @@
           "Expenses"
         ],
         "summary": "Submit an expense claim (v1, #157 remnant)",
-        "description": "Requires scope `expenses:write` (bearer) or any authenticated session (submitting is a member action, not admin-only). `lineTotal`/`totalAmount` are always computed server-side. Bearer callers MUST supply `userID` in the body (the owning user, checked against the key's own site) since a bearer request carries no session owner. **Status-transition update (approve/reject/reimburse) is DEFERRED to Phase 3** — there is no `PUT /api/v1/expenses/{id}` in this release. **Legacy alias:** `POST /api/expenses/create`.",
+        "description": "Requires scope `expenses:write` (bearer) or any authenticated session (submitting is a member action, not admin-only). `lineTotal`/`totalAmount` are always computed server-side, in the claim's currency, which the answer names as `currency` (#966, D-139). Bearer callers MUST supply `userID` in the body (the owning user, checked against the key's own site) since a bearer request carries no session owner. **Status-transition update (approve/reject/reimburse) is DEFERRED to Phase 3** — there is no `PUT /api/v1/expenses/{id}` in this release. **Legacy alias:** `POST /api/expenses/create`.",
         "security": [
           {
             "bearerAuth": []

@@ -144,8 +144,10 @@ if ($stmt !== false) {
 // remainder is legitimate un-named/un-itemised envelope giving — see the
 // "loose envelope" row below) but must never OVER-shoot it.
 if ($envelopeSumPence > $agreedEnvelopePence) {
-    $_SESSION['flash_msg']  = 'Named envelopes (' . Giving::formatAmount($envelopeSumPence) . ') exceed the agreed envelope total ('
-        . Giving::formatAmount($agreedEnvelopePence) . '). Adjust the named envelopes or the agreed envelope total before closing.';
+    // 💷 In the count's own currency (#966, D-139), never a pound sign by default.
+    $countMoney = (string) ($session['currency'] ?? '');
+    $_SESSION['flash_msg']  = 'Named envelopes (' . Giving::formatAmount($envelopeSumPence, $countMoney) . ') exceed the agreed envelope total ('
+        . Giving::formatAmount($agreedEnvelopePence, $countMoney) . '). Adjust the named envelopes or the agreed envelope total before closing.';
     $_SESSION['flash_type'] = 'danger';
     header('Location: ' . Site::url('giving/count/session') . '?id=' . $countSessionId);
     exit();

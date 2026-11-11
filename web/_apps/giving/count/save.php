@@ -370,7 +370,8 @@ if ($action === 'envelope-add') {
 
     Logger::activity(
         'CountEnvelopeAdded',
-        'Logged a named envelope (' . Giving::formatAmount((int) round(((float) $amount) * 100)) . ') for session #' . $countSessionId,
+        // 💷 In the count's own currency, as the envelope row is (#966, D-139).
+        'Logged a named envelope (' . Giving::formatAmount((int) round(((float) $amount) * 100), (string) ($session['currency'] ?? '')) . ') for session #' . $countSessionId,
         $userId
     );
     backToCountSession($countSessionId, 'Named envelope logged.', 'success');

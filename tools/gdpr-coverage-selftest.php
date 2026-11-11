@@ -2378,12 +2378,16 @@ check(
     //    requires each row's exact name. What stays here is structure that
     //    table does not read as text: no COALESCE (which falls through to the
     //    account's made-up name), and the join's own conditions below.
-    str_contains($method($givingCode, 'buildHmrcCsv'), 'COALESCE(') === false
-    && str_contains($method($givingCode, 'buildHmrcCsv'), '`k`.`clearedAt` IS NULL')
+    // #966 round 3: the claim file's query moved into hmrcRows(), the ONE
+    //    reader behind buildHmrcCsv() and hmrcLeftOutCount(); the structure
+    //    is pinned where the query now is.
+    str_contains($method($givingCode, 'hmrcRows'), 'COALESCE(') === false
+    && str_contains($method($givingCode, 'hmrcRows'), '`k`.`clearedAt` IS NULL')
     // The kept name is read only beside an EMPTIED account, and "an erased
     // donor" is one whose account is emptied: a kept row beside a live
     // member (an erasure that stopped) is neither.
-    && str_contains($method($givingCode, 'buildHmrcCsv'), "GdprEraser::emptiedAccountSql('u')")
+    && str_contains($method($givingCode, 'hmrcRows'), "GdprEraser::emptiedAccountSql('u')")
+    && str_contains($method($givingCode, 'buildHmrcCsv'), 'self::hmrcRows(')
     && str_contains($method($givingCode, 'erasedDonorSql'), "GdprEraser::emptiedAccountSql('ku')")
     && str_contains($method($givingCode, 'isErasedDonor'), "self::erasedDonorSql('?', '?')")
     && str_contains($method($givingCode, 'renderStatementPdf'), 'self::isErasedDonor($siteId, $donorId) === true')
