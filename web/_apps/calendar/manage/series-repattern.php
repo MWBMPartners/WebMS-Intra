@@ -36,7 +36,8 @@
  *     IT CAN BE BROUGHT BACK, AS A DRAFT, from the series' bulk edit page
  *     (`calendar/manage/series-edit`), since #691. `Portal\Core\HiddenSeriesDates`
  *     is the one place that decides it. Say exactly that and no more: it comes
- *     back as a DRAFT whatever it was (D-145), and onto a day the series
+ *     back as a DRAFT (D-145) — or still CANCELLED if it had been cancelled
+ *     before it was hidden (D-146) — and onto a day the series
  *     already has a live date on — the ordinary case after a series is
  *     shortened and extended over the same weeks again, because this page then
  *     makes NEW rows for those days — the first press is refused and a second,
@@ -521,6 +522,9 @@ if ($confirmed === true && $plan !== null && $problem === '') {
         // Set just before the one throw that is NOT a fault, so the catch can
         // say what really happened instead of "something went wrong".
         $recordAppeared = false;
+        // The second such throw: the series' live dates changed between the
+        // plan being worked out and this transaction taking the series' lock.
+        $seriesMoved = false;
 
         // 🔒 ALL OR NOTHING. A half-applied pattern change is the worst
         //    outcome: the diary then holds some dates on the old pattern and
@@ -528,6 +532,69 @@ if ($confirmed === true && $plan !== null && $problem === '') {
         $mysqli->begin_transaction();
 
         try {
+            // 0️⃣ THE SERIES' OWN ROW, LOCKED, AS THE FIRST STATEMENT — then the
+            //    live dates read again and compared with the ones the plan was
+            //    worked out from (#691).
+            //
+            //    WHY. Everything above this line — the plan, the preview, the
+            //    digest — was read WITHOUT a lock. Since #691 a hidden date can
+            //    be brought back (`Portal\Core\HiddenSeriesDates::restore()`), and
+            //    a restore committed between the plan and this transaction
+            //    would leave two live dates on one day: the plan adds a date
+            //    onto a day the restore has just filled. Both writers now take
+            //    this same row FIRST, so they queue: whichever comes second sees
+            //    what the first committed. The re-read is a LOCKING read for
+            //    the same reason — a plain one reads this transaction's
+            //    snapshot, which is exactly what must not be trusted here.
+            //
+            //    Refused rather than re-planned: the person confirmed a
+            //    specific list of changes, and a different list is a different
+            //    decision. The fresh preview is one press away.
+            $seriesLock = $mysqli->prepare(
+                'SELECT `seriesID` FROM `tblEventSeries` WHERE `seriesID` = ? AND `siteID` = ? FOR UPDATE'
+            );
+            if ($seriesLock === false) {
+                throw new RuntimeException('the series could not be locked');
+            }
+            $seriesLock->bind_param('ii', $seriesID, $siteId);
+            $seriesLock->execute();
+            $seriesStill = $seriesLock->get_result()->fetch_row();
+            $seriesLock->close();
+
+            $liveNow   = [];
+            $liveAgain = $mysqli->prepare(
+                'SELECT `eventID`, `startDateTime`, `endDateTime`, `patternStart`, `patternEnd` FROM `tblEvents` '
+                . 'WHERE `seriesID` = ? AND `siteID` = ? AND `isDeleted` = 0 AND `externalFeedID` IS NULL '
+                . 'ORDER BY `eventID` ASC FOR UPDATE'
+            );
+            if ($liveAgain === false) {
+                throw new RuntimeException('the series\' dates could not be read again');
+            }
+            $liveAgain->bind_param('ii', $seriesID, $siteId);
+            $liveAgain->execute();
+            $againRows = $liveAgain->get_result();
+            while ($againRow = $againRows->fetch_row()) {
+                $liveNow[] = implode('|', array_map(static fn ($v): string => (string) $v, $againRow));
+            }
+            $liveAgain->close();
+
+            $livePlanned = [];
+            foreach ($events as $plannedId => $plannedRow) {
+                $livePlanned[] = implode('|', [
+                    (string) $plannedId,
+                    (string) $plannedRow['startDateTime'],
+                    (string) $plannedRow['endDateTime'],
+                    (string) $plannedRow['patternStart'],
+                    (string) $plannedRow['patternEnd'],
+                ]);
+            }
+            sort($livePlanned);
+            sort($liveNow);
+            if ($seriesStill === null || $liveNow !== $livePlanned) {
+                $seriesMoved = true;
+                throw new RuntimeException('the series changed between the plan and the change');
+            }
+
             // 1️⃣ Dates that stay, re-timed in place. ONLY the start, the end
             //    and the recorded origin — never the name, venue or anything
             //    else a person may have changed by hand.
@@ -1138,25 +1205,33 @@ if ($confirmed === true && $plan !== null && $problem === '') {
             $mysqli->rollback();
             // 🛡️ NEVER THE FAULT'S OWN WORDS. A database error can quote the
             //    value it choked on, which here can be an event's name.
-            Logger::errorPlatform(
-                'Calendar',
-                $recordAppeared === true ? 'Warning' : 'Error',
-                $recordAppeared === true ? 'REPATTERN_RECORD_APPEARED' : 'REPATTERN_FAILED',
-                $recordAppeared === true
-                    ? 'a series pattern change was stopped because a date it was about to remove had gained a '
-                      . 'record since the preview was drawn, so the diary is exactly as it was before'
-                    : 'a series pattern change was rolled back, so the diary is exactly as it was before',
-                'seriesID=' . $seriesID
-            );
+            // A series that moved under the change is the page doing its job,
+            // like a record appearing, so neither is logged as a fault.
+            if ($seriesMoved === false) {
+                Logger::errorPlatform(
+                    'Calendar',
+                    $recordAppeared === true ? 'Warning' : 'Error',
+                    $recordAppeared === true ? 'REPATTERN_RECORD_APPEARED' : 'REPATTERN_FAILED',
+                    $recordAppeared === true
+                        ? 'a series pattern change was stopped because a date it was about to remove had gained a '
+                          . 'record since the preview was drawn, so the diary is exactly as it was before'
+                        : 'a series pattern change was rolled back, so the diary is exactly as it was before',
+                    'seriesID=' . $seriesID
+                );
+            }
             // Two different things, and telling them apart matters: one is a
             // fault and one is the page doing its job. Saying "something went
             // wrong" about the second would send somebody looking for a bug.
-            $problem = $recordAppeared === true
+            $problem = $seriesMoved === true
+                ? 'Nothing was changed. While you were confirming, this series\' dates changed — somebody may have '
+                  . 'brought a hidden date back, or changed the series another way. Press "Show me what would change" '
+                  . 'again to see what the change would do now.'
+                : ($recordAppeared === true
                 ? 'Nothing was changed. While you were confirming, somebody added a record — attendance, a '
                   . 'booking, a registration — to one of the dates this change would have removed. Press "Show '
                   . 'me what would change" again and that date will be listed as one to leave alone.'
                 : 'Something went wrong part way through, so nothing was changed at all — the diary is '
-                  . 'exactly as it was. Please try again.';
+                  . 'exactly as it was. Please try again.');
         }
     }
 }
@@ -1260,7 +1335,7 @@ $showReading = static function (?string $reading): string {
         <li>A date is <strong>left exactly as it is</strong> if anything is attached to it (attendance, bookings, registrations, invitations), or if somebody has moved it by hand.</li>
         <li>A date that goes is <strong>hidden rather than deleted</strong>, so nothing attached to it is
             destroyed. You can bring it back afterwards from this series' bulk edit page, where it returns as a
-            draft. If the series has since been given another date on that same day, you are asked to confirm
+            draft (or still cancelled, if it had been cancelled). If the series has since been given another date on that same day, you are asked to confirm
             first, because the series would then have two dates on that day.</li>
     </ul>
     <p class="mb-0 small text-muted">Nothing is written until you have seen exactly what will change and confirmed it.</p>
@@ -1470,7 +1545,8 @@ $showReading = static function (?string $reading): string {
                         These are hidden rather than deleted, so nothing attached to them is destroyed. Nothing is
                         attached to any of them in any case — a date carrying attendance, a booking or a
                         registration is in the list below instead. <strong>You can bring a hidden date back</strong>
-                        from this series' bulk edit page, where it returns as a draft &mdash; and if the series has
+                        from this series' bulk edit page, where it returns as a draft (or still cancelled, if it had
+                        been cancelled) &mdash; and if the series has
                         since been given another date on that day, only after you confirm you want two.
                     </p>
                 <?php endif; ?>

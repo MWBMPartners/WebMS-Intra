@@ -241,15 +241,16 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <li>
             A date that is removed is <strong>hidden rather than deleted</strong>, so nothing attached to it
             is destroyed, and <strong>you can bring it back</strong>: the series' bulk edit page lists its
-            hidden dates under <em>Hidden dates</em>, each with a <em>Bring back as a draft</em> button. It
-            returns as a draft whatever it was before, so members do not see it until you publish it. If
+            hidden dates under <em>Hidden dates</em>, each with a button to bring it back. It returns as a
+            draft, so members do not see it until you publish it &mdash; except a date that had been
+            cancelled before it was hidden, which comes back still cancelled, with its reason. If
             the series has since been given another date on that day &mdash; which is what happens if you
             shorten a series and then extend it over the same weeks again &mdash; the first press is
             refused and says so. If you really do want both (a morning and an evening service, say), press
             <em>Bring it back anyway</em>, which then appears beside it; the series will have two dates on
             that day. If you want the old one instead, hide or move the date that is there now first. The
-            list also shows dates deleted by hand, one at a time, because the portal does not record which
-            way a date was hidden.
+            list also shows dates deleted by hand, one at a time, because a hidden date carries no mark
+            saying which way it was hidden.
         </li>
     </ul>
     <p class="text-muted small">

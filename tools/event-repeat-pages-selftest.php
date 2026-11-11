@@ -3607,6 +3607,72 @@ function restPress(string $jar, int $seriesId, int $eventId, ?string $token = nu
 }
 
 /**
+ * Every `SeriesDateRestored` description for one date, WHOLE. A check that
+ * only looked for the numbers passed with the event's web address appended
+ * (found by the independent check), so the description is compared exactly.
+ *
+ * @return list<string>
+ */
+function restLogLines(int $eventId): array
+{
+    return array_map(
+        static fn (array $r): string => (string) $r['activityDescription'],
+        q(
+            "SELECT activityDescription FROM tblActivityLogs WHERE siteID = ? AND activityType = 'SeriesDateRestored' "
+            . 'AND activityDescription LIKE ? ORDER BY logID',
+            'is',
+            [ORG, 'Event #' . $eventId . ' %']
+        )
+    );
+}
+
+/**
+ * Start one POST WITHOUT waiting for it, so this run can hold a lock while the
+ * real page waits on it. `restAsyncFinish()` collects it.
+ *
+ * @param array<string,string> $post
+ *
+ * @return array{multi:CurlMultiHandle, handle:CurlHandle, running:int}
+ */
+function restAsyncStart(string $jar, string $path, array $post): array
+{
+    global $port;
+    $handle = curl_init('http://127.0.0.1:' . $port . ADDR . $path);
+    curl_setopt_array($handle, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_HEADER => true, CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_TIMEOUT => 120, CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_HTTPHEADER => ['Expect:'],
+        CURLOPT_COOKIEJAR => $jar, CURLOPT_COOKIEFILE => $jar, CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => http_build_query($post),
+    ]);
+    $multi = curl_multi_init();
+    curl_multi_add_handle($multi, $handle);
+    $running = 1;
+    $until   = microtime(true) + 2.0;
+    while (microtime(true) < $until && $running > 0) {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.1);
+    }
+
+    return ['multi' => $multi, 'handle' => $handle, 'running' => $running];
+}
+
+/** Let a request started by `restAsyncStart()` finish; hands back its HTTP status. */
+function restAsyncFinish(array $async): int
+{
+    $running = $async['running'];
+    $until   = microtime(true) + 60;
+    while ($running > 0 && microtime(true) < $until) {
+        curl_multi_exec($async['multi'], $running);
+        curl_multi_select($async['multi'], 0.2);
+    }
+    $status = (int) curl_getinfo($async['handle'], CURLINFO_HTTP_CODE);
+    curl_multi_remove_handle($async['multi'], $async['handle']);
+    curl_multi_close($async['multi']);
+
+    return $status;
+}
+
+/**
  * The form token a signed-in person's page carries in its `<meta>` tag, for a
  * person who cannot open Manage Events. A REAL token, so a refusal of their
  * post is the gate's doing and not a missing token's.
@@ -3704,6 +3770,28 @@ $restBadToken = restPress($jar['admin'], $restSeries, $restThird, str_repeat('0'
 ok('T12 a press with a WRONG form token changes nothing either',
     (int) (restRow($restThird)['isDeleted'] ?? -1) === 1, json_encode($restBadToken));
 
+// 🛡️ THE BULK UPDATE CANNOT REACH A HIDDEN DATE. Its checkbox list shows live
+//    dates only, but its write had no `isDeleted = 0`, so a forged number
+//    changed a hidden date's status. Posted with a LIVE date beside it, so the
+//    check also proves the update itself ran.
+$restBulkLive = (int) one(
+    'SELECT eventID FROM tblEvents WHERE seriesID = ? AND isDeleted = 0 ORDER BY startDateTime LIMIT 1',
+    'i',
+    [$restSeries]
+)['eventID'];
+req($jar['admin'], 'POST', '/calendar/manage/series-edit', [
+    'csrf_token' => managePage($jar['admin'])['token'],
+    'seriesID'   => (string) $restSeries,
+    'eventIDs'   => [(string) $restBulkLive, (string) $restThird],
+    'bulkStatus' => 'postponed',
+]);
+ok('T12b a bulk update naming a HIDDEN date leaves that date exactly as it was (read back: still hidden, still published)',
+    (int) (restRow($restThird)['isDeleted'] ?? -1) === 1 && (string) (restRow($restThird)['status'] ?? '') === 'published',
+    json_encode(restRow($restThird)));
+ok('T12c ...while the LIVE date posted beside it WAS updated, so the update really ran',
+    (string) (restRow($restBulkLive)['status'] ?? '') === 'postponed');
+q("UPDATE tblEvents SET status = 'published' WHERE eventID = ?", 'i', [$restBulkLive]);
+
 // -----------------------------------------------------------------------------
 // T13 — bringing one back.
 // -----------------------------------------------------------------------------
@@ -3726,12 +3814,9 @@ ok('T17 it is the SAME row: same number, same address, same series, same time',
 ok('T18 it records who brought it back', (int) ($restAfter['updatedByID'] ?? 0) === ADMIN);
 ok('T19 the message says it is back as a draft', str_contains($restDone['message'], 'back in the series as a draft'), $restDone['message']);
 ok('T20 the OTHER hidden date was not touched', (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1);
-ok('T21 the activity log records it, by number only',
-    one(
-        "SELECT logID FROM tblActivityLogs WHERE siteID = ? AND activityType = 'SeriesDateRestored' AND activityDescription LIKE ?",
-        'is',
-        [ORG, '%#' . $restThird . ' of series #' . $restSeries . '%']
-    ) !== null);
+ok('T21 the activity log records it, by number only — the WHOLE description, compared exactly',
+    restLogLines($restThird) === ['Event #' . $restThird . ' of series #' . $restSeries . ' brought back as a draft'],
+    json_encode(restLogLines($restThird)));
 ok('T22 the page no longer lists it as hidden',
     str_contains(restPage($jar['admin'], $restSeries)['body'], 'data-hidden-event="' . $restThird . '"') === false);
 
@@ -3832,12 +3917,10 @@ ok('T31g ...so 28 October now holds TWO live dates of the series',
     count(array_filter(repatLiveStarts('EVREP Restore'), static fn (string $s): bool => str_starts_with($s, '2029-10-28'))) === 2);
 ok('T31h ...and the message says plainly that the series now has two dates on that day',
     str_contains($restAnyway['message'], 'now has two dates on that day'), $restAnyway['message']);
-ok('T31i ...and the activity log records that it was confirmed',
-    one(
-        "SELECT logID FROM tblActivityLogs WHERE siteID = ? AND activityType = 'SeriesDateRestored' AND activityDescription LIKE ?",
-        'is',
-        [ORG, '%#' . $restFourth . ' of series #' . $restSeries . '%confirmed%']
-    ) !== null);
+ok('T31i ...and the activity log records that it was confirmed — the whole description, compared exactly',
+    restLogLines($restFourth) === ['Event #' . $restFourth . ' of series #' . $restSeries
+        . ' brought back as a draft, confirmed onto a day the series already had a date on'],
+    json_encode(restLogLines($restFourth)));
 
 // The confirmation on a day with NO clash is simply an ordinary restore: it
 // skips nothing, and the words do not claim two dates on one day.
@@ -3925,6 +4008,138 @@ ok('T35 ...one live date on 11 November, not two',
     count(array_filter(repatLiveStarts('EVREP Restore race'), static fn (string $s): bool => str_starts_with($s, '2029-11-11'))) === 1);
 ok('T36 ...and the message says the day is taken', str_contains(flashOn($raceAfter['body']), 'already has a date on that day'),
     flashOn($raceAfter['body']));
+
+// -----------------------------------------------------------------------------
+// T36b — THE SERIES LOCK IS HELD FOR THE WHOLE RESTORE, not just one statement.
+// -----------------------------------------------------------------------------
+// T33-T36 cannot tell this apart: a locking read OUTSIDE a transaction still
+// WAITS for another holder, so with `begin_transaction()` moved down to the
+// write they all still passed (found by the independent check). The property
+// that matters is that the series row is still held while the restore is part
+// way through. So this connection holds the hidden DATE's row, the restore
+// (having taken the series row in step 1) waits at step 3, and this connection
+// then asks for the series row with NOWAIT: refused (3572) only if the restore
+// is still holding it.
+createEvent($jar['admin'], 'EVREP Restore nowait', '2030-05-05T10:00', '2030-05-05T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$nowaitSeries = repatSeries('EVREP Restore nowait');
+$restApply($nowaitSeries, ['patternStart' => '2030-05-05T10:00', 'patternEnd' => '2030-05-05T11:00', 'repeatFrequency' => 'weekly'], '1');
+$nowaitHidden = restHidden('EVREP Restore nowait');
+$nowaitId     = (int) ($nowaitHidden[0]['eventID'] ?? 0);
+ok('T36b the lock-holding check has one hidden date', count($nowaitHidden) === 1);
+$nowaitToken = managePage($jar['admin'])['token'];
+$db->begin_transaction();
+q('SELECT eventID FROM tblEvents WHERE eventID = ? FOR UPDATE', 'i', [$nowaitId]);
+$nowaitAsync = restAsyncStart($jar['admin'], '/calendar/manage/series-edit', [
+    'csrf_token' => $nowaitToken, 'seriesID' => (string) $nowaitSeries, 'action' => 'restore', 'restoreEventID' => (string) $nowaitId,
+]);
+ok('T36c (premise) the restore is WAITING for the date this connection holds', $nowaitAsync['running'] > 0);
+$nowaitCode = 0;
+try {
+    q('SELECT seriesID FROM tblEventSeries WHERE seriesID = ? FOR UPDATE NOWAIT', 'i', [$nowaitSeries]);
+} catch (mysqli_sql_exception $e) {
+    $nowaitCode = (int) $e->getCode();
+}
+ok('T36d WHILE IT WAITS, THE SERIES ROW IS STILL HELD BY THE RESTORE: asking for it with NOWAIT is refused (3572)',
+    $nowaitCode === 3572, 'error code ' . $nowaitCode);
+$db->rollback();
+restAsyncFinish($nowaitAsync);
+ok('T36e once released, the restore finishes and the date is back (read back)',
+    (int) (restRow($nowaitId)['isDeleted'] ?? -1) === 0);
+
+// -----------------------------------------------------------------------------
+// T36f — THE PATTERN PAGE TAKES THE SAME LOCK AND RE-CHECKS (#691).
+// -----------------------------------------------------------------------------
+// The pattern page works out its plan WITHOUT a lock. A date brought back in
+// the window between that plan and the page's own transaction would otherwise
+// leave two live dates on one day: the plan adds a date onto a day that has
+// just been filled. This connection holds the series row while the page is
+// confirming, brings the hidden date back meanwhile (exactly what a restore
+// writes), and commits; the page must then refuse.
+createEvent($jar['admin'], 'EVREP Repat lock', '2030-06-02T10:00', '2030-06-02T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$plockSeries = repatSeries('EVREP Repat lock');
+$plockFields = ['patternStart' => '2030-06-02T10:00', 'patternEnd' => '2030-06-02T11:00', 'repeatFrequency' => 'weekly'];
+$restApply($plockSeries, $plockFields, '1');
+$plockHidden = restHidden('EVREP Repat lock');
+$plockId     = (int) ($plockHidden[0]['eventID'] ?? 0);
+ok('T36f the pattern-lock series has its second date hidden', count($plockHidden) === 1
+    && (string) $plockHidden[0]['startDateTime'] === '2030-06-09 10:00:00');
+$plockPreview = repatPost($jar['admin'], $plockSeries, $plockFields + ['repeatCount' => '2']);
+ok('T36g (premise) the preview would ADD 9 June back', preg_match('/Added\s*<span class="badge bg-success">1<\/span>/', $plockPreview['body']) === 1);
+$plockToken = token(repatOpen($jar['admin'], $plockSeries)['body']);
+$db->begin_transaction();
+q('SELECT seriesID FROM tblEventSeries WHERE seriesID = ? FOR UPDATE', 'i', [$plockSeries]);
+$plockAsync = restAsyncStart($jar['admin'], '/calendar/manage/series-repattern', $plockFields + [
+    'csrf_token' => $plockToken, 'seriesID' => (string) $plockSeries, 'repeatCount' => '2',
+    'confirm' => '1', 'planDigest' => $plockPreview['digest'],
+]);
+ok('T36h (premise) the pattern change is WAITING for the series this connection holds', $plockAsync['running'] > 0);
+// 🧠 CAUGHT, NOT LEFT TO CRASH THE RUN. With the page's series lock removed
+//    (planted), the page locks this series' DATE rows first and then waits on
+//    the series row this connection holds, so this write is chosen as the
+//    victim of a deadlock. A check whose failure is an uncaught exception is
+//    a crash with a label, so the deadlock is turned into a red check here.
+$plockDeadlock = '';
+try {
+    q("UPDATE tblEvents SET isDeleted = 0, deletedAt = NULL, status = 'draft' WHERE eventID = ?", 'i', [$plockId]);
+    $db->commit();
+} catch (mysqli_sql_exception $e) {
+    $plockDeadlock = 'error ' . (int) $e->getCode();
+    $db->rollback();
+}
+restAsyncFinish($plockAsync);
+ok('T36h2 the page waited on the SERIES row before touching any date, so this write met no deadlock',
+    $plockDeadlock === '', $plockDeadlock);
+ok('T36i THE PATTERN CHANGE REFUSED: 9 June holds ONE live date, the one brought back, not two',
+    count(array_filter(repatLiveStarts('EVREP Repat lock'), static fn (string $s): bool => str_starts_with($s, '2030-06-09'))) === 1,
+    implode(', ', repatLiveStarts('EVREP Repat lock')));
+ok('T36j ...and nothing was added at all (no new row)', count(repatRows('EVREP Repat lock')) === 2,
+    (string) count(repatRows('EVREP Repat lock')));
+
+// -----------------------------------------------------------------------------
+// T36k — A DATE CANCELLED BEFORE IT WAS HIDDEN COMES BACK STILL CANCELLED (D-146).
+// -----------------------------------------------------------------------------
+// Cancelled through the real bulk update. The REASON is written with SQL,
+// because nothing under web/ writes `cancelReason` today (searched:
+// `grep -rn cancelReason web/_apps web/_core` finds only readers).
+createEvent($jar['admin'], 'EVREP Restore cancelled', '2030-07-07T10:00', '2030-07-07T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$cancSeries = repatSeries('EVREP Restore cancelled');
+$cancRows   = repatRows('EVREP Restore cancelled');
+$cancId     = (int) ($cancRows[1]['eventID'] ?? 0);
+req($jar['admin'], 'POST', '/calendar/manage/series-edit', [
+    'csrf_token' => managePage($jar['admin'])['token'],
+    'seriesID'   => (string) $cancSeries,
+    'eventIDs'   => [(string) $cancId],
+    'bulkStatus' => 'cancelled',
+]);
+q("UPDATE tblEvents SET cancelReason = 'EVREP the hall is flooded' WHERE eventID = ?", 'i', [$cancId]);
+$restApply($cancSeries, ['patternStart' => '2030-07-07T10:00', 'patternEnd' => '2030-07-07T11:00', 'repeatFrequency' => 'weekly'], '1');
+$cancBefore = one('SELECT isDeleted, status, cancelReason FROM tblEvents WHERE eventID = ?', 'i', [$cancId]);
+ok('T36k (premise) the second date was cancelled, with a reason, and then hidden by a pattern change',
+    (int) ($cancBefore['isDeleted'] ?? 0) === 1 && (string) ($cancBefore['status'] ?? '') === 'cancelled'
+    && (string) ($cancBefore['cancelReason'] ?? '') === 'EVREP the hall is flooded', json_encode($cancBefore));
+$cancPage = restPage($jar['admin'], $cancSeries);
+ok('T36l the page shows it was Cancelled and its button says it comes back still cancelled',
+    str_contains(text($cancPage['body']), 'Bring back, still cancelled'));
+$cancPress = restPress($jar['admin'], $cancSeries, $cancId);
+$cancAfter = one('SELECT isDeleted, status, cancelReason FROM tblEvents WHERE eventID = ?', 'i', [$cancId]);
+ok('T36m IT COMES BACK STILL CANCELLED, WITH ITS REASON (read back)',
+    (int) ($cancAfter['isDeleted'] ?? -1) === 0 && (string) ($cancAfter['status'] ?? '') === 'cancelled'
+    && (string) ($cancAfter['cancelReason'] ?? '') === 'EVREP the hall is flooded', json_encode($cancAfter));
+ok('T36n ...and the message says so, not "as a draft"',
+    str_contains($cancPress['message'], 'still cancelled') && str_contains($cancPress['message'], 'as a draft') === false,
+    $cancPress['message']);
+ok('T36o ...and the activity log says so, compared exactly',
+    restLogLines($cancId) === ['Event #' . $cancId . ' of series #' . $cancSeries . ' brought back still cancelled'],
+    json_encode(restLogLines($cancId)));
 
 // -----------------------------------------------------------------------------
 // T37 — THE ADDRESS IS TAKEN. Unreachable while the unique key exists; proved,

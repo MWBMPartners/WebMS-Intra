@@ -18,21 +18,37 @@
  *
  * WHICH DATES ARE LISTED — every hidden date of the series, however it was
  * hidden (the owner, 11 November 2026 — D-143). That is broader than "the
- * dates a pattern change hid", and on purpose: three things hide an event (the pattern page, the Delete button on
- * the Manage Events page, and the events API), and NONE of them records which
- * one did it. `calendar/manage/delete.php` does not even fill `deletedAt`.
- * Narrowing the list would need a guess — and a guess that hid a date somebody
- * wanted back would put them where #691 started. The page says so in words.
+ * dates a pattern change hid", and on purpose: three things hide an event (the
+ * pattern page, the Delete button on the Manage Events page, and the events
+ * API), and NOTHING ON THE EVENT ROW says which one did it. Be exact about
+ * the rest, because an earlier version of this comment said "none of them
+ * records which", and that was not true: the Delete button logs
+ * `EventDeleted` with the event's number and the API logs `ApiEventDelete`,
+ * while the pattern page logs only COUNTS (`SeriesRepatterned`), and
+ * `calendar/manage/delete.php` leaves `deletedAt` empty. So the activity log
+ * can sometimes name the Delete button but can never name the pattern page
+ * for a particular date. Narrowing the list on that would be a guess — and a
+ * guess that hid a date somebody wanted back would put them where #691
+ * started. The page says, in words, that both kinds are listed.
  *
  * WHAT BRINGING ONE BACK DOES, AND WHY
  * -----------------------------------------------------------------------------
  *   • The row is un-hidden IN PLACE: same number, same address, same name,
  *     venue, registrations and everything attached. Nothing is copied.
- *   • IT COMES BACK AS A DRAFT, whatever it was when it was hidden (the
- *     owner, 11 November 2026 — D-145). That is D-033's reasoning applied to a date coming back: a date nobody has looked
- *     at since it vanished should not reappear in front of members unasked. A
- *     draft is one tick from right on the same page (Status → Published); a
- *     wrongly published service is already in front of everybody.
+ *   • IT COMES BACK AS A DRAFT (the owner, 11 November 2026 — D-145). That is
+ *     D-033's reasoning applied to a date coming back: a date nobody has
+ *     looked at since it vanished should not reappear in front of members
+ *     unasked. A draft is one tick from right on the same page (Status →
+ *     Published); a wrongly published service is already in front of
+ *     everybody.
+ *   • EXCEPT A DATE THAT WAS CANCELLED before it was hidden, which comes back
+ *     STILL CANCELLED, with its reason untouched (the owner, 11 November 2026
+ *     — D-146, superseding D-145 for that case). As a draft it would be one
+ *     bulk "Publish" away from putting a cancelled service live again, and its
+ *     cancellation reason would be sitting on a row that no longer says it is
+ *     cancelled. Every other status — published, draft, postponed — comes back
+ *     as a draft. The status is the one read UNDER THE LOCK in step 3, so it
+ *     is the status the row really has at the moment of writing.
  *   • The series' repeat rule (`tblRecurrenceRules`) is NOT touched. The
  *     calendar feed already re-checks that a rule matches the series' PUBLISHED
  *     dates before it collapses them into one entry (`calendar/export.php`), so
@@ -88,16 +104,34 @@
  * -----------------------------------------------------------------------------
  * `restore()` opens its transaction FIRST and then takes `SELECT … FOR UPDATE`
  * on the SERIES row before anything else (#697: a lock outside a transaction is
- * decoration). That row is the one thing every restore of this series must
- * pass through, so two restores into the same day queue behind it and the
- * second sees the first's committed date and is refused as DAY_TAKEN. Every
- * later read in the transaction is a locking read too, because a plain SELECT
- * reads the transaction's snapshot and would not see what the first restore
- * just committed. The pattern page does not take this lock, so a restore and a
- * pattern change at the same instant are not serialised by it; the restore's
- * write is conditional (`isDeleted = 1`, the series, the organisation) and the
- * pattern page's own writes are conditional too, so neither can write over a
- * row the other has just changed.
+ * decoration — and it does not LOOK like decoration: a locking read outside a
+ * transaction still WAITS for another holder, so a test that only watches it
+ * wait passes, while the lock it then takes is released at the end of that
+ * one statement. Check T33c asks whether the series row is still held while
+ * the restore is part-way through, which is the property that matters.) That
+ * row is the one thing every restore of this series must pass through, so two
+ * restores into the same day queue behind it and the second sees the first's
+ * committed date and is refused as DAY_TAKEN.
+ *
+ * EVERY read in the transaction is a locking read — the organisation's row is
+ * read `LOCK IN SHARE MODE`, the rest `FOR UPDATE` — because a plain SELECT
+ * reads the transaction's SNAPSHOT, and a snapshot would not see what another
+ * restore committed while this one waited. (An earlier version read the
+ * organisation with a plain SELECT under a comment claiming every read was a
+ * locking one. It did no harm — it came after the series lock, so its
+ * snapshot was taken late enough — but the claim was untrue, and the next
+ * read added below it would have trusted it.) `LOCK IN SHARE MODE` is the
+ * older spelling, chosen because both MySQL and MariaDB accept it; whether
+ * every MariaDB version accepts the newer `FOR SHARE` was not checked.
+ *
+ * THE PATTERN PAGE TAKES THE SAME LOCK, IN THE SAME ORDER. Its transaction's
+ * first statement is the same `SELECT … FOR UPDATE` on the series row, and it
+ * then re-reads the series' live dates and refuses if they differ from the
+ * ones its plan was worked out from. Without that, a restore committed between
+ * the pattern page working out its plan and writing it could leave two live
+ * dates on one day: the plan would add a date onto a day the restore had just
+ * filled. Both writers take the series row first, so whichever is second sees
+ * what the first committed, and neither can deadlock the other on it.
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -123,6 +157,11 @@ final class HiddenSeriesDates
     // live date on (D-144). Its own answer, because its words must say that
     // the series now has two dates on that day.
     public const RESTORED_SAME_DAY = 'restored-same-day';
+    // The same two, for a date that was CANCELLED before it was hidden and so
+    // comes back still cancelled (D-146). Their own answers, because "back as
+    // a draft, members cannot see it" would be untrue of them.
+    public const RESTORED_CANCELLED          = 'restored-cancelled';
+    public const RESTORED_SAME_DAY_CANCELLED = 'restored-same-day-cancelled';
     public const NOT_FOUND     = 'not-found';
     public const ALREADY_BACK  = 'already-back';
     public const DAY_TAKEN     = 'day-taken';
@@ -182,7 +221,8 @@ final class HiddenSeriesDates
     }
 
     /**
-     * Bring one hidden date of a series back, as a draft.
+     * Bring one hidden date of a series back: as a draft, or still cancelled if
+     * it was cancelled before it was hidden (D-145, D-146).
      *
      * The caller has already decided that the person may manage this series
      * (the series pages ask `App::isAdmin()`) and has checked the form token;
@@ -243,7 +283,9 @@ final class HiddenSeriesDates
             //    bring a date back into an organisation that has been switched
             //    off: nobody could see it, and it would come back to life the
             //    day the organisation was switched on again, unasked.
-            $site = $db->prepare('SELECT `siteID` FROM `tblSites` WHERE `siteID` = ? AND `isActive` = 1');
+            //    A LOCKING read (shared), like every read in this transaction:
+            //    see "TWO ADMINISTRATORS AT ONCE" in the class comment.
+            $site = $db->prepare('SELECT `siteID` FROM `tblSites` WHERE `siteID` = ? AND `isActive` = 1 LOCK IN SHARE MODE');
             if ($site === false) {
                 throw new \RuntimeException('the organisation could not be read');
             }
@@ -262,7 +304,7 @@ final class HiddenSeriesDates
             //    another organisation's event number — is NOT_FOUND, the same
             //    answer as a number that does not exist.
             $event = $db->prepare(
-                'SELECT `eventID`, `eventSlug`, `startDateTime`, `isDeleted` FROM `tblEvents` '
+                'SELECT `eventID`, `eventSlug`, `startDateTime`, `isDeleted`, `status` FROM `tblEvents` '
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `seriesID` = ? AND `externalFeedID` IS NULL '
                 . 'FOR UPDATE'
             );
@@ -336,16 +378,20 @@ final class HiddenSeriesDates
             // 6️⃣ The write. Every condition the reads established is repeated
             //    on the statement itself, so it changes this one row or none.
             //    `deletedAt` is emptied because the column means "when it was
-            //    hidden", and a live row was not. Status: a DRAFT (see the class
-            //    comment and D-033).
-            $write = $db->prepare(
-                "UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = 'draft', `updatedByID` = ? "
+            //    hidden", and a live row was not. Status: a DRAFT (D-145), or
+            //    still CANCELLED if it was cancelled before it was hidden
+            //    (D-146). Nothing else is written, so a cancelled date keeps its
+            //    `cancelReason` and who cancelled it, untouched.
+            $wasCancelled = (string) $row['status'] === 'cancelled';
+            $newStatus    = $wasCancelled === true ? 'cancelled' : 'draft';
+            $write        = $db->prepare(
+                'UPDATE `tblEvents` SET `isDeleted` = 0, `deletedAt` = NULL, `status` = ?, `updatedByID` = ? '
                 . 'WHERE `eventID` = ? AND `siteID` = ? AND `seriesID` = ? AND `isDeleted` = 1 AND `externalFeedID` IS NULL'
             );
             if ($write === false) {
                 throw new \RuntimeException('the date could not be brought back');
             }
-            $write->bind_param('iiii', $userId, $eventId, $siteId, $seriesId);
+            $write->bind_param('siiii', $newStatus, $userId, $eventId, $siteId, $seriesId);
             $write->execute();
             $changed = $write->affected_rows;
             $write->close();
@@ -358,7 +404,11 @@ final class HiddenSeriesDates
             }
 
             $db->commit();
-            $answer = $dayTaken === true ? self::RESTORED_SAME_DAY : self::RESTORED;
+            if ($wasCancelled === true) {
+                $answer = $dayTaken === true ? self::RESTORED_SAME_DAY_CANCELLED : self::RESTORED_CANCELLED;
+            } else {
+                $answer = $dayTaken === true ? self::RESTORED_SAME_DAY : self::RESTORED;
+            }
         } catch (\Throwable $e) {
             try {
                 $db->rollback();
@@ -379,8 +429,9 @@ final class HiddenSeriesDates
         // 📝 Numbers only: an event's name can carry somebody's details.
         Logger::activity(
             'SeriesDateRestored',
-            'Event #' . $eventId . ' of series #' . $seriesId . ' brought back as a draft'
-            . ($answer === self::RESTORED_SAME_DAY ? ', confirmed onto a day the series already had a date on' : ''),
+            'Event #' . $eventId . ' of series #' . $seriesId . ' brought back '
+            . ($wasCancelled === true ? 'still cancelled' : 'as a draft')
+            . ($dayTaken === true ? ', confirmed onto a day the series already had a date on' : ''),
             $userId
         );
 
@@ -406,6 +457,17 @@ final class HiddenSeriesDates
                 'words' => 'That date is back in the series as a draft, as you confirmed. This series now has two dates '
                     . 'on that day — hide or move one of them if that is not what you want. Members cannot see the date '
                     . 'you brought back until you publish it.',
+            ],
+            self::RESTORED_CANCELLED => [
+                'type'  => 'success',
+                'words' => 'That date is back in the series, still cancelled, because it had been cancelled before it was '
+                    . 'hidden. Members see it as cancelled, with the reason it was given.',
+            ],
+            self::RESTORED_SAME_DAY_CANCELLED => [
+                'type'  => 'warning',
+                'words' => 'That date is back in the series, still cancelled, as you confirmed, because it had been '
+                    . 'cancelled before it was hidden. This series now has two dates on that day — hide or move one of '
+                    . 'them if that is not what you want.',
             ],
             self::ALREADY_BACK => [
                 'type'  => 'info',

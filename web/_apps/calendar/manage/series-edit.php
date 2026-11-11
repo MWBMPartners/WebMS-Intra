@@ -243,8 +243,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Imported events are read-only (#514 D5); the fetch below already keeps them off the checkbox
     // list, but the condition is repeated on the write itself so a forged eventID in the posted list
     // updates 0 rows for that id rather than silently overwriting a row the source calendar owns.
+    //
+    // ♻️ `isDeleted = 0` FOR THE SAME REASON (#691). The checkbox list shows live dates only, but the
+    //    write did not say so, so a forged number could change a HIDDEN date's status — publishing a
+    //    date that is not even in the diary, which would then come back "published" by a route that
+    //    never went through `HiddenSeriesDates`. Hidden dates are changed only by being brought back.
     $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses)
-         . ' WHERE eventID IN (' . $placeholders . ') AND seriesID = ? AND siteID = ? AND externalFeedID IS NULL';
+         . ' WHERE eventID IN (' . $placeholders . ') AND seriesID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL';
 
     $stmt = $mysqli->prepare($sql);
     if ($stmt !== false) {
@@ -549,15 +554,17 @@ checkboxes.forEach(function (cb) {
             <span class="badge bg-secondary"><?php echo count($hiddenDates); ?></span></h5>
         <small class="text-muted">
             Dates of this series that were removed by a pattern change <strong>or deleted by hand</strong>, one at
-            a time. They were hidden rather than deleted, so nothing attached to them was lost. The portal
-            does not record which way a date was hidden, so both kinds are listed here.
+            a time. They were hidden rather than deleted, so nothing attached to them was lost. A hidden date
+            carries no mark saying which way it was hidden, so both kinds are listed here.
         </small>
     </div>
     <div class="card-body">
         <p class="small mb-3">
-            <strong>A date you bring back arrives as a draft</strong>, whatever it was before it was hidden, so
-            members do not see it until you have looked at it and published it (tick it in the list above and set
-            <em>Status</em> to Published). If the series already has a date on that day, the first press is
+            <strong>A date you bring back arrives as a draft</strong>, so members do not see it until you have
+            looked at it and published it (tick it in the list above and set <em>Status</em> to Published).
+            <strong>The one exception is a date that was cancelled before it was hidden:</strong> it comes back
+            still cancelled, with its reason, so members see it as cancelled rather than as a service that is
+            happening. If the series already has a date on that day, the first press is
             refused and tells you so; you can then choose <em>Bring it back anyway</em>, which leaves the series
             with two dates on that day. A later pattern change may hide it again if the new pattern does not
             include its day.
@@ -600,7 +607,12 @@ checkboxes.forEach(function (cb) {
                             <input type="hidden" name="action" value="restore">
                             <input type="hidden" name="restoreEventID" value="<?php echo (int) $hd['eventID']; ?>">
                             <button type="submit" class="btn btn-sm btn-outline-primary">
-                                <i class="fa-solid fa-rotate-left me-1"></i> Bring back as a draft
+                                <?php if ($hd['status'] === 'cancelled'): ?>
+                                    <?php // 🚫 D-146: a cancelled date comes back cancelled, and the button says so. ?>
+                                    <i class="fa-solid fa-rotate-left me-1"></i> Bring back, still cancelled
+                                <?php else: ?>
+                                    <i class="fa-solid fa-rotate-left me-1"></i> Bring back as a draft
+                                <?php endif; ?>
                             </button>
                         </form>
                         <?php if ($restoreOffer === (int) $hd['eventID'] && $hd['dayTaken'] === true): ?>
