@@ -3196,6 +3196,10 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   helpers; never write a second copy of that rule. Member-facing pages are pinned as RENDERED
   (`tools/erasure-pages-selftest.rendered-pins.txt`); whether a sentence is TRUE is a person's job at review,
   not a phrase list's. The record is DEV_NOTES.md, "Keeping a worker's name on a safeguarding record (#703)".
+  `GdprEraser::inventoryWords()` is the ONE place an inventory row becomes a member's words (pass `true` on a page
+  listing what is held now) and `anonymiseKeepsNumber()` the ONE rule for whether a record keeps the number (#927);
+  `Giving::buildHmrcCsv()` takes a kept row's name and nothing else when one joins, so the claim file never says
+  "[Deleted User]" (#941).
 - **No place is built in either (#935, migration 274).** `Sabbath::place()` is the
   ONE answer to where sunset is worked out (typed place, else the organisation's
   map position, else none and the fixed times, said on the page);

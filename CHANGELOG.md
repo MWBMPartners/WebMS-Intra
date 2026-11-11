@@ -4,6 +4,192 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### Erasure: a cleared kept giving record, labels that keep your number, and the Gift Aid file never says "[Deleted User]" (#941, #927)
+
+- **An erasure can no longer finish while gifts still carry the donor's account number
+  (#941).** Sometimes an earlier run kept a donor's name at an organisation, cleared it, and
+  then stopped before the account was emptied. The next run used to skip that organisation
+  ("Nothing was changed"). Every gift the person made after that kept their number, with
+  nothing that would ever clear it, and the request still closed as completed. Now, while
+  the account is still live, that run works the organisation's records out again from the
+  start, as a first run does. It keeps the name again, on the same row and tied to the
+  request doing the erasing, for whatever must be kept for tax, and takes the donor off
+  everything else. If the account has already been emptied, the row stays cleared and any
+  gift still carrying the number loses it.
+- **Request erasure and My data now say when a kept record keeps your account number
+  (#927).** An expense claim, and a tax declaration whose kept name is removed, were
+  labelled "kept, with some details about you removed". Both keep the account number on
+  purpose (D-113). They now read "kept, with some details about you removed but still
+  carrying your account number".
+- **My data no longer describes the present as if the erasure had already happened
+  (#927).** Its badge printed the internal word ("anonymise", "retain"). It now says what
+  WOULD happen: "would be deleted if you ask to be erased", "would be kept, ... if you ask
+  to be erased". The page lists what is held now.
+- **The erasure trail says what a kept giving record holds, and a blank address is no
+  address.** The trail used to say where the kept name and address came from, and was wrong
+  in several ways. It said "read from the account" when the address came from a tax
+  declaration. It said "from the account" when that address was blank. It said "none is
+  held" when one was held at another organisation. The line now reads the record back after
+  it is written and says what it holds: the name or no name, and a home address or no home
+  address. A blank address (or name, or postcode) is now stored as nothing at all. Before,
+  it was stored as an empty value. Blanks are common: a member who saves their directory
+  entry with the address box empty stores one. The line no longer says "this donor's name
+  and address" over a record that holds no address.
+- **The Gift Aid claim file can no longer name an erased donor "[Deleted User]".** It read
+  the donor's name as "the kept name, or else the account's". When a kept record had no
+  name, that fell through to the emptied account's stand-in name. This happened for a donor
+  whose account was emptied before the giving step ran, and for a donor whose own name was
+  blank (the Microsoft and Google sign-ins store a blank name when the provider sends none).
+  Measured: the file read "[Deleted,User]". Such a row now has an empty first and last name,
+  as a nameless donor always had. HMRC's upload refuses that, so somebody looks.
+- **The giving-records settings page says "No name was kept" for a kept record with no
+  name.** It said "No name was recorded: the account had already been emptied" for every
+  such record. That is untrue when the account's own name was blank, which a Microsoft or
+  Google sign-in can leave.
+- **When an erasure empties a kept giving record an earlier run left, the trail says what
+  that record held.** It used to say "a name and address" whatever the record held.
+- **A declaration address that is only white space is no address.** The account's address
+  is then kept instead, and the empty declaration's postcode is not.
+
+## DEV_NOTES.md — "A cleared kept giving row, and a label that follows the number (#941, #927)"
+
+- `GdprEraser::keepGivingRecordsAtSite()`, step 1c, handles a `tblGivingKeptDonors` row
+  whose `clearedAt` is set. The two cases need opposite answers:
+  - **Beside a live account**, the row is worked out again from the start, as a first run
+    would: no earlier row for the date or the scope, and "not known" for the unkept gift
+    dates. The row is re-used, because `uq_gkd_site_donor` allows only one per
+    organisation and donor. The re-use writes `clearedAt = NULL`, a new `createdAt`, and
+    THIS request's number.
+  - The request number matters: the clearing line is written on the trail of the request
+    the row names. If the row kept naming a cancelled request, and that request were later
+    deleted (`fk_gkd_request` is ON DELETE SET NULL), `clearKeptGivingIdentity()` would
+    refuse for ever. Section 23 now runs the re-work under a SECOND request filed after the
+    first was cancelled, and checks that the clearing line lands on the new one.
+  - **Beside an emptied account**, the row stays cleared and no name is written. Any gift
+    still carrying the number loses it.
+- Why "work it out again" rather than "take the name off everything": the method's own
+  rule says a run beside a live account IS the erasure. A gift made since the clearing,
+  under a declaration made since, is statutory tax evidence. Taking the donor off it cannot
+  be undone, which is the direction D-032 calls dangerous.
+- `givingOutlook()` needed no code change for the live case. It already counted a cleared
+  row by today's rule with no earlier row, which is now what the step does. Section 23
+  holds the two to the same numbers.
+- `GdprEraser::anonymiseKeepsNumber()` is THE ONE rule for whether an anonymise instruction
+  leaves the account number. `processEntry()` and `inventory()` (field `keepsNumber`) both
+  ask it.
+- `GdprEraser::inventoryWords($row, $ifErased)` is THE ONE place a row becomes words. Pass
+  `$ifErased = true` on any page that lists what is held NOW. My data does; Request
+  erasure frames the words itself ("will be ...").
+- **The kept-record audit line reads the row back; it does not describe the inputs.**
+  Sentences that said where the name and address came from were wrong two rounds running.
+  Each was a branch reasoning about the inputs (a declaration here or elsewhere, an account
+  address of `''` or NULL). The line now selects `fullName` and `address` from the row
+  after the write. It counts `''` and NULL alike as nothing, and says "Kept on this record:
+  the name / no name and a home address / no home address".
+- **A blank value is stored as NULL** in `tblGivingKeptDonors` (`fullName`, `address`,
+  `postcode`; whitespace counts as blank). NULL is what "nothing kept" means everywhere else
+  on that row, because the clearing writes NULL. `displayAddress` is `''` whenever a member
+  saves their directory entry with the box blank.
+- **`Giving::buildHmrcCsv()` takes the kept row's name and nothing else when a kept row
+  joins:** `CASE WHEN k.keptDonorID IS NOT NULL THEN k.fullName WHEN u.fullName =
+  '[Deleted User]' THEN NULL ELSE u.fullName END`, in the SELECT and the ORDER BY. A kept row
+  joins only beside an emptied account, so the old `COALESCE(k.fullName, u.fullName)`
+  meant "[Deleted User]" whenever the kept name was empty. With no kept row, a tombstone
+  name still gives an empty name. Only `buildHmrcCsv()` fell back this way. The other
+  reader of the kept name (`GivingRetention`'s list on the retention page) shows a missing
+  name as missing.
+- **The claim file's account-name rule keys on the made-up name alone, never on
+  `isActive`.** A global administrator can save an erased account with Active ticked
+  (`admin/users/save.php`). It then still reads "[Deleted User]", and the kept row stops
+  joining, because the join asks `emptiedAccountSql()`, which requires the account to be
+  switched off. So in that state only the account rule decides the name, and a rule that let
+  a switched-on account through put "[Deleted,User]" back in the file. Section 23 pins it,
+  with the switch made in SQL; the test has no web server.
+- **The claim file's name rule is tested as a TABLE, not by examples** (round 6). Two
+  rounds running, one more case pinned the rule from one side only. First a branch keyed
+  on `isActive = 1` passed. Then one keyed on `isActive = 0` passed the next round's case.
+  Section 23 now builds one donor for every combination and requires each row's exact
+  name, worked out in the test from the facts:
+  - the kept row: none, named, nameless, blank, or cleared;
+  - the account: switched on or off;
+  - the account name: the made-up one, real, `''`, NULL, or white space;
+  - the e-mail: the made-up one, or real.
+
+  That is 100 donors; a kept row joins for 3 of them. "Deleted" must appear nowhere in the
+  file.
+
+  Round 7 widened two dimensions the first table had collapsed:
+  - **A cleared kept row WITH a name.** A cleared row was always nameless, so code that
+    joined cleared rows changed nothing the table could see.
+  - **The made-up name in other capitals** ("[deleted user]"). A case-sensitive comparison
+    passed every check once the exact-text pins were retired.
+
+  Now 6 kept-row states x 2 x 6 account names x 2 e-mails = 144 donors, with 6 joining. The
+  oracle treats the made-up name as matching in any capitals, in both the join and the name
+  rule. `tblUsers.fullName` is `utf8mb4_general_ci`, so the database's own `=` ignores case.
+  That is the safe direction: an empty name, which HMRC refuses. Plants p07 (cleared rows
+  join through a neutralised condition), p14 (the cleared condition removed) and p05
+  (`BINARY` comparison) each turn the table red. Combinations no page produces today are built in SQL anyway, because the rule must
+  hold for every row the query can see. The single "switched back on" case from round 5 is
+  replaced by the table, which also stops it leaving that donor switched on. The two
+  exact-text pins on the CASE expression in `gdpr-coverage-selftest.php` are retired: an
+  inserted branch left both green twice. The structural pins stay: no COALESCE, and the
+  join's own conditions.
+- **The giving-records page** (`admin/settings/giving-records/index.php`) shows "No name
+  was kept" and asserts no reason, because nothing on the page tells the two causes apart.
+  A name of only white space also counts as no name. Pinned over HTTP in
+  `erasure-pages-selftest.php` with a nameless kept row beside Cal's live account.
+- **The `tblGivingKeptDonors.fullName` comment is corrected in `full_schema.sql` only, with
+  no migration.**
+  - The owner's statement of 2 November 2026 says no live installation exists, so the
+    first release is a clean install (recorded in assistant memory, NOT in
+    `docs/decisions/`; see Found 7).
+  - The migration harness does not compare comments (`tools/e2e-migrations/run.sh`), so the
+    two install routes cannot disagree on anything it checks.
+  - A comment changes no behaviour.
+  - Migration 209, which first created the table with the old comment, is left as history:
+    it uses `CREATE TABLE IF NOT EXISTS`, so a fresh install takes the new comment from
+    `full_schema.sql`.
+  - Migration 281 is unused.
+- **One helper, `$holds`, says what a kept row holds**, with `''`, NULL and white space all
+  counting as nothing. It is used for the read-back after a write and for step 4's
+  sentence. Step 4 reads the earlier row at step 1, inside the transaction and before
+  emptying it, and says what it held. The re-use sentences no longer claim a name and
+  address they never read ("kept a record here and later emptied it").
+- The declaration-address filter is `address REGEXP '[^[:space:]]'`, replacing
+  `address <> ''`. A tab-only address passed the old filter, was chosen, became NULL, and
+  hid the account's address while its postcode was kept.
+- Section 23 pins the four address cases. Clara (from a declaration) holds an address. An
+  account address of `''`, an account with no address, and an address held only at another
+  organisation each hold NULL and say "no home address".
+- Round 4 (check round 3) adds one donor per branch at a third organisation that keeps every
+  gift:
+  - a home address from the ACCOUNT with no declaration (the headline property; every
+    earlier case had a declaration);
+  - an account address of white space;
+  - a declaration postcode of `''`;
+  - account names of `''`, NULL and white space;
+  - an account already emptied before the run;
+  - a kept row an older version wrote with `''`;
+  - an earlier run's row emptied by step 4;
+  - a tab-only declaration address.
+  The claim file is built after these and must never contain "[Deleted User]".
+  Nine plants, each caught.
+- `tools/erasure-pages-selftest.php` makes `tblExpenseClaims.userID` emptiable for one
+  request. It puts the column back in three places:
+  - a `finally` around that check;
+  - `cleanup()`, which a SIGINT or SIGTERM now reaches (a `pcntl` handler turns the signal
+    into an exit);
+  - the start of every run, the only thing that can repair a run killed with SIGKILL.
+  Measured: under SIGTERM the column was back at once. Under SIGKILL it stayed emptiable
+  (and the test's own web server was orphaned and had to be stopped by hand). The next run
+  on that database repaired it and passed, twice.
+- A label check on a fresh schema cannot tell the rule from a hard-coded list of tables,
+  because they agree there. `tools/erasure-pages-selftest.php` makes
+  `tblExpenseClaims.userID` emptiable for one request, requires the label to follow, then
+  puts the column back and checks it is identical.
+- Seven check rounds (protected arm). Follow-ups: #970, #977, #980.
+
 ### No country is built in; the installer asks, and the installer pages send a strict browser rule (#942, D-133, migration 279)
 
 - **The installer asks for the installation's country and the first organisation's time zone**, suggesting both
