@@ -1517,8 +1517,8 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     inherit the template's status, and the template's status is not read at all. It has no
     registration window of its own (the template's `registrationClosesAt` is a moment just before
     the TEMPLATE's date) and nothing beyond the series' description, so publishing it at once puts a
-    half-finished entry in front of members; and a hidden date cannot be brought back (#691), so the
-    recoverable mistake is the one to make. **The preview AND the message afterwards must BOTH say
+    half-finished entry in front of members; and a draft is one step from right, so the
+    recoverable mistake is the one to make (D-033's other reason lapsed with #691). **The preview AND the message afterwards must BOTH say
     so** ("added as drafts"), pinned by S15b and S15c of `tools/event-repeat-pages-selftest.php`.
     Publishing a whole change's worth at once is #696.
     date's own history: never born cancelled, and carrying no cancellation
@@ -1551,9 +1551,12 @@ The dates it adds are **published from the series' BULK EDIT page**, which the h
     column as a hard gate. `registrationEnabled` is given its DEFAULT and
     not NULL, because it is `NOT NULL` and binding null fails the whole
     INSERT. The added date's `timezone` is the zone the READINGS were made
-    in, never the template's. **And never say a hidden date can be put back:
-    there is no restore path anywhere in this repository (#691), only
-    `FeedImporter` ever clears `isDeleted`.** Tests:
+    in, never the template's. **A hidden date CAN be brought back now (#691; D-143 to D-147):
+    `Portal\Core\HiddenSeriesDates` is the ONE place, from the series' bulk edit page, as a DRAFT — or
+    still CANCELLED / still POSTPONED, with its reason if it had one, if it was so (`KEEPS_STATUS`,
+    `statusOnReturn()`). Every hidden date is offered. Onto a day already in use, the first press is
+    refused and "Bring it back anyway" (`confirmSameDay=1`) is judged under the lock. The SERIES ROW is
+    the lock both `restore()` and the pattern page take first. Never say "it can be put back" unqualified.** Tests:
     `tools/series-repattern-selftest.php` (72, no database) and sections R
     and S of `tools/event-repeat-pages-selftest.php` (247 over HTTP; it
     needed a third, non-administrator account because both existing ones are

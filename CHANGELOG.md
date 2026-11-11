@@ -4,6 +4,25 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A date hidden from a series can be brought back (#691; D-143 to D-147)
+
+- The series' bulk edit page now lists the series' hidden dates — those a pattern change removed and those
+  deleted by hand, since a hidden date carries no mark saying which — each with a button to bring it back. Until
+  now nothing in the portal could undo a hidden date; it needed direct database access.
+- A date comes back as a draft, so members do not see it until somebody publishes it — except a date that had
+  been cancelled or postponed before it was hidden, which comes back still cancelled or still postponed, with its
+  reason if it had one. It keeps its own number, web address and everything attached to it.
+- If the series already has a date on that day (which is what happens after a series is shortened and then
+  extended over the same weeks), the first press is refused and says why; the page then offers "Bring it back
+  anyway", which brings it back and says the series now has two dates on that day.
+- Refused when the series has been deleted, and when the number is not a hidden date of this series in this
+  organisation — another organisation's number gets the same answer as one that does not exist.
+- Changing a series' pattern now refuses, rather than leaving two dates on one day, if a date was brought back
+  while the change was being confirmed. The series' bulk update can no longer change a hidden date.
+- The sentences on the pattern page and in the calendar help that said a hidden date could not be brought back
+  now say how to do it. Self-test: section T of `tools/event-repeat-pages-selftest.php`. Follow-ups #998 (no page can set a cancellation reason), #1000 (a hidden date can still be edited
+  through its edit address). Codex has not reviewed this.
+
 ### A rota swap request can now be answered, and the people involved can be e-mailed about it (#657, D-141)
 
 - The Duty Roster page (`/rota`) lists "Swap requests for you" with Accept and Decline, open requests

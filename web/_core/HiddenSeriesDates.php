@@ -262,8 +262,8 @@ final class HiddenSeriesDates
     }
 
     /**
-     * Bring one hidden date of a series back: as a draft, or still cancelled if
-     * it was cancelled before it was hidden (D-145, D-146).
+     * Bring one hidden date of a series back: as a draft, or still cancelled or
+     * still postponed if it was so before it was hidden (D-145, D-146, D-147).
      *
      * The caller has already decided that the person may manage this series
      * (the series pages ask `App::isAdmin()`) and has checked the form token;

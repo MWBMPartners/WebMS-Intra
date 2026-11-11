@@ -248,7 +248,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ♻️ `isDeleted = 0` FOR THE SAME REASON (#691). The checkbox list shows live dates only, but the
     //    write did not say so, so a forged number could change a HIDDEN date's status — publishing a
     //    date that is not even in the diary, which would then come back "published" by a route that
-    //    never went through `HiddenSeriesDates`. Hidden dates are changed only by being brought back.
+    //    never went through `HiddenSeriesDates`. This page changes a hidden date only by bringing it back;
+    //    the single-event edit page (`calendar/manage/save.php`) does not yet refuse one (#1000).
     $sql = 'UPDATE tblEvents SET ' . implode(', ', $setClauses)
          . ' WHERE eventID IN (' . $placeholders . ') AND seriesID = ? AND siteID = ? AND isDeleted = 0 AND externalFeedID IS NULL';
 

@@ -23689,3 +23689,40 @@ asker's own list (`whereDutyIsNow()`). The pages hold no rule.
   same transaction).
 - The test's copy of web/ holds the database password; its clean-up ignores further Ctrl-C and deletes
   the password and key files FIRST.
+
+### Bringing a hidden date of a series back (#691; D-143 to D-147)
+
+`Portal\Core\HiddenSeriesDates` is the ONE place a series' hidden dates are listed and the ONE place one is
+brought back; the bulk edit page (`calendar/manage/series-edit`) draws the list and posts the buttons and holds no
+rule. A date comes back IN PLACE (same row, number, address and attachments) as a DRAFT (D-145), or STILL
+CANCELLED / STILL POSTPONED with its reason if it was so (D-146, D-147). `KEEPS_STATUS` is the one list of statuses
+that survive and `statusOnReturn()` the one rule, asked by the write and by the page's button; the status is the
+one read under the lock. A hand-built post with `confirmSameDay=1` skips the first press of D-144 — the day is
+still read under the lock, and only an administrator with the form token can send one.
+
+- It lists EVERY hidden date of the series (D-143): three things hide an event and nothing on the row says which
+  (the Delete button and the API log the number; the pattern page logs only counts).
+- THE SERIES ROW IS THE MUTEX, for BOTH writers. `restore()` and the pattern page each lock it `FOR UPDATE` as the
+  first statement of their transaction, so they queue and the second sees what the first committed; the pattern
+  page then re-reads the series' live dates (locking read) and refuses if its plan was worked out from a different
+  set. Every read inside `restore()`'s transaction is a locking read (`FOR UPDATE`, the organisation
+  `LOCK IN SHARE MODE`), because a plain read uses the transaction's snapshot.
+- A LOCKING READ OUTSIDE A TRANSACTION STILL WAITS, so "the restore waited for the lock" does not prove the lock is
+  held. T36d proves it: while the restore is blocked at step 3, this run asks for the series row NOWAIT and must
+  get 3572. Moving `begin_transaction()` to the write left T33-T36 green and turns T36d red.
+- A taken day (D-144): first press refused (DAY_TAKEN), then "Bring it back anyway" (`confirmSameDay=1`). The
+  confirmation is consulted only after the day is read under the lock, so it never skips the check.
+- Other refusals: NOT_FOUND (missing, another organisation's, another series', imported, gone series — one answer,
+  so no existence leak), ALREADY_BACK, ADDRESS_TAKEN (unreachable while `uq_event_site_slug` exists, which covers
+  hidden rows; kept for a database that has lost the key).
+- The series' bulk update carries `isDeleted = 0`: a hidden date is changed only by being brought back.
+- The repeat rule row is not touched: `calendar/export.php` re-checks a rule against the published dates.
+- The organisation's `isActive` test inside `restore()` is a second line: the portal turns a switched-off
+  organisation away before any page runs, so T47 proves the behaviour and cannot reach that test on its own.
+- D-033's second reason ("a hidden date cannot be brought back") has LAPSED with #691. D-033 still stands on its
+  first reason. Do not quote the lapsed half.
+- Nothing under web/ writes `cancelReason` (#998); section T sets one with SQL for that reason, and the words say
+  "with its reason if it was given one".
+- Test: section T of `tools/event-repeat-pages-selftest.php` (90 checks), including three lock tests with ONE
+  worker — this run's own connection holds a row while the real page waits on it over HTTP, and each asserts the
+  page is still waiting before anything else is judged.

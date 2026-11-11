@@ -497,6 +497,12 @@ Events, series, RSVP, exports, and seven view modes.
   the website box too (D-089, #850). `Portal\Core\PublicWebsite`, migration 258, test
   `tools/public-website-tick-selftest.php`.
 - Event series with bulk edit (#75).
+  - **Hidden dates** (#691; D-143 to D-147): the bulk edit page lists every hidden date of the series —
+    including those deleted by hand — with a button to bring each back. It returns as a draft, or still
+    cancelled / still postponed (with its reason, if it had one) if it was so before it was hidden. If the
+    series already has a date on that day the first press is refused, and a separate "Bring it back anyway"
+    button then brings it back, leaving two dates on that day. A pattern change confirmed while a date is
+    being brought back is refused rather than leaving two dates on one day.
 - Event categories + types (hierarchical, per-site).
 - **Repeating events: weekly / fortnightly / monthly / quarterly / yearly**, created from the event form
   (#569). Pick how often, then stop after a number of dates or after a date. Weekly and fortnightly take
@@ -545,8 +551,8 @@ Events, series, RSVP, exports, and seven view modes.
     - **A date the change ADDS arrives as a draft**, so members cannot see it until somebody
       publishes it from Manage Events (#692, the owner's decision of 31 October 2026). An added date
       is a copy of the series and nothing more — it has no registration window of its own and nothing
-      beyond the series' description — and a date that has been hidden cannot be brought back (#691),
-      so the recoverable mistake is the one the page makes. The preview says so before anything is
+      beyond the series' description — and a draft is one step from right, whereas a date published
+      too soon is already in front of members, so the recoverable mistake is the one the page makes. The preview says so before anything is
       written, and the message afterwards says how many arrived as drafts. **Publishing them all at
       once already works** on the page the change sends you to: the series' bulk edit page lists every
       date with a tick-box and a Status control. Until they are published, a subscriber sees each date
@@ -559,7 +565,9 @@ Events, series, RSVP, exports, and seven view modes.
       that already has series in it.
     - **A date that stays is re-timed in place** — only its start and finish change, so a
       hand-changed title, venue or description is never at risk. **A date that goes is hidden, not
-      deleted**, so nothing cascades and an administrator can put it back.
+      deleted**, so nothing cascades, and it can be brought back from the series' bulk edit page
+      (#691) — as a draft (still cancelled or postponed, if it was), and onto a day the series has since
+      been given another date on only after a second, deliberate press.
     - **A date the pattern adds starts clean.** It takes the series' name, venue, category and
       settings, and none of what belongs to one date's own history: it is never created already
       cancelled, and carries no cancellation reason, moderation note or submitter details.
