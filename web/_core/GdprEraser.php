@@ -1227,14 +1227,28 @@ class GdprEraser
              //    ("Added user #N to site #M", admin/sites/users.php). So the
              //    sentence says what is removed AND what stays, and how the log is
              //    cleared (the nightly clear-out, `log_sweep_tables()`).
+             // 🗣️ #940 (D-117, D-118, D-119): the activity log may now be kept
+             //    for ever, by the installation's choice or, where the
+             //    installation allows it, an organisation's; and an
+             //    organisation's own administrator sets its period, within the
+             //    installation's. A record that belongs to no organisation
+             //    (its organisation removed - `fk_logs_site` is ON DELETE SET
+             //    NULL) is swept by the installation's figure (`log_sweep()`).
+             //    And #933: what a record SAYS can give a full name or an
+             //    e-mail address, not only a provider's, so it says "your
+             //    e-mail address" and that the words last as long as the
+             //    record - which under "for ever" is for ever.
              'reason' => 'the record of what happened is kept for running and repairing the portal, until the activity log '
-                 . 'is cleared: the nightly clear-out deletes it after the number of days set for the organisation (a year '
-                 . 'unless changed), if that scheduled job has been set up. Removed from your own records: your account '
-                 . 'number, the address the request came from, the browser\'s name, the request\'s headers, the '
-                 . 'session\'s fingerprint and the facts about the session. What each record says is kept as it was '
-                 . 'written, so it can still name you or give your account number, and a record of linking or unlinking '
-                 . 'a sign-in provider gives that provider\'s e-mail address. Records other people made can also mention '
-                 . 'you'],
+                 . 'is cleared: the nightly clear-out deletes it after the period set for the organisation it was recorded '
+                 . 'under (a year unless changed; that organisation\'s own administrator sets it, within the limit for the '
+                 . 'whole installation), or after the installation\'s period for a record that belongs to no organisation, '
+                 . 'if that scheduled job has been set up. The installation, and an organisation where the installation '
+                 . 'allows it, can instead choose to keep the activity log for ever, and then nothing deletes it. Removed '
+                 . 'from your own records: your account number, the address the request came from, the browser\'s name, '
+                 . 'the request\'s headers, the session\'s fingerprint and the facts about the session. What each record '
+                 . 'says is kept as it was written for as long as the record is, so it can still name you, give your e-mail '
+                 . 'address or give your account number - a record of linking or unlinking a sign-in provider, for '
+                 . 'instance, gives that provider\'s e-mail address. Records other people made can also mention you'],
 
             // 📅 `calendarToken` and `notifyPrefs` are cleared since the same
             //    day. The token is the key inside the person's private
@@ -1268,6 +1282,11 @@ class GdprEraser
              //    when a later request of the same kind arrives. The same content
              //    is in the catalogue, privacy/policy.php and the policy doc, and
              //    section 23 of the coverage test pins each place WHOLE.
+             // 📜 #940 (D-117): the activity log may be kept for ever by the
+             //    installation's or the organisation's choice, so its clause
+             //    says "unless ... chosen to keep it for ever", and names the
+             //    organisation the record was made under (each is swept by its
+             //    own organisation's figure).
              'reason' => 'your account is kept as an empty shell so that the records pointing at it do not break: '
                  . 'your name becomes "[Deleted User]", and your e-mail address, telephone, address, biography, map '
                  . 'position, language, sign-in secrets, calendar link and notification choices are emptied. Most '
@@ -1283,8 +1302,9 @@ class GdprEraser
                  . 'D-110, D-111). Separately, records kept for '
                  . 'security and as a history of changes can mention your account number, in what they describe or in '
                  . 'a stored copy of a record that was changed: the activity log, deleted by the nightly clear-out after '
-                 . 'the number of days set for the organisation (a year unless changed), if that scheduled job has been set '
-                 . 'up; the change history of records, which nothing clears; and rate-limit records, tidied away only '
+                 . 'the period set for the organisation it was recorded under (a year unless changed), if that scheduled job '
+                 . 'has been set up, unless the installation or that organisation has chosen to keep it for ever, when '
+                 . 'nothing deletes it; the change history of records, which nothing clears; and rate-limit records, tidied away only '
                  . 'when a later request of the same kind happens to trigger it, so one can stay for a long time. '
                  . 'Neither list is every place your number may be written: anything typed about you can mention it '
                  . 'too. Through that number and the names kept beside it, anyone who can read the database or a backup '

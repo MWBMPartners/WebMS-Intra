@@ -612,9 +612,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <?php else: ?>
                         <strong>at most <?php echo (int) $activityInstallationDays; ?> days</strong>.
                     <?php endif; ?>
-                    Records that belong to no organisation &mdash; written before the
-                    organisation was decided, or by a scheduled job &mdash; follow the
-                    installation's figure.
+                    <?php // 📜 #940: this named "written before the organisation was decided, or by
+                          //    a scheduled job" as the records with no organisation. Read from the code,
+                          //    not measured: Logger::activity() writes Site::id(), which is a whole
+                          //    number on every request and job (it starts at 1), so such records are
+                          //    put under an organisation. What leaves a record with none is its
+                          //    organisation being removed (`fk_logs_site` is ON DELETE SET NULL), an
+                          //    older record, or a copy ActivityLogCleaner makes of one. ?>
+                    Records that belong to no organisation &mdash; for example one whose
+                    organisation has since been removed &mdash; follow the installation's figure.
                 </p>
                 <p class="mb-0">Rows that would be deleted now, across every organisation: <strong><?php echo number_format($preview['activity']); ?></strong></p>
             </div>

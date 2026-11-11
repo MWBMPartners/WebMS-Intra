@@ -810,6 +810,23 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <strong>If the period matters for somebody who has asked to be erased, shorten it, or
             deal with those rows directly and record that you have.</strong>
         </li>
+        <?php // 📜 #940 (D-117, D-118, D-119): the activity log may now be kept for ever, so what an
+              //    erasure leaves in it can stay for ever. Said here because this is the list an
+              //    administrator reads before deciding what an erasure is worth. "Some records", never a
+              //    list of which: no such list is complete (the count of writers is #933's). ?>
+        <li>
+            <strong>The activity log: what each record says.</strong> On the person's own records an
+            erasure removes the account number, the network address, the browser and the session
+            details, but what each record says is kept as it was written &mdash; and some records,
+            the person's own and other people's, give a full name, an e-mail address or an account
+            number. Those words go only when the record does: the nightly job, once it has been set
+            up, deletes it after the
+            period set for the organisation it was made under, which that organisation's
+            administrator sets within the installation's, on Admin, Maintenance, Retention (a record
+            that belongs to no organisation follows the installation's period).
+            <strong>Where the installation, or an organisation where the installation allows it, has
+            chosen to keep the activity log for ever, nothing deletes them.</strong>
+        </li>
         <li>
             <strong>Kept on purpose, because the words are about the organisation rather than the
             person.</strong> Decided on 3 November 2026: a <strong>presenter's name typed in by

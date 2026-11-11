@@ -89,6 +89,12 @@
  *      refused; and a real decision empties the cell, is recorded naming who
  *      decided, changes what the page then shows, and reaches no record as
  *      words.
+ *   K. (#703 round 8.) What a giver is told will happen to their own gifts.
+ *   L. (#940; D-117, D-118.) How long the activity log is kept, as the privacy
+ *      page and the privacy notice say it for THIS organisation: a number of
+ *      days, the organisation's own or the installation's, or kept for ever by
+ *      either's choice - every state drawn over HTTP and compared with literal
+ *      words written in the test.
  *
  * TAKING PICTURES OF THE SETTINGS PAGE
  * ------------------------------------
@@ -181,7 +187,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 104; // 80 until #703 (D-016) added two: the two writers
+const EXPECTED_CHECKS = 108; // 80 until #703 (D-016) added two: the two writers
                             // record who made a visit and who recorded a DBS check
                             // BY NAME, driven through the real pages. #703 round 2
                             // added four: the case page (D-110) and the check-in and
@@ -210,6 +216,11 @@ const EXPECTED_CHECKS = 104; // 80 until #703 (D-016) added two: the two writers
                             // Round 12 added K11r (which organisations a lose
                             // row names) and K13 (every hold state, one
                             // table). 104.
+                            // #940 added section L: L1 (every activity-log state,
+                            // one table, both privacy pages) and L2 (the words
+                            // when the figure could not be read), L3 and L4 (the
+                            // first steps' step 5 and the Retention page's card,
+                            // pinned as rendered). 108.
 
 function refuse(string $why): never
 {
@@ -821,7 +832,12 @@ $seed(REQ_B_PUT, ORG_B, ADMB, 'processing', 20);
 $seed(REQ_B_ASK, ORG_B, ADMB, 'pending_confirmation', null);
 
 // Organisations told apart by the first part of the address: recorded first, put back by the clean-up.
-foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path'] as $key => $value) {
+// #940: the activity log's installation-wide figure is set to the built-in year
+// for the run, because the privacy notice and the Retention page now PRINT it,
+// and their pins are taken at 365 days. Another test on the same database can
+// leave it elsewhere (retention-caps-selftest.php leaves 30), which made this
+// test's pins fail for a reason that had nothing to do with the pages.
+foreach (['multisite.enabled' => 'true', 'multisite.detectionMode' => 'path', 'audit.retentionDays' => '365'] as $key => $value) {
     $row                     = one('SELECT settingID, settingValue FROM tblSettings WHERE settingKey = ? AND siteID IS NULL', 's', [$key]);
     $state['settings'][$key] = $row;
     if ($row === null) {
@@ -2790,6 +2806,131 @@ foreach ($givingBefore8 as $row) {
     q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, ?, ?, ?, 0)', 'isss',
         [ORG_A, $row['settingKey'], $row['settingValue'], $row['defaultValue']]);
 }
+
+// =============================================================================
+head('L. How long the activity log is kept, as a member reads it (#940; D-117, D-118)');
+// =============================================================================
+// Since #932 the activity log may be kept for ever - by the installation, or by
+// an organisation where the installation allows it - and an organisation's own
+// administrator sets its period within the installation's. The privacy page and
+// the privacy notice print THIS organisation's real figure. Each state below is
+// drawn over HTTP and its words compared with the LITERAL text written here,
+// never computed by the code under test (#647), as K13 does for gifts. The
+// table holds the states a plant has to get wrong to stay green: an
+// organisation's own figure under the installation's (a page printing the
+// installation's figure fails it); an organisation's "never" under an
+// installation with a number (held to the number, so "for ever" fails it); and
+// the two "for ever"s, which say WHO chose it.
+//
+// The whole "Retention" section of the privacy page is ALSO pinned as rendered,
+// in every state, so an old sentence planted back BESIDE the new one fails too.
+// What this cannot drive: the "could not be read" state (it needs one read to
+// fail while the page still draws). Its words are compared by calling the class
+// directly, at the end.
+$alrLead = [
+    'days'       => static fn (string $n): string => 'This organisation\'s activity log is deleted by a nightly clear-out after ' . $n
+        . ', if that scheduled job has been set up. This organisation\'s administrators set that period, within the limit set for the whole portal.',
+    'own-never'  => 'This organisation has chosen to keep its activity log for ever, so nothing deletes it.',
+    'inst-never' => 'This portal keeps the activity log for ever, and this organisation has not chosen a shorter period, so nothing deletes it.',
+];
+$alrTail = ' A record made while you were using another organisation on this portal follows that organisation\'s period, and one that '
+    . 'belongs to no organisation, such as one whose organisation has since been removed, follows the period set for the whole portal. '
+    . 'If your account is erased, your account number, network address, browser and session details are taken off your own records, but '
+    . 'what each record says is kept as it was written: some name people, by full name, e-mail address or account number, and those words '
+    . 'stay for as long as the record does.';
+$alrClause = [
+    'days'       => static fn (string $n): string => 'the activity log, deleted here by a nightly clear-out after ' . $n . ', if that scheduled job has been set up',
+    'own-never'  => 'the activity log, which this organisation has chosen to keep for ever, so nothing clears it',
+    'inst-never' => 'the activity log, which this portal keeps for ever (this organisation has not chosen a shorter period), so nothing clears it',
+];
+$alrClauseTail = ' (a record made at another organisation on this portal follows that organisation\'s period, and one that belongs to no '
+    . 'organisation the whole portal\'s)';
+// [label, the installation's stored figure, this organisation's own (null = no row), state attribute, page words, notice words]
+$alrTable = [
+    ['installation 365 days, organisation follows it',   '365', null, 'days',               $alrLead['days']('365 days'), $alrClause['days']('365 days')],
+    ['installation 365 days, organisation 45 days',      '365', '45', 'days',               $alrLead['days']('45 days'),  $alrClause['days']('45 days')],
+    ['installation 1 day, organisation follows it',      '1',   null, 'days',               $alrLead['days']('1 day'),    $alrClause['days']('1 day')],
+    ['installation 200 days, organisation chose never',  '200', '0',  'days',               $alrLead['days']('200 days'), $alrClause['days']('200 days')],
+    ['installation never, organisation follows it',      '0',   null, 'installation-never', $alrLead['inst-never'],       $alrClause['inst-never']],
+    ['installation never, organisation chose never',     '0',   '0',  'own-never',          $alrLead['own-never'],        $alrClause['own-never']],
+    ['installation never, organisation 30 days',         '0',   '30', 'days',               $alrLead['days']('30 days'),  $alrClause['days']('30 days')],
+];
+// The installation's row was recorded and set to 365 at set-up (the clean-up
+// puts the original back); this section changes it and returns it to 365.
+$alrJar = $child . $sep . 'jar-section-l.txt';
+/** The one element carrying `data-activity-log-retention`, as [state, words]; [] unless EXACTLY one. */
+$alrOne = static function (string $html): array {
+    $doc   = \Dom\HTMLDocument::createFromString($html, LIBXML_NOERROR);
+    $found = $doc->querySelectorAll('[data-activity-log-retention]');
+    if (count($found) !== 1) {
+        return [];
+    }
+
+    return [(string) $found[0]->getAttribute('data-activity-log-retention'), trim((string) preg_replace('/\s+/', ' ', (string) $found[0]->textContent))];
+};
+$alrWrong = [];
+$alrSeen  = [];
+try {
+    foreach ($alrTable as [$label, $installation, $own, $stateWord, $pageWords, $noticeWords]) {
+        q("UPDATE tblSettings SET settingValue = ? WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'", 's', [$installation]);
+        q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]);
+        if ($own !== null) {
+            siteSetting(ORG_A, 'audit.retentionDays', $own);
+        }
+        $page   = req($alrJar, 'GET', '/privacy');
+        $notice = req($alrJar, 'GET', '/privacy/policy');
+        $got    = $alrOne((string) $page['body']);
+        $gotN   = $alrOne((string) $notice['body']);
+        if ($page['status'] !== 200 || $got !== [$stateWord, $pageWords . $alrTail]) {
+            $alrWrong[] = $label . ' (privacy page, HTTP ' . $page['status'] . '): ' . json_encode($got);
+        }
+        if ($notice['status'] !== 200 || $gotN !== [$stateWord, $noticeWords . $alrClauseTail]) {
+            $alrWrong[] = $label . ' (privacy notice, HTTP ' . $notice['status'] . '): ' . json_encode($gotN);
+        }
+        $region            = renderedRegion((string) $page['body'], $sectionAfter('Retention'));
+        $alrSeen[$label]   = $region;
+        if (renderedPin('privacy page retention, ' . $label, $region) === false) {
+            $alrWrong[] = $label . ' (privacy page, the whole Retention section differs from its pin' . ($region === '' ? ': not exactly one such section' : '') . ')';
+        }
+    }
+} finally {
+    q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]);
+    q("UPDATE tblSettings SET settingValue = '365' WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'");
+}
+// The premise: seven DIFFERENT sections, or the states were not really drawn.
+if (count(array_unique($alrSeen)) !== count($alrTable)) {
+    $alrWrong[] = 'the ' . count($alrTable) . ' states drew ' . count(array_unique($alrSeen)) . ' different Retention section(s)';
+}
+ok('L1 EVERY ACTIVITY-LOG STATE, IN ONE TABLE: for the installation\'s figure (days, one day, never) x this organisation\'s own (none, days, never), the privacy page and the privacy notice each say exactly the literal words written in this test, with the right state, and the privacy page\'s whole Retention section is its pinned markup (7 states) (#940)',
+    count($alrTable) === 7 && $alrWrong === [], implode(' || ', $alrWrong));
+// The one state no request can reach: a figure that could not be read. Its words
+// are the class's own, compared with the literal text here.
+require_once $repo . DIRECTORY_SEPARATOR . 'web' . DIRECTORY_SEPARATOR . '_core' . DIRECTORY_SEPARATOR . 'ActivityLogRetention.php';
+$alrUnknown = ['state' => \Portal\Core\ActivityLogRetention::MEMBER_UNKNOWN, 'days' => 0];
+ok('L2 a figure that could not be read names NO figure on either page, and says it could not be read (#940)',
+    \Portal\Core\ActivityLogRetention::privacyPageWords($alrUnknown) === 'The activity log is deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless this organisation or the whole portal has chosen to keep it for ever. The period in force here could not be read just now.' . $alrTail
+    && \Portal\Core\ActivityLogRetention::privacyNoticeClause($alrUnknown) === 'the activity log, deleted by a nightly clear-out after the period set for this organisation, if that scheduled job has been set up, unless this organisation or the whole portal has chosen to keep it for ever' . $alrClauseTail);
+
+// Two administrators' sentences #940 changed, pinned AS RENDERED so a reworded
+// one cannot pass unseen (each is checked by nothing else): step 5 of the first
+// steps (the clear-out skips an activity log set to never delete, and each
+// organisation's administrator sets its own period), and the Retention page's
+// note on which records follow the installation's figure.
+$alrPick = static fn (string $selector): \Closure => static function (\Dom\HTMLDocument $doc) use ($selector): array {
+    $found = $doc->querySelectorAll($selector);
+
+    return count($found) === 1 ? [$found[0]] : [];
+};
+$alrSteps = req($jar['adm'], 'GET', '/help/admin-first-steps');
+$alrStep5 = renderedRegion((string) $alrSteps['body'], $alrPick('#step5 .accordion-body > p'));
+ok('L3 the first steps\' step 5 says the clear-out skips an activity log set to never delete, and who sets each organisation\'s period - exactly the pinned markup an administrator receives (#940)',
+    $alrSteps['status'] === 200 && renderedPin('first steps, step 5', $alrStep5),
+    'HTTP ' . $alrSteps['status'] . ' ' . mb_substr($alrStep5, 0, 600));
+$alrRetention = req($jar['root'], 'GET', '/admin/maintenance/retention');
+$alrNote      = renderedRegion((string) $alrRetention['body'], $alrPick('p[data-activity-log-in-force]'));
+ok('L4 the Retention page\'s activity-log card, for a global administrator, is exactly the pinned markup: this organisation\'s figure, the installation\'s, and which records follow the installation\'s (#940)',
+    $alrRetention['status'] === 200 && renderedPin('retention page, activity log card', $alrNote),
+    'HTTP ' . $alrRetention['status'] . ' ' . mb_substr($alrNote, 0, 600));
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared
 // (#703 round 10: it sat after the help page's pin, before section K's, and so

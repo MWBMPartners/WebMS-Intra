@@ -9,6 +9,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ActivityLogRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\GivingRetention;
@@ -38,6 +39,11 @@ try {
 // gift, for the "Financial records" sentence. (The exception's two branches
 // below test the rule themselves, and a coverage check counts those two.)
 $everyGiftKept = ($givingRule['scope'] ?? '') === GivingRetention::SCOPE_ALL;
+
+// 📜 #940 (D-117, D-118): how long THIS organisation's activity log is kept, for
+// the "Records kept for security" sentence. A failed read is its own answer
+// and names no figure (ActivityLogRetention::memberFactsForSite()).
+$activityLogFacts = ActivityLogRetention::memberFactsForSite($mysqli, Site::id());
 
 $pageTitle   = 'Privacy policy';
 $pageSection = 'privacy';
@@ -89,8 +95,16 @@ We handle personal data under the UK GDPR and the Data Protection Act 2018.</p>
     <li><strong>If you worked or volunteered here</strong>, the pastoral visits you made, the care cases you opened, the DBS (safeguarding) checks you recorded and the children you checked in or out keep your <strong>name and account number</strong> as the person who did it, even after you are erased. A safeguarding record must still say who carried it out. Because your account number stays on them, anyone who can read the database or a backup could use them to tell which of your other kept records (an expense claim, for instance) were yours.</li>
     <?php // 🧾 #703 round 5: the records kept for security and as a history of changes. Each
           //    clearing rule is read from the code (see GdprEraser's tblUsers reason), and the
-          //    sentence does not claim to be every place a number can be written. ?>
-    <li><strong>Records kept for security and as a history of changes</strong> can mention your account number, in what they describe or in a stored copy of a record that was changed: the activity log, deleted after the number of days set for this organisation (a year unless changed) by a nightly clear-out, if that scheduled job has been set up; the change history of records, which nothing clears; and rate-limit records, tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither of these lists is every place your number may be written: anything typed about you can mention it too.</li>
+          //    sentence does not claim to be every place a number can be written.
+          //    #940 (D-117, D-118): the activity log's clause is THIS organisation's real
+          //    period - a number of days, or kept for ever by this organisation's choice or
+          //    the whole portal's - worded in ONE place, ActivityLogRetention::
+          //    privacyNoticeClause(), from the reader the clear-out uses. It used to say
+          //    "a year unless changed", which stopped being enough when "never" became a
+          //    choice. The last sentence is #933's: an erasure leaves what a log record SAYS,
+          //    and some records give a full name or an e-mail address, so "kept for ever"
+          //    keeps those too. "Some", not a list - no list of those writers is complete. ?>
+    <li><strong>Records kept for security and as a history of changes</strong> can mention your account number, in what they describe or in a stored copy of a record that was changed: <span data-activity-log-retention="<?php echo htmlspecialchars($activityLogFacts['state'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(ActivityLogRetention::privacyNoticeClause($activityLogFacts), ENT_QUOTES, 'UTF-8'); ?></span>; the change history of records, which nothing clears; and rate-limit records, tidied away only when a later request of the same kind happens to trigger it, so one can stay for a long time. Neither of these lists is every place your number may be written: anything typed about you can mention it too. What a record in the activity log says is kept as it was written for as long as the record is, and some give a person's full name or e-mail address as well as an account number.</li>
 </ul>
 
 <h3>Contact</h3>

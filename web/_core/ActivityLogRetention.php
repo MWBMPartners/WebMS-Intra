@@ -250,6 +250,135 @@ final class ActivityLogRetention
     }
 
     // #########################################################################
+    // 🗣️ What a member is told (#940; D-117, D-118)
+    // #########################################################################
+
+    /** The period is a number of days (`days` holds it). */
+    public const MEMBER_DAYS = 'days';
+
+    /** This organisation has chosen "never delete" for itself. */
+    public const MEMBER_OWN_NEVER = 'own-never';
+
+    /** The installation keeps the log for ever and this organisation follows it. */
+    public const MEMBER_INSTALLATION_NEVER = 'installation-never';
+
+    /** The figure could not be read: the words then promise no figure at all. */
+    public const MEMBER_UNKNOWN = 'unknown';
+
+    /**
+     * 🔎 Which of the four things a member should be told about ONE
+     *    organisation's activity log, as FACTS: `state` is one of the MEMBER_*
+     *    constants and `days` is the figure in force (0 for never, and 0 when
+     *    it could not be read).
+     *
+     * The figure is daysForSite(), the SAME reader the nightly clear-out uses,
+     * so a page and the clear-out cannot disagree (#647). Only when that answer
+     * is "never" is the organisation's own row read, and only to say WHO chose
+     * it: an organisation that chose never for itself, or one that follows an
+     * installation which did. (An organisation's own NUMBER under an
+     * installation of never is simply a number of days; an own never under an
+     * installation with a number is held to that number by daysForSite().)
+     *
+     * A failed read is its OWN answer, never a figure. Before #940 the privacy
+     * page printed `privacy.dataRetentionDays`, a different setting from the
+     * one the clear-out uses (#703 round 6 found it); "could not read" must
+     * never become a number either, or the page states a period nobody set.
+     *
+     * @return array{state: string, days: int}
+     */
+    public static function memberFactsForSite(\mysqli $db, int $siteId): array
+    {
+        try {
+            $days = self::daysForSite($siteId);
+            if ($days !== self::NEVER) {
+                return ['state' => self::MEMBER_DAYS, 'days' => $days];
+            }
+
+            return [
+                'state' => self::ownDays($db, $siteId) === self::NEVER ? self::MEMBER_OWN_NEVER : self::MEMBER_INSTALLATION_NEVER,
+                'days'  => self::NEVER,
+            ];
+        } catch (\Throwable $e) {
+            return ['state' => self::MEMBER_UNKNOWN, 'days' => self::NEVER];
+        }
+    }
+
+    /**
+     * 📄 The privacy page's paragraph about the activity log, as plain text
+     *    (the page escapes it). Each state's words are spelled out WHOLE, never
+     *    assembled from pieces in the middle of a clause: #694 found four of six
+     *    wording faults inside sentences built from branches.
+     *
+     * What it says, and why each part is there:
+     *   - how long, for THIS organisation, from the reader the clear-out uses;
+     *   - who sets it (D-118: the organisation's own administrator, within the
+     *     installation's limit) - only where a number is in force, because
+     *     under "never" the point is that nothing deletes it;
+     *   - that a record made at ANOTHER organisation on this portal follows
+     *     that organisation's period, and one belonging to no organisation (its
+     *     organisation removed: `fk_logs_site` is ON DELETE SET NULL) the whole
+     *     portal's - `log_sweep()` sweeps each by its own figure;
+     *   - and what "kept" means after an erasure (#933): the account number,
+     *     address, browser and session details come off the person's own
+     *     records, but what each record SAYS stays as written, and some say a
+     *     full name, an e-mail address or an account number. "Some", never a
+     *     list: #933 is the record of which writers do it, and no list here is
+     *     complete.
+     *
+     * @param array{state: string, days: int} $facts From memberFactsForSite().
+     */
+    public static function privacyPageWords(array $facts): string
+    {
+        $period = match ($facts['state']) {
+            self::MEMBER_DAYS => 'This organisation\'s activity log is deleted by a nightly clear-out after '
+                . self::inWords($facts['days']) . ', if that scheduled job has been set up. This organisation\'s '
+                . 'administrators set that period, within the limit set for the whole portal.',
+            self::MEMBER_OWN_NEVER => 'This organisation has chosen to keep its activity log for ever, so nothing '
+                . 'deletes it.',
+            self::MEMBER_INSTALLATION_NEVER => 'This portal keeps the activity log for ever, and this organisation '
+                . 'has not chosen a shorter period, so nothing deletes it.',
+            default => 'The activity log is deleted by a nightly clear-out after the period set for this '
+                . 'organisation, if that scheduled job has been set up, unless this organisation or the whole '
+                . 'portal has chosen to keep it for ever. The period in force here could not be read just now.',
+        };
+
+        return $period
+            . ' A record made while you were using another organisation on this portal follows that '
+            . 'organisation\'s period, and one that belongs to no organisation, such as one whose organisation '
+            . 'has since been removed, follows the period set for the whole portal.'
+            . ' If your account is erased, your account number, network address, browser and session details '
+            . 'are taken off your own records, but what each record says is kept as it was written: some name '
+            . 'people, by full name, e-mail address or account number, and those words stay for as long as the '
+            . 'record does.';
+    }
+
+    /**
+     * 📜 The privacy NOTICE's clause about the activity log, inside its list of
+     *    "records kept for security and as a history of changes" (each one is
+     *    named, then how it is cleared, separated by semicolons). Plain text;
+     *    the page escapes it. Spelled out whole per state, as above.
+     *
+     * @param array{state: string, days: int} $facts From memberFactsForSite().
+     */
+    public static function privacyNoticeClause(array $facts): string
+    {
+        $period = match ($facts['state']) {
+            self::MEMBER_DAYS => 'the activity log, deleted here by a nightly clear-out after '
+                . self::inWords($facts['days']) . ', if that scheduled job has been set up',
+            self::MEMBER_OWN_NEVER => 'the activity log, which this organisation has chosen to keep for ever, so '
+                . 'nothing clears it',
+            self::MEMBER_INSTALLATION_NEVER => 'the activity log, which this portal keeps for ever (this '
+                . 'organisation has not chosen a shorter period), so nothing clears it',
+            default => 'the activity log, deleted by a nightly clear-out after the period set for this '
+                . 'organisation, if that scheduled job has been set up, unless this organisation or the whole '
+                . 'portal has chosen to keep it for ever',
+        };
+
+        return $period . ' (a record made at another organisation on this portal follows that organisation\'s '
+            . 'period, and one that belongs to no organisation the whole portal\'s)';
+    }
+
+    // #########################################################################
     // 🚫 The rule for an organisation
     // #########################################################################
 

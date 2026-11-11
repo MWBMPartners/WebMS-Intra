@@ -20,6 +20,7 @@
 
 declare(strict_types=1);
 
+use Portal\Core\ActivityLogRetention;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\Site;
@@ -40,6 +41,12 @@ if ($externalURL !== '') {
     header('Location: ' . $externalURL, true, 302);
     exit();
 }
+
+// 📜 How long THIS organisation's activity log is kept (#940; D-117, D-118):
+//    a number of days, "never" chosen here, "never" chosen for the whole
+//    portal, or "could not be read". Read after the redirect above, so a
+//    site sending members to its own policy never asks.
+$activityLogFacts = ActivityLogRetention::memberFactsForSite($mysqli, Site::id());
 
 require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 'header.php';
 ?>
@@ -89,18 +96,30 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
 </ul>
 
 <h2 class="h4 mt-4">Retention</h2>
+<?php // 📜 #940: the activity log's period for THIS organisation, worded in ONE place
+      //    (ActivityLogRetention::privacyPageWords()), from the same reader the
+      //    nightly clear-out uses. A read that fails says so and names no figure. ?>
+<p data-activity-log-retention="<?php echo htmlspecialchars($activityLogFacts['state'], ENT_QUOTES, 'UTF-8'); ?>">
+    <?php echo htmlspecialchars(ActivityLogRetention::privacyPageWords($activityLogFacts), ENT_QUOTES, 'UTF-8'); ?>
+</p>
 <p>
     <?php // 🗣️ #703 round 6: this printed `privacy.dataRetentionDays` as the logs' period, which is a
           //    different setting from the one the clear-out uses (`audit.retentionDays` /
           //    `errors.retentionDays`), and it ended "any logs that referenced you are detached",
           //    which is untrue: what a log record says is kept as written. Round 7: "your name is
           //    removed" was untrue too - worker records (D-016, D-110, D-111) and gifts kept for tax
-          //    keep the name. ?>
-    Activity logs and error logs are deleted by a nightly clear-out after the
-    number of days set for this organisation (a year unless changed;
-    <code>audit.retentionDays</code> / <code>errors.retentionDays</code>), if
-    that scheduled job has been set up. Account records remain while your
-    account is active. When your account is erased it is emptied, but some
+          //    keep the name.
+          //    #940 (D-117, D-118): the activity log may now be kept for ever, by
+          //    the installation's choice or this organisation's, and this
+          //    organisation's own administrator sets its period. So the activity
+          //    log has its own paragraph above, with the REAL figure for this
+          //    organisation from the reader the clear-out uses; the error log,
+          //    which has no "never" (D-117 rules that out), keeps its own words
+          //    here. The setting names were taken out: a member cannot act on
+          //    them, and they read as jargon (the plain-English rule). ?>
+    Error logs are deleted by the same nightly clear-out after the number of
+    days set for them (a year unless changed), if that scheduled job has been
+    set up. Account records remain while your account is active. When your account is erased it is emptied, but some
     records keep your account number on purpose, and some keep your name as
     well (records you made as a worker or volunteer, and gifts kept for tax);
     what a log record says is also kept as it was written &mdash; see the

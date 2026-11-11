@@ -144,7 +144,11 @@ endif;
         </h2>
         <div id="step5" class="accordion-collapse collapse" data-bs-parent="#adminFirstSteps">
             <div class="accordion-body">
-                <p>Activity logs and error logs grow unbounded. A retention sweeper deletes old rows nightly.</p>
+                <?php // 📜 #940 (D-117, D-118): "a retention sweeper deletes old rows nightly" stopped being
+                      //    the whole truth when the activity log could be kept for ever. The sweeper skips
+                      //    an activity log set to "Never delete", and each organisation's administrator sets
+                      //    that organisation's own period, within the installation's. ?>
+                <p>Without the retention sweeper, activity logs and error logs grow without limit. It deletes old rows nightly, after the period set for each &mdash; except the activity log wherever it has been set to never delete, for the whole installation or for one organisation where the installation allows it. Each organisation's administrator sets its own activity-log period, within the installation's, on <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">Admin, Maintenance, Retention</a>.</p>
                 <ol>
                     <li>Choose a long random token and save it as <code>maintenance.cronToken</code> in Settings. It is a portal-wide setting, so a global administrator has to do this. The <a href="<?php echo htmlspecialchars(Site::url('admin/maintenance/retention'), ENT_QUOTES, 'UTF-8'); ?>">retention page</a> shows what the sweep will remove.</li>
                     <li>Add this to DreamHost's cron scheduler (or your shared-hosting equivalent), replacing YOUR-PORTAL with your portal's address:
