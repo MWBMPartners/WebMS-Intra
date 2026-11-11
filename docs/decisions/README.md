@@ -201,7 +201,8 @@ appended with its real date and a note that it was added later.
 | [D-143](143-a-series-page-offers-every-hidden-date-back.md) | 2026-11-11 | A series' bulk-edit page offers every hidden date back, however it was hidden | in force |
 | [D-144](144-a-restored-date-on-a-day-already-taken-needs-a-second-confirmation.md) | 2026-11-11 | Bringing back a date onto a day the series already uses needs a deliberate second confirmation | in force |
 | [D-145](145-a-restored-date-comes-back-as-a-draft.md) | 2026-11-11 | A date brought back comes back as a draft | in force |
+| [D-146](146-a-cancelled-date-brought-back-stays-cancelled.md) | 2026-11-11 | A date that was cancelled before it was hidden comes back still cancelled | in force |
 
-*145 decisions. This index is checked against the folder by
+*146 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
