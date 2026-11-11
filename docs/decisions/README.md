@@ -192,7 +192,9 @@ appended with its real date and a note that it was added later.
 | [D-134](134-an-approved-suggestion-e-mails-the-person-who-suggested-it.md) | 2026-11-11 | An approved event suggestion e-mails the person who suggested it | in force |
 | [D-135](135-no-live-install-so-a-schema-change-needs-no-migration.md) | 2026-11-02 | While no customer installation exists, a schema change needs no numbered migration | in force |
 | [D-136](136-moderators-notes-are-for-signed-in-administrators-only.md) | 2026-11-11 | Moderators' notes and who-did-what numbers are for signed-in administrators only | in force |
+| [D-137](137-a-failed-sign-in-keeps-the-name-that-was-typed.md) | 2026-11-11 | A failed sign-in keeps the name that was typed, readable, in the activity log | in force |
+| [D-138](138-an-organisations-own-labels-stay-in-activity-descriptions.md) | 2026-11-11 | An organisation's own labels stay in activity-log descriptions | in force |
 
-*136 decisions. This index is checked against the folder by
+*138 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
