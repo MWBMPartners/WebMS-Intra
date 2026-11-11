@@ -4,6 +4,46 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### A rota swap request can now be answered, and the people involved can be e-mailed about it (#657, D-141)
+
+- The Duty Roster page (`/rota`) lists "Swap requests for you" with Accept and Decline, open requests
+  any member may take, and "Swap requests you made" with what happened to each, where the duty is now,
+  and a Withdraw button. Until now nothing listed a request or linked to the page that answers one, so
+  a duty never changed hands.
+- Accepting moves the duty, clears its "reminder already sent" stamp so the new holder gets their own
+  reminder, and cancels any other request still waiting for the same duty. Both people can see it
+  moved.
+- E-mail, through a new **Rota swap requests** switch on the Notification preferences page: an e-mail
+  is attempted to the person asked when a request is made; for an OPEN request, to every active member
+  of the organisation with the switch on, one message each (D-141); and to the asker when it is
+  accepted or declined, saying what that answer did. No page promises anybody an e-mail, because the
+  portal cannot know one will arrive. A member whose account is switched off, who is no longer in the
+  organisation, who has switched the e-mails off, or who has no usable address is sent nothing — asked
+  at the moment of sending. The e-mails go as plain text (a member's own words are never sent as
+  markup) and carry a use-by moment, the end of the duty's day.
+- The answer is one locked, all-or-nothing write: the request and its duty are read with
+  `SELECT … FOR UPDATE` inside the transaction that writes, so a double-click, or two members taking an
+  open request at once, cannot move a duty twice; an old request cannot give away a duty an
+  administrator has already moved; and if any part of the write fails, none of it is kept. If the
+  database's reply to the final commit is lost, the member is told only what is known — "We could not
+  confirm whether your answer was saved. Reload the page to see where the request stands." — never
+  "nothing was changed".
+- Only the person asked may accept or decline. Before, the handler (which no page reached) let anybody
+  decline an open request, closing it for everybody; and the request form accepted ANY posted account
+  number as the person asked, including somebody outside the organisation. Both are refused now, and a
+  request number from another organisation gets the same answer as one that does not exist.
+- The page only offers a button the handler would accept. A duty whose date has passed cannot be
+  offered or taken. While open requests are switched off, no open request can be taken.
+- After answering, a member reads exactly what their answer did ("Swap accepted. The duty was moved to
+  you."; "You declined the request. This did not move the duty."; "Your request was withdrawn. This did
+  not move the duty."), and the asker's e-mail says the same ("<name> accepted your request …, and the
+  duty was moved to them." / "<name> declined your request … This did not move the duty."). Only the
+  asker's own list on the Duty Roster says where the duty is NOW, because it reads the duty while it
+  draws the page — so it stays true when an administrator has moved the duty while a request waited.
+- Test: `tools/rota-swaps-selftest.php` (207 checks, real HTTP and real MySQL 8.0.36; 32 planted faults,
+  each caught and green again). Codex has not reviewed this.
+- Follow-ups: #987 (the Duty Roster lists use the database server's date), #989 (no limit on requests; large organisations).
+
 ### A walk-in written in different capitals shows as attended on every day (#655)
 
 - On an event's attendance grid, a walk-in written in different capitals or with a trailing space on different days

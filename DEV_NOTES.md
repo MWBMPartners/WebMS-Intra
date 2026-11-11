@@ -23588,3 +23588,104 @@ statement early: a reader that blanks or splits SQL must track strings and comme
   is in the code. Lesson: the old comment said the grid and the removal "cannot disagree"; the check disproved it
   twice. A guarantee about two halves needs ONE rule both use, and the handler is a half.
 
+### Rota swap requests (#657)
+
+`Portal\Core\RotaSwaps` is the ONE place that decides who a swap request may be aimed at
+(`whyNotTarget()`), who may answer it and how (`whyNotAllowed()`, which takes FACTS and is asked by BOTH
+the Duty Roster page, before drawing each button, and `respond()`, on facts read under the lock), what an
+answer does (`respond()`), who is e-mailed (`tellAsked()`, `tellOpen()`, `tellAnswered()`,
+`whyNotTold()`), what a member reads after answering (`answerWords()`), and where a duty is on the
+asker's own list (`whereDutyIsNow()`). The pages hold no rule.
+
+- **What the tests prove about `respond()`, and no more.** It begins its transaction, then reads the
+  request joined to its duty with `FOR UPDATE`, asks every rule of that read, and writes by key.
+  - Section T proves the LOCK: the test holds the duty's row, the real `respond()` runs in a second
+    PROCESS and is seen in `LOCK WAIT` (asked of `information_schema.INNODB_TRX`, not assumed from a
+    sleep), the duty is moved, and the accept must be refused. Without ` FOR UPDATE` it goes through.
+  - Section V proves the TRANSACTION: a scratch `BEFORE UPDATE` trigger on `tblRotaSwapRequest` refuses
+    the SECOND write, and the first write (the duty's move) must be undone. With `$began = true` (each
+    statement committing on its own) the duty stays moved under a request still marked waiting. **Round
+    1's section T could not see that fault** — it proves the lock exists, not that the read and writes
+    are one unit — and the class docblock claimed more than T proved; it now claims only these three.
+  - Section U has two members take one open request at once, each in its own process, with a scratch
+    trigger making the first taker's write SLEEP so the second really arrives mid-way (both states asked
+    of the database). Exactly one gets the duty. U is BEHAVIOUR and does not on its own prove the
+    transaction: under autocommit the second taker still blocks on the first's write and is then refused
+    as "changed hands". V is what proves it.
+- **The writes are deliberately NOT conditional** (`WHERE status = 'pending'`): that belt-and-braces
+  would make the lock impossible to test, and a guard nothing can distinguish from its absence is not a
+  guard.
+- **The order of the rules is part of the rule.** WHO comes first, so a person who may not answer a
+  request learns nothing else about it; a request number from another organisation gets the same answer
+  as one that does not exist (section O; the organisation is in the locked read's `WHERE`).
+- **An open request (D-141)** is e-mailed to every active member except the asker with the switch on;
+  candidates come from a membership list, but each is judged by `whyNotTold()` at sending, so the
+  decision is never that query's. One message each, never a shared "To" line. It cannot be declined.
+  While `rota.allow_open_swap` is off it cannot be taken (`OPEN_SWITCHED_OFF`); the setting is passed into
+  `respond()` by the handler so the class reads no settings.
+- **"Where is the duty now" sentences failed three rounds running, so round 4 SIMPLIFIED rather than
+  refined — the design to remember.** Round 1 wrote "the duty is still yours" after every decline; round 2
+  fixed the list and e-mail but left the answer page's own messages ("still yours" after a withdrawal,
+  "stays with the person who asked" to a decliner) and promises that somebody "is told"; round 3 rebuilt
+  every such message from the duty's row read again AFTER the commit (`holderOf()` + a four-argument
+  `whereDutyIsNow()` worded for any reader). That kept going untrue at the edges, its new branches were
+  pinned by fragments, and the read after the commit could THROW and show an error page for an answer
+  that had been stored. **The rule now, in `RotaSwaps`' docblock:**
+  - no page says anybody "is told" or "is sent" an e-mail;
+  - a message about an ANSWER says what THAT ANSWER DID, from facts `respond()` established inside its
+    own locked transaction — it returns `action`, `askerID` and `answererName` (read inside the
+    transaction; on an accept the duty was moved to exactly that person). `answerWords()` is the page's
+    three fixed sentences; `tellAnswered($db, $siteId, $swapId, $did)` takes respond()'s answer, so the
+    accept e-mail names whoever took an OPEN request, and names the taker even if the duty is moved
+    straight after the commit (M7/M8: a scratch trigger moves it inside the accept, so the duty's row and
+    respond()'s facts disagree — round 4's checks could not tell them apart, and putting round 3's
+    after-commit read back stayed green). An answerer whose name cannot be read is "A member" (took it)
+    or "The member you asked" (declined), both pinned (M9, M10);
+  - only a page that reads the duty's row while drawing itself says where the duty IS:
+    `whereDutyIsNow($holder, $holderName, $asker)`, on the asker's "Swap requests you made" list, four
+    branches each pinned (E3, W1, W4, W5). `holderOf()` is deleted.
+  Every sentence on the answer path is pinned WHOLE (D1, E1, H2, I7, W2, W3; e-mails M4–M10 between
+  their own line breaks) — round 3's checks matched fragments, so planting the accept message and the
+  accept e-mail back to wrong fixed sentences stayed green.
+- **A lost reply at the commit is its own outcome (#649's shape).** `respond()` answers FAILED only when
+  the fault came BEFORE the commit and the transaction was rolled back (a rollback that itself fails means
+  the connection has gone, and the server discards the uncommitted transaction) — then "nothing was
+  changed" is known. A fault AT the commit answers `UNKNOWN`: the server may have committed and only the
+  reply been lost, so the page says "We could not confirm whether your answer was saved. Reload the page
+  to see where the request stands." It does not say "try again" because that tells the member nothing
+  happened — NOT because a retry could answer twice: if the commit did land, the request is no longer
+  waiting and `whyNotAllowed()` refuses a retry as "already been answered" (round 5's stated reason was
+  wrong). In the UNKNOWN branch `respond()` ROLLS BACK BEFORE LOGGING — a PRECAUTION, not a fix for a
+  fault that had happened. It matters only if commit() fails on a connection that is still usable with
+  the transaction open: `Logger` writes on the same connection, so without the rollback the log row would
+  land in the open transaction and vanish (plant P33 shows that, in that injected state). After a REAL
+  dropped connection it changes nothing: measured on MySQL 8.0.36 by the independent check, commit(), the
+  rollback and the log INSERT all fail with 2006, the server has already discarded the write, and
+  `Logger::writeErrorRow()` sends the line to its fallback — so the record was never lost, before or
+  after this change. Both error-log lines carry the request's number (D-138: a number names nobody).
+  **How it is tested, and the route that was dropped.** Section X drives the real page with the fault
+  INJECTED at the one line that commits, in the run's copy: "the server committed and the reply was lost"
+  (the decline IS stored — exactly why "nothing was changed" would be untrue) and an injected commit()
+  failure on a LIVE connection with the transaction still open (not stored) — a state a real dropped
+  connection cannot produce; it exists to pin the precaution above. An independent check had proposed FLUSH TABLES WITH READ
+  LOCK plus KILL QUERY on the waiting commit; that works only with a pause between the last write and the
+  commit, and `respond()` has none — measured on MySQL 8.0.36, the read lock waited 2.81 s for the running
+  write and the page's commit went straight through before it, so the route passes or fails by luck.
+  Round 5's note that "no harness here can" reach this branch was wrong in the other direction. Plants
+  P32 (the flag removed) and P33 (the rollback removed) each go red.
+- **Reading what is really sent (section M).** With no mail server named, Mailer logs only a subject and
+  an address. To check that the asker's words go as text (`bodyIsText`) and that the message carries its
+  use-by moment (`expiresAt`), the route is filled in and pointed at a closed port: the connection is
+  refused, the message is KEPT in `tblMailQueue` sealed with the installation's key, and the test opens it
+  the way the portal does. Nothing leaves the machine. The `mail.%` settings are snapshotted and put back
+  exactly.
+- **Two test traps worth keeping:** `$row['col'] ?? 'x'` can never see a NULL (`??` treats a NULL value
+  as missing) — two checks were written that way and failed on correct code; and a count of e-mails to
+  one address must be taken before AND after, or a plant's leftover attempt makes the "green again" run
+  fail.
+- What it cannot do: tell whether an e-mail ARRIVED; check that the person taking a duty is free or
+  suited to it; limit how many requests (and so e-mails) a member makes (#989); finish a large
+  organisation's open-request e-mails quickly (about 47 seconds or more, in the request — see Found); stop somebody asking several people (the first acceptance wins, the rest are cancelled in the
+  same transaction).
+- The test's copy of web/ holds the database password; its clean-up ignores further Ctrl-C and deletes
+  the password and key files FIRST.

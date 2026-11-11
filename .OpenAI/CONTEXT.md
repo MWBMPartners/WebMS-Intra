@@ -1420,6 +1420,7 @@ in `.claude/CLAUDE.md` under the heading named in brackets.
     `api/push/subscribe` refuses a request that is not signed in. The counts on
     Admin, Integrations, Push copy the sender's rule: change both together.
     Test: `tools/go-live-button-selftest.php`.
+- **Rota swap requests (#657, D-141).** `Portal\Core\RotaSwaps` is the ONE place that decides who a swap may be aimed at, who may answer it (`whyNotAllowed()`, asked by the page AND by `respond()` under its lock), what an answer does (transaction first, then the request and its duty `FOR UPDATE`), and who is e-mailed (`whyNotTold()`, through the `rotaSwaps` preference; an open request to every member with it on). A message about an answer says what that answer did (`answerWords()`, from `respond()`'s own facts); only the asker's list says where the duty is now (`whereDutyIsNow()`); no page promises an e-mail. Test: `tools/rota-swaps-selftest.php`.
 
     **Outside calendars (#514).** `EventVisibility::where()` is the ONE
     place that decides who may see an event. Every place that reads

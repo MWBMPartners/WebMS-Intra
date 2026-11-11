@@ -1905,8 +1905,12 @@ reminderSentAt` + `rota.reminder_days_before` (074), and the milestones
   underlying row changes: `tasks/save.php` re-arms `reminderSent` on a
   future reminder edit; `tasks/complete.php` carries the reminder forward
   (interval-shifted) into a recurring task's next occurrence instead of
-  dropping it; `rota/swap-respond.php` clears `reminderSentAt` on an
+  dropping it; `RotaSwaps::respond()` clears `reminderSentAt` on an
   accepted swap so the new assignee gets their own reminder.
+- **Rota swap requests (#657, D-141):** ask a named member or anybody to take a duty; the person asked
+  accepts or declines on the Duty Roster page; an open request is e-mailed to every member with the
+  switch on; accepting moves the duty in one locked, all-or-nothing write; e-mails go through the
+  "Rota swap requests" notification switch (`Portal\Core\RotaSwaps`).
 - **Fixed in the same PR:** `cron/event-reminders.php` selected `u.email`
   from `tblUsers` — the real column is `emailAddress` — so under this
   app's strict mysqli reporting the event-reminder cron 500'd on every
