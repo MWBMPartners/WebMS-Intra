@@ -134,21 +134,13 @@ if ($toggle === 1) {
         // the one row that key allows for an event, a day and a person.
         //
         // ⚠ AN EARLIER VERSION OF THIS COMMENT SAID the grid and this
-        // statement "cannot disagree". THEY CAN, and it is worth knowing
-        // rather than believing otherwise. The grid builds its keys in PHP by
-        // exact bytes (`'w:' . $walkinName . ':' . $d`) while the database
-        // compares them case-insensitively. So "Dave" on one day and "dave" on
-        // another are ONE name in the grid's list (it reads
-        // `SELECT DISTINCT walkinName`) but two different PHP keys, and the
-        // second day draws as not attended although a row exists — which makes
-        // that row invisible AND out of this branch's reach, because the cell
-        // then posts `toggle=1` rather than `toggle=0`.
-        //
-        // That display gap is older than this branch and is NOT fixed here
-        // (#655);
-        // the grid should fold case the way the database does, or the enrol
-        // form should settle on one spelling. What IS true of this statement is
-        // the sentence above it.
+        // statement "cannot disagree", and for a while they could (#655): the
+        // grid keyed walk-ins by exact bytes, so "Dave" on one day and "dave"
+        // on another drew the second as not attended and posted `toggle=1`
+        // instead of this branch. The grid now takes its key from the
+        // database's own grouping of equal names (`AttendanceWalkins`), so
+        // whatever name it posts here is matched by the SAME rule as the
+        // statement below, and the sentence above is true of both halves.
         $stmt = $mysqli->prepare(
             'DELETE FROM tblEventAttendance '
             . 'WHERE eventID = ? AND userID IS NULL AND walkinName = ? AND dayDate = ?'

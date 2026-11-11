@@ -20,6 +20,7 @@
 declare(strict_types=1);
 
 use Portal\Core\AnonymousCheckins;
+use Portal\Core\AttendanceWalkins;
 use Portal\Core\App;
 use Portal\Core\Auth;
 use Portal\Core\I18n;
@@ -117,43 +118,25 @@ if ($stmt !== false) {
     $stmt->execute();
     $result = $stmt->get_result();
     while ($r = $result->fetch_assoc()) {
-        $participants[] = ['userID' => (int) $r['userID'], 'name' => (string) $r['fullName'], 'isWalkin' => false, 'walkinName' => null];
+        $participants[] = ['userID' => (int) $r['userID'], 'name' => (string) $r['fullName'], 'isWalkin' => false, 'walkinName' => null, 'groupRef' => null];
     }
     $stmt->close();
 }
 
-// 🚶 Walk-ins (anonymous attendees with no RSVP row).
-$stmt = $mysqli->prepare(
-    'SELECT DISTINCT walkinName FROM tblEventAttendance '
-    . 'WHERE eventID = ? AND userID IS NULL AND walkinName IS NOT NULL '
-    . 'ORDER BY walkinName ASC'
-);
-if ($stmt !== false) {
-    $stmt->bind_param('i', $eventId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($r = $result->fetch_assoc()) {
-        $participants[] = ['userID' => null, 'name' => (string) $r['walkinName'], 'isWalkin' => true, 'walkinName' => (string) $r['walkinName']];
-    }
-    $stmt->close();
-}
-
-// ✅ Build attendance map: key = userID:dayDate OR walkin:walkinName:dayDate
-$attended = [];
-$stmt = $mysqli->prepare(
-    'SELECT userID, walkinName, dayDate FROM tblEventAttendance WHERE eventID = ?'
-);
-if ($stmt !== false) {
-    $stmt->bind_param('i', $eventId);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    while ($r = $result->fetch_assoc()) {
-        $key = $r['userID'] !== null
-            ? 'u:' . (int) $r['userID'] . ':' . $r['dayDate']
-            : 'w:' . (string) $r['walkinName'] . ':' . $r['dayDate'];
-        $attended[$key] = true;
-    }
-    $stmt->close();
+// 🚶 Walk-ins (anonymous attendees with no RSVP row) AND the map of ticked
+// cells, both read from ONE query in `AttendanceWalkins` (#655).
+//
+// ⚠ THIS USED TO BE TWO QUERIES AND A BYTE-EXACT PHP KEY. The list came from
+//    `SELECT DISTINCT walkinName` (the database's case-insensitive rule) and
+//    the map was keyed `'w:' . $name . ':' . $day` (PHP's exact bytes), so
+//    "Dave" on one day and "dave" on another were one row with a cell that
+//    drew as empty although attendance existed — and could not be removed.
+//    The walk-in's key is now the number the DATABASE gives its group of equal
+//    names, so the two halves cannot disagree about what "the same name" is.
+$walkinRead = AttendanceWalkins::read($mysqli, $eventId);
+$attended   = $walkinRead['attended'];
+foreach ($walkinRead['walkins'] as $w) {
+    $participants[] = ['userID' => null, 'name' => $w['name'], 'isWalkin' => true, 'walkinName' => $w['name'], 'groupRef' => $w['groupRef']];
 }
 
 // -----------------------------------------------------------------------------
@@ -562,7 +545,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             <?php endif; ?>
                         </div>
                         <?php foreach ($days as $d):
-                            $key = $p['userID'] !== null ? 'u:' . $p['userID'] . ':' . $d : 'w:' . $p['walkinName'] . ':' . $d;
+                            $key = AttendanceWalkins::cellKey($p['userID'], $p['groupRef'], $d);
                             $isAttended = isset($attended[$key]);
                             $dayLabel = htmlspecialchars(date('D j M', strtotime($d)), ENT_QUOTES, 'UTF-8');
                         ?>

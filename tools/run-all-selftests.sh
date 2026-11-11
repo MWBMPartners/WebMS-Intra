@@ -249,6 +249,7 @@ site-addresses|tools/site-addresses-selftest.php|selftest_siteaddresses|web:site
 come-back-addresses|tools/come-back-addresses-selftest.php|selftest_comeback|web:come-back SELFTEST_WEB_PORT=11320
 page-scripts|tools/page-scripts-selftest.php|selftest_pagescripts|web:page-scripts SELFTEST_WEB_PORT=9651
 help-pages|tools/help-pages-selftest.php|selftest_helppages|web:help-pages SELFTEST_WEB_PORT=9663
+attendance-walkins|tools/attendance-walkins-selftest.php|selftest_attwalkins|web:attendance-walkins SELFTEST_WEB_PORT=9655
 outside-services|tools/outside-services-selftest.php|selftest_outside|SELFTEST_WEB_PORT=9778
 registration-retention|tools/registration-retention-selftest.php|selftest_regret|SELFTEST_WEB_PORT=9816
 activity-log-retention|tools/activity-log-retention-selftest.php|selftest_alret|SELFTEST_WEB_PORT=9932
