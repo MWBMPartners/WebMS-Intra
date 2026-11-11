@@ -258,10 +258,11 @@ CLASSIFIED: dict[str, object] = {
 #      date rules, so `next sunday 2026-03-29 01:30 -168 hours` matched and
 #      was stored an hour early. Planted back it fails K07c.
 #    * Round 4 looked a weekday outside 0-6 up in the day-name list for
-#      `<weekday> N weeks ago` (-1 to -7 by weekday; +7 for `ago ago`),
-#      raising "Undefined array key -7". Planted back (the range guard
-#      removed) it fails K07g and K07g2; loosening either bound alone fails
-#      K07g.
+#      `<weekday> N weeks ago` (-1 to -7 by weekday with one `ago`; with
+#      `ago ago` the weekday's own number, +1 to +6, and +7 only for
+#      sunday), raising "Undefined array key -7". Planted back (the range
+#      guard removed) it fails K07g and K07g2; loosening either bound alone,
+#      even by one step, fails K07g.
 IMPORT_STEP3_GUARD = (
     "$relative = $parsed['relative'] ?? []; "
     "if ($parsed['is_localtime'] === false "
@@ -299,9 +300,13 @@ _IMPORT_REASON = (
     "date_parse() misreports, combined with millisecond or microsecond "
     "arithmetic that exactly cancels the misreport, can still match and store "
     "the written reading -- `next <weekday>`, `last <weekday> of <month>` and "
-    "`<ordinal> <weekday> of next month` are examples, not a complete list "
-    "(an `... ago` cell is not one: the weekday guard keeps it on the old "
-    "answer). Driven by section K of tools/clock-change-selftest.php."
+    "`<ordinal> <weekday> of next month` are examples, not a complete list. "
+    "A `<weekday> N weeks ago` cell with ONE `ago` is not one: date_parse() "
+    "reports its weekday as -1 to -7, so the weekday guard always keeps it on "
+    "the old answer. With `ago ago` it reports the weekday's own number (+1 "
+    "to +6, or +7 for sunday), so a monday-to-saturday `ago ago` cell is "
+    "ordinary and can be one. Driven by section K of "
+    "tools/clock-change-selftest.php."
 )
 ALLOWED: dict[str, tuple[str, str | tuple[str, ...]]] = {
     "web/_apps/calendar/manage/import.php::$startSql::tblEvents.startDateTime::$fmtclockraw":

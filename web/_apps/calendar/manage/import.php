@@ -739,16 +739,27 @@ $fmtClockRaw = static function (string $text, ?string &$why = null): ?string {
     //        below.
     //
     //        A WEEKDAY `date_parse()` REPORTS OUTSIDE 0-6 keeps the line below.
-    //        For `<weekday> N weeks ago` it reports -1 to -7, depending on the
-    //        weekday (`tuesday` gives -2, `sunday` -7), and for `... ago ago`
-    //        it reports +7 (measured). The first version looked that up in the
-    //        day-name list -- PHP's "Undefined array key -7" warning, logged to
-    //        `tblErrors` on every such row and visible on dev and beta (the
-    //        independent check's round 4). Because every such cell now keeps
-    //        the line below BEFORE the comparison, an "ago" cell is NOT a member
-    //        of the limit above, even with cancelling msec: measured by the
-    //        independent check's round 5, 0 of 245,616 such cells were stored
-    //        as written (round 4 stored 114). K07g and K07g2 test both bounds.
+    //        For `<weekday> N weeks ago` -- ONE `ago` -- it reports -1 (monday)
+    //        to -7 (sunday), always outside 0-6. The first version looked that
+    //        up in the day-name list -- PHP's "Undefined array key -7" warning,
+    //        logged to `tblErrors` on every such row and visible on dev and
+    //        beta (the independent check's round 4). The guard keeps every
+    //        such cell on the line below BEFORE the comparison, so a one-`ago`
+    //        cell is never stored as written, even with cancelling msec
+    //        (measured by the independent check's round 5: 0 of 245,616 such
+    //        cells; round 4 stored 114).
+    //
+    //        `... ago ago` is DIFFERENT, and an earlier version of this
+    //        paragraph said every "ago" cell was kept, which was untrue: it
+    //        reports the weekday's own number, +1 (monday) to +6 (saturday),
+    //        INSIDE 0-6, and +7 only for sunday (measured). So a monday-to-
+    //        saturday `ago ago` cell passes the guard and is an ordinary cell
+    //        -- and carrying a misreported rule plus cancelling msec it IS a
+    //        member of the limit above: in Asia/Jerusalem `next friday 1 week
+    //        ago ago 2026-03-20 02:30 -604800000 msec` stores 2026-03-27
+    //        02:30:00 where the old answer was 03:30:00 (measured). K07g and
+    //        K07g2 test both bounds: monday (-1) and tuesday (-2) the lower,
+    //        sunday `ago ago` (+7) the upper.
     //
     //        KNOWN AND LEFT, safe in direction: a cell the canonical cell
     //        cannot reproduce keeps the line below, which is what it stored

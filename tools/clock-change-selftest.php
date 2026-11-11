@@ -1211,18 +1211,24 @@ if ($foundBoth === false) {
     check('K07f2 msec/usec time arithmetic keeps its EXACT answer, not stored an hour early',
         $exactWrong === [] ? 'all exact' : implode(' | ', $exactWrong), 'all exact');
 
-    // K07g — NO PHP WARNING FROM STEP (d). For `<weekday> N weeks ago`,
-    //        `date_parse()` reports a relative weekday of -1 to -7 depending on
-    //        the weekday (`tuesday` gives -2, `sunday` -7), and for `... ago
-    //        ago` it reports +7 (measured -- an earlier version of this comment
-    //        said "-7, -6 or -1"). Round 4 looked that up in the day-name list:
+    // K07g — NO PHP WARNING FROM STEP (d). For `<weekday> N weeks ago` with
+    //        ONE `ago`, `date_parse()` reports a relative weekday of -1
+    //        (monday) to -7 (sunday); with `ago ago` it reports the weekday's
+    //        own number, +1 to +6, and +7 only for sunday (measured -- earlier
+    //        versions of this comment said "-7, -6 or -1" and then "+7 for
+    //        `ago ago`"). So only the one-`ago` cells and the sunday `ago ago`
+    //        cell fall outside 0-6. Round 4 looked such a value up in the
+    //        day-name list:
     //        "Undefined array key -7", logged to tblErrors for every such row
     //        and visible on dev and beta (the independent check's round 4).
     //        Such a cell keeps the old answer now. The warning is caught by a
     //        handler here because the value alone cannot show it: PHP carries
-    //        on after the warning. The `tuesday` cell (-2) and the `ago ago`
-    //        cell (+7) test the guard's two bounds behaviourally -- loosen
-    //        either bound and that cell warns.
+    //        on after the warning. The `monday` cell (-1), the `tuesday` cell
+    //        (-2) and the sunday `ago ago` cell (+7) test the guard's two
+    //        bounds behaviourally -- loosen either bound, even by one step,
+    //        and a cell warns. (Without the monday cell, loosening the lower
+    //        bound to `>= -1` left this test green and only the gate's text
+    //        pin caught it.)
     $warned = [];
     $weeksWrong = [];
     set_error_handler(static function (int $no, string $msg) use (&$warned): bool {
@@ -1232,6 +1238,7 @@ if ($foundBoth === false) {
     foreach ([
         ['sunday 1 week ago 2026-04-05 01:30',                   '2026-03-29 02:30:00'],
         ['saturday 2 weeks ago 2026-04-12 01:30 +86400000 msec', '2026-03-29 02:30:00'],
+        ['monday 1 week ago 2026-04-06 01:30',                   '2026-03-23 01:30:00'],
         ['tuesday 1 week ago 2026-03-31 01:30',                  '2026-03-17 01:30:00'],
         ['sunday 1 week ago ago 2026-03-22 01:30',               '2026-04-05 01:30:00'],
     ] as [$weeksCell, $weeksWant]) {
