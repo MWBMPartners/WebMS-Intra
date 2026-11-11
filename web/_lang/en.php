@@ -47,6 +47,7 @@ return [
     'nav.transcription'     => 'Transcription',
     'nav.safeguarding'      => 'Safeguarding (DBS)',
     'nav.decision_cards'    => 'Decision Cards',
+    'nav.outside_calendars' => 'Outside calendars',
     'nav.sites'             => 'Sites',
     'nav.my_account'        => 'My Account',
     'nav.sign_in'           => 'Sign In',

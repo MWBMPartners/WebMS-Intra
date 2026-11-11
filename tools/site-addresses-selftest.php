@@ -178,7 +178,7 @@
 declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_FULL     = 103;
+const EXPECTED_FULL     = 108;
 const EXPECTED_NO_CRAWL = 93;
 const EXPECTED_ONLY     = 11;
 
@@ -312,6 +312,7 @@ const BADMIN  = 919011; // an administrator of organisation B, and a member of n
 const BMEMBER = 919012; // an ordinary member of B
 const AMEMBER = 919013; // a member of A only: the members-only gate stops them at B's addresses
 const U1      = 919014; // a member of the default organisation (number 1) only
+const LEGACY  = 919016; // holds ONLY the older portal-wide administrator flag, and is a plain member of B: sees the Admin menu, but the Outside calendars page refuses them (#619)
 const ROOT    = 919015; // a GLOBAL administrator, and a member of B: the only one the menu offers the organisations page
 /** B's first part of the address, as every address in B must begin. */
 const B = '/' . KEY_B;
@@ -766,14 +767,15 @@ removeWorld();
 foreach ([[ORG_A, KEY_A, NAME_A, HOST_A], [ORG_B, KEY_B, NAME_B, HOST_B]] as [$id, $key, $name, $host]) {
     q('INSERT INTO tblSites (siteID, siteKey, siteName, hostPattern, isActive) VALUES (?, ?, ?, ?, 1)', 'isss', [$id, $key, $name, $host]);
 }
-$people = ['badmin' => BADMIN, 'bmember' => BMEMBER, 'amember' => AMEMBER, 'u1' => U1, 'root' => ROOT];
+$people = ['badmin' => BADMIN, 'bmember' => BMEMBER, 'amember' => AMEMBER, 'u1' => U1, 'root' => ROOT, 'legacy' => LEGACY];
 foreach ($people as $who => $id) {
     // Only "root" is a global administrator. The crawler ("badmin") stays an
     // administrator of B alone, so the crawl meets the pages as before.
     $global = $id === ROOT ? 1 : 0;
-    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, ?, ?)', 'issii', [$id, 'Selftest ' . $who, $who . '.addresses@selftest.invalid', $global, $global]);
+    $legacyFlag = $id === LEGACY ? 1 : $global; // LEGACY: the portal-wide flag only, never a global administrator
+    q('INSERT INTO tblUsers (userID, fullName, emailAddress, isActive, isAdmin, isRootAdmin) VALUES (?, ?, ?, 1, ?, ?)', 'issii', [$id, 'Selftest ' . $who, $who . '.addresses@selftest.invalid', $legacyFlag, $global]);
 }
-foreach ([[BADMIN, ORG_B, 1], [BMEMBER, ORG_B, 0], [AMEMBER, ORG_A, 0], [U1, 1, 0], [ROOT, ORG_B, 1]] as [$user, $site, $admin]) {
+foreach ([[BADMIN, ORG_B, 1], [BMEMBER, ORG_B, 0], [AMEMBER, ORG_A, 0], [U1, 1, 0], [ROOT, ORG_B, 1], [LEGACY, ORG_B, 0]] as [$user, $site, $admin]) {
     q('INSERT INTO tblUserSites (userID, siteID, isActive, isSiteAdmin, isSiteRootAdmin) VALUES (?, ?, 1, ?, 0)', 'iii', [$user, $site, $admin]);
 }
 // Every app switched on in organisation B, so the menu and the crawl meet as many pages as there are.
@@ -1040,7 +1042,7 @@ if ($only === []) {
     $verdict   = judge($menuLinks, B);
     ok('F02 every link in the menu keeps the organisation\'s part (' . $verdict['judged'] . ' addresses read)', $verdict['judged'] >= 25 && wrong($verdict) === '', $verdict['judged'] . ' read; ' . wrong($verdict));
     $expected20 = ['', 'admin', 'admin/errors', 'admin/activity', 'admin/audit', 'admin/users', 'settings', 'admin/apps', 'admin/reports', 'admin/workflows',
-        'admin/sms', 'admin/transcription', 'admin/safeguarding/dbs', 'admin/decision-cards', 'account', 'logout'];
+        'admin/sms', 'admin/transcription', 'admin/safeguarding/dbs', 'admin/decision-cards', 'admin/calendar/feeds', 'account', 'logout'];
     $missing = array_filter($expected20, static fn (string $page): bool => in_array(B . '/' . $page, $menuLinks, true) === false);
     ok('F03 the logo, the dashboard, the administration menu, "My account" and "Sign out" are each there under the organisation\'s part', $missing === [], 'not found: ' . implode(', ', array_map(static fn (string $p): string => B . '/' . $p, $missing)));
     // Migrations is for a GLOBAL administrator only (#499, 13 October 2026): the page refuses everybody else,
@@ -1049,6 +1051,45 @@ if ($only === []) {
     ok('F03b an administrator of ONE organisation is not offered Migrations in the menu: the page would refuse them',
         in_array(B . '/admin/migrations', $menuLinks, true) === false && in_array('/admin/migrations', $menuLinks, true) === false,
         'the menu holds: ' . implode(', ', array_filter($menuLinks, static fn (string $a): bool => str_contains($a, 'migrations') === true)));
+    // 📅 Outside calendars (#619). The Admin menu and the Admin dashboard's buttons offer the page to exactly the
+    // people the page lets in (an administrator of THIS organisation, or a global one: EventVisibility::isAdminOfSite()),
+    // and not to an ordinary member, who has no Admin menu at all. With the Calendar app switched off for the
+    // organisation the entry is left out (the dates it copies in are shown by Calendar); F03 above is the control
+    // that it is there when Calendar is on. The address is the organisation's own, never a bare "/admin/…".
+    $feedsAddress = B . '/admin/calendar/feeds';
+    $adminPage    = req($jarAdmin, 'GET', B . '/admin');
+    ok('F03c the Admin dashboard of B\'s administrator has the Outside calendars button, at B\'s own address', $adminPage['status'] === 200
+        && str_contains($adminPage['body'], 'data-outside-calendars-tile="1"') === true && in_array($feedsAddress, addressesIn($adminPage['body']), true) === true
+        && in_array('/admin/calendar/feeds', addressesIn($adminPage['body']), true) === false, said($adminPage));
+    $jarMemberMenu = signIn('bmember', B);
+    $memberFront   = req($jarMemberMenu, 'GET', B . '/');
+    preg_match('#<nav class="navbar.*?</nav>#s', $memberFront['body'], $menuMember);
+    ok('F03d an ordinary member of B is offered Outside calendars neither in the menu nor on the dashboard (the page would refuse them)',
+        $memberFront['status'] === 200 && in_array($feedsAddress, addressesIn($menuMember[0] ?? ''), true) === false
+        && str_contains($memberFront['body'], 'Outside calendars') === false
+        && str_contains(req($jarMemberMenu, 'GET', B . '/admin')['body'], 'data-outside-calendars-tile') === false,
+        'member menu: ' . implode(' ', addressesIn($menuMember[0] ?? '')));
+    // The control that the entry follows the PAGE's gate and not the older flag: this person gets the Admin menu
+    // (App::isAdmin() is true for them) yet the page refuses them, so the menu must not point there. Without this
+    // account the member check above is vacuous: a member has no Admin menu to leave the entry out of.
+    $jarLegacy   = signIn('legacy', B);
+    $legacyFront = req($jarLegacy, 'GET', B . '/');
+    preg_match('#<nav class="navbar.*?</nav>#s', $legacyFront['body'], $menuLegacy);
+    $legacyPage  = req($jarLegacy, 'GET', $feedsAddress);
+    $legacyAdmin = req($jarLegacy, 'GET', B . '/admin');
+    ok('F03f somebody holding only the older administrator flag has the Admin menu (control: it offers the dashboard) but is not offered Outside calendars, because the page refuses them (403)',
+        in_array(B . '/admin', addressesIn($menuLegacy[0] ?? ''), true) === true && in_array($feedsAddress, addressesIn($menuLegacy[0] ?? ''), true) === false
+        && str_contains($legacyAdmin['body'], 'data-outside-calendars-tile') === false && $legacyPage['status'] === 403,
+        'menu: ' . implode(' ', addressesIn($menuLegacy[0] ?? '')) . '; page ' . $legacyPage['status'] . '; dashboard ' . $legacyAdmin['status']);
+    siteSetting(ORG_B, 'calendar.enabled', 'false');
+    $calendarOff = req($jarAdmin, 'GET', B . '/');
+    $calendarOffAdmin = req($jarAdmin, 'GET', B . '/admin');
+    siteSetting(ORG_B, 'calendar.enabled', 'true');
+    preg_match('#<nav class="navbar.*?</nav>#s', $calendarOff['body'], $menuOff);
+    ok('F03e with the Calendar app switched off in B, the entry is left out of the menu and the dashboard (and comes back when it is switched on again, F03)',
+        $calendarOff['status'] === 200 && in_array($feedsAddress, addressesIn($menuOff[0] ?? ''), true) === false
+        && str_contains($calendarOffAdmin['body'], 'data-outside-calendars-tile') === false, said($calendarOff));
+
     ok('F04 the menu holds no bare address at all, not even one the check would excuse', array_filter($menuLinks, static fn (string $a): bool => str_starts_with($a, '/') === true && str_starts_with($a, B . '/') === false && str_starts_with($a, '/assets/') === false) === [],
         implode(', ', array_filter($menuLinks, static fn (string $a): bool => str_starts_with($a, '/') === true && str_starts_with($a, B . '/') === false)));
     $verdict = judge(addressesIn(furniture($front['body'])), B);
@@ -1083,6 +1124,8 @@ if ($only === []) {
     // switcher: one link to the front page of each OTHER organisation. Those two are meant to lead away.
     $switcher = ['/' . KEY_A . '/', '/' . (string) (one('SELECT siteKey FROM tblSites WHERE siteID = 1')['siteKey'] ?? '') . '/'];
     $ownLinks = array_values(array_diff($rootLinks, $switcher));
+    ok('F12c a global administrator is offered Outside calendars too, under B\'s part (the page lets them in: EventVisibility::isAdminOfSite())', in_array(B . '/admin/calendar/feeds', $rootLinks, true) === true,
+        'the menu holds: ' . implode(', ', array_filter($rootLinks, static fn (string $a): bool => str_contains($a, 'calendar') === true)));
     ok('F12b a global administrator IS offered Migrations in the menu, under B\'s part',
         in_array(B . '/admin/migrations', $rootLinks, true) === true,
         'the menu holds: ' . implode(', ', array_filter($rootLinks, static fn (string $a): bool => str_contains($a, 'migrations') === true)));

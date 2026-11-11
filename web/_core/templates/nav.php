@@ -332,6 +332,14 @@ if ($isLoggedIn === true && Site::isMultisiteEnabled() === true && $navUser !== 
                             </a>
                         </li>
                         <?php endif; ?>
+                        <?php // Outside calendars (#619): shown to whoever the page itself lets in, asked through FeedAdmin::menuEntryShown(). ?>
+                        <?php if (\Portal\Core\FeedAdmin::menuEntryShown() === true): ?>
+                        <li>
+                            <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>">
+                                <i class="fa-solid fa-calendar-plus me-1"></i> <?php echo htmlspecialchars(t('nav.outside_calendars'), ENT_QUOTES, 'UTF-8'); ?>
+                            </a>
+                        </li>
+                        <?php endif; ?>
                         <li>
                             <a class="dropdown-item" href="<?php echo htmlspecialchars(Site::url('settings'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <i class="fa-solid fa-gear me-1"></i> <?php echo htmlspecialchars(t('nav.settings'), ENT_QUOTES, 'UTF-8'); ?>

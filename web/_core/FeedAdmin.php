@@ -128,6 +128,49 @@ namespace Portal\Core;
 final class FeedAdmin
 {
     // =========================================================================
+    // 🧭 Who is shown the way to the Outside calendars page (#619)
+    // =========================================================================
+
+    /**
+     * Should the Admin menu and the Admin dashboard show "Outside calendars"
+     * to the person signed in, in the organisation open now? (#619)
+     *
+     * It asks the SAME question the page asks of itself
+     * (`EventVisibility::isAdminOfSite()`, in `admin/calendar/feeds.php`) and
+     * does not keep a second rule. That is deliberately NOT `App::isAdmin()`:
+     * the older portal-wide flag says nothing about which organisation
+     * somebody belongs to, so a person it admitted would be shown a link the
+     * page then refuses with a 403.
+     *
+     * The Calendar app's switch is asked as well. The page's address
+     * (`admin/calendar/...`) is not owned by the Calendar app, so the router
+     * would still open it with Calendar switched off; but the dates it copies
+     * in are shown by Calendar, so with Calendar off the entry would lead to a
+     * page whose work nobody can see. The page itself is unchanged: this is
+     * only about whether to point at it.
+     *
+     * NEVER THROWS: it is asked while every page is drawn, and a failed read
+     * must hide a menu entry, not break the page. Remembered per request.
+     */
+    public static function menuEntryShown(): bool
+    {
+        static $answer = null;
+        if ($answer !== null) {
+            return $answer;
+        }
+        try {
+            $userId = Auth::check() === true ? (int) ($_SESSION['user_id'] ?? 0) : 0;
+            $answer = $userId > 0
+                && AppRegistry::isEnabled('calendar') === true
+                && EventVisibility::isAdminOfSite(App::db(), $userId, Site::id()) === true;
+        } catch (\Throwable $e) {
+            $answer = false;
+        }
+
+        return $answer;
+    }
+
+    // =========================================================================
     // 🏷️ Labels — the ONE place every word shown to an administrator lives
     // =========================================================================
 

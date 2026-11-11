@@ -1050,6 +1050,15 @@ $mailPage = htmlspecialchars(Router::url('admin/integrations/email'), ENT_QUOTES
                     <span class="small">Decision Cards</span>
                 </a>
             </div>
+            <?php // 📅 Outside calendars (#619): the same question as the Admin menu and as the page itself, FeedAdmin::menuEntryShown(). ?>
+            <?php if (\Portal\Core\FeedAdmin::menuEntryShown() === true): ?>
+            <div class="col-6 col-md-4 col-lg-2" data-outside-calendars-tile="1">
+                <a href="<?php echo htmlspecialchars(Site::url('admin/calendar/feeds'), ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-outline-secondary w-100 d-flex flex-column align-items-center gap-1 py-3">
+                    <i class="fa-solid fa-calendar-plus fa-lg"></i>
+                    <span class="small">Outside calendars</span>
+                </a>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
