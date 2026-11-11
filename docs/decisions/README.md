@@ -190,7 +190,8 @@ appended with its real date and a note that it was added later.
 | [D-132](132-a-look-at-expense-records-that-showed-none-is-not-recorded.md) | 2026-11-11 | A look at expense records that showed no claim is not recorded | in force |
 | [D-133](133-the-installation-and-each-organisation-choose-their-country.md) | 2026-11-11 | The installation and each organisation choose their own country; nothing defaults to Great Britain | in force |
 | [D-134](134-an-approved-suggestion-e-mails-the-person-who-suggested-it.md) | 2026-11-11 | An approved event suggestion e-mails the person who suggested it | in force |
+| [D-135](135-no-live-install-so-a-schema-change-needs-no-migration.md) | 2026-11-02 | While no customer installation exists, a schema change needs no numbered migration | in force |
 
-*134 decisions. This index is checked against the folder by
+*135 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*

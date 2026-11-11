@@ -109,3 +109,7 @@ which cannot be automated safely for exactly the reason run-time rewriting
 cannot. It is protected instead by
 `tools/audit-checks/check_reserved_words_quoted.py`, which fails when an
 identifier IS a reserved word or is referenced bare (#718).
+
+> **While no customer installation exists, a schema change needs no paired migration: D-135** (the owner,
+> 2 November 2026). The rule above becomes binding again the moment a customer installs. The end-to-end harness may
+> still need a migration; check it rather than assuming.
