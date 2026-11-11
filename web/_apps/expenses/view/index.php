@@ -12,6 +12,9 @@
  * departments its holder approves for (#648, D-103). Anybody else is told
  * the claim does not exist.
  *
+ * Each RECEIPT links to `expenses/receipt` (#867), which asks the same rule
+ * as this page and sends the file; before #867 the list linked to nothing.
+ *
  * It also shows the one-off message another Expenses page left for this
  * person (#587): the withdraw page sends people here, and until 12 October
  * 2026 this page showed no such message, so "withdrawn successfully", "cannot
@@ -405,7 +408,22 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <div class="col-12 col-md-5">
                         <span class="d-md-none fw-semibold">File: </span>
                         <i class="fa-solid fa-file me-1"></i>
-                        <?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?>
+                        <?php
+                        // 📥 A RECEIPT opens (#867): a row with no stage, which only the
+                        //    submit handler writes. Anybody reading this line already
+                        //    passed this page's own `mayViewClaim()` above, which is the
+                        //    same rule the receipt address asks, so the link is drawn for
+                        //    exactly the people it will open for. A row WITH a stage is a
+                        //    version of the claim's generated PDF, which that address
+                        //    deliberately does not serve, so it stays plain text.
+                        ?>
+                        <?php if ($f['stage'] === null || $f['stage'] === ''): ?>
+                            <a href="<?php echo htmlspecialchars(Router::url('expenses/receipt') . '?claim=' . (int) $claim['claimID'] . '&id=' . (int) $f['fileID'], ENT_QUOTES, 'UTF-8'); ?>"
+                               data-receipt-link="<?php echo (int) $f['fileID']; ?>"
+                               title="Download this receipt"><?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?></a>
+                        <?php else: ?>
+                            <?php echo htmlspecialchars((string) $f['fileLabel'], ENT_QUOTES, 'UTF-8'); ?>
+                        <?php endif; ?>
                         <?php if ($f['stage'] !== null && $f['stage'] !== ''): ?>
                             <span class="badge bg-secondary ms-1"><?php echo htmlspecialchars(ucfirst($f['stage']), ENT_QUOTES, 'UTF-8'); ?></span>
                         <?php endif; ?>

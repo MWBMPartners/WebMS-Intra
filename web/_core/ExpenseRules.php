@@ -1770,4 +1770,196 @@ final class ExpenseRules
             . 'Please fill it in again and attach fewer or smaller receipts, so that together they come to less than '
             . $limit . '. A photo taken at a lower resolution is often much smaller.';
     }
+
+    /* ---------------------------------------------------------------------- */
+    /* 📥 Opening a receipt (#867)                                             */
+    /* ---------------------------------------------------------------------- */
+    //
+    // WHAT WAS WRONG. The claim page listed each receipt's label, kind and
+    // size and linked to none of them, and nothing anywhere served the
+    // receipts folder — which is outside the web root on purpose, so the web
+    // server cannot hand a file out by itself. So an approver deciding a
+    // claim, and a treasurer paying one, could not look at the evidence they
+    // were deciding or paying against. Found while building #649.
+    //
+    // WHO MAY OPEN ONE. Exactly the people who may open the claim: the
+    // `expenses/receipt` address asks `reachToSee()` and `mayViewClaim()`,
+    // the same two calls the claim page asks, and keeps no rule of its own.
+    // A receipt somebody may not open is answered exactly as a receipt that
+    // does not exist (the money pages' rule: nobody learns from the answer
+    // that a claim or a receipt is real).
+    //
+    // WHAT COUNTS AS A RECEIPT. A row of `tblExpenseClaimFiles` with NO
+    // `stage`. Only two places write that table (established with
+    // `grep -rn tblExpenseClaimFiles web --include='*.php'`):
+    // `expenses/submit/save.php`, which stores receipts in `receiptsFolder()`
+    // and never sets a stage, and `ExpensePdf::generate()`, which records each
+    // version of the claim's own PDF WITH a stage, in a different folder, and
+    // overwrites one file for every stage — so a stage row does not even name
+    // the version it describes. That PDF is not a receipt and this address
+    // does not serve it.
+    //
+    // WHY THE PATH IS JUDGED HERE. The address takes two numbers and never a
+    // name, so nothing a request sends reaches the file system. What does is
+    // the stored name in the database, which the portal wrote — and a row is
+    // still not a reason to trust a path: a restored backup, a hand-edited row
+    // or a fault elsewhere could put `../`, or a link to somewhere else, into
+    // the folder. So the stored name must be a plain file name, AND the file it
+    // names, with every symbolic link followed, must still be directly inside
+    // the receipts folder.
+
+    /**
+     * Where receipts are kept: the ONE place the folder is named. The submit
+     * handler stores receipts here and the receipt address reads them from
+     * here; two places building it would be two places to change, and the one
+     * that drifted would simply stop finding anything.
+     *
+     * Needs `PORTAL_ROOT`, which start-up defines.
+     *
+     * @return string An absolute path, with no separator at the end.
+     */
+    public static function receiptsFolder(): string
+    {
+        return PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'expenses';
+    }
+
+    /**
+     * Is this stored name a plain file name the portal could have written?
+     * Pure, so a self-test can ask it directly.
+     *
+     * The portal has written two shapes: `412_1700000000_receipt1.pdf` since
+     * #714, and before that `412_1700000000_<the uploader's name with every
+     * character outside A-Z, a-z, 0-9, dot, underscore and hyphen removed>`
+     * (established with `git show 3f07981c:web/public_html/expenses/submit/save.php`,
+     * whose line 105 builds it).
+     * Both start with the claim number and use only those characters. So a
+     * name is accepted when it uses only those characters, starts with a
+     * letter or digit (which rules out `.`, `..` and hidden files) and is no
+     * longer than the column. A slash, a backslash, a NUL byte or any other
+     * character can never be part of one.
+     *
+     * @param string $storedFilename `tblExpenseClaimFiles.storedFilename`.
+     */
+    public static function isPlainReceiptName(string $storedFilename): bool
+    {
+        return preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$/D', $storedFilename) === 1;
+    }
+
+    /**
+     * The real path of a stored receipt, or null when it must not be served.
+     *
+     * Null when the name is not plain (`isPlainReceiptName()`), when the
+     * folder or the file does not exist or cannot be read, when it is not a
+     * regular file, or when the file — with every symbolic link followed —
+     * is not directly inside the receipts folder. The caller answers every
+     * null the same way.
+     *
+     * @param string $storedFilename `tblExpenseClaimFiles.storedFilename`.
+     *
+     * @return string|null The resolved path to read, or null.
+     */
+    public static function receiptFile(string $storedFilename): ?string
+    {
+        if (self::isPlainReceiptName($storedFilename) === false) {
+            return null;
+        }
+        $folder = realpath(self::receiptsFolder());
+        if ($folder === false || is_dir($folder) === false) {
+            return null;
+        }
+        $file = realpath($folder . DIRECTORY_SEPARATOR . $storedFilename);
+        // 🔗 `realpath()` follows links, so a link inside the folder that
+        //    points anywhere else resolves to that somewhere else and fails
+        //    this test. DIRECTLY inside: the portal never makes sub-folders
+        //    here, so the file's folder must be the receipts folder itself.
+        if ($file === false || dirname($file) !== $folder) {
+            return null;
+        }
+        if (is_file($file) === false || is_readable($file) === false) {
+            return null;
+        }
+
+        return $file;
+    }
+
+    /**
+     * The `Content-Type` to send a receipt with: the type stored when it was
+     * uploaded (worked out by the server from the file's contents, never the
+     * type the browser claimed), when it is a well-formed `type/subtype` with
+     * nothing after it; otherwise `application/octet-stream`, which every
+     * browser treats as "a file to save".
+     *
+     * Whatever is sent, the address also sends `Content-Disposition:
+     * attachment`, `X-Content-Type-Options: nosniff` and a page rule that
+     * sandboxes the answer, so even a stored `text/html` is saved rather than
+     * shown as a page of the portal.
+     *
+     * @param mixed $storedType `tblExpenseClaimFiles.fileType`, which may be NULL.
+     */
+    public static function receiptContentType(mixed $storedType): string
+    {
+        if (is_string($storedType) === true
+            && preg_match('#^[A-Za-z0-9][A-Za-z0-9!\#$&^_.+-]{0,62}/[A-Za-z0-9][A-Za-z0-9!\#$&^_.+-]{0,62}$#D', $storedType) === 1) {
+            return strtolower($storedType);
+        }
+
+        return 'application/octet-stream';
+    }
+
+    /**
+     * The whole `Content-Disposition` value for a receipt: always
+     * `attachment`, with the name given twice, as RFC 6266 section 4.3
+     * advises —
+     *
+     *   filename="..."        plain ASCII letters, digits, dot, underscore and
+     *                         hyphen only, for a browser that reads nothing else;
+     *   filename*=UTF-8''...  the label in full, percent-encoded as RFC 5987
+     *                         (now RFC 8187) requires, which every current
+     *                         browser prefers when it is present.
+     *
+     * NOTHING FROM THE LABEL REACHES THE HEADER UNENCODED. The label has been
+     * a name the portal makes up since #714 (`Claim_412_Receipt_1_2026-11-09.pdf`),
+     * but a row written before then holds the uploader's own name, which may
+     * contain quotes, semicolons, line breaks or any character at all. In the
+     * plain form every such character becomes `_`; in the encoded form
+     * `rawurlencode()` leaves only letters, digits and `-_.~`, all of which
+     * RFC 5987 allows bare. Control characters are removed first and bytes
+     * that are not UTF-8 are replaced, so a line break can never end the
+     * header early. Pure, so a self-test can ask it directly.
+     *
+     * @param string $label          `tblExpenseClaimFiles.fileLabel` (may be empty).
+     * @param int    $fileId         The receipt's number, for a made-up name when
+     *                               the label leaves nothing usable.
+     * @param string $storedFilename The stored name, for its extension only.
+     */
+    public static function receiptDisposition(string $label, int $fileId, string $storedFilename): string
+    {
+        // 🧹 One clean copy of the label: valid UTF-8, no control characters
+        //    (C0, DEL, C1, and the two Unicode line and paragraph separators),
+        //    no folder part, and not absurdly long.
+        $clean = mb_scrub($label, 'UTF-8');
+        $clean = (string) preg_replace('/[\x00-\x1F\x7F]+/', '', $clean);
+        $clean = (string) preg_replace('/[\x{80}-\x{9F}\x{2028}\x{2029}]+/u', '', $clean);
+        $clean = basename(str_replace('\\', '/', $clean));
+        $clean = trim($clean);
+        if (mb_strlen($clean, 'UTF-8') > 150) {
+            $clean = mb_substr($clean, 0, 150, 'UTF-8');
+        }
+        if ($clean === '' || $clean === '.' || $clean === '..') {
+            $ext   = strtolower((string) pathinfo($storedFilename, PATHINFO_EXTENSION));
+            $clean = 'receipt-' . $fileId . (preg_match('/^[a-z0-9]{1,10}$/D', $ext) === 1 ? '.' . $ext : '');
+        }
+
+        // 🔤 The plain form: every other character becomes "_", runs of "_"
+        //    become one, and a name left with nothing but punctuation falls
+        //    back to the made-up one.
+        $ascii = (string) preg_replace('/[^A-Za-z0-9._-]/', '_', $clean);
+        $ascii = (string) preg_replace('/_+/', '_', $ascii);
+        $ascii = trim($ascii, '._');
+        if ($ascii === '') {
+            $ascii = 'receipt-' . $fileId;
+        }
+
+        return 'attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($clean);
+    }
 }

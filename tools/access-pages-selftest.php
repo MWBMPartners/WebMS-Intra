@@ -102,6 +102,17 @@
  *      administrators, a global administrator and the treasurer see both
  *      claims and download both; the approvals list follows the DECIDING
  *      reach; and the claimant always opens their own.
+ *  L4. #867 — a receipt opens for exactly the people who may open its claim:
+ *      the claimant, an approver of the department, a treasurer and both
+ *      kinds of administrator get the file's own bytes with its stored type,
+ *      as an attachment, with nosniff, no-store and a sandboxing page rule;
+ *      everybody else gets byte for byte what a made-up receipt gets, after
+ *      the same database work; a receipt of another claim, the claim's own
+ *      generated PDF, stored names that leave the folder (../, an absolute
+ *      path, a link) and numbers that are not plain numbers are refused; a
+ *      label that could break the header gives one well-formed RFC 6266 /
+ *      5987 header; and the claim page, the approvals list and the treasury
+ *      list link to where the receipts are.
  *   M. Withdrawing a claim, through the real page, reading back what is
  *      STORED. The claimant withdraws a pending claim and its status reads
  *      Withdrawn; a second press, and an approved, a paid and a rejected
@@ -276,7 +287,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 433; // 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
+const EXPECTED_CHECKS = 474; // 433 until #867 added part L4 (forty-one: who may open a receipt, the refusals compared with a made-up one, the database work, a receipt of another claim, the generated PDF, five stored-path and eight request tricks, the header, and the links); 427 until #529 round 3 added six (a second delete, the list's count, a page delete by an administrator, and an API key both ways); 416 until #529 round 2 added D-114's eight and three coverage pins; 408 until #529 round 1 added D-109's five and a flagged outsider's three; 369 until #529 added part Q (thirty-nine); 361 until #648's round 1 added eight more to L3 (the rest of the existence-leak class); 348 until #648 added part L3 (fifteen) and took two treasurer/lead refusals out of L2 (D-040); 334 until #792 added the api/translation row (two checks); 336 until #834 added part P (twelve)
 
 function refuse(string $why): never
 {
@@ -2638,6 +2649,352 @@ ok(
     $deptOther . '  ||  ' . $deptNone
 );
 
+// =============================================================================
+head('L4. #867 — a receipt opens for exactly the people who may open its claim');
+// =============================================================================
+/**
+ * WHAT WAS WRONG. The claim page listed each receipt's label, kind and size
+ * with no link, and nothing served the receipts folder (outside the web root
+ * on purpose), so an approver or a treasurer could not look at the evidence
+ * they were deciding or paying against. `expenses/receipt?claim=&id=` now
+ * sends one receipt, asking the claim page's own rule
+ * (`ExpenseRules::reachToSee()` and `mayViewClaim()`).
+ *
+ * THE WORLD. L3's three claims, each given a receipt FILE in the scratch
+ * copy's receipts folder and a row, so every answer can be compared with the
+ * real bytes: LEAD's claim in DEPT (APPR approves for DEPT), LEAD's claim in
+ * L3_DEPT (where APPR, MEM and TRS hold nothing), and MEM's own claim in
+ * L3_DEPT (so MEM gets in on "it is mine" ALONE — no department, no role).
+ * Plus rows no correct portal writes but a restored or hand-edited database
+ * could hold: a stored name climbing out with `../`, an absolute path, `..`,
+ * a LINK inside the folder to a secret outside it, a row whose file is gone,
+ * and the claim's generated-PDF row (it has a stage) with a file of its name
+ * planted in the receipts folder — so only the "no stage" condition stands
+ * between it and being served.
+ *
+ * WHAT IT CANNOT DO: drive a browser, so it proves the HEADERS a browser acts
+ * on (attachment, nosniff, a sandboxing page rule) rather than what a browser
+ * then does with them.
+ */
+const L4_R_OWN   = 916861; // receipt of L3_OWN_DEPT (LEAD's claim, DEPT)
+const L4_R_OTHER = 916862; // receipt of L3_OTHER_DEPT (LEAD's claim, L3_DEPT)
+const L4_R_MEM   = 916863; // receipt of L3_MEM_CLAIM (MEM's own claim)
+const L4_R_PDF   = 916864; // the generated PDF's row on L3_OWN_DEPT (it has a stage)
+const L4_R_UP    = 916865; // stored name climbing out with ../
+const L4_R_ABS   = 916866; // stored name an absolute path
+const L4_R_DOTS  = 916867; // stored name '..'
+const L4_R_LINK  = 916868; // a plain name, but a LINK to a file outside the folder
+const L4_R_GONE  = 916869; // a row whose file is not there
+const L4_R_NAME  = 916870; // a label with quotes, line breaks and non-ASCII letters
+const L4_R_TYPE  = 916871; // a stored type with something after it, over HTML bytes
+const L4_NO_FILE = 916879; // matches no receipt at all
+
+$l4Folder = $child . $sep . 'web' . $sep . '_uploads' . $sep . 'expenses';
+if (is_dir($l4Folder) === false && mkdir($l4Folder, 0700, true) === false) {
+    refuse('the scratch copy\'s receipts folder could not be made');
+}
+$l4Secret = $child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key';
+/** What each receipt file really holds, read back from disk below; binary on purpose. */
+$l4Bytes = [
+    L4_R_OWN   => "%PDF-1.4\n" . random_bytes(3000) . "\n%%EOF\n",
+    L4_R_OTHER => "\x89PNG\r\n\x1a\n" . random_bytes(1500),
+    L4_R_MEM   => "\xFF\xD8\xFF\xE0" . random_bytes(2500),
+    L4_R_NAME  => "%PDF-1.4 the label test\n",
+    L4_R_TYPE  => "<html><body><script>document.title='ran'</script></body></html>",
+];
+/** The type each one is served with: the stored type, or octet-stream when the stored one is not a bare type/subtype. */
+$l4Types = [
+    L4_R_OWN => 'application/pdf', L4_R_OTHER => 'image/png', L4_R_MEM => 'image/jpeg',
+    L4_R_NAME => 'application/pdf', L4_R_TYPE => 'application/octet-stream',
+];
+$l4Label = "Jane \"Smith\";\r\nX-Injected: yes\r\n café ünïcode.pdf";
+/** One receipt row, and its file when it has bytes. Stage and type may be NULL. */
+$l4Add = static function (int $id, int $claim, string $label, string $stored, ?string $type, ?string $stage, ?string $bytes) use ($l4Folder, $sep): void {
+    if ($bytes !== null && file_put_contents($l4Folder . $sep . $stored, $bytes) !== strlen($bytes)) {
+        refuse('a receipt file could not be written into the scratch copy');
+    }
+    q(
+        'INSERT INTO `tblExpenseClaimFiles` (`fileID`, `claimID`, `fileLabel`, `storedFilename`, `fileSize`, `fileType`, `stage`) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'iississ', [$id, $claim, $label, $stored, $bytes === null ? 0 : strlen($bytes), $type, $stage]
+    );
+};
+$l4Add(L4_R_OWN, L3_OWN_DEPT, 'Claim_' . L3_OWN_DEPT . '_Receipt_1_2026-11-11.pdf', L3_OWN_DEPT . '_1700000000_receipt1.pdf', 'application/pdf', null, $l4Bytes[L4_R_OWN]);
+$l4Add(L4_R_OTHER, L3_OTHER_DEPT, 'Claim_' . L3_OTHER_DEPT . '_Receipt_1_2026-11-11.png', L3_OTHER_DEPT . '_1700000000_receipt1.png', 'image/png', null, $l4Bytes[L4_R_OTHER]);
+$l4Add(L4_R_MEM, L3_MEM_CLAIM, 'Claim_' . L3_MEM_CLAIM . '_Receipt_1_2026-11-11.jpg', L3_MEM_CLAIM . '_1700000000_receipt1.jpg', 'image/jpeg', null, $l4Bytes[L4_R_MEM]);
+$l4Add(L4_R_PDF, L3_OWN_DEPT, 'Claim_' . L3_OWN_DEPT . '_Pending.pdf', 'claim_' . L3_OWN_DEPT . '.pdf', 'application/pdf', 'Pending', "%PDF-1.4 the claim's own form\n");
+$l4Add(L4_R_UP, L3_OWN_DEPT, 'up.pdf', '..' . $sep . '..' . $sep . '_auth_keys' . $sep . 'enc.key', 'application/pdf', null, null);
+$l4Add(L4_R_ABS, L3_OWN_DEPT, 'abs.pdf', $l4Secret, 'application/pdf', null, null);
+$l4Add(L4_R_DOTS, L3_OWN_DEPT, 'dots.pdf', '..', 'application/pdf', null, null);
+$l4Add(L4_R_LINK, L3_OWN_DEPT, 'link.pdf', L3_OWN_DEPT . '_1700000000_receipt9.pdf', 'application/pdf', null, null);
+if (symlink($l4Secret, $l4Folder . $sep . L3_OWN_DEPT . '_1700000000_receipt9.pdf') === false) {
+    refuse('a link could not be made inside the scratch copy\'s receipts folder');
+}
+$l4Add(L4_R_GONE, L3_OWN_DEPT, 'gone.pdf', L3_OWN_DEPT . '_1700000000_receipt8.pdf', 'application/pdf', null, null);
+$l4Add(L4_R_NAME, L3_OWN_DEPT, $l4Label, L3_OWN_DEPT . '_1700000000_receipt2.pdf', 'application/pdf', null, $l4Bytes[L4_R_NAME]);
+$l4Add(L4_R_TYPE, L3_OWN_DEPT, 'Claim_' . L3_OWN_DEPT . '_Receipt_3_2026-11-11.html', L3_OWN_DEPT . '_1700000000_receipt3.pdf', 'text/html; charset=utf-8', null, $l4Bytes[L4_R_TYPE]);
+$secretBytes = (string) file_get_contents($l4Secret);
+if (strlen($secretBytes) < 32) {
+    refuse('the scratch copy\'s key file is not there to plant a link to');
+}
+
+/** One receipt, as status, body and headers. */
+$l4Get = static fn (string $who, int $claimId, int $fileId): array => req($who, 'GET', ADDR_A . '/expenses/receipt?claim=' . $claimId . '&id=' . $fileId);
+/** One header's value, or '' when it is not there (the LAST, as a browser takes it). */
+$l4Header = static function (array $answer, string $name): string {
+    ap_findAll('/^' . preg_quote($name, '/') . ':[ \t]*(.*?)[ \t]*\r?$/mi', $answer['head'], $m);
+
+    return (string) (end($m[1]) ?: '');
+};
+/** Served exactly: 200, the file's own bytes, the stored type, attachment, nosniff, no caching, sandboxed. */
+$l4Served = static function (array $answer, int $fileId) use ($l4Bytes, $l4Types, $l4Header): bool {
+    return $answer['status'] === 200
+        && $answer['body'] === $l4Bytes[$fileId]
+        && $l4Header($answer, 'Content-Type') === $l4Types[$fileId]
+        && str_starts_with($l4Header($answer, 'Content-Disposition'), 'attachment; filename="') === true
+        && strtolower($l4Header($answer, 'X-Content-Type-Options')) === 'nosniff'
+        && str_contains($l4Header($answer, 'Cache-Control'), 'no-store') === true
+        && str_contains($l4Header($answer, 'Content-Security-Policy'), 'sandbox') === true
+        && $l4Header($answer, 'Content-Length') === (string) strlen($l4Bytes[$fileId]);
+};
+/** Why an answer was not served, for a failure line. */
+$l4Why = static fn (array $answer): string => 'HTTP ' . $answer['status'] . ', ' . strlen($answer['body']) . ' bytes, type "'
+    . $l4Header($answer, 'Content-Type') . '", disposition "' . $l4Header($answer, 'Content-Disposition') . '"';
+/** Two answers are the SAME answer: status, page (nonce aside) and headers (date, cookie and nonce aside). */
+$l4Same = static fn (array $x, array $y): bool => $x['status'] === $y['status']
+    && $l3Bare($x['body']) === $l3Bare($y['body']) && $l3Head($x['head']) === $l3Head($y['head']);
+/** No answer may hold any receipt's bytes, or the key file a link points at. */
+$l4Leaks = static function (array $answer) use ($l4Bytes, $secretBytes): bool {
+    foreach ($l4Bytes as $bytes) {
+        if (str_contains($answer['body'], $bytes) === true) {
+            return true;
+        }
+    }
+
+    return str_contains($answer['body'], $secretBytes);
+};
+
+// --- who may open it, and gets exactly the file ------------------------------
+foreach ([
+    ['L4-1. the CLAIMANT opens a receipt of their own claim — on "it is mine" alone: MEM has no department or role that reaches it', 'mem', L3_MEM_CLAIM, L4_R_MEM],
+    ['L4-2. an APPROVER of the claim\'s department opens its receipt', 'appr', L3_OWN_DEPT, L4_R_OWN],
+    ['L4-3. a TREASURER opens a receipt of a department they hold nothing in', 'trs', L3_OTHER_DEPT, L4_R_OTHER],
+    ['L4-4. an ADMINISTRATOR of the organisation opens a receipt', 'adm', L3_OTHER_DEPT, L4_R_OTHER],
+    ['L4-5. a GLOBAL administrator opens a receipt', 'gadm', L3_OWN_DEPT, L4_R_OWN],
+] as [$label, $who, $claimId, $fileId]) {
+    $answer = $l4Get($jar[$who], $claimId, $fileId);
+    ok($label . ': HTTP 200, the file\'s own bytes, its stored type, attachment, nosniff, no-store and a sandboxing page rule', $l4Served($answer, $fileId), $l4Why($answer));
+}
+
+// --- who may not, and gets EXACTLY what a receipt that does not exist gets --
+// Each refused person is compared with THEMSELVES asking for a made-up receipt
+// number on the same claim, and for a made-up claim as well — the answer must
+// be the same in status, page and headers, and hold none of the bytes.
+$l4Refused = static function (string $label, string $who, int $claimId, int $fileId, int $wantStatus) use (&$jar, $l4Get, $l4Same, $l4Leaks, $l3Head): void {
+    $real  = $l4Get($jar[$who], $claimId, $fileId);
+    $none  = $l4Get($jar[$who], $claimId, L4_NO_FILE);
+    $none2 = $l4Get($jar[$who], L3_NO_CLAIM, L4_NO_FILE);
+    ok(
+        $label . ': HTTP ' . $wantStatus . ', byte for byte what a made-up receipt and a made-up claim get, and none of the file',
+        $real['status'] === $wantStatus && $l4Same($real, $none) === true && $l4Same($real, $none2) === true
+            && $l4Leaks($real) === false && strlen($none['body']) > 200,
+        'HTTP ' . $real['status'] . '/' . $none['status'] . '/' . $none2['status'] . ', lengths ' . strlen($real['body']) . '/' . strlen($none['body']) . '/' . strlen($none2['body'])
+            . '; headers only in one: ' . implode(' | ', array_diff(explode("\n", $l3Head($real['head'])), explode("\n", $l3Head($none['head']))))
+    );
+};
+$l4Refused('L4-6. an approver of ANOTHER department (APPR, on a claim of L3_DEPT)', 'appr', L3_OTHER_DEPT, L4_R_OTHER, 404);
+$l4Refused('L4-7. an ORDINARY member of the claim\'s own department (MEM, on LEAD\'s claim in DEPT)', 'mem', L3_OWN_DEPT, L4_R_OWN, 404);
+$l3Role(MEM, true);
+$l4Refused('L4-8. the Approver ROLE with no department (MEM holding it, D-103)', 'mem', L3_OWN_DEPT, L4_R_OWN, 404);
+$l3Role(MEM, false);
+// Outsiders are refused at the organisation's door first (403, the same for
+// every address); with that gate stood down, the PAGE's own answer is tried.
+foreach (['bmem' => 'a MEMBER of the other organisation', 'badm' => 'an ADMINISTRATOR of the other organisation', 'nomem' => 'an account in NO organisation'] as $who => $words) {
+    $l4Refused('L4-9. ' . $words . ', at the door', $who, L3_OWN_DEPT, L4_R_OWN, 403);
+}
+membersGate(false);
+foreach (['bmem' => 'a MEMBER of the other organisation', 'badm' => 'an ADMINISTRATOR of the other organisation', 'nomem' => 'an account in NO organisation'] as $who => $words) {
+    $l4Refused('L4-10. ' . $words . ', with the door stood down so the page itself answers', $who, L3_OWN_DEPT, L4_R_OWN, 404);
+}
+membersGate(true);
+// Signed out: sent to sign in, and the only difference between a real and a
+// made-up receipt is the numbers the visitor typed, carried in the address
+// they are sent back to.
+$outReal = $l4Get($nobody, L3_OWN_DEPT, L4_R_OWN);
+$outNone = $l4Get($nobody, L3_NO_CLAIM, L4_NO_FILE);
+$digits  = static fn (string $text): string => ap_replace('/[0-9]/', '0', $text);
+ok(
+    'L4-11. a SIGNED-OUT visitor is sent to sign in, with the same answer for a real receipt as a made-up one (numbers aside), and none of the file',
+    $outReal['status'] === 302 && str_contains($outReal['location'], '/login') === true
+        && $outReal['status'] === $outNone['status'] && $digits($l3Head($outReal['head'])) === $digits($l3Head($outNone['head']))
+        && $digits($outReal['body']) === $digits($outNone['body']) && $l4Leaks($outReal) === false,
+    'HTTP ' . $outReal['status'] . ' to ' . $outReal['location'] . ' / HTTP ' . $outNone['status'] . ' to ' . $outNone['location']
+);
+
+// --- the same database work for "not yours" and "not there" ----------------
+// The reach is worked out BEFORE anything is looked up, as on the claim page,
+// so a real receipt out of reach and a made-up number send the same
+// statements. The query log is handled exactly as L3-3b handles it.
+$l4LogWas = one('SELECT @@GLOBAL.general_log AS general_log, @@GLOBAL.log_output AS log_output');
+if ($l4LogWas === null || ap_find('/^[A-Z,]+$/', (string) $l4LogWas['log_output']) !== 1) {
+    refuse('the database would not say how its query log is set');
+}
+$state['queryLog'] = ['general_log' => (int) $l4LogWas['general_log'], 'log_output' => (string) $l4LogWas['log_output']];
+q("SET GLOBAL log_output = 'TABLE'");
+q('SET GLOBAL general_log = 1');
+/** The statements the portal sent for one receipt request, numbers blanked. @return list<string> */
+$l4Statements = static function (string $who, int $claimId, int $fileId) use (&$jar, $l4Get): array {
+    q('TRUNCATE TABLE mysql.general_log');
+    $l4Get($jar[$who], $claimId, $fileId);
+    $rows = q("SELECT CONVERT(argument USING utf8mb4) AS a FROM mysql.general_log WHERE command_type IN ('Query', 'Execute') AND thread_id <> CONNECTION_ID() ORDER BY event_time, thread_id");
+
+    return array_map(static fn (array $r): string => ap_replace('/\d+/', '0', (string) $r['a']), $rows);
+};
+$sqlOtherR = $l4Statements('appr', L3_OTHER_DEPT, L4_R_OTHER);
+$sqlNoneR  = $l4Statements('appr', L3_NO_CLAIM, L4_NO_FILE);
+q('SET GLOBAL general_log = ' . (int) $state['queryLog']['general_log']);
+q("SET GLOBAL log_output = '" . $state['queryLog']['log_output'] . "'");
+q('TRUNCATE TABLE mysql.general_log');
+$state['queryLog'] = null;
+$readsFile = static fn (array $sql): bool => array_filter($sql, static fn (string $a): bool => str_contains($a, 'FROM `tblExpenseClaimFiles`')) !== [];
+ok(
+    'L4-12. …and the SAME DATABASE WORK: the same statements, in the same order, numbers aside — the department read and the receipt read in both',
+    $sqlOtherR === $sqlNoneR && $readsFile($sqlNoneR) === true && $readsDepts($sqlNoneR) === true,
+    count($sqlOtherR) . ' statements against ' . count($sqlNoneR) . '; first difference: '
+        . (string) (array_values(array_diff_assoc($sqlOtherR, $sqlNoneR))[0] ?? array_values(array_diff_assoc($sqlNoneR, $sqlOtherR))[0] ?? 'none')
+);
+
+// --- a receipt number that belongs to ANOTHER claim -------------------------
+// TRS may open BOTH claims, so only "this receipt is not this claim's" can
+// refuse it — and it must look exactly like a receipt that does not exist.
+$crossed = $l4Get($jar['trs'], L3_OWN_DEPT, L4_R_OTHER);
+$crossedNone = $l4Get($jar['trs'], L3_OWN_DEPT, L4_NO_FILE);
+ok(
+    'L4-13. a receipt number from ANOTHER claim is refused even for a treasurer who may open both claims: 404, byte for byte a made-up receipt, and none of the file',
+    $crossed['status'] === 404 && $l4Same($crossed, $crossedNone) === true && $l4Leaks($crossed) === false,
+    $l4Why($crossed)
+);
+$crossed2 = $l4Get($jar['appr'], L3_OWN_DEPT, L4_R_MEM);
+ok(
+    'L4-14. …and an approver naming a claim they MAY open with a receipt of one they may not gets the same 404',
+    $crossed2['status'] === 404 && $l4Same($crossed2, $l4Get($jar['appr'], L3_OWN_DEPT, L4_NO_FILE)) === true && $l4Leaks($crossed2) === false,
+    $l4Why($crossed2)
+);
+
+// --- the claim's own generated PDF is not a receipt -------------------------
+// A file of its stored name is planted in the receipts folder, a state only a
+// restore or a hand edit could make, so that "the row has no stage" is the
+// ONLY thing refusing it here.
+file_put_contents($l4Folder . $sep . 'claim_' . L3_OWN_DEPT . '.pdf', "%PDF-1.4 the claim's own form\n");
+$pdfRow = $l4Get($jar['adm'], L3_OWN_DEPT, L4_R_PDF);
+ok(
+    'L4-15. the claim\'s GENERATED PDF row (it has a stage) is not served by the receipt address, even with a file of its name in the receipts folder',
+    $pdfRow['status'] === 404 && str_contains($pdfRow['body'], 'the claim\'s own form') === false,
+    $l4Why($pdfRow)
+);
+
+// --- path tricks ------------------------------------------------------------
+// Every one asked by an ADMINISTRATOR, who may open the claim, so only the
+// path rule can refuse it.
+foreach ([
+    [L4_R_UP, 'a stored name climbing out of the folder with ../'],
+    [L4_R_ABS, 'a stored name that is an absolute path'],
+    [L4_R_DOTS, 'a stored name that is ".."'],
+    [L4_R_LINK, 'a plain stored name that is a LINK to a file outside the folder'],
+    [L4_R_GONE, 'a row whose file is not there'],
+] as [$fileId, $words]) {
+    $answer = $l4Get($jar['adm'], L3_OWN_DEPT, $fileId);
+    ok(
+        'L4-16. ' . $words . ': refused with 404 to somebody who may open the claim, and nothing of the key file is sent',
+        $answer['status'] === 404 && str_contains($answer['body'], $secretBytes) === false && $l4Header($answer, 'Content-Disposition') === '',
+        $l4Why($answer)
+    );
+}
+$l4Logged = (int) one("SELECT COUNT(*) AS n FROM `tblErrors` WHERE `errorCode` = 'RECEIPT_UNAVAILABLE' AND `siteID` = ?", 'i', [ORG_A])['n'];
+ok(
+    'L4-17. …and each of those five is recorded for an administrator as a receipt that could not be opened (a receipt row with no usable file is lost evidence)',
+    $l4Logged === 5,
+    $l4Logged . ' record(s)'
+);
+foreach ([
+    'id=' . L4_R_OWN . 'abc'              => 'a number with letters after it (which (int) would read as the real number)',
+    'id[]=' . L4_R_OWN                    => 'the number sent as a LIST',
+    'id=0' . L4_R_OWN                     => 'the number with a leading zero',
+    'id=-' . L4_R_OWN                     => 'a negative number',
+    'id=' . L4_R_OWN . '.0'               => 'a decimal number',
+    'id=..%2F' . L4_R_OWN                 => 'a path in place of the number',
+    'id=' . L4_R_OWN . '%00'              => 'a NUL byte after the number',
+] as $query => $words) {
+    $answer = req($jar['adm'], 'GET', ADDR_A . '/expenses/receipt?claim=' . L3_OWN_DEPT . '&' . $query);
+    ok('L4-18. ' . $words . ': 404, and the receipt is not sent', $answer['status'] === 404 && $l4Leaks($answer) === false, $l4Why($answer));
+}
+$answer = req($jar['adm'], 'GET', ADDR_A . '/expenses/receipt?claim=' . L3_OWN_DEPT . 'x&id=' . L4_R_OWN);
+ok('L4-19. a claim number with letters after it: 404, and the receipt is not sent', $answer['status'] === 404 && $l4Leaks($answer) === false, $l4Why($answer));
+
+// --- a stored label that could break the header ------------------------------
+$named = $l4Get($jar['adm'], L3_OWN_DEPT, L4_R_NAME);
+$disp  = $l4Header($named, 'Content-Disposition');
+ok(
+    'L4-20. a label holding quotes, a semicolon, two line breaks and non-ASCII letters gives ONE well-formed header: the plain name only letters, digits, dot, underscore and hyphen, the full name percent-encoded (RFC 5987), and no second header smuggled in',
+    $l4Served($named, L4_R_NAME) === true
+        && ap_find('/^attachment; filename="[A-Za-z0-9._-]+"; filename\*=UTF-8\'\'[A-Za-z0-9%._~-]+$/D', $disp) === 1
+        && ap_findAll('/^Content-Disposition:/mi', $named['head']) === 1
+        && ap_find('/^X-Injected:/mi', $named['head']) === 0,
+    'disposition: ' . $disp
+);
+ok(
+    'L4-21. …and the encoded name decodes to the label exactly, with only the line breaks taken out',
+    ap_find('/filename\*=UTF-8\'\'(\S+)$/', $disp, $enc) === 1 && rawurldecode($enc[1]) === str_replace("\r\n", '', $l4Label),
+    'decoded: ' . (isset($enc[1]) === true ? rawurldecode($enc[1]) : '(none)')
+);
+$typed = $l4Get($jar['adm'], L3_OWN_DEPT, L4_R_TYPE);
+ok(
+    'L4-22. a stored type with something after it ("text/html; charset=utf-8", over HTML bytes) is sent as application/octet-stream, as an attachment, sandboxed',
+    $l4Served($typed, L4_R_TYPE),
+    $l4Why($typed)
+);
+
+// --- the links ---------------------------------------------------------------
+$l4Href = static fn (int $claimId, int $fileId): string => 'href="' . ADDR_A . '/expenses/receipt?claim=' . $claimId . '&amp;id=' . $fileId . '"';
+$page = $l3Open('appr', L3_OWN_DEPT);
+ok(
+    'L4-23. the claim page links each RECEIPT to its address, and draws no link for the generated-PDF row (still listed by name)',
+    $page['status'] === 200 && str_contains($page['body'], $l4Href(L3_OWN_DEPT, L4_R_OWN)) === true
+        && str_contains($page['body'], 'data-receipt-link="' . L4_R_PDF . '"') === false
+        && str_contains($page['body'], 'Claim_' . L3_OWN_DEPT . '_Pending.pdf') === true,
+    'HTTP ' . $page['status']
+);
+$memPage = $l3Open('mem', L3_MEM_CLAIM);
+ok(
+    'L4-24. the claimant\'s own claim page links their receipt, and following that link gives them the file',
+    $memPage['status'] === 200 && str_contains($memPage['body'], $l4Href(L3_MEM_CLAIM, L4_R_MEM)) === true
+        && $l4Served(req($jar['mem'], 'GET', html_entity_decode(ap_find('/href="([^"]*expenses\/receipt\?claim=' . L3_MEM_CLAIM . '[^"]*)"/', $memPage['body'], $hm) === 1 ? $hm[1] : '/none', ENT_QUOTES, 'UTF-8')), L4_R_MEM) === true,
+    'HTTP ' . $memPage['status']
+);
+$apprList = req($jar['appr'], 'GET', $approve);
+ok(
+    'L4-25. the approvals list links the claim number to the claim\'s own page, where the receipts are',
+    $apprList['status'] === 200 && str_contains($apprList['body'], 'href="' . ADDR_A . '/expenses/view?id=' . L3_OWN_DEPT . '" data-claim-link="' . L3_OWN_DEPT . '"') === true,
+    'HTTP ' . $apprList['status']
+);
+q("UPDATE `tblExpenseClaims` SET `status` = 'Approved' WHERE `claimID` = ?", 'i', [L3_OTHER_DEPT]);
+$trsList = req($jar['trs'], 'GET', ADDR_A . '/expenses/treasury');
+q("UPDATE `tblExpenseClaims` SET `status` = 'Pending' WHERE `claimID` = ?", 'i', [L3_OTHER_DEPT]);
+ok(
+    'L4-26. the treasury list links an approved claim\'s number to the claim\'s own page, which the treasurer can open and whose receipt they can open',
+    $trsList['status'] === 200 && str_contains($trsList['body'], 'href="' . ADDR_A . '/expenses/view?id=' . L3_OTHER_DEPT . '" data-claim-link="' . L3_OTHER_DEPT . '"') === true
+        && str_contains($l3Open('trs', L3_OTHER_DEPT)['body'], $l4Href(L3_OTHER_DEPT, L4_R_OTHER)) === true,
+    'HTTP ' . $trsList['status']
+);
+$refusedPage = $l3Open('mem', L3_OWN_DEPT);
+ok(
+    'L4-27. somebody who may not open the claim is shown no receipt address at all (the claim page\'s own 404)',
+    $refusedPage['status'] === 404 && str_contains($refusedPage['body'], 'expenses/receipt') === false,
+    'HTTP ' . $refusedPage['status']
+);
+
+q('DELETE FROM `tblErrors` WHERE `errorCode` = ? AND `siteID` = ?', 'si', ['RECEIPT_UNAVAILABLE', ORG_A]);
+q('DELETE FROM `tblExpenseClaimFiles` WHERE `fileID` BETWEEN ? AND ?', 'ii', [L4_R_OWN, L4_NO_FILE]);
+
 q('DELETE FROM tblUserRoles WHERE roleID = ?', 'i', [L3_ROLE]);
 q('DELETE FROM tblRoles WHERE roleID = ?', 'i', [L3_ROLE]);
 q('DELETE FROM tblExpenseClaimItems WHERE claimID IN (?, ?, ?)', 'iii', [L3_OWN_DEPT, L3_OTHER_DEPT, L3_MEM_CLAIM]);
@@ -2723,9 +3080,15 @@ $leave = static function (string $who, string $words) use ($child, $sep): bool {
 
     return false;
 };
-/** The claim numbers a list page shows, in order. */
+/**
+ * The claim numbers a list page shows, in order. Since #867 each number is a
+ * LINK to the claim's own page (`<a href=…>#123</a>`), so the link's opening
+ * tag may sit between the label and the number; without that this read an
+ * empty list on both pages and the before/after comparisons below became
+ * `[] === []`.
+ */
 $listed = static function (string $who, string $address): array {
-    ap_findAll('#</span>\#(\d+)#', req($who, 'GET', $address)['body'], $found);
+    ap_findAll('#</span>(?:<a\b[^>]*>)?\#(\d+)#', req($who, 'GET', $address)['body'], $found);
     $ids = array_map('intval', $found[1]);
     sort($ids);
 

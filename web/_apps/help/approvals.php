@@ -175,7 +175,10 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <i class="fa-solid fa-triangle-exclamation mt-1"></i>
         <div>
             <strong>Best practice:</strong> Always verify that the claimed amount seems reasonable for the description provided, and check that any attached receipts match the amounts shown.
+            To see them, press the claim's number in the list: it opens the claim's own page, where each receipt is a link that downloads it.
+            The same is true on the Treasury list.
         </div>
+        <!-- #867: until 11 November 2026 nothing in the portal could open a receipt, so this advice could not be followed. -->
     </div>
 </div>
 

@@ -249,7 +249,11 @@ $cutShort   = ExpenseRules::uploadsCutShort($startupWarning, $filesSent, $countL
 //    `is_dir()` is asked again after a failed `mkdir()` because two claims
 //    submitted at once may race to make it, and the loser's `mkdir()` answers
 //    false for a folder that now exists — that must not refuse a claim.
-$upDir = PORTAL_ROOT . DIRECTORY_SEPARATOR . '_uploads' . DIRECTORY_SEPARATOR . 'expenses';
+//
+//    The folder is named in ONE place, `ExpenseRules::receiptsFolder()`,
+//    because the receipt address (`expenses/receipt`, #867) reads receipts
+//    from it; two copies of the name would be two places to change.
+$upDir = ExpenseRules::receiptsFolder();
 if (count($receiptsToStore) > 0 && is_dir($upDir) === false) {
     if (@mkdir($upDir, 0755, true) === false && is_dir($upDir) === false) {
         Logger::errorPlatform(

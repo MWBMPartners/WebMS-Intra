@@ -2641,6 +2641,13 @@ INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
 VALUES ('expenses/view', 'expenses/view/index.php', 1)
 ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`);
 
+-- 📥 Opening one receipt of a claim (#867, migration 278). Who may open it is
+--    who may open the claim (Portal\Core\ExpenseRules); this row must stay in
+--    step with web/_sql/278_expense_receipt_route.sql.
+INSERT INTO `tblRoutes` (`routeKey`, `targetFile`, `isProtected`)
+VALUES ('expenses/receipt', 'expenses/view/receipt.php', 1)
+ON DUPLICATE KEY UPDATE `targetFile` = VALUES(`targetFile`), `isProtected` = VALUES(`isProtected`);
+
 -- ✏️ Changing a claim nobody has decided on yet (#651, migration 223). The
 --    rule about when that is allowed is in Portal\Core\ExpenseRules; these
 --    two rows must stay in step with web/_sql/223_expenses_edit_routes.sql.
@@ -11705,6 +11712,12 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('275_group_meeting_place_map_ag
 -- `approvedHost`, the unique key on it, and an ordinary key on `hostName` in
 -- place of the old unique one. This is the record.
 INSERT INTO `tblMigrations` (`filename`) VALUES ('276_public_address_unique_on_approval.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
+-- ── from 278_expense_receipt_route.sql (#867) ───────────────────────────────
+-- The `expenses/receipt` address is written above, in the Expenses block of
+-- the routes; this is the record.
+INSERT INTO `tblMigrations` (`filename`) VALUES ('278_expense_receipt_route.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
 -- ── the two tblEvents venue links that migration 179 adds (#594 item 4) ─────

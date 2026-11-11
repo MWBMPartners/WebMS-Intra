@@ -164,7 +164,15 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <?php foreach ($claims as $c): ?>
             <div class="portal-data-row">
                 <div class="col-12 col-md-1">
-                    <span class="d-md-none fw-semibold">ID: </span>#<?php echo (int) $c['claimID']; ?>
+                    <?php
+                    // 📎 #867: the claim number opens the claim's own page, where its
+                    //    receipts are listed and can be opened — so an approver can
+                    //    look at the evidence before deciding. Safe to draw for every
+                    //    row: this list follows `reachToDecide()`, and every claim it
+                    //    reaches is also within `reachToSee()`, which the claim page
+                    //    and the receipt address ask (#648).
+                    ?>
+                    <span class="d-md-none fw-semibold">ID: </span><a href="<?php echo htmlspecialchars(Router::url('expenses/view') . '?id=' . (int) $c['claimID'], ENT_QUOTES, 'UTF-8'); ?>" data-claim-link="<?php echo (int) $c['claimID']; ?>" title="Open the claim and its receipts">#<?php echo (int) $c['claimID']; ?></a>
                 </div>
                 <div class="col-12 col-md-3">
                     <span class="d-md-none fw-semibold">Title: </span><?php echo htmlspecialchars($c['claimTitle'], ENT_QUOTES, 'UTF-8'); ?>
