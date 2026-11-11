@@ -1,7 +1,8 @@
 # D-120 · A small group's meeting-place map is treated as the host's home
 
 **Date:** 2026-11-11  
-**Status:** in force
+**Status:** in force, in part superseded  
+**Superseded in part by:** D-124 (the host is the named member, not whoever entered the place)
 
 **Question:** a small group's page can show an OpenStreetMap map of where the group meets, and small groups often
 meet in a member's home. Showing the map sends that address, and the viewer's internet address, to an outside

@@ -1,7 +1,8 @@
 # D-122 · Erasing the person who entered a group's meeting place removes the address
 
 **Date:** 2026-11-11  
-**Status:** in force
+**Status:** in force, in part superseded  
+**Superseded in part by:** D-124 (the host is the named member, not whoever entered the place)
 
 **Question:** a small group's meeting place is often a member's home, and since #809 the portal records who typed
 it in (treated as that person's home under D-120). If that person is erased, what happens to the group's meeting
