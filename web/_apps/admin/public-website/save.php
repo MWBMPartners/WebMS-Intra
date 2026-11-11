@@ -30,6 +30,11 @@
  * refusal and every save is recorded by the class. Like every other `value`
  * here, a post with no `value` at all is refused, never read as a choice.
  *
+ * AN EVENT WITH NO END TIME (#882, D-129): `no_end_listing` saves how long
+ * such an event stays on the public website's list — `mode` 'day' or 'fixed',
+ * with `hours` and `minutes` for a fixed time — through
+ * `PublicWebsiteSetup::saveNoEndListing()`, which checks the bounds.
+ *
  * @package   Portal\Admin
  * @author    MWBM Partners Ltd (t/a MWservices)
  * @copyright 2026-present MWBM Partners Ltd (t/a MWservices)
@@ -145,6 +150,22 @@ if ($action === 'door_on' || $action === 'door_replace' || $action === 'door_off
         'door_replace' => PublicWebsiteSetup::replaceDoorName($mysqli, $siteId, $actorId),
         default        => PublicWebsiteSetup::turnDoorOff($mysqli, $siteId, $actorId),
     };
+    $finish($out['message'], $out['type']);
+}
+
+// ⏱️ D-129 (#882): how long an event with no end time stays on the public
+//    website's list. Its own fields (`mode`, and for a fixed time `hours` and
+//    `minutes`), each passed ONLY when it arrived as text — a missing field
+//    is never read as empty (#677); the class refuses a fixed time whose
+//    boxes did not both arrive. The same gate as everything else here
+//    (maySetUp(), above); every save and refusal recorded by the class.
+if ($action === 'no_end_listing') {
+    $field = static fn (string $name): ?string => is_string($_POST[$name] ?? null) === true ? $_POST[$name] : null;
+    $mode  = $field('mode');
+    if ($mode === null) {
+        $finish('That form did not arrive whole. Nothing was changed.', 'danger');
+    }
+    $out = PublicWebsiteSetup::saveNoEndListing($mysqli, $siteId, $mode, $field('hours'), $field('minutes'), $actorId);
     $finish($out['message'], $out['type']);
 }
 

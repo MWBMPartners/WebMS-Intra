@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "public-door-events.schema.json",
   "title": "The public door's events feed",
-  "description": "What an organisation's own website reads from the portal's public door at events.json (/w/{name}/events.json on the portal's address, or /events.json on the organisation's public address): the organisation's events that somebody put on the public website, that are inside their website dates today, and that have not finished yet on their own clock, soonest first. Nothing members-only, draft, cancelled, postponed, deleted, unticked or another organisation's ever appears. Written by Portal\\Core\\PublicDoor::renderEvents() (web/_core/PublicDoor.php) and checked by tools/audit-checks/check_public_door_schema.py.",
+  "description": "What an organisation's own website reads from the portal's public door at events.json (/w/{name}/events.json on the portal's address, or /events.json on the organisation's public address): the organisation's events that somebody put on the public website, that are inside their website dates today, and that are still listed — not finished yet on their own clock; an event with no end time stays listed until the end of its day on its own clock, or for a fixed time after it starts when the organisation chose one (see listedUntil) — soonest first by the real moment each starts, so events on different clocks are in true order. Nothing members-only, draft, cancelled, postponed, deleted, unticked or another organisation's ever appears. Written by Portal\\Core\\PublicDoor::renderEvents() (web/_core/PublicDoor.php) and checked by tools/audit-checks/check_public_door_schema.py.",
   "$comment": "FOR MAINTAINERS. JSON has no comments, so every explanation lives here. A change to the shape is a change to what other people's websites read: add fields rather than rename or remove them, and raise `version` (and FORMAT_VERSION in PublicDoor.php) for anything a reader written against version 1 would misread. The check reads this file with a validator of its own that understands ONLY the keywords it lists in UNDERSTOOD, and fails on any other, so a keyword it cannot enforce can never sit here as decoration. Database numbers, who created or changed anything, contact details, map positions, capacity and registration are deliberately absent and must stay so (#493 plan, section 3).",
   "type": "object",
   "additionalProperties": false,
@@ -26,7 +26,7 @@
       "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
     },
     "events": {
-      "description": "The events, soonest first. At most the `limit` asked for (20 when none was asked, 50 at most). Empty when there are none.",
+      "description": "The events, soonest first by the real moment each starts (startsAt), whatever clock each is on. At most the `limit` asked for (20 when none was asked, 50 at most). Empty when there are none.",
       "type": "array",
       "maxItems": 50,
       "items": { "$ref": "#/$defs/event" }
@@ -57,7 +57,7 @@
       "description": "One event.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "title", "startsAt", "endsAt", "startsOnClock", "endsOnClock", "allDay", "timezone", "detailsLimited", "description", "location"],
+      "required": ["id", "title", "startsAt", "endsAt", "startsOnClock", "endsOnClock", "listedUntil", "allDay", "timezone", "detailsLimited", "description", "location"],
       "properties": {
         "id": {
           "description": "The event's short name in the portal's own addresses (its slug), which stays the same while the event exists. It is not the event's database number as a field, but a slug the portal made for itself can END in that number (to keep two slugs apart), so do not treat it as hiding one.",
@@ -89,6 +89,11 @@
           "description": "When it ends, in the same form as startsOnClock, or null exactly when endsAt is null.",
           "type": ["string", "null"],
           "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$"
+        },
+        "listedUntil": {
+          "description": "The moment the door stops listing this event, as an INSTANT in the same form as startsAt (#882). For an event with an end time it is endsAt. For an all-day event it is midnight at the end of its last day on its own clock. For an event with a start time and NO end time it is, by the organisation's choice, midnight at the end of its start's day on its own clock (the default) or exactly a fixed time after startsAt (15 minutes to 24 hours). A reader deciding whether an event is still on, such as a countdown, should use this rather than endsAt, which is null for an event with no end time. null exactly when startsAt is null.",
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$"
         },
         "allDay": {
           "description": "true when the event lasts the whole day, so its times are not meant to be shown.",

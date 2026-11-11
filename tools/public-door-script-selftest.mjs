@@ -108,7 +108,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 /** How many checks a full run makes; a different number means a block was skipped or ran twice. */
-const EXPECTED_CHECKS = 64; // 39 in the first build; round 1 of P4b's check added E07-E09 and X14-X25; #493 P4c added F01-F05 and FX1-FX5
+const EXPECTED_CHECKS = 66; // #882 adds N05 and X08b; 39 in the first build; round 1 of P4b's check added E07-E09 and X14-X25; #493 P4c added F01-F05 and FX1-FX5
 
 /* Any Chromium-family browser (see tools/csrf-carriers-selftest.mjs for why). */
 const BROWSERS = [
@@ -244,6 +244,17 @@ function feeds() {
             ev('Tomorrow', now + 86400000, null, 'Europe/London'),
         ]),
         EMPTYEEEEEEEEEEEEEEEEEEEE: events('Europe/London', []),
+        // #882 (D-129): an event with NO end time that started two hours ago
+        // and that the door still lists for three more hours (its
+        // `listedUntil`). The countdown must follow the door's list and say it
+        // is under way. The script before #882 ended it at its START, so it
+        // skipped to "Later today". A no-end event whose listedUntil has
+        // passed is gone either way.
+        NOENDFFFFFFFFFFFFFFFFFFFF: events('Europe/London', [
+            ev('Gone, no end time', now - 5 * 3600000, null, 'Europe/London', { listedUntil: stampIn(now - 3600000, 'Europe/London') }),
+            ev('Still on, no end time', now - 2 * 3600000, null, 'Europe/London', { listedUntil: stampIn(now + 3 * 3600000, 'Europe/London') }),
+            ev('Later today', now + 4 * 3600000, now + 5 * 3600000, 'Europe/London'),
+        ]),
     };
 }
 
@@ -546,6 +557,7 @@ async function main() {
 <script src="PORTAL/w/POSTERSBBBBBBBBBBBBBBBBBB/door.js" data-show="posters" data-target="#spot" data-lang="en-GB" defer></script>`,
                 '/site/next.html': `<script src="PORTAL/w/NEXTCCCCCCCCCCCCCCCCCCCCC/door.js" data-show="next" defer></script>
 <script src="PORTAL/w/NOWDDDDDDDDDDDDDDDDDDDDDD/door.js" data-show="next" defer></script>`,
+                '/site/noend.html': `<script src="PORTAL/w/NOENDFFFFFFFFFFFFFFFFFFFF/door.js" data-show="next" defer></script>`,
                 '/site/off.html': `<script src="PORTAL/w/OFFFFFFFFFFFFFFFFFFFFFFFF/door.js" data-show="events" defer></script>
 <script src="PORTAL/w/EMPTYEEEEEEEEEEEEEEEEEEEE/door.js" data-show="events" defer></script>`,
             };
@@ -679,6 +691,11 @@ async function main() {
             f.nextViolations = await browser.evaluate('return window.__violations;');
             f.nextErrors = browser.errors.slice();
 
+            // #882: the countdown follows the door's own "still listed" rule.
+            seen.length = 0;
+            f.noEndReady = await browser.open(`${site}/noend.html`, READY);
+            f.noEnd = (await browser.evaluate(READ)).map((one) => ({ titles: one.titles, text: one.text }));
+
             seen.length = 0;
             // The door-off copy draws nothing, so "ready" is: the empty one drew AND both asked for their feed.
             f.offReady = await browser.open(`${site}/off.html`,
@@ -734,6 +751,9 @@ async function main() {
                 base.nextTick.first[3] !== base.nextTick.second[3]], ['2', '03', '25', true, true]);
         check('N03 the clock is a timer for assistive technology, and hidden for the event under way', base.nextClocks, ['timer', 'hidden']);
         check('N04 "next" asks for 50 events, so it can choose by instant rather than by the feed\'s order', base.nextLimit, ['50', '50']);
+        check('N05 (#882, D-129) an event with NO end time that the door still lists (its listedUntil is three hours away) is "Happening now", not skipped for the next one; one whose listedUntil has passed is not shown',
+            [base.noEndReady, base.noEnd.map((n) => n.titles), base.noEnd[0]?.text?.startsWith('Happening now')],
+            [true, [['Still on, no end time']], true]);
 
         console.log('O. The door off, and an empty feed');
         check('O01 a door that refuses its feed draws NOTHING; an empty feed says "No upcoming events."', [base.offReady, base.off], [true, [{ empty: true, text: '' }, { empty: false, text: 'No upcoming events.' }]]);
@@ -782,6 +802,8 @@ async function main() {
             (r) => r.feedRequests.some((q) => q.referer !== null));
         await plant('X08 "next" choosing the FIRST in the feed rather than the soonest instant: N01 notices', 'if (best === null || start < best.start) {', 'if (best === null) {',
             (r) => JSON.stringify(r.next.map((n) => n.titles)) !== JSON.stringify(base.next.map((n) => n.titles)));
+        await plant('X08b (#882) the countdown ignoring the door\'s listedUntil (the script before #882): N05 notices', "if (typeof ev.listedUntil === 'string') {", 'if (false) {',
+            (r) => JSON.stringify(r.noEnd.map((n) => n.titles)) !== JSON.stringify(base.noEnd.map((n) => n.titles)));
         await plant('X09 a global variable leaked (the wrapper taken away from one name): I04 notices', "(function () {\n    'use strict';", "window.webmsDoor = true;\n(function () {\n    'use strict';",
             (r) => r.evPage.newGlobals.length > 0);
         await plant('X10 the event\'s time taken from the instant rather than its own clock reading: E06 notices', 'var reading = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]));',
@@ -837,6 +859,8 @@ async function main() {
                 out[k] = f[k] === null ? null : { ...f[k], text: null, whens: null };
             }
             out.next = f.next.map((n) => n.titles);
+            // #882: the no-end countdown's text holds a moving clock too.
+            out.noEnd = f.noEnd.map((n) => n.titles);
             return out;
         };
         const sb = steady(base);

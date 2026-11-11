@@ -145,6 +145,34 @@ final class PublicWebsiteSetup
     public const KEY_DOOR_TEST_OPEN      = PublicWebsite::DOOR_TEST_OPEN_KEY;
 
     /**
+     * D-129 (#882): how long an event with a start time but no end time stays
+     * on the public door's event list. Stored as 'day' — until the end of the
+     * event's day on its OWN clock, the default — or a whole number of
+     * MINUTES after it starts, counted as exact time (a fixed period is real
+     * minutes, not a move of the clock's hands, so across a night the clocks
+     * change it is still that long). It changes NOTHING for an event that has
+     * an end time, nor for an all-day event (D-129 rules both out).
+     *
+     * WHERE IT LIVES, and why: each organisation's own row, chosen on Admin →
+     * Public website by the people that page lets in (D-085), and read by
+     * `noEndListingFor()`. With no own row the installation's row is read,
+     * which migration 277 seeds 'day' and which no page offers — the same
+     * shape as the noticeboard foyer's `noticeboard.foyer.shows`. It is a
+     * DISPLAY setting, not a limit between two parties, so the #668 rule
+     * (the installation caps the organisation) does not apply (D-129 says so).
+     *
+     * THE BOUNDS: 15 minutes to 24 hours. Less than a quarter of an hour is
+     * the behaviour D-129 replaced (gone at its start) in all but name; more
+     * than a day is no longer "a fixed maximum time" for one event but a
+     * missing end time, and the end-of-day default already covers a whole day.
+     * A value outside them is refused with the reason, never shortened.
+     */
+    public const KEY_NO_END_LISTING   = PublicWebsite::NO_END_LISTING_KEY;
+    public const NO_END_DAY           = 'day';
+    public const NO_END_MIN_MINUTES   = 15;
+    public const NO_END_MAX_MINUTES   = 1440;
+
+    /**
      * The most websites one organisation may list as allowed to frame its
      * pages. A cap IN CODE (D-082): a list longer than this is refused with
      * the reason, never shortened.
@@ -1595,6 +1623,86 @@ final class PublicWebsiteSetup
         return $own === 'anybody' ? 'anybody' : 'testers';
     }
 
+    /**
+     * D-129 (#882): how long an event with NO end time stays on the public
+     * door's event list, for one organisation — null for "until the end of
+     * its day on its own clock" (the default), or a number of minutes after
+     * it starts. The ONE reader `PublicDoor::events()` asks.
+     *
+     * The organisation's own row, else the installation's (seeded 'day').
+     * A value nobody could have saved here (a hand edit, a number outside the
+     * bounds) is IGNORED and logged, and the default applies; so does a
+     * database that cannot be asked. The default is the safe direction for a
+     * display setting: it lists an event a little longer, never drops one
+     * the organisation meant to show. Never throws.
+     */
+    public static function noEndListingFor(\mysqli $db, int $siteId): ?int
+    {
+        return self::noEndListingShown($db, $siteId)['minutes'];
+    }
+
+    /**
+     * What the card shows, and what the door uses: the stored choice read
+     * back CHECKED. `own` says whether the organisation has a row of its own
+     * (false: it follows the installation's default); `minutes` is null for
+     * the end of the day. Never throws.
+     *
+     * @return array{minutes:?int, own:bool}
+     */
+    public static function noEndListingShown(\mysqli $db, int $siteId): array
+    {
+        try {
+            $own = self::organisationRow($db, $siteId, self::KEY_NO_END_LISTING, false);
+            if ($own === null) {
+                $stmt = $db->prepare('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL LIMIT 1');
+                $key  = self::KEY_NO_END_LISTING;
+                $stmt->bind_param('s', $key);
+                $stmt->execute();
+                $row = $stmt->get_result()->fetch_assoc();
+                $stmt->close();
+                $stored = $row === null ? null : (string) ($row['settingValue'] ?? '');
+            } else {
+                $stored = $own;
+            }
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: how long an event with no end time is listed could not be read, '
+                . 'so the default (the end of its day) is used: ' . $e->getMessage());
+
+            return ['minutes' => null, 'own' => false];
+        }
+        if ($stored === null || $stored === self::NO_END_DAY) {
+            return ['minutes' => null, 'own' => $own !== null];
+        }
+        $minutes = preg_match('/^[1-9][0-9]{0,4}$/D', $stored) === 1 ? (int) $stored : 0;
+        if ($minutes < self::NO_END_MIN_MINUTES || $minutes > self::NO_END_MAX_MINUTES) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: organisation #' . $siteId . '\'s stored time for an event with no end '
+                . 'time is not one this page would accept, so the default (the end of its day) is used.');
+
+            return ['minutes' => null, 'own' => $own !== null];
+        }
+
+        return ['minutes' => $minutes, 'own' => $own !== null];
+    }
+
+    /** "until the end of its day" or "for 2 hours 30 minutes after it starts": the words for a choice, on the card and in the log. */
+    public static function noEndListingWords(?int $minutes): string
+    {
+        if ($minutes === null) {
+            return 'until the end of its day, on its own clock';
+        }
+        $hours = intdiv($minutes, 60);
+        $rest  = $minutes % 60;
+        $parts = [];
+        if ($hours > 0) {
+            $parts[] = $hours . ' hour' . ($hours === 1 ? '' : 's');
+        }
+        if ($rest > 0) {
+            $parts[] = $rest . ' minute' . ($rest === 1 ? '' : 's');
+        }
+
+        return 'for ' . implode(' ', $parts) . ' after it starts';
+    }
+
     // =========================================================================
     // 4️⃣ Saving — every save and every refusal is recorded
     // =========================================================================
@@ -1868,6 +1976,68 @@ final class PublicWebsiteSetup
         $words = self::doorReachWords(['choice' => $value] + self::doorReachFacts($db, $siteId));
 
         return ['saved' => true, 'type' => $words['savedChoiceType'], 'message' => $words['savedChoice']];
+    }
+
+    /**
+     * Save how long an event with no end time stays on the public door's
+     * event list (D-129, #882): `$mode` 'day' (until the end of its day on
+     * its own clock) or 'fixed' (`$hours` and `$minutes` after it starts,
+     * together 15 minutes to 24 hours). The caller passes `$hours` and
+     * `$minutes` only when they ARRIVED (#677); for 'fixed' both are needed,
+     * and a missing one is refused rather than read as nothing. An empty box
+     * counts as 0, because a browser sends an empty number box as ''. Anything
+     * else that is not a whole number, or a total outside the bounds, is
+     * refused with the reason and recorded, never shortened (#668).
+     *
+     * Whoever may open Admin → Public website may set it (D-085): the caller
+     * asks `maySetUp()`, as for the main website and the framing list.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    public static function saveNoEndListing(\mysqli $db, int $siteId, string $mode, ?string $hours, ?string $minutes, ?int $actorId): array
+    {
+        $what = 'time an event with no end time stays listed';
+        if ($mode === self::NO_END_DAY) {
+            $value   = self::NO_END_DAY;
+            $chosen  = null;
+        } elseif ($mode === 'fixed') {
+            if ($hours === null || $minutes === null) {
+                return self::refusedAndRecorded($what, $siteId, 'That form did not arrive whole. Nothing was saved.', $actorId);
+            }
+            $h = trim($hours) === '' ? '0' : trim($hours);
+            $m = trim($minutes) === '' ? '0' : trim($minutes);
+            if (preg_match('/^[0-9]{1,4}$/D', $h) !== 1 || preg_match('/^[0-9]{1,4}$/D', $m) !== 1 || (int) $m > 59) {
+                return self::refusedAndRecorded($what, $siteId, 'Give the time as whole hours and minutes (0 to 59 minutes). '
+                    . 'Nothing was saved.', $actorId);
+            }
+            $chosen = (int) $h * 60 + (int) $m;
+            if ($chosen < self::NO_END_MIN_MINUTES || $chosen > self::NO_END_MAX_MINUTES) {
+                return self::refusedAndRecorded($what, $siteId, 'The time must be at least ' . self::NO_END_MIN_MINUTES
+                    . ' minutes and at most ' . intdiv(self::NO_END_MAX_MINUTES, 60) . ' hours. Nothing was saved.', $actorId);
+            }
+            $value = (string) $chosen;
+        } else {
+            return self::refusedAndRecorded($what, $siteId, 'That choice was not recognised. Nothing was saved.', $actorId);
+        }
+        try {
+            $was = self::noEndListingShown($db, $siteId);
+            self::upsertOrganisationRow($db, $siteId, self::KEY_NO_END_LISTING, $value);
+        } catch (\Throwable $e) {
+            error_log('[WebMS-Intra] PublicWebsiteSetup: the time an event with no end time stays listed could not be saved: ' . $e->getMessage());
+
+            return self::refusedAndRecorded($what, $siteId, 'The database refused the change. Nothing was saved.', $actorId);
+        }
+        Logger::activity(
+            'PublicWebsiteNoEndListingSaved',
+            'Organisation #' . $siteId . '\'s events with no end time stay on its public website\'s list: '
+            . self::noEndListingWords($was['minutes']) . ($was['own'] === true ? '' : ' (the default)') . ' → '
+            . self::noEndListingWords($chosen) . '.',
+            $actorId
+        );
+
+        return ['saved' => true, 'type' => 'success', 'message' => 'Saved: an event with no end time now stays on your '
+            . 'public website\'s list ' . self::noEndListingWords($chosen) . '. Events with an end time, and all-day events, '
+            . 'are not affected.'];
     }
 
     /**

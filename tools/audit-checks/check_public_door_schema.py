@@ -200,7 +200,7 @@ def validate(instance, schema, root: dict, where: str, out: list[str]) -> None:
 ORG = {"name": "Example Church", "timezone": "Europe/London"}
 GOOD_EVENT = {
     "id": "harvest-supper", "title": "Harvest supper", "startsAt": "2026-11-20T19:00:00+00:00",
-    "endsAt": None, "startsOnClock": "2026-11-20T19:00:00", "endsOnClock": None, "allDay": False, "timezone": "Europe/London", "detailsLimited": False,
+    "endsAt": None, "startsOnClock": "2026-11-20T19:00:00", "endsOnClock": None, "listedUntil": "2026-11-21T00:00:00+00:00", "allDay": False, "timezone": "Europe/London", "detailsLimited": False,
     "description": "Bring a dish.", "location": {"name": "Hall", "address": None, "url": "https://example.org/hall"},
 }
 GOOD_POSTER = {
@@ -256,6 +256,10 @@ MUST_FAIL = [
     # taken out of `required`.
     ("events", "startsOnClock missing", events_doc([{k: v for k, v in GOOD_EVENT.items() if k != "startsOnClock"}])),
     ("events", "endsOnClock missing", events_doc([{k: v for k, v in GOOD_EVENT.items() if k != "endsOnClock"}])),
+    # #882: the moment the door stops listing an event, which the countdown
+    # follows; required, and an instant (with its offset), never a reading.
+    ("events", "listedUntil missing", events_doc([{k: v for k, v in GOOD_EVENT.items() if k != "listedUntil"}])),
+    ("events", "listedUntil given as a reading with no offset", events_doc([with_change(GOOD_EVENT, listedUntil="2026-11-21T00:00:00")])),
     ("events", "fifty-one events", events_doc([GOOD_EVENT] * 51)),
     ("posters", "a sort order leaking out", posters_doc([with_change(GOOD_POSTER, sortOrder=3)])),
     ("posters", "a plain-http link", posters_doc([with_change(GOOD_POSTER, link="http://example.org")])),

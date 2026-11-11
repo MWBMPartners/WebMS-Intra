@@ -676,23 +676,7 @@ class Events
             throw new \InvalidArgumentException('Events::nowOnItsOwnClock(): the alias must be a plain SQL name.');
         }
 
-        $zones = [];
-        $stmt  = $siteId === null
-            ? $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents`')
-            : $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents` WHERE `siteID` = ?');
-        // A backstop only: under this portal's strict reporting a failed
-        // prepare THROWS (see the ⚠️ note above), so this is never false here.
-        if ($stmt !== false) {
-            if ($siteId !== null) {
-                $stmt->bind_param('i', $siteId);
-            }
-            $stmt->execute();
-            $result = $stmt->get_result();
-            while ($row = $result->fetch_assoc()) {
-                $zones[] = (string) ($row['zone'] ?? '');
-            }
-            $stmt->close();
-        }
+        $zones = self::zonesInUse($db, $siteId);
 
         if ($zones === []) {
             // No events at all: `CASE` with no `WHEN` is not SQL, and the
@@ -718,6 +702,265 @@ class Events
         $params[] = $elseReading;
 
         return ['sql' => $sql, 'types' => str_repeat('s', count($params)), 'params' => $params];
+    }
+
+    /**
+     * The zone texts the events of one organisation (or, with null, of every
+     * organisation) are stored with, BYTE FOR BYTE (see the 🔤 note on
+     * `nowOnItsOwnClock()`): the ONE read behind every per-zone builder in
+     * this class, so they cannot disagree about which zones exist. A handful
+     * of rows, whatever the number of events. Public since #898, because the
+     * public door needs the zones' offsets to know how wide a window of
+     * readings can hold the soonest real moments (`PublicDoor::events()`).
+     *
+     * A failed read THROWS under this portal's strict reporting; it never
+     * comes back empty (an empty list means "no events at all").
+     *
+     * @return list<string>
+     */
+    public static function zonesInUse(mysqli $db, ?int $siteId): array
+    {
+        $zones = [];
+        $stmt  = $siteId === null
+            ? $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents`')
+            : $db->prepare('SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents` WHERE `siteID` = ?');
+        // A backstop only: under this portal's strict reporting a failed
+        // prepare THROWS (see the ⚠️ note on nowOnItsOwnClock()), so this is
+        // never false here.
+        if ($stmt !== false) {
+            if ($siteId !== null) {
+                $stmt->bind_param('i', $siteId);
+            }
+            $stmt->execute();
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $zones[] = (string) ($row['zone'] ?? '');
+            }
+            $stmt->close();
+        }
+
+        return $zones;
+    }
+
+    /**
+     * 🕰️ What each event's OWN clock read at ONE given moment, as a SQL
+     *    expression -- `nowOnItsOwnClock()` with the moment passed in rather
+     *    than read from the clock (#882, #898).
+     *
+     * The public door passes `time()`. A test passes a moment on one of the
+     * two nights a year the clocks change, because the real "now" cannot be
+     * chosen and the cases that matter are on particular dates (the same
+     * reason `deadlineReadingFor()` takes its moment). Built by the SAME
+     * builder as `nowOnItsOwnClock()`, so the two cannot disagree about a
+     * zone; the reading is made from the instant in UTC, which has no
+     * transitions, then shown on the zone's clock.
+     *
+     * @return array{sql: string, types: string, params: list<string>} As `nowOnItsOwnClock()`.
+     */
+    public static function readingOnItsOwnClockAt(mysqli $db, string $alias, int $siteId, int $atUtc): array
+    {
+        $reading = static fn (\DateTimeZone $zone): string
+            => (new \DateTimeImmutable('@' . $atUtc))->setTimezone($zone)->format('Y-m-d H:i:s');
+
+        return self::perZoneReading($db, $alias, $siteId, $reading, $reading(new \DateTimeZone(Site::timezone($siteId))));
+    }
+
+    /**
+     * ⏱️ "This event STARTS at or after the instant `$atUtc`", judged on each
+     *    event's own clock exactly as the instant the portal publishes for it
+     *    (`I18n::wallClockInstant()`, the public door's `startsAt`) -- as a
+     *    SQL condition, with no `CONVERT_TZ()` (#882).
+     *
+     * WHY IT IS NEEDED. A stored start is a READING on its event's clock
+     * (`tblEvents.timezone`), not a moment. "Started less than three hours
+     * ago" is a question about real hours: three EXACT hours, which across a
+     * night the clocks change is not "the reading plus three". Comparing the
+     * reading with a reading moved by three hours would be an hour out on
+     * those two nights a year -- the house rule ("Times always respect the
+     * time zone") says exact hours are seconds, never a wall-clock offset.
+     *
+     * HOW, WITHOUT CONVERTING EACH ROW. For each zone in use, PHP works out
+     * the SET of readings whose instant is at or after `$atUtc`
+     * (`readingsAtOrAfter()`): a handful of ranges of readings, almost always
+     * ONE ("from this reading on"), two or three only when a clock change
+     * falls near the moment. The condition is then
+     *
+     *     CASE CAST(`e`.`timezone` AS BINARY)
+     *          WHEN ? THEN (`e`.`startDateTime` >= ? [AND ... < ?] OR ...)
+     *          ... ELSE (the same for the organisation's clock) END = 1
+     *
+     * with every value bound, exact row by row inside SQL, so `LIMIT` stays
+     * right. The zones are read with `zonesInUse()`, and the `ELSE` -- a zone
+     * written between that read and this statement -- reads the
+     * organisation's clock, as `nowOnItsOwnClock()` does; a zone text PHP
+     * cannot open reads it too, through `Site::zoneFor()`, as every page
+     * that shows the event does. With no events at all there are no zones,
+     * and a `CASE` with no `WHEN` is not SQL (#804's trap), so the
+     * organisation's test is returned on its own.
+     *
+     * Like `nowOnItsOwnClock()`, it differs row by row, so it cannot use the
+     * `startDateTime` index; a caller wanting one adds a loose bound beside it.
+     *
+     * @return array{sql: string, types: string, params: list<string>} A
+     *         condition to put after AND; bind `params` where `sql` appears.
+     */
+    public static function startsAtOrAfter(mysqli $db, string $alias, int $siteId, int $atUtc): array
+    {
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]{0,30}$/', $alias) !== 1) {
+            throw new \InvalidArgumentException('Events::startsAtOrAfter(): the alias must be a plain SQL name.');
+        }
+        $column = '`' . $alias . '`.`startDateTime`';
+        $test   = static function (\DateTimeZone $zone) use ($column, $atUtc): array {
+            $parts  = [];
+            $params = [];
+            foreach (self::readingsAtOrAfter($zone, $atUtc) as [$from, $until]) {
+                if ($until === null) {
+                    $parts[]  = $column . ' >= CAST(? AS DATETIME)';
+                    $params[] = $from;
+                } else {
+                    $parts[]  = '(' . $column . ' >= CAST(? AS DATETIME) AND ' . $column . ' < CAST(? AS DATETIME))';
+                    $params[] = $from;
+                    $params[] = $until;
+                }
+            }
+
+            // Never empty in practice (a reading far enough ahead is always
+            // after any instant), but an empty OR is not SQL, and "nothing"
+            // is the honest answer for an empty set.
+            return ['sql' => $parts === [] ? '0 = 1' : '(' . implode(' OR ', $parts) . ')', 'params' => $params];
+        };
+
+        $own   = $test(new \DateTimeZone(Site::timezone($siteId)));
+        $zones = self::zonesInUse($db, $siteId);
+        if ($zones === []) {
+            return ['sql' => $own['sql'], 'types' => str_repeat('s', count($own['params'])), 'params' => $own['params']];
+        }
+
+        $sql    = '(CASE CAST(`' . $alias . '`.`timezone` AS BINARY)';
+        $params = [];
+        foreach ($zones as $zone) {
+            $one      = $test(Site::zoneFor($zone, $siteId));
+            $sql     .= ' WHEN ? THEN ' . $one['sql'];
+            $params[] = $zone;
+            $params   = array_merge($params, $one['params']);
+        }
+        $sql   .= ' ELSE ' . $own['sql'] . ' END) = 1';
+        $params = array_merge($params, $own['params']);
+
+        return ['sql' => $sql, 'types' => str_repeat('s', count($params)), 'params' => $params];
+    }
+
+    /**
+     * The stored READINGS, on `$zone`'s clock, whose instant is at or after
+     * `$atUtc` -- as a list of ranges `[from, until)` of `Y-m-d H:i:s` text,
+     * the last with `until` null ("and every reading after it"). Public and
+     * given the moment, so a test can drive it on the nights a clock changes;
+     * `startsAtOrAfter()` is its one caller in the portal.
+     *
+     * "The instant" of a reading is `I18n::wallClockInstant()`'s, ASKED, never
+     * re-derived, so this agrees with the `startsAt` the public door prints:
+     * a reading inside the hour a clock skips is moved FORWARD by the gap (RFC
+     * 5545's rule), and a reading in the hour a clock repeats is PHP's own
+     * pick. That is also why the answer can be MORE than one range: a skipped
+     * reading such as 01:30 is the instant of 02:30, so in the hour after a
+     * clock goes forward 01:30 can count as "after" while 02:10 does not.
+     * Treating the readings as one ordered line would be wrong there.
+     *
+     * HOW. Read as "seconds, as if the reading were UTC", a reading r has the
+     * instant r - o, where o (the offset PHP uses for it) changes only near a
+     * clock change. The zone's changes in a window round the moment give the
+     * readings where o may change; between two such readings o is constant,
+     * which is CHECKED (o is asked at both ends of every piece, and a piece
+     * whose ends differ is split in half until they agree), not assumed. In a
+     * piece with offset o, "instant >= X" is "r >= X + o".
+     *
+     * Outside the window the answer is certain: a reading more than two days
+     * below "X plus the lowest offset in the window" is before X, and one more
+     * than two days above "X plus the highest" is after it, because no zone's
+     * offsets, over its whole history, are two days apart: measured over
+     * every zone PHP knows, the widest is Pacific/Apia's 25.5 hours (from its
+     * local mean time to its summer time after it jumped the date line in
+     * 2011); a bare offset such as `+05:00` never changes at all. So the
+     * window covers every reading whose answer could depend on which offset
+     * applies.
+     *
+     * @return list<array{0:string, 1:?string}>
+     */
+    public static function readingsAtOrAfter(\DateTimeZone $zone, int $atUtc): array
+    {
+        $offsetOf = static function (int $r) use ($zone): int {
+            $instant = I18n::wallClockInstant(gmdate('Y-m-d H:i:s', $r), $zone);
+            if ($instant === null) {
+                throw new \RuntimeException('Events::readingsAtOrAfter(): a reading near the moment could not be placed on its clock.');
+            }
+
+            return $r - $instant->getTimestamp();
+        };
+
+        $offsets = [(int) $zone->getOffset(new \DateTimeImmutable('@' . $atUtc))];
+        $points  = [];
+        $states  = $zone->getTransitions($atUtc - 4 * 86400, $atUtc + 4 * 86400);
+        if (is_array($states) === true) {
+            $before = null;
+            foreach ($states as $i => $state) {
+                $offsets[] = (int) $state['offset'];
+                // The first entry is the state at the window's start, not a
+                // change. Each later one is a change at `ts` from `$before`
+                // to its offset: the readings `ts + before` and `ts + after`
+                // are where the rule for a reading can differ.
+                if ($i > 0 && $before !== null) {
+                    $points[] = (int) $state['ts'] + $before;
+                    $points[] = (int) $state['ts'] + (int) $state['offset'];
+                }
+                $before = (int) $state['offset'];
+            }
+        }
+        $low    = $atUtc + min($offsets) - 2 * 86400;
+        $high   = $atUtc + max($offsets) + 2 * 86400;
+        $points = array_values(array_filter($points, static fn (int $p): bool => $p > $low && $p < $high));
+        $points[] = $low;
+        $points[] = $high;
+        sort($points);
+        $points = array_values(array_unique($points));
+
+        $ranges = [];
+        $piece  = static function (int $from, int $until) use (&$piece, &$ranges, $offsetOf, $atUtc): void {
+            if ($until <= $from) {
+                return;
+            }
+            $offset = $offsetOf($from);
+            if ($until - $from > 1 && $offsetOf($until - 1) !== $offset) {
+                $middle = intdiv($from + $until, 2);
+                $piece($from, $middle);
+                $piece($middle, $until);
+                return;
+            }
+            $start = max($from, $atUtc + $offset);
+            if ($start < $until) {
+                $ranges[] = [$start, $until];
+            }
+        };
+        for ($i = 0; $i + 1 < count($points); $i++) {
+            $piece($points[$i], $points[$i + 1]);
+        }
+        // Everything from the window's top up is after the moment.
+        $ranges[] = [$high, null];
+
+        // Join touching ranges, so the usual answer is ONE open range.
+        $joined = [];
+        foreach ($ranges as [$from, $until]) {
+            $last = count($joined) - 1;
+            if ($last >= 0 && $joined[$last][1] === $from) {
+                $joined[$last][1] = $until;
+                continue;
+            }
+            $joined[] = [$from, $until];
+        }
+
+        return array_map(
+            static fn (array $r): array => [gmdate('Y-m-d H:i:s', $r[0]), $r[1] === null ? null : gmdate('Y-m-d H:i:s', $r[1])],
+            $joined
+        );
     }
 
     /**

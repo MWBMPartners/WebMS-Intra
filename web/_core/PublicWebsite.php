@@ -103,6 +103,18 @@ final class PublicWebsite
     public const DOOR_TEST_PERMITTED_KEY = 'public.door.testCopies.permitted';
     public const DOOR_TEST_OPEN_KEY      = 'public.door.testCopies.open';
 
+    /**
+     * D-129 (#882): how long an event with a start time but NO end time stays
+     * on the public door's event list — 'day' (until the end of its day on its
+     * own clock, the default) or a whole number of minutes after it starts.
+     * The installation's row is the default (seeded 'day', offered on no page);
+     * an organisation's own row is its choice, made on Admin → Public website
+     * through `PublicWebsiteSetup`, the ONE place that reads and writes it.
+     * Locked out of the general settings editor here, beside the others, so a
+     * value nobody checked cannot be stored there.
+     */
+    public const NO_END_LISTING_KEY = 'public.events.noEndListedFor';
+
     /** An organisation's "follow the installation": its own row is deleted. */
     public const INHERIT = 'inherit';
 
@@ -443,7 +455,7 @@ final class PublicWebsite
      * @var list<string>
      */
     public const LOCKED_KEYS = [self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY,
-        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY];
+        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY, self::NO_END_LISTING_KEY];
 
     /**
      * 🧭 WHICH PAGE a locked key is changed on — the ONE place that decides

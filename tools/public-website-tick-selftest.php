@@ -3430,9 +3430,10 @@ $p = $plant('_apps/admin/users/index.php', "        carry.disabled = held.indexO
 check('P86 (measured, expected to stay GREEN) with the locked box\'s carrier never switched on, the browser would send no answer for it — nothing here runs the page\'s script, so only the handler\'s refusal is proved',
     [$p['applied'], $p['result']['administrator changes a holder\'s other roles'] ?? null], [true, [true, true]]);
 // #493 P4a added D-087's two test-copy keys to the list (on a second line);
-// this plant still takes out exactly the three P3 keys it is about.
-$p = $plant('_core/PublicWebsite.php', "public const LOCKED_KEYS = [self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY,\n        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY];",
-    'public const LOCKED_KEYS = [self::RULE_KEY, self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY];', $scnPwLocked);
+// this plant still takes out exactly the three P3 keys it is about. #882
+// (D-129) added the no-end-time key to the same second line.
+$p = $plant('_core/PublicWebsite.php', "public const LOCKED_KEYS = [self::RULE_KEY, self::WEBSITE_ADDRESS_KEY, self::FRAME_ORIGINS_KEY, self::FRAME_PERMITTED_KEY,\n        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY, self::NO_END_LISTING_KEY];",
+    'public const LOCKED_KEYS = [self::RULE_KEY, self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY, self::NO_END_LISTING_KEY];', $scnPwLocked);
 check('P87 with the three keys taken out of the editor lock, the general settings editor would store them', [$p['applied'], $p['result']], [true, [false, false, false]]);
 $p = $plant('_core/templates/nav.php', '<?php if (App::isAdmin() !== true && $navMaySetUpWebsite === true): ?>', '<?php if (App::isAdmin() !== true): ?>', $scnPwMenu);
 check('P88 with the menu link no longer asking the gate, a member is shown a way to a page that refuses them', [$p['applied'], $p['result']['member'] ?? null], [true, 1]);

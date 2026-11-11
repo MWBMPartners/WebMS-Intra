@@ -11714,6 +11714,18 @@ INSERT INTO `tblMigrations` (`filename`) VALUES ('275_group_meeting_place_map_ag
 INSERT INTO `tblMigrations` (`filename`) VALUES ('276_public_address_unique_on_approval.sql')
     ON DUPLICATE KEY UPDATE `filename` = `filename`;
 
+-- ── from 277_public_events_without_end_time.sql (#882, D-129) ───────────────
+-- How long an event with no end time stays on the public website's list:
+-- 'day' (until the end of its day on its own clock) or a number of minutes.
+-- The installation's row is the default; an organisation's own row is its
+-- choice, made on Admin, Public website. See the migration.
+INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES
+    (NULL, 'public.events.noEndListedFor', 'day', 'day', 0)
+ON DUPLICATE KEY UPDATE `defaultValue` = VALUES(`defaultValue`);
+
+INSERT INTO `tblMigrations` (`filename`) VALUES ('277_public_events_without_end_time.sql')
+    ON DUPLICATE KEY UPDATE `filename` = `filename`;
+
 -- ── from 278_expense_receipt_route.sql (#867) ───────────────────────────────
 -- The `expenses/receipt` address is written above, in the Expenses block of
 -- the routes; this is the record.

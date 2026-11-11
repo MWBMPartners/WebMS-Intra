@@ -38,6 +38,17 @@
  *      https picture passed through, a plain-http link dropped, another
  *      organisation's upload never named; media served only while its poster
  *      is on the public website, and stopping the moment it is unticked.
+ *   N  (#882, D-129; #898) an event with NO end time: by default kept until
+ *      the end of its day on its OWN clock (the same reading still today on
+ *      one clock and a past day on another), with listedUntil saying so; the
+ *      card's fixed time (refusals with the reason and on record, the bounds,
+ *      a hand edit ignored when read), exact real minutes; an event WITH an
+ *      end time and an all-day event unaffected by either choice. The REAL
+ *      order: two events on clocks 25 hours apart whose readings and real
+ *      moments disagree, with `limit` set so reading order drops the sooner.
+ *      N11-N15 run the REAL PublicDoor::events() in-process at fixed moments
+ *      on London's 25-hour and 23-hour days, because the real "now" cannot be
+ *      chosen. PN1-PN11 put the old code back piece by piece.
  *   J  (#493 P4b) the script a website pastes in, /w/{name}/door.js and
  *      /door.js on a public address: the file kept outside the web root,
  *      byte for byte, as text/javascript with its headers; the same gate
@@ -80,7 +91,9 @@
  *      (frame-ancestors 'none' on data even when the organisation lists
  *      websites that may frame its page), Referrer-Policy, caching,
  *      X-Robots-Tag, no X-Frame-Options or COOP left over from start-up, NO
- *      Set-Cookie, and no session file made by any door request.
+ *      Set-Cookie, and no session file made by any door request. H06 (#882
+ *      point 2) MEASURES that no organisation can add its own row for a
+ *      setting start-up turns into a header on the door's answers.
  *   S  every captured feed answer satisfies its schema
  *      (`tools/audit-checks/check_public_door_schema.py --answers`).
  *   E  error.php and the API description, which start the portal WITHOUT
@@ -192,7 +205,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 341; // #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
+const PDS_EXPECTED_CHECKS = 369; // #882 (D-129) and #898 add N01-N16, H06 and PN1-PN11 to the 341 below; #895 (D-121) adds Q01-Q15 and PQ1-PQ17 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -1903,7 +1916,7 @@ check('C02 an event still running on its own clock IS shown, and they come soone
 check('C03 one event carries exactly the published fields, its id is its slug (not a number), and its full details where allowed',
     [array_keys($shown ?? []), is_string($shown['id'] ?? null) && str_starts_with((string) $shown['id'], 'pds-'), $shown['description'] ?? null,
         $shown['location'] ?? null, $shown['detailsLimited'] ?? null],
-    [['id', 'title', 'startsAt', 'endsAt', 'startsOnClock', 'endsOnClock', 'allDay', 'timezone', 'detailsLimited', 'description', 'location'], true, 'Bring a dish.',
+    [['id', 'title', 'startsAt', 'endsAt', 'startsOnClock', 'endsOnClock', 'listedUntil', 'allDay', 'timezone', 'detailsLimited', 'description', 'location'], true, 'Bring a dish.',
         ['name' => 'PDS Hall', 'address' => '1 PDS Street', 'url' => 'https://hall.selftest.invalid/'], false]);
 $leaks = [];
 foreach (['01234 PDS PHONE', 'pds-hall-secret', '51.1234567', 'pds.secret.words', 'PDS HOST ORG', '"eventID"', '"siteID"', 'createdBy', '"capacity"'] as $needle) {
@@ -1998,6 +2011,242 @@ check('C19 markup and quotes inside a value are written as \\u escapes: no live 
             return null;
         })()],
     [false, false, false, false, '<b>"Tom & Jerry\'s"</b></script>']);
+
+// =============================================================================
+echo "N. An event with no end time (#882, D-129), and the real order (#898)\n";
+// =============================================================================
+// Every N event is made OFF the website and ticked only inside the scenario
+// that needs it ($nShow), so no other section's list changes. The no-end
+// cases use TWO clocks chosen now: a clock where it is between 03:00 and
+// 22:59 (so its day began well before and does not end during the run), and
+// Pacific/Kiritimati, which is ALWAYS on a later date than that clock (it is
+// the furthest ahead of UTC there is). The same stored reading is then still
+// "today" on one clock and already a past day on the other: "on its OWN clock".
+$nAheadZone = 'Pacific/Kiritimati';
+$nAheadDate = (new DateTimeImmutable('now', new DateTimeZone($nAheadZone)))->format('Y-m-d');
+$nZone = null;
+foreach (array_merge(['Pacific/Pago_Pago', 'Europe/London', 'Pacific/Honolulu', 'America/Los_Angeles'], DateTimeZone::listIdentifiers()) as $z) {
+    $here = new DateTimeImmutable('now', new DateTimeZone($z));
+    $hour = (int) $here->format('G');
+    if ($hour >= 3 && $hour <= 22 && $here->format('Y-m-d') < $nAheadDate) {
+        $nZone = $z;
+        break;
+    }
+}
+if ($nZone === null) {
+    refuse('section N found no clock that is between 03:00 and 22:59 and on an earlier date than Pacific/Kiritimati');
+}
+$nClock   = new DateTimeZone($nZone);
+$nNow     = new DateTimeImmutable('now', $nClock);
+$nToday   = $nNow->format('Y-m-d');
+// "N minutes ago" in REAL minutes, read on that clock (a change of the clocks in
+// between must not make it an hour out).
+$nAgo     = static fn (int $minutes): string => (new DateTimeImmutable('@' . (time() - $minutes * 60)))->setTimezone($nClock)->format('Y-m-d H:i:s');
+$nIds     = [];
+$nMake    = static function (string $name, string $zone, string $start, ?string $end) use ($makeEvent, $siteA, &$nIds): int {
+    $id = $makeEvent($name, $siteA, $zone, $start, $end, ['showOnWebsite' => '0']);
+    $nIds[$name] = $id;
+    return $id;
+};
+$nMake('PDS N no end today', $nZone, $nToday . ' 00:30:00', null);
+$nMake('PDS N no end today, ahead clock', $nAheadZone, $nToday . ' 00:30:00', null);
+$nMake('PDS N no end yesterday', $nZone, $nNow->modify('-1 day')->format('Y-m-d') . ' 23:59:00', null);
+$nMake('PDS N no end 90 minutes ago', $nZone, $nAgo(90), null);
+$nMake('PDS N no end 150 minutes ago', $nZone, $nAgo(150), null);
+$nMake('PDS N ended a minute ago', $nZone, $nAgo(30), $nAgo(1));
+// #898: the same day forty days on, two clocks 25 hours apart. "Later reading,
+// sooner moment": 23:00 in Kiritimati (+14) is 09:00 UTC; 08:00 in Pago Pago
+// (-11) is 19:00 UTC. Far from every other event of A, so nothing sits between.
+$nOrderDay = $nowA->modify('+40 days')->format('Y-m-d');
+$nMake('PDS N sooner, later reading', 'Pacific/Kiritimati', $nOrderDay . ' 23:00:00', null);
+$nMake('PDS N later, earlier reading', 'Pacific/Pago_Pago', $nOrderDay . ' 08:00:00', null);
+// The two nights London's clocks change, for the fixed-moment checks run in
+// the portal's own classes (the real "now" cannot be chosen).
+$nMake('PDS N clock 25-hour day', 'Europe/London', '2026-10-25 00:30:00', null);
+$nMake('PDS N clock 23-hour day', 'Europe/London', '2027-03-28 00:30:00', null);
+$state['nIds'] = array_values($nIds);
+register_shutdown_function(static function () use (&$state, $db): void {
+    foreach ($state['nIds'] ?? [] as $id) {
+        $db->query('DELETE FROM `tblEvents` WHERE `eventID` = ' . (int) $id);
+    }
+    $db->query("DELETE FROM `tblSettings` WHERE (`settingKey` = 'public.events.noEndListedFor' AND `siteID` IS NOT NULL) OR `settingKey` = 'selftest.p882.probe'");
+});
+/** Tick the named N events (or none), run $then, untick them again. */
+$nShow = static function (array $names, callable $then) use ($setEv, &$nIds): mixed {
+    foreach ($names as $n) {
+        $setEv($nIds[$n], ['showOnWebsite' => '1']);
+    }
+    try {
+        return $then();
+    } finally {
+        foreach ($names as $n) {
+            $setEv($nIds[$n], ['showOnWebsite' => '0']);
+        }
+    }
+};
+/** The N titles a feed gives, in the feed's OWN order (not sorted). */
+$nTitles = static function (array $r): ?array {
+    $j = json_decode($r['body'], true);
+    if ($r['status'] !== 200 || is_array($j) === false || isset($j['events']) === false) {
+        return null;
+    }
+    return array_values(array_filter(array_map(static fn (array $e): string => (string) $e['title'], $j['events']),
+        static fn (string $t): bool => str_starts_with($t, 'PDS N ')));
+};
+$nNoEnd = ['PDS N no end today', 'PDS N no end today, ahead clock', 'PDS N no end yesterday', 'PDS N no end 90 minutes ago',
+    'PDS N no end 150 minutes ago', 'PDS N ended a minute ago'];
+$nListed = static fn (): ?array => $nShow($nNoEnd, static function () use ($feedA, $nTitles): ?array {
+    $t = $nTitles($feedA('events.json?limit=50'));
+    if ($t !== null) {
+        sort($t);
+    }
+    return $t;
+});
+$setOwn($siteA, 'public.events.noEndListedFor', null);
+check('N01 (D-129, the default) an event with no end time that started today on its own clock (' . $nZone . ') is STILL listed; the same reading on a clock already past that day (' . $nAheadZone . '), and one that started late yesterday, are gone; one that ended a minute ago is gone, end time and all',
+    $nListed(), ['PDS N no end 150 minutes ago', 'PDS N no end 90 minutes ago', 'PDS N no end today']);
+$nFeedToday = $nShow(['PDS N no end today'], static fn (): array => json_decode($feedA('events.json?limit=50')['body'], true)['events'] ?? []);
+$nRow = null;
+foreach ($nFeedToday as $one) {
+    if ($one['title'] === 'PDS N no end today') {
+        $nRow = $one;
+    }
+}
+check('N02 its listedUntil is midnight at the end of its own day, on its own clock, with that clock\'s offset; endsAt stays null',
+    [$nRow['listedUntil'] ?? 'missing', array_key_exists('endsAt', $nRow ?? []) === true ? $nRow['endsAt'] : 'missing'],
+    [(new DateTimeImmutable($nNow->modify('+1 day')->format('Y-m-d') . ' 00:00:00', $nClock))->format('Y-m-d\TH:i:sP'), null]);
+
+// The card (D-129: the organisation chooses; D-085: whoever may open the page).
+$nRefusedBefore = $logged('PublicWebsiteSetupRefused', $people['root']['id']);
+$nFlash = static function (string $page): string {
+    if (preg_match('#<div class="alert alert-[a-z]+" role="alert">(.*?)</div>#s', $page, $m) !== 1) {
+        return '';
+    }
+    return trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8'));
+};
+$nOwnRow = static function () use ($db, $siteA): ?string {
+    $r = $db->query("SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = 'public.events.noEndListedFor' AND `siteID` = {$siteA}")->fetch_assoc();
+    return $r === null ? null : (string) $r['settingValue'];
+};
+$n03a = $card('root', 'no_end_listing', ['mode' => 'fixed', 'hours' => '0', 'minutes' => '10']);
+$n03b = $card('root', 'no_end_listing', ['mode' => 'fixed', 'hours' => '24', 'minutes' => '1']);
+$n03c = $card('root', 'no_end_listing', ['mode' => 'fixed', 'minutes' => '30']);
+$n03d = $card('root', 'no_end_listing', ['mode' => 'sometimes']);
+check('N03 the card refuses, with the reason and on record, a time under 15 minutes, one over 24 hours, a fixed time whose hours box did not arrive, and an unknown choice — and writes nothing',
+    [$nFlash($n03a['page']), $nFlash($n03b['page']), $nFlash($n03c['page']), $nFlash($n03d['page']),
+        $logged('PublicWebsiteSetupRefused', $people['root']['id']) - $nRefusedBefore, $nOwnRow()],
+    ['The time must be at least 15 minutes and at most 24 hours. Nothing was saved.', 'The time must be at least 15 minutes and at most 24 hours. Nothing was saved.',
+        'That form did not arrive whole. Nothing was saved.', 'That choice was not recognised. Nothing was saved.', 4, null]);
+$nSavedBefore = $logged('PublicWebsiteNoEndListingSaved', $people['root']['id']);
+$n04 = $card('root', 'no_end_listing', ['mode' => 'fixed', 'hours' => '2', 'minutes' => '0']);
+check('N04 a fixed time of 2 hours is saved as A\'s own row (120 minutes), recorded, and the card says so and pre-selects it',
+    [$nOwnRow(), $logged('PublicWebsiteNoEndListingSaved', $people['root']['id']) - $nSavedBefore,
+        str_contains($n04['page'], 'data-no-end-listing="120"'), str_contains($n04['page'], 'id="pw-noend-fixed" checked')],
+    ['120', 1, true, true]);
+check('N05 with 2 hours chosen: started 90 minutes ago, listed; 150 minutes ago, gone; an event with an end time that has passed is STILL gone (the setting changes nothing for it)',
+    array_values(array_intersect(['PDS N ended a minute ago', 'PDS N no end 150 minutes ago', 'PDS N no end 90 minutes ago'], $nListed() ?? [])),
+    ['PDS N no end 90 minutes ago']);
+check('N06 with 2 hours chosen, an all-day event with no end time is still kept through the whole of its own day (unaffected), and gone the day after',
+    $allDayShown(), ['PDS A all day today']);
+$nFeedFixed = $nShow(['PDS N no end 90 minutes ago'], static fn (): array => json_decode($feedA('events.json?limit=50')['body'], true)['events'] ?? []);
+$nRowFixed = null;
+foreach ($nFeedFixed as $one) {
+    if ($one['title'] === 'PDS N no end 90 minutes ago') {
+        $nRowFixed = $one;
+    }
+}
+check('N07 with 2 hours chosen, listedUntil is exactly 7,200 seconds after startsAt',
+    $nRowFixed === null ? null : strtotime((string) $nRowFixed['listedUntil']) - strtotime((string) $nRowFixed['startsAt']), 7200);
+$n08 = $card('root', 'no_end_listing', ['mode' => 'day']);
+check('N08 choosing "until the end of the day" again stores \'day\' and the list is the default\'s again',
+    [$nOwnRow(), str_contains($n08['page'], 'data-no-end-listing="day"'), $nListed()],
+    ['day', true, ['PDS N no end 150 minutes ago', 'PDS N no end 90 minutes ago', 'PDS N no end today']]);
+$setOwn($siteA, 'public.events.noEndListedFor', null);
+
+// #898: the order is the real moment's, and `limit` never drops the sooner one.
+$nOrder = ['PDS N sooner, later reading', 'PDS N later, earlier reading'];
+$nAll = $nShow($nOrder, static fn (): array => json_decode($feedA('events.json?limit=50')['body'], true)['events'] ?? []);
+$nAt  = array_search('PDS N sooner, later reading', array_column($nAll, 'title'), true);
+check('N09 (#898) the full list puts 23:00 in Pacific/Kiritimati (09:00 UTC) BEFORE 08:00 in Pacific/Pago_Pago (19:00 UTC) on the same date, and every event in the list is in order of its real start',
+    [array_values(array_filter(array_column($nAll, 'title'), static fn (string $t): bool => in_array($t, $nOrder, true))),
+        (static function () use ($nAll): bool {
+            $m = array_map(static fn (array $e): int => (int) strtotime((string) $e['startsAt']), $nAll);
+            $sorted = $m;
+            sort($sorted);
+            return $m === $sorted;
+        })()],
+    [$nOrder, true]);
+$nLimit = $nAt === false ? 1 : $nAt + 1;
+check('N10 (#898) with `limit` set so the list ends at the sooner of the two (limit=' . $nLimit . '), the sooner one is the last given — reading order would have given the later one instead and dropped the sooner',
+    $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))), ['PDS N sooner, later reading']);
+
+// The nights the clocks change, at fixed moments, in the portal's OWN classes:
+// PublicDoor::events() takes the moment it judges at, so the real reader runs
+// on 25 October 2026 (a 25-hour day in London) and 28 March 2027 (23 hours).
+file_put_contents($child . $sep . 'n-ask.php', <<<'ASK'
+<?php
+// Written by tools/public-door-selftest.php for ONE run. Test only. Runs the
+// REAL PublicDoor::events() from the copy of web/, at the moment given.
+declare(strict_types=1);
+spl_autoload_register(static function (string $class): void {
+    $file = __DIR__ . '/web/_core/' . str_replace('Portal\\Core\\', '', $class) . '.php';
+    if (is_file($file) === true) {
+        require_once $file;
+    }
+});
+define('PORTAL_CORE', __DIR__ . '/web/_core');
+define('PORTAL_ENV', 'prod');
+define('PORTAL_ENV_SOURCE', 'environment');
+$c = require __DIR__ . '/web/_auth_keys/auth_creds.php';
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+$mysqli = new mysqli($c['db_host'], $c['db_user'], $c['db_pass'], $c['db_name'], (int) $c['db_port']);
+$mysqli->set_charset('utf8mb4');
+$site = (int) $argv[1];
+\Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => '']], $site);
+try {
+    $read = \Portal\Core\PublicDoor::events($mysqli, $site, 50, (int) $argv[2]);
+} catch (\Throwable $e) {
+    echo json_encode(['error' => get_class($e) . ': ' . $e->getMessage()]);
+    exit;
+}
+echo json_encode(array_values(array_filter(array_column($read['events'], 'title'), static fn (string $t): bool => str_starts_with($t, 'PDS N clock'))));
+ASK);
+$nAsk = static function (string $utc) use ($child, $sep, $siteA): mixed {
+    $raw = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -d ' . escapeshellarg('error_log=' . $child . $sep . 'n-ask.log') . ' '
+        . escapeshellarg($child . $sep . 'n-ask.php') . ' ' . $siteA . ' ' . (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->getTimestamp() . ' 2>&1');
+    $got = json_decode($raw, true);
+    return is_array($got) === true ? $got : ['could not ask' => $raw];
+};
+$nClocks = ['PDS N clock 25-hour day', 'PDS N clock 23-hour day'];
+/** At each moment, is the named clock event listed? */
+$nClockAt = static function (string $name, array $moments) use ($nShow, $nClocks, $nAsk): array {
+    return $nShow($nClocks, static function () use ($name, $moments, $nAsk): array {
+        $out = [];
+        foreach ($moments as $m) {
+            $got = $nAsk($m);
+            $out[$m] = isset($got['could not ask']) === true || isset($got['error']) === true ? $got : in_array($name, $got, true);
+        }
+        return $out;
+    });
+};
+$london = new DateTimeZone('Europe/London');
+$dayLength = static fn (string $d): float => ((new DateTimeImmutable($d . ' 00:00:00', $london))->modify('+1 day')->getTimestamp()
+    - (new DateTimeImmutable($d . ' 00:00:00', $london))->getTimestamp()) / 3600;
+check('N11 the premise: in Europe/London 25 October 2026 lasts 25 hours and 28 March 2027 lasts 23',
+    [$dayLength('2026-10-25'), $dayLength('2027-03-28')], [25.0, 23.0]);
+check('N12 (the default) the 25-hour day: an event with no end time starting at 00:30 is still listed at 23:45 that night (24 h 15 min after it began — more than a day of real time) and gone at 00:05 the next day',
+    $nClockAt('PDS N clock 25-hour day', ['2026-10-25 23:45:00', '2026-10-26 00:05:00']), ['2026-10-25 23:45:00' => true, '2026-10-26 00:05:00' => false]);
+check('N13 (the default) the 23-hour day: starting at 00:30, still listed at 23:45 (22 h 15 min later) and gone at 00:15 the next day — less than a day of real time after it began',
+    $nClockAt('PDS N clock 23-hour day', ['2027-03-28 22:45:00', '2027-03-28 23:15:00']), ['2027-03-28 22:45:00' => true, '2027-03-28 23:15:00' => false]);
+$setOwn($siteA, 'public.events.noEndListedFor', '120');
+check('N14 (2 hours chosen) across the clocks going FORWARD: starting at 00:30, listed at 03:15 on the clock (1 h 45 min of real time later) and gone at 03:45 — exact hours, not the clock\'s hands',
+    $nClockAt('PDS N clock 23-hour day', ['2027-03-28 02:15:00', '2027-03-28 02:45:00']), ['2027-03-28 02:15:00' => true, '2027-03-28 02:45:00' => false]);
+check('N15 (2 hours chosen) across the clocks going BACK: starting at 00:30, listed at the SECOND 01:15 (1 h 45 min later) and gone at the second 01:45',
+    $nClockAt('PDS N clock 25-hour day', ['2026-10-25 01:15:00', '2026-10-25 01:45:00']), ['2026-10-25 01:15:00' => true, '2026-10-25 01:45:00' => false]);
+$setOwn($siteA, 'public.events.noEndListedFor', '5');
+check('N16 a stored time the card would refuse (5 minutes, a hand edit) is IGNORED and the default applies: the event that started 90 minutes ago is still listed',
+    in_array('PDS N no end 90 minutes ago', $nListed() ?? [], true), true);
+$setOwn($siteA, 'public.events.noEndListedFor', null);
 
 // =============================================================================
 echo "J. The script a website pastes in (#493 P4b; D-056, D-084)\n";
@@ -2693,6 +2942,46 @@ $http('GET', '/w/' . str_repeat('ab', 12) . '/events.json');
 $http('GET', '/w/' . $nameA . '/events.json', ['cookie' => 'PHPSESSID=' . str_repeat('z', 32)]);
 check('H05 no door request makes a session file — a made-up cookie included', $sessionFiles() - $before, 0);
 $setOwn($siteA, 'public.frame.origins', null);
+
+// #882 point 2, MEASURED: start-up sends some headers from settings it merges
+// for the request's organisation — for a door request, the door's
+// organisation — and the door leaves three of them in place on every answer,
+// its refusals included (Strict-Transport-Security, Permissions-Policy and
+// X-Powered-By, from `portal.headers.*`, `branding.hidePoweredBy` and
+// `product.name`). If an ORGANISATION could hold its own row for one of
+// those, a known organisation's refusal could differ from an unknown name's.
+// The general settings editor is the only page that could add one (Admin,
+// Settings' header group writes the installation's row only); asked here, as
+// that organisation's own global administrator, for every such key, it adds
+// none — every key is seeded installation-wide, and the editor refuses to add
+// an organisation's row for a key the installation holds. A probe key the
+// installation does NOT hold IS added, so the refusal is the editor's rule and
+// not a page that refuses everything.
+$hKeys = ['portal.headers.strict_transport_security', 'portal.headers.permissions_policy', 'portal.headers.coop', 'portal.headers.corp',
+    'portal.headers.referrer_policy', 'portal.headers.x_frame_options', 'branding.hidePoweredBy', 'product.name'];
+$hAdd = static function (string $key) use ($http, $tokenOn, $people): string {
+    $jar   = $people['root']['jar'];
+    $token = $tokenOn($http('GET', '/settings', ['jar' => $jar])['body']);
+    $http('POST', '/settings/save', ['jar' => $jar, 'post' => ['csrf_token' => $token, 'settingID' => '0', 'settingKey' => $key,
+        'settingValue' => 'selftest-882']]);
+    $page = $http('GET', '/settings', ['jar' => $jar])['body'];
+    return preg_match('#<div class="alert alert-[a-z]+[^"]*"[^>]*>(.*?)</div>#s', $page, $m) === 1
+        ? trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES, 'UTF-8')) : '';
+};
+$hOwnRows = static function (array $keys) use ($db): int {
+    $in = "'" . implode("', '", array_map([$db, 'real_escape_string'], $keys)) . "'";
+    return (int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblSettings` WHERE `siteID` IS NOT NULL AND `settingKey` IN ({$in})")->fetch_assoc()['n'] ?? 0);
+};
+$hSaid = [];
+foreach ($hKeys as $k) {
+    $hSaid[$k] = $hAdd($k);
+}
+$hProbe = $hAdd('selftest.p882.probe');
+check('H06 (#882) no organisation can hold its own row for a setting start-up turns into a header on the door\'s answers: adding each of the eight as A\'s global administrator is refused ("already exists") and stores nothing, while a key the installation does not hold IS added — so the door\'s refusals need no fixed headers of their own',
+    [array_values(array_unique(array_map(static fn (string $s): bool => str_contains($s, 'already exists'), $hSaid))), $hOwnRows($hKeys),
+        $hOwnRows(['selftest.p882.probe']) === 1, $hProbe !== ''],
+    [[true], 0, true, true]);
+$db->query("DELETE FROM `tblSettings` WHERE `settingKey` = 'selftest.p882.probe'");
 
 // =============================================================================
 echo "R. Every refusal is byte-identical\n";
@@ -4122,7 +4411,9 @@ $p = $plant('_core/PublicDoor.php', "e.`isDeleted` = 0 AND e.`status` = \\'publi
     static fn (): array => array_values(array_intersect(['PDS A deleted', 'PDS A draft', 'PDS A cancelled'], $titles($feedA('events.json?limit=50'), 'events') ?? [])));
 check('P15 with "published and not deleted" taken out, the deleted, draft and cancelled events are given out', [$p['applied'], $p['result']],
     [true, ['PDS A deleted', 'PDS A draft', 'PDS A cancelled']]);
-$p = $plant('_core/PublicDoor.php', "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql']", "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql'] . ' - INTERVAL 30 DAY'",
+// #882 moved "still listed" into PublicDoor::stillListedWhere(); the default
+// (end-of-day) branch is the one in force here.
+$p = $plant('_core/PublicDoor.php', "'ELSE ' . \$dayEnds . ' END) >= ' . \$now['sql'],", "'ELSE ' . \$dayEnds . ' END) >= ' . \$now['sql'] . ' - INTERVAL 30 DAY',",
     static fn (): bool => in_array('PDS A finished', $titles($feedA('events.json?limit=50'), 'events') ?? [], true));
 check('P16 with "not finished yet" loosened, a finished event is given out', [$p['applied'], $p['result']], [true, true]);
 $p = $plant('_core/PublicDoor.php', '$row  = EventVisibility::redact($row, (int) $row[\'canSeeFull\'] === 1);', '$row  = EventVisibility::redact($row, true);',
@@ -4203,7 +4494,7 @@ $p = $plant('_core/PublicDoor.php', "if (PublicWebsiteSetup::doorStateFor(\$db, 
         return $s;
     });
 check('P33 with one refusal given words of its own, the byte-for-byte comparison tells it apart', [$p['applied'], $p['result']], [true, false]);
-$faultAt = "\$org   = self::organisationFacts(\$db, \$siteId);\n        \$today = self::organisationToday(\$siteId);";
+$faultAt = "\$org    = self::organisationFacts(\$db, \$siteId);\n        \$today  = self::organisationToday(\$siteId);";
 $p = $plant('_core/PublicDoor.php', $faultAt, "throw new \\mysqli_sql_exception('planted fault', 2006);\n        " . $faultAt,
     static fn (): bool => $signature($feedA()) === $ref);
 check('P34 a planted database fault in the events reader gives the SAME 404 as every other refusal', [$p['applied'], $p['result']], [true, true]);
@@ -4236,10 +4527,69 @@ $p = $plant('_core/PublicDoor.php', "if (\$lifetime > 0 && (\$touched === false 
         return $s;
     }, 'alpha');
 check('P39 with the session-lifetime question taken out, an expired tester session is served on a test copy', [$p['applied'], $p['result']], [true, 200]);
-$p = $plant('_core/PublicDoor.php', "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql']",
-    "'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . \$now['sql'] . ' AND COALESCE(e.`endDateTime`, e.`startDateTime`) >= CAST(NOW() AS DATETIME)'",
+$p = $plant('_core/PublicDoor.php', "\$allDay  = 'DATE_ADD(DATE(COALESCE(e.`endDateTime`, e.`startDateTime`)), INTERVAL 1 DAY) - INTERVAL 1 SECOND';",
+    "\$allDay  = 'COALESCE(e.`endDateTime`, e.`startDateTime`)';",
     $allDayShown);
 check('P40 judging an all-day event by its stored midnight again, it vanishes at the start of its own day', [$p['applied'], $p['result']], [true, []]);
+
+// #882 (D-129) and #898: the old code put back, piece by piece. The expected
+// value of each is what the scenario gives UNDER the fault.
+$p = $plant('_core/PublicDoor.php', "'ELSE ' . \$dayEnds . ' END) >= ' . \$now['sql'],", "'ELSE e.`startDateTime` END) >= ' . \$now['sql'],", $nListed);
+check('PN1 with an event with no end time ending at its START again (the code before #882), every one that has started is gone (N01 catches it)',
+    [$p['applied'], $p['result']], [true, []]);
+$p = $plant('_core/PublicDoor.php', "WHEN e.`endDateTime` IS NOT NULL THEN e.`endDateTime` '", "'", $nListed);
+check('PN2 with the end-of-day rule reaching an event WITH an end time, one that ended a minute ago is kept to midnight (N01 catches it)',
+    [$p['applied'], in_array('PDS N ended a minute ago', $p['result'] ?? [], true)], [true, true]);
+$nUnder = static function (string $value, callable $then) use ($setOwn, $siteA): mixed {
+    $setOwn($siteA, 'public.events.noEndListedFor', $value);
+    try {
+        return $then();
+    } finally {
+        $setOwn($siteA, 'public.events.noEndListedFor', null);
+    }
+};
+$p = $plant('_core/PublicDoor.php', '$noEnd  = PublicWebsiteSetup::noEndListingFor($db, $siteId);', '$noEnd  = null;',
+    static fn (): mixed => $nUnder('120', $nListed));
+check('PN3 with the organisation\'s choice never read, 2 hours chosen still keeps the event that started 150 minutes ago (N05 catches it)',
+    [$p['applied'], in_array('PDS N no end 150 minutes ago', $p['result'] ?? [], true)], [true, true]);
+$p = $plant('_core/PublicDoor.php', "'OR (e.`isAllDay` <> 1 AND e.`endDateTime` IS NULL AND '", "'OR (e.`isAllDay` <> 1 AND '",
+    static fn (): mixed => $nUnder('120', $nListed));
+check('PN4 with the fixed time reaching an event WITH an end time, one that ended a minute ago (started 30 minutes ago) is listed again (N05 catches it)',
+    [$p['applied'], in_array('PDS N ended a minute ago', $p['result'] ?? [], true)], [true, true]);
+$p = $plant('_core/PublicDoor.php', "\$started = Events::startsAtOrAfter(\$db, 'e', \$siteId, \$atUtc - \$noEndMinutes * 60);",
+    "\$started = ['sql' => 'DATE_ADD(e.`startDateTime`, INTERVAL ' . \$noEndMinutes . ' MINUTE) >= ' . \$now['sql'], 'types' => \$now['types'], 'params' => \$now['params']];",
+    static fn (): mixed => $nUnder('120', static fn (): array => [
+        $nClockAt('PDS N clock 23-hour day', ['2027-03-28 02:15:00']), $nClockAt('PDS N clock 25-hour day', ['2026-10-25 01:45:00'])]));
+check('PN5 with the fixed time counted on the clock\'s hands (the reading plus 2 hours), the clocks going forward drop it an hour early and going back keep it an hour late (N14 and N15 catch it)',
+    [$p['applied'], $p['result']], [true, [['2027-03-28 02:15:00' => false], ['2026-10-25 01:45:00' => true]]]);
+$p = $plant('_core/PublicDoor.php', '$noEnd  = PublicWebsiteSetup::noEndListingFor($db, $siteId);', '$noEnd  = PublicWebsiteSetup::noEndListingFor($db, $siteId) ?? 1440;',
+    static fn (): array => [$nClockAt('PDS N clock 25-hour day', ['2026-10-25 23:45:00']), $nClockAt('PDS N clock 23-hour day', ['2027-03-28 23:15:00'])]);
+check('PN6 with "the end of its day" taken as 24 real hours, the 25-hour day drops it before its midnight and the 23-hour day keeps it past it (N12 and N13 catch it)',
+    [$p['applied'], $p['result']], [true, [['2026-10-25 23:45:00' => false], ['2027-03-28 23:15:00' => true]]]);
+$p = $plant('_core/PublicDoor.php', 'usort($rows, static function (array $a, array $b): int {', 'if (false) usort($rows, static function (array $a, array $b): int {',
+    static fn (): mixed => $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))));
+check('PN7 (#898) with the order left as the READINGS\' (the code before #898), the limited list gives the later event and drops the sooner (N10 catches it)',
+    [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);
+$p = $plant('_core/PublicDoor.php', '$latest + self::maxOffsetOfZones(Events::zonesInUse($db, $siteId), $siteId)', '$latest',
+    static fn (): mixed => $nShow($nOrder, static fn (): ?array => $nTitles($feedA('events.json?limit=' . $nLimit))));
+check('PN8 (#898) with the second read\'s window not widened by the clocks\' offsets, the sooner event on the clock furthest ahead is never read (N10 catches it)',
+    [$p['applied'], $p['result']], [true, ['PDS N later, earlier reading']]);
+$p = $plant('_core/PublicWebsiteSetup.php', 'if ($chosen < self::NO_END_MIN_MINUTES || $chosen > self::NO_END_MAX_MINUTES) {', 'if (false) {',
+    static function () use ($card, $nOwnRow, $setOwn, $siteA): ?string {
+        $card('root', 'no_end_listing', ['mode' => 'fixed', 'hours' => '0', 'minutes' => '10']);
+        $got = $nOwnRow();
+        $setOwn($siteA, 'public.events.noEndListedFor', null);
+        return $got;
+    });
+check('PN9 with the card\'s bounds taken out, 10 minutes is stored (N03 catches it)', [$p['applied'], $p['result']], [true, '10']);
+$p = $plant('_core/PublicWebsiteSetup.php', 'if ($minutes < self::NO_END_MIN_MINUTES || $minutes > self::NO_END_MAX_MINUTES) {', 'if (false) {',
+    static fn (): mixed => $nUnder('5', static fn (): bool => in_array('PDS N no end 90 minutes ago', $nListed() ?? [], true)));
+check('PN10 with the stored value no longer checked when read, a hand-edited 5 minutes drops the event that started 90 minutes ago (N16 catches it)',
+    [$p['applied'], $p['result']], [true, false]);
+$p = $plant('_core/PublicDoor.php', "'(((e.`isAllDay` = 1 OR e.`endDateTime` IS NOT NULL) AND", "'(((e.`endDateTime` IS NOT NULL) AND",
+    static fn (): mixed => $nUnder('120', $allDayShown));
+check('PN11 with the fixed time\'s rule forgetting all-day events, an all-day event with no end time vanishes while a fixed time is chosen (N06 catches it)',
+    [$p['applied'], $p['result']], [true, []]);
 $p = $plant('_core/PublicDoor.php', '| JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT', '',
     static fn (): bool => str_contains($feedA('events.json?limit=50')['body'], '</script>'));
 check('P41 with the JSON_HEX_ flags taken out, a live </script> reaches the answer', [$p['applied'], $p['result']], [true, true]);
@@ -4362,7 +4712,7 @@ $p = (static function () use ($child, $sep, $hostFault, $startServer, $waitForSe
 })();
 check('P44 with the fail-closed rule taken out as well, the same fault puts the sign-in page on a public address', [$p['applied'], $p['result']], [true, [200, true]]);
 
-$p = $plant('_core/PublicWebsite.php', "self::FRAME_PERMITTED_KEY,\n        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY];", 'self::FRAME_PERMITTED_KEY];',
+$p = $plant('_core/PublicWebsite.php', "self::FRAME_PERMITTED_KEY,\n        self::DOOR_TEST_PERMITTED_KEY, self::DOOR_TEST_OPEN_KEY, self::NO_END_LISTING_KEY];", 'self::FRAME_PERMITTED_KEY, self::NO_END_LISTING_KEY];',
     static fn (): array => array_map(static fn (array $one): bool => $one[0], (array) $askLocks()));
 check('P45 with D-087\'s two settings taken out of the editor lock, the general settings editor would store them', [$p['applied'], $p['result']],
     [true, ['public.door.testCopies.permitted' => false, 'public.door.testCopies.open' => false]]);

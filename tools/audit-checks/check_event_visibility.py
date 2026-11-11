@@ -342,11 +342,15 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # clear-out's reading, which can only be late) and made it compare zones
     # byte for byte (`CAST(... AS BINARY)`), so the probes' text changed too.
     # They still read only zone texts.
-    ("_core/Events.php", 681): (
+    # Moved 681/682 -> 725/726 by #882/#898 (11 November 2026), which lifted
+    # the read into the public `zonesInUse()` (the public door needs the zone
+    # list to size its second read) and added the fixed-moment reading and
+    # `startsAtOrAfter()` beside the builder. The probes are unchanged.
+    ("_core/Events.php", 725): (
         "SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents`')",
         "reads only the zone texts in use, to work out each event's clock (#804); no event is returned",
     ),
-    ("_core/Events.php", 682): (
+    ("_core/Events.php", 726): (
         "SELECT DISTINCT CAST(`timezone` AS BINARY) AS `zone` FROM `tblEvents` WHERE `siteID` = ?",
         "reads only one organisation's zone texts, to work out each event's clock (#804); no event is returned",
     ),
@@ -361,7 +365,8 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # Moved 1076 -> 1092 by #883, which added the `$refused` list to
     # `freeSlug()`'s comment and loop; the question itself is unchanged, and
     # since #883 it serves every writer of an event, not only the import.
-    ("_core/Events.php", 1092): (
+    # Moved 1092 -> 1335 by #882/#898, which added methods above it.
+    ("_core/Events.php", 1335): (
         "SELECT `eventID` FROM `tblEvents` WHERE `siteID` = ? AND `eventSlug` = ? LIMIT 1",
         "asks only whether an event web address is taken, across every row the unique key covers (#877, #883); no event is returned",
     ),
@@ -376,7 +381,8 @@ LINE_ALLOWLIST: dict[tuple[str, int], tuple[str, str]] = {
     # 1161 -> 1164 when round 3 reworded that try's comment.
     # Moved 1164 -> 1275 by #883, which added `slugWasTaken()` and
     # `saveUnderFreeSlug()` above it.
-    ("_core/Events.php", 1275): (
+    # Moved 1275 -> 1518 by #882/#898, which added methods above it.
+    ("_core/Events.php", 1518): (
         "SELECT `eventID`, `eventSlug`, `startDateTime` FROM `tblEvents` WHERE `siteID` = ? AND `isDeleted` = 0",
         "asks whether this organisation's calendar already holds the same event, for its own manager importing a file (D-100); copied-in events of the same organisation count on purpose",
     ),

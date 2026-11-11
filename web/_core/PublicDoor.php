@@ -9,7 +9,10 @@
  * reach websites the portal does not run. In this package it answers:
  *
  *   events.json       the organisation's events that are on the public website
- *                     and have not finished yet, as JSON
+ *                     and are still listed (not finished yet; an event with no
+ *                     end time until the end of its day, or the organisation's
+ *                     chosen time — #882, D-129: `stillListedWhere()`), soonest
+ *                     first by their REAL moment (#898), as JSON
  *                     (`web/_core/data/public-door-events.schema.json`);
  *   posters.json      its posters on the public website, as JSON
  *                     (`web/_core/data/public-door-posters.schema.json`);
@@ -610,40 +613,120 @@ final class PublicDoor
     // =========================================================================
 
     /**
-     * The organisation's events on the public website that have not finished
-     * yet on their OWN clock (`Events::nowOnItsOwnClock()`), soonest first,
-     * at most `$limit`. An ALL-DAY event lasts until the end of its last day
-     * on that clock — its stored times are only the day's midnight, so
-     * judged by them it vanished at the START of its own day (round 1 of
-     * P4a's check). The arithmetic is on the clock readings themselves, so it
-     * needs no zone. It reads in website mode, with the copied-in rule in force for the
-     * organisation; published only; full detail only where the rule allows it,
-     * cut with `EventVisibility::redact()` otherwise.
+     * The organisation's events on the public website that are STILL LISTED
+     * (`stillListedWhere()`), soonest first by their REAL moment, at most
+     * `$limit`. It reads in website mode, with the copied-in rule in force for
+     * the organisation; published only; full detail only where the rule allows
+     * it, cut with `EventVisibility::redact()` otherwise.
+     *
+     * ⏱️ SOONEST BY THE REAL MOMENT (#898). A stored start is a READING on its
+     *    event's own clock, so ordering by it puts 10:00 in New York before
+     *    11:00 in London although New York's is later — and with a `limit`,
+     *    the sooner event could be the one cut off. A real moment in SQL needs
+     *    `CONVERT_TZ()`, which shared hosting rarely supports, so the order is
+     *    decided here instead, over a window of readings PROVED wide enough:
+     *
+     *    1. read the first `$limit` listed rows in READING order;
+     *    2. if there were fewer, they are every listed row: done;
+     *    3. otherwise let T be the latest real moment among them. At least
+     *       `$limit` listed events start at or before T, so every event in the
+     *       soonest `$limit` starts at or before T too, and its reading is at
+     *       most T plus its clock's offset. So read again every listed row
+     *       whose reading is at most T plus the HIGHEST offset any zone in use
+     *       has ever had (`maxOffsetOfZones()`), and nothing in the answer can
+     *       be outside them;
+     *    4. order those by the real moment — `I18n::wallClockInstant()`, the
+     *       very instant printed as `startsAt`, so the order and the feed can
+     *       never disagree — then by reading and the event's number, and keep
+     *       the first `$limit`.
+     *
+     *    The second read costs one more statement only when there are at least
+     *    `$limit` listed events, and it is bounded by time (the events in about
+     *    a day past T), not by the size of the calendar. The per-zone `CASE`
+     *    of `Events::nowOnItsOwnClock()` (#804) cannot do the ordering itself:
+     *    it binds ONE reading per zone for ONE moment, and a sort key needs
+     *    each row's own offset, which changes twice a year.
+     *
+     * `$atUtc` is the moment to judge "still listed" at. The door passes
+     * nothing (now); a test passes a moment on a night the clocks change,
+     * because the real "now" cannot be chosen (the reason
+     * `Events::deadlineReadingFor()` takes its moment too).
      *
      * @return array{organisation:array{name:string, timezone:string}, events:list<array<string,mixed>>}
      */
-    public static function events(\mysqli $db, int $siteId, int $limit): array
+    public static function events(\mysqli $db, int $siteId, int $limit, ?int $atUtc = null): array
     {
-        $org   = self::organisationFacts($db, $siteId);
-        $today = self::organisationToday($siteId);
-        $vis   = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today, PublicWebsite::copiedRuleFor($db, $siteId));
-        $full  = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_WEBSITE, 0, $today, 'canSeeFull');
-        $now   = Events::nowOnItsOwnClock($db, 'e', $siteId);
-        $stmt  = $db->prepare(
-            'SELECT e.`eventSlug`, e.`eventName`, e.`description`, e.`startDateTime`, e.`endDateTime`, e.`timezone`, '
-            . 'e.`isAllDay`, e.`locationName`, e.`locationAddress`, e.`locationWebURL`, ' . $full['sql'] . ' '
-            . 'FROM `tblEvents` e WHERE e.`siteID` = ? AND e.`isDeleted` = 0 AND e.`status` = \'published\' '
-            . 'AND (CASE WHEN e.`isAllDay` = 1 THEN DATE_ADD(DATE(COALESCE(e.`endDateTime`, e.`startDateTime`)), INTERVAL 1 DAY) - INTERVAL 1 SECOND '
-            . 'ELSE COALESCE(e.`endDateTime`, e.`startDateTime`) END) >= ' . $now['sql']
-            . $vis['sql'] . ' ORDER BY e.`startDateTime` ASC, e.`eventID` ASC LIMIT ?'
-        );
-        $stmt->bind_param(
-            $full['types'] . 'i' . $now['types'] . $vis['types'] . 'i',
-            ...array_merge($full['params'], [$siteId], $now['params'], $vis['params'], [$limit])
-        );
-        $stmt->execute();
-        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $stmt->close();
+        $at     = $atUtc ?? time();
+        $org    = self::organisationFacts($db, $siteId);
+        $today  = self::organisationToday($siteId);
+        $vis    = EventVisibility::where('e', EventVisibility::MODE_WEBSITE, 0, $today, PublicWebsite::copiedRuleFor($db, $siteId));
+        $full   = EventVisibility::fullDetailSelect('e', EventVisibility::MODE_WEBSITE, 0, $today, 'canSeeFull');
+        $noEnd  = PublicWebsiteSetup::noEndListingFor($db, $siteId);
+        $listed = self::stillListedWhere($db, $siteId, $at, $noEnd);
+
+        // One statement, asked once or twice: `$upTo` (a reading) bounds the
+        // second read, `$max` limits the first. Inside this reader on purpose
+        // (tools/audit-checks/check_public_door_reads.py: every database read
+        // of the door is inside a reader).
+        $read = static function (?string $upTo, ?int $max) use ($db, $siteId, $full, $listed, $vis): array {
+            $stmt = $db->prepare(
+                'SELECT e.`eventID`, e.`eventSlug`, e.`eventName`, e.`description`, e.`startDateTime`, e.`endDateTime`, e.`timezone`, '
+                . 'e.`isAllDay`, e.`locationName`, e.`locationAddress`, e.`locationWebURL`, ' . $full['sql'] . ' '
+                . 'FROM `tblEvents` e WHERE e.`siteID` = ? AND e.`isDeleted` = 0 AND e.`status` = \'published\' '
+                . 'AND ' . $listed['sql']
+                . ($upTo === null ? '' : ' AND e.`startDateTime` <= CAST(? AS DATETIME)')
+                . $vis['sql'] . ' ORDER BY e.`startDateTime` ASC, e.`eventID` ASC' . ($max === null ? '' : ' LIMIT ?')
+            );
+            $types  = $full['types'] . 'i' . $listed['types'] . ($upTo === null ? '' : 's') . $vis['types'] . ($max === null ? '' : 'i');
+            $params = array_merge($full['params'], [$siteId], $listed['params'], $upTo === null ? [] : [$upTo], $vis['params'],
+                $max === null ? [] : [$max]);
+            $stmt->bind_param($types, ...$params);
+            $stmt->execute();
+            $got = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $stmt->close();
+
+            return $got;
+        };
+        // The real moment of a row's start, or null when its reading cannot
+        // be placed on a clock (such a row sorts last, rather than first).
+        $momentOf = static function (array $row) use ($siteId): ?int {
+            $instant = I18n::wallClockInstant((string) $row['startDateTime'], Site::zoneFor((string) $row['timezone'], $siteId));
+
+            return $instant === null ? null : $instant->getTimestamp();
+        };
+
+        $rows = $read(null, $limit);
+        if (count($rows) >= $limit) {
+            $latest = null;
+            foreach ($rows as $row) {
+                $m = $momentOf($row);
+                if ($m !== null && ($latest === null || $m > $latest)) {
+                    $latest = $m;
+                }
+            }
+            if ($latest !== null) {
+                $upTo = gmdate('Y-m-d H:i:s', $latest + self::maxOffsetOfZones(Events::zonesInUse($db, $siteId), $siteId));
+                $rows = $read($upTo, null);
+            }
+        }
+        foreach ($rows as $i => $row) {
+            $rows[$i]['__moment'] = $momentOf($row);
+        }
+        usort($rows, static function (array $a, array $b): int {
+            if ($a['__moment'] !== $b['__moment']) {
+                if ($a['__moment'] === null) {
+                    return 1;
+                }
+                if ($b['__moment'] === null) {
+                    return -1;
+                }
+
+                return $a['__moment'] <=> $b['__moment'];
+            }
+
+            return [(string) $a['startDateTime'], (int) $a['eventID']] <=> [(string) $b['startDateTime'], (int) $b['eventID']];
+        });
+        $rows = array_slice($rows, 0, $limit);
 
         $events = [];
         foreach ($rows as $row) {
@@ -663,6 +746,11 @@ final class PublicDoor
                 // pages; one that counts down uses startsAt.
                 'startsOnClock'  => self::clockText($row['startDateTime'], $zone),
                 'endsOnClock'    => self::clockText($row['endDateTime'], $zone),
+                // #882 (D-129): the moment the door stops listing it, so a
+                // reader — the script's countdown above all — follows the
+                // SAME rule as this list rather than guessing one for an
+                // event with no end time.
+                'listedUntil'    => self::listedUntilText($row, $zone, $noEnd),
                 'allDay'         => (int) $row['isAllDay'] === 1,
                 'timezone'       => $zone->getName(),
                 'detailsLimited' => $row['detailsLimited'] === true,
@@ -672,6 +760,125 @@ final class PublicDoor
         }
 
         return ['organisation' => $org, 'events' => $events];
+    }
+
+    /**
+     * 📋 THE ONE RULE for whether an event is still on the public door's list
+     *    at the moment `$atUtc`, as a SQL condition on `tblEvents` aliased `e`
+     *    — every surface reads its events through `events()`, which asks this,
+     *    so the feed, the framed page and the script all follow it. Each event
+     *    is judged on its OWN clock (`tblEvents.timezone`):
+     *
+     *    - an ALL-DAY event: until the end of its last day (its end's date,
+     *      else its start's) — its stored times are only the day's midnight,
+     *      so judged by them it vanished at the START of its own day (round 1
+     *      of P4a's check). Unchanged by #882;
+     *    - an event WITH an end time: until its end. Unchanged by #882 (D-129:
+     *      the setting must change nothing for an event that has one);
+     *    - an event with a start time and NO end time (D-129):
+     *        · by default, until the end of its START's day — midnight, as a
+     *          READING compared with the clock's reading now, so a day of 23
+     *          or 25 hours on the nights the clocks change is simply that
+     *          day, as long as it really is;
+     *        · or, when the organisation chose a fixed time
+     *          (`$noEndMinutes`), until exactly that many real minutes after
+     *          it starts: `Events::startsAtOrAfter()` with the moment moved
+     *          back by that many seconds. Seconds, never "the reading plus
+     *          two hours", which is an hour out across a clock change.
+     *
+     *    Before #882 an event with no end time counted its START as its end,
+     *    so a 10:00 service with no end time was gone from a church's website
+     *    at 10:00 on the morning it happened.
+     *
+     *    The readings are compared with what each event's clock reads at
+     *    `$atUtc` (`Events::readingOnItsOwnClockAt()`), with no `CONVERT_TZ()`;
+     *    the per-zone values are bound, so each appears once per use.
+     *
+     * @return array{sql:string, types:string, params:list<string>}
+     */
+    private static function stillListedWhere(\mysqli $db, int $siteId, int $atUtc, ?int $noEndMinutes): array
+    {
+        $now     = Events::readingOnItsOwnClockAt($db, 'e', $siteId, $atUtc);
+        $allDay  = 'DATE_ADD(DATE(COALESCE(e.`endDateTime`, e.`startDateTime`)), INTERVAL 1 DAY) - INTERVAL 1 SECOND';
+        $dayEnds = 'DATE_ADD(DATE(e.`startDateTime`), INTERVAL 1 DAY) - INTERVAL 1 SECOND';
+        if ($noEndMinutes === null) {
+            return [
+                'sql'    => '(CASE WHEN e.`isAllDay` = 1 THEN ' . $allDay . ' WHEN e.`endDateTime` IS NOT NULL THEN e.`endDateTime` '
+                    . 'ELSE ' . $dayEnds . ' END) >= ' . $now['sql'],
+                'types'  => $now['types'],
+                'params' => $now['params'],
+            ];
+        }
+        $started = Events::startsAtOrAfter($db, 'e', $siteId, $atUtc - $noEndMinutes * 60);
+
+        return [
+            'sql'    => '(((e.`isAllDay` = 1 OR e.`endDateTime` IS NOT NULL) AND (CASE WHEN e.`isAllDay` = 1 THEN ' . $allDay
+                . ' ELSE e.`endDateTime` END) >= ' . $now['sql'] . ') '
+                . 'OR (e.`isAllDay` <> 1 AND e.`endDateTime` IS NULL AND ' . $started['sql'] . '))',
+            'types'  => $now['types'] . $started['types'],
+            'params' => array_merge($now['params'], $started['params']),
+        ];
+    }
+
+    /**
+     * The moment the door stops listing one event (`stillListedWhere()`'s
+     * rule, for that row), as an instant with its offset, or null when its
+     * start cannot be placed on its clock. Its end for an event with one;
+     * midnight at the end of its last day, on its own clock, for an all-day
+     * event and (by default) for one with no end time; its start plus the
+     * organisation's fixed time otherwise. Midnight inside an hour a clock
+     * skips becomes the moment the clock jumps (`I18n::wallClockInstant()`
+     * moves it forward), which is the moment that day really ended.
+     */
+    private static function listedUntilText(array $row, \DateTimeZone $zone, ?int $noEndMinutes): ?string
+    {
+        $start = I18n::wallClockReading((string) $row['startDateTime']);
+        if ($start === null || self::instantText($row['startDateTime'], $zone) === null) {
+            return null;
+        }
+        $allDay = (int) $row['isAllDay'] === 1;
+        if ($allDay === false && $row['endDateTime'] !== null) {
+            return self::instantText($row['endDateTime'], $zone);
+        }
+        if ($allDay === false && $noEndMinutes !== null) {
+            $instant = I18n::wallClockInstant((string) $row['startDateTime'], $zone);
+
+            return $instant === null ? null
+                : (new \DateTimeImmutable('@' . ($instant->getTimestamp() + $noEndMinutes * 60)))->setTimezone($zone)->format('Y-m-d\TH:i:sP');
+        }
+        $basis = $allDay === true && $row['endDateTime'] !== null ? I18n::wallClockReading((string) $row['endDateTime']) : $start;
+        if ($basis === null) {
+            return null;
+        }
+
+        // The reading "midnight after that day", built in UTC (no transitions), then placed on the clock.
+        return self::instantText($basis->modify('+1 day')->format('Y-m-d') . ' 00:00:00', $zone);
+    }
+
+    /**
+     * The highest offset from UTC, in seconds, that any of these zone texts
+     * has EVER had (its whole history, as PHP knows it) — never below zero,
+     * so it is a safe distance to look ahead in readings. Used only to size
+     * `events()`'s second read; a zone PHP cannot open is the organisation's,
+     * as `Site::zoneFor()` decides everywhere.
+     *
+     * @param list<string> $zoneTexts
+     */
+    private static function maxOffsetOfZones(array $zoneTexts, int $siteId): int
+    {
+        $max = 0;
+        foreach (array_merge($zoneTexts, ['']) as $text) {
+            $zone   = Site::zoneFor($text, $siteId);
+            $states = $zone->getTransitions();
+            $max    = max($max, (int) $zone->getOffset(new \DateTimeImmutable('now')));
+            if (is_array($states) === true) {
+                foreach ($states as $state) {
+                    $max = max($max, (int) $state['offset']);
+                }
+            }
+        }
+
+        return $max;
     }
 
     /**

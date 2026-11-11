@@ -126,6 +126,12 @@ if ($doorPage !== '') {
     }
 }
 $framingInForce = PublicWebsiteSetup::frameOriginsInForce($mysqli, $siteId);
+// D-129 (#882): how long an event with no end time stays on the list. Read
+// through the ONE reader the door asks, CHECKED, from THIS organisation's own
+// row (else the installation's default, which no page offers) — never the
+// merged settings array (#674, #936).
+$noEndShown   = PublicWebsiteSetup::noEndListingShown($mysqli, $siteId);
+$noEndMinutes = $noEndShown['minutes'];
 // D-087 on a test copy (#493 P4d): the ONE answer the door itself asks, so the
 // card can never say something the door does not do. It asks the channel
 // first, so on the live portal nothing else is asked.
@@ -410,6 +416,29 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                     <button type="submit" class="btn btn-outline-secondary btn-sm">Add your main website (<?php echo $esc($suggestion); ?>) to the list</button>
                 </form>
             <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- ⏱️ An event with no end time (#882, D-129): how long it stays on the public website's list. -->
+    <div class="card mb-3" data-no-end-listing="<?php echo $noEndMinutes === null ? 'day' : (string) $noEndMinutes; ?>">
+        <div class="card-body">
+            <h2 class="h5">Events with no end time</h2>
+            <p class="text-muted">An event with an end time stays on your public website's list until it ends, and an all-day event until the end of its day. An event with a start time but <strong>no end time</strong> stays listed for as long as you choose here. Each event is judged on its own clock.</p>
+            <p class="mb-2" data-no-end-now="1"><strong>Now:</strong> such an event stays listed <?php echo $esc(PublicWebsiteSetup::noEndListingWords($noEndMinutes)); ?><?php echo $noEndShown['own'] === true ? '' : ' (the default)'; ?>.</p>
+            <form method="post" action="<?php echo $esc(Site::url('admin/public-website/save')); ?>" data-no-end-form="1">
+                <input type="hidden" name="csrf_token" value="<?php echo $esc($csrf); ?>">
+                <input type="hidden" name="action" value="no_end_listing">
+                <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="day" id="pw-noend-day"<?php echo $noEndMinutes === null ? ' checked' : ''; ?>><label class="form-check-label" for="pw-noend-day">Until the end of the day it starts on (midnight on its own clock)</label></div>
+                <div class="form-check"><input class="form-check-input" type="radio" name="mode" value="fixed" id="pw-noend-fixed"<?php echo $noEndMinutes !== null ? ' checked' : ''; ?>><label class="form-check-label" for="pw-noend-fixed">For a fixed time after it starts:</label></div>
+                <div class="d-flex flex-wrap gap-2 align-items-center ms-4 mt-1">
+                    <label class="visually-hidden" for="pw-noend-hours">Hours</label>
+                    <input type="number" class="form-control form-control-sm w-auto" id="pw-noend-hours" name="hours" min="0" max="24" step="1" value="<?php echo $noEndMinutes === null ? '1' : (string) intdiv($noEndMinutes, 60); ?>"> hours
+                    <label class="visually-hidden" for="pw-noend-minutes">Minutes</label>
+                    <input type="number" class="form-control form-control-sm w-auto" id="pw-noend-minutes" name="minutes" min="0" max="59" step="1" value="<?php echo $noEndMinutes === null ? '0' : (string) ($noEndMinutes % 60); ?>"> minutes
+                </div>
+                <div class="form-text">At least <?php echo (int) PublicWebsiteSetup::NO_END_MIN_MINUTES; ?> minutes and at most <?php echo (int) intdiv(PublicWebsiteSetup::NO_END_MAX_MINUTES, 60); ?> hours, counted as real time: across a night the clocks change it is still exactly that long.</div>
+                <button type="submit" class="btn btn-primary btn-sm mt-2">Save</button>
+            </form>
         </div>
     </div>
 
