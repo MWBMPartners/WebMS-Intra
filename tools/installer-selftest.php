@@ -1714,7 +1714,7 @@ ok('N06 the last page says the country by name and the time zone set',
     said($done));
 // #942: every installer answer carries its browser rule (web/_install/csp.php), and EVERY script on the page carries
 // THAT answer's nonce, or the browser would refuse to run it (and the installer would quietly stop working). The rule
-// itself is proved in a real browser by tools/installer-country-script-selftest.mjs; this proves it is on every page.
+// itself is proved in a real browser by tools/installer-country-script-selftest.mjs; this proves it is on the three pages N14 fetches (Web addresses, finish, last page); L20 walks all ten pages but does not check the policy.
 $cspOf = static function (array $answer): array {
     if (preg_match('/^Content-Security-Policy:\s*(.+?)\s*$/mi', $answer['head'], $m) !== 1) {
         return ['', 'no Content-Security-Policy header'];

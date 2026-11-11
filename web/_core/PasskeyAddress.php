@@ -136,9 +136,10 @@
  *     Measured in Edge 157 on a page at that very name (bücher.localhost,
  *     which the browser shows and sends as xn--bcher-kva.localhost): the
  *     name as typed is REFUSED, for making a passkey and for using one, and
- *     only the "xn--" form is accepted. So no passkey can have been made under
- *     such a setting either; it is now ignored, the portal's own name is used,
- *     and nothing is stranded. Typed in its "xn--" form it is kept, and works.
+ *     only the "xn--" form is accepted. So in Edge no passkey can have been made
+ *     under such a setting either (Firefox and Safari were not measured, and a
+ *     browser that hashed the typed name could have made one); it is now
+ *     ignored and the portal's own name is used. Typed in its "xn--" form it is kept, and works.
  *     (Case A12 of tools/passkey-address-browser-selftest.mjs.)
  *   - FROM NOW ON, with the setting empty, the rpId follows the portal's
  *     address, so CHANGING `site.url` to a different name — or, in "own

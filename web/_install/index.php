@@ -80,7 +80,7 @@ declare(strict_types=1);
 //    pages and the redirects. Only a script carrying installCspNonce() runs,
 //    and fetches, beacons and WebSockets are refused. It does NOT stop a page
 //    being navigated elsewhere, a stylesheet from cdn.jsdelivr.net, or a DNS
-//    hint: csp.php lists exactly what it blocks and what it does not.
+//    hint: csp.php lists what #942's checks measured it blocking and not blocking; that list is not complete.
 require_once __DIR__ . DIRECTORY_SEPARATOR . 'csp.php';
 installSendCsp();
 

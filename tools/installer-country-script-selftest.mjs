@@ -16,23 +16,20 @@
  * (web/_install/csp.php), and this file proves it in a real browser, on the
  * REAL installer page served by PHP's own web server.
  *
- * WHAT THE POLICY BLOCKS:
- *   a script without this answer's nonce (in any case or spelling, built in
- *   PHP from pieces, or inside an `<iframe srcdoc>`), inline event handlers
- *   (`onload=` and the like), `javascript:` addresses, fetch, XMLHttpRequest,
- *   WebSockets, beacons (on `pagehide` too), prefetch, and pictures, frames,
- *   fonts and media from other hosts.
- * WHAT IT DOES NOT BLOCK:
- *   navigating the page elsewhere (`location`, a `<meta http-equiv=refresh>`
- *   a script adds); a stylesheet from `cdn.jsdelivr.net` with anything after
- *   the host name (a source in a policy matches every path under it, so
- *   `https://cdn.jsdelivr.net/x?z=Europe%2FLondon` loads); DNS-prefetch and
- *   preconnect hints; and `window.open` (not measured in a headless browser).
- * (Measured in a browser during #942's checks: the refusal of nonce-less
- * scripts, handlers, `javascript:` addresses, fetch, WebSockets, beacons and
- * prefetch, and every item in the second list but `window.open`.
- * XMLHttpRequest, and pictures, frames, fonts and media from other hosts,
- * follow from the directives in csp.php and were not tried one by one.)
+ * WHAT THE POLICY BLOCKS (each item measured in Edge headless during #942's checks):
+ *   a script without this answer's nonce (in any case or spelling, built in PHP from pieces, or inside an
+ *   `<iframe srcdoc>`), inline event handlers (`onload=` and the like), `javascript:` addresses, fetch,
+ *   XMLHttpRequest, WebSockets, EventSource, beacons (on `pagehide` too), `<a ping>`, `<link rel=prefetch>`,
+ *   a form posting to another host, and pictures, frames, fonts, media and stylesheets from other hosts
+ *   (except the jsDelivr stylesheet below).
+ * WHAT IT DOES NOT BLOCK (also measured, and NOT a complete list — only what #942's checks tried):
+ *   navigating the page elsewhere (`location`, a `<meta http-equiv=refresh>` a script adds); `window.open`
+ *   (it reached a listener once the popup blocker was off); a stylesheet from `cdn.jsdelivr.net` with anything
+ *   after the host name (a policy source matches every path under it, #976); `<link rel=prerender>` and
+ *   speculation rules (a nonce-carrying `<script type=speculationrules>` that prefetches or prerenders any
+ *   address); WebRTC (an `RTCPeerConnection` to a TURN server); requests to the installer's OWN server (a
+ *   picture at `/x?z=…` loads); preconnect hints; and DNS-prefetch hints (NOT measured: a DNS lookup is not a request a test can record). A browser may have other routes nobody
+ *   has tried.
  *
  * The text pin (tools/audit-checks/check_installer_country_script_pinned.py)
  * guards ONLY the suggestion script. The installer's other three scripts carry
