@@ -919,7 +919,8 @@ $checkModerated('M', $mClean);
 // walked past section C). So THIS section is the guarantee, and it asks the
 // question by behaviour (D-065):
 //
-//   EVERY column of tblEvents is filled with a distinct, recognisable value,
+//   EVERY column of tblEvents is filled with a recognisable value (not every
+//   VALUE a column can hold: enums take one value, flags are mostly 1, #981),
 //   the column list being read from information_schema WHILE THE TEST RUNS,
 //   so a column added later is filled without anybody remembering to. Then
 //   the event page (to a visitor, a member, a global administrator and an
@@ -981,8 +982,9 @@ if (count($eventColumns) < 60) {
 }
 
 /**
- * A distinct, recognisable value for EVERY column, by its type, for one
- * event. `$seed` makes them distinct between events; the three dates of the
+ * A recognisable value for EVERY column, by its type, for one event.
+ * `$seed` makes text and number columns differ between events (enums, flags,
+ * links and dates do not, #981); the three dates of the
  * series share one seed, so their shown fields agree and the series is still
  * sent as one repeating entry.
  *
@@ -1776,7 +1778,7 @@ if ($measuring === true) {
     );
     $before = $renderAll();
     $checkRenders('P12-', $before);
-    check('P13 with `e.*` back (the code before #968), every page and file is identical to the named-column version — with every column filled, a column read but not listed would differ here, however the code reaches it',
+    check('P13 with `e.*` back (the code before #968), every page and file is identical to the named-column version — with every column filled, a column read but not listed would differ here, however the code reaches it, if one of R\'s events makes that read reach the page (#981)',
         $rendersDiffer($rClean, $before), []);
     if ($rendersDiffer($rClean, $before) !== []) {
         echo '      first difference: ' . $firstDifference($rClean, $before, $rendersDiffer($rClean, $before)) . "\n";

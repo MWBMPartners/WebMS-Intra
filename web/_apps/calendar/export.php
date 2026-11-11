@@ -140,10 +140,12 @@ if ($eventId > 0) {
     //    GEO, STATUS, the dates, zone and all-day shape, UID, URL,
     //    LAST-MODIFIED) plus `seriesID`, which decides whether a series is
     //    collapsed — and it is the same in all three statements. In
-    //    tools/event-suggester-privacy-selftest.php, section R is the
-    //    guarantee: it fills every column of tblEvents, downloads all three
-    //    kinds of file with these lists and with `e.*` put back, and requires
-    //    them identical, and its plants take each listed column off in turn.
+    //    tools/event-suggester-privacy-selftest.php, section R is the main
+    //    guard: it fills every column of tblEvents, downloads all three kinds
+    //    of file with these lists and with `e.*` put back, and requires them
+    //    identical, and its plants take each listed column off in turn. It
+    //    sees a missing column only when one of its events holds a value that
+    //    makes the read reach the file (#981).
     //    Section C is a cheap tripwire on the source (PHP's tokeniser: every
     //    `$row[…]`, `$r[…]`, `$ev[…]`, `$events[0][…]` read must be listed,
     //    every listed column read, the three lists the same). The event page's

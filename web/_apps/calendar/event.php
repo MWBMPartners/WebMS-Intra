@@ -124,12 +124,14 @@ $today     = date('Y-m-d');
 //    missed because the reads were collected with a pattern of letters only,
 //    and `W3W` holds a digit. Two checks in
 //    tools/event-suggester-privacy-selftest.php now stand guard:
-//      - Section R is the guarantee. It fills EVERY column of tblEvents with a
-//        distinct value (the column list read from the database as it runs),
-//        renders this page for a spread of events and viewers, and compares
-//        it with `e.*` put back: a column read but not listed shows up there
-//        whatever spelling reaches it. Its plants take every listed column
-//        off in turn and require R to see each go.
+//      - Section R is the main guard. It fills EVERY column of tblEvents (the
+//        column list read from the database as it runs), renders this page
+//        for nine events and four viewers, and compares it with `e.*` put
+//        back: a column read but not listed shows up there whatever spelling
+//        reaches it, PROVIDED one of those events holds a value that makes the
+//        read reach the page. A show-or-hide test on a value no event holds
+//        (an enum value or flag none of them carries) is not seen (#981). Its
+//        plants take every listed column off in turn and require R to see each.
 //      - Section C is a cheap tripwire: PHP's own tokeniser collects every
 //        `$event['…']` and requires this list and those reads to match both
 //        ways, and trips on the spellings it knows for reaching the row
