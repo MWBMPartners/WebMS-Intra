@@ -37,10 +37,14 @@
  *   F. Scope: another event of the same organisation, and an event of another
  *      (inactive) organisation, hold walk-ins with the same names. They must
  *      not tick this event's cells, and a reference taken from them must be
- *      refused with the one truthful message and change nothing.
- *   G. A STALE reference (its oldest row already removed, as with a second tab
- *      or the back button) is answered with that same message, nothing is
- *      changed, and a reload gives a reference that works.
+ *      refused with that one answer and change nothing; a press on another
+ *      organisation's event is the ordinary 404 (F06).
+ *   G. A STALE reference (the walk-in's oldest row, which it names, removed by
+ *      ANOTHER session — a second coordinator; a second tab or the back button
+ *      are stopped earlier, by the form token) and a reference that NEVER
+ *      existed are answered with the same message, the same status and the same
+ *      Location as the foreign ones in F. Nothing is changed, and a reload
+ *      gives a reference that works.
  *   D. PLANTED FAULTS, each in the scratch copy and each required to turn its
  *      named checks red (or, for one, to leave a named check GREEN): the grid
  *      grouping by exact bytes; the handler trimming the stored name; the grid
@@ -482,22 +486,34 @@ function press(string $ref, string $day, string $toggle, int $event = EVENT): ar
 }
 
 /**
- * Was this answer the ONE truthful refusal? The handler redirects to the grid
- * with a flash, so the next grid load must carry the words; a 404 also counts
- * (the event itself is not this organisation's). Call it straight after the
- * press: loading the grid is what consumes the flash.
+ * What a press ANSWERED, as one comparable string: the status, the Location and
+ * the flash words the next grid load shows. Call it straight after the press:
+ * loading the grid is what consumes the flash.
  */
-function refused(array $answer): bool
+function outcome(array $answer): string
 {
     global $jar;
-    if ($answer['status'] === 404) {
-        return true;
-    }
-    if ($answer['status'] !== 302) {
-        return false;
+    $flash = '';
+    if ($answer['status'] === 302) {
+        $grid = req($jar, 'GET', '/calendar/event/attendance?eventID=' . EVENT)['body'];
+        if (preg_match('/<div class="alert alert-(\w+)">\s*(.*?)\s*<\/div>/s', $grid, $m) === 1) {
+            $flash = $m[1] . ': ' . html_entity_decode($m[2], ENT_QUOTES, 'UTF-8');
+        }
     }
 
-    return str_contains(req($jar, 'GET', '/calendar/event/attendance?eventID=' . EVENT)['body'], 'no longer on this event');
+    return $answer['status'] . ' | ' . $answer['location'] . ' | ' . $flash;
+}
+
+/**
+ * Is this outcome the refusal — exactly a 302 back to the grid with the
+ * flash? A 404, a 200 or a 302 with no flash is NOT: a refusal that differed
+ * by case would tell a caller which references exist.
+ */
+function isRefusal(string $outcome): bool
+{
+    return str_ends_with($outcome, ' | warning: This list changed since you opened it. It has been reloaded; please try again. Nothing was changed.')
+        && str_starts_with($outcome, '302 | ')
+        && str_contains($outcome, '/calendar/event/attendance?eventID=' . EVENT . ' | ');
 }
 
 /** Enrol a NEW walk-in by typing the name, as the enrol form posts it. */
@@ -665,15 +681,19 @@ function scenario(string $tag): int
     ok($tag . ' F01 another event\'s "eve" does not tick this event\'s "Eve" (only day 1 is ticked)', togglesOf('Eve') === '0,1,1', togglesOf('Eve'));
     ok($tag . ' F02 another event\'s walk-in is not listed on this event\'s grid', count(walkinRows()) === 1, implode(' / ', array_column(walkinRows(), 'name')));
     $before = [rowsHeld(EVENT), rowsHeld(EVENT_OTHER), rowsHeld(EVENT_OTHER_ORG)];
-    $a1 = refused(press((string) $foreign, $days[0], '0'));
-    ok($tag . ' F03 a reference from another event is refused with the one truthful message', $a1 === true);
-    $b1 = refused(press((string) $foreignOrgZ, $days[0], '0'));
-    $c1 = refused(press((string) $foreignOrg, $days[2], '1'));
-    $d1 = refused(press((string) $foreignOrg, $days[2], '1', EVENT_OTHER_ORG)); // the other organisation's own event and row
-    ok($tag . ' F04 a reference from another organisation, and a press on its event, are refused', $b1 === true && $c1 === true && $d1 === true, json_encode([$b1, $c1, $d1]));
+    $outcomes = [];
+    $outcomes['another event'] = outcome(press((string) $foreign, $days[0], '0'));
+    ok($tag . ' F03 a reference from another event gets the refusal (302 to the grid + the flash)', isRefusal($outcomes['another event']), $outcomes['another event']);
+    $outcomes['another organisation, a row'] = outcome(press((string) $foreignOrgZ, $days[0], '0'));
+    $outcomes['another organisation, same name'] = outcome(press((string) $foreignOrg, $days[1], '1'));
+    ok($tag . ' F04 references from another organisation get the same refusal', isRefusal($outcomes['another organisation, a row']) && isRefusal($outcomes['another organisation, same name']), json_encode([$outcomes['another organisation, a row'], $outcomes['another organisation, same name']]));
+    $outcomes['never existed'] = outcome(press('2147483000', $days[0], '1'));
+    ok($tag . ' F04b a reference that never existed gets the same refusal', isRefusal($outcomes['never existed']), $outcomes['never existed']);
+    $other = outcome(press((string) $foreignOrg, $days[1], '1', EVENT_OTHER_ORG)); // the other organisation's own event and row
+    ok($tag . ' F06 a press on an event that is not this organisation\'s is the ordinary 404', str_starts_with($other, '404 | '), $other);
     ok($tag . ' F05 and no row anywhere was added or removed by any of them', [rowsHeld(EVENT), rowsHeld(EVENT_OTHER), rowsHeld(EVENT_OTHER_ORG)] === $before);
 
-    // G. A stale reference: the group's oldest row is removed behind the page's back.
+    // G. A stale reference: the group's oldest row is removed by ANOTHER session.
     clearAll();
     $oldest = addRow(EVENT, 'Gus', $days[0]);
     addRow(EVENT, 'gus', $days[1]);
@@ -683,11 +703,12 @@ function scenario(string $tag): int
             $gus = $row;
         }
     }
-    q('DELETE FROM `tblEventAttendance` WHERE `attendanceID` = ?', 'i', [$oldest]); // the other tab removes it
+    q('DELETE FROM `tblEventAttendance` WHERE `attendanceID` = ?', 'i', [$oldest]); // a second coordinator removes it
     $heldBefore = rowsHeld();
-    $stale = $gus === null ? ['status' => 0, 'location' => '', 'body' => ''] : press($gus['cells'][2]['ref'], $days[2], '1');
-    ok($tag . ' G01 a stale reference is refused with the one truthful message, not a bare 404', $stale['status'] === 302 && refused($stale) === true, 'HTTP ' . $stale['status']);
+    $outcomes['stale'] = $gus === null ? 'no row to press' : outcome(press($gus['cells'][2]['ref'], $days[2], '1'));
+    ok($tag . ' G01 a stale reference gets the refusal, and the walk-in still has day 2, so the words claim only that the list changed', isRefusal($outcomes['stale']), $outcomes['stale']);
     ok($tag . ' G02 and the stale press changed nothing', rowsHeld() === $heldBefore, implode(', ', rowsHeld()));
+    ok($tag . ' G04 every refusal — another event, another organisation, never existed, stale — is the SAME answer (status, Location, flash)', count(array_unique($outcomes)) === 1 && isRefusal($outcomes['stale']) === true, json_encode($outcomes));
     $fresh = null;
     foreach (walkinRows() as $row) {
         if ($row['name'] === 'gus') {
@@ -761,8 +782,10 @@ $plants = [
     ['grid not scoped to the event', [[$helper, 'WHERE a.`eventID` = ? \'', 'WHERE ? > 0 \'']], ['F01'], []],
     ['reference lookup not scoped to the event', [[$helper, 'WHERE a.`attendanceID` = ? AND a.`eventID` = ? AND', 'WHERE a.`attendanceID` = ? AND ? > 0 AND']], ['F03'], []],
     // The handler's own check is the first wall; the lookup's organisation test is the second.
-    ['handler event check bypassed (lookup still scoped to the organisation)', [$bypass], [], ['F03', 'F04', 'F05']],
-    ['handler event check bypassed AND the lookup not scoped to the organisation', [$bypass, [$helper, 'AND e.`siteID` = ? \'', 'AND ? > 0 \'']], ['F04'], []],
+    ['handler event check bypassed (lookup still scoped to the organisation)', [$bypass], ['F06'], ['F03', 'F04', 'F04b', 'F05']],
+    ['handler event check bypassed AND the lookup not scoped to the organisation', [$bypass, [$helper, 'AND e.`siteID` = ? \'', 'AND ? > 0 \'']], ['F05', 'F06'], []],
+    // Existence must not leak: 404 when the row exists somewhere, the flash when it does not.
+    ['handler answers 404 when the reference exists elsewhere', [[$handler, '    if ($stored === null) {', "    if (\$stored === null && (int) \$mysqli->query('SELECT COUNT(*) FROM tblEventAttendance WHERE attendanceID = ' . \$walkinRef)->fetch_row()[0] > 0) { http_response_code(404); exit('Event not found'); }\n    if (\$stored === null) {"]], ['F03', 'F04', 'G04'], ['F04b', 'G01']],
 ];
 foreach ($plants as [$name, $edits, $mustFail, $mustStayGreen]) {
     $labels  = plantedRun($name, $edits);

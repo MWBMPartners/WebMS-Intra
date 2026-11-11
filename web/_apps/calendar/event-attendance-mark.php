@@ -70,15 +70,23 @@ if ($ok === false) { http_response_code(404); exit('Event not found'); }
 $redirect = Site::url('calendar/event/attendance') . '?eventID=' . $eventId;
 
 // 🔑 A walk-in cell posts a reference; use the STORED name exactly. ONE
-// truthful answer for every reference that cannot be used — another event's,
-// another organisation's, one that never existed, and one whose row has since
-// been removed (a second tab, a second coordinator, the back button). The same
-// words for all four, so the answer reveals nothing about other events, and
-// the press is not silently lost: the grid is redrawn and says so.
+// answer for every reference that cannot be used — another event's, another
+// organisation's, one that never existed, and a stale one (the walk-in's
+// oldest row, which the reference names, has been removed since the page was
+// drawn). The words are true in each case, because all they claim is that the
+// list has changed, and they are the same for all four, so the answer reveals
+// nothing about other events. The press is not silently lost: the grid is
+// redrawn and says so.
+//
+// WHO CAN REACH THE STALE CASE. Not a second tab or the back button: the form
+// token rotates on every accepted post, so those are refused with a 400 by
+// `Auth::verifyCsrf()` above before any reference is looked at. A DIFFERENT
+// session can — a second coordinator removing the row while this one's page is
+// open.
 if ($walkinRef > 0) {
     $stored = AttendanceWalkins::storedName($mysqli, $eventId, $siteId, $walkinRef);
     if ($stored === null) {
-        $_SESSION['flash_msg']  = 'That walk-in is no longer on this event\'s list. The list has been reloaded; please try again. Nothing was changed.';
+        $_SESSION['flash_msg']  = 'This list changed since you opened it. It has been reloaded; please try again. Nothing was changed.';
         $_SESSION['flash_type'] = 'warning';
         header('Location: ' . $redirect, true, 302);
         exit();

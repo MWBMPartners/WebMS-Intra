@@ -48,9 +48,10 @@
  *     that same stored value is what `storedName()` hands the handler, so the
  *     removal and the add use exactly the bytes the grid drew.
  *   - A row whose name is EMPTY ('') groups with other empty names and is
- *     DRAWN with a blank label, but its cell cannot be pressed (the handler
- *     ignores an empty name). Only hand-written SQL can create one: both
- *     portal writers refuse an empty name. Not handled further (#655 notes).
+ *     DRAWN with a blank label. Its cell CAN be pressed, but the handler
+ *     silently ignores an empty name and redirects, so nothing happens. Only
+ *     hand-written SQL can create one: both portal writers refuse an empty
+ *     name. Not handled further (#655 notes).
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -150,7 +151,8 @@ final class AttendanceWalkins
     /**
      * 🔑 The name exactly as STORED for a walk-in reference the grid posted,
      * or null when the reference is not a walk-in row of THAT event in THAT
-     * organisation (the handler answers that exactly like "not found").
+     * organisation. The handler answers every such case the same way: a message
+     * that the list has changed, and a redirect to the grid.
      *
      * WHY A REFERENCE AND NOT THE NAME. The handler used to trim() the posted
      * name before the DELETE / INSERT. The database ignores trailing SPACES but
