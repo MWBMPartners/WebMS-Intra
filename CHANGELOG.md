@@ -4,6 +4,20 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### The events detail answer keeps moderators' notes for signed-in administrators; public event pages read only their own columns (#968, D-136)
+
+- `GET /api/events/detail` and `GET /api/v1/events/{id}` used to send every caller allowed to see an event its
+  `moderationNote`, the account numbers of whoever created, edited, suggested, moderated and last changed its
+  status, and `deletedAt`. These seven now go only to an administrator signed in to the portal (a global
+  administrator or one of the organisation's own); every API key, whatever its scope, gets none of them (D-136).
+  Measured before the fix: a member and an `events:read` key were sent all seven, the note included.
+- `/calendar/event` and the calendar downloads read the whole event row, so a visitor's name and address (#963)
+  and the moderation note were in memory on two public pages. Each now names the columns it uses. A self-test
+  fills every events column, renders both pages for nine kinds of event and four viewers, and requires them
+  identical to the whole-row versions; it cannot see a show-or-hide read on a value none of its events holds
+  (#981). The first version of the page's list left out the what3words address; corrected before release.
+  Four check rounds (protected arm). Follow-up: #981.
+
 ### Erasure: a cleared kept giving record, labels that keep your number, and the Gift Aid file never says "[Deleted User]" (#941, #927)
 
 - **An erasure can no longer finish while gifts still carry the donor's account number

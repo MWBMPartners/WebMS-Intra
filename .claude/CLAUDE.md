@@ -460,6 +460,8 @@ Internal portal platform (PHP 8.5, backward-compatible with 8.4, Bootstrap 5.3.3
   and holds none of its own; every look at expense records is logged as numbers only (D-130, D-132).
   A visitor's event suggestion: `tblEvents.submitterName` / `submitterEmail` are read only by the moderation
   page and the approval e-mail (D-134, #963); the events API, the activity log and webhooks carry neither.
+  `events/api/detail.php` sends `moderationNote` and the who-did-what numbers only to an administrator signed in to
+  the portal, never to an API key (D-136, #968); `calendar/event.php` and `calendar/export.php` name their columns.
   `Portal\Core\EventSuggestions` is the ONE place the approval e-mail is worded and sent (#859): once only,
   after the approval is stored, never throwing. A body holding anything a stranger typed goes through
   `Mailer::send()` with `'bodyIsText' => true`, or Mailer's HTML guess sends their markup as written.

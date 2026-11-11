@@ -23474,3 +23474,18 @@ statement early: a reader that blanks or splits SQL must track strings and comme
   account on/off; account name tombstone, tombstone in other capitals, real, '', NULL, whitespace; e-mail made-up
   or real: 144 donors) with an oracle written from the facts, never from the code. **Cover the dimension, not an
   example of it.**
+
+
+## What the events detail answer keeps back, and how the public pages' column lists are kept complete (#968)
+
+- `events/api/detail.php` keeps `moderationNote` and the who-did-what numbers only when NO API key is sent and the
+  session passes `App::isAdmin()` (D-136). When a key is sent the session is ignored; a write key still counts as
+  managing events for the draft rule only.
+- **The column lists took four rounds, and the lesson is the instrument again.** Round 1's list missed
+  `locationW3W` because the reads were collected with a letters-only pattern. A tokeniser check (section C) was then
+  beaten by spellings it did not know (`call_user_func('compact', 'event')`, `namespace\compact`). The main guard
+  is now BEHAVIOURAL (D-065): section R fills every `tblEvents` column (the list read from `information_schema` at
+  run time), renders the page for nine events and four viewers and the three downloads, and compares with `e.*` put
+  back; plants take each listed column off in turn. **Its limit, stated rather than hidden:** it fills every
+  column, not every VALUE, so a show-or-hide read on a value no event holds is unseen (#981). Section C stays as a
+  cheap tripwire.
