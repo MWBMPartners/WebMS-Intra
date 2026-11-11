@@ -46,14 +46,18 @@
  *   R  the page offers only buttons the handler would accept; with open
  *      requests switched off an open request cannot be taken but can be
  *      withdrawn
- *   W  every sentence about where a duty is says where it is NOW, after an
- *      administrator has moved it: the asker's list and e-mail after a
- *      decline, what the decliner reads, what a withdrawing asker reads, and
- *      the duty taken off everybody or held by somebody with no name
+ *   W  with an administrator having moved the duty: the asker's own list —
+ *      the ONE place that says where a duty is now, because it reads the
+ *      duty while drawing — says who has it (named, nobody, or "another
+ *      member"); and what the decliner and a withdrawing asker read is the
+ *      fixed sentence about what THEIR answer did, never where the duty is
  *   M  what the e-mails really carry: the mail route is pointed at a closed
  *      port, so each message is KEPT in the mail queue and opened here — the
- *      asker's words go as text, the use-by moment is set, the decline
- *      e-mail says where the duty is now
+ *      asker's words go as text, the use-by moment is set, and the accept
+ *      and decline e-mails say, word for word, what the answer did: who
+ *      answered, as respond() recorded it inside its transaction — even when
+ *      the duty is moved straight after — with the two fallback names for an
+ *      answerer whose name cannot be read
  *   T  THE LOCK: this test holds the duty's row; the real
  *      `RotaSwaps::respond()` runs in its own PROCESS and must WAIT (asked of
  *      information_schema, not assumed from a sleep); the duty is moved while
@@ -81,6 +85,11 @@
  *     an e-mail arrive. The mail route is the SMTP mailbox with no server
  *     named, which records each attempt as "not set up".
  *   - It does not drive a real browser; nothing on these pages needs script.
+ *   - It does NOT drive a lost reply at the COMMIT (`RotaSwaps::UNKNOWN`,
+ *     "We could not confirm whether your answer was saved"): that needs the
+ *     server to commit and the reply to PHP to fail, which nothing here can
+ *     arrange. That branch is read, not run. The FAILED branch ("nothing was
+ *     changed") is driven by section V.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_rotaswaps SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/rota-swaps-selftest.php
@@ -114,7 +123,7 @@ $failed = 0;
 $state  = ['proc' => null, 'child' => null, 'workers' => [], 'hold' => null, 'db' => null, 'settings' => [], 'mailRows' => null];
 
 /** The scratch triggers sections U and V create, dropped by the clean-up whatever happens. */
-const SCRATCH_TRIGGERS = ['zzRotaSwapSlowTrg', 'zzRotaSwapFailTrg', 'zzRotaSwapCanTrg'];
+const SCRATCH_TRIGGERS = ['zzRotaSwapSlowTrg', 'zzRotaSwapFailTrg', 'zzRotaSwapMoveTrg', 'zzRotaSwapCanTrg'];
 
 function refuse(string $why): never
 {
@@ -626,7 +635,7 @@ $signIn = static function (string $who) use (&$people, $password, $child): void 
         refuse("signing in as {$who} did not answer a redirect (HTTP {$in['status']})");
     }
 };
-foreach (['asker', 'asked', 'third', 'off'] as $who) {
+foreach (['asker', 'asked', 'third', 'off', 'noname'] as $who) {
     $signIn($who);
 }
 
@@ -1046,8 +1055,10 @@ $scnOpenSwitchedOff = static function () use ($newSlot, $ask, $answer, $roster, 
 };
 
 /**
- * W: a decline after an administrator has moved the duty must NOT tell the
- * asker "the duty is still yours" — on the page (here) or in the e-mail (M).
+ * W: a decline after an administrator has moved the duty. The asker's LIST
+ * (which reads the duty while drawing) must say who has it now, never "the
+ * duty is still yours"; the decliner reads only what their answer did. The
+ * decline e-mail for this same answer is checked in M.
  */
 $scnWhereNow = static function () use ($newSlot, $ask, $answer, $roster, $rowOf, $A, $B, $C, $people): array {
     $slot = $newSlot($A);
@@ -1203,10 +1214,21 @@ $expectedUseBy = static function (string $date) use ($siteId): string {
 /**
  * M: what the e-mails really say and carry. A message quoting the asker's
  * own words `<b>x</b>` must go as TEXT (shown as typed, never as markup); it
- * must carry its use-by moment; and the decline e-mail after the duty has
- * been moved must say where it is now.
+ * must carry its use-by moment; and the accept and decline e-mails must say,
+ * word for word, what the answer DID — who answered, as `respond()` recorded
+ * it inside its own transaction, never where the duty is now.
+ *
+ * WHY A SCRATCH TRIGGER MOVES THE DUTY (the "moved" case). Round 4's checks
+ * could not tell the e-mail's name from respond()'s facts apart from a name
+ * read again AFTER the commit, because nothing ever moved the duty between
+ * the two: putting round 3's after-commit read back left everything green.
+ * A trigger on the request's own "accepted" write moves the duty to a third
+ * person inside the same transaction, so after the commit the duty's row and
+ * respond()'s facts DISAGREE, and the e-mail must follow respond(). Driven
+ * through the real page, so it also proves the page passes respond()'s answer
+ * on.
  */
-$scnMailContent = static function () use ($routeDown, $kept, $expectedUseBy, $newSlot, $ask, $answer, $scnWhereNow, $roleName, $A, $B, $people): array {
+$scnMailContent = static function () use ($routeDown, $kept, $expectedUseBy, $newSlot, $ask, $answer, $scnWhereNow, $roleName, $A, $B, $C, $people): array {
     $routeDown(true);
     $slot = $newSlot($A);
     $ask('asker', $slot, $B, 'Can you <b>x</b> cover?');
@@ -1223,6 +1245,24 @@ $scnMailContent = static function () use ($routeDown, $kept, $expectedUseBy, $ne
     $reqO  = $ask('asker', $slotO, 0, 'Open accept e-mail');
     $answer('third', $reqO['swapId'], 'accept');
     $accO  = $kept('asker', 'Your rota swap was accepted: ' . $roleName . ' on ' . $slotO['words']);
+    // The duty moved to C straight after B accepted (see the docblock).
+    $slotM = $newSlot($A);
+    $reqM  = $ask('asker', $slotM, $B, 'Moved after accept');
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapMoveTrg`');
+    $GLOBALS['db']->query("CREATE TRIGGER `zzRotaSwapMoveTrg` AFTER UPDATE ON `tblRotaSwapRequest` FOR EACH ROW BEGIN IF NEW.`status` = 'accepted' AND OLD.`requestMessage` = 'Moved after accept' THEN UPDATE `tblRotaSlot` SET `assignedToID` = " . (int) $C . ' WHERE `slotID` = NEW.`slotID`; END IF; END');
+    $answer('asked', $reqM['swapId'], 'accept');
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapMoveTrg`');
+    $accM  = $kept('asker', 'Your rota swap was accepted: ' . $roleName . ' on ' . $slotM['words']);
+    // An answerer whose name cannot be read: taking an open request, and
+    // declining one aimed at them.
+    $slotN = $newSlot($A);
+    $reqN  = $ask('asker', $slotN, 0, 'No-name taker');
+    $answer('noname', $reqN['swapId'], 'accept');
+    $accN  = $kept('asker', 'Your rota swap was accepted: ' . $roleName . ' on ' . $slotN['words']);
+    $slotD = $newSlot($A);
+    $reqD  = $ask('asker', $slotD, $people['noname']['id'], 'No-name decliner');
+    $answer('noname', $reqD['swapId'], 'decline');
+    $decN  = $kept('asker', 'Your rota swap was declined: ' . $roleName . ' on ' . $slotD['words']);
     $routeDown(false);
     $dutyOf = static fn (array $slot): string => $roleName . ' on ' . $slot['words'] . ', 10:00–12:00';
 
@@ -1239,6 +1279,12 @@ $scnMailContent = static function () use ($routeDown, $kept, $expectedUseBy, $ne
             && stripos($decl['text'], 'still yours') === false,
         'accepted' => $accT !== null && str_contains($accT['text'], "\n" . $people['asked']['name'] . ' accepted your request to swap ' . $dutyOf($slotT) . ", and the duty was moved to them.\n"),
         'openTaker' => $accO !== null && str_contains($accO['text'], "\n" . $people['third']['name'] . ' accepted your request to swap ' . $dutyOf($slotO) . ", and the duty was moved to them.\n"),
+        // The premise first: the duty really is with C after the commit, so
+        // an e-mail that read it then would name C.
+        'movedPremise' => (int) (q('SELECT `assignedToID` FROM `tblRotaSlot` WHERE `slotID` = ?', 'i', [$slotM['id']])[0]['assignedToID'] ?? 0) === (int) $C,
+        'movedTaker' => $accM !== null && str_contains($accM['text'], "\n" . $people['asked']['name'] . ' accepted your request to swap ' . $dutyOf($slotM) . ", and the duty was moved to them.\n"),
+        'noNameTaker' => $accN !== null && str_contains($accN['text'], "\nA member accepted your request to swap " . $dutyOf($slotN) . ", and the duty was moved to them.\n"),
+        'noNameDecliner' => $decN !== null && str_contains($decN['text'], "\nThe member you asked declined your request to swap " . $dutyOf($slotD) . ". This did not move the duty.\n"),
         'detail'  => json_encode(['expiresAt' => $msg['expiresAt'] ?? null, 'expected' => $expectedUseBy($slot['date']), 'text' => substr($msg['text'] ?? '', 0, 300), 'decline' => substr($decl['text'] ?? '', 0, 300), 'accept' => substr($accT['text'] ?? '', 0, 300), 'open' => substr($accO['text'] ?? '', 0, 300)], JSON_UNESCAPED_UNICODE),
     ];
 };
@@ -1490,6 +1536,10 @@ check('M3 the e-mail carries its use-by moment: the start of the day after the d
 check('M4 the decline e-mail says what the answer did, word for word — "<name> declined your request to swap <duty>. This did not move the duty." — even with the duty moved', $m['declined'], $m['detail']);
 check('M5 the accept e-mail says, word for word, "<name> accepted your request to swap <duty>, and the duty was moved to them."', $m['accepted'], $m['detail']);
 check('M6 for an OPEN request it names whoever TOOK it, as respond() recorded it', $m['openTaker'], $m['detail']);
+check('M7 (the premise) a scratch trigger moved the duty to a third person inside the accept, so after the commit the duty\'s row and respond()\'s facts disagree', $m['movedPremise'], $m['detail']);
+check('M8 …and the accept e-mail still names the person who TOOK it (respond()\'s fact), not whoever holds the duty afterwards', $m['movedTaker'], $m['detail']);
+check('M9 an answerer whose name cannot be read is "A member" when they took the duty…', $m['noNameTaker'], $m['detail']);
+check('M10 …and "The member you asked" when they declined', $m['noNameDecliner'], $m['detail']);
 
 // =============================================================================
 section('T  the lock: two answers at once');
@@ -1618,6 +1668,18 @@ $plants  = [
     'P27 the accept e-mail names the person ASKED, not who took it' => ['_core/RotaSwaps.php',
         ["\$answerer = (string) (\$did['answererName'] ?? '');", "\$answerer = \$req['targetName'];"],
         static fn (): bool => $scnMailContent()['openTaker'],
+    ],
+    'P29 the accept e-mail names whoever holds the duty AFTER the commit (round 3\'s read)' => ['_core/RotaSwaps.php',
+        ["\$answerer = (string) (\$did['answererName'] ?? '');", "\$answerer = \$accepted === true ? \$req['holderName'] : (string) (\$did['answererName'] ?? '');"],
+        static fn (): bool => $scnMailContent()['movedTaker'],
+    ],
+    'P30 the "A member" fallback name lost' => ['_core/RotaSwaps.php',
+        ["(\$accepted === true ? 'A member' : 'The member you asked')", "(\$accepted === true ? 'Somebody' : 'The member you asked')"],
+        static fn (): bool => $scnMailContent()['noNameTaker'],
+    ],
+    'P31 the "The member you asked" fallback name lost' => ['_core/RotaSwaps.php',
+        ["(\$accepted === true ? 'A member' : 'The member you asked')", "(\$accepted === true ? 'A member' : 'Somebody')"],
+        static fn (): bool => $scnMailContent()['noNameDecliner'],
     ],
     'P28 the decline e-mail back to "the duty is still yours"' => ['_core/RotaSwaps.php',
         ["'. This did not move the duty.',\n", "'. The duty is still yours.',\n"],

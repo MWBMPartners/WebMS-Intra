@@ -110,6 +110,18 @@ if ($result['outcome'] === RotaSwaps::REFUSED) {
     exit();
 }
 
+if ($result['outcome'] === RotaSwaps::UNKNOWN) {
+    // 🤷 The commit failed or its reply was lost: the answer may have been
+    //    stored. Say only what is known — never "nothing was changed", and
+    //    never "try again", which could answer twice (#649's shape).
+    $_SESSION['rota_flash']      = 'We could not confirm whether your answer was saved. Reload the page to see where the request stands.';
+    $_SESSION['rota_flash_type'] = 'warning';
+    header('Location: ' . $back);
+    exit();
+}
+
+// FAILED: the fault came before the commit and the transaction was rolled
+// back, so it IS known that nothing was written.
 $_SESSION['rota_flash']      = 'The swap request could not be answered just now, and nothing was changed. Please try again.';
 $_SESSION['rota_flash_type'] = 'danger';
 header('Location: ' . $back);

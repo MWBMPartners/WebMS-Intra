@@ -188,8 +188,14 @@ final class RotaSwaps
     public const DONE    = 'done';
     /** `respond()` refused the answer; `reason` says why, and nothing changed. */
     public const REFUSED = 'refused';
-    /** The database refused something; nothing changed. */
+    /** The database refused something BEFORE the commit, and it was rolled back; nothing changed. */
     public const FAILED  = 'failed';
+    /**
+     * The COMMIT itself failed or its reply was lost, so whether the answer
+     * was stored is NOT KNOWN: a server can commit and the reply never reach
+     * PHP (#649's shape). Never worded as "nothing was changed".
+     */
+    public const UNKNOWN = 'unknown';
 
     /**
      * Today's date on the ORGANISATION's own calendar, as `Y-m-d`.
@@ -367,23 +373,30 @@ final class RotaSwaps
      * request still waiting for the same duty is cancelled, because the duty
      * is no longer the asker's to give.
      *
-     * It never throws for a database fault: it rolls back and answers FAILED.
+     * It never throws for a database fault. A fault BEFORE the commit is
+     * rolled back and answers FAILED (nothing changed: a rollback that itself
+     * fails means the connection has gone, and the server then discards the
+     * uncommitted transaction). A fault AT the commit answers UNKNOWN, because
+     * the server may have committed and only the reply been lost.
      *
      * `$openAllowed` is the organisation's `rota.allow_open_swap` setting,
      * passed in by the caller (see `whyNotAllowed()`).
      *
      * WHAT IT ANSWERS: what THIS answer did, as established inside its own
-     * locked transaction — the outcome, who asked, who answered (number and
-     * name, read inside the transaction), and on an accept who the duty was
-     * moved to. Every message and e-mail about the answer is built from these
+     * locked transaction — the outcome, the answer given (`action`), who
+     * asked (`askerID`, for the e-mail's recipient) and the name of whoever
+     * answered (`answererName`, read inside the transaction; on an accept the
+     * duty was moved to exactly that person, so it is the name of who now
+     * took it). Every message and e-mail about the answer is built from these
      * facts and nothing read afterwards (#657 round 4).
      *
-     * @return array{outcome:string, reason:string, slotID:int, action:string, askerID:?int, answererID:?int, answererName:string, movedToID:?int}
+     * @return array{outcome:string, reason:string, slotID:int, action:string, askerID:?int, answererName:string}
      */
     public static function respond(\mysqli $db, int $siteId, int $swapId, int $userId, string $action, string $responseMessage, bool $openAllowed): array
     {
-        $response = mb_substr(trim($responseMessage), 0, 500, 'UTF-8');
-        $began    = false;
+        $response   = mb_substr(trim($responseMessage), 0, 500, 'UTF-8');
+        $began      = false;
+        $committing = false;
         try {
             // ⚠️ THE TRANSACTION STARTS FIRST, and the read is inside it with
             //    FOR UPDATE, which locks BOTH rows the join reads — the request
@@ -475,7 +488,12 @@ final class RotaSwaps
                 $mark->close();
             }
 
-            $db->commit();
+            // ⚠️ FROM HERE ON a failure is NOT "nothing changed": the server
+            //    may commit and the reply be lost (#649's shape).
+            $committing = true;
+            if ($db->commit() === false) {
+                throw new \RuntimeException('commit answered false');
+            }
 
             return [
                 'outcome'      => self::DONE,
@@ -483,32 +501,38 @@ final class RotaSwaps
                 'slotID'       => $slotId,
                 'action'       => $action,
                 'askerID'      => $facts['requestedByID'],
-                'answererID'   => $userId,
+                // On an accept the duty was moved to exactly this person in
+                // this transaction (the person asked, or whoever took an open
+                // request), so this is the name of who took it.
                 'answererName' => $answererName,
-                // On an accept the duty was moved to the answerer, in this
-                // transaction: for a request aimed at one person that is that
-                // person; for an open request, whoever took it.
-                'movedToID'    => $action === self::ACCEPT ? $userId : null,
             ];
         } catch (\Throwable $e) {
+            if ($committing === true) {
+                // The commit itself failed or its reply was lost: whether the
+                // answer was stored is not known, and is not guessed at.
+                Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND_UNKNOWN', 'A rota swap answer may or may not have been stored: the commit did not confirm', '');
+
+                return self::didNothing(self::UNKNOWN, '', 0);
+            }
             if ($began === true) {
                 try {
                     $db->rollback();
                 } catch (\Throwable $ignored) {
-                    // The connection has gone; the server rolls back for us.
+                    // The connection has gone; the server discards the
+                    // uncommitted transaction for us, so nothing was stored.
                 }
             }
             // The fault's own words are not logged: they can quote a value.
-            Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND', 'A rota swap answer could not be stored', '');
+            Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND', 'A rota swap answer was not stored: it failed before the commit and was rolled back', '');
 
             return self::didNothing(self::FAILED, '', 0);
         }
     }
 
-    /** What `respond()` answers when it did NOTHING (refused or failed). */
+    /** What `respond()` answers when it did NOTHING it can stand behind (refused, failed or unknown). */
     private static function didNothing(string $outcome, string $reason, int $slotId): array
     {
-        return ['outcome' => $outcome, 'reason' => $reason, 'slotID' => $slotId, 'action' => '', 'askerID' => null, 'answererID' => null, 'answererName' => '', 'movedToID' => null];
+        return ['outcome' => $outcome, 'reason' => $reason, 'slotID' => $slotId, 'action' => '', 'askerID' => null, 'answererName' => ''];
     }
 
     /**
