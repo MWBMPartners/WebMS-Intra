@@ -915,20 +915,24 @@ final class PublicWebsiteSetup
      *    itself as well — that is the backstop, caught as error 1062, and it
      *    is what still holds if this ask is ever wrong; the lock is what turns
      *    the clash into a sentence rather than an error.
-     *    The approval refusal NAMES the organisation that holds the name: it
-     *    is read only by the installation's global administrator, who sees
-     *    every organisation anyway.
+     *    The refusal SHOWN names the organisation that holds the name — the
+     *    person shown it is the installation's global administrator, who sees
+     *    every organisation anyway. The refusal RECORDED never does, and
+     *    neither does any approval record: the activity log is stamped with
+     *    the organisation the administrator has open, and that organisation's
+     *    ordinary administrators read it (`approvalRefused()`,
+     *    `recordApprovalDecision()`; #895, round 1 of its check).
      *
      * @return array{saved:bool, type:string, message:string}
      */
     public static function approvePublicHost(\mysqli $db, int $siteId, string $host, bool $isRootAdmin, ?int $actorId): array
     {
         if ($isRootAdmin === false) {
-            return self::refusedAndRecorded('public address approval', $siteId, 'Only a global administrator of the whole '
+            return self::approvalRefused($siteId, 'Only a global administrator of the whole '
                 . 'installation can approve a public address. Nothing was changed.', $actorId);
         }
         if (PortalAddress::visitorCanChooseHost() === true) {
-            return self::refusedAndRecorded('public address approval', $siteId, 'The portal\'s own address is not set, so it '
+            return self::approvalRefused($siteId, 'The portal\'s own address is not set, so it '
                 . 'cannot tell whether this is an address members sign in at. Set it on Admin, Settings, Organisation first. '
                 . 'Nothing was changed.', $actorId);
         }
@@ -937,7 +941,7 @@ final class PublicWebsiteSetup
         // would accept " EVENTS.example.org " and record that spelling.
         $stored = self::publicHostFor($db, $siteId);
         if ($stored === '' || $stored !== $host) {
-            return self::refusedAndRecorded('public address approval', $siteId, 'That address is no longer the one waiting '
+            return self::approvalRefused($siteId, 'That address is no longer the one waiting '
                 . 'for approval (it was changed, removed or approved already). Nothing was changed; look at the page again.', $actorId);
         }
         $notWaiting = 'That address is no longer the one waiting for approval (it was changed, removed or approved already). '
@@ -972,7 +976,7 @@ final class PublicWebsiteSetup
                 if ($mine === null || (string) $mine['hostName'] !== $stored || $mine['approvedAtUtc'] !== null) {
                     $db->rollback();
 
-                    return self::refusedAndRecorded('public address approval', $siteId, $notWaiting, $actorId);
+                    return self::approvalRefused($siteId, $notWaiting, $actorId);
                 }
                 if ($takenBy === null) {
                     $stmt = $db->prepare('UPDATE `' . self::HOSTS_TABLE . '` SET `approvedAtUtc` = UTC_TIMESTAMP(), `approvedByID` = ? '
@@ -996,22 +1000,26 @@ final class PublicWebsiteSetup
             // of this name — the backstop, reached only if the ask above was
             // somehow passed. Said in the same words as the ask's refusal.
             if ($e instanceof \mysqli_sql_exception && $e->getCode() === 1062) {
-                return self::refusedAndRecorded('public address approval', $siteId, self::takenWords($db, $stored, $siteId, true), $actorId);
+                return self::approvalRefused($siteId, self::takenWords($db, $stored, $siteId, true, true), $actorId,
+                    self::takenWords($db, $stored, $siteId, true, false));
             }
             error_log('[WebMS-Intra] PublicWebsiteSetup: a public address could not be approved: ' . $e->getMessage());
 
-            return self::refusedAndRecorded('public address approval', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
+            return self::approvalRefused($siteId, 'The database refused the change. Nothing was changed.', $actorId);
         }
         if ($takenBy !== null) {
-            return self::refusedAndRecorded('public address approval', $siteId, self::takenWords($db, $stored, $siteId), $actorId);
+            return self::approvalRefused($siteId, self::takenWords($db, $stored, $siteId, false, true), $actorId,
+                self::takenWords($db, $stored, $siteId, false, false));
         }
         if ($changed < 1) {
-            return self::refusedAndRecorded('public address approval', $siteId, $notWaiting, $actorId);
+            return self::approvalRefused($siteId, $notWaiting, $actorId);
         }
-        Logger::activity('PublicWebsitePublicAddressApproved', 'Organisation #' . $siteId . '\'s public address ' . $stored
-            . ' was approved by the installation\'s global administrator. It answers as the public door from now on.'
-            . ($alsoAsked > 0 ? ' ' . $alsoAsked . ' other organisation' . ($alsoAsked === 1 ? '' : 's') . ' had asked for the same '
-                . 'address and ' . ($alsoAsked === 1 ? 'is' : 'are') . ' now shown it as taken.' : ''), $actorId);
+        // The record names this organisation's own address only when it goes
+        // into this organisation's own log (#895, round 1 of its check): it
+        // never says how many others asked, or who they are.
+        self::recordApprovalDecision('PublicWebsitePublicAddressApproved', $siteId, 'Organisation #' . $siteId . '\'s public address '
+            . $stored . ' was approved by the installation\'s global administrator. It answers as the public door from now on.',
+            'Another organisation\'s public address was approved by the installation\'s global administrator.', $actorId);
 
         return ['saved' => true, 'type' => 'success', 'message' => 'Approved: ' . $stored . ' now answers as that organisation\'s '
             . 'public door, while its door is on.'
@@ -1020,10 +1028,21 @@ final class PublicWebsiteSetup
     }
 
     /**
-     * The refusal the installation's global administrator reads when another
-     * organisation is already approved for this name (D-121). It names that
-     * organisation, because this administrator sees every organisation, and
-     * says what to do. Never throws: an unreadable name is left out.
+     * The refusal shown when another organisation is already approved for
+     * this name (D-121), and says what to do. Never throws: an unreadable name
+     * is left out.
+     *
+     * `$nameHolder`: name the organisation that holds it. Only for the words
+     * SHOWN on screen: approval is refused only after `$isRootAdmin` passed,
+     * so the person shown them is the installation's global administrator,
+     * who sees every organisation anyway. NEVER for the words RECORDED: the
+     * activity log is stamped with the organisation the administrator has
+     * open, and that organisation's ordinary administrators read it on
+     * Admin, Activity (#895, round 1 of its check — measured: the losing
+     * organisation's administrator read the winner's name there). An earlier
+     * version of this comment said the refusal "is read only by the
+     * installation's global administrator", which was true of the screen and
+     * untrue of the record.
      *
      * `$byDatabase` is true when the database's own unique key refused the
      * second approval (the backstop) rather than the locked ask: the words
@@ -1031,22 +1050,24 @@ final class PublicWebsiteSetup
      * tell the two apart, which is the only way to prove the lock is doing
      * its work while the key is there behind it.
      */
-    private static function takenWords(\mysqli $db, string $host, int $siteId, bool $byDatabase = false): string
+    private static function takenWords(\mysqli $db, string $host, int $siteId, bool $byDatabase, bool $nameHolder): string
     {
         $holder = '';
-        try {
-            $others = self::otherRequestsFor($db, $siteId, $host);
-            if ($others !== null && $others['approvedSiteId'] !== null) {
-                $stmt = $db->prepare('SELECT `siteName` FROM `tblSites` WHERE `siteID` = ?');
-                $id   = $others['approvedSiteId'];
-                $stmt->bind_param('i', $id);
-                $stmt->execute();
-                $row = $stmt->get_result()->fetch_assoc();
-                $stmt->close();
-                $holder = $row === null ? '' : (string) $row['siteName'];
+        if ($nameHolder === true) {
+            try {
+                $others = self::otherRequestsFor($db, $siteId, $host);
+                if ($others !== null && $others['approvedSiteId'] !== null) {
+                    $stmt = $db->prepare('SELECT `siteName` FROM `tblSites` WHERE `siteID` = ?');
+                    $id   = $others['approvedSiteId'];
+                    $stmt->bind_param('i', $id);
+                    $stmt->execute();
+                    $row = $stmt->get_result()->fetch_assoc();
+                    $stmt->close();
+                    $holder = $row === null ? '' : (string) $row['siteName'];
+                }
+            } catch (\Throwable $e) {
+                $holder = '';
             }
-        } catch (\Throwable $e) {
-            $holder = '';
         }
 
         return 'That address is already approved for another organisation' . ($holder === '' ? '' : ' (' . $holder . ')')
@@ -1105,7 +1126,7 @@ final class PublicWebsiteSetup
     public static function withdrawPublicHostApproval(\mysqli $db, int $siteId, bool $isRootAdmin, ?int $actorId): array
     {
         if ($isRootAdmin === false) {
-            return self::refusedAndRecorded('public address approval', $siteId, 'Only a global administrator of the whole '
+            return self::approvalRefused($siteId, 'Only a global administrator of the whole '
                 . 'installation can withdraw approval of a public address. Nothing was changed.', $actorId);
         }
         $host = self::publicHostFor($db, $siteId);
@@ -1119,14 +1140,15 @@ final class PublicWebsiteSetup
         } catch (\Throwable $e) {
             error_log('[WebMS-Intra] PublicWebsiteSetup: approval of a public address could not be withdrawn: ' . $e->getMessage());
 
-            return self::refusedAndRecorded('public address approval', $siteId, 'The database refused the change. Nothing was changed.', $actorId);
+            return self::approvalRefused($siteId, 'The database refused the change. Nothing was changed.', $actorId);
         }
         if ($changed < 1) {
             return ['saved' => true, 'type' => 'info', 'message' => 'That address was not approved. Nothing was changed.'];
         }
-        Logger::activity('PublicWebsitePublicAddressApprovalWithdrawn', 'Approval of organisation #' . $siteId . '\'s public '
-            . 'address ' . ($host === '' ? '(unreadable)' : $host) . ' was withdrawn by the installation\'s global administrator. '
-            . 'It is not the public door any more.', $actorId);
+        self::recordApprovalDecision('PublicWebsitePublicAddressApprovalWithdrawn', $siteId, 'Approval of organisation #' . $siteId
+            . '\'s public address ' . ($host === '' ? '(unreadable)' : $host) . ' was withdrawn by the installation\'s global '
+            . 'administrator. It is not the public door any more.',
+            'Approval of another organisation\'s public address was withdrawn by the installation\'s global administrator.', $actorId);
 
         return ['saved' => true, 'type' => 'success', 'message' => 'Approval withdrawn: that address is not the public door any more.'];
     }
@@ -2199,12 +2221,12 @@ final class PublicWebsiteSetup
                         . 'answers on for signing in. The public address has to be a different name, so public visitors '
                         . 'never reach the address members sign in at. Nothing was saved.', $actorId);
                 }
-                if ($host === $was) {
-                    return ['saved' => true, 'type' => 'info', 'message' => 'Saved. Nothing was different.'];
-                }
                 // D-121: a name ANOTHER organisation is approved for is refused
                 // (a request for it could never be approved while that stands).
                 // A name another organisation has only asked for is accepted.
+                // Asked BEFORE "nothing was different": an organisation whose
+                // request has lost and that saves it again unchanged is told it
+                // is taken, as its card says, never "Saved".
                 $others = self::otherRequestsFor($db, $siteId, $host);
                 if ($others === null) {
                     return self::refusedAndRecorded('public address', $siteId, 'Whether another organisation already has '
@@ -2212,6 +2234,9 @@ final class PublicWebsiteSetup
                 }
                 if ($others['approvedSiteId'] !== null) {
                     return self::refusedAndRecorded('public address', $siteId, self::TAKEN_FOR_ORGANISATION, $actorId);
+                }
+                if ($host === $was) {
+                    return ['saved' => true, 'type' => 'info', 'message' => 'Saved. Nothing was different.'];
                 }
                 // ⚠️ AN UPDATE OR AN INSERT, NEVER `INSERT … ON DUPLICATE KEY
                 //    UPDATE`. Before migration 276 this table had TWO unique
@@ -2870,6 +2895,57 @@ final class PublicWebsiteSetup
         $stmt->bind_param('is', $siteId, $key);
         $stmt->execute();
         $stmt->close();
+    }
+
+    /**
+     * Record a refusal about APPROVING or WITHDRAWING an organisation's public
+     * address, and answer it (D-101, D-121).
+     *
+     * 🔒 The activity log is stamped with the organisation the person has
+     *    OPEN (`Logger::activity()` uses `Site::id()`), and that organisation's
+     *    ordinary administrators read it on Admin, Activity. The installation's
+     *    global administrator approves every organisation's address from
+     *    whichever organisation is open, so a record here must never carry
+     *    ANOTHER organisation's number, name or address (#895, round 1 of its
+     *    check: measured, the losing organisation's administrator read the
+     *    winner's name in its own log). So the record says "this
+     *    organisation's" when it is the organisation's own address and
+     *    "another organisation's" otherwise, and `$logged` (when given) is the
+     *    refusal's words with nothing about any other organisation in them.
+     *    `$shown` is what the person who pressed the button sees.
+     *
+     *    The cost, said plainly: an approval decision about organisation B,
+     *    made with organisation A open, is recorded in A's log without saying
+     *    which organisation it was about, and nothing is recorded in B's. The
+     *    log has no installation-only place: a record with no organisation is
+     *    hidden on Admin, Activity from everybody but a global administrator,
+     *    but Admin, Activity's EXPORT gives it to every organisation's
+     *    administrator (`siteID = ? OR siteID IS NULL`), so leaving the
+     *    organisation empty would not have kept it private.
+     *
+     * @return array{saved:bool, type:string, message:string}
+     */
+    private static function approvalRefused(int $siteId, string $shown, ?int $actorId, ?string $logged = null): array
+    {
+        Logger::activity(
+            'PublicWebsiteSetupRefused',
+            'Refused: a change to ' . (Site::id() === $siteId ? 'this organisation\'s' : 'another organisation\'s')
+            . ' public address approval. ' . ($logged ?? $shown),
+            $actorId
+        );
+
+        return ['saved' => false, 'type' => 'danger', 'message' => $shown];
+    }
+
+    /**
+     * Record an approval or a withdrawal (D-101) without putting another
+     * organisation's number or address into the open organisation's log:
+     * `$ownWords` only when the address is the open organisation's own,
+     * `$otherWords` (which names nobody) otherwise. See `approvalRefused()`.
+     */
+    private static function recordApprovalDecision(string $type, int $siteId, string $ownWords, string $otherWords, ?int $actorId): void
+    {
+        Logger::activity($type, Site::id() === $siteId ? $ownWords : $otherWords, $actorId);
     }
 
     /**

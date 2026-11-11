@@ -132,9 +132,13 @@
  *      later request for an approved name is refused, a losing request is
  *      kept and can be approved once the winner's approval is withdrawn, the
  *      door answers only for the approved one, the database's own key
- *      refuses a second approval, the approval's LOCK is made visible (a
- *      second approval waits on it and is refused by the ask), and a real
- *      race on two web servers leaves exactly one approved, five times.
+ *      refuses a second approval, a second approval made while the first is
+ *      open waits and is refused by the ask (Q11), a real race on two web
+ *      servers leaves exactly one approved five times, each refusal from the
+ *      ask and never the backstop (Q12), the approver HOLDS its lock from
+ *      its read to its write even with the key in place (Q13), and neither
+ *      organisation's own administrator reads the other's name, number or
+ *      address in its own activity log (Q14).
  *   P  the plants: each gate and each header taken out of a COPY of the
  *      portal, and the scenario that should catch it re-run. The expected
  *      value of a plant check is the value UNDER the fault, as
@@ -152,8 +156,12 @@
  *   - One web worker, so two administrators pressing the card at once is not
  *     exercised — EXCEPT approving a public address (section Q), which
  *     starts a second web server for Q12 and holds a lock on this test's own
- *     connection for Q11. Q12 does not measure how far the two requests
- *     really overlapped; Q11 is the deterministic proof of the lock.
+ *     connection for Q11 and Q13. Q12 does not measure how far the two
+ *     requests really overlapped, so it catches a lock released too early
+ *     only when they happen to overlap; Q11 shows a second approval waits
+ *     and is refused by the ask, but CANNOT see a lock taken outside the
+ *     transaction (round 1 of #895's check); Q13 is the deterministic proof
+ *     that the lock is held from the read to the write.
  *     exercised; the writers' answers to that race are read, not run.
  *   - Caches in between, and the minute `max-age=60` allows, are not tested.
  *   - With PHP's "files" session store only: the guarantee that a made-up
@@ -182,7 +190,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const PDS_EXPECTED_CHECKS = 332; // #895 (D-121) adds Q01-Q12 and PQ1-PQ11 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
+const PDS_EXPECTED_CHECKS = 337; // #895 (D-121) adds Q01-Q14 and PQ1-PQ14 to the 309 below; 170 in P4a; #493 P4b adds J01-J11, W01-W04, T10 and PJ1-PJ11; P4c adds V01-V19, VP01-VP16, T11, PV01-PV14, (round 1) T12 and PV15-PV18, and (round 2) PV19-PV20; P4d adds U01-U25 and PU01-PU18, and (round 1) U16b, U19b, U21b, U24b and PU19-PU23, U20 replaced; (round 2) U26 and U27, every sentence from doorReachWords(); (round 3) U28; (round 4) U28 with seven states
 
 $sep  = DIRECTORY_SEPARATOR;
 $repo = dirname(__DIR__);
@@ -643,6 +651,9 @@ foreach ([
     'tester'  => ['isAdmin' => 1, 'isRoot' => 0, 'site' => $siteA],
     'member'  => ['isAdmin' => 0, 'isRoot' => 0, 'site' => $siteA],
     'memberB' => ['isAdmin' => 0, 'isRoot' => 0, 'site' => $siteB],
+    // #895 (round 1 of its check): B's own ordinary administrator, who reads
+    // B's activity log in Q14. Not a global administrator of anything.
+    'adminB'  => ['isAdmin' => 1, 'isRoot' => 0, 'site' => $siteB],
     // D-101: the installation's global administrator (the ONLY one who may
     // approve a public address), and somebody given "Set up the public
     // website" in A (who may save one, and may not approve it).
@@ -1487,7 +1498,17 @@ $scnQRace = static function () use ($db, $siteA, $siteB, $qName, $port, $child, 
                 curl_multi_remove_handle($multi, $h);
             }
             curl_multi_close($multi);
-            $rounds[] = [(int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblPublicHosts` WHERE `hostName` = '{$qName}' AND `approvedAtUtc` IS NOT NULL")->fetch_assoc()['n'] ?? 0), $codes];
+            // What each administrator was told (the flash waits in each session
+            // for its next page). Round 1 of #895's check: with the lock taken
+            // OUTSIDE the transaction, exactly one is still approved — the key
+            // refuses the second — so the count alone passes on that broken
+            // code. The refusal must come from the locked ASK.
+            $said = '';
+            foreach ([$port, $port2] as $k => $onPort) {
+                $said .= $req($onPort, 'GET', '/admin/public-website', $jars[$k]);
+            }
+            $rounds[] = [(int) ($db->query("SELECT COUNT(*) AS `n` FROM `tblPublicHosts` WHERE `hostName` = '{$qName}' AND `approvedAtUtc` IS NOT NULL")->fetch_assoc()['n'] ?? 0), $codes,
+                str_contains($said, 'That address is already approved for another organisation'), str_contains($said, 'The database itself refused')];
         }
         return ['the second server started' => true, 'rounds' => $rounds];
     } finally {
@@ -1498,10 +1519,142 @@ $scnQRace = static function () use ($db, $siteA, $siteB, $qName, $port, $child, 
         $qPutBack();
     }
 };
-$qRaceWant = ['the second server started' => true, 'rounds' => array_fill(0, 5, [1, [302, 302]])];
+$qRaceWant = ['the second server started' => true, 'rounds' => array_fill(0, 5, [1, [302, 302], true, false])];
 $qRace = $scnQRace();
-check('Q12 two administrators approving the two clashing requests at the same moment, on two web servers, five times: exactly one is approved every time',
+check('Q12 two administrators approving the two clashing requests at the same moment, on two web servers, five times: exactly one is approved every time, and the other is refused by the locked ask, never by the database\'s backstop',
     $qRace, $qRaceWant);
+
+/**
+ * Q13: the approver HOLDS the lock on every row asking for the name until it
+ * writes — made visible with the database's key IN PLACE.
+ *
+ * Round 1 of #895's check found that Q11 and Q12 both passed with the lock
+ * taken OUTSIDE the transaction (plant MP1: `begin_transaction()` moved after
+ * the locking read, so the read's locks end with its own statement — #697's
+ * shape). Q11 cannot see it: the request's read waits on THIS test's lock,
+ * and on waking it reads the committed approval anyway. Q12 sees it only when
+ * the two requests happen to overlap inside a few milliseconds.
+ *
+ * So the request is stopped DELIBERATELY between its read and its write: this
+ * connection takes a gap lock on the unique key where the approved name would
+ * go (`WHERE approvedHost = ? FOR UPDATE`, which finds no row), so the
+ * request's locking read (through the ordinary key on hostName) is NOT held
+ * up, but its UPDATE — which puts the name into the unique key — waits. While
+ * it waits, a SECOND connection asks for B's row with NOWAIT. A request that
+ * still holds its read's locks has B's row, so that ask is refused at once;
+ * one whose locks ended with the read does not, and the ask succeeds.
+ */
+$scnQHeld = static function () use ($db, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $siteA, $siteB, $qName, $port, $people, $tokenOn,
+    $http, $qBothWaiting, $qPutBack): array {
+    $qBothWaiting();
+    $jar   = $people['instroot']['jar'];
+    $token = $tokenOn($http('GET', '/admin/public-website', ['jar' => $jar])['body']);
+    $db->begin_transaction();
+    $gap = $db->prepare('SELECT `siteID` FROM `tblPublicHosts` WHERE `approvedHost` = ? FOR UPDATE');
+    $gap->bind_param('s', $qName);
+    $gap->execute();
+    $gap->get_result()->fetch_all();
+    $gap->close();
+    $multi = curl_multi_init();
+    $one   = curl_init('http://127.0.0.1:' . $port . '/admin/public-website/save');
+    curl_setopt_array($one, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false, CURLOPT_TIMEOUT => 90,
+        CURLOPT_PROXY => '', CURLOPT_NOPROXY => '*', CURLOPT_COOKIEFILE => $jar, CURLOPT_COOKIEJAR => $jar,
+        CURLOPT_POSTFIELDS => http_build_query(['csrf_token' => $token, 'action' => 'public_host_approve', 'site' => (string) $siteA, 'host' => $qName])]);
+    curl_multi_add_handle($multi, $one);
+    $until = microtime(true) + 1.5;
+    $running = 1;
+    while (microtime(true) < $until && $running > 0) {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.1);
+    }
+    $stillWaiting = $running > 0;
+    // The second connection: is B's row still locked by the waiting request?
+    $held = 'not asked';
+    try {
+        $other = new mysqli($dbHost, $dbUser, $dbPass, $dbName, $dbPort);
+        $other->begin_transaction();
+        try {
+            $other->query("SELECT `siteID` FROM `tblPublicHosts` WHERE `siteID` = {$siteB} FOR UPDATE NOWAIT")->fetch_all();
+            $held = false;
+        } catch (mysqli_sql_exception $e) {
+            $held = in_array($e->getCode(), [3572, 1205], true) === true ? true : 'error ' . $e->getCode();
+        }
+        $other->rollback();
+        $other->close();
+    } catch (Throwable $e) {
+        $held = 'could not ask: ' . $e->getMessage();
+    }
+    $db->commit();
+    do {
+        curl_multi_exec($multi, $running);
+        curl_multi_select($multi, 0.2);
+    } while ($running > 0);
+    curl_multi_remove_handle($multi, $one);
+    curl_multi_close($multi);
+    $approved = $db->query("SELECT `siteID` FROM `tblPublicHosts` WHERE `hostName` = '{$qName}' AND `approvedAtUtc` IS NOT NULL")->fetch_all();
+    $out = ['the request waited at its write' => $stillWaiting, 'B\'s row still locked by it' => $held,
+        'approved' => array_map(static fn (array $r): int => (int) $r[0], $approved) === [$siteA] ? 'A only' : 'not A alone'];
+    $qPutBack();
+    return $out;
+};
+check('Q13 between its locking read and its write, the approver still holds the lock on the OTHER organisation\'s row asking for the name (a second connection is refused it at once), with the database\'s key in place; then A alone is approved',
+    $scnQHeld(), ['the request waited at its write' => true, 'B\'s row still locked by it' => true, 'approved' => 'A only']);
+
+/**
+ * Q14: what each organisation's OWN administrator reads in its OWN activity
+ * log about approvals (#895, round 1 of its check — measured there: the
+ * losing organisation's ordinary administrator read "…already approved for
+ * another organisation (Selftest Door B)…", and the approval line named the
+ * winner by number with its address). The log is stamped with the
+ * organisation the installation's administrator has OPEN, so with A open the
+ * decisions about B land in A's log, and with B open the decisions about A
+ * land in B's.
+ *
+ * A fresh name, set straight into the database, so no line any organisation
+ * wrote itself mentions it: here the address IS another organisation's
+ * information, and any sight of it in A's log is a leak.
+ */
+$scnQLogs = static function () use ($db, $siteA, $siteB, $nameTest, $cardAs, $http, $tokenOn, $people, $signIn, $instroot, $qPutBack): array {
+    $name = 'privacy-895.selftest.test';
+    $db->query("UPDATE `tblPublicHosts` SET `hostName` = '{$name}', `approvedAtUtc` = NULL, `approvedByID` = NULL WHERE `siteID` IN ({$siteA}, {$siteB})");
+    $look = static function (string $page, string $pattern): bool {
+        return preg_match($pattern, $page) === 1;
+    };
+    $bNumber = '/organisation #' . $siteB . '(?![0-9])/i';
+    $aNumber = '/organisation #' . $siteA . '(?![0-9])/i';
+    $out = [];
+    // A is open: approve B (the winner), then try A (refused as taken).
+    $instroot();
+    $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteB, 'host' => $name]);
+    $signIn('tester');
+    $aLog = $http('GET', '/admin/activity', ['jar' => $people['tester']['jar']])['body'];
+    $out['A after the approval'] = [$look($aLog, '/Selftest Door B/'), $look($aLog, $bNumber), str_contains($aLog, $name),
+        str_contains($aLog, 'Another organisation&#039;s public address was approved')];
+    $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteA, 'host' => $name]);
+    $aLog = $http('GET', '/admin/activity', ['jar' => $people['tester']['jar']])['body'];
+    $out['A after the refusal'] = [$look($aLog, '/Selftest Door B/'), $look($aLog, $bNumber), str_contains($aLog, $name),
+        str_contains($aLog, 'already approved for another organisation. Only one')];
+    // B is open: the installation's administrator, working in B, tries A again
+    // (refused), withdraws B's approval and approves A.
+    $jar  = $people['instroot']['jar'];
+    $page = $http('GET', '/site/choose', ['jar' => $jar]);
+    $http('POST', '/site/switch', ['jar' => $jar, 'post' => ['csrf_token' => $tokenOn($page['body']), 'site_id' => (string) $siteB]]);
+    $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteA, 'host' => $name]);
+    $cardAs('instroot', 'public_host_withdraw', ['site' => (string) $siteB]);
+    $cardAs('instroot', 'public_host_approve', ['site' => (string) $siteA, 'host' => $name]);
+    $signIn('adminB');
+    $bLog = $http('GET', '/admin/activity', ['jar' => $people['adminB']['jar']])['body'];
+    $out['B after A\'s refusal and approval'] = [$look($bLog, '/' . preg_quote($nameTest, '/') . '/'), $look($bLog, $aNumber),
+        str_contains($bLog, 'Another organisation&#039;s public address was approved'), str_contains($bLog, 'another organisation&#039;s public address approval')];
+    $out['A approved in the end'] = $db->query("SELECT `approvedAtUtc` FROM `tblPublicHosts` WHERE `siteID` = {$siteA}")->fetch_assoc()['approvedAtUtc'] !== null;
+    // The installation's administrator goes back to A for every later section.
+    $instroot();
+    $qPutBack();
+    return $out;
+};
+check('Q14 neither organisation\'s own administrator reads the other\'s name, number or address in its own activity log — after the approval, after the refusal, and from the winning side — while each still sees that a decision was made',
+    $scnQLogs(), ['A after the approval' => [false, false, false, true], 'A after the refusal' => [false, false, false, true],
+        'B after A\'s refusal and approval' => [false, false, true, true], 'A approved in the end' => true]);
 
 // ── Round 8 of P4a's check: two publicHostInEffect() callers were pinned by
 // nothing (reverting either left 164/164). Each is driven in the three states
@@ -4170,8 +4323,8 @@ $p = $plant('_core/PublicWebsiteSetup.php', "`changedAtUtc` = UTC_TIMESTAMP(), '
         return $after !== null;
     });
 check('P58 with "saving clears approval" taken out, a CHANGED address keeps the old approval', [$p['applied'], $p['result']], [true, true]);
-$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$isRootAdmin === false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can approve",
-    "        if (false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can approve",
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$isRootAdmin === false) {\n            return self::approvalRefused(\$siteId, 'Only a global administrator of the whole '\n                . 'installation can approve",
+    "        if (false) {\n            return self::approvalRefused(\$siteId, 'Only a global administrator of the whole '\n                . 'installation can approve",
     static function () use ($db, $siteA, $cardAs, $hostRow, $hostA): mixed {
         $db->query("UPDATE `tblPublicHosts` SET `approvedAtUtc` = NULL WHERE `siteID` = {$siteA}");
         $cardAs('setup', 'public_host_approve', ['site' => '1', 'host' => $hostA]);
@@ -4194,8 +4347,8 @@ check('P60 with "the portal\'s own address must be set" taken out, a public addr
 // Round 7 of P4a's check: each guard above that was pinned by nothing.
 $p = $plant('_core/PublicWebsiteSetup.php', "'VALUES (?, ?, UTC_TIMESTAMP(), NULL, NULL)'", "'VALUES (?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP(), NULL)'", $scnFirstAddress);
 check('P61 with an organisation\'s FIRST address stored approved, it is the door the moment it is saved', [$p['applied'], is_string($p['result'][0] ?? null) && $p['result'][0] !== 'no row', $p['result'][1] ?? null], [true, true, true]);
-$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$isRootAdmin === false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can withdraw",
-    "        if (false) {\n            return self::refusedAndRecorded('public address approval', \$siteId, 'Only a global administrator of the whole '\n                . 'installation can withdraw",
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (\$isRootAdmin === false) {\n            return self::approvalRefused(\$siteId, 'Only a global administrator of the whole '\n                . 'installation can withdraw",
+    "        if (false) {\n            return self::approvalRefused(\$siteId, 'Only a global administrator of the whole '\n                . 'installation can withdraw",
     $scnWithdrawRefused);
 check('P62 with "the installation\'s global administrator only" taken out of withdrawing, A\'s holder withdraws A\'s approval AND B\'s', [$p['applied'], $p['result'][0] ?? null, $p['result'][1] ?? null], [true, false, false]);
 $p = $plant('_core/PublicDoor.php', '$host = PublicWebsiteSetup::publicHostInEffect($db, $siteId);', '$host = PublicWebsiteSetup::publicHostFor($db, $siteId);', $scnUnapprovedNotShown);
@@ -4209,8 +4362,8 @@ $p = $plant('_core/PublicDoor.php', "|| PublicWebsiteSetup::publicHostInEffect(\
 check('P66 with whyNoAddress() back on any stored address, the card cannot say why the door has no address', [$p['applied'], $p['result'][4] ?? null], [true, false]);
 $p = $plant('_core/PublicWebsiteSetup.php', "could not be listed: ' . \$e->getMessage());\n\n            return null;", "could not be listed: ' . \$e->getMessage());\n\n            return [];", $scnListUnreadable);
 check('P67 with an unreadable list answered as an empty one, the installation\'s administrator is told no organisation has entered an address', [$p['applied'], $p['result']], [true, [false, true]]);
-$p = $plant('_core/PublicWebsiteSetup.php', "        if (PortalAddress::visitorCanChooseHost() === true) {\n            return self::refusedAndRecorded('public address approval'",
-    "        if (false) {\n            return self::refusedAndRecorded('public address approval'", $scnApproveNoSiteUrl);
+$p = $plant('_core/PublicWebsiteSetup.php', "        if (PortalAddress::visitorCanChooseHost() === true) {\n            return self::approvalRefused(\$siteId",
+    "        if (false) {\n            return self::approvalRefused(\$siteId", $scnApproveNoSiteUrl);
 check('P68 with "the portal\'s own address must be set" taken out of approving, an address is approved while nobody can tell members\' addresses', [$p['applied'], $p['result'][0] ?? null], [true, true]);
 // Round 8 of P4a's check: the two publicHostInEffect() callers nothing pinned.
 $p = $plant('_core/PublicWebsiteSetup.php', "        \$publicHost = self::publicHostInEffect(\$db, \$siteId);\n        Logger::activity('PublicDoorNameReplaced',",
@@ -4693,6 +4846,21 @@ check('PQ9 with the list no longer working out who an address is taken by, the l
 $p = $plant('_apps/admin/public-website/index.php', "<?php if (\$rowState !== 'taken'): ?>", '<?php if (true): ?>', $scnQClash);
 check('PQ10 with the list drawing an Approve button on a taken request, the installation\'s administrator is offered one (Q05 catches it)',
     [$p['applied'], $p['result']['taken on the list'][1] ?? null], [true, true]);
+$qMp1From = ["            \$db->begin_transaction();\n            try {\n                \$lock = \$db->prepare(",
+    "                \$lock->close();\n                if (\$mine === null"];
+$qMp1To   = ["            try {\n                \$lock = \$db->prepare(",
+    "                \$lock->close();\n                \$db->begin_transaction();\n                if (\$mine === null"];
+$p = $plant('_core/PublicWebsiteSetup.php', $qMp1From, $qMp1To, $scnQHeld);
+check('PQ12 with the transaction begun only AFTER the locking read (the lock released with its own statement, #697), the other organisation\'s row is free while the approver waits to write — with the database\'s key in place (Q13 catches it; Q11 cannot)',
+    [$p['applied'], $p['result']['B\'s row still locked by it'] ?? null], [true, false]);
+$p = $plant('_core/PublicWebsiteSetup.php', 'Logger::activity($type, Site::id() === $siteId ? $ownWords : $otherWords, $actorId);',
+    'Logger::activity($type, $ownWords, $actorId);', $scnQLogs);
+check('PQ13 with an approval recorded in its own words whichever organisation is open, the losing organisation\'s log names the winner by number and gives the address (Q14 catches it)',
+    [$p['applied'], array_slice($p['result']['A after the approval'] ?? [], 1, 2)], [true, [true, true]]);
+$p = $plant('_core/PublicWebsiteSetup.php', ". ' public address approval. ' . (\$logged ?? \$shown),", ". ' public address approval. ' . \$shown,", $scnQLogs);
+check('PQ14 with the refusal recorded in the words SHOWN, the losing organisation\'s log names the winner (Q14 catches it)',
+    [$p['applied'], $p['result']['A after the refusal'][0] ?? null], [true, true]);
+
 $qKeyBack = $db->query("SHOW INDEX FROM `tblPublicHosts` WHERE `Key_name` = 'uq_public_host_approved' AND `Non_unique` = 0 AND `Column_name` = 'approvedHost'")->num_rows;
 check('PQ11 after the key plants, the unique key on approvedHost is back exactly as migration 276 makes it', $qKeyBack, 1);
 

@@ -46,10 +46,16 @@
 -- clashing rows inside a transaction and asks first, so the refusal reaches a
 -- person in words, and this key is what still holds if that ask is ever wrong.
 --
--- VIRTUAL, never STORED: MySQL refuses a STORED worked-out column on a table
--- whose rows a cascading foreign key can change (ERROR 1215, see migration
--- 187), and `fk_public_host_site` is ON DELETE CASCADE. A unique key on a
--- VIRTUAL column is supported by InnoDB on MySQL 8.0, 8.4 and MariaDB.
+-- VIRTUAL, because nothing needs it stored: it is worked out from two
+-- columns of the same row, and the unique key keeps its own copy of the
+-- value. (STORED would also have worked here — measured on MySQL 8.0.36,
+-- where the table was accepted and a cascading delete worked, and on MariaDB
+-- 11.4.13 by #895's independent check. MySQL's ERROR 1215 about STORED
+-- columns, migration 187's reason, applies only when a cascading foreign key
+-- sits on a column the worked-out one is made FROM, and neither `hostName`
+-- nor `approvedAtUtc` carries one. An earlier version of this note gave that error as the
+-- reason; it was untrue.) A unique key on a VIRTUAL column is supported by
+-- InnoDB on MySQL 8.0, 8.4 and MariaDB.
 -- The worked-out column takes the table's own collation, so two spellings that
 -- differ only in capitals still clash, as they did under the old key.
 --
@@ -85,7 +91,7 @@ SET @col_exists := (
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tblPublicHosts' AND COLUMN_NAME = 'approvedHost'
 );
 SET @sql := IF(@col_exists = 0,
-    'ALTER TABLE `tblPublicHosts` ADD COLUMN `approvedHost` VARCHAR(253) AS (IF(`approvedAtUtc` IS NULL, NULL, `hostName`)) VIRTUAL COMMENT ''Worked out by the database (#895, D-121): the host name while the address is APPROVED, and empty while it is only requested. Exists so uq_public_host_approved can make an approved name unique while letting any number of organisations request one. VIRTUAL not STORED: fk_public_host_site cascades.'' AFTER `approvedByID`',
+    'ALTER TABLE `tblPublicHosts` ADD COLUMN `approvedHost` VARCHAR(253) AS (IF(`approvedAtUtc` IS NULL, NULL, `hostName`)) VIRTUAL COMMENT ''Worked out by the database (#895, D-121): the host name while the address is APPROVED, and empty while it is only requested. Exists so uq_public_host_approved can make an approved name unique while letting any number of organisations request one. VIRTUAL: it is worked out from two columns of the same row and never needs storing; the unique key keeps its own copy.'' AFTER `approvedByID`',
     'SELECT 1'
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

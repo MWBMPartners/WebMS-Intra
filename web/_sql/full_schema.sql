@@ -11454,8 +11454,9 @@ CREATE TABLE IF NOT EXISTS `tblPublicHosts` (
     -- administrator approves one, and the database refuses a second approval.
     -- `approvedHost` is empty for a row only requested, and a unique key
     -- stands aside for an empty value (#487) — which is exactly the rule
-    -- wanted here. VIRTUAL, not STORED: fk_public_host_site cascades.
-    `approvedHost` VARCHAR(253) AS (IF(`approvedAtUtc` IS NULL, NULL, `hostName`)) VIRTUAL COMMENT 'Worked out by the database (#895, D-121): the host name while the address is APPROVED, and empty while it is only requested. Exists so uq_public_host_approved can make an approved name unique while letting any number of organisations request one. VIRTUAL not STORED: fk_public_host_site cascades.',
+    -- wanted here. VIRTUAL because nothing needs it stored (migration 276
+    -- says why the usual STORED objection, ERROR 1215, does not apply).
+    `approvedHost` VARCHAR(253) AS (IF(`approvedAtUtc` IS NULL, NULL, `hostName`)) VIRTUAL COMMENT 'Worked out by the database (#895, D-121): the host name while the address is APPROVED, and empty while it is only requested. Exists so uq_public_host_approved can make an approved name unique while letting any number of organisations request one. VIRTUAL: it is worked out from two columns of the same row and never needs storing; the unique key keeps its own copy.',
     PRIMARY KEY (`siteID`),
     UNIQUE KEY `uq_public_host_approved` (`approvedHost`),
     KEY `idx_public_host_name` (`hostName`),
