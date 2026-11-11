@@ -828,10 +828,23 @@ final class SmallGroups
      * three saves. "Different" cannot be judged by comparing fields, so the
      * rule does not try: only an EMPTY place counts as starting again.
      *
-     * What it CANNOT see (D-128's stated limit): a non-host who empties a place
-     * and then types the same address in afresh as "not anybody's home". The
-     * portal cannot know whose home an address is; that is the owner's
-     * recorded limit for the mark, not something this rule claims to stop.
+     * "EMPTY" means `placeIsEmpty()`: every part of the place except the
+     * country — both address lines, the town, the region, the postcode, the
+     * map position AND the what3words address. A place with only its position,
+     * only its postcode or only its what3words left is NOT empty and is
+     * refused like any other change (check round 3: clearing the written
+     * address while keeping the position, then marking it, put the host's home
+     * on a map). Never judge "empty" here on a narrower test.
+     *
+     * A KNOWN LIMIT, accepted by the owner in D-131: a non-host who empties a
+     * place completely and then types the same address in afresh as "not
+     * anybody's home". The portal cannot know whose home an address is, so
+     * this rule does not stop it. D-131 records this DELIBERATE route (D-128
+     * covers only a home ticked by mistake). What D-131 asks instead is a
+     * WARNING in the tick's own words, on both forms
+     * (`partials/place-map-agreement.php`), and it rules OUT keeping a
+     * fingerprint of past addresses (that would contradict deleting an
+     * address at once, D-126) and restricting the tick to administrators.
      *
      * The `$markTicked` term: both handlers refuse a host AND the mark
      * together (`$refuseBoth`) before asking this, so through a handler the

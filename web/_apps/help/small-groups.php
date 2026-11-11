@@ -47,6 +47,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
             <a href="#joining" class="badge text-bg-secondary text-decoration-none">Joining a Group</a>
             <a href="#roll" class="badge text-bg-secondary text-decoration-none">Taking the Roll</a>
             <a href="#location" class="badge text-bg-secondary text-decoration-none">Meeting Location</a>
+            <a href="#hosts" class="badge text-bg-secondary text-decoration-none">Hosts, Homes and Maps</a>
             <a href="#data-protection" class="badge text-bg-secondary text-decoration-none">Data Protection</a>
         </div>
     </div>
@@ -141,6 +142,49 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
         <li><strong>Everyone at this site</strong> — visible to any logged-in member of the site.</li>
     </ul>
     <p class="text-muted small mb-0">The directory listing never shows an address — location only ever appears on a group's own detail page, and only when the viewer clears the visibility check above.</p>
+</section>
+
+<?php // 🏠 #809 (D-120, D-122 to D-128): where a group meets is usually somebody's home, so each
+      //    meeting place names its HOST and a map needs that host's own agreement. Each sentence
+      //    below is what the code does: SmallGroups::mayEditHome() (D-125),
+      //    SmallGroups::placeAgreementAfterSave() and whyHostChangeRefused() (D-124, D-128),
+      //    place-save.php's remove action (D-126), GdprEraser's hostUserID instructions (D-122),
+      //    and group.php's next-meeting panel (D-127). Change them together. ?>
+<section id="hosts" class="mb-5">
+    <h2 class="h4 mb-3"><i class="fa-solid fa-house-user me-2"></i>Hosts, Homes and Maps</h2>
+    <p>
+        A group has its usual meeting place, and can also keep a list of members' homes it takes turns
+        meeting in. Each place names its <strong>host</strong>: the member of the group whose home it is.
+        When a leader records or plans a meeting, they choose which of these places it is at.
+    </p>
+    <ul>
+        <li><strong>Who may add or change a home.</strong> Leaders and coordinators may add or change any of the
+            group's places and choose the host. A member may add their own home (they are always its host) and
+            change only their own.</li>
+        <li><strong>Maps need the host's own agreement.</strong> A map of a place is shown only when its host has
+            ticked "a map of my home may be shown" on their own form, maps are allowed by your organisation and for
+            the host, and the person looking has not switched maps off for themselves. A leader who types in somebody
+            else's address cannot agree for them. Changing the address, or the host, means the host has to agree
+            again. Otherwise only the written address is shown.</li>
+        <li><strong>Only the host can change who lives there.</strong> Once a place names its host, nobody else can
+            name a different host, remove the host, or mark it as not anybody's home. Anybody who may edit the place
+            can still correct its address. To meet somewhere else, remove the home from the list, or clear every part
+            of the usual place except the country, and enter the new place afresh.</li>
+        <li><strong>A place that is nobody's home.</strong> A church hall or similar can be marked "This is not
+            anybody's home". It then has no host, and a map of it may be shown to whoever can see its address, if
+            their own map settings allow it. A place with a host cannot be marked, and changing the address clears
+            the mark. <strong>Never tick it for somebody's home:</strong> that shows their home on a map without them
+            agreeing, and the portal cannot tell a hall from a home.</li>
+        <li><strong>Removing a home deletes its address at once.</strong> Meetings held or planned there then say they are at
+            "a place no longer recorded".</li>
+        <li><strong>Members see the next meeting.</strong> A meeting given a future date is a planned meeting. The
+            group's members see the next one on the group's page, with where it is shown only if the group's
+            address setting above lets them see addresses. A planned meeting takes no roll and is not counted in
+            attendance figures.</li>
+        <li><strong>When a host's account is erased,</strong> the address of every place they are named as host of
+            is emptied, together with their agreement to a map. An address with no host named is not reached by
+            anybody's erasure, because nothing records whose home it is.</li>
+    </ul>
 </section>
 
 <section id="data-protection" class="mb-5">

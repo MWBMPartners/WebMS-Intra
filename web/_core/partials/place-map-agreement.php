@@ -94,8 +94,8 @@ if (function_exists('portal_place_map_agreement') === false) {
                 . $esc($name) . ' has ' . ($agreed === true ? 'agreed' : 'not agreed') . ' to a map of it. Only '
                 . $esc($name) . ' can change that, by opening this form themselves. Only ' . $esc($name)
                 . ' can name a different host or mark it as not anybody\'s home. You may correct the address, but '
-                . 'then any agreement given so far no longer counts. To meet somewhere else, empty or remove this '
-                . 'place and enter the new one afresh.</p>';
+                . 'then any agreement given so far no longer counts. To meet somewhere else, remove this place, or '
+                . 'clear every part of it except the country (both address lines, the town, the region, the postcode, the map position and the what3words address), and enter the new one afresh.</p>';
         }
         echo '</div>';
     }
@@ -164,13 +164,19 @@ if (function_exists('portal_place_host_select') === false) {
         echo '</select>';
         echo '<small class="text-muted">A member of the group. Only they can agree to a map of their home. With nobody '
             . 'named, no map is shown unless the place is marked as not anybody\'s home below. Once a host is named, only '
-            . 'they can name somebody else or mark it; anybody else must empty or remove the place first.</small>';
+            . 'they can name somebody else or mark it; anybody else must first remove the place, or clear '
+            . 'every part of it except the country (both address lines, the town, the region, the postcode, the map position and the what3words address).</small>';
         echo '<input type="hidden" name="notAHomeAsked" value="1">';
         echo '<div class="form-check mt-2">';
         echo '<input type="checkbox" class="form-check-input" name="notAHome" id="notAHome" value="1"'
             . (($cfg['notAHome'] ?? false) === true ? ' checked' : '') . '>';
+        // ⚠️ D-131: the warning is part of the tick's own words, on BOTH the
+        //    usual-place form and the listed-home form (this partial draws both).
+        //    A home emptied and typed back in as "not anybody's home" cannot be
+        //    recognised, so this sentence is the protection there is.
         echo '<label class="form-check-label" for="notAHome">This is not anybody\'s home (for example, a church hall). '
-            . 'A map of it may be shown to whoever can see its address.</label>';
+            . 'A map of it may be shown to whoever can see its address. <strong class="portal-not-a-home-warning">'
+            . 'Ticking this for somebody\'s home shows that home on a map without them agreeing.</strong></label>';
         echo '</div>';
         echo '<small class="text-muted">Only tick this if nobody lives here: a home address ticked by mistake would be '
             . 'shown on a map. A place with a host named cannot be marked, and changing the address clears the mark '

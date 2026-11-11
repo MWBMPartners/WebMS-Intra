@@ -373,7 +373,7 @@ if ($isCreate === true) {
     //    home", whatever they do to the address; only emptying or removing it
     //    starts again. Asked on the LOCKED row.
     $takeOver = SmallGroups::whyHostChangeRefused($lockedRow, $postedPlace, $hostPick['host'], $markTicked, $userId,
-        'empty the meeting place\'s address and save');
+        'clear every part of the meeting place except the country (both address lines, the town, the region, the postcode, the map position and the what3words address) and save');
     if ($takeOver !== '') {
         $db->rollback();
         $_SESSION['flash_msg']  = $takeOver;
