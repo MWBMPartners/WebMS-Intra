@@ -3028,12 +3028,17 @@ ok('L8 the three messages a global administrator is shown about "Never delete" f
 // 'Never delete'", which under 30 days names a range the organisation may not
 // use and a choice its form does not offer. Every case is written here
 // literally, and nothing may be saved for the organisation.
-$alrOrgPress = static function (array $fields) use ($jar, $alrFlash): string {
-    $form = req($jar['adm'], 'GET', '/admin/maintenance/retention');
-    req($jar['adm'], 'POST', '/admin/maintenance/retention', ['csrf_token' => token($form['body']), 'action' => 'activity-retention-organisation'] + $fields);
+$alrOrgPress = static function (array $fields, string $who = 'adm') use ($jar, $alrFlash): string {
+    $form = req($jar[$who], 'GET', '/admin/maintenance/retention');
+    req($jar[$who], 'POST', '/admin/maintenance/retention', ['csrf_token' => token($form['body']), 'action' => 'activity-retention-organisation'] + $fields);
 
-    return $alrFlash((string) req($jar['adm'], 'GET', '/admin/maintenance/retention')['body']);
+    return $alrFlash((string) req($jar[$who], 'GET', '/admin/maintenance/retention')['body']);
 };
+$alrOrgOwnNow = static fn (): string => (string) json_encode(one("SELECT settingValue FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]));
+// Both rows L9 changes are recorded first and put back EXACTLY on every exit:
+// the installation's (also restored by the clean-up) and the organisation's own.
+$alrOrgRowBefore  = one("SELECT settingValue, defaultValue FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]);
+$alrInstRowBefore = one("SELECT settingValue FROM tblSettings WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'");
 $alrUnderNever = 'A number of days has to be a whole number from 1 to 3650. For no time limit, choose "Never delete" instead. Nothing was saved.';
 $alrUnder30    = 'A number of days has to be a whole number from 1 to 30. Nothing was saved.';
 $alrOrgCases   = [];
@@ -3053,11 +3058,40 @@ try {
                 : 'This installation allows at most 30 days, so that number was not saved. You can choose 30 or fewer. '
                     . 'Ask whoever runs this installation if you need more.'];
         $alrOrgCases['installation ' . $named . ', nothing saved for the organisation'] = [
-            json_encode(one("SELECT settingValue FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A])), 'null'];
+            $alrOrgOwnNow(), 'null'];
     }
+    // #940 round 4, narrow check: three more shapes, all under installation 30
+    // (the loop above leaves it there).
+    //  (a) NOT A WHOLE NUMBER: letters, a negative and a fraction. Each must
+    //      get the ORGANISATION's words, never the installation's, and save
+    //      nothing - a version wording only '0' and '' this way passed.
+    foreach (['abc', '-1', '1.5'] as $alrBad) {
+        $alrOrgCases['installation 30 days, "' . $alrBad . '"'] = [$alrOrgPress(['choice' => 'days', 'days' => $alrBad]), $alrUnder30];
+    }
+    $alrOrgCases['installation 30 days, after "abc", "-1" and "1.5", nothing saved'] = [$alrOrgOwnNow(), 'null'];
+    //  (b) A GLOBAL ADMINISTRATOR pressing the ORGANISATION's form gets the
+    //      organisation's words: it is the form that decides, not the person.
+    $alrOrgCases['installation 30 days, a 0 pressed by a global administrator'] = [
+        $alrOrgPress(['choice' => 'days', 'days' => '0'], 'root'), $alrUnder30];
+    $alrOrgCases['installation 30 days, after the global administrator, nothing saved'] = [$alrOrgOwnNow(), 'null'];
+    //  (c) THE ORGANISATION HOLDS A FIGURE OF ITS OWN (10). The range is still
+    //      the installation's, 1 to 30 - the installation is the ceiling, not
+    //      the organisation's own figure - and the stored 10 is left alone.
+    siteSetting(ORG_A, 'audit.retentionDays', '10');
+    $alrOrgCases['installation 30 days, organisation at 10, a 0'] = [$alrOrgPress(['choice' => 'days', 'days' => '0']), $alrUnder30];
+    $alrOrgCases['installation 30 days, organisation at 10, its 10 unchanged'] = [$alrOrgOwnNow(), json_encode(['settingValue' => '10'])];
 } finally {
     q("DELETE FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]);
-    q("UPDATE tblSettings SET settingValue = '365' WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'");
+    if ($alrOrgRowBefore !== null) {
+        q('INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, \'audit.retentionDays\', ?, ?, 0)', 'iss',
+            [ORG_A, (string) $alrOrgRowBefore['settingValue'], (string) $alrOrgRowBefore['defaultValue']]);
+    }
+    q("UPDATE tblSettings SET settingValue = ? WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'", 's',
+        [(string) ($alrInstRowBefore['settingValue'] ?? '365')]);
+}
+if (one("SELECT settingValue, defaultValue FROM tblSettings WHERE siteID = ? AND settingKey = 'audit.retentionDays'", 'i', [ORG_A]) !== $alrOrgRowBefore
+    || one("SELECT settingValue FROM tblSettings WHERE siteID IS NULL AND settingKey = 'audit.retentionDays'") !== $alrInstRowBefore) {
+    $alrOrgCases['both rows L9 changed are put back exactly'] = ['not put back', 'put back'];
 }
 $alrOrgWrong = [];
 foreach ($alrOrgCases as $case => [$got, $want]) {
@@ -3065,8 +3099,8 @@ foreach ($alrOrgCases as $case => [$got, $want]) {
         $alrOrgWrong[] = $case . ': ' . $got;
     }
 }
-ok('L9 the ORGANISATION\'s form refuses a 0, an empty box and a figure past ten years in its own words: under an installation that keeps the log for ever it offers "Never delete", under one of 30 days it gives 1 to 30 and never names "Never delete", each exactly the literal words here, and nothing is saved (#940 round 4)',
-    count($alrOrgCases) === 8 && $alrOrgWrong === [], implode(' || ', $alrOrgWrong));
+ok('L9 the ORGANISATION\'s form refuses a 0, an empty box, letters, a negative, a fraction and a figure past ten years in its own words: under an installation that keeps the log for ever it offers "Never delete", under one of 30 days it gives 1 to 30 and never names "Never delete" - also when a global administrator presses it, and when the organisation holds a figure of its own - each exactly the literal words here, nothing is saved, and both rows are put back (#940 round 4)',
+    count($alrOrgCases) === 16 && $alrOrgWrong === [], implode(' || ', $alrOrgWrong));
 
 // The pin file as a whole, asked AFTER every rendered pin has been compared
 // (#703 round 10: it sat after the help page's pin, before section K's, and so
