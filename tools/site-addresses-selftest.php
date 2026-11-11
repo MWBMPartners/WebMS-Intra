@@ -179,7 +179,7 @@ declare(strict_types=1);
 
 /** How many checks each kind of run makes. A different number means a block was skipped or ran twice. */
 const EXPECTED_FULL     = 108;
-const EXPECTED_NO_CRAWL = 93;
+const EXPECTED_NO_CRAWL = 98;
 const EXPECTED_ONLY     = 11;
 
 function refuse(string $why): never

@@ -23523,3 +23523,38 @@ statement early: a reader that blanks or splits SQL must track strings and comme
 - **Not fixed:** an account re-saved before #977 stays as it was (#986), which is why `Giving::buildHmrcCsv()`
   keeps its "[Deleted User]" → empty name rule. The offboarding page prints no flash message (#985).
 
+### An activity record's words are not a person's details (#933)
+
+- #626's rule is that a record names its person in `userID`; #933 measured 53 of 682 writers also naming people in
+  the words, which no erasure empties. Write numbers and fixed words and put the person in the third argument —
+  including on records written before anybody is signed in (provider link, password reset), which named nobody at
+  all.
+- The owner kept three things readable: a failed sign-in's typed name (D-137; the sign-in limit matches those exact
+  words, so never change them without changing the limit), a refused child-collection name (a safeguarding record,
+  same reasoning), and an organisation's own labels (D-138). The support e-mail address is logged on purpose too
+  (#990 asks the owner).
+- The gate `check_activity_descriptions_personal.py` reads NAMES with PHP's tokeniser; its exceptions are keyed by
+  file, record type and name, and it cannot see a value under an innocent name, one built in a local variable
+  first, one passed through a wrapper's callers, named arguments in another order, a plural, a snake_case key or a
+  getter — three of the 41 were invisible to it. Two calls of one record type in one file share one exception. Its
+  `TEXT_PINS` list pins the event-registration slug filter whole, because that value is built in a local variable.
+- Two traps from testing: the reset page answers before it writes, so a test must wait for the final record; and
+  failed sign-ins name nobody, so a test that makes them must remove them itself or the address limit refuses the
+  next run.
+- When a writer stops naming somebody, look for the SENTENCES that describe it as naming somebody: three pinned,
+  member-facing texts said a provider's e-mail address was kept after #933 had removed it (round 3). And a record a
+  visitor writes "names nobody" only while they are signed out: `Logger::activity()` fills `userID` from the
+  session, so a signed-in member's anonymous prayer request names them (#988).
+
+### The Outside calendars menu entry (#619)
+
+- `FeedAdmin::menuEntryShown()` is the ONE question whether to point at the Outside calendars page (the menu in
+  `nav.php` and the tile in `_apps/admin/index.php` both ask it). It asks `EventVisibility::isAdminOfSite()`, the
+  page's own gate, NOT `App::isAdmin()`: the older flag admits people the page then refuses with a 403 (check F03f,
+  an account holding only that flag). It never throws and is remembered per request.
+- The page's address is not owned by the Calendar app, so the router still opens it with Calendar off; the entry
+  follows the Calendar switch anyway because the copied-in dates are shown by Calendar. To change that, drop the
+  `AppRegistry::isEnabled('calendar')` term in that one method.
+- Tests: F03, F03c-F03f and F12c of `tools/site-addresses-selftest.php`. F03f needs its own account because a plain
+  member has no Admin menu, so a "shown to everyone" plant is invisible to a member-only check.
+

@@ -4,6 +4,32 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An activity record names its person by number, not in its words (#933; D-137, D-138)
+
+- An erasure empties a record's account number and network address but keeps its description, and the log may be
+  kept for ever (D-117). 41 places that wrote a person's details into the description now write numbers and fixed
+  words: the e-mail address on every password reset and provider link; a registrant's, child's, donor's, role
+  holder's or new member's name; a name typed for an outside helper; a visitor's network address; a passkey's name;
+  a device's push address.
+- Kept readable on purpose: the sign-in name typed in a failed sign-in (D-137), the name of an adult refused when
+  collecting a child, the organisation's own labels such as a group's or a task's name (D-138), and the
+  organisation's support e-mail address (#990).
+- New hard gate `check_activity_descriptions_personal.py` (with its own self-test) and HTTP self-test
+  `activity-description-selftest.php`.
+- What a member is told about the activity log on erasure, the written list of personal data and
+  `docs/gdpr-erasure-policy.md` no longer say a sign-in provider's e-mail address is kept in the log; their example
+  is now a failed sign-in.
+- A failed bot check on the event registration form records the event address only when it looks like one.
+- Whether an "anonymous" prayer request sent while signed in should be tied to the member's account is #988; error
+  messages copied into records are #990. Codex has not reviewed this.
+
+### Outside calendars is in the Admin menu (#619)
+
+- `/admin/calendar/feeds` now has an entry in the Admin menu and a button among the Admin dashboard's "More Admin
+  Screens". It is shown only to whoever the page itself lets in (an administrator of the open organisation, or a
+  global administrator), and is left out when the Calendar app is switched off for the organisation. The other pages
+  #514 added are reached from that list or are part of the Approvals page. Codex has not reviewed this.
+
 ### An account erased on request can no longer be changed or switched back on (#977)
 
 - A global administrator could open an erased account on Admin → Users, tick Active (or change its address, its

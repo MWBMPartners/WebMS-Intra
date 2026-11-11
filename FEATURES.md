@@ -624,6 +624,8 @@ Events, series, RSVP, exports, and seven view modes.
 An organisation subscribes the portal to a calendar somebody else publishes (Google, Microsoft 365, any calendar file at a
 web address). The portal copies the events in, and an administrator decides who sees each one and how much of it. The
 administrators' guide is `/help/calendar-imports`. The technical record is DEV_NOTES.md, "Outside calendars (#514)".
+Reached from Admin menu → Outside calendars and from the Admin dashboard, for whoever the page lets in, while the Calendar
+app is on (#619).
 
 **Adding and running a calendar**
 - Pages: the list `/admin/calendar/feeds`, add or change one `…/feeds/edit`, one calendar's own page `…/feeds/view`. There is no
@@ -1351,6 +1353,9 @@ another repo, ever**.
 - Per-user language preference.
 - Date/time format settings (#69).
 
+- Activity-log descriptions carry numbers and fixed words, not a person's name, e-mail address, network address or own
+  words (#933). Kept readable on purpose: the name typed in a failed sign-in (D-137), the name of an adult refused
+  when collecting a child, an organisation's own labels (D-138) and its support e-mail address.
 - The activity log keeps a fingerprint, not the sign-in identifier (#622). A record used to store the session
   identifier — which IS the sign-in cookie, so anyone reading the table, a backup or a pre-upgrade snapshot held
   working sign-ins — beside a copy of everything in the session, which held two-step backup codes and some
