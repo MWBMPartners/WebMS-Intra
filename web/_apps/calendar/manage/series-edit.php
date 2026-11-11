@@ -8,7 +8,7 @@
  * fields (status, category, type, visibility, featured). Admins can select
  * individual events or use "select all" to apply changes in one operation.
  *
- * ♻️ HIDDEN DATES (#691). Below the list, the page shows every HIDDEN date of
+ * ♻️ HIDDEN DATES (#691; the owner's decisions D-143, D-144, D-145). Below the list, the page shows every HIDDEN date of
  * the series — a date a pattern change removed, or one deleted on its own —
  * with a button to bring each back AS A DRAFT. `Portal\Core\HiddenSeriesDates`
  * decides everything about it (which dates are listed, whether one may come
@@ -123,14 +123,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     //    in front of the whole page (`App::isAdmin()`, above) and the form
     //    token just checked, so it is gated exactly as the rest of the series
     //    pages are, with no second rule of its own.
+    //
+    // 🤝 THE SECOND PRESS (the owner, 11 November 2026 — D-144). A date whose
+    //    day the series already uses is refused on the first press; the page
+    //    then offers "Bring it back anyway", whose form carries
+    //    `confirmSameDay=1`. Only that exact value counts, and it is handed to
+    //    `restore()` as a plain yes/no: whether the day is REALLY taken is
+    //    decided there, under its lock, so a confirmation can never stand in
+    //    for the check.
     if ((string) ($_POST['action'] ?? '') === 'restore') {
-        $outcome = HiddenSeriesDates::restore(
+        $restoreEventID = (int) ($_POST['restoreEventID'] ?? 0);
+        $outcome        = HiddenSeriesDates::restore(
             $mysqli,
             $siteId,
             $seriesID,
-            (int) ($_POST['restoreEventID'] ?? 0),
-            $userId === null ? null : (int) $userId
+            $restoreEventID,
+            $userId === null ? null : (int) $userId,
+            (string) ($_POST['confirmSameDay'] ?? '') === '1'
         );
+        // 📌 Remember which date was refused for its day, so the page drawn
+        //    after the redirect can offer the deliberate second press beside
+        //    THAT date only. Read once and dropped (see the card below). It is
+        //    a convenience for the page, not a permission: the confirmed press
+        //    is judged afresh by `restore()` whatever this holds.
+        if ($outcome === HiddenSeriesDates::DAY_TAKEN) {
+            $_SESSION['seriesRestoreOffer'] = ['seriesID' => $seriesID, 'eventID' => $restoreEventID];
+        }
         $said                   = HiddenSeriesDates::words($outcome);
         $_SESSION['flash_msg']  = $said['words'];
         $_SESSION['flash_type'] = $said['type'];
@@ -278,6 +296,16 @@ if ($stmt !== false) {
 
 // ♻️ The series' hidden dates, for the card at the foot of the page (#691).
 $hiddenDates = HiddenSeriesDates::listFor($mysqli, $siteId, $seriesID);
+
+// 🤝 The date, if any, whose first press was just refused for its day (D-144):
+//    only that one is offered "Bring it back anyway". Taken out of the session
+//    as it is read, so a reload or another series never shows it again.
+$restoreOffer = 0;
+$offerHeld    = $_SESSION['seriesRestoreOffer'] ?? null;
+unset($_SESSION['seriesRestoreOffer']);
+if (is_array($offerHeld) === true && (int) ($offerHeld['seriesID'] ?? 0) === $seriesID) {
+    $restoreOffer = (int) ($offerHeld['eventID'] ?? 0);
+}
 
 // 📋 Fetch categories and types for dropdowns
 $categories = [];
@@ -520,17 +548,19 @@ checkboxes.forEach(function (cb) {
         <h5 class="mb-0"><i class="fa-solid fa-eye-slash me-1"></i> Hidden dates
             <span class="badge bg-secondary"><?php echo count($hiddenDates); ?></span></h5>
         <small class="text-muted">
-            Dates of this series that were removed by a pattern change or deleted one at a time. They were
-            hidden rather than deleted, so nothing attached to them was lost. The portal does not record which
-            way a date was hidden, so both kinds are listed here.
+            Dates of this series that were removed by a pattern change <strong>or deleted by hand</strong>, one at
+            a time. They were hidden rather than deleted, so nothing attached to them was lost. The portal
+            does not record which way a date was hidden, so both kinds are listed here.
         </small>
     </div>
     <div class="card-body">
         <p class="small mb-3">
             <strong>A date you bring back arrives as a draft</strong>, whatever it was before it was hidden, so
             members do not see it until you have looked at it and published it (tick it in the list above and set
-            <em>Status</em> to Published). A date cannot come back onto a day this series already has a date on.
-            A later pattern change may hide it again if the new pattern does not include its day.
+            <em>Status</em> to Published). If the series already has a date on that day, the first press is
+            refused and tells you so; you can then choose <em>Bring it back anyway</em>, which leaves the series
+            with two dates on that day. A later pattern change may hide it again if the new pattern does not
+            include its day.
         </p>
         <div class="portal-data-list">
             <div class="portal-data-row portal-data-header d-none d-md-flex">
@@ -562,17 +592,35 @@ checkboxes.forEach(function (cb) {
                     </div>
                     <div class="col-12 col-md-3">
                         <?php if ($hd['dayTaken'] === true): ?>
-                            <span class="small text-muted">This series already has a date on that day, so this one cannot come back.</span>
-                        <?php else: ?>
-                            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series-edit'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
+                            <span class="small text-muted d-block">This series already has a date on that day.</span>
+                        <?php endif; ?>
+                        <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series-edit'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+                            <input type="hidden" name="seriesID" value="<?php echo (int) $seriesID; ?>">
+                            <input type="hidden" name="action" value="restore">
+                            <input type="hidden" name="restoreEventID" value="<?php echo (int) $hd['eventID']; ?>">
+                            <button type="submit" class="btn btn-sm btn-outline-primary">
+                                <i class="fa-solid fa-rotate-left me-1"></i> Bring back as a draft
+                            </button>
+                        </form>
+                        <?php if ($restoreOffer === (int) $hd['eventID'] && $hd['dayTaken'] === true): ?>
+                            <?php
+                            // 🤝 THE DELIBERATE SECOND PRESS (D-144): its own
+                            //    form and its own button, offered only beside
+                            //    the date whose first press was just refused.
+                            //    `confirmSameDay` is what `restore()` reads.
+                            ?>
+                            <form method="post" action="<?php echo htmlspecialchars(Site::url('calendar/manage/series-edit'), ENT_QUOTES, 'UTF-8'); ?>" class="d-inline" data-restore-anyway="<?php echo (int) $hd['eventID']; ?>">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(Auth::csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="seriesID" value="<?php echo (int) $seriesID; ?>">
                                 <input type="hidden" name="action" value="restore">
                                 <input type="hidden" name="restoreEventID" value="<?php echo (int) $hd['eventID']; ?>">
-                                <button type="submit" class="btn btn-sm btn-outline-primary">
-                                    <i class="fa-solid fa-rotate-left me-1"></i> Bring back as a draft
+                                <input type="hidden" name="confirmSameDay" value="1">
+                                <button type="submit" class="btn btn-sm btn-warning mt-1">
+                                    <i class="fa-solid fa-triangle-exclamation me-1"></i> Bring it back anyway
                                 </button>
                             </form>
+                            <span class="small text-muted d-block">The series will then have two dates on that day.</span>
                         <?php endif; ?>
                     </div>
                 </div>

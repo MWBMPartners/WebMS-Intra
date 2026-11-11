@@ -36,10 +36,12 @@
  *     IT CAN BE BROUGHT BACK, AS A DRAFT, from the series' bulk edit page
  *     (`calendar/manage/series-edit`), since #691. `Portal\Core\HiddenSeriesDates`
  *     is the one place that decides it. Say exactly that and no more: it comes
- *     back as a DRAFT whatever it was, and it is REFUSED onto a day the series
- *     already has a live date on — which is the ordinary case after a series is
+ *     back as a DRAFT whatever it was (D-145), and onto a day the series
+ *     already has a live date on — the ordinary case after a series is
  *     shortened and extended over the same weeks again, because this page then
- *     makes NEW rows for those days. Until #691 these sentences had to say
+ *     makes NEW rows for those days — the first press is refused and a second,
+ *     deliberate "Bring it back anyway" press is needed (D-144), which leaves
+ *     two dates on that day. Until #691 these sentences had to say
  *     there was no way back at all: an earlier "an administrator can put it
  *     back" was written when nothing could, and was corrected on 31 October
  *     2026 before the restore existed.
@@ -1258,7 +1260,8 @@ $showReading = static function (?string $reading): string {
         <li>A date is <strong>left exactly as it is</strong> if anything is attached to it (attendance, bookings, registrations, invitations), or if somebody has moved it by hand.</li>
         <li>A date that goes is <strong>hidden rather than deleted</strong>, so nothing attached to it is
             destroyed. You can bring it back afterwards from this series' bulk edit page, where it returns as a
-            draft — unless the series has since been given another date on that same day.</li>
+            draft. If the series has since been given another date on that same day, you are asked to confirm
+            first, because the series would then have two dates on that day.</li>
     </ul>
     <p class="mb-0 small text-muted">Nothing is written until you have seen exactly what will change and confirmed it.</p>
 </div>
@@ -1467,8 +1470,8 @@ $showReading = static function (?string $reading): string {
                         These are hidden rather than deleted, so nothing attached to them is destroyed. Nothing is
                         attached to any of them in any case — a date carrying attendance, a booking or a
                         registration is in the list below instead. <strong>You can bring a hidden date back</strong>
-                        from this series' bulk edit page, where it returns as a draft &mdash; but not onto a day the
-                        series has since been given another date on.
+                        from this series' bulk edit page, where it returns as a draft &mdash; and if the series has
+                        since been given another date on that day, only after you confirm you want two.
                     </p>
                 <?php endif; ?>
 

@@ -3586,20 +3586,24 @@ function restPage(string $jar, int $seriesId): array
  * with a fresh form token unless `$token` says otherwise. Hands back the answer
  * AND the message the page then shows, read from the page it redirects to.
  */
-function restPress(string $jar, int $seriesId, int $eventId, ?string $token = null): array
+function restPress(string $jar, int $seriesId, int $eventId, ?string $token = null, bool $confirmSameDay = false): array
 {
     // The token from the Manage Events page: one token serves the whole
     // session, and this page answers even when the series named has gone, so
     // a refusal below is never just a missing token.
     $fresh = managePage($jar)['token'];
     $post  = ['seriesID' => (string) $seriesId, 'action' => 'restore', 'restoreEventID' => (string) $eventId];
+    if ($confirmSameDay === true) {
+        // The field the "Bring it back anyway" form carries (D-144).
+        $post['confirmSameDay'] = '1';
+    }
     if ($token !== '') {
         $post['csrf_token'] = $token ?? $fresh;
     }
     $sent  = req($jar, 'POST', '/calendar/manage/series-edit', $post);
     $after = req($jar, 'GET', $sent['location'] === '' ? '/calendar/manage/series' : (string) preg_replace('#^.*?' . preg_quote(ADDR, '#') . '#', '', $sent['location']));
 
-    return ['status' => $sent['status'], 'location' => $sent['location'], 'message' => flashOn($after['body'])];
+    return ['status' => $sent['status'], 'location' => $sent['location'], 'message' => flashOn($after['body']), 'body' => $after['body']];
 }
 
 /**
@@ -3780,17 +3784,78 @@ ok('T27 extending to four dates again re-added 28 October as a NEW row',
     && (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1,
     implode(', ', repatLiveStarts('EVREP Restore')));
 $restDayPage = restPage($jar['admin'], $restSeries);
-ok('T28 the page lists the hidden 28 October but offers NO button for it, and says why',
+ok('T28 the page lists the hidden 28 October, says its day is taken, and offers only the ORDINARY button so far',
     str_contains($restDayPage['body'], 'data-hidden-event="' . $restFourth . '"')
-    && preg_match('/name="restoreEventID" value="' . $restFourth . '"/', $restDayPage['body']) !== 1
+    && preg_match('/name="restoreEventID" value="' . $restFourth . '"/', $restDayPage['body']) === 1
     && str_contains(text($restDayPage['body']), 'already has a date on that day'));
-// A post straight at the handler, as a page drawn a moment earlier would send.
+ok('T28b ...and NO "Bring it back anyway" until a first press has been refused (D-144)',
+    str_contains($restDayPage['body'], 'data-restore-anyway=') === false
+    && str_contains($restDayPage['body'], 'name="confirmSameDay"') === false);
+// The FIRST press, the ordinary button.
 $restDay = restPress($jar['admin'], $restSeries, $restFourth);
-ok('T29 a press anyway is REFUSED: the hidden date stays hidden (read back)',
+ok('T29 the FIRST press is REFUSED: the hidden date stays hidden (read back)',
     (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1);
 ok('T30 and only ONE live date sits on 28 October',
     count(array_filter(repatLiveStarts('EVREP Restore'), static fn (string $s): bool => str_starts_with($s, '2029-10-28'))) === 1);
 ok('T31 and the message says plainly why', str_contains($restDay['message'], 'already has a date on that day'), $restDay['message']);
+
+// 🤝 D-144: after that refusal the page offers a separate, deliberate choice.
+ok('T31b the page drawn after the refusal offers "Bring it back anyway" for THAT date, carrying the confirmation',
+    preg_match('/<form[^>]*data-restore-anyway="' . $restFourth . '"/', $restDay['body']) === 1
+    && str_contains($restDay['body'], 'name="confirmSameDay" value="1"')
+    && str_contains(text($restDay['body']), 'Bring it back anyway'));
+ok('T31c ...and only once: drawn again, the page no longer offers it',
+    str_contains(restPage($jar['admin'], $restSeries)['body'], 'data-restore-anyway=') === false);
+
+// A forged confirmation, from somebody who may not manage the series, and
+// from an administrator's browser without the form token: both refused.
+$restForged = req($jar['member'], 'POST', '/calendar/manage/series-edit', [
+    'csrf_token'     => restMetaToken($jar['member']),
+    'seriesID'       => (string) $restSeries,
+    'action'         => 'restore',
+    'restoreEventID' => (string) $restFourth,
+    'confirmSameDay' => '1',
+]);
+ok('T31d a CONFIRMED press from a member who is not an administrator is refused (403) and changes nothing',
+    $restForged['status'] === 403 && (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1, 'HTTP ' . $restForged['status']);
+restPress($jar['admin'], $restSeries, $restFourth, '', true);
+ok('T31e a CONFIRMED press WITHOUT the form token changes nothing',
+    (int) (restRow($restFourth)['isDeleted'] ?? -1) === 1);
+
+// The deliberate second press itself.
+$restAnyway = restPress($jar['admin'], $restSeries, $restFourth, null, true);
+$restAnywayRow = restRow($restFourth);
+ok('T31f THE CONFIRMED PRESS BRINGS IT BACK, as a draft (read back)',
+    (int) ($restAnywayRow['isDeleted'] ?? -1) === 0 && (string) ($restAnywayRow['status'] ?? '') === 'draft',
+    json_encode($restAnywayRow));
+ok('T31g ...so 28 October now holds TWO live dates of the series',
+    count(array_filter(repatLiveStarts('EVREP Restore'), static fn (string $s): bool => str_starts_with($s, '2029-10-28'))) === 2);
+ok('T31h ...and the message says plainly that the series now has two dates on that day',
+    str_contains($restAnyway['message'], 'now has two dates on that day'), $restAnyway['message']);
+ok('T31i ...and the activity log records that it was confirmed',
+    one(
+        "SELECT logID FROM tblActivityLogs WHERE siteID = ? AND activityType = 'SeriesDateRestored' AND activityDescription LIKE ?",
+        'is',
+        [ORG, '%#' . $restFourth . ' of series #' . $restSeries . '%confirmed%']
+    ) !== null);
+
+// The confirmation on a day with NO clash is simply an ordinary restore: it
+// skips nothing, and the words do not claim two dates on one day.
+createEvent($jar['admin'], 'EVREP Restore confirm', '2030-04-07T10:00', '2030-04-07T11:00', [
+    'repeatFrequency' => 'weekly',
+    'repeatCount'     => '2',
+]);
+$confirmSeries = repatSeries('EVREP Restore confirm');
+$restApply($confirmSeries, ['patternStart' => '2030-04-07T10:00', 'patternEnd' => '2030-04-07T11:00', 'repeatFrequency' => 'weekly'], '1');
+$confirmHidden = restHidden('EVREP Restore confirm');
+$confirmId     = (int) ($confirmHidden[0]['eventID'] ?? 0);
+$confirmPress  = restPress($jar['admin'], $confirmSeries, $confirmId, null, true);
+ok('T31j the confirmation on a day with NO clash restores it like an ordinary press (read back: live, draft)',
+    count($confirmHidden) === 1
+    && (int) (restRow($confirmId)['isDeleted'] ?? -1) === 0 && (string) (restRow($confirmId)['status'] ?? '') === 'draft');
+ok('T31k ...with the ORDINARY words, which do not claim two dates on one day',
+    str_contains($confirmPress['message'], 'back in the series as a draft')
+    && str_contains($confirmPress['message'], 'two dates') === false, $confirmPress['message']);
 
 // -----------------------------------------------------------------------------
 // T32 — TWO ADMINISTRATORS: the restore waits for the series' lock and then

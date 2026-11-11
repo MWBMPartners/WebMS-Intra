@@ -17,8 +17,8 @@
  * own.
  *
  * WHICH DATES ARE LISTED — every hidden date of the series, however it was
- * hidden. That is broader than "the dates a pattern change hid", and on
- * purpose: three things hide an event (the pattern page, the Delete button on
+ * hidden (the owner, 11 November 2026 — D-143). That is broader than "the
+ * dates a pattern change hid", and on purpose: three things hide an event (the pattern page, the Delete button on
  * the Manage Events page, and the events API), and NONE of them records which
  * one did it. `calendar/manage/delete.php` does not even fill `deletedAt`.
  * Narrowing the list would need a guess — and a guess that hid a date somebody
@@ -28,8 +28,8 @@
  * -----------------------------------------------------------------------------
  *   • The row is un-hidden IN PLACE: same number, same address, same name,
  *     venue, registrations and everything attached. Nothing is copied.
- *   • IT COMES BACK AS A DRAFT, whatever it was when it was hidden. That is
- *     D-033's reasoning applied to a date coming back: a date nobody has looked
+ *   • IT COMES BACK AS A DRAFT, whatever it was when it was hidden (the
+ *     owner, 11 November 2026 — D-145). That is D-033's reasoning applied to a date coming back: a date nobody has looked
  *     at since it vanished should not reappear in front of members unasked. A
  *     draft is one tick from right on the same page (Status → Published); a
  *     wrongly published service is already in front of everybody.
@@ -50,13 +50,28 @@
  *     administrator brought it back a moment earlier). Said separately because
  *     it is this organisation's own date, so naming it leaks nothing, and "not
  *     found" would send somebody looking for a fault.
- *   • DAY_TAKEN — the series already has a live date on that DAY. That is the
- *     case that really happens: shorten a series, then extend it over the same
- *     weeks again, and the pattern page makes NEW rows for those days (the
- *     hidden ones keep their addresses for ever). Bringing the old one back
- *     would put the same service in the diary twice, and
- *     `SeriesRepattern` refuses to touch two dates on one day afterwards
- *     (`KEPT_SAME_DAY`), so the series could no longer be re-patterned there.
+ *   • DAY_TAKEN — the series already has a live date on that DAY, and the
+ *     person has NOT confirmed they want two. That is the case that really
+ *     happens: shorten a series, then extend it over the same weeks again, and
+ *     the pattern page makes NEW rows for those days (the hidden ones keep
+ *     their addresses for ever). Bringing the old one back would put the same
+ *     service in the diary twice, and `SeriesRepattern` refuses to touch two
+ *     dates on one day afterwards (`KEPT_SAME_DAY`).
+ *
+ *     BUT IT IS NOT A WALL (the owner, 11 November 2026 — D-144). A series can
+ *     legitimately hold two dates on one day (a morning and an evening
+ *     service), so the first press is refused with the reason and the page
+ *     then offers a separate "Bring it back anyway" button, whose form carries
+ *     `confirmSameDay=1`. With that confirmation the date comes back (as a
+ *     draft) and the answer is RESTORED_SAME_DAY, whose words say plainly that
+ *     the series now has two dates on that day.
+ *
+ *     THE CONFIRMATION IS JUDGED UNDER THE LOCK, never before it. Whether the
+ *     day is taken is read inside the locked transaction, so it is the state
+ *     at the moment of writing that decides: a confirmation sent for a day
+ *     that has since been freed is an ordinary restore (RESTORED), and a plain
+ *     press for a day that became taken while it waited is refused. The
+ *     confirmation only ever ANSWERS the refusal; it never skips the check.
  *   • ADDRESS_TAKEN — another event in the organisation holds this date's web
  *     address (`eventSlug`). BE PRECISE ABOUT HOW LIKELY THAT IS: while
  *     `uq_event_site_slug (siteID, eventSlug)` exists it CANNOT happen — the
@@ -104,6 +119,10 @@ final class HiddenSeriesDates
     // 🏷️ What `restore()` answers. `words()` is the only place each becomes
     //    English, so the page can never say something the class did not mean.
     public const RESTORED      = 'restored';
+    // Brought back WITH the confirmation, onto a day the series already had a
+    // live date on (D-144). Its own answer, because its words must say that
+    // the series now has two dates on that day.
+    public const RESTORED_SAME_DAY = 'restored-same-day';
     public const NOT_FOUND     = 'not-found';
     public const ALREADY_BACK  = 'already-back';
     public const DAY_TAKEN     = 'day-taken';
@@ -172,9 +191,19 @@ final class HiddenSeriesDates
      * Never throws: a fault rolls back, is recorded without its own words (a
      * database error can quote a value, here an event's name), and answers
      * FAILED.
+     *
+     * `$sameDayConfirmed` is the deliberate second press of D-144: true only
+     * when the posted form carried `confirmSameDay=1`. It matters ONLY when
+     * the day turns out to be taken, which is decided below, under the lock.
      */
-    public static function restore(mysqli $db, int $siteId, int $seriesId, int $eventId, ?int $userId): string
-    {
+    public static function restore(
+        mysqli $db,
+        int $siteId,
+        int $seriesId,
+        int $eventId,
+        ?int $userId,
+        bool $sameDayConfirmed = false
+    ): string {
         if ($seriesId <= 0 || $eventId <= 0) {
             return self::NOT_FOUND;
         }
@@ -294,7 +323,11 @@ final class HiddenSeriesDates
             $dayTest->execute();
             $dayTaken = $dayTest->get_result()->fetch_row() !== null;
             $dayTest->close();
-            if ($dayTaken === true) {
+            // 🤝 D-144: a taken day is refused UNLESS this press is the
+            //    deliberate second one. Asked here, on the locked read, so the
+            //    answer is about the day as it is now and not as it was when
+            //    the page was drawn.
+            if ($dayTaken === true && $sameDayConfirmed === false) {
                 $db->rollback();
 
                 return self::DAY_TAKEN;
@@ -325,6 +358,7 @@ final class HiddenSeriesDates
             }
 
             $db->commit();
+            $answer = $dayTaken === true ? self::RESTORED_SAME_DAY : self::RESTORED;
         } catch (\Throwable $e) {
             try {
                 $db->rollback();
@@ -345,11 +379,12 @@ final class HiddenSeriesDates
         // 📝 Numbers only: an event's name can carry somebody's details.
         Logger::activity(
             'SeriesDateRestored',
-            'Event #' . $eventId . ' of series #' . $seriesId . ' brought back as a draft',
+            'Event #' . $eventId . ' of series #' . $seriesId . ' brought back as a draft'
+            . ($answer === self::RESTORED_SAME_DAY ? ', confirmed onto a day the series already had a date on' : ''),
             $userId
         );
 
-        return self::RESTORED;
+        return $answer;
     }
 
     /**
@@ -366,6 +401,12 @@ final class HiddenSeriesDates
                 'words' => 'That date is back in the series as a draft, so members cannot see it yet. '
                     . 'Tick it in the list below and set Status to Published when it is ready.',
             ],
+            self::RESTORED_SAME_DAY => [
+                'type'  => 'warning',
+                'words' => 'That date is back in the series as a draft, as you confirmed. This series now has two dates '
+                    . 'on that day — hide or move one of them if that is not what you want. Members cannot see the date '
+                    . 'you brought back until you publish it.',
+            ],
             self::ALREADY_BACK => [
                 'type'  => 'info',
                 'words' => 'That date is already back in the series — somebody else may have just brought it back. Nothing was changed.',
@@ -373,8 +414,9 @@ final class HiddenSeriesDates
             self::DAY_TAKEN => [
                 'type'  => 'warning',
                 'words' => 'Nothing was changed. This series already has a date on that day, so bringing the hidden one back '
-                    . 'would put the same day in the diary twice. Hide or move the date that is there now first if you want '
-                    . 'the old one back instead.',
+                    . 'would put two dates on the same day. If that is what you want — a morning and an evening service, '
+                    . 'say — press "Bring it back anyway" beside it below. If you want the old one back instead, hide or '
+                    . 'move the date that is there now first.',
             ],
             self::ADDRESS_TAKEN => [
                 'type'  => 'warning',
