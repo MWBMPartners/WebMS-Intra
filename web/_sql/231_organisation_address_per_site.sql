@@ -60,11 +60,13 @@
 --   organisation would be carrying its own copy of the old one.
 --
 --   The installation-wide `org.*` rows are also LEFT IN PLACE. They are the
---   seeded defaults (all empty except `org.address.countryCode`, which is
---   'GB'), and after this migration nothing writes them — the page writes the
---   organisation's row. They remain as what a NEWLY CREATED organisation
---   inherits until somebody fills its address in, which is the right answer
---   for a country code and harmless for the rest.
+--   seeded defaults, and after this migration the organisation page writes
+--   the organisation's row instead. They remain as what a NEWLY CREATED
+--   organisation inherits until somebody fills its address in, which is the
+--   right answer for a country code and harmless for the rest. (When this was
+--   written `org.address.countryCode` was seeded 'GB'. Since #942 (D-133) all
+--   nine are seeded EMPTY, and the installer writes the country it asks for
+--   into the installation's row.)
 --
 -- SAFE TO RUN TWICE
 --   `ON DUPLICATE KEY UPDATE settingID = settingID` is a no-op. Note the
@@ -85,12 +87,15 @@
 --   There is no schema change here, so nothing needs guarding.
 --
 -- A FRESH INSTALL
---   `full_schema.sql` seeds one organisation (`default`) and seeds these keys
---   installation-wide with empty values apart from the country code, so the
---   folded-in copy of this statement moves exactly one row: that organisation
---   gets its own `org.address.countryCode` of 'GB'. The statement is identical
---   in both places, so an upgraded database and a fresh one end up the same,
---   which is what the end-to-end migration harness requires.
+--   `full_schema.sql` seeds one organisation (`default`) and, since #942
+--   (D-133), seeds all nine keys installation-wide EMPTY, so the folded-in
+--   copy of this statement moves NOTHING on a fresh install. (Until #942 the
+--   country code was seeded 'GB' and that one row was copied to the
+--   organisation; the installer now writes the country it asks for into the
+--   INSTALLATION's row at the finish, after this has run, so the organisation
+--   follows it.) The statement is identical in both places, so an upgraded
+--   database and a fresh one end up the same, which is what the end-to-end
+--   migration harness requires.
 -- =============================================================================
 
 -- 🏠 Give every organisation its own copy of whatever address the

@@ -57,7 +57,7 @@ web/_apps/venues/schedule-pdf.php           no-rule  the venue schedule to print
 web/_apps/venues/invoice-pdf.php            no-rule  the venue invoice to print draws its own page; its body has an onload that opens the print box
 
 # Pages that must work when the portal itself cannot.
-web/_install/index.php                      no-rule  the installer runs before there is a portal to draw a header; three scripts
+web/_install/index.php                      no-rule  the installer runs before there is a portal to draw a header; four scripts (the fourth suggests a country and time zone, #942)
 web/public_html/offline/index.php           no-rule  the "you are offline" page is kept by the browser and must stand alone; one script and a Retry button's onclick
 
 # --- Pages that send a script rule of their own -------------------------------

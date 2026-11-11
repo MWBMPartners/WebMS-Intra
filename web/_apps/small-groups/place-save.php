@@ -155,8 +155,20 @@ $addressLine2 = $text('addressLine2', 255);
 $city         = $text('city', 100);
 $region       = $text('region', 100);
 $postcode     = $text('postcode', 20);
+// 🌍 The home's country (#942). Two letters are stored in capitals and an
+//    empty box stores none. Anything else is now REFUSED with the reason, the
+//    rule small-groups/save.php applies to the usual place: it used to be
+//    stored as no country without a word, so a typed "Ireland" vanished.
+//    (A home keeps "no country" as NULL and the usual place as '': the two
+//    columns were made that way, and changing either is not this change.)
 $countryCode  = strtoupper(trim((string) ($_POST['countryCode'] ?? '')));
-$countryCode  = preg_match('/^[A-Z]{2}$/', $countryCode) === 1 ? $countryCode : null;
+if ($countryCode !== '' && preg_match('/^[A-Z]{2}$/', $countryCode) !== 1) {
+    $_SESSION['flash_msg']  = 'The country must be a two-letter code, such as FR or US, or left empty. Nothing was saved.';
+    $_SESSION['flash_type'] = 'danger';
+    header('Location: ' . $formUrl);
+    exit();
+}
+$countryCode  = $countryCode !== '' ? $countryCode : null;
 
 $w3wPosted = trim((string) ($_POST['what3words'] ?? ''));
 if ($w3wPosted !== '' && GeoLocation::validateW3W($w3wPosted) === null) {

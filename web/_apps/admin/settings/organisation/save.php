@@ -390,12 +390,15 @@ $address = GeoLocation::normaliseAddress([
 //    IT ASKS WHETHER THE FIELD ARRIVED (#677): a request without it leaves
 //    the country exactly as it was.
 $countrySent      = array_key_exists('countryCode', $_POST) === true;
-$countryOwnBefore = Countries::ownOf($siteId);
+// The organisation's own row AS STORED: two letters off the list ("QQ"), or
+// text that is not a code at all ("GBR"), is accepted back unchanged, because
+// the page offers it back selected (see the page for why).
+$countryOwnBefore = Countries::ownStoredText($siteId);
 $countryChosen    = null;
 if ($countrySent === true) {
     $countryChosen = Countries::fromPosted($_POST['countryCode']);
     if ($countryChosen === null && $countryOwnBefore !== '' && is_string($_POST['countryCode']) === true
-        && strtoupper(trim($_POST['countryCode'])) === $countryOwnBefore
+        && trim($_POST['countryCode']) === $countryOwnBefore
     ) {
         $countryChosen = $countryOwnBefore;
     }

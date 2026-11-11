@@ -192,7 +192,7 @@ declare(strict_types=1);
  * number means a block was skipped or ran twice. With a second server named
  * (SELFTEST_DB_PORT_2) one more is made: see `$expectedChecks`.
  */
-const EXPECTED_CHECKS = 144; // 136 + N01, N01b, N02-N07 (#942)
+const EXPECTED_CHECKS = 149; // 136 + N01, N01b, N02, N02b, N03-N11 (#942)
 
 /** The made-up addresses this run types. `.invalid` never reaches anybody. */
 const ADDRESS_TYPED = 'https://portal.installer-selftest.invalid';
@@ -1527,14 +1527,14 @@ ok('N01 the web addresses page ASKS for the country and the time zone, and choos
     && str_contains($zoneList, '<option value="Europe/London" data-country="GB">') === true,
     count($countryOptions[1]) . ' countries; selected in country list: ' . substr_count($countryList, ' selected'));
 ok('N01b the suggestion is made in the browser from the browser\'s own time zone, and the script sends nothing anywhere (no fetch, no request, no address)',
-    str_contains($suggestJs, 'Intl.DateTimeFormat().resolvedOptions().timeZone') === true && preg_match('/fetch\s*\(|XMLHttpRequest|sendBeacon|https?:\/\/|\.src\s*=|location/i', $suggestJs) !== 1,
+    str_contains($suggestJs, 'Intl.DateTimeFormat().resolvedOptions().timeZone') === true && preg_match('/fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|new\s+Image|wss?:\/\/|https?:\/\/|\.src\s*=|location|window\.open/i', $suggestJs) !== 1,
     $suggestJs === '' ? 'no such script on the page' : 'a request or an address was found in the script');
 
 // What the page's own script does in a browser, measured rather than read: the script is run in node with a small stand-in
 // for the two lists (built from the page's real options) and the browser's time zone set through TZ, which is where
 // node's Intl reads it from. Each case: [browser zone, country already chosen, zone already chosen, a country chosen
 // afterwards (or ''), country expected, zone expected].
-$simulate = static function (string $browserZone, string $country, string $zone, string $changeTo) use ($suggestJs, $countryOptions, $zoneOptions): string {
+$simulate = static function (string $browserZone, string $country, string $zone, string $changeTo) use ($suggestJs, $countryOptions, $zoneOptions): array {
     $harness = <<<'JS'
 const data = JSON.parse(require('fs').readFileSync(process.argv[2], 'utf8'));
 function list(rows, initial, chosen) {
@@ -1550,12 +1550,43 @@ function list(rows, initial, chosen) {
         fire: (t) => { if (heard[t]) { heard[t](); } },
     };
 }
+// 🚫 TRAPS for every way a page's script can send something somewhere (#942,
+//    D-133: "nothing is looked up or sent anywhere"). Each one records that it
+//    was used and does nothing else. A text search of the script (N01b) cannot
+//    see `new WebSocket('wss://…')` or a picture's address built at run time;
+//    running the script with these in place can. Any record fails N02.
+const calls = [];
+const record = (what) => { calls.push(what); };
+const setTrap = (name, value) => Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+setTrap('fetch', (...a) => { record('fetch'); return new Promise(() => {}); });
+setTrap('WebSocket', class { constructor() { record('new WebSocket'); } send() { record('WebSocket.send'); } });
+setTrap('EventSource', class { constructor() { record('new EventSource'); } });
+setTrap('XMLHttpRequest', class { open() { record('XMLHttpRequest.open'); } send() { record('XMLHttpRequest.send'); } setRequestHeader() {} });
+// An element whose address is set fetches it: a picture, a script, a frame, a link.
+const element = (tag) => new Proxy({ tagName: String(tag).toUpperCase(), style: {}, setAttribute(n) { if (/^(src|href|action|data|srcset|poster)$/i.test(String(n))) { record(tag + '.setAttribute(' + n + ')'); } }, appendChild() {}, addEventListener() {} }, {
+    set(t, k, v) { if (/^(src|href|action|data|srcset|poster)$/i.test(String(k))) { record(tag + '.' + String(k) + '='); } t[k] = v; return true; },
+});
+setTrap('Image', function Image() { return element('img'); });
+setTrap('Audio', function Audio() { record('new Audio'); return element('audio'); });
+const loc = new Proxy({ href: 'http://installer.invalid/?step=4.5', assign() { record('location.assign'); }, replace() { record('location.replace'); }, reload() {} }, {
+    set(t, k) { record('location.' + String(k) + '='); return true; },
+});
+Object.defineProperty(globalThis, 'location', { configurable: true, get: () => loc, set: () => { record('location='); } });
+setTrap('navigator', { sendBeacon: () => { record('navigator.sendBeacon'); return true; }, userAgent: 'node' });
+setTrap('window', globalThis);
+setTrap('open', () => { record('window.open'); return null; });
 const country = list([['', '']].concat(data.countries.map((c) => [c, ''])), data.country, data.country === '' ? '0' : '1');
 const zone = list([['', '']].concat(data.zones), data.zone, data.zone === '' ? '0' : '1');
-global.document = { getElementById: (id) => (id === 'country' ? country : (id === 'timezone' ? zone : null)) };
+setTrap('document', {
+    getElementById: (id) => (id === 'country' ? country : (id === 'timezone' ? zone : null)),
+    createElement: (tag) => element(tag),
+    body: { appendChild() {} }, head: { appendChild() {} },
+    write: () => { record('document.write'); },
+    get location() { return loc; }, set location(v) { record('document.location='); },
+});
 eval(data.script);
 if (data.changeTo !== '') { country.value = data.changeTo; country.fire('change'); }
-process.stdout.write(country.value + '|' + zone.value);
+process.stdout.write(JSON.stringify({ chosen: country.value + '|' + zone.value, calls }));
 JS;
     $dir  = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'installer-selftest-942-' . bin2hex(random_bytes(4));
     @mkdir($dir, 0700);
@@ -1569,9 +1600,12 @@ JS;
     @unlink($dir . '/data.json');
     @rmdir($dir);
 
-    return trim($out);
+    $said = json_decode(trim($out), true);
+
+    return is_array($said) === true ? $said : ['chosen' => 'node said: ' . trim($out), 'calls' => []];
 };
 $suggested = [];
+$sent      = [];
 foreach ([
     'a browser in London: the United Kingdom and its one zone'                 => ['Europe/London', '', '', '', 'GB|Europe/London'],
     'a browser in New York: the United States, and New York (not Adak)'      => ['America/New_York', '', '', '', 'US|America/New_York'],
@@ -1582,12 +1616,17 @@ foreach ([
     'a zone already in the country chosen is left as it is'                  => ['America/Chicago', '', '', 'US', 'US|America/Chicago'],
 ] as $what => [$browserZone, $country, $zone, $changeTo, $expected]) {
     $got = $simulate($browserZone, $country, $zone, $changeTo);
-    if ($got !== $expected) {
-        $suggested[] = $what . ': expected ' . $expected . ', got ' . $got;
+    if (($got['chosen'] ?? '') !== $expected) {
+        $suggested[] = $what . ': expected ' . $expected . ', got ' . (string) ($got['chosen'] ?? '');
+    }
+    if (($got['calls'] ?? []) !== []) {
+        $sent[] = $what . ': ' . implode(', ', (array) $got['calls']);
     }
 }
 ok('N02 the page\'s script, RUN (in node, with the browser\'s zone set): London suggests GB and Europe/London, New York suggests US and America/New_York, UTC suggests nothing, a choice already made is kept, and a country chosen afterwards suggests its zone only when that is not a guess',
     $suggestJs !== '' && $suggested === [], implode(' | ', $suggested));
+ok('N02b and while it ran, in every one of those cases, the script SENT NOTHING: no fetch, WebSocket, XMLHttpRequest, EventSource, picture or other address set, beacon, new window or change of address (each is a trap that records its use)',
+    $suggestJs !== '' && $sent === [], implode(' | ', $sent));
 $badCountry = post($owner, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => ADDRESS_TYPED, 'support_email' => SUPPORT_TYPED, 'country' => 'ZZ']);
 ok('N03 a country that is not on the list is refused in words, and nothing is kept', page($badCountry) === 'addresses' && str_contains(message($badCountry), 'The country chosen is not one the installer knows') === true
     && str_starts_with(message($badCountry), 'Nothing was saved.') === true && page(req($owner, 'GET', '/?step=5')) === 'addresses', said($badCountry));
@@ -1603,6 +1642,15 @@ $finish = req($owner, 'GET', '/?step=5');
 ok('I16 the finish page says what it is about to set up: the database by name, the tidied address, the support address, that the channel is assumed; it asks for the code again; one heading',
     page($finish) === 'finish' && substr_count($finish['body'], '<h1') === 1 && str_contains($finish['body'], '<code>' . $databases['a'] . '</code>') === true && str_contains($finish['body'], '<code>' . ADDRESS_TYPED . '</code>') === true
     && str_contains($finish['body'], '<code>' . SUPPORT_TYPED . '</code>') === true && str_contains(words($finish), 'That is ASSUMED') === true && str_contains($finish['body'], 'name="owner_code"') === true, said($finish));
+$finishCountry = preg_match('/data-finish="country">(.*?)<\/span>/s', $finish['body'], $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '(no such line)';
+$finishZone    = preg_match('/data-finish="timezone">(.*?)<\/span>/s', $finish['body'], $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '(no such line)';
+ok('N08 on a NEW database with nothing chosen, the finish page says no country is known and that the organisation stays on UTC, the zone this database holds (both true here)',
+    $finishCountry === 'Not chosen. No country is known until somebody sets one in Admin, Settings, Organisation.'
+    && $finishZone === 'Not chosen, so your organisation stays on UTC, the time zone this database holds, until somebody changes it in Admin, Organisations.',
+    $finishCountry . ' | ' . $finishZone);
+ok('N09 the zone box\'s help says an unchosen zone keeps what the database holds, UTC only on a new database (it said the organisation "stays on UTC" whatever the database held)',
+    str_contains(words($addressPage), 'Left unchosen, your organisation keeps the time zone the database already holds: UTC on a new database.') === true
+    && str_contains(words($addressPage), 'stays on UTC until somebody sets it') === false);
 $noCode    = post($owner, '/?step=5', ['action' => 'finalize']);
 $wrongCode = post($owner, '/?step=5', ['action' => 'finalize', 'owner_code' => installCodeAsShown(oneLetterOut(codeOf($rootA)))]);
 ok('I17 the finish asks for the code AGAIN: with none, and with a wrong one, it refuses in words, though this session was let in',
@@ -2073,6 +2121,25 @@ q($databases['b'], "UPDATE `tblSites` SET `timezone` = 'America/Chicago' WHERE `
 $typed = post($fourth, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => 'portal-b.installer-selftest.invalid', 'support_email' => '', 'country' => 'NZ', 'timezone' => 'Pacific/Auckland']);
 ok('L13 a bare host name is taken to mean https, and the support address may be left empty', $typed['status'] === 302 && $typed['location'] === '?step=5'
     && str_contains(req($fourth, 'GET', '/?step=5')['body'], '<code>https://portal-b.installer-selftest.invalid</code>') === true, said($typed));
+// #942: what the finish page says about a database CARRIED ON with that holds a country and a zone of its own.
+$finishLines = static function (array $page): array {
+    $c = preg_match('/data-finish="country">(.*?)<\/span>/s', $page['body'], $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '(no such line)';
+    $z = preg_match('/data-finish="timezone">(.*?)<\/span>/s', $page['body'], $m) === 1 ? html_entity_decode($m[1], ENT_QUOTES, 'UTF-8') : '(no such line)';
+
+    return [$c, $z];
+};
+[$bCountry, $bZone] = $finishLines(req($fourth, 'GET', '/?step=5'));
+ok('N10 carried on with, with a country and zone CHOSEN: the finish page says each choice will NOT be saved and names what the database holds and keeps (Ireland, America/Chicago)',
+    $bCountry === 'You chose New Zealand, but this database already holds a country, Ireland, and it is kept. Change it later in Admin, Settings, Organisation.'
+    && $bZone === 'You chose Pacific/Auckland, but this database is being carried on with, so it keeps its own time zone, America/Chicago. Change it in Admin, Organisations.',
+    $bCountry . ' | ' . $bZone);
+// …and with NOTHING chosen, which is the case the first version told was on UTC with no country.
+$typed = post($fourth, '/?step=4.5', ['action' => 'web_addresses', 'portal_address' => 'portal-b.installer-selftest.invalid', 'support_email' => '']);
+[$bCountry, $bZone] = $finishLines(req($fourth, 'GET', '/?step=5'));
+ok('N11 carried on with, NOTHING chosen: the finish page says the database\'s own country (Ireland) and zone (America/Chicago) are kept, never "no country is known" or UTC',
+    $typed['status'] === 302 && $bCountry === 'Not chosen here, so the country this database already holds is kept: Ireland.'
+    && $bZone === 'Not chosen, so your organisation stays on America/Chicago, the time zone this database holds, until somebody changes it in Admin, Organisations.',
+    $bCountry . ' | ' . $bZone);
 
 // A key file that was already there: any length is a working key, and secrets may already be stored with it.
 $olderKey = 'an older key file of some other length, written before this installer ran';
@@ -2107,10 +2174,14 @@ ok('L16 an address the database ALREADY held is kept, not replaced by the one ty
 ok('L17 still one address row; no support address; no code file; the refuse file in _auth_keys', count(q($databases['b'], "SELECT 1 FROM tblSettings WHERE settingKey = 'site.url'")) === 1
     && setting($databases['b'], 'portal.support.email') === '' && names($authB) === '.htaccess, .installed, auth_creds.php, enc.key'
     && @file_get_contents($authB . $sep . '.htaccess') === $shippedRefuse, setting($databases['b'], 'site.url') . ' ; ' . names($authB));
-ok('N07 a database CARRIED ON with keeps the country and the time zone it already had, the ones chosen on the page are not written, and the last page says both (#942)',
+ok('N07 a database CARRIED ON with keeps the country and the time zone it already had, and the last page, with nothing chosen, names both as they are: Ireland, kept because none was chosen, and America/Chicago (it said "on UTC") (#942)',
     setting($databases['b'], 'org.address.countryCode') === 'IE' && (q($databases['b'], 'SELECT `timezone` FROM `tblSites` WHERE `siteID` = 1')[0]['timezone'] ?? '') === 'America/Chicago'
-    && str_contains(words($done), 'That is not the country you chose. This database already had a country saved, and it was kept.') === true
-    && str_contains($done['body'], 'data-zone-written="0"') === true && str_contains(words($done), 'Kept as it was, because you chose to carry on') === true,
+    && str_contains(words($done), 'Ireland. Each organisation starts from it') === true
+    && str_contains(words($done), 'You chose none, so the country this database already had saved was kept.') === true
+    && str_contains(words($done), 'That is not the country you chose') === false
+    && str_contains($done['body'], 'data-zone-written="0"') === true
+    && str_contains(words($done), 'Not chosen, so your organisation is on America/Chicago, the time zone this database holds.') === true
+    && str_contains(words($done), 'UTC') === false,
     setting($databases['b'], 'org.address.countryCode') . '; ' . said($done));
 $private = preg_match('/<div class="alert [a-z-]+" id="install-done-private">(.*?)<\/div>/s', $done['body'], $m) === 1
     ? trim((string) preg_replace('/\s+/', ' ', html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'))) : '(no such part)';

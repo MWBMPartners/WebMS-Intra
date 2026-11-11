@@ -438,6 +438,20 @@ final class Countries
     }
 
     /**
+     * 🏠 What an organisation's own row HOLDS, trimmed, whatever it is ('' when
+     * it has no row). Only its settings page needs this: a row holding text
+     * that is not two capital letters (say "GBR", typed into the general
+     * Settings editor) counts as "not chosen" everywhere else, and the page
+     * must SAY so and offer that text back rather than show "Same as the
+     * installation" — which the next Save would act on by deleting the row,
+     * with nobody told.
+     */
+    public static function ownStoredText(int $siteId): string
+    {
+        return self::readRows($siteId)['ownText'];
+    }
+
+    /**
      * 🌍 The country an organisation IS in: its own when it has chosen one,
      * else the installation's, else '' (none known). The ONE answer for every
      * reader that needs "this organisation's country": a new venue
@@ -462,11 +476,11 @@ final class Countries
      * Both rows in one query. A read that fails is "nothing known" (''),
      * never a made-up country.
      *
-     * @return array{own: string, installation: string}
+     * @return array{own: string, installation: string, ownText: string}
      */
     private static function readRows(?int $siteId): array
     {
-        $answer = ['own' => '', 'installation' => ''];
+        $answer = ['own' => '', 'installation' => '', 'ownText' => ''];
         try {
             $db   = App::db();
             $site = $siteId ?? 0;
@@ -485,10 +499,13 @@ final class Countries
                 $code  = strtoupper(trim((string) ($row['settingValue'] ?? '')));
                 $which = $row['siteID'] === null ? 'installation' : 'own';
                 $answer[$which] = preg_match('/^[A-Z]{2}$/', $code) === 1 ? $code : '';
+                if ($which === 'own') {
+                    $answer['ownText'] = trim((string) ($row['settingValue'] ?? ''));
+                }
             }
             $stmt->close();
         } catch (\Throwable $e) {
-            return ['own' => '', 'installation' => ''];
+            return ['own' => '', 'installation' => '', 'ownText' => ''];
         }
 
         return $answer;

@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 271;  // + eighteen in part Q (#942: Q00-Q17) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 275;  // + twenty-two in part Q (#942: Q00-Q08, Q09a, Q09, Q10, Q10b, Q11-Q19) on the 253 before: + two in part N (#937: N10b, N10c) on the 251 before: + forty-seven in part P (#935, #936: P00-P07, six P08, P09-P41) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -4238,21 +4238,49 @@ ok(
     said($qRefused) . '; own ' . json_encode($qOwnRow())
 );
 
+$qLine1Is = static fn (string $text): bool => one('SELECT 1 AS x FROM tblSettings WHERE settingKey = ? AND siteID = 1 AND settingValue = ?', 'ss', ['org.address.line1', $text]) !== null;
+$qPage    = req($adminJar, 'GET', '/admin/settings/organisation');
+$qFields  = $qOrgForm($qPage['body']);
+unset($qFields['countryCode']);
+$qNoField = req($adminJar, 'POST', '/admin/settings/organisation/save', ['csrf_token' => token($qPage['body']), 'addressLine1' => 'Selftest 942 No country field'] + $qFields);
+ok(
+    'Q09a a Save that does not SEND the country field leaves the organisation\'s own FR exactly as it is, and the rest of the save still happens (#677: ask whether a field ARRIVED; read as empty it would delete the row)',
+    $qOwnRow() === 'FR' && $qLine1Is('Selftest 942 No country field') === true,
+    said($qNoField) . '; own ' . json_encode($qOwnRow())
+);
+
+// "Same as the installation" must remove THIS organisation's row and nobody else's.
+q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (?, 'org.address.countryCode', 'DE', '', 0)", 'i', [ORG_TWO]);
 $qSaved = $qSaveOrg(['countryCode' => '']);
 ok(
-    'Q09 choosing "Same as the installation" REMOVES the organisation\'s own row (an empty row would hide the installation\'s), so it follows NZ again',
-    $qOwnRow() === null && $qNewVenueBox() === 'NZ',
-    said($qSaved) . '; own ' . json_encode($qOwnRow())
+    'Q09 choosing "Same as the installation" REMOVES the organisation\'s own row (an empty row would hide the installation\'s), so it follows NZ again; ANOTHER organisation\'s own country, DE, is left exactly as it was',
+    $qOwnRow() === null && $qNewVenueBox() === 'NZ' && $qOwnRow(ORG_TWO) === 'DE',
+    said($qSaved) . '; own ' . json_encode($qOwnRow()) . ', the second organisation ' . json_encode($qOwnRow(ORG_TWO))
 );
+q("DELETE FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID = ?", 'i', [ORG_TWO]);
 
 // A two-letter code the portal does not list, put there by hand (only SQL can): offered, chosen, and kept by a Save.
 q("INSERT INTO tblSettings (siteID, settingKey, settingValue, defaultValue, isSensitive) VALUES (1, 'org.address.countryCode', 'QQ', '', 0)");
 $qPage  = req($adminJar, 'GET', '/admin/settings/organisation');
-$qSaved = $qSaveOrg([]);
+$qSaved = $qSaveOrg(['addressLine1' => 'Selftest 942 Kept QQ']);
+$qSaid  = flashAfter($adminJar, '/admin/settings/organisation');
 ok(
-    'Q10 an organisation\'s own code that is NOT on the list is offered and selected, and Save untouched keeps it (with no option selected the browser would send "Same as the installation" and quietly drop it)',
-    $qSelected($qPage['body'], 'countryCode') === 'QQ' && $qOwnRow() === 'QQ',
-    said($qSaved) . '; selected ' . json_encode($qSelected($qPage['body'], 'countryCode')) . '; own ' . json_encode($qOwnRow())
+    'Q10 an organisation\'s own code that is NOT on the list is offered and selected, and a Save with it unchanged SUCCEEDS and keeps it: the success message, the address line posted is stored, and QQ is still there (with no option selected the browser would send "Same as the installation" and quietly drop it; and refusing every such Save would also "keep" it)',
+    $qSelected($qPage['body'], 'countryCode') === 'QQ' && $qOwnRow() === 'QQ' && $qLine1Is('Selftest 942 Kept QQ') === true
+        && str_contains($qSaid, 'Organisation address saved.') === true,
+    said($qSaved) . '; selected ' . json_encode($qSelected($qPage['body'], 'countryCode')) . '; own ' . json_encode($qOwnRow()) . '; said: ' . $qSaid
+);
+// Text that is not a country code at all ("GBR", as the general Settings editor can store): SAID, offered, kept.
+q("UPDATE tblSettings SET settingValue = 'GBR' WHERE settingKey = 'org.address.countryCode' AND siteID = 1");
+$qPage  = req($adminJar, 'GET', '/admin/settings/organisation');
+$qSaved = $qSaveOrg(['addressLine1' => 'Selftest 942 Kept GBR']);
+$qSaid  = flashAfter($adminJar, '/admin/settings/organisation');
+ok(
+    'Q10b an organisation row holding "GBR" (not a two-letter code) is SAID on the page (ignored, the installation\'s country, New Zealand, used instead), offered back selected, and a Save with it unchanged succeeds and keeps it (it showed "Same as the installation", and the next Save deleted the row with nobody told)',
+    tz_find('#data-country-unusable[^>]*>[^<]*stored as &quot;GBR&quot;[^<]*New Zealand#', $qPage['body']) === 1
+        && $qSelected($qPage['body'], 'countryCode') === 'GBR' && one("SELECT settingValue FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID = 1")['settingValue'] === 'GBR'
+        && $qLine1Is('Selftest 942 Kept GBR') === true && str_contains($qSaid, 'Organisation address saved.') === true,
+    said($qSaved) . '; selected ' . json_encode($qSelected($qPage['body'], 'countryCode')) . '; said: ' . $qSaid
 );
 q("DELETE FROM tblSettings WHERE settingKey = 'org.address.countryCode' AND siteID = 1");
 
@@ -4281,8 +4309,16 @@ post($adminJar, '/small-groups/manage', '/small-groups/save', ['action' => 'crea
 $qSpain = $qGroupId('Selftest 942 Spain');
 post($adminJar, '/small-groups/manage?id=' . $qSpain, '/small-groups/save', ['action' => 'update', 'groupID' => $qSpain, 'groupName' => 'Selftest 942 Spain']);
 ok('Q17 a group saved as ES keeps ES when an edit does not SEND the country (#677; it became GB)', $qGroupCountry('Selftest 942 Spain') === 'ES', json_encode($qGroupCountry('Selftest 942 Spain')));
+ok('Q18 a NEW home on a group\'s list starts on the organisation\'s country, IE (the shared form used to fill GB)', $qGroupBox('/small-groups/place?id=' . $qSpain) === 'IE', $qGroupBox('/small-groups/place?id=' . $qSpain));
+$qHomes = static fn (int $group): int => (int) (one('SELECT COUNT(*) AS n FROM tblSmallGroupPlaces WHERE groupID = ?', 'i', [$group])['n'] ?? -1);
+$qHomesBefore = $qHomes($qSpain);
+post($adminJar, '/small-groups/place?id=' . $qSpain, '/small-groups/place-save', ['action' => 'create', 'groupID' => $qSpain, 'addressLine1' => '1 Selftest 942 Road', 'countryCode' => 'Ireland']);
+ok('Q19 a home whose country is not two letters is REFUSED with the reason and no home is added, the rule of the usual place (it was stored as no country without a word)',
+    $qHomes($qSpain) === $qHomesBefore && str_contains(flashAfter($adminJar, '/small-groups/place?id=' . $qSpain), 'The country must be a two-letter code') === true,
+    'homes ' . $qHomesBefore . ' then ' . $qHomes($qSpain));
 
 // ---- put everything back as part Q found it ------------------------------------------
+q("DELETE FROM tblSmallGroupPlaces WHERE groupID IN (SELECT groupID FROM tblSmallGroups WHERE groupName LIKE 'Selftest 942%' AND siteID = 1)");
 q("DELETE FROM tblSmallGroups WHERE groupName LIKE 'Selftest 942%' AND siteID = 1");
 q("DELETE FROM tblSettings WHERE settingKey LIKE 'org.%' AND (siteID IS NULL OR siteID = 1)");
 foreach ($qOrgWas as $row) {

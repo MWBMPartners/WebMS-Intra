@@ -82,13 +82,21 @@ $hasCoords = $values['lat'] !== '' && $values['lng'] !== '';
 $countryOwn          = Countries::ownOf(Site::id());
 $countryInstallation = Countries::ofInstallation();
 $countryChoices      = Countries::choices();
-// A code the organisation holds that is not on the list (only hand-written SQL
-// can store one) is offered as a choice too. Without it NO option would carry
-// `selected`, and a select with none selected is a vote for the first option
+// What the organisation's own row HOLDS. Usually the same as $countryOwn; it
+// differs only for text that is not two capital letters (say "GBR", typed into
+// the general Settings editor), which counts as "not chosen" everywhere and so
+// the installation's country is in force.
+$countryOwnText      = Countries::ownStoredText(Site::id());
+$countryOwnUnusable  = $countryOwnText !== '' && $countryOwn === '';
+// Text the organisation holds that is not on the list is offered as a choice
+// too, and selected. Without it NO option would carry `selected`, or the wrong
+// one would, and a select with none selected is a vote for the first option
 // (#763) — here "Same as the installation", so the next Save would quietly
-// throw the organisation's own country away.
-if ($countryOwn !== '' && isset($countryChoices[$countryOwn]) === false) {
-    $countryChoices = [$countryOwn => $countryOwn . ' (not on the portal\'s list)'] + $countryChoices;
+// delete the organisation's own row with nobody told. The save handler accepts
+// the stored text back unchanged, so the rest of the address can still be saved.
+$countrySelected     = $countryOwnText !== '' ? $countryOwnText : '';
+if ($countrySelected !== '' && isset($countryChoices[$countrySelected]) === false) {
+    $countryChoices = [$countrySelected => $countrySelected . ' (not on the portal\'s list)'] + $countryChoices;
 }
 $countryInForce = $countryOwn !== '' ? $countryOwn : $countryInstallation;
 
@@ -238,11 +246,11 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                 <div class="col-12 col-md-6">
                     <label class="form-label" for="countryCode"><?php echo $e(t('location.country')); ?></label>
                     <select class="form-select" id="countryCode" name="countryCode" aria-describedby="countryHelp">
-                        <option value=""<?php echo $countryOwn === '' ? ' selected' : ''; ?>><?php echo $e($countryInstallation !== ''
+                        <option value=""<?php echo $countrySelected === '' ? ' selected' : ''; ?>><?php echo $e($countryInstallation !== ''
                             ? 'Same as the installation: ' . Countries::name($countryInstallation)
                             : 'Same as the installation (none chosen yet)'); ?></option>
                         <?php foreach ($countryChoices as $code => $countryName): ?>
-                            <option value="<?php echo $e((string) $code); ?>"<?php echo (string) $code === $countryOwn ? ' selected' : ''; ?>><?php echo $e($countryName); ?></option>
+                            <option value="<?php echo $e((string) $code); ?>"<?php echo (string) $code === $countrySelected ? ' selected' : ''; ?>><?php echo $e($countryName); ?></option>
                         <?php endforeach; ?>
                     </select>
                     <div class="form-text" id="countryHelp">
@@ -255,6 +263,14 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                             &ldquo;Same as the installation&rdquo; means no country is known: new venues then need one typed in.
                         <?php endif; ?>
                     </div>
+                    <?php if ($countryOwnUnusable === true): ?>
+                        <div class="alert alert-warning small mt-2 mb-0" role="note" data-country-unusable><?php echo $e(
+                            'This organisation\'s country is stored as "' . $countryOwnText . '", which is not a two-letter country code, '
+                            . 'so the portal ignores it and uses '
+                            . ($countryInstallation !== '' ? 'the installation\'s country, ' . Countries::name($countryInstallation) : 'no country at all')
+                            . '. Choose a country from the list and save to put it right. Saving with it unchanged keeps it as it is.'
+                        ); ?></div>
+                    <?php endif; ?>
                     <?php if ($zoneAdvice !== ''): ?>
                         <div class="alert alert-warning small mt-2 mb-0" role="note"><?php echo $e($zoneAdvice); ?></div>
                     <?php endif; ?>
