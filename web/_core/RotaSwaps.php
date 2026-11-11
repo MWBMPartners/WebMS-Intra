@@ -510,7 +510,25 @@ final class RotaSwaps
             if ($committing === true) {
                 // The commit itself failed or its reply was lost: whether the
                 // answer was stored is not known, and is not guessed at.
-                Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND_UNKNOWN', 'A rota swap answer may or may not have been stored: the commit did not confirm', '');
+                //
+                // ⚠️ ROLL BACK BEFORE LOGGING, even here. A COMMIT that never
+                //    reached the server (section X of the self-test injects
+                //    exactly that) leaves this connection's transaction OPEN, and
+                //    `Logger` may write on this same connection — so the log
+                //    row would land inside the open transaction and vanish
+                //    when the connection closes, leaving no record anywhere
+                //    (#694 round 3's shape). A rollback never undoes a commit
+                //    that did happen, so it cannot make anything worse; it
+                //    does not make the outcome KNOWN either, so the answer
+                //    stays UNKNOWN.
+                try {
+                    $db->rollback();
+                } catch (\Throwable $ignored) {
+                    // The connection has gone; nothing is open on it.
+                }
+                // The request's NUMBER is logged (a number names nobody,
+                // D-138), so an administrator can look the request up.
+                Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND_UNKNOWN', 'Rota swap request #' . $swapId . ': an answer may or may not have been stored — the commit did not confirm', '');
 
                 return self::didNothing(self::UNKNOWN, '', 0);
             }
@@ -523,7 +541,7 @@ final class RotaSwaps
                 }
             }
             // The fault's own words are not logged: they can quote a value.
-            Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND', 'A rota swap answer was not stored: it failed before the commit and was rolled back', '');
+            Logger::errorPlatform('Rota', 'Warning', 'SWAP_RESPOND', 'Rota swap request #' . $swapId . ': an answer was not stored — it failed before the commit and was rolled back', '');
 
             return self::didNothing(self::FAILED, '', 0);
         }
@@ -768,9 +786,10 @@ final class RotaSwaps
      * sentence is built from it — who answered, and on an accept that the
      * duty was moved to them, both established inside respond()'s locked
      * transaction — and says nothing about where the duty is "now" (see
-     * `whereDutyIsNow()` for why). The rest (the duty's role and date, the
-     * two messages, the asker's address) describes the REQUEST, which the
-     * answer cannot change, so it is read here.
+     * `whereDutyIsNow()` for why). The rest is read here: the duty's role and
+     * date and the asker's address, which no answer changes, the asker's
+     * message, and the reply (`responseMessage`) — which THIS answer has just
+     * written, so reading it back gives exactly what the answerer typed.
      *
      * @param array<string,mixed> $did What `respond()` answered (outcome DONE).
      */

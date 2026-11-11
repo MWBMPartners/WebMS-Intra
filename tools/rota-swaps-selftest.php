@@ -68,6 +68,12 @@
  *   V  THE TRANSACTION: a scratch trigger makes the SECOND write fail; the
  *      first (the duty's move) must be undone. T cannot see this fault — it
  *      proves the lock exists, not that the read and writes are one unit
+ *   X  A COMMIT THAT DOES NOT CONFIRM, driven through the real page with the
+ *      fault injected at the commit line: the server committed and the reply
+ *      was lost, and the COMMIT never arrived. Either way the member must read
+ *      "We could not confirm…" and NOT "nothing was changed", and the error
+ *      log must keep the line naming the request — even when the transaction
+ *      was still open (round 5 called this untestable; it was not).
  *   P  THE PLANTS: each fault put into the COPY of the code (count them
  *      from the list in section P — no number is written here, because one
  *      already went stale here), each of which must turn the check that
@@ -85,11 +91,10 @@
  *     an e-mail arrive. The mail route is the SMTP mailbox with no server
  *     named, which records each attempt as "not set up".
  *   - It does not drive a real browser; nothing on these pages needs script.
- *   - It does NOT drive a lost reply at the COMMIT (`RotaSwaps::UNKNOWN`,
- *     "We could not confirm whether your answer was saved"): that needs the
- *     server to commit and the reply to PHP to fail, which nothing here can
- *     arrange. That branch is read, not run. The FAILED branch ("nothing was
- *     changed") is driven by section V.
+ *   - Section X does not make a real network fault: it INJECTS one at the
+ *     single line in `respond()` that commits, in this run's copy (see the
+ *     scenario's docblock for why a lock-based route races and was dropped).
+ *     The page, the catch, the words and the log are the real code.
  *
  * Usage:  SELFTEST_DB_NAME=selftest_rotaswaps SELFTEST_DB_PASS=… SELFTEST_DB_PORT=… \
  *         php tools/rota-swaps-selftest.php
@@ -936,6 +941,67 @@ $scnAllOrNothing = static function () use ($newSlot, $ask, $answer, $holder, $sw
     ];
 };
 
+/**
+ * X: a commit that does not confirm, driven through the REAL page.
+ *
+ * HOW THE FAULT IS MADE, AND WHY NOT THE OBVIOUS WAY. The first build of this
+ * section followed an independent check's recipe: slow the page's write with
+ * a scratch trigger, take the server's global read lock (FLUSH TABLES WITH
+ * READ LOCK) so the page's COMMIT waits for it, then KILL QUERY that commit.
+ * That works when there is a pause between a transaction's last write and its
+ * commit — and in `respond()` there is none. Measured on MySQL 8.0.36: the
+ * read lock took 2.81 seconds, because it waits for the write still running,
+ * and in that instant the page's commit went straight through; the page's
+ * connection was next seen waiting on the activity-log INSERT that FOLLOWS a
+ * successful answer. Any route through a lock races the same way, so it would
+ * be a test that passes or fails by luck.
+ *
+ * So the fault is INJECTED at the one line that commits, in this run's COPY of
+ * web/, for this scenario only, and put back in `finally`. Everything else —
+ * the page, `respond()` up to the commit, the catch, the handler's words, the
+ * error log — is the real code. Two faults, the two ways into `UNKNOWN`:
+ *   'lost'    the server COMMITS and the reply is lost (commit() runs, then a
+ *             2013 "lost connection" is thrown). The decline IS stored —
+ *             which is exactly why the page must not say "nothing was changed".
+ *   'dropped' the COMMIT never reaches the server (a 2006 "server has gone
+ *             away" is thrown instead of committing). The transaction is still
+ *             OPEN on the connection, so this is the case where the error-log
+ *             line would be lost with it unless `respond()` rolls back first.
+ */
+$scnLostCommit = static function (string $fault) use ($newSlot, $ask, $answer, $swap, $copyCore, $A, $B): array {
+    $slot = $newSlot($A);
+    $req  = $ask('asker', $slot, $B, 'Lost commit reply');
+    $file = $copyCore . 'RotaSwaps.php';
+    $was  = (string) file_get_contents($file);
+    $line = 'if ($db->commit() === false) {';
+    $with = $fault === 'lost'
+        ? 'if ($db->commit() === false || throw new \mysqli_sql_exception(\'injected by tools/rota-swaps-selftest.php: the reply to COMMIT was lost\', 2013)) {'
+        : 'if (throw new \mysqli_sql_exception(\'injected by tools/rota-swaps-selftest.php: the connection dropped before COMMIT\', 2006)) {';
+    $injected = substr_count($was, $line) === 1;
+    try {
+        if ($injected === true) {
+            file_put_contents($file, str_replace($line, $with, $was));
+        }
+        $res = $answer('asked', $req['swapId'], 'decline');
+    } finally {
+        file_put_contents($file, $was);
+    }
+    $flash  = $res['flash'];
+    $logged = (int) (q("SELECT COUNT(*) AS `n` FROM `tblErrors` WHERE `errorCode` = 'SWAP_RESPOND_UNKNOWN' AND `errorTitle` LIKE CONCAT('Rota swap request #', ?, ':%')", 'i', [$req['swapId']])[0]['n'] ?? 0);
+    $status = (string) ($swap($req['swapId'])['status'] ?? '');
+
+    return [
+        'injected'   => $injected,
+        // What the database really holds afterwards: stored for 'lost', not
+        // for 'dropped' — the premise that the two faults differ.
+        'premise'    => $fault === 'lost' ? $status === 'declined' : $status === 'pending',
+        'unknown'    => $flash === 'We could not confirm whether your answer was saved. Reload the page to see where the request stands.',
+        'notNothing' => $flash !== '' && stripos($flash, 'nothing was changed') === false,
+        'logged'     => $logged === 1,
+        'detail'     => $fault . ': read "' . $flash . '", request now ' . $status . ', log lines naming it: ' . $logged,
+    ];
+};
+
 /** L: a post with no form token, or a wrong one, changes nothing — on both pages. */
 $scnTokens = static function () use ($newSlot, $ask, $holder, $swap, $roster, $A, $B): array {
     $slot   = $newSlot($A);
@@ -1565,6 +1631,19 @@ check('V1 when the second write fails, the duty\'s move is UNDONE and the reques
 check('V2 …and the member is told it could not be answered, not that it worked', $v['said'], $v['detail']);
 
 // =============================================================================
+section('X  a commit that does not confirm');
+// =============================================================================
+$xl = $scnLostCommit('lost');
+check('X1 (the premise) the server COMMITTED and the reply was lost: the decline really is stored', $xl['injected'] && $xl['premise'], $xl['detail']);
+check('X2 …and the member reads "We could not confirm whether your answer was saved. Reload the page to see where the request stands."', $xl['unknown'], $xl['detail']);
+check('X3 …and is NOT told "nothing was changed" — which here would be untrue', $xl['notNothing'], $xl['detail']);
+check('X4 …and the error log keeps one line naming the request', $xl['logged'], $xl['detail']);
+$xd = $scnLostCommit('dropped');
+check('X5 (the premise) the COMMIT never arrived: the decline is not stored and the transaction was left open', $xd['injected'] && $xd['premise'], $xd['detail']);
+check('X6 …the member still reads "We could not confirm…", never "nothing was changed"', $xd['unknown'] && $xd['notNothing'], $xd['detail']);
+check('X7 …and the error-log line SURVIVES the open transaction (respond() rolls back before logging)', $xd['logged'], $xd['detail']);
+
+// =============================================================================
 section('P  the plants: each fault must turn its check red');
 // =============================================================================
 // Each plant names the file in the COPY of web/ it edits, the exact text it
@@ -1680,6 +1759,14 @@ $plants  = [
     'P31 the "The member you asked" fallback name lost' => ['_core/RotaSwaps.php',
         ["(\$accepted === true ? 'A member' : 'The member you asked')", "(\$accepted === true ? 'A member' : 'Somebody')"],
         static fn (): bool => $scnMailContent()['noNameDecliner'],
+    ],
+    'P32 the "from here on it may have committed" flag removed' => ['_core/RotaSwaps.php',
+        ['            $committing = true;' . "\n", ''],
+        static fn (): bool => ($r = $scnLostCommit('lost'))['unknown'] && $r['notNothing'],
+    ],
+    'P33 the UNKNOWN branch no longer rolls back before logging' => ['_core/RotaSwaps.php',
+        ["                try {\n                    \$db->rollback();\n                } catch (\\Throwable \$ignored) {\n                    // The connection has gone; nothing is open on it.\n                }\n", ''],
+        static fn (): bool => $scnLostCommit('dropped')['logged'],
     ],
     'P28 the decline e-mail back to "the duty is still yours"' => ['_core/RotaSwaps.php',
         ["'. This did not move the duty.',\n", "'. The duty is still yours.',\n"],

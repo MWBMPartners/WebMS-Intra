@@ -112,8 +112,12 @@ if ($result['outcome'] === RotaSwaps::REFUSED) {
 
 if ($result['outcome'] === RotaSwaps::UNKNOWN) {
     // 🤷 The commit failed or its reply was lost: the answer may have been
-    //    stored. Say only what is known — never "nothing was changed", and
-    //    never "try again", which could answer twice (#649's shape).
+    //    stored. Say only what is known (#649's shape) — never "nothing was
+    //    changed", and not "try again" either, because "try again" says that
+    //    nothing happened. (A retry would do no harm: if the commit DID land,
+    //    the request is no longer waiting and whyNotAllowed() refuses it as
+    //    "already been answered". The reason is the message, not a risk of a
+    //    double answer.) Reloading shows the request as it really stands.
     $_SESSION['rota_flash']      = 'We could not confirm whether your answer was saved. Reload the page to see where the request stands.';
     $_SESSION['rota_flash_type'] = 'warning';
     header('Location: ' . $back);
