@@ -43,9 +43,12 @@
  *   - A name that differs only by something the database treats as a real
  *     difference (a trailing tab, a doubled inner space, `ß` against `ss`)
  *     is, correctly, a different walk-in: it gets its own row.
- *   - Display name: where several spellings exist the list shows whichever
- *     one the database hands back for the group (it is not specified which).
- *     The removal statement compares by the same rule, so any of them works.
+ *   - Display name: where several spellings exist the list shows the one on
+ *     the group's oldest row (the SQL orders by name, then row number), and
+ *     that same stored value is what `storedName()` hands the handler, so the
+ *     removal and the add use exactly the bytes the grid drew.
+ *   - A row whose name is EMPTY ('') groups with other empty names and is
+ *     drawn with a blank label; not handled specially (see #655 notes).
  *
  * @package   Portal\Core
  * @author    MWBM Partners Ltd (t/a MWservices)
@@ -82,7 +85,11 @@ final class AttendanceWalkins
             . 'SELECT `walkinName`, MIN(`attendanceID`) AS `groupRef` FROM `tblEventAttendance` '
             . 'WHERE `eventID` = ? AND `userID` IS NULL AND `walkinName` IS NOT NULL GROUP BY `walkinName`'
             . ') g ON g.`walkinName` = a.`walkinName` AND a.`userID` IS NULL '
-            . 'WHERE a.`eventID` = ?';
+            . 'WHERE a.`eventID` = ? '
+            // By name the way the database sorts (the order the list always
+            // had), then oldest row first, so the name drawn for a group is
+            // the one `storedName()` returns for its number.
+            . 'ORDER BY a.`walkinName` ASC, a.`attendanceID` ASC';
     }
 
     /**
@@ -132,9 +139,53 @@ final class AttendanceWalkins
         }
         $stmt->close();
 
-        // Same order the list always had: by name, the way the database sorts.
-        usort($walkins, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        // `$walkins` is keyed by group number; the list is in the order the
+        // SQL `ORDER BY` gave (the database's own sort), which array_values
+        // keeps.
+        return ['walkins' => array_values($walkins), 'attended' => $attended];
+    }
 
-        return ['walkins' => $walkins, 'attended' => $attended];
+    /**
+     * 🔑 The name exactly as STORED for a walk-in reference the grid posted,
+     * or null when the reference is not a walk-in row of THAT event in THAT
+     * organisation (the handler answers that exactly like "not found").
+     *
+     * WHY A REFERENCE AND NOT THE NAME. The handler used to trim() the posted
+     * name before the DELETE / INSERT. The database ignores trailing SPACES but
+     * not a leading space, a trailing tab or a newline, so "Dave<TAB>" removed
+     * DAVE's row and " Ann" matched nothing at all. A cell now posts the
+     * group number, and the handler uses the stored bytes, so the statement
+     * matches by the SAME rule the grid grouped by. Only a NEW walk-in typed
+     * into the enrol form is trimmed.
+     *
+     * Scope: the row must belong to this event AND the event to this
+     * organisation; the lookup is the only thing that makes a posted number
+     * safe to act on.
+     */
+    public static function storedName(\mysqli $mysqli, int $eventId, int $siteId, int $ref): ?string
+    {
+        if ($ref <= 0) {
+            return null;
+        }
+        $stmt = $mysqli->prepare(
+            'SELECT a.`walkinName` FROM `tblEventAttendance` a '
+            . 'JOIN `tblEvents` e ON e.`eventID` = a.`eventID` '
+            . 'WHERE a.`attendanceID` = ? AND a.`eventID` = ? AND e.`siteID` = ? '
+            // Same event rule as the handler and the grid: not deleted, not
+            // imported. `externalFeedID` is written unquoted on purpose:
+            // check_event_visibility.py looks for that literal text, and the
+            // word is not reserved.
+            . 'AND e.`isDeleted` = 0 AND e.externalFeedID IS NULL '
+            . 'AND a.`userID` IS NULL AND a.`walkinName` IS NOT NULL'
+        );
+        if ($stmt === false) {
+            return null;
+        }
+        $stmt->bind_param('iii', $ref, $eventId, $siteId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row === null ? null : (string) $row['walkinName'];
     }
 }

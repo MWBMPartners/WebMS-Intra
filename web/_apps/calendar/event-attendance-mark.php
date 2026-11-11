@@ -20,6 +20,7 @@
 declare(strict_types=1);
 
 use Portal\Core\App;
+use Portal\Core\AttendanceWalkins;
 use Portal\Core\Auth;
 use Portal\Core\Logger;
 use Portal\Core\Site;
@@ -38,7 +39,11 @@ if (Auth::verifyCsrf($_POST['csrf_token'] ?? '') === false) {
 
 $eventId    = (int) ($_POST['eventID'] ?? 0);
 $userId     = (int) ($_POST['userID'] ?? 0);
+// A NEW walk-in typed into the enrol form arrives as a name and is trimmed;
+// an EXISTING walk-in's cell arrives as a reference (`walkinRef`) and is
+// never trimmed, because it is replaced below by the name as STORED (#655).
 $walkinName = trim((string) ($_POST['walkinName'] ?? ''));
+$walkinRef  = (int) ($_POST['walkinRef'] ?? 0);
 $dayDate    = trim((string) ($_POST['dayDate'] ?? ''));
 $toggle     = (int) ($_POST['toggle'] ?? 0);
 $markerId   = (int) ($_SESSION['user_id'] ?? 0);
@@ -61,6 +66,17 @@ $stmt->execute();
 $ok = (bool) $stmt->get_result()->fetch_assoc();
 $stmt->close();
 if ($ok === false) { http_response_code(404); exit('Event not found'); }
+
+// 🔑 A walk-in cell posts a reference; use the STORED name exactly. A
+// reference that is not a walk-in row of THIS event in THIS organisation is
+// answered like a missing event, so it also reveals nothing about other ones.
+if ($walkinRef > 0) {
+    $stored = AttendanceWalkins::storedName($mysqli, $eventId, $siteId, $walkinRef);
+    if ($stored === null) {
+        http_response_code(404); exit('Event not found');
+    }
+    $walkinName = $stored;
+}
 
 $redirect = Site::url('calendar/event/attendance') . '?eventID=' . $eventId;
 
@@ -125,7 +141,10 @@ if ($toggle === 1) {
         $stmt->execute();
         $stmt->close();
         Logger::activity('EventAttendanceUnmarked', 'Event #' . $eventId . ' day ' . $dayDate . ' user ' . $userId);
-    } elseif ($walkinName !== '') {
+    } elseif ($walkinRef > 0 && $walkinName !== '') {
+        // Removal needs the reference: a bare typed name is not enough, because
+        // only the stored name matches by the grid's rule. `$walkinName` here is
+        // that stored value, resolved above.
         // `userID IS NULL` is deliberate: it keeps this statement from ever
         // reaching a MEMBER's row, whatever the posted name says. The name is
         // compared the way the column is stored (utf8mb4_general_ci, so
@@ -138,9 +157,12 @@ if ($toggle === 1) {
         // grid keyed walk-ins by exact bytes, so "Dave" on one day and "dave"
         // on another drew the second as not attended and posted `toggle=1`
         // instead of this branch. The grid now takes its key from the
-        // database's own grouping of equal names (`AttendanceWalkins`), so
-        // whatever name it posts here is matched by the SAME rule as the
-        // statement below, and the sentence above is true of both halves.
+        // database's own grouping of equal names (`AttendanceWalkins`) and the
+        // cell posts a REFERENCE, which this page turns back into the name
+        // exactly as stored. So the statement below compares the STORED bytes
+        // with the column, by the SAME rule the grid grouped by — including
+        // for a leading space or a trailing tab, which the old trim() of the
+        // posted name got wrong.
         $stmt = $mysqli->prepare(
             'DELETE FROM tblEventAttendance '
             . 'WHERE eventID = ? AND userID IS NULL AND walkinName = ? AND dayDate = ?'

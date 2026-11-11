@@ -556,7 +556,7 @@ require PORTAL_CORE . DIRECTORY_SEPARATOR . 'templates' . DIRECTORY_SEPARATOR . 
                                     <?php if ($p['userID'] !== null): ?>
                                         <input type="hidden" name="userID" value="<?php echo (int) $p['userID']; ?>">
                                     <?php else: ?>
-                                        <input type="hidden" name="walkinName" value="<?php echo htmlspecialchars((string) $p['walkinName'], ENT_QUOTES, 'UTF-8'); ?>">
+                                        <input type="hidden" name="walkinRef" value="<?php echo (int) $p['groupRef']; ?>">
                                     <?php endif; ?>
                                     <input type="hidden" name="dayDate" value="<?php echo htmlspecialchars($d, ENT_QUOTES, 'UTF-8'); ?>">
                                     <input type="hidden" name="toggle" value="<?php echo $isAttended ? '0' : '1'; ?>">
