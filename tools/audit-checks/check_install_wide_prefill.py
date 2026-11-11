@@ -126,9 +126,11 @@ than none
    is not one of the three shapes (`$save('a.b', $value)`), a box filled from a
    PARENT array read into a variable first (`$s = $SETTINGS['backup'];
    … $s['keep']`), and a page whose own saver writes with the level chosen at
-   run time (see below). The first shape can also over-report: an array entry
-   keyed by a setting name that is NOT a write (a list of labels, say) counts
-   as one.
+   run time (see below). The first TWO shapes can also over-report, because
+   neither proves the array is later written: an array entry keyed by a
+   setting name that is NOT a write (a list of labels, say), and an element
+   assignment made only for display (`$shown['a.b'] = App::settings('a.b')`)
+   each count as one.
 Both 6 and 7 were missing from this list until the independent check of
 30 October 2026 planted them. **A list of limits that omitted a LIVE instance
 overstated the gate**, which this project treats as worse than no guarantee --

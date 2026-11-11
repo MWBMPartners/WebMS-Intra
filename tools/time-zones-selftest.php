@@ -121,7 +121,7 @@
 declare(strict_types=1);
 
 const RESULT_MARK     = '@@time-zones-selftest-result@@';
-const EXPECTED_CHECKS = 231;  // + twenty-seven in part P (#935, #936: P00-P07, six P08, P09-P21) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
+const EXPECTED_CHECKS = 244;  // + forty in part P (#935, #936: P00-P07, six P08, P09-P34) on the 204 before: + eighteen in part N (#782: N00-N17) on the 186 that follow: 134 + six (r7) + three (r8) + two (r9) + three W09i-W09k (r10) + thirteen in part X (#777 part two, #783) + fourteen in part X (#804, #805, #806: X03b-X03e, X10-X19) + eleven in part X (#812, #819: X18b-X18l)
 
 // =============================================================================
 // 🧒 THE CHILD PROCESS
@@ -209,6 +209,31 @@ if (($argv[1] ?? '') === '--child') {
                 $out['start']  = (new DateTimeImmutable('@' . $winStart))->setTimezone(new DateTimeZone((string) $job['showIn']))->format('D Y-m-d H:i');
                 $out['startTs'] = $winStart;
                 $out['place']   = \Portal\Core\Sabbath::place(); // #935: where sunset is worked out, or null
+                break;
+            case 'sunsetWindows': // #935 round 3: windows at given places and clocks, with PHP's default zone set to a given one
+                $errorsBefore = (int) $mysqli->query('SELECT COUNT(*) AS n FROM `tblErrors`')->fetch_assoc()['n'];
+                date_default_timezone_set((string) $job['phpZone']);
+                $out['zoneBefore'] = date_default_timezone_get();
+                foreach ((array) $job['cases'] as $name => [$zone, $lat, $lng, $at]) {
+                    [$start, $end] = \Portal\Core\Sabbath::computeWindow((int) $at, null, [
+                        'method' => 'sunset_calc', 'location_lat' => (string) $lat, 'location_lng' => (string) $lng,
+                        'timezone' => (string) $zone, 'start_offset_minutes' => '0', 'end_offset_minutes' => '0',
+                    ]);
+                    $clock = new DateTimeZone((string) $zone);
+                    $out['windows'][$name] = (new DateTimeImmutable('@' . $start))->setTimezone($clock)->format('D Y-m-d H:i')
+                        . ' / ' . (new DateTimeImmutable('@' . $end))->setTimezone($clock)->format('D Y-m-d H:i');
+                }
+                // And a window worked out for ANOTHER organisation, as the held-texts job does.
+                \Portal\Core\Sabbath::computeWindow((int) $job['otherAt'], (int) $job['otherSite']);
+                $out['zoneAfter']   = date_default_timezone_get();
+                $out['errorsAdded'] = (int) $mysqli->query('SELECT COUNT(*) AS n FROM `tblErrors`')->fetch_assoc()['n'] - $errorsBefore;
+                break;
+            case 'sabbathOther': // #935 round 3: another organisation's place and quiet answer WITHOUT forcing the context (the held-texts job)
+                $out['siteNow'] = \Portal\Core\Site::id();
+                $out['place']   = \Portal\Core\Sabbath::place((int) $job['site']);
+                foreach ((array) $job['moments'] as $moment) {
+                    $out['quiet'][] = \Portal\Core\Sabbath::isQuietNow(null, (int) $moment, (int) $job['site']);
+                }
                 break;
             case 'sabbathForced': // #935 round 2: another organisation forced in AFTER start-up, as ApiAuth does
                 \Portal\Core\Site::forceContext((int) $job['site']);
@@ -3807,6 +3832,17 @@ ok(
     $forced['threw'] === '' && ($forced['quiet'] ?? null) === [false, true],
     json_encode($forced['quiet'] ?? null)
 );
+// P22: the same two organisations WITHOUT forcing the context, which is what the
+// held-texts job does: it passes each text's own organisation while Site::id()
+// stays the job's. P15/P16 cannot see a place() that asks about Site::id() rather
+// than the organisation given, because there the two are the same (round 2, M3).
+$other = child(['task' => 'sabbathOther', 'site' => ORG_TWO, 'moments' => [$santiagoSunset - 1800, $santiagoSunset + 600]]);
+ok(
+    'P22 WITHOUT forcing the context (the held-texts job), the organisation GIVEN decides: Santiago\'s position and Santiago\'s sunset, while the request is still organisation 1\'s',
+    $other['threw'] === '' && ($other['siteNow'] ?? 0) === 1
+        && abs((float) ($other['place']['lat'] ?? 0) - -33.45) < 0.0001 && ($other['quiet'] ?? null) === [false, true],
+    json_encode($other)
+);
 $siteRow('org.latitude', null, ORG_TWO);
 $siteRow('org.longitude', null, ORG_TWO);
 if ($pMultisiteWas === null) {
@@ -3862,6 +3898,80 @@ ok(
     'P21 the answer to a save previews the window JUST saved: a start offset of 30 minutes shows the window beginning at 18:30 (start-up had read 0, so it showed 18:00)',
     str_contains(words($previewed['body']), 'Sabbath settings saved.') === true && tz_find('#Current window \(your settings\):\s*\S+ \d+ \S+ 18:30 →#', words($previewed['body'])) === 1,
     said($previewed) . '; ' . (tz_find('#Current window \(your settings\):[^(]*#', words($previewed['body']), $pv) === 1 ? $pv[0] : 'no preview found')
+);
+
+// ---- round 3: the right DAY's sunset, everywhere (#935) ---------------------------------
+// date_sun_info() answers for a day chosen by PHP's DEFAULT zone, and near the date
+// line for the wrong day even on the place's own zone. Each window below must open on
+// that week's FRIDAY evening and close on SATURDAY evening on the place's own clock,
+// with PHP's default zone set three different ways, two of them far from the place.
+$satNoon = static fn (string $zone, string $saturday): int => (new DateTimeImmutable($saturday . ' 12:00:00', new DateTimeZone($zone)))->getTimestamp();
+$places935 = [
+    'Tongatapu'  => ['Pacific/Tongatapu', -21.14, -175.2, '2026-11-13'],
+    'Apia'       => ['Pacific/Apia', -13.83, -171.76, '2026-11-13'],
+    'Chatham'    => ['Pacific/Chatham', -43.95, -176.56, '2026-11-13'],
+    'Adak'       => ['America/Adak', 51.88, -176.66, '2026-11-13'],
+    'Auckland'   => ['Pacific/Auckland', -36.85, 174.76, '2027-01-15'],
+    'Kiritimati' => ['Pacific/Kiritimati', 1.87, -157.4, '2026-11-13'],
+    'Fiji'       => ['Pacific/Fiji', -18.14, 178.44, '2026-11-13'],
+    '+10:00'     => ['+10:00', -27.47, 153.03, '2026-11-13'],
+    'Anadyr'     => ['Asia/Anadyr', 64.73, 177.5, '2027-10-01'], // PHP's calculation SKIPS this Friday: the halfway rule
+];
+$cases935 = [];
+foreach ($places935 as $name => [$zone, $lat, $lng, $friday]) {
+    $cases935[$name] = [$zone, $lat, $lng, $satNoon($zone, (new DateTimeImmutable($friday))->modify('+1 day')->format('Y-m-d'))];
+}
+// Polar night: the sun does not rise at Longyearbyen in mid-December, so there is no
+// sunset and the window falls back to 18:00 on its own clock, as the docblock says.
+$cases935['Longyearbyen'] = ['Arctic/Longyearbyen', 78.22, 15.65, $satNoon('Arctic/Longyearbyen', '2026-12-19')];
+setting('portal.sabbath.method', 'sunset_calc');
+setting('portal.sabbath.location_lat', '-33.45');
+setting('portal.sabbath.location_lng', '-70.66');
+$runs935 = [];
+foreach (['UTC', 'Pacific/Kiritimati', 'Pacific/Pago_Pago'] as $phpZone) {
+    $runs935[$phpZone] = child(['task' => 'sunsetWindows', 'phpZone' => $phpZone, 'cases' => $cases935,
+        'otherSite' => ORG_TWO, 'otherAt' => $satNoon('America/Santiago', '2028-06-17')]);
+}
+$pNo = 23;
+foreach ($places935 as $name => [$zone, $lat, $lng, $friday]) {
+    $saturday = (new DateTimeImmutable($friday))->modify('+1 day')->format('Y-m-d');
+    $seen = [];
+    $right = true;
+    foreach ($runs935 as $phpZone => $run) {
+        $window = (string) ($run['windows'][$name] ?? '');
+        $seen[$phpZone] = $window;
+        // Friday afternoon or evening to Saturday afternoon or evening, and NOT 18:00
+        // on the dot: that is the polar-night fallback, and a first version of this
+        // check passed a sunsetAt() that found no sunset and fell back every time
+        // (planted). None of these places has a sunset at 18:00 in these weeks: the
+        // windows seen are printed under each check, pass or fail, so that can be read.
+        $right = $right && $run['threw'] === ''
+            && tz_find('#^Fri ' . $friday . ' (?!18:00)(1[2-9]|2[0-3]):\d\d / Sat ' . $saturday . ' (?!18:00)(1[2-9]|2[0-3]):\d\d$#', $window) === 1;
+    }
+    ok(
+        'P' . $pNo++ . ' the sunset window at ' . $name . ' (' . $zone . ') opens on FRIDAY ' . $friday . ' evening and closes on SATURDAY evening, on its own clock, whatever PHP\'s default zone',
+        $right,
+        json_encode($seen)
+    );
+    if ($right === true) {
+        echo '        ' . json_encode($seen) . "\n";
+    }
+}
+ok(
+    'P' . $pNo++ . ' working out windows, one of them for ANOTHER organisation, leaves PHP\'s default time zone exactly as it found it',
+    array_filter($runs935, static fn (array $run): bool => ($run['zoneBefore'] ?? '') === '' || ($run['zoneAfter'] ?? '') !== $run['zoneBefore']) === [],
+    json_encode(array_map(static fn (array $run): array => [$run['zoneBefore'] ?? null, $run['zoneAfter'] ?? null], $runs935))
+);
+ok(
+    'P' . $pNo++ . ' and writes NOTHING to the error log (an offset zone such as +10:00 used to log a notice for every window)',
+    array_filter($runs935, static fn (array $run): bool => ($run['errorsAdded'] ?? -1) !== 0) === [],
+    json_encode(array_map(static fn (array $run): mixed => $run['errorsAdded'] ?? null, $runs935))
+);
+$polar = array_map(static fn (array $run): string => (string) ($run['windows']['Longyearbyen'] ?? ''), $runs935);
+ok(
+    'P' . $pNo++ . ' in POLAR NIGHT (Longyearbyen, December) there is no sunset, and the window says so by using 18:00 on Friday to 18:00 on Saturday on its own clock',
+    array_unique($polar) === ['UTC' => 'Fri 2026-12-18 18:00 / Sat 2026-12-19 18:00'],
+    json_encode($polar)
 );
 
 // ---- put everything back as part P found it ------------------------------------------

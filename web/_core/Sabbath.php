@@ -228,7 +228,8 @@ class Sabbath
      * the settings page, so they can be seen and changed.
      *
      * @param int|null   $siteId  The organisation whose map position is the
-     *                            fallback; null for the current one.
+     *                            fallback; null for the current one,
+     *                            Site::id() (also after a forced context).
      * @param array|null $sabbath As for computeWindow(); null means as this
      *                            request has them.
      *
@@ -256,19 +257,18 @@ class Sabbath
         //    reaches Sms::send($siteId) → isQuietNow(…, $siteId), and the window
         //    was opened at the ADDRESS organisation's sunset on the KEY
         //    organisation's clock. Measured: London's position, Sydney's clock.
-        //    Only with NO organisation given (something that belongs to the
-        //    request itself) are the merged settings read. A read that fails
-        //    means "no place known", never a made-up one.
-        if ($siteId === null) {
-            $orgLat = App::settings('org.latitude');
-            $orgLng = App::settings('org.longitude');
-        } else {
-            try {
-                $orgLat = App::settingForSite('org.latitude', $siteId);
-                $orgLng = App::settingForSite('org.longitude', $siteId);
-            } catch (\Throwable $e) {
-                return null;
-            }
+        //    NO organisation given means the CURRENT one, Site::id(), read the
+        //    same way: the same organisation zone(null) uses for the clock, so
+        //    the place and the clock always belong to one organisation, even
+        //    after a forced context (round 2 found the two disagreeing when
+        //    null read the merged settings). A read that fails means "no place
+        //    known", never a made-up one.
+        $siteId ??= Site::id();
+        try {
+            $orgLat = App::settingForSite('org.latitude', $siteId);
+            $orgLng = App::settingForSite('org.longitude', $siteId);
+        } catch (\Throwable $e) {
+            return null;
         }
         $lat = self::coordinate($orgLat, 90.0);
         $lng = self::coordinate($orgLng, 180.0);
@@ -321,32 +321,83 @@ class Sabbath
     }
 
     /**
-     * Sunset at a place, on the calendar date `$date` has on ITS OWN clock.
+     * 🌇 Sunset at a place, on the calendar date `$date` has on ITS OWN clock.
      *
-     * ⚠️ `date_sun_info()` decides WHICH DAY from PHP's DEFAULT time zone, not
-     * from anything it is given. Measured on PHP 8.5: Friday 16 June 2028 at
-     * noon in Santiago, at Santiago's position, gives Friday's sunset with the
-     * default zone on UTC and SATURDAY's (24 hours later) with it on Sydney.
-     * Start-up sets the default zone to the organisation the ADDRESS resolved
-     * to, so for any other organisation (a scheduled job working through
-     * several, or Site::forceContext()) the window could open a day late. So
-     * the default zone is set to the window's own for the one call and put
-     * back, whatever happens. Found by #935's round-2 check (P16).
+     * THE RULE: the sunset is the one that falls after local NOON on that date
+     * and before local noon the next day, on the window's own clock. Nothing
+     * global is touched.
+     *
+     * WHY IT HAS TO BE A RULE AND NOT ONE CALL. `date_sun_info()` decides which
+     * day to answer for from PHP's DEFAULT time zone, not from anything it is
+     * given, and near the date line it answers for the wrong day even when that
+     * zone is the place's own. Measured on PHP 8.5:
+     *   - Friday 16 June 2028 at noon in Santiago gives Friday's sunset with the
+     *     default zone on UTC and SATURDAY's with it on Sydney. Start-up sets
+     *     the default zone to the organisation the ADDRESS resolved to, so any
+     *     other organisation (the held-texts job, Site::forceContext()) could
+     *     have its window a day late (#935 round 2, P16).
+     *   - Even with the default zone set to the place's own, Tongatapu, Apia,
+     *     Kiritimati and Fiji got SATURDAY's sunset for Friday 13 November 2026,
+     *     every week in Apia and Tongatapu; Adak sometimes got the day BEFORE
+     *     (round 2's independent check). Since #231 the window in those places
+     *     ran Saturday to Sunday.
+     *   - And with a zone written as an offset ("+10:00", which Site::zoneFor()
+     *     accepts) date_default_timezone_set() refuses with a notice, so round
+     *     2's set-and-restore did nothing there and logged two notices a window.
+     * So every sunset `date_sun_info()` gives for instants every six hours from
+     * two days before local noon to two days after is collected, and the one
+     * inside the date's noon-to-noon is taken. Which day PHP thinks each
+     * instant is no longer matters.
+     *
+     * WHEN NONE FALLS INSIDE, two cases, said plainly:
+     *   - PHP's calculation can SKIP a day near a day boundary (measured: Anadyr,
+     *     Friday 1 October 2027, gives Thursday's and Saturday's sunsets from
+     *     every instant tried, never Friday's). When there is a sunset inside the
+     *     day before and the day after, the time halfway between is used. Where
+     *     that could be compared with a real answer across 19 places and 106
+     *     weeks, it was at most 682 seconds out, the largest near the polar
+     *     circles.
+     *   - POLAR DAY OR NIGHT: the sun does not set (or does not rise), so there
+     *     is no sunset at all. Then 18:00 on that date, on the window's clock,
+     *     as the fixed method uses. Measured at Longyearbyen.
      */
     private static function sunsetAt(\DateTimeImmutable $date, float $lat, float $lng): int
     {
-        $defaultZone = date_default_timezone_get();
-        try {
-            date_default_timezone_set($date->getTimezone()->getName());
-            $info = date_sun_info($date->getTimestamp(), $lat, $lng);
-        } finally {
-            date_default_timezone_set($defaultZone);
+        $zone = $date->getTimezone();
+        $noon = new \DateTimeImmutable($date->format('Y-m-d') . ' 12:00:00', $zone);
+        $from = $noon->getTimestamp();
+        $to   = $noon->modify('+1 day')->getTimestamp();
+
+        $found = [];
+        for ($hours = -48; $hours <= 48; $hours += 6) {
+            $info   = date_sun_info($from + ($hours * 3600), $lat, $lng);
+            $sunset = is_array($info) === true ? ($info['sunset'] ?? null) : null;
+            if (is_int($sunset) === true) {
+                $found[$sunset] = true;
+            }
         }
-        if (is_array($info) && isset($info['sunset']) && is_int($info['sunset'])) {
-            return $info['sunset'];
+        $sunsets = array_keys($found);
+        sort($sunsets);
+
+        $before = null;
+        $after  = null;
+        foreach ($sunsets as $sunset) {
+            if ($sunset >= $from && $sunset < $to) {
+                return $sunset;
+            }
+            if ($sunset < $from) {
+                $before = $sunset;
+            } elseif ($after === null) {
+                $after = $sunset;
+            }
         }
-        // 🪞 Fallback: 18:00 local on the given date.
-        return $date->setTime(18, 0, 0)->getTimestamp();
+        // A skipped day: halfway between the day before's and the day after's.
+        if ($before !== null && $after !== null && ($after - $before) > 40 * 3600 && ($after - $before) < 56 * 3600) {
+            return intdiv($before + $after, 2);
+        }
+
+        // 🪞 No sunset (polar day or night): 18:00 on the given date, on its own clock.
+        return $noon->setTime(18, 0, 0)->getTimestamp();
     }
 
     private static function userOverride(int $userId): string
