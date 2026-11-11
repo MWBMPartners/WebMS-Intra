@@ -264,8 +264,8 @@ scheduled-jobs|tools/scheduled-jobs-selftest.php|selftest_scheduledjobs|web:sche
 portal-check|tools/portal-check-selftest.php|selftest_portalcheck|
 mail-pages|tools/mail-pages-selftest.php|selftest_mailpages|web:mail-pages SELFTEST_WEB_PORT=9580
 mail-queue|tools/mail-queue-selftest.php|selftest_mailqueue|web:mail-queue SELFTEST_WEB_PORT=9585
-mail-queue-pages|tools/mail-queue-pages-selftest.php|selftest_mailqueuepages|
-maillib|tools/maillib/tests/run.php|-|web:mail-queue-pages SELFTEST_WEB_PORT=9800 SELFTEST_MAIL_PORT=9801
+mail-queue-pages|tools/mail-queue-pages-selftest.php|selftest_mailqueuepages|web:mail-queue-pages SELFTEST_WEB_PORT=9800 SELFTEST_MAIL_PORT=9801
+maillib|tools/maillib/tests/run.php|-|
 offsite-settings|tools/offsite-settings-selftest.php|selftest_offsite|web:offsite-settings
 installer|tools/installer-selftest.php|-|web:installer SELFTEST_DB_PORT_2=33307 SELFTEST_WEB_PORT=9750
 db-strict-mode|tools/db-strict-mode-selftest.php|-|web:db-strict SELFTEST_DB_PORT=33308 SELFTEST_DB_NAME=selftest_strict

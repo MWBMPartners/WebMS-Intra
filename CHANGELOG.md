@@ -4,6 +4,22 @@
 ## [Unreleased] (alpha)
 <!-- #474, #476, #748 -->
 
+### An approved event suggestion e-mails the person who suggested it (#859, D-134)
+
+- The public "Submit an Event" form promised an e-mail on approval and nothing ever sent one. Approving a
+  suggestion on Admin, Calendar, Moderation now sends one short e-mail to the address the visitor gave, in the
+  organisation's name, saying it was approved and (D-092) that it is shown to members only unless the organisation
+  makes it public. It is sent once only (a second press, a double click or a stale page sends nothing), after the
+  approval is stored, and a broken mail route never stops an approval. Rejecting sends nothing, and neither does a
+  suggestion with no address or one made by a signed-in member. The form's sentences say exactly this, and the
+  moderation page says what became of each e-mail.
+- **A deleted suggestion can no longer be approved.** A pending suggestion deleted on Manage Events stayed on the
+  moderation list and Approve published it; it is now left off the list and Approve refuses it.
+- **Security:** `Mailer::send()` has a `bodyIsText` option. Without it Mailer guesses HTML-or-text from the body and
+  sends anything that looks like HTML as written, with no escaping and no footer — so a visitor's event name or own
+  name could have put a working link or tracking image into the organisation's e-mail. The approval e-mail always
+  uses it; other callers are unchanged (#971 reviews them). Two check rounds (protected arm). Follow-up: #972.
+
 ### A visitor who suggests an event no longer has their name and e-mail address handed out (#963, D-134)
 
 - Measured before the fix: once a suggestion from somebody not signed in was approved, `GET /api/events/detail`

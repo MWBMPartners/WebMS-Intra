@@ -23260,3 +23260,24 @@ statement early: a reader that blanks or splits SQL must track strings and comme
   webhook it subscribes. A NEW leak elsewhere — a second activity record, `tblErrors`, the post-submit address, a
   webhook of another type — would not turn it red (#969). The webhook body is read from
   `tblWebhookDeliveries.payload`, the same string `emit()` sends; #615 refuses a receiver on this machine.
+
+
+## An approved suggestion e-mails its suggester (#859, D-134)
+
+- `Portal\Core\EventSuggestions` is the ONE place: `approvalMessage()` holds the words (members-only, and
+  already-public), `tellSuggesterApproved()` reads the approved row and sends, `approvedWords()` is what the
+  moderation page says. `moderate.php` keeps no copy.
+- **Once only comes from the handler:** approval is one conditional `UPDATE … WHERE submissionStatus = 'pending'
+  AND isDeleted = 0`, and only the request told "1 row" sends; nothing puts a decided suggestion back to pending.
+  It sends after the UPDATE is stored, in its own try/catch (the stock Microsoft 365 route throws).
+- **A stranger's typing is never HTML.** `Mailer::send()` guesses HTML-or-text with `<[a-zA-Z][^>]*>`, and
+  `renderBase()` guesses again with the same pattern, so `bodyIsText` skips BOTH (each plant alone sent a link
+  live). Measured before the fix: `<a href=…>` in a name and `<img src=…>` in an event name were sent as written.
+  A first docblock said Mailer escaped it; it did not.
+- The subject names nothing, because the send log keeps a subject after an erasure empties the recipient. The time
+  is the event's own stored reading (`I18n::formatClockDateTime()`), never converted (E21: a New York event in a
+  London organisation; E22: 01:30 on London's spring-forward morning).
+- No template row: `tblEmailTemplates` is read by no sender, only by the admin template pages, so seeding one would
+  give an editor whose edits change nothing (#671).
+- Test: section E of `tools/public-website-tick-selftest.php` (plants P120-P130). E19 keeps one message for real
+  (SMTP pointed at a port nothing listens on) and reads its stored HTML from the queue.

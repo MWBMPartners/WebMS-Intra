@@ -3235,6 +3235,9 @@ technical record is DEV_NOTES.md, "A question asked too early (#763)".
   and holds none of its own; every look at expense records is logged as numbers only (D-130, D-132).
   A visitor's event suggestion: `tblEvents.submitterName` / `submitterEmail` are read only by the moderation
   page and the approval e-mail (D-134, #963); the events API, the activity log and webhooks carry neither.
+  `Portal\Core\EventSuggestions` is the ONE place the approval e-mail is worded and sent (#859): once only,
+  after the approval is stored, never throwing. A body holding anything a stranger typed goes through
+  `Mailer::send()` with `'bodyIsText' => true`, or Mailer's HTML guess sends their markup as written.
   The technical record is DEV_NOTES.md, "Outside services in three tiers (#778)".
 - **The public website, for events (#493 P1; D-057, D-077, D-078, D-080, D-081).**
   `EventVisibility::where()` in "website" mode is the ONE rule for which events the public website lists
