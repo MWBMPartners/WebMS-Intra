@@ -1658,24 +1658,26 @@ jobs:
         if: always()
         run: node tools/brand-colour-selftest.mjs
 
-      # 🌍 #942, D-133: the installer's country suggestion sends NOTHING
-      #    anywhere. The real script, read out of web/_install/index.php, runs in
-      #    a real browser in four time zones while every request is recorded,
-      #    with a control page proving the recording is live. A text search and
-      #    a list of traps each missed a planted send (two check rounds), so this
-      #    asks the browser. Needs a browser and PHP (the runner image has both);
-      #    it REFUSES rather than skipping without them.
       # 🌍 #942, D-133: the installer's country suggestion promises to send
-      #    nothing anywhere, and three check rounds showed no test can prove an
-      #    absence. So the script is PINNED WHOLE: any change to a statement
-      #    fails here until it is re-pinned with --repin, which puts the change
-      #    in front of a reviewer. The browser test below is supporting evidence.
+      #    nothing anywhere. Four check rounds showed that reading the page's
+      #    source cannot prove that, so the BROWSER enforces it: every installer
+      #    answer carries a strict Content Security Policy (web/_install/csp.php).
+      #    The text pin below guards the one thing that policy cannot block (a
+      #    DNS or preconnect hint built from the time zone, which would have to
+      #    be written into the suggestion script): any change to that script
+      #    fails here until it is re-pinned with --repin, in front of a reviewer.
       - name: 'The installer country suggestion script is as pinned (hard gate, #942)'
         id: installer_country_pinned
         if: always()
         run: python3 -I tools/audit-checks/check_installer_country_script_pinned.py
 
-      - name: 'What the installer country suggestion asks for, in a real browser (#942)'
+      # The browser test proves the policy in a real browser on the REAL
+      # installer page served by PHP: the page works under it, and six planted
+      # sends (a <SCRIPT> in capitals, the double escape, onload=, srcdoc, a
+      # javascript: address, a PHP-built tag) all reach a listener with the
+      # policy off and none with it on. Needs a browser and PHP (the runner
+      # image has both); it REFUSES rather than skipping without them.
+      - name: 'The installer browser rule blocks every send, in a real browser (#942)'
         id: installer_country_browser
         if: always()
         run: node tools/installer-country-script-selftest.mjs
@@ -2091,7 +2093,7 @@ jobs:
             echo "- Brand colours read in a real browser: ${{ steps.brand_colour_browser.outcome }} (D-091)"
             echo "- Every audit check's own self-test passes: ${AUDIT_SELFTESTS_OUTCOME} (hard gate, #919)"
             echo "- The installer country suggestion script is as pinned: ${{ steps.installer_country_pinned.outcome }} (hard gate, #942)"
-            echo "- What the installer country suggestion asks for, in a browser: ${{ steps.installer_country_browser.outcome }} (#942)"
+            echo "- The installer browser rule blocks every send, in a browser: ${{ steps.installer_country_browser.outcome }} (#942)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not

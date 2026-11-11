@@ -119,7 +119,10 @@ LIST_FILE = Path(__file__).with_name("check_inline_scripts_have_nonce.exempt.txt
 # Today's length of the exemption list. A longer list fails: an exemption is
 # for a page that sends its own rule or none, never a way to quiet a finding.
 # Lower this number in the commit that removes a line.
-MOST_EXEMPTIONS = 20
+# 19 since #942: web/_install/index.php now sends its own rule (web/_install/csp.php)
+# and every one of its scripts carries that answer's nonce, so it is held to
+# this check like any page.
+MOST_EXEMPTIONS = 19
 
 # Fewer files than this means the check is looking in the wrong place, and
 # "nothing found" would then mean "nothing read". web/ holds well over 900.

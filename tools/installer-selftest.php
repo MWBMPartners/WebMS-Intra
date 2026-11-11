@@ -192,7 +192,7 @@ declare(strict_types=1);
  * number means a block was skipped or ran twice. With a second server named
  * (SELFTEST_DB_PORT_2) one more is made: see `$expectedChecks`.
  */
-const EXPECTED_CHECKS = 151; // 136 + N01, N01b, N02, N03-N06, N06b, N07-N13 (#942; N02b's traps were replaced by a whole-script pin and a browser test)
+const EXPECTED_CHECKS = 152; // 136 + N01, N01b, N02, N03-N06, N06b, N07-N14 (#942; N02b's traps were replaced by the installer's browser rule, a text pin and a browser test)
 
 /** The made-up addresses this run types. `.invalid` never reaches anybody. */
 const ADDRESS_TYPED = 'https://portal.installer-selftest.invalid';
@@ -863,10 +863,17 @@ function names(string $folder): string
     return implode(', ', $names);
 }
 
-/** The first page with everything that differs between two visitors taken out: the token, and any message. */
+/**
+ * The first page with everything that differs between two visitors taken out: the token, the script nonce, and any
+ * message. The nonce (#942, web/_install/csp.php) is new for every answer by design. It is taken out BY NAME, as the
+ * `nonce="…"` attribute of a script tag and nothing else, never by widening a pattern to "any 32 hexadecimal
+ * characters", which would also blind this comparison to a real difference of that length (the lesson of the
+ * password-reset page's comparison, 31 October 2026).
+ */
 function shape(array $answer): string
 {
     $body = (string) preg_replace('/name="install_token" value="[0-9a-f]{64}"/', 'name="install_token" value="T"', $answer['body']);
+    $body = (string) preg_replace('/<script nonce="[0-9a-f]{32}">/', '<script nonce="N">', $body);
 
     return (string) preg_replace('/\s*<div class="alert alert-danger install-card" role="alert" id="install-error">.*?<\/div>/s', '', $body);
 }
@@ -1519,7 +1526,7 @@ ok('I14 a support address that is not an e-mail address is refused in words, and
 // made by the page's script, in the browser, from the browser's time zone; nothing is fetched and nothing is sent.
 $countryList  = preg_match('/<select[^>]*id="country"[^>]*>(.*?)<\/select>/s', $addressPage['body'], $m) === 1 ? $m[1] : '';
 $zoneList     = preg_match('/<select[^>]*id="timezone"[^>]*>(.*?)<\/select>/s', $addressPage['body'], $m) === 1 ? $m[1] : '';
-$suggestJs    = preg_match('/<script>\s*(\/\/ 🌍 Suggest a country.*?)<\/script>/s', $addressPage['body'], $m) === 1 ? $m[1] : '';
+$suggestJs    = preg_match('/<script nonce="[0-9a-f]{32}">\s*(\/\/ 🌍 Suggest a country.*?)<\/script>/s', $addressPage['body'], $m) === 1 ? $m[1] : '';
 preg_match_all('/<option value="([A-Z]{2})"/', $countryList, $countryOptions);
 preg_match_all('/<option value="([^"]+)" data-country="([A-Z]*)"/', $zoneList, $zoneOptions, PREG_SET_ORDER);
 ok('N01 the web addresses page ASKS for the country and the time zone, and chooses NEITHER itself: "Not chosen yet" is the only selected option in each, no country is built in (#942)',
@@ -1528,11 +1535,12 @@ ok('N01 the web addresses page ASKS for the country and the time zone, and choos
     && str_contains($zoneList, '<option value="Europe/London" data-country="GB">') === true,
     count($countryOptions[1]) . ' countries; selected in country list: ' . substr_count($countryList, ' selected'));
 // N01b is a QUICK TEXT TRIPWIRE and nothing more. A text search cannot show that a script sends nothing (round 1 of
-// the #942 check passed it with a planted `new WebSocket('wss://…')`). Nor can a browser that samples what it sees
-// (round 3 sent the zone out four ways past one). The GUARD is that the script is pinned WHOLE as text by
-// tools/audit-checks/check_installer_country_script_pinned.py, so any change to it must be re-pinned and read by a
-// person; tools/installer-country-script-selftest.mjs is supporting evidence.
-ok('N01b (a quick text tripwire only: the guard is the whole-script pin) the script reads the browser\'s own time zone, and its text names none of the usual ways of sending something',
+// the #942 check passed it with a planted `new WebSocket('wss://…')`), and neither can a browser that samples what it
+// sees (round 3). WHAT ENFORCES IT is the installer's browser rule (web/_install/csp.php: nothing may be fetched, and
+// only a script carrying the answer's nonce runs), proved in a real browser by tools/installer-country-script-selftest.mjs
+// and present on every page by N14. The one thing that rule cannot block, a DNS or preconnect hint, would have to be
+// written into this script, whose text is pinned by tools/audit-checks/check_installer_country_script_pinned.py.
+ok('N01b (a quick text tripwire only: the browser rule enforces it, and the text pin guards hints) the script reads the browser\'s own time zone, and its text names none of the usual ways of sending something',
     str_contains($suggestJs, 'Intl.DateTimeFormat().resolvedOptions().timeZone') === true && preg_match('/fetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon|new\s+Image|wss?:\/\/|https?:\/\/|\.src\s*=|location|window\.open/i', $suggestJs) !== 1,
     $suggestJs === '' ? 'no such script on the page' : 'a request or an address was found in the script');
 
@@ -1703,6 +1711,33 @@ ok('N06 the last page says the country by name and the time zone set',
     str_contains($done['body'], 'data-done="country" data-country="FR"') === true && str_contains(words($done), 'France. Each organisation starts from it') === true
     && str_contains($done['body'], 'data-zone-written="1"') === true && str_contains(words($done), 'Europe/Paris. Change it in Admin, Organisations.') === true,
     said($done));
+// #942: every installer answer carries its browser rule (web/_install/csp.php), and EVERY script on the page carries
+// THAT answer's nonce, or the browser would refuse to run it (and the installer would quietly stop working). The rule
+// itself is proved in a real browser by tools/installer-country-script-selftest.mjs; this proves it is on every page.
+$cspOf = static function (array $answer): array {
+    if (preg_match('/^Content-Security-Policy:\s*(.+?)\s*$/mi', $answer['head'], $m) !== 1) {
+        return ['', 'no Content-Security-Policy header'];
+    }
+    if (preg_match("/script-src 'nonce-([0-9a-f]{32})'/", $m[1], $n) !== 1 || str_contains($m[1], "default-src 'none'") === false
+        || str_contains($m[1], "connect-src 'none'") === false) {
+        return ['', 'a policy without default-src none, connect-src none and a nonce: ' . $m[1]];
+    }
+    $all  = preg_match_all('/<script\b/i', $answer['body']);
+    $good = substr_count($answer['body'], '<script nonce="' . $n[1] . '">');
+
+    return [$n[1], $all === $good ? '' : $good . ' of ' . $all . ' scripts carry this answer\'s nonce'];
+};
+$cspFaults = [];
+$nonces    = [];
+foreach (['the Web addresses page' => $addressPage, 'the finish page' => $finish, 'the last page' => $done] as $what => $answer) {
+    [$nonce, $fault] = $cspOf($answer);
+    $nonces[] = $nonce;
+    if ($fault !== '') {
+        $cspFaults[] = $what . ': ' . $fault;
+    }
+}
+ok('N14 every installer page carries the browser rule (nothing by default, nothing fetched, scripts only by nonce), EVERY script on it carries that answer\'s nonce, and the nonce is new for each answer',
+    $cspFaults === [] && count(array_unique($nonces)) === 3, implode(' | ', $cspFaults) . ' ' . json_encode($nonces));
 ok('N06b the stored "GBR" (not a country code, so ignored) was REPLACED by the country chosen, and the last page says so (it said "GBR" was a country that was kept, and France was dropped)',
     str_contains(words($done), 'This database held "GBR" as its country, which is not a country code, so the country you chose replaced it.') === true,
     said($done));

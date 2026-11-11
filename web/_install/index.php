@@ -75,6 +75,14 @@
 
 declare(strict_types=1);
 
+// 🛡️ The browser's rule for what these pages may run and reach (#942), sent
+//    FIRST so every answer carries it: the wizard's pages, the plain error
+//    pages and the redirects. Only a script carrying installCspNonce() runs,
+//    and nothing may be fetched or sent anywhere. See csp.php for why, and for
+//    what it does not block.
+require_once __DIR__ . DIRECTORY_SEPARATOR . 'csp.php';
+installSendCsp();
+
 // ---------------------------------------------------------------------------
 // Constants for this self-contained installer
 // ---------------------------------------------------------------------------
@@ -3581,7 +3589,7 @@ header('X-Robots-Tag: noindex, nofollow');
     </style>
 
     <!-- 🌙 Prevent FOUC: apply saved theme + CB prefs before first paint -->
-    <script>
+    <script nonce="<?php echo htmlspecialchars(installCspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
     (function(){
         var html = document.documentElement;
         var t = localStorage.getItem('portal-theme');
@@ -4255,7 +4263,7 @@ header('X-Robots-Tag: noindex, nofollow');
                         Every time the portal shows, and every reminder it sends, follows this clock. Choosing a country suggests its time zone when it has only one. On a new database it is set for your organisation; a database you chose to carry on with keeps the time zone it has. You can change it later in Admin, Organisations. Left unchosen, your organisation keeps the time zone the database already holds: UTC on a new database.
                     </div>
                 </div>
-                <script>
+                <script nonce="<?php echo htmlspecialchars(installCspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
                 // 🌍 Suggest a country and time zone from this browser's own time
                 //    zone (#942, D-133). Runs only in the browser and sends nothing.
                 //    Each option of the zone list carries the country PHP's zone
@@ -4511,7 +4519,7 @@ header('X-Robots-Tag: noindex, nofollow');
 
 </div>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(installCspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // Theme + CB toggle wiring for the installer (standalone — doesn't load portal.js)
 (function(){
     var html = document.documentElement;
@@ -4583,7 +4591,7 @@ header('X-Robots-Tag: noindex, nofollow');
 })();
 </script>
 
-<script>
+<script nonce="<?php echo htmlspecialchars(installCspNonce(), ENT_QUOTES, 'UTF-8'); ?>">
 // Password strength meter for the installer (standalone — doesn't load portal.js)
 (function () {
     function score(value, minLength) {

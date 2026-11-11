@@ -1,62 +1,55 @@
 #!/usr/bin/env python3
 """
-The installer's country suggestion script is pinned WHOLE, as text (#942, D-133).
+The installer's country suggestion script's TEXT is pinned (#942, D-133).
 
 Path: tools/audit-checks/check_installer_country_script_pinned.py
 
-WHAT IT GUARDS
---------------
+WHAT ENFORCES "SENDS NOTHING", AND WHAT THIS ADDS
+--------------------------------------------------
 D-133: the installer suggests a country and a time zone from the installing
 person's own browser time zone, and "nothing is looked up or sent anywhere".
-That promise rests on one small script on the installer's Web addresses page
-(the `<script>` whose first line is `// 🌍 Suggest a country`). This check
-requires that script's CODE to equal `installer-country-script.pinned.js`
-beside it, exactly. ANY change to a statement fails, on purpose, until somebody
-re-pins it with `--repin` — a separate, visible act that puts the change in
-front of a reviewer, who reads it.
 
-WHY A PIN AND NOT A TEST OF WHAT IT SENDS — the reason, settled after three
-check rounds each got the zone out past the previous guard:
-  * round 1: a search of the script's TEXT missed `new WebSocket('wss://…')`;
-  * round 2: a list of traps in node missed a send behind a timer, an image
-    built through `innerHTML`, CSS `url()` and `import()`;
-  * round 3: a real browser recording every request missed a `pagehide`
-    `sendBeacon`, a `<link rel=preconnect>` and `dns-prefetch` (DNS and TLS
-    server names never reach the browser's Network domain), a timer past its
-    window, and a send on the ZONE box's change.
-Proving that something is ABSENT by sampling the ways it could happen is
-unbounded: every list is one short. This script is OURS and SMALL, so the
-honest guard is that nobody can change it without a person reading the change.
-`tools/installer-country-script-selftest.mjs` stays as supporting evidence of
-what the script does in a browser; it is not the guard.
+THE BROWSER ENFORCES THAT, not this check. Every installer answer carries a
+strict Content Security Policy (web/_install/csp.php): only a script carrying
+the answer's nonce runs, and nothing may be fetched, beaconed, streamed, framed
+or posted elsewhere. Four check rounds each got the zone out past a guard that
+READ the page's source (a WebSocket; a timer; an `innerHTML` picture; a
+`pagehide` beacon; then a `<SCRIPT>` in capitals, the `<!-- <script` double
+escape, an `onload=` attribute, an `<iframe srcdoc>`, a `javascript:` address
+and a tag built in PHP from two halves). Reading source cannot list every way
+HTML runs code; a browser obeying the policy does not need to.
+`tools/installer-country-script-selftest.mjs` proves the policy blocks each of
+those in a real browser.
+
+WHAT THIS CHECK GUARDS is the one thing the policy does NOT block: a
+DNS-prefetch or preconnect HINT built from the time zone (browsers put hints
+under no directive). Such a hint, or any other change, would have to be written
+into the suggestion script itself — the `<script>` whose first line is
+`// 🌍 Suggest a country`, which runs because it carries the nonce. So its CODE
+must equal `installer-country-script.pinned.js` beside this file, exactly; any
+change to a statement fails until somebody re-pins it with `--repin`, a
+separate, visible act that puts the change in front of a reviewer.
+
+It also refuses `<!--` and `<script` (in any case) inside the pinned body,
+because in HTML they change where the browser thinks the script ENDS (the
+"double escape"), so the code that runs would no longer be the code pinned.
 
 HOW THE CODE IS COMPARED
 ------------------------
 With `normalised_code()`, `js_source()` and `js_will_not_parse()` from
 `check_translation_text_from_db.py` — the #485 pin's own rules, LOADED from
-that file, never copied (two copies of a normaliser are two chances for the
-generator and the checker to disagree). In short:
-  * comment TEXT, indentation and blank lines are free;
-  * a LINE BREAK is NOT free: in JavaScript a newline is a semicolon;
-  * U+2028 and U+2029 end a `//` comment in JavaScript, so they are folded to
-    line breaks first; a file JavaScript would refuse outright (an unclosed
-    `/*`, a control character) is refused here too, because a pin of code that
-    does not run certifies nothing.
-WHAT IT STILL CANNOT SEE, from the #485 notes: whitespace inside a string
-literal (this script has no string whose whitespace matters), and code after a
-string CONTAINING `//` or `/*` on the same line (none today; adding one would
-itself change the pinned code).
+that file, never copied. Comment text, indentation and blank lines are free; a
+LINE BREAK is not (in JavaScript a newline is a semicolon); U+2028 and U+2029
+are folded to line breaks; a body JavaScript would refuse outright is refused.
+It still cannot see whitespace inside a string literal.
 
-ALSO PINNED: the NUMBER of `<script` tags in the installer. A send added in a
-NEW script elsewhere on the page would leave this one untouched, so the count
-must equal SCRIPT_COUNT below, failing both ways. The other three scripts'
-CONTENTS are not pinned (the theme switches and the password strength meter,
-none of which reads the time zone today); a change to their number is, but a
-change INSIDE one of them is not, and that is said rather than hidden.
-
-NOT COVERED: HTML on the page outside any script (a `<link rel=preconnect>`
-written as markup). It cannot carry the zone, which only the browser knows,
-but it can reveal that somebody opened the installer; nothing here pins that.
+THE OTHER THREE SCRIPTS (the theme switches and the password strength meter)
+are NOT pinned, and that is said plainly. Under the policy each runs only
+because it carries the nonce, so a new or changed script runs only if it is
+written into our own code WITH the nonce — a change a reviewer reads. The
+count of `<script` tags (any case) is kept here as a cheap tripwire for that:
+SCRIPT_COUNT, failing both ways. It cannot see a tag built in PHP from pieces,
+which the policy refuses to run anyway (it carries no nonce).
 
 USAGE
   python3 tools/audit-checks/check_installer_country_script_pinned.py
@@ -80,7 +73,9 @@ PINNED = os.path.join("tools", "audit-checks", "installer-country-script.pinned.
 # colour-blind switches' wiring, the password strength meter, and this one
 # (#942). Change it together with a reading of whatever new script was added.
 SCRIPT_COUNT = 4
-SCRIPT_RE = re.compile(r"<script>\s*(// 🌍 Suggest a country.*?)</script>", re.DOTALL)
+# The opening tag's attributes are read quote by quote: the nonce attribute is
+# printed by PHP (`<?php echo … ?>`), whose `?>` holds a `>` inside the quotes.
+SCRIPT_RE = re.compile(r'<script\b(?:[^>"]|"[^"]*")*>\s*(// 🌍 Suggest a country.*?)</script>', re.DOTALL | re.IGNORECASE)
 
 
 def _pin_rules():
@@ -98,6 +93,12 @@ def the_script(text: str) -> tuple[str | None, str]:
         return None, f"expected exactly ONE `<script>` beginning `// 🌍 Suggest a country` in {INSTALLER}, found {len(found)}"
     if "<?" in found[0]:
         return None, "the suggestion script now holds PHP, so what the browser runs is no longer what this file says"
+    # `<!--` and `<script` inside a script change where an HTML parser ends it
+    # (the "double escape"): code after the first `</script>` would then run as
+    # part of THIS script, carrying its nonce, while this check stopped reading.
+    if "<!--" in found[0] or re.search(r"<script", found[0], re.IGNORECASE) is not None:
+        return None, ("the suggestion script holds `<!--` or `<script`, which change where a browser ends it "
+                      "(the double escape), so the code that runs would not be the code pinned")
     return found[0], ""
 
 
@@ -106,12 +107,12 @@ def main() -> int:
     with open(os.path.join(ROOT, INSTALLER), encoding="utf-8") as handle:
         page = handle.read()
     problems = []
-    scripts = len(re.findall(r"<script\b", page))
+    scripts = len(re.findall(r"<script\b", page, re.IGNORECASE))
     if scripts != SCRIPT_COUNT:
         problems.append(
-            f"{INSTALLER} has {scripts} `<script` tag(s); {SCRIPT_COUNT} are pinned. A new script on the "
-            f"installer's pages can read the browser's time zone and send it, which this pin of the one "
-            f"suggestion script cannot see. Read the change, then set SCRIPT_COUNT in this file."
+            f"{INSTALLER} has {scripts} `<script` tag(s) (any case); {SCRIPT_COUNT} are counted. Under the "
+            f"installer's policy a new script runs only if it carries the nonce, so read it: does it read the "
+            f"time zone, or write a hint? Then set SCRIPT_COUNT in this file."
         )
     script, why = the_script(page)
     if script is None:
@@ -135,9 +136,10 @@ def main() -> int:
                     f"      First difference at character {where} of the normalised code:\n"
                     f"        pinned: …{want[max(0, where - 60):where + 60]}…\n"
                     f"        found:  …{live[max(0, where - 60):where + 60]}…\n"
-                    f"      THIS FAILS ON ANY CHANGE TO A STATEMENT, ON PURPOSE: D-133 promises this script sends "
-                    f"nothing anywhere, and three check rounds showed no test can prove that. Read the change; "
-                    f"if it is right, run this check with --repin and say in the commit message what changed."
+                    f"      THIS FAILS ON ANY CHANGE TO A STATEMENT, ON PURPOSE: the installer's policy blocks every "
+                    f"send but a DNS or preconnect hint, and a hint built from the time zone would have to be "
+                    f"written here. Read the change; if it is right, run this check with --repin and say in the "
+                    f"commit message what changed."
                 )
     if problems:
         for problem in problems:

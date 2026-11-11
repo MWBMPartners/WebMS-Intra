@@ -1,67 +1,69 @@
 /**
- * What the installer's country suggestion asks for in a real browser — SUPPORTING EVIDENCE, not the guard.
+ * The installer's browser rule (its Content Security Policy) blocks every way of sending, in a real browser.
  *
  * Path: tools/installer-country-script-selftest.mjs
  *
- * WHAT THE GUARD IS, AND WHY THIS IS NOT IT
- * -----------------------------------------
+ * WHAT ENFORCES "SENDS NOTHING"
+ * ------------------------------
  * D-133 (#942): the installer suggests a country and a time zone from the
  * installing person's own browser time zone, and "nothing is looked up or sent
- * anywhere". **The guard for that promise is a pin**:
- * `tools/audit-checks/check_installer_country_script_pinned.py` requires the
- * script to equal its pinned copy, so no statement in it can change without a
- * person reading the change.
+ * anywhere". Four check rounds tried to prove that by READING the page's source
+ * or by WATCHING a browser for a send, and each was got past (a WebSocket, a
+ * timer, an `innerHTML` picture, a `pagehide` beacon, a `<SCRIPT>` in capitals,
+ * the `<!-- <script` double escape, an `onload=` attribute, an `<iframe
+ * srcdoc>`, a `javascript:` address, a tag built in PHP from two halves).
  *
- * That was settled after three rounds of trying to PROVE the absence of a send
- * by watching for one, each defeated: a text search missed a WebSocket; a list
- * of traps in node missed a timer, an `innerHTML` picture, CSS `url()` and
- * `import()`; and this file's first version — which claimed to see every
- * request — missed a `pagehide` beacon, a `<link rel=preconnect>`, a timer past
- * its window and a send on the zone box's change, with the zone reaching a real
- * listener and every check green. Proving absence by sampling routes is
- * unbounded.
+ * So the BROWSER enforces it now: every installer answer carries a strict
+ * Content Security Policy (web/_install/csp.php). Only a script carrying the
+ * answer's nonce runs, and nothing may be fetched, beaconed, streamed, framed
+ * or posted elsewhere. THIS FILE PROVES THE POLICY WORKS, in a real browser,
+ * on the REAL installer page served by PHP's own web server.
  *
- * WHAT THIS DOES SHOW
- * -------------------
- *   1. The real script — read out of web/_install/index.php verbatim — run in
- *      headless Chrome, Chromium or Edge with the browser's time zone set by
- *      `Emulation.setTimezoneOverride` to London, New York, Chicago and UTC,
- *      makes the right suggestion in each (so it really RUNS there).
- *   2. While it loads, while the country box AND the zone box are changed, and
- *      while the page is left for another page, the browser's Network domain
- *      records no request to any address but the page's own:
- *      `Network.requestWillBeSent`,
- *      `Network.webSocketCreated` and new windows. Each recording lasts at
- *      least two seconds and until the network has been quiet for half a
- *      second.
- *   3. The recording is LIVE: a control page sends three things (a fetch with
- *      a built-up name, an `innerHTML` picture, a WebSocket) 1.2 seconds after
- *      loading — AFTER the half-second quiet spell, INSIDE the two-second
- *      minimum — and all three must be recorded. A recorder that stopped at
- *      the first quiet spell would miss them and go red.
+ * WHAT IT PROVES
+ * --------------
+ *   C. The real installer page (the code page, which every visit starts on),
+ *      served by `php -S` from a scratch copy of web/:
+ *      - carries the policy, with `default-src 'none'` and a nonce;
+ *      - WORKS under it: its own scripts run (the theme script sets
+ *        `data-bs-theme`), its form submits and the next page draws, and the
+ *        browser reports no violation of the policy by the installer's own
+ *        page;
+ *      - and with each of the six sends round 4 of the check proved real
+ *        PLANTED into the copy (a `<SCRIPT>` in capitals, the double escape,
+ *        an `onload=` attribute, an `<iframe srcdoc>`, a `javascript:` address,
+ *        a tag built in PHP), a listener on another port receives NONE of them,
+ *        and the browser reports the policy refusing them.
+ *      - THE PLANTS ARE PROVED LIVE: the same planted copy, served with the
+ *        policy taken off by the router, sends all six to the listener.
+ *   B. The real suggestion script, served under the SAME policy (built by PHP
+ *      from csp.php) with the nonce, in London, New York, Chicago and UTC,
+ *      makes the right suggestion; and the Network domain sees nothing leave
+ *      while it loads, while the country and zone boxes change, and while the
+ *      page is left.
+ *   A. The recorder used in B is live: a control page with NO policy sends
+ *      three things 1.2 seconds after load (after the quiet spell, inside the
+ *      two-second minimum), and all three are recorded.
  *
- * WHAT IT CANNOT SEE, said plainly
- * --------------------------------
- *   * PRE-CONNECTION AND DNS HINTS. `<link rel=preconnect>` and `dns-prefetch`
- *     send a server name over DNS and TLS, which never reach the Network
- *     domain. A zone written into such a name is invisible here.
- *   * A BEACON ON LEAVING. A planted `pagehide` `sendBeacon` was NOT recorded,
- *     whether the page was left for `about:blank` or for another page on the
- *     same origin (measured, both). So leaving the page is exercised, but a
- *     beacon sent as it goes is not seen; and a tab or browser that is CLOSED
- *     is not tried at all.
- *   * TIMERS PAST ITS WINDOW. Anything put off beyond the recording (a few
- *     seconds) is not seen.
- *   * SAME-ORIGIN SENDS. A request to the page's own address is allowed, so
- *     `fetch('/?z=' + zone)` passes. On the real installer that address is the
- *     customer's own server, which is where the person is anyway, but it is a
- *     send all the same.
- *   * The rest of the installer's page. It runs the script on a FIXTURE page
- *     (the real page needs an installation code, a database and a session),
- *     with the two lists built by PHP from the same `Portal\Core\Countries`
- *     and zone data the installer uses.
- *   * It needs PHP and a Chromium-family browser, and REFUSES (exit 2)
- *     without either, never skips.
+ * WHAT IT CANNOT SEE OR SHOW, said plainly
+ * ----------------------------------------
+ *   * The policy does NOT block DNS-prefetch or preconnect HINTS: browsers put
+ *     them under no directive, and DNS and TLS server names never reach the
+ *     Network domain, so neither the policy nor this recorder stops or sees
+ *     one. The guard against a hint built from the time zone is the text pin
+ *     of the suggestion script (tools/audit-checks/
+ *     check_installer_country_script_pinned.py): a hint must be written in our
+ *     own code.
+ *   * Only the code page of the real installer is driven in a browser: the
+ *     later pages need a database. installer-selftest.php requires that every
+ *     installer page carries the policy and that every script on it carries
+ *     that answer's nonce, over HTTP.
+ *   * A `pagehide` beacon was NOT recorded by the Network domain in B (measured);
+ *     under the policy it is refused anyway (`connect-src 'none'`).
+ *   * Same-origin requests are allowed by B's recorder (`fetch('/?z=')` passes
+ *     there); under the policy a fetch to the installer's own server is still
+ *     refused, but a picture from it is not (`img-src 'self'`).
+ *   * It needs PHP and a Chromium-family browser, and REFUSES (exit 2) without
+ *     either, never skips.
  *
  * HOW IT IS BUILT
  * ---------------
@@ -84,7 +86,7 @@
 
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFile, mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, mkdir, rm, cp, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -105,6 +107,9 @@ const BROWSERS = [
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const INSTALLER = path.join(ROOT, 'web', '_install', 'index.php');
 const COUNTRIES = path.join(ROOT, 'web', '_core', 'Countries.php');
+const CSP = path.join(ROOT, 'web', '_install', 'csp.php');
+const WEB = path.join(ROOT, 'web');
+const FIXTURE_NONCE = 'fixturenonce0123456789abcdef0123';
 
 let passed = 0;
 let failed = 0;
@@ -128,7 +133,7 @@ function refuse(why) {
 /* ── The real script, out of the installer's own source ──────────────────── */
 async function realScript() {
     const source = await readFile(INSTALLER, 'utf8');
-    const found = [...source.matchAll(/<script>\s*(\/\/ 🌍 Suggest a country[\s\S]*?)<\/script>/g)];
+    const found = [...source.matchAll(/<script\b(?:[^>"]|"[^"]*")*>\s*(\/\/ 🌍 Suggest a country[\s\S]*?)<\/script>/gi)];
     if (found.length !== 1) {
         refuse(`expected exactly ONE suggestion script in ${INSTALLER}, found ${found.length}`);
     }
@@ -140,6 +145,11 @@ async function realScript() {
 }
 
 /* ── The two lists, built by PHP from the installer's own sources ────────── */
+/* The installer's own policy, for a given nonce, from csp.php itself. */
+function policyFor(nonce) {
+    return execFileSync('php', ['-r', 'require $argv[1]; echo installCspPolicy($argv[2]);', CSP, nonce], { encoding: 'utf8' });
+}
+
 function lists() {
     try { execFileSync('php', ['-v'], { stdio: 'ignore' }); } catch { refuse('no php on this machine: it builds the two lists from Countries.php'); }
     const code = 'require $argv[1];'
@@ -150,14 +160,14 @@ function lists() {
 }
 
 const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-function page(script, extra) {
+function page(script, extra, nonce = '') {
     const { countries, zones } = LISTS;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>country fixture</title></head><body>
 <select id="country" name="country" data-chosen="0"><option value="" selected>Not chosen yet</option>
 ${countries.map(([k, n]) => `<option value="${esc(k)}">${esc(n)}</option>`).join('')}</select>
 <select id="timezone" name="timezone" data-chosen="0"><option value="" selected>Not chosen yet</option>
 ${zones.map(([id, c]) => `<option value="${esc(id)}" data-country="${esc(c)}">${esc(id)}</option>`).join('')}</select>
-<script>
+<script${nonce === '' ? '' : ` nonce="${nonce}"`}>
 ${script}
 </script>
 ${extra}
@@ -175,6 +185,8 @@ class Browser {
         this.requests = [];
         this.inflight = new Set();
         this.lastActivity = Date.now();
+        this.log = [];
+        this.documentHeaders = {};
         ws.addEventListener('message', (event) => {
             const msg = JSON.parse(event.data);
             const p = msg.params ?? {};
@@ -188,6 +200,12 @@ class Browser {
             } else if (msg.method === 'Network.webSocketCreated') {
                 this.requests.push(`websocket ${p.url ?? '?'}`);
                 this.lastActivity = Date.now();
+            } else if (msg.method === 'Log.entryAdded') {
+                this.log.push(String(p.entry?.text ?? ''));
+            } else if (msg.method === 'Runtime.exceptionThrown') {
+                this.log.push(String(p.exceptionDetails?.exception?.description ?? p.exceptionDetails?.text ?? ''));
+            } else if (msg.method === 'Network.responseReceived' && p.type === 'Document') {
+                this.documentHeaders = p.response?.headers ?? {};
             } else if (msg.method === 'Target.targetCreated' && p.targetInfo?.type === 'page' && p.targetInfo?.targetId !== this.ownTarget) {
                 this.requests.push(`new window ${p.targetInfo?.url ?? '?'}`);
             }
@@ -286,7 +304,10 @@ setTimeout(function () {
     // made while leaving that is an ordinary request is recorded. A planted
     // `pagehide` BEACON was not recorded either way (here, or leaving for
     // about:blank) — measured — so this test does not claim beacons.
-    const pages = { '/page.html': page(script, ''), '/control.html': page(script, control), '/left.html': '<!doctype html><title>left</title>' };
+    // B's page is served under the installer's REAL policy (from csp.php), with
+    // the nonce on the script, so the suggestion is shown to work under it.
+    const pages = { '/page.html': page(script, '', FIXTURE_NONCE), '/control.html': page(script, control), '/left.html': '<!doctype html><title>left</title>' };
+    const policy = policyFor(FIXTURE_NONCE);
 
     const work = await mkdtemp(path.join(tmpdir(), 'installer-country-'));
     const profile = path.join(work, 'profile');
@@ -297,14 +318,18 @@ setTimeout(function () {
             answer.writeHead(404).end('not found');
             return;
         }
-        answer.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        const head = { 'Content-Type': 'text/html; charset=utf-8' };
+        if (name === '/page.html') { head['Content-Security-Policy'] = policy; }
+        answer.writeHead(200, head);
         answer.end(pages[name]);
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     const edge = spawn(browserPath, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`,
         '--no-first-run', '--no-default-browser-check', '--disable-gpu'], { stdio: 'ignore' });
+    const extraStops = [];
     const stop = async () => {
+        for (const extra of extraStops) { try { await extra(); } catch { /* already gone */ } }
         const ended = new Promise((resolve) => { edge.once('exit', resolve); setTimeout(resolve, 5000); });
         try { edge.kill('SIGTERM'); } catch { /* already gone */ }
         await ended;
@@ -340,6 +365,7 @@ setTimeout(function () {
         await browser.send('Runtime.enable');
         await browser.send('Network.enable');
         await browser.send('Network.setCacheDisabled', { cacheDisabled: true });
+        await browser.send('Log.enable');
 
         const foreign = () => browser.requests.filter((u) => u.startsWith(origin + '/') === false);
         const chosen = () => browser.evaluate('return document.getElementById("country").value + "|" + document.getElementById("timezone").value;');
@@ -373,14 +399,170 @@ setTimeout(function () {
             await browser.settle();
             check(`B ${zone}: and nothing while a country and a zone are chosen, or while the page is left (a beacon sent as it goes is NOT seen; see the header)`, foreign(), []);
         }
+        check('B the suggestion ran under the installer\'s real policy with no violation reported',
+            browser.log.filter((t) => /Content Security Policy/i.test(t)), []);
+
+        await realInstaller(browser, work, extraStops);
     } finally {
         await stop();
     }
 
     console.log('');
     console.log(`${passed + failed} checks: ${passed} passed, ${failed} failed.`);
-    console.log('Supporting evidence only: the guard is check_installer_country_script_pinned.py. See the header.');
+    console.log('The policy in web/_install/csp.php is the enforcement; the text pin guards the hints it cannot block.');
     process.exit(failed === 0 ? 0 : 1);
+}
+
+/* ── C. The REAL installer, served by PHP, under its own policy ───────────── */
+
+/** A free port, chosen by the system. */
+async function freePort() {
+    const probe = createServer();
+    await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const port = probe.address().port;
+    await new Promise((resolve) => probe.close(resolve));
+    return port;
+}
+
+/** Copy web/ into `to`, leaving out every secret and upload, the web folder renamed httpdocs. */
+async function copyWeb(to) {
+    const skip = new Set(['_auth_keys', '_uploads', '_backups', '_libraries', '.channel']);
+    await cp(WEB, to, { recursive: true, filter: (from) => {
+        const rel = path.relative(WEB, from);
+        return rel === '' || skip.has(rel.split(path.sep)[0]) === false;
+    } });
+    await rename(path.join(to, 'public_html'), path.join(to, 'httpdocs'));
+}
+
+/* The router imitates the web folder's .htaccess (the same as installer-selftest.php's).
+   With STRIP set it takes the policy OFF, for the control run that proves the plants are live. */
+const ROUTER = `<?php
+declare(strict_types=1);
+if (getenv('STRIP_CSP') === '1') { header_register_callback(static function (): void { header_remove('Content-Security-Policy'); }); }
+$root = (string) realpath((string) $_SERVER['DOCUMENT_ROOT']);
+$uri  = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+if (preg_match('#(^|/)\\\\.(?!well-known)#', $uri) === 1) { http_response_code(403); exit('403'); }
+$target = $root . '/index.php';
+$real   = $uri === '/' ? false : realpath($root . $uri);
+if ($real !== false && str_starts_with($real, $root . DIRECTORY_SEPARATOR) === true && is_file($real) === true) {
+    if (strtolower(pathinfo($real, PATHINFO_EXTENSION)) === 'php') { $target = $real; } else { readfile($real); return true; }
+}
+$_SERVER['SCRIPT_NAME'] = substr($target, strlen($root));
+$_SERVER['PHP_SELF'] = $_SERVER['SCRIPT_NAME'];
+$_SERVER['SCRIPT_FILENAME'] = $target;
+chdir(dirname($target));
+require $target;
+return true;
+`;
+
+/** The six sends round 4 of the check proved real, each to the listener on its own path. */
+function plants(listener) {
+    const to = (what) => `http://127.0.0.1:${listener}/${what}`;
+    const gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    return [
+        ['upper', `<SCRIPT>fetch('${to('upper')}')</SCRIPT>`],
+        ['double', `<script>\n// <!-- <script>\n// </script>\nfetch('${to('double')}');\n</script>`],
+        ['onload', `<img alt="" src="${gif}" onload="fetch('${to('onload')}')">`],
+        ['srcdoc', `<iframe srcdoc="&lt;script&gt;fetch('${to('srcdoc')}')&lt;/script&gt;"></iframe>`],
+        ['jsurl', `<a id="planted-jsurl" href="javascript:fetch('${to('jsurl')}')">x</a>`],
+        ['php', `<?php echo '<scr' . 'ipt>fetch("${to('php')}")</scr' . 'ipt>'; ?>`],
+    ];
+}
+
+async function realInstaller(browser, work, extraStops) {
+    const hits = [];
+    const listener = createServer((request, answer) => {
+        hits.push(new URL(request.url, 'http://x').pathname.slice(1));
+        answer.writeHead(204, { 'Access-Control-Allow-Origin': '*' }).end();
+    });
+    await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
+    extraStops.push(() => new Promise((resolve) => listener.close(resolve)));
+    const listenPort = listener.address().port;
+
+    const routerFile = path.join(work, 'router.php');
+    await writeFile(routerFile, ROUTER, 'utf8');
+    const serve = async (root, strip) => {
+        const port = await freePort();
+        const php = spawn('php', ['-d', 'display_errors=0', '-d', 'log_errors=0', '-d', `session.save_path=${work}`,
+            '-S', `127.0.0.1:${port}`, '-t', path.join(root, 'httpdocs'), routerFile],
+            { stdio: 'ignore', env: { ...process.env, STRIP_CSP: strip === true ? '1' : '0', PHP_CLI_SERVER_WORKERS: '' } });
+        const halt = () => new Promise((resolve) => { php.once('exit', resolve); php.kill('SIGTERM'); setTimeout(resolve, 3000); });
+        extraStops.push(halt);
+        for (let i = 0; i < 100; i += 1) {
+            try { await fetch(`http://127.0.0.1:${port}/assets/`); break; } catch { await new Promise((r) => setTimeout(r, 100)); }
+        }
+        return { origin: `http://127.0.0.1:${port}`, halt };
+    };
+    const open = async (url) => {
+        browser.log = [];
+        browser.documentHeaders = {};
+        await browser.send('Page.navigate', { url });
+        for (let i = 0; i < 100; i += 1) {
+            const ready = await browser.evaluate('return document.readyState === "complete" ? 1 : 0;').catch(() => 0);
+            if (ready === 1) { break; }
+            await new Promise((r) => setTimeout(r, 100));
+        }
+        await browser.settle();
+    };
+    const violations = () => browser.log.filter((t) => /Content Security Policy/i.test(t));
+
+    console.log('C. The REAL installer page, served by PHP, under its own policy');
+    const clean = path.join(work, 'clean');
+    await copyWeb(clean);
+    let server = await serve(clean, false);
+    await open(`${server.origin}/`);
+    const csp = String(browser.documentHeaders['content-security-policy'] ?? browser.documentHeaders['Content-Security-Policy'] ?? '');
+    check('C1 the installer\'s page carries its policy: nothing by default, and scripts only by this answer\'s nonce',
+        [csp.includes("default-src 'none'"), /script-src 'nonce-[0-9a-f]{32}'/.test(csp), csp.includes("connect-src 'none'")], [true, true, true]);
+    check('C2 and WORKS under it: the page is the installer\'s code page, its own theme script RAN, and the browser reports no violation by the page',
+        [await browser.evaluate('return /Install/.test(document.title) && document.getElementById("owner_code") !== null;'),
+         await browser.evaluate('return (document.documentElement.getAttribute("data-bs-theme") || "") !== "";'),
+         violations()], [true, true, []]);
+    await browser.evaluate('document.getElementById("owner_code").value = "AAAA-BBBB-CCCC-DDDD"; document.getElementById("owner_code").form.submit(); return 1;');
+    await new Promise((r) => setTimeout(r, 500));
+    for (let i = 0; i < 100; i += 1) {
+        const ready = await browser.evaluate('return document.readyState === "complete" ? 1 : 0;').catch(() => 0);
+        if (ready === 1) { break; }
+        await new Promise((r) => setTimeout(r, 100));
+    }
+    check('C3 its form SUBMITS under the policy (`form-action \'self\'`) and the answer draws: a wrong code is refused in words, with no violation',
+        [await browser.evaluate('return /not the code/i.test(document.body.innerText);'), violations()], [true, []]);
+    await server.halt();
+
+    // The six sends, planted into a copy of the installer, just inside its <body>.
+    const planted = path.join(work, 'planted');
+    await copyWeb(planted);
+    const installer = path.join(planted, '_install', 'index.php');
+    const source = await readFile(installer, 'utf8');
+    const anchor = '<body>\n<div class="install-shell"';
+    if (source.split(anchor).length !== 2) { refuse('the installer\'s <body> anchor for the plants was not found exactly once'); }
+    await writeFile(installer, source.replace(anchor, `<body>\n${plants(listenPort).map(([, html]) => html).join('\n')}\n<div class="install-shell"`), 'utf8');
+    const names = plants(listenPort).map(([name]) => name);
+    const visitPlanted = async (strip) => {
+        hits.length = 0;
+        const run = await serve(planted, strip);
+        await open(`${run.origin}/`);
+        await browser.evaluate('var a = document.getElementById("planted-jsurl"); if (a) { a.click(); } return 1;').catch(() => 0);
+        await browser.settle();
+        await new Promise((r) => setTimeout(r, 1000));
+        const seen = names.filter((n) => hits.includes(n));
+        const log = violations();
+        // SHOW_VIOLATIONS=1 prints the browser's own words for each refusal (how C6's counts were measured).
+        if (process.env.SHOW_VIOLATIONS === '1') { console.log(log.join('\n---\n')); }
+        await run.halt();
+        return { seen, log };
+    };
+    const live = await visitPlanted(true);
+    check('C4 CONTROL: with the policy taken OFF, all six planted sends really reach the listener (so the plants are live)', live.seen, names);
+    const held = await visitPlanted(false);
+    check('C5 with the policy ON, NONE of the six reaches the listener', held.seen, []);
+    // Measured in Edge: four inline scripts refused (the capitals, the double
+    // escape, the PHP-built tag, and the script inside the srcdoc frame, which
+    // inherits the policy), one inline event handler and one javascript: address.
+    check('C6 and the browser reports the policy refusing each: four inline scripts (capitals, double escape, PHP-built, inside the srcdoc frame), one event handler, one javascript: address',
+        [held.log.filter((t) => /Executing inline script violates/i.test(t)).length,
+         held.log.filter((t) => /Executing inline event handler violates/i.test(t)).length,
+         held.log.filter((t) => /Running the JavaScript URL violates/i.test(t)).length], [4, 1, 1]);
 }
 
 main().catch((error) => refuse(error.message));
