@@ -198,7 +198,10 @@ appended with its real date and a note that it was added later.
 | [D-140](140-a-visitors-event-suggestion-details-are-erased-on-request.md) | 2026-11-11 | A visitor's event-suggestion details are erased on request, not automatically | in force |
 | [D-141](141-an-open-rota-swap-request-is-e-mailed-to-every-member.md) | 2026-11-11 | An open rota swap request is e-mailed to every member who has the switch on | in force |
 | [D-142](142-a-workers-download-lists-records-carrying-their-name-without-details.md) | 2026-11-11 | A worker's data download lists the records that carry their name, without the other person's details | in force |
+| [D-143](143-a-series-page-offers-every-hidden-date-back.md) | 2026-11-11 | A series' bulk-edit page offers every hidden date back, however it was hidden | in force |
+| [D-144](144-a-restored-date-on-a-day-already-taken-needs-a-second-confirmation.md) | 2026-11-11 | Bringing back a date onto a day the series already uses needs a deliberate second confirmation | in force |
+| [D-145](145-a-restored-date-comes-back-as-a-draft.md) | 2026-11-11 | A date brought back comes back as a draft | in force |
 
-*142 decisions. This index is checked against the folder by
+*145 decisions. This index is checked against the folder by
 `tools/audit-checks/check_decisions_recorded.py`, so a file without a row — or a
 row without a file — fails.*
