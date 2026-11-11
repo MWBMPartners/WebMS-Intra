@@ -444,9 +444,11 @@ class Giving
      *   ''           .. '2026-12-31'        0 rows          4 rows
      *
      * So the same address gave an empty Gift Aid file on one server and a full
-     * one on another. (Plain `<`, `<=`, `>`, `>=` and `=` agree on all four;
-     * it is BETWEEN, and a comparison whose column side is an expression, that
-     * split.) The pages used to check with strtotime(), or not at all, and
+     * one on another. (Plain `<`, `<=`, `>`, `>=` and `=` agree on all four
+     * for a month of 00-12 and a day of 00-31 -- it is BETWEEN, and a
+     * comparison whose column side is an expression, that split there -- but
+     * not beyond: at month 13 or day 32 MariaDB answers differently from
+     * MySQL even for the plain ones, measured.) The pages used to check with strtotime(), or not at all, and
      * strtotime() ACCEPTS '2026-02-31' (it rolls it to 3 March), so it was
      * never a test of whether a day exists.
      *

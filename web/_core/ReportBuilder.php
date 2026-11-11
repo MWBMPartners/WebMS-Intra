@@ -775,8 +775,10 @@ final class ReportBuilder
             return [(float) $raw, 'd'];
         }
         if ($type === 'date') {
+            // `\A…\z`, not `^…$`: `$` lets a trailing newline through (#892,
+            // round 4; the same shape as #956).
             $s = (string) $raw;
-            if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $s, $m) !== 1
+            if (preg_match('/\A(\d{4})-(\d{2})-(\d{2})\z/', $s, $m) !== 1
                 || checkdate((int) $m[2], (int) $m[3], (int) $m[1]) === false
             ) {
                 throw new \InvalidArgumentException('Expected a date (YYYY-MM-DD).');
@@ -785,33 +787,52 @@ final class ReportBuilder
         }
         if ($type === 'datetime') {
             // 📅 A date-and-time that does not EXIST is refused (#951, #891,
-            //    #892). createFromFormat() alone accepted '2027-02-31 10:00:00'
-            //    by rolling it into 3 March, and the IMPOSSIBLE text was then
-            //    bound into the filter -- where `col BETWEEN ? AND ?` answers it
-            //    differently on MySQL 8.0/8.4 (no rows) and on 9.7 and MariaDB
-            //    (rows), measured.
-            //    The PARTS are checked, never the text against a reformatted
-            //    copy: round 2 required the parse to give back exactly what was
-            //    written, and that refused real values the old check accepted
-            //    and every engine reads correctly -- '2026-06-01 9:00',
-            //    '2026-6-1 10:00', '2026-06-01 1:00:00' -- which a saved report
-            //    could hold (found by round 2 of the check). So the pattern
-            //    takes what createFromFormat('Y-m-d H:i[:s]') took (a 4-digit
-            //    year, a 1- or 2-digit month, day and hour, 2-digit minutes and
-            //    seconds); checkdate() decides the day; the hour, minute and
-            //    second are range-checked. Compared with the old check over a
-            //    grid of written values (every mix of 1- and 2-digit parts, in
-            //    and out of range, with stray spaces, a 'T' and a date alone):
-            //    no real value it accepted is refused, and nothing it refused is
-            //    accepted (no count is given: it is a property of the grid, not
-            //    of the code). Built from the digits, so
-            //    no time zone is involved and a real reading in the hour the
-            //    clocks skip is accepted (#777).
-            $s    = (string) $raw;
-            $real = preg_match('/\A(\d{4})-(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{2})(?::(\d{2}))?\z/', $s, $part) === 1
-                && checkdate((int) $part[2], (int) $part[3], (int) $part[1]) === true
-                && (int) $part[4] <= 23 && (int) $part[5] <= 59 && (int) ($part[6] ?? '0') <= 59;
-            if ($real === false) {
+            //    #892). The two createFromFormat() calls below are EXACTLY the
+            //    ones this check has always made, so every value it accepted
+            //    before is still accepted -- unpadded parts, a two-digit year,
+            //    two spaces or a tab between date and time, all of which every
+            //    engine reads the same as the padded form and a saved report
+            //    could hold. ONE refusal is added: createFromFormat() quietly
+            //    CORRECTS an impossible value ('2027-02-31 10:00:00' becomes
+            //    3 March, '9:60' becomes 10:00, hour 24 the next midnight) and
+            //    reports that it did so as a warning ("The parsed date was
+            //    invalid", "The parsed time was invalid"). Any warning or
+            //    error means the text bound below is not the moment PHP read,
+            //    and such text splits the engines: `col BETWEEN ? AND ?` gives
+            //    no rows on MySQL 8.0/8.4 and rows on 9.7 and MariaDB for
+            //    31 February, and minute or second 60 gives no rows on MySQL
+            //    and every row on MariaDB (measured).
+            //    HISTORY, so neither is tried again: round 2 required the parse
+            //    to give back exactly the text written, which refused real
+            //    unpadded values; round 3 replaced it with a hand-written
+            //    pattern and claimed "no real value it accepted is refused",
+            //    which was FALSE -- it refused two-digit and three-digit years
+            //    and two spaces or a tab. This version keeps the old calls and
+            //    adds no second pattern to drift. Measured against the
+            //    1cb4b9fa check over a grid of written values (every mix of
+            //    padded and unpadded parts, in and out of range, years of one
+            //    to five digits, one space, two spaces or a tab, plus 'T', a
+            //    date alone, stray spaces, a newline and a fraction), BOTH
+            //    ways: no value it accepted whose written parts are real is
+            //    refused, and nothing it refused, or whose parts are not real,
+            //    is accepted. Hour 24 is among the values PHP warns about,
+            //    so it needs no rule of its own. PHP's own zone is not used:
+            //    no moment is kept, and a real reading in the hour the clocks
+            //    skip parses with no warning (#777).
+            $s       = (string) $raw;
+            $correct = false;
+            foreach (['Y-m-d H:i:s', 'Y-m-d H:i'] as $format) {
+                $dt = \DateTimeImmutable::createFromFormat($format, $s);
+                if ($dt === false) {
+                    continue;
+                }
+                // Read at once: the next call would replace it. PHP 8.2 and
+                // later answer false when there was nothing to report.
+                $errors  = \DateTimeImmutable::getLastErrors();
+                $correct = $errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0);
+                break;
+            }
+            if ($correct === false) {
                 throw new \InvalidArgumentException('Expected a date/time (YYYY-MM-DD HH:MM[:SS]).');
             }
             return [$s, 's'];

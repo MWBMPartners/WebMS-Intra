@@ -267,8 +267,12 @@ echo "\n=== PART Z — a date that does not EXIST is refused, never rolled (#951
 // answers an impossible day differently by engine -- no rows on MySQL 8.0/8.4,
 // rows on MySQL 9.7 and MariaDB 11.4 (measured). The `date` type always used
 // checkdate(); the `datetime` type used createFromFormat(), which ROLLS
-// '2027-02-31 10:00:00' into 3 March and said yes. These go red if the
-// round-trip test in ReportBuilder::coerceValue() is taken out.
+// '2027-02-31 10:00:00' into 3 March and said yes. It still makes the same
+// createFromFormat() calls, and now refuses a value whenever PHP reports that
+// it had to correct it (DateTime::getLastErrors()). These go red if that
+// refusal is taken out of ReportBuilder::coerceValue(). Minute and second 60
+// matter most: they split the engines (no rows on MySQL, every row on
+// MariaDB), and a first version of this part did not try them.
 $tasksWith = static fn (array $row): array => [
     'v' => 1, 'source' => 'tasks', 'columns' => ['priority'],
     'filters' => ['conjunction' => 'AND', 'rows' => [$row]],
@@ -278,6 +282,10 @@ foreach ([
     ['completedAt', 'between', ['2027-01-01 00:00:00', '2027-04-31 10:00'], '31 April, end of a datetime range (minutes only)'],
     ['completedAt', 'gte', ['2027-00-10 10:00:00'], 'month 00 on a datetime'],
     ['completedAt', 'lt', ['2027-03-01 25:00:00'], 'hour 25 on a datetime'],
+    ['completedAt', 'lt', ['2027-03-01 24:00'], 'hour 24 on a datetime (PHP turns it into the next midnight)'],
+    ['completedAt', 'gte', ['2027-03-01 9:60'], 'minute 60 on a datetime'],
+    ['completedAt', 'gte', ['2027-03-01 10:00:60'], 'second 60 on a datetime'],
+    ['dueDate', 'gte', ["2027-03-01\n"], 'a date followed by a newline (`$` used to let it through)'],
     ['dueDate', 'between', ['2027-02-29', '2027-12-31'], '29 February in a year that has none, on a date'],
     // Refused before this work too, and must stay refused: a 'T' between date
     // and time, and a date with no time, on a date-and-time column.
@@ -289,10 +297,9 @@ foreach ([
     });
 }
 // ...and the over-reach direction: real values still compile, INCLUDING a
-// reading in the hour London's clocks skip. The check reads the digits and no
-// time zone, so that reading cannot be mistaken for an impossible one; PHP's own
-// zone is set to London for these cases on purpose (round 2's version made a
-// moment and needed UTC to get this right), and put back afterwards.
+// reading in the hour London's clocks skip. PHP's own zone is set to London for
+// these cases on purpose -- createFromFormat() reads in it, and that reading
+// must parse with no warning -- and put back afterwards.
 $zoneWas = date_default_timezone_get();
 date_default_timezone_set('Europe/London');
 foreach ([
@@ -305,6 +312,12 @@ foreach ([
     [['2026-06-01 9:00', '2026-06-01 23:00'], 'a one-digit hour (9:00)'],
     [['2026-01-01 00:00', '2026-6-1 10:00'], 'a one-digit month and day (2026-6-1)'],
     [['2026-01-01 00:00', '2026-06-01 1:00:00'], 'a one-digit hour with seconds (1:00:00)'],
+    // ...and three more the original check accepted, every engine reads the
+    // same as the four-digit, one-space form, and round 3's hand-written
+    // pattern REFUSED (found by round 3 of the check):
+    [['2026-01-01 00:00', '26-06-01 10:00'], 'a two-digit year (26-06-01)'],
+    [['2026-01-01 00:00', '2026-06-01  10:00'], 'two spaces between the date and the time'],
+    [['2026-01-01 00:00', "2026-06-01\t10:00"], 'a tab between the date and the time'],
 ] as [$vals, $what]) {
     $compiled = null;
     try {

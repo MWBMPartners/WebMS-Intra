@@ -226,7 +226,7 @@ if (str_starts_with($dbName, 'selftest_') === false) {
 
 // 🔢 How many checks this file runs — EXACTLY. A check that never ran cannot
 //    fail, so the count is part of the result. Change it only with a check.
-const EXPECTED_CHECKS = 278; // 235 before section 19 (#709) added nine; the fix round
+const EXPECTED_CHECKS = 281; // 235 before section 19 (#709) added nine; the fix round
                              // replaced its single guard check with eight, giving 251.
                              // Section 20 (#707) then added seven: five on which rows the
                              // change-history step reaches, one on the actor link still
@@ -274,7 +274,9 @@ const EXPECTED_CHECKS = 278; // 235 before section 19 (#709) added nine; the fix
                              // two: a statement file whose period names a day that
                              // does not exist is DELETED when an unkept gift is on
                              // it and KEPT when only kept gifts are, on every
-                             // engine. 278.
+                             // engine. 278. Its round 4 added three, on the two ENDS
+                             // of a period (a kept gift on the first day, on the
+                             // last day, and an unkept gift on the first day). 281.
 
 // The headings that must all be reached for a pass.
 const REQUIRED_SECTIONS = ['0', '1', '2', '3', '3b', '4', '4b', '4c', '5', '5b', '5c', '6', '7', '7b', '7c', '7d', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21'];
@@ -3864,6 +3866,23 @@ $thirtyFirstNoMonthHas = static function (string $ymd, int $step): string {
 };
 $badPeriodH       = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(500) . '_' . $thirtyFirstNoMonthHas($ago(300), 1) . '.pdf', 'made-up statement, impossible end, an unkept gift on it');
 $badAllKeptH      = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $thirtyFirstNoMonthHas($ago(100), -1) . '_' . $ago(90) . '.pdf', 'made-up statement, impossible start, only a kept gift on it');
+// 📏 #892 round 4: the two ENDS of a period are part of it. statementFileIsKept()
+//    counts gifts with `>= ?` and `<= ?`, and nothing failed when either became
+//    `>` or `<` -- yet with `<`, a statement whose only kept gift is on its LAST
+//    day counts no gift and is DELETED, a copy that could not be made again.
+//      $endDayKeptH    her kept gift of 100 days ago is the period's LAST day   -> KEPT
+//      $startDayKeptH  the same gift is the period's FIRST day                  -> KEPT
+//      $startUnkeptH   her UNKEPT gift of 500 days ago is the FIRST day, her
+//                      kept gift of 300 days ago the last                       -> DELETED
+//    The third pins the other half of the rule, the text comparison of the
+//    gifts that lost her name (`$date >= $from`): with `>` it would miss the
+//    unkept gift on the first day and KEEP the file. (No fixture here puts an
+//    unkept gift on a period's LAST day with a kept gift inside: her only
+//    unkept gift is older than both kept ones, so `$date <= $to` is pinned by
+//    nothing -- said rather than pretended.)
+$endDayKeptH      = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(110) . '_' . $ago(100) . '.pdf', 'made-up statement, kept gift on its last day');
+$startDayKeptH    = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(100) . '_' . $ago(95) . '.pdf', 'made-up statement, kept gift on its first day');
+$startUnkeptH     = ge_file('_uploads/giving/statements/' . SITE_G1 . '/statement-' . P_H . '-' . $ago(500) . '_' . $ago(300) . '.pdf', 'made-up statement, unkept gift on its first day');
 $h['envelope']    = ge_linked('tblCountEnvelopes', ['giverID' => P_H], ['giverName' => null, 'amount' => '12.50']);
 $h['giftAllOne']  = ge_gift(SITE_G2, P_H, $ago(900), 700, $catG2);
 $h['giftAllTwo']  = ge_gift(SITE_G2, P_H, $ago(50), 800, $catG2);
@@ -3899,6 +3918,7 @@ ge_ok('the linked giving rows were built, and organisation 3 has set nothing yet
     // #703 round 12: both no-period files really exist BEFORE the runs, so
     // "deleted" afterwards means the run deleted them.
     && is_file($noPeriodH) === true && is_file($noPeriodI) === true && is_file($badPeriodH) === true && is_file($badAllKeptH) === true
+    && is_file($endDayKeptH) === true && is_file($startDayKeptH) === true && is_file($startUnkeptH) === true
     && GivingRetention::ruleForSite(SITE_G1)['confirmed'] === false && GivingRetention::ruleForSite(SITE_G2)['scope'] === GivingRetention::SCOPE_ALL);
 
 $resultH = ge_execute(REQ_H, P_H);
@@ -3963,11 +3983,12 @@ ge_ok('THE STATEMENT FILE IS STILL THERE: the statement the organisation issued 
 ge_ok('A STATEMENT THE DONOR MADE FOR THEMSELVES IS KEPT when every gift on it is a kept gift, and deleted when it lists a gift that lost the donor\'s name, or no gift at all; and the line says how many files were kept and how many deleted',
     is_file($ownAllKeptH) === true && file_get_contents($ownAllKeptH) === 'made-up statement, all kept'
     && is_file($ownMixedH) === false && is_file($ownFileH) === false
-    // Deleted: 3, then 4 since #891/#892 ($badPeriodH).
-    && count($fileLine) === 1 && $fileLine[0]['action'] === 'delete' && $fileLine[0]['recordKey'] === '4 file(s)'
+    // Deleted: 3, then 4 since #891/#892 ($badPeriodH), 5 since its round 4 ($startUnkeptH).
+    && count($fileLine) === 1 && $fileLine[0]['action'] === 'delete' && $fileLine[0]['recordKey'] === '5 file(s)'
     // 4 since #703 round 11, which added a kept file whose name gives no period ($noPeriodH);
-    // 5 since #891/#892, which added a kept one whose period has an impossible START ($badAllKeptH).
-    && str_contains((string) $fileLine[0]['details'], '5 rendered statement PDF(s) kept with the donor\'s giving records as tax evidence'),
+    // 5 since #891/#892, which added a kept one whose period has an impossible START ($badAllKeptH);
+    // 7 since its round 4 ($endDayKeptH and $startDayKeptH).
+    && str_contains((string) $fileLine[0]['details'], '7 rendered statement PDF(s) kept with the donor\'s giving records as tax evidence'),
     json_encode([is_file($ownAllKeptH), is_file($ownMixedH), is_file($ownFileH), $fileLine]));
 // 🧹 THE DECISIVE #721 CHECK, and it is decisive because the KEPT branch is
 //    live in this world. A half-written statement is a write that never
@@ -3980,10 +4001,11 @@ ge_ok('A STATEMENT THE DONOR MADE FOR THEMSELVES IS KEPT when every gift on it i
 //    this, and the plant reported it as tax evidence.
 ge_ok('A PART-WRITTEN statement is DELETED even where the donor\'s records are kept, and is never counted as tax evidence (#721)',
     is_file($ownPartH) === false
-    // The honest count is 5 since #891/#892 ($noPeriodH and $badAllKeptH are
-    // among the kept); a part file wrongly counted would make it 6. (It read
-    // 4, and forbade 5, from #703 round 11 until then.)
-    && str_contains((string) $fileLine[0]['details'], '6 rendered statement PDF(s) kept') === false,
+    // The honest count is 7 since #891/#892 round 4 ($noPeriodH, $badAllKeptH,
+    // $endDayKeptH and $startDayKeptH are among the kept); a part file wrongly
+    // counted would make it 8. (It read 4, and forbade 5, from #703 round 11;
+    // then 5, forbidding 6, until round 4.)
+    && str_contains((string) $fileLine[0]['details'], '8 rendered statement PDF(s) kept') === false,
     json_encode(['part file still there' => is_file($ownPartH), 'line' => $fileLine]));
 
 $keptG2 = ge_one('SELECT * FROM tblGivingKeptDonors WHERE siteID = ? AND donorID = ?', 'ii', [SITE_G2, P_H]);
@@ -4073,6 +4095,15 @@ ge_ok('A STATEMENT FILE WHOSE NAME GIVES NO PERIOD is KEPT at an organisation ke
 ge_ok('A STATEMENT FILE WHOSE PERIOD HAS AN IMPOSSIBLE END and lists a gift that LOST the donor\'s name is DELETED, on every engine, as one with a real period is -- never kept and counted as tax evidence (#891, #892; round 2 of the check)',
     is_file($badPeriodH) === false,
     json_encode(['file still there' => is_file($badPeriodH), 'name' => basename($badPeriodH)]));
+ge_ok('A STATEMENT WHOSE ONLY KEPT GIFT IS ON ITS LAST DAY is KEPT: the period\'s end is part of it (`<= ?`, never `< ?`) (#892 round 4)',
+    is_file($endDayKeptH) === true && file_get_contents($endDayKeptH) === 'made-up statement, kept gift on its last day',
+    json_encode(['file still there' => is_file($endDayKeptH), 'name' => basename($endDayKeptH)]));
+ge_ok('A STATEMENT WHOSE ONLY KEPT GIFT IS ON ITS FIRST DAY is KEPT: the period\'s start is part of it (`>= ?`, never `> ?`) (#892 round 4)',
+    is_file($startDayKeptH) === true && file_get_contents($startDayKeptH) === 'made-up statement, kept gift on its first day',
+    json_encode(['file still there' => is_file($startDayKeptH), 'name' => basename($startDayKeptH)]));
+ge_ok('A STATEMENT WITH A GIFT THAT LOST THE DONOR\'S NAME ON ITS FIRST DAY is DELETED, though a kept gift is on it too: the unkept gift is inside the period (#892 round 4)',
+    is_file($startUnkeptH) === false,
+    json_encode(['file still there' => is_file($startUnkeptH), 'name' => basename($startUnkeptH)]));
 ge_ok('A STATEMENT FILE WHOSE PERIOD HAS AN IMPOSSIBLE START and lists ONLY a kept gift is KEPT, on every engine -- the case `BETWEEN` decided by server (no gift found on MySQL 8.0/8.4, so deleted) (#891, #892)',
     is_file($badAllKeptH) === true && file_get_contents($badAllKeptH) === 'made-up statement, impossible start, only a kept gift on it',
     json_encode(['file still there' => is_file($badAllKeptH), 'name' => basename($badAllKeptH)]));
@@ -4260,7 +4291,7 @@ ge_ok('THE NAME, THE ADDRESS AND THE LINK GO TOGETHER: the kept row is emptied a
     json_encode([$keptNow, $hCleared['giftTwo'], $hCleared['declaration']]));
 ge_ok('...and THE KEPT STATEMENT FILES go with them, the one the donor made for themselves included: deleted from disk, and the record no longer points at a file; the record itself, its totals and its period stay',
     is_file($issuedH['file']) === false && is_file($ownAllKeptH) === false && is_file($noPeriodH) === false
-    && is_file($badAllKeptH) === false
+    && is_file($badAllKeptH) === false && is_file($endDayKeptH) === false && is_file($startDayKeptH) === false
     && ge_same($hBeforeClear['statement'], $hCleared['statement'], ['pdfPath']) === true
     && $hCleared['statement']['pdfPath'] === null && $hCleared['statement']['totalPence'] === $hBeforeClear['statement']['totalPence'],
     json_encode([is_file($issuedH['file']), $hCleared['statement']]));
@@ -4271,8 +4302,9 @@ ge_ok('WITH AN AUDIT LINE, on the ORIGINAL erasure request\'s trail: it says the
     && $clearLine['recordKey'] === 'organisation #' . SITE_G1
     && str_contains((string) $clearLine['details'], 'was ' . GivingRetention::dateInWords($stateH['keepUntil']) . ' and has passed')
     // 3 since #703 round 11: the kept file whose name gives no period goes too.
-    // 4 since #891/#892: so does the kept file whose period has an impossible start ($badAllKeptH).
-    && str_contains((string) $clearLine['details'], 'removed from 2 gifts, 1 tax declaration and the record that held them, and 4 kept statement files were deleted')
+    // 4 since #891/#892: so does the kept file whose period has an impossible start ($badAllKeptH);
+    // 6 since its round 4: and the two whose kept gift is on a period's first or last day.
+    && str_contains((string) $clearLine['details'], 'removed from 2 gifts, 1 tax declaration and the record that held them, and 6 kept statement files were deleted')
     && str_contains((string) $clearLine['details'], 'no record was deleted')
     && str_contains((string) $clearLine['details'], '1 year, confirmed on ' . GivingRetention::dateInWords($todayG1))
     && preg_match('/Hana|Kept Lane/', (string) $clearLine['details']) !== 1 && GdprEraser::verifyAuditChain(REQ_H) === true,
