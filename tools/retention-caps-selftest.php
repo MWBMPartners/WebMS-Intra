@@ -124,7 +124,10 @@
  *
  * Leaves:  `tblSettings` exactly as it found it, on every way out including a
  *          failure (#947) — see "EVERY SETTINGS ROW IS PUT BACK" below. A run
- *          killed outright is put right by the next run on the same database.
+ *          stopped from outside (kill, Ctrl-C) is put right by the next run on
+ *          the SAME build of the database; after a rebuild the next run is
+ *          refused until the stale record is deleted, rather than put an old
+ *          build's settings onto a new one. Two runs at once are refused.
  *          Other tables keep this file's fixture rows, as they always have.
  *
  * @package   Portal\Tools
@@ -269,13 +272,40 @@ $mysqli = new mysqli($rcHost, $rcUser, $rcPass, $dbName, $rcPort);
 // `tools/activity-log-retention-selftest.php`): the capture is written to a
 // file named for this database, BEFORE anything is changed, and removed only
 // after a successful put-back. A shutdown function does the put-back, and PHP
-// runs it on a normal end, on every `exit()`, and after an uncaught error. Only
-// `kill -9` (or the machine going down) skips it — and then the file is still
-// there, so the next run takes ITS capture as the original and puts that back
+// runs it on a normal end, on every `exit()`, and after an uncaught error.
+// A run STOPPED FROM OUTSIDE skips it: `kill -9`, an ordinary `kill`
+// (SIGTERM), Ctrl-C (SIGINT), a runner's timeout, or the machine going down —
+// measured for SIGTERM and SIGINT in #947's check round 1, since PHP only runs
+// shutdown functions when the script ends itself. So the leftover-file path
+// is not rare: any interrupted local run reaches it. Then the file is still
+// there, and the next run takes ITS capture as the original and puts that back
 // first. It never takes the rows in the database as the original while that
-// file exists, because they may be the dead run's leftovers. The file name
-// carries the server's port as well as the database name, so two servers each
-// holding a `selftest_retcaps` cannot overwrite each other's capture.
+// file exists, because they may be the dead run's leftovers.
+//
+// A LEFTOVER IS ONLY PUT BACK ONTO THE SAME TABLE IT CAME FROM (#947 check
+// round 1). The whole-suite runner rebuilds `selftest_retcaps` from
+// `full_schema.sql` on every run, on the same port with the same name, so a
+// file named only by port and database would be "restored" onto a FRESH
+// database: measured, it deleted a setting the new install script had added
+// and left stale row numbers and times in place for ever, while the run passed.
+// So the file also records WHICH table it captured — the server's own id and
+// the moment `tblSettings` was created, which a write never changes and a
+// rebuild always does — and a file that does not match is REFUSED, the
+// database untouched, with the same "delete that file" advice an unreadable
+// one gets. The limit: `CREATE_TIME` counts whole seconds, so a database
+// dropped and rebuilt within the second it was first created would look the
+// same; loading the install script takes several seconds.
+//
+// TWO RUNS AT ONCE on one database are refused too. The second would find
+// the first's LIVE file and take it for an unfinished run's. A named lock on
+// the server (`GET_LOCK`) is held by this run's connection, and the server
+// lets it go when that connection ends, however the run ended — so a killed
+// run never leaves the lock behind the way it can leave the file.
+//
+// A capture holding NO rows is refused rather than put back: putting back an
+// empty table would delete every setting there is. A database whose
+// `tblSettings` is empty has not had the install script loaded, and is
+// refused at capture for the same reason.
 //
 // WHAT THIS CANNOT DO: put back anything but `tblSettings`. The second
 // organisation this file creates (`tblSites` row 2) and the log, event and
@@ -330,8 +360,9 @@ $rcSettingsPutBack = static function (mysqli $db, array $original) use ($rcSetti
     }
 
     // 🏢 Section F renames `tblSites` for the length of one save and puts it
-    //    back in a `finally`. Only `kill -9` inside that window skips the
-    //    `finally`, and then every later run would fail on a missing table, so
+    //    back in a `finally`. A run stopped from outside inside that window
+    //    (`kill`, Ctrl-C, `kill -9`) skips the `finally`, and then every later
+    //    run would fail on a missing table, so
     //    it is put back here too when that is plainly what happened.
     $away  = $db->query("SHOW TABLES LIKE 'tblSitesP932Away'")->num_rows > 0;
     $sites = $db->query("SHOW TABLES LIKE 'tblSites'")->num_rows > 0;
@@ -403,28 +434,94 @@ $rcSettingsPutBack = static function (mysqli $db, array $original) use ($rcSetti
     return $changed;
 };
 
+/**
+ * WHICH `tblSettings` this is: the server's own id, the database, and the
+ * moment the table was created. A write never changes the last of these and a
+ * rebuild of the database always does (measured on MySQL 8.0.36), so a capture
+ * taken from one build of `selftest_retcaps` is never mistaken for another.
+ * MariaDB has no `@@server_uuid`; there the server is named by its host name
+ * and port instead, which is weaker and is all it offers.
+ *
+ * @return array{server: string, database: string, created: string}
+ */
+$rcSettingsIdentity = static function (mysqli $db) use ($dbName): array {
+    try {
+        $server = (string) ($db->query('SELECT @@server_uuid AS s')->fetch_assoc()['s'] ?? '');
+    } catch (Throwable $noUuid) {
+        $server = (string) ($db->query('SELECT CONCAT(@@hostname, \':\', @@port) AS s')->fetch_assoc()['s'] ?? '');
+    }
+    $created = $db->query(
+        "SELECT `CREATE_TIME` AS c FROM `information_schema`.`TABLES` "
+        . "WHERE `TABLE_SCHEMA` = DATABASE() AND `TABLE_NAME` = 'tblSettings'"
+    )->fetch_assoc()['c'] ?? null;
+
+    return ['server' => $server, 'database' => $dbName, 'created' => (string) $created];
+};
+
+/** Refuse this run, saying why and what to do, having changed nothing. */
+$rcSettingsRefuse = static function (string $why) use ($rcSettingsFile, $dbName): never {
+    echo "REFUSED — {$why}\n"
+        . "Nothing in {$dbName} was changed. If an earlier run was stopped part-way, reload\n"
+        . "web/_sql/full_schema.sql into {$dbName}, delete {$rcSettingsFile}, and run again.\n";
+    exit(1);
+};
+
+// 🔒 ONE RUN AT A TIME on this database, asked before the file is even looked
+//    at: a second run would otherwise read the first's live capture as an
+//    unfinished run's and put it back under the first's feet. The name is
+//    hashed only to stay inside MySQL's 64-character limit for a lock name.
+$rcLockName = 'retcaps-selftest-' . substr(hash('sha256', $dbName), 0, 40);
+$rcLocked   = (int) ($mysqli->query("SELECT GET_LOCK('" . $rcLockName . "', 0) AS l")->fetch_assoc()['l'] ?? 0);
+if ($rcLocked !== 1) {
+    echo "REFUSED — another run of this test is using {$dbName} right now. Nothing was changed; wait for it to finish.\n";
+    exit(1);
+}
+
+$rcSettingsHere     = $rcSettingsIdentity($mysqli);
 $rcSettingsOriginal = null;
+if ($rcSettingsHere['created'] === '') {
+    $rcSettingsRefuse("the moment {$dbName}'s tblSettings was created cannot be read, so a capture of it could not be told from a capture of another build of it.");
+}
 if (is_file($rcSettingsFile) === true) {
     // An earlier run on this database did not finish. ITS capture is the
     // original; the rows in the database now may be what it left behind.
-    $rcSettingsOriginal = json_decode((string) file_get_contents($rcSettingsFile), true);
-    if (is_array($rcSettingsOriginal) === false) {
+    $rcSettingsSaved = json_decode((string) file_get_contents($rcSettingsFile), true);
+    if (is_array($rcSettingsSaved) === false
+        || is_array($rcSettingsSaved['identity'] ?? null) === false
+        || is_array($rcSettingsSaved['rows'] ?? null) === false
+    ) {
         // Refused rather than re-captured: the rows now may be a dead run's
         // leftovers, and taking them as the original would make them permanent.
-        echo "REFUSED — {$rcSettingsFile} is there but cannot be read, so the settings as they were before an\n"
-            . "earlier unfinished run are not known. Reload web/_sql/full_schema.sql into {$dbName}, delete that\n"
-            . "file, and run again.\n";
-        exit(1);
+        // A file from before the identity was recorded lands here too.
+        $rcSettingsRefuse("{$rcSettingsFile} is there but cannot be read as this test's record, so the settings as they were before an earlier unfinished run are not known.");
     }
-    $rcSettingsBack = $rcSettingsPutBack($mysqli, $rcSettingsOriginal);
+    if ($rcSettingsSaved['rows'] === []) {
+        // Putting back an empty table would delete every setting there is.
+        $rcSettingsRefuse("{$rcSettingsFile} records NO settings at all, and putting that back would delete every one.");
+    }
+    if ($rcSettingsSaved['identity'] !== $rcSettingsHere) {
+        // A capture of a DIFFERENT build of this database — the usual case
+        // after the whole-suite runner rebuilds it. Restoring it would replace
+        // a fresh install's settings with an old one's.
+        $rcSettingsRefuse("{$rcSettingsFile} was captured from a different copy of {$dbName} (" . json_encode($rcSettingsSaved['identity'])
+            . ', this one is ' . json_encode($rcSettingsHere) . '), so it is not put back.');
+    }
+    $rcSettingsOriginal = $rcSettingsSaved['rows'];
+    $rcSettingsBack     = $rcSettingsPutBack($mysqli, $rcSettingsOriginal);
     echo "  ! an earlier run on {$dbName} did not finish; its record of the settings was used, and "
         . $rcSettingsBack . " setting(s) were put back before starting\n";
 } else {
     $rcSettingsOriginal = $rcSettingsNow($mysqli);
+    if ($rcSettingsOriginal === []) {
+        $rcSettingsRefuse("{$dbName}'s tblSettings is empty, so web/_sql/full_schema.sql has not been loaded into it.");
+    }
     // Written to a temporary name and then renamed, so a run killed while
     // writing leaves either no file or a whole one, never half of one.
     $rcSettingsTemp = $rcSettingsFile . '.' . bin2hex(random_bytes(4)) . '.part';
-    file_put_contents($rcSettingsTemp, json_encode($rcSettingsOriginal, JSON_THROW_ON_ERROR));
+    file_put_contents(
+        $rcSettingsTemp,
+        json_encode(['identity' => $rcSettingsHere, 'rows' => $rcSettingsOriginal], JSON_THROW_ON_ERROR)
+    );
     rename($rcSettingsTemp, $rcSettingsFile);
 }
 

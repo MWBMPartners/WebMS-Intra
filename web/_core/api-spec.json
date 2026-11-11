@@ -11513,7 +11513,7 @@
           "Venues"
         ],
         "summary": "Whether a venue and room are free for a proposed time",
-        "description": "Classifies a proposed start and end against what is already booked, for the event editor to warn on a clash before anything is saved. For any signed-in person; an API key cannot reach this.\n\n**`start` and `end` are readings on a clock, not moments in history**, and are used together with `tz`. **`tz` defaults to `Europe/London` and is NOT the organisation's own time zone** -- send it explicitly for any organisation that is not in the United Kingdom, or the answer will be an hour or more out.\n\n**This endpoint does not refuse much.** A caller without permission to view venues, and an unknown venue, both answer 200 reporting that there is no venue to check, so it cannot be used to discover which venues exist. An unknown **room** is different: it falls back to classifying the venue as a whole rather than reporting nothing. It also does NOT check that `end` is after `start`.",
+        "description": "Classifies a proposed start and end against what is already booked, for the event editor to warn on a clash before anything is saved. For any signed-in person; an API key cannot reach this.\n\n**`start` and `end` are readings on a clock, not moments in history**, and are used together with `tz`. **When `tz` is left out, the organisation's own time zone is used** (it was `Europe/London` for every organisation until #782, so older notes saying otherwise are out of date). A `start` or `end` sent as a list (`start[]=...`) is refused with 400 `invalid-range` (#937).\n\n**This endpoint does not refuse much.** A caller without permission to view venues, and an unknown venue, both answer 200 reporting that there is no venue to check, so it cannot be used to discover which venues exist. An unknown **room** is different: it falls back to classifying the venue as a whole rather than reporting nothing. It also does NOT check that `end` is after `start`.",
         "security": [
           {
             "sessionCookie": []
@@ -11593,7 +11593,7 @@
             }
           },
           "400": {
-            "description": "`start` missing or malformed, `end` present but malformed, or `tz` is not a zone name the server knows. All say `invalid-range`.",
+            "description": "`start` missing or malformed, `end` present but malformed, `start` or `end` sent as a list rather than text (#937), or `tz` is not a zone name the server knows. All say `invalid-range`.",
             "content": {
               "application/json": {
                 "schema": {

@@ -45,13 +45,20 @@ on every run while it exited 0, and one seeded setting
 described those marks as written "in their own per-block way"; they are the
 ordinary form, which this script already reads — the fault was the comment
 stripping. It now tracks quotes the same way the splitter does, so the list
-holds only a migration with no mark ANYWHERE in full_schema.sql (proved by
-deleting one mark from a scratch copy, for 263 and for 100). The same fault
-could hide a real gap in the silent direction, since a statement cut in the
-wrong place is not read at all: a check that names correct migrations every
-run trains people to ignore it (#483), and one that cannot read a statement
-cannot report it either. `check_api_spec_matches_code.py` met the same trap in
-#675.
+holds only a migration with no mark in full_schema.sql IN A FORM THIS SCRIPT
+READS — an `INSERT ... VALUES` or an `INSERT ... SELECT ... FROM DUAL` into
+`tblMigrations` naming its file. A mark written any other way (a `REPLACE`, a
+stored procedure, a mark built in pieces) would still be listed, and that is
+the safe direction. Proved by deleting one mark from a scratch copy, for 263
+and for 100: each is then listed. The same fault could hide a real gap in the
+silent direction, since a statement cut in the wrong place is not read at all:
+a check that names correct migrations every run trains people to ignore it
+(#483), and one that cannot read a statement cannot report it either.
+`check_api_spec_matches_code.py` had a near relative in #675 — there a `;`
+inside a `--` comment ended a statement early; here a `--` inside a quoted
+string started a comment that was not one. Different characters, one lesson:
+a reader that blanks or splits SQL must track quoted strings and comments
+together, never one with no regard for the other.
 
 WHAT IT CANNOT SEE: the test itself. A row written with a test counts as
 seeded whatever the test says, so this script cannot tell a right test from a

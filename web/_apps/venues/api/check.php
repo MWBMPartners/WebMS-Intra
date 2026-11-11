@@ -18,7 +18,9 @@
  *
  * Params: `start`, `end` (both `Y-m-d\TH:i` wall-clock — the exact shape a
  * `datetime-local` input posts, and what `calendar/manage/save.php` stores
- * verbatim into `tblEvents`), `tz` (IANA string, default `Europe/London`),
+ * verbatim into `tblEvents`; either sent as a list is refused, #937), `tz`
+ * (IANA string; when absent, or sent as a list, the ORGANISATION's own zone
+ * from `Site::timezone()` — it was `Europe/London` for everybody until #782),
  * `venueID` (optional int), `roomID` (optional int, #436). WALL-CLOCK RULE
  * (see `Venues.php`'s own class header): these strings are passed straight
  * through to `Venues::classifyEventCoverage()` as the pseudo-event's
