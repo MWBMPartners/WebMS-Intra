@@ -302,9 +302,42 @@ done
 # there would remove the very container it had just refused to touch (#923).
 UP_ATTEMPTED=0
 
-trap teardown EXIT INT TERM
+# Teardown runs from the EXIT trap ALONE, so it runs exactly once however the
+# run ends: a normal finish, a failure under `set -e`, or an interrupt.
+#
+# An interrupt (Ctrl-C, or a CI job being cancelled) must STOP the run. Until
+# 11 November 2026 this line read `trap teardown EXIT INT TERM`. A trap on INT
+# or TERM REPLACES the signal's normal effect, so bash ran teardown and then
+# CARRIED ON with the next command — against a container teardown had just
+# removed, so every later step failed, and teardown then ran a second time at
+# the real exit. Now an interrupt calls `exit` with the usual status for that
+# signal (128 + its number: 130 for INT, 143 for TERM), and `exit` is what
+# fires the EXIT trap.
+#
+# A signal arriving while a command such as `docker exec` is still running is
+# acted on when that command ends: bash runs a trap only between commands.
+# A Ctrl-C at a terminal reaches that command too, so it ends at once; a
+# signal sent to this script's process alone waits for the command to finish.
+#
+# ⚠ A script started in the background (`&`) by another script starts with
+# SIGINT IGNORED, and bash cannot trap a signal that was ignored when it
+# started — so `kill -INT` does nothing to such a run, with or without this
+# trap. Send TERM instead, or start it so that SIGINT is not ignored.
+interrupted() {
+    trap '' INT TERM
+    echo >&2
+    echo "✗ interrupted by SIG$1 — stopping the run" >&2
+    exit "$2"
+}
+trap teardown EXIT
+trap 'interrupted INT 130' INT
+trap 'interrupted TERM 143' TERM
 
 teardown() {
+    # A second Ctrl-C while the container is being removed would cut the
+    # removal short and leave the container behind. Teardown is the last thing
+    # this script does, so nothing is lost by ignoring both signals from here.
+    trap '' INT TERM
     [[ -n "${SNAP_DIR:-}" ]] && rm -rf "${SNAP_DIR}" 2>/dev/null || true
     if [[ "${UP_ATTEMPTED}" -ne 1 ]]; then
         return 0
@@ -2048,7 +2081,7 @@ phase7_link_state() {
 phase7_installer_carry_on_over_an_older_database() {
     echo
     echo "═════ Phase 7: the installer's \"carry on\" over an older database whose two time-zone places differ ═════"
-    local file name
+    local file name number
     local done_list="${SNAP_DIR}/p7_done.txt"
     local err_file="${SNAP_DIR}/p7_err.txt"
     echo "  Building the older database: the install script of 6 March 2026, then this checkout's migrations up to 216 …"
@@ -2065,7 +2098,15 @@ phase7_installer_carry_on_over_an_older_database() {
         [[ -e "${file}" ]] || continue
         name="$(basename "${file}")"
         # Nothing numbered 217 or later: this database has never seen migration 217.
-        [[ "${name:0:3}" < "217" ]] || continue
+        # Compared as a NUMBER. This used to be `[[ "${name:0:3}" < "217" ]]`, a
+        # comparison of TEXT, which gives the right answer only while every
+        # name starts with exactly three digits: "1000_x.sql" would read as
+        # "100" and be wrongly let in. Every one of the 269 numbered files
+        # starts with three digits today, so the files selected are the same
+        # (checked on 11 November 2026, #923). `10#` makes "089" mean 89, and
+        # not a mistake in base 8.
+        number="${name%%[!0-9]*}"
+        (( 10#${number} < 217 )) || continue
         if grep -Fxq -- "${name}" "${done_list}"; then
             continue
         fi
