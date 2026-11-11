@@ -44,8 +44,9 @@
  *   - An OPEN request ("anyone can cover", allowed by `rota.allow_open_swap`)
  *     may be ACCEPTED by any member of the organisation except the asker. It
  *     cannot be declined: one person saying no does not answer "could anybody
- *     cover?", so it simply stays open. (Put to the owner on #657 as a
- *     question; this is the recommended answer, built while it waits.)
+ *     cover?", so it simply stays open. While the organisation has open
+ *     requests switched OFF, no open request may be taken, including one
+ *     posted before it was switched off; the asker may still withdraw it.
  *   - The asker may WITHDRAW their own request while it is waiting.
  *   - A request that is no longer waiting cannot be answered again. That is
  *     what makes a second press of Accept a refusal rather than a second move.
@@ -60,22 +61,30 @@
  * outside a transaction is decoration). Every rule above is asked of what
  * that locked read returns, and the writes that follow are by key. So a
  * second answer, or an administrator's change to the duty, waits for the
- * first to commit and is then judged on what the first wrote.
- * `tools/rota-swaps-selftest.php` section T proves the lock is load-bearing:
- * it holds the duty's row in its own transaction, runs the real `respond()`
- * in its own PROCESS, moves the duty while that process waits, and requires
- * the accept to be refused. With the lock removed the accept goes through and
- * gives away a duty that was no longer the asker's to give.
+ * first to commit and is then judged on what the first wrote. What
+ * `tools/rota-swaps-selftest.php` proves, and no more:
+ *   - section T, the LOCK: it holds the duty's row in its own transaction,
+ *     runs the real `respond()` in its own PROCESS, sees that process WAIT
+ *     (asked of the database, not assumed from a sleep), moves the duty, and
+ *     requires the accept to be refused. With the lock removed the accept
+ *     goes through and gives away a duty that was no longer the asker's.
+ *   - section V, the TRANSACTION: a scratch trigger makes the second write
+ *     fail; the first write (the duty's move) must be undone with it. With
+ *     the transaction removed the duty stays moved under a request still
+ *     marked as waiting.
+ *   - section U: two members take one open request at the same moment, each
+ *     in its own process; exactly one gets the duty.
  *
  * WHO IS TOLD. Only by e-mail, through the member's existing notification
  * preferences (the `rotaSwaps` switch on the Notification preferences page,
  * read with `WebPush::notifyPrefAllows()`, where a choice never made means
  * YES). The person ASKED is told when a request is made; the ASKER is told
- * when it is accepted or declined. Nobody is told about an OPEN request —
- * e-mailing the whole organisation is a broadcast, which is a different
- * feature — it is shown to every member on the Duty Roster page instead.
- * Nobody is told about a withdrawal or a request cancelled because another
- * was accepted first: the request simply leaves their page.
+ * when it is accepted or declined. An OPEN request is e-mailed to every
+ * active member of the organisation except the asker who has the switch on
+ * (the owner, 11 November 2026 — D-141), one message each, so nobody sees
+ * anybody else's address (`tellOpen()`). Nobody is told about a withdrawal
+ * or a request cancelled because another was accepted first: the request
+ * simply leaves their page.
  *
  * A person is sent nothing when their account is switched off, when they are
  * no longer a member of the organisation (asked of `Site::isOwnOrganisation()`,
@@ -131,6 +140,7 @@ final class RotaSwaps
     public const NOT_YOURS       = 'not-yours';
     public const OWN_REQUEST     = 'own-request';
     public const OPEN_NO_DECLINE = 'open-no-decline';
+    public const OPEN_SWITCHED_OFF = 'open-switched-off';
     public const NOT_WAITING     = 'not-waiting';
     public const ASKER_GONE      = 'asker-gone';
     public const CHANGED_HANDS   = 'changed-hands';
@@ -205,15 +215,25 @@ final class RotaSwaps
      * May `$userId` give `$action` to the request described by `$facts`? ''
      * when they may, otherwise one of the refusal codes above.
      *
-     * It takes FACTS, never a connection, so the page that draws the buttons
-     * and `respond()` — which asks it again on facts read under the lock —
-     * cannot disagree (#647).
+     * It takes FACTS, never a connection, so the Duty Roster page — which asks
+     * it for every row before drawing an Accept, Take or Decline button — and
+     * `respond()` — which asks it again on facts read under the lock — apply
+     * one rule (#647). They can still give different answers when the facts
+     * change between the page being drawn and the button being pressed; the
+     * locked answer is the one that counts.
      *
      * @param array{status:string, targetUserID:?int, requestedByID:?int, assignedToID:?int, slotDate:string}|null $facts
      *        Null when no request of that number exists in this organisation.
-     * @param string $today `Y-m-d` on the organisation's calendar (`today()`).
+     * @param string $today       `Y-m-d` on the organisation's calendar (`today()`).
+     * @param bool   $openAllowed The organisation's `rota.allow_open_swap` setting
+     *                            NOW. Switching it off stops every open request
+     *                            being TAKEN, including one posted while it was
+     *                            on: the setting is the organisation saying
+     *                            "duties are not handed to whoever volunteers",
+     *                            and an old request does not overrule that. The
+     *                            asker can still withdraw such a request.
      */
-    public static function whyNotAllowed(?array $facts, int $userId, string $action, string $today): string
+    public static function whyNotAllowed(?array $facts, int $userId, string $action, string $today, bool $openAllowed): string
     {
         if (in_array($action, [self::ACCEPT, self::DECLINE, self::WITHDRAW], true) === false) {
             return self::UNKNOWN_ACTION;
@@ -242,6 +262,9 @@ final class RotaSwaps
             }
             if ($target === null && $action === self::DECLINE) {
                 return self::OPEN_NO_DECLINE;
+            }
+            if ($target === null && $openAllowed === false) {
+                return self::OPEN_SWITCHED_OFF;
             }
         }
 
@@ -275,6 +298,7 @@ final class RotaSwaps
             self::NOT_YOURS       => 'That swap request is not yours to answer.',
             self::OWN_REQUEST     => 'You cannot accept your own swap request. You can withdraw it instead.',
             self::OPEN_NO_DECLINE => 'An open request cannot be declined. It stays open for somebody else to accept.',
+            self::OPEN_SWITCHED_OFF => 'Open swap requests are switched off here, so this one can no longer be taken. The person who asked can withdraw it.',
             self::NOT_WAITING     => 'That swap request has already been answered or withdrawn, so nothing was changed.',
             self::ASKER_GONE      => 'The person who asked for that swap no longer has an account, so the duty cannot be passed on. Nothing was changed.',
             self::CHANGED_HANDS   => 'That duty is no longer with the person who asked, so the swap cannot go ahead. Nothing was changed.',
@@ -324,16 +348,32 @@ final class RotaSwaps
      *
      * It never throws for a database fault: it rolls back and answers FAILED.
      *
+     * `$openAllowed` is the organisation's `rota.allow_open_swap` setting,
+     * passed in by the caller (see `whyNotAllowed()`).
+     *
      * @return array{outcome:string, reason:string, slotID:int}
      */
-    public static function respond(\mysqli $db, int $siteId, int $swapId, int $userId, string $action, string $responseMessage): array
+    public static function respond(\mysqli $db, int $siteId, int $swapId, int $userId, string $action, string $responseMessage, bool $openAllowed): array
     {
         $response = mb_substr(trim($responseMessage), 0, 500, 'UTF-8');
         $began    = false;
         try {
             // ⚠️ THE TRANSACTION STARTS FIRST, and the read is inside it with
             //    FOR UPDATE, which locks BOTH rows the join reads — the request
-            //    and its duty. Section T of the self-test proves this matters.
+            //    and its duty. What the self-test PROVES about each half, and
+            //    no more:
+            //      - the LOCK: section T holds the duty's row, sees this read
+            //        WAIT for it, moves the duty, and requires a refusal. With
+            //        ` FOR UPDATE` removed the accept goes through.
+            //      - the TRANSACTION: section V makes the SECOND write fail
+            //        (a scratch trigger) and requires the FIRST — the duty's
+            //        move — to be undone. With the transaction removed the
+            //        duty stays moved under a request still marked waiting.
+            //      - section U has two members take one open request at once:
+            //        exactly one gets it. That is the BEHAVIOUR; it does not on
+            //        its own prove the transaction, because with autocommit
+            //        the second taker still blocks on the first's write and is
+            //        then refused as "changed hands". V is what proves it.
             $began = $db->begin_transaction();
             if ($began === false) {
                 return ['outcome' => self::FAILED, 'reason' => '', 'slotID' => 0];
@@ -356,7 +396,7 @@ final class RotaSwaps
             $read->close();
 
             $facts  = $row === null ? null : self::factsFrom($row);
-            $reason = self::whyNotAllowed($facts, $userId, $action, self::today($siteId));
+            $reason = self::whyNotAllowed($facts, $userId, $action, self::today($siteId), $openAllowed);
             if ($reason !== '') {
                 $db->rollback();
                 return ['outcome' => self::REFUSED, 'reason' => $reason, 'slotID' => (int) ($row['slotID'] ?? 0)];
@@ -463,7 +503,8 @@ final class RotaSwaps
                 return 'no-request';
             }
             if ($req['targetUserID'] === null) {
-                return 'open';
+                // D-141: an open request goes to every member with the switch on.
+                return self::tellOpen($db, $siteId, $req);
             }
             $who    = self::person($db, $req['targetUserID']);
             $whyNot = self::whyNotTold($db, $siteId, $req['targetUserID'], $who);
@@ -471,31 +512,130 @@ final class RotaSwaps
                 return 'not-told:' . $whyNot;
             }
 
-            $asker   = $req['askerName'] !== '' ? $req['askerName'] : 'A member';
-            $duty    = self::dutyWords($req);
-            $subject = 'Rota swap request: ' . $req['roleName'] . ' on ' . self::dateWords($req['slotDate']);
-            $lines   = [
-                'Hello ' . self::firstName((string) ($who['fullName'] ?? '')) . ',',
-                '',
-                $asker . ' has asked whether you can take their duty: ' . $duty . '.',
-            ];
-            if ($req['requestMessage'] !== '') {
-                $lines[] = '';
-                $lines[] = 'Their message: ' . $req['requestMessage'];
-            }
-            $lines[] = '';
-            $lines[] = 'Nothing changes unless you accept. To accept or decline, open the Duty Roster:';
-            $link    = PortalAddress::absolute('rota', $siteId);
-            $lines[] = $link !== '' ? $link : '(sign in to the portal and open the Duty Roster)';
-            $lines[] = '';
-            $lines[] = 'You can turn these e-mails off on your Notification preferences page.';
-
-            return self::send($siteId, (string) $who['emailAddress'], $subject, implode("\n", $lines), $req['slotDate']);
+            return self::sendAsk($siteId, $req, $who, false);
         } catch (\Throwable $e) {
             Logger::errorPlatform('Rota', 'Warning', 'SWAP_TELL_ASKED', 'A rota swap request e-mail could not be prepared', '');
 
             return 'failed';
         }
+    }
+
+    /**
+     * 📣 Tell every member about an OPEN request (the owner, 11 November 2026 —
+     * D-141): every ACTIVE member of the organisation, except the asker, who
+     * has the "Rota swap requests" switch on.
+     *
+     * WHO IS A CANDIDATE, and who is TOLD, are two questions on purpose. The
+     * candidates are read as the request form's own list is: an active
+     * account with an active membership of this organisation. That list only
+     * says whom to ASK about; each candidate is then judged at the moment of
+     * sending by `whyNotTold()` — the same rule as the targeted e-mail, which
+     * asks `Site::isOwnOrganisation()` — so the decision is never this query's.
+     *
+     * ONE MESSAGE EACH, never one message to everybody: a shared "To" line
+     * would hand every member's address to every other member.
+     *
+     * Called AFTER the request is saved, never inside a transaction: an e-mail
+     * cannot be taken back, and a slow mail route must not hold a lock.
+     *
+     * Answers `open:<told>/<candidates>`, where `told` counts messages Mailer
+     * accepted to send or keep — never a promise that any arrived.
+     *
+     * WHAT IT CANNOT DO: limit how many requests a member makes, and so how
+     * many e-mails everybody receives (raised as its own issue). And Mailer
+     * sends only the first few messages of one request at once, keeping the
+     * rest for the mail queue's scheduled job, so where that job is not
+     * running most of an open request's e-mails wait in the queue unsent.
+     *
+     * @param array<string,mixed> $req What `describe()` gave.
+     */
+    private static function tellOpen(\mysqli $db, int $siteId, array $req): string
+    {
+        $asker = (int) ($req['requestedByID'] ?? 0);
+        $stmt  = $db->prepare(
+            'SELECT `u`.`userID` FROM `tblUsers` `u` '
+            . 'INNER JOIN `tblUserSites` `us` ON `us`.`userID` = `u`.`userID` AND `us`.`siteID` = ? AND `us`.`isActive` = 1 '
+            . 'WHERE `u`.`isActive` = 1 AND `u`.`userID` <> ? ORDER BY `u`.`userID`'
+        );
+        if ($stmt === false) {
+            return 'failed';
+        }
+        $stmt->bind_param('ii', $siteId, $asker);
+        $stmt->execute();
+        $ids = array_map(static fn (array $r): int => (int) $r['userID'], $stmt->get_result()->fetch_all(MYSQLI_ASSOC));
+        $stmt->close();
+
+        $told = 0;
+        foreach ($ids as $id) {
+            $who = self::person($db, $id);
+            if ($who === null || self::whyNotTold($db, $siteId, $id, $who) !== '') {
+                continue;
+            }
+            $outcome = self::sendAsk($siteId, $req, $who, true);
+            if (in_array($outcome, [Mailer::OUTCOME_SENT, Mailer::OUTCOME_QUEUED, Mailer::OUTCOME_HELD], true) === true) {
+                $told++;
+            }
+        }
+
+        return 'open:' . $told . '/' . count($ids);
+    }
+
+    /**
+     * The "will you take this duty?" e-mail, to one person.
+     *
+     * @param array<string,mixed> $req What `describe()` gave.
+     * @param array<string,mixed> $who The recipient's row (`person()`).
+     */
+    private static function sendAsk(int $siteId, array $req, array $who, bool $open): string
+    {
+        $asker   = $req['askerName'] !== '' ? $req['askerName'] : 'A member';
+        $duty    = self::dutyWords($req);
+        $subject = ($open === true ? 'Open rota swap request: ' : 'Rota swap request: ')
+                 . $req['roleName'] . ' on ' . self::dateWords($req['slotDate']);
+        $lines   = [
+            'Hello ' . self::firstName((string) ($who['fullName'] ?? '')) . ',',
+            '',
+            $open === true
+                ? $asker . ' has asked whether anybody can take their duty: ' . $duty . '. This went to every member who has rota swap e-mails switched on.'
+                : $asker . ' has asked whether you can take their duty: ' . $duty . '.',
+        ];
+        if ($req['requestMessage'] !== '') {
+            $lines[] = '';
+            $lines[] = 'Their message: ' . $req['requestMessage'];
+        }
+        $lines[] = '';
+        $lines[] = $open === true
+            ? 'Nothing changes unless somebody takes it, and the first person to take it gets the duty. To take it, open the Duty Roster:'
+            : 'Nothing changes unless you accept. To accept or decline, open the Duty Roster:';
+        $link    = PortalAddress::absolute('rota', $siteId);
+        $lines[] = $link !== '' ? $link : '(sign in to the portal and open the Duty Roster)';
+        $lines[] = '';
+        $lines[] = 'You can turn these e-mails off on your Notification preferences page.';
+
+        return self::send($siteId, (string) $who['emailAddress'], $subject, implode("\n", $lines), $req['slotDate']);
+    }
+
+    /**
+     * Where a duty is NOW, in words for the person who asked to swap it. The
+     * ONE place this sentence is built, so the e-mail and the Duty Roster
+     * cannot disagree.
+     *
+     * WHY IT ASKS WHO HOLDS IT. Both used to say "the duty is still yours"
+     * after every decline. A decline moves nothing, but the duty can have
+     * moved anyway — an administrator reassigned it while the request was
+     * waiting — and then that sentence sent a member to a duty that was no
+     * longer theirs.
+     */
+    public static function whereDutyIsNow(?int $holderId, string $holderName, ?int $askerId): string
+    {
+        if ($holderId !== null && $askerId !== null && $holderId === $askerId) {
+            return 'The duty is still yours.';
+        }
+        if ($holderId === null) {
+            return 'The duty is no longer yours: it is not assigned to anybody at the moment.';
+        }
+
+        return 'The duty is no longer yours: it is now with ' . ($holderName !== '' ? $holderName : 'another member') . '.';
     }
 
     /**
@@ -536,7 +676,8 @@ final class RotaSwaps
                 '',
                 $accepted === true
                     ? $answerer . ' accepted your request to swap ' . $duty . '. The duty is now theirs, and is no longer on your list.'
-                    : $answerer . ' declined your request to swap ' . $duty . '. The duty is still yours.',
+                    : $answerer . ' declined your request to swap ' . $duty . '. '
+                      . self::whereDutyIsNow($req['assignedToID'], $req['holderName'], $req['requestedByID']),
             ];
             if ($req['responseMessage'] !== '') {
                 $lines[] = '';
@@ -645,13 +786,13 @@ final class RotaSwaps
     /**
      * One request with everything an e-mail about it needs, or null.
      *
-     * @return array{status:string, targetUserID:?int, requestedByID:?int, slotDate:string, startTime:?string, endTime:?string, roleName:string, requestMessage:string, responseMessage:string, askerName:string, targetName:string, holderName:string}|null
+     * @return array{status:string, targetUserID:?int, requestedByID:?int, slotDate:string, assignedToID:?int, startTime:?string, endTime:?string, roleName:string, requestMessage:string, responseMessage:string, askerName:string, targetName:string, holderName:string}|null
      */
     private static function describe(\mysqli $db, int $siteId, int $swapId): ?array
     {
         $stmt = $db->prepare(
             'SELECT `w`.`status`, `w`.`targetUserID`, `w`.`requestedByID`, `w`.`requestMessage`, `w`.`responseMessage`, '
-            . '`s`.`slotDate`, `s`.`startTime`, `s`.`endTime`, `r`.`name` AS `roleName`, '
+            . '`s`.`slotDate`, `s`.`startTime`, `s`.`endTime`, `s`.`assignedToID`, `r`.`name` AS `roleName`, '
             . '`ua`.`fullName` AS `askerName`, `ut`.`fullName` AS `targetName`, `uh`.`fullName` AS `holderName` '
             . 'FROM `tblRotaSwapRequest` `w` '
             . 'JOIN `tblRotaSlot` `s` ON `s`.`slotID` = `w`.`slotID` '
@@ -677,6 +818,7 @@ final class RotaSwaps
             'targetUserID'    => $row['targetUserID'] === null ? null : (int) $row['targetUserID'],
             'requestedByID'   => $row['requestedByID'] === null ? null : (int) $row['requestedByID'],
             'slotDate'        => (string) $row['slotDate'],
+            'assignedToID'    => $row['assignedToID'] === null ? null : (int) $row['assignedToID'],
             'startTime'       => $row['startTime'] === null ? null : (string) $row['startTime'],
             'endTime'         => $row['endTime'] === null ? null : (string) $row['endTime'],
             'roleName'        => (string) $row['roleName'],

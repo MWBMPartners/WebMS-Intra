@@ -61,7 +61,12 @@ $swapId   = (int) (is_string($_POST['swapID'] ?? null) === true ? $_POST['swapID
 $action   = is_string($_POST['action'] ?? null) === true ? $_POST['action'] : '';
 $response = is_string($_POST['responseMessage'] ?? null) === true ? $_POST['responseMessage'] : '';
 
-$result = RotaSwaps::respond($db, $siteId, $swapId, $userId, $action, $response);
+// Whether open requests may be taken here at all, read for THIS organisation
+// (the merged settings already are) and passed in, so the rule stays in one
+// place and the class needs no settings of its own.
+$openAllowed = (string) (App::settings()['rota']['allow_open_swap'] ?? '1') === '1';
+
+$result = RotaSwaps::respond($db, $siteId, $swapId, $userId, $action, $response, $openAllowed);
 
 if ($result['outcome'] === RotaSwaps::DONE) {
     // 📝 Numbers only in the description: a rota's own labels are allowed

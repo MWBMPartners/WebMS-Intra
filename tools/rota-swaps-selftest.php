@@ -32,22 +32,44 @@
  *   H  withdrawing: only the asker may, and a withdrawn request cannot then
  *      be accepted
  *   I  an open request: anyone but the asker may take it, nobody may decline
- *      it, nobody is e-mailed about it
+ *      it, and (D-141) it is e-mailed to every member with the switch on —
+ *      not to a member who switched it off, a suspended member, somebody in
+ *      another organisation or none, a member with no usable address, or the
+ *      asker
  *   J  a duty an administrator has moved cannot be given away by an old
  *      request
  *   K  accepting one request cancels the others for the same duty
+ *   L  a post with no form token, or a wrong one, changes nothing (both pages)
+ *   O  another organisation's request number gets exactly the answer of a
+ *      number that does not exist, and nothing changes
+ *   Q  a duty whose date has passed can be neither offered nor taken
+ *   R  the page offers only buttons the handler would accept; with open
+ *      requests switched off an open request cannot be taken but can be
+ *      withdrawn
+ *   W  after a decline, the asker is told where the duty is NOW
+ *   M  what the e-mails really carry: the mail route is pointed at a closed
+ *      port, so each message is KEPT in the mail queue and opened here — the
+ *      asker's words go as text, the use-by moment is set, the decline
+ *      e-mail says where the duty is now
  *   T  THE LOCK: this test holds the duty's row; the real
  *      `RotaSwaps::respond()` runs in its own PROCESS and must WAIT (asked of
  *      information_schema, not assumed from a sleep); the duty is moved while
  *      it waits; the accept must then be refused. Without the lock the accept
  *      goes through and gives away a duty that was no longer the asker's.
- *   P  THE PLANTS: six faults, each put into the COPY of the code, each of
- *      which must turn the check that guards it RED, and all green again after
+ *   U  two members take one open request at once, each in its own process,
+ *      the first slowed inside its write by a scratch trigger: one wins
+ *   V  THE TRANSACTION: a scratch trigger makes the SECOND write fail; the
+ *      first (the duty's move) must be undone. T cannot see this fault — it
+ *      proves the lock exists, not that the read and writes are one unit
+ *   P  THE PLANTS: each fault put into the COPY of the code (19 of them —
+ *      count from the list in section P), each of which must turn the check
+ *      that guards it RED, and all green again after
  *
- * WHY T IS NOT AN HTTP TEST. PHP's built-in server runs one request at a time
- * here, so two answers never overlap and a race test over HTTP would pass on
- * broken code (#647). Sections C and D prove the page calls `respond()`; T
- * proves the lock inside it holds.
+ * WHY T, U AND V ARE NOT ALL HTTP TESTS. PHP's built-in server runs one
+ * request at a time here, so two answers never overlap and a race test over
+ * HTTP would pass on broken code (#647). Sections C and D prove the page calls
+ * `respond()`; T and U run it from separate processes. V IS driven over HTTP:
+ * it needs a failure, not an overlap.
  *
  * WHAT IT CANNOT DO, said plainly:
  *   - It sees what the portal ASKED the mail route to send (every attempt is
@@ -85,7 +107,10 @@ $repo = dirname(__DIR__);
 
 $passed = 0;
 $failed = 0;
-$state  = ['proc' => null, 'child' => null, 'worker' => null, 'hold' => null, 'db' => null, 'settings' => [], 'people' => [], 'roleType' => 0];
+$state  = ['proc' => null, 'child' => null, 'workers' => [], 'hold' => null, 'db' => null, 'settings' => [], 'mailRows' => null];
+
+/** The scratch triggers sections U and V create, dropped by the clean-up whatever happens. */
+const SCRATCH_TRIGGERS = ['zzRotaSwapSlowTrg', 'zzRotaSwapFailTrg', 'zzRotaSwapCanTrg'];
 
 function refuse(string $why): never
 {
@@ -151,8 +176,30 @@ if ($tables < 100) {
 try {
     $db->query('SELECT COUNT(*) AS n FROM information_schema.INNODB_TRX')->free();
 } catch (Throwable $e) {
-    refuse("section T reads information_schema.INNODB_TRX to see that an answer is really WAITING on a lock, which needs the PROCESS privilege; '{$dbUser}' does not have it");
+    refuse("sections T and U read information_schema.INNODB_TRX to see that an answer is really WAITING on a lock, which needs the PROCESS privilege; '{$dbUser}' does not have it");
 }
+if (function_exists('sodium_crypto_secretbox') === false) {
+    refuse('section M seals the mailbox password and opens the kept message the way the portal does, which needs PHP\'s sodium extension');
+}
+// Sections U and V use scratch TRIGGERs. Asked up front, on a scratch table,
+// so a missing right is a plain REFUSED with nothing held. (On MySQL 8 with
+// binary logging, a trigger needs SUPER or log_bin_trust_function_creators.)
+try {
+    $db->query('CREATE TABLE IF NOT EXISTS `zzRotaSwapsProbe` (`probeID` INT NOT NULL AUTO_INCREMENT PRIMARY KEY) ENGINE=InnoDB');
+    $db->query('DROP TRIGGER IF EXISTS `zzRotaSwapCanTrg`');
+    $db->query('CREATE TRIGGER `zzRotaSwapCanTrg` BEFORE INSERT ON `zzRotaSwapsProbe` FOR EACH ROW SET NEW.`probeID` = NEW.`probeID`');
+    $db->query('DROP TRIGGER `zzRotaSwapCanTrg`');
+    $db->query('DROP TABLE `zzRotaSwapsProbe`');
+} catch (Throwable $e) {
+    refuse("sections U and V create scratch TRIGGERs, which '{$dbUser}' may not do here (" . $e->getMessage() . ')');
+}
+foreach (SCRATCH_TRIGGERS as $trigger) {
+    $db->query('DROP TRIGGER IF EXISTS `' . $trigger . '`');
+}
+// Every installation-wide mail setting as it stands, so the clean-up can put
+// back exactly this — section M points the mail route at a server that is
+// down, and the mail code may record what it found there in settings of its own.
+$state['mailRows'] = $db->query("SELECT `settingKey`, `settingValue`, `isSensitive` FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` LIKE 'mail.%'")->fetch_all(MYSQLI_ASSOC);
 
 /** Run one statement with bound values; answers the rows for a SELECT. */
 function q(string $sql, string $types = '', array $params = []): array
@@ -171,7 +218,7 @@ function q(string $sql, string $types = '', array $params = []): array
 }
 
 /** Set an installation-wide setting, remembering its old value once so the clean-up puts it back. */
-function setting(string $key, string $value): void
+function setting(string $key, string $value, int $secret = 0): void
 {
     global $state;
     $row = q('SELECT `settingValue` FROM `tblSettings` WHERE `settingKey` = ? AND `siteID` IS NULL', 's', [$key]);
@@ -179,11 +226,11 @@ function setting(string $key, string $value): void
         $state['settings'][$key] = $row === [] ? null : (string) $row[0]['settingValue'];
     }
     if ($row === []) {
-        q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, ?, 0)', 'sss', [$key, $value, $value]);
+        q('INSERT INTO `tblSettings` (`siteID`, `settingKey`, `settingValue`, `defaultValue`, `isSensitive`) VALUES (NULL, ?, ?, ?, ?)', 'sssi', [$key, $value, $value, $secret]);
 
         return;
     }
-    q('UPDATE `tblSettings` SET `settingValue` = ? WHERE `settingKey` = ? AND `siteID` IS NULL', 'ss', [$value, $key]);
+    q('UPDATE `tblSettings` SET `settingValue` = ?, `isSensitive` = ? WHERE `settingKey` = ? AND `siteID` IS NULL', 'sis', [$value, $secret, $key]);
 }
 
 // ── Putting things back: ONE clean-up, in a safe ORDER ───────────────────────
@@ -206,14 +253,31 @@ register_shutdown_function(static function () use (&$state, &$removePeople): voi
         }
         $state['hold'] = null;
     }
-    foreach (['worker', 'proc'] as $k) {
-        if (is_resource($state[$k]) === true) {
-            proc_terminate($state[$k]);
-            proc_close($state[$k]);
+    foreach ($state['workers'] as $worker) {
+        if (is_resource($worker) === true) {
+            proc_terminate($worker);
+            proc_close($worker);
         }
-        $state[$k] = null;
     }
+    $state['workers'] = [];
+    if (is_resource($state['proc']) === true) {
+        proc_terminate($state['proc']);
+        proc_close($state['proc']);
+    }
+    $state['proc'] = null;
     if ($state['db'] instanceof mysqli) {
+        foreach (SCRATCH_TRIGGERS as $trigger) {
+            try {
+                $state['db']->query('DROP TRIGGER IF EXISTS `' . $trigger . '`');
+            } catch (Throwable $e) {
+                echo "  ! could not drop the scratch trigger {$trigger}\n";
+            }
+        }
+        try {
+            $state['db']->query('DROP TABLE IF EXISTS `zzRotaSwapsProbe`');
+        } catch (Throwable $e) {
+            echo "  ! could not drop the scratch table zzRotaSwapsProbe\n";
+        }
         foreach ($state['settings'] as $key => $was) {
             try {
                 if ($was === null) {
@@ -223,6 +287,23 @@ register_shutdown_function(static function () use (&$state, &$removePeople): voi
                 }
             } catch (Throwable $e) {
                 echo "  ! could not put back the setting {$key}\n";
+            }
+        }
+        // The mail settings exactly as they were: anything added since is
+        // removed, anything changed is put back (value and secret mark).
+        if (is_array($state['mailRows']) === true) {
+            try {
+                $keep = array_column($state['mailRows'], 'settingKey');
+                foreach (q("SELECT `settingKey` FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` LIKE 'mail.%'") as $now) {
+                    if (in_array($now['settingKey'], $keep, true) === false) {
+                        q('DELETE FROM `tblSettings` WHERE `siteID` IS NULL AND `settingKey` = ?', 's', [$now['settingKey']]);
+                    }
+                }
+                foreach ($state['mailRows'] as $was) {
+                    q('UPDATE `tblSettings` SET `settingValue` = ?, `isSensitive` = ? WHERE `siteID` IS NULL AND `settingKey` = ?', 'sis', [$was['settingValue'], (int) $was['isSensitive'], $was['settingKey']]);
+                }
+            } catch (Throwable $e) {
+                echo "  ! could not put the mail settings back\n";
             }
         }
         if (is_callable($removePeople) === true) {
@@ -322,7 +403,9 @@ $mysqli = new mysqli((string) getenv('W_HOST'), (string) getenv('W_USER'), (stri
 $mysqli->set_charset('utf8mb4');
 \Portal\Core\Site::init($mysqli, ['site' => ['timezoneKeptAt' => \Portal\Core\Site::ZONE_MARK_VALUE]], (int) $argv[2]);
 file_put_contents($argv[5], (string) $mysqli->thread_id);
-echo json_encode(\Portal\Core\RotaSwaps::respond($mysqli, (int) $argv[2], (int) $argv[3], (int) $argv[4], 'accept', ''));
+// Open requests allowed: the setting is the handler's to read, and these
+// sections are about the lock and the transaction, not that setting.
+echo json_encode(\Portal\Core\RotaSwaps::respond($mysqli, (int) $argv[2], (int) $argv[3], (int) $argv[4], 'accept', '', true));
 WORKER);
 
 // ── The web server ──────────────────────────────────────────────────────────
@@ -433,19 +516,39 @@ $removePeople = static function () use ($mark): void {
     }
     q("DELETE FROM `tblRotaRoleType` WHERE `name` LIKE 'Selftest swap duty%'");
     q("DELETE FROM `tblEmailLog` WHERE `toRecipients` LIKE '" . $mark . "-%'");
+    q("DELETE FROM `tblMailQueue` WHERE `toRecipients` LIKE '%" . $mark . "-%'");
+    // The second organisation (section O), once nothing points at it.
+    foreach (q("SELECT `siteID` FROM `tblSites` WHERE `siteKey` = 'selftest-rotaswaps-b'") as $b) {
+        try {
+            q('DELETE FROM `tblUserSites` WHERE `siteID` = ?', 'i', [(int) $b['siteID']]);
+            q('DELETE FROM `tblSites` WHERE `siteID` = ?', 'i', [(int) $b['siteID']]);
+        } catch (Throwable $e) {
+            echo "  ! could not remove the second organisation (" . $e->getMessage() . ")\n";
+        }
+    }
 };
 $removePeople();
+
+// 🏢 A SECOND organisation, with its own member, rota and request (section O).
+q("INSERT INTO `tblSites` (`siteKey`, `siteName`, `timezone`, `isActive`) VALUES ('selftest-rotaswaps-b', 'Selftest rota swaps B', 'UTC', 1)");
+$siteB = (int) $db->insert_id;
 
 $run      = bin2hex(random_bytes(3));
 $password = 'Sel' . bin2hex(random_bytes(8)) . '!9x';
 $people   = [];
-/** Make one member with a password and an active membership. */
-$makePerson = static function (string $key, string $name, bool $member = true) use (&$people, $mark, $run, $siteId, $password): int {
-    $email = $mark . '-' . $key . '-' . $run . '@selftest.invalid';
+/**
+ * Make one person with a password and, unless `$memberOf` is 0, an active
+ * membership of `$memberOf` (this organisation by default). `$address` false
+ * gives them an address that is NOT an e-mail address (it still starts with
+ * this run's mark, so the clean-up finds them).
+ */
+$makePerson = static function (string $key, string $name, ?int $memberOf = null, bool $address = true) use (&$people, $mark, $run, $siteId, $password): int {
+    $email = $mark . '-' . $key . '-' . $run . ($address === true ? '@selftest.invalid' : '');
     q("INSERT INTO `tblUsers` (`fullName`, `emailAddress`, `isActive`, `isAdmin`, `createdAt`) VALUES (?, ?, 1, 0, NOW())", 'ss', [$name, $email]);
     $id = (int) $GLOBALS['db']->insert_id;
-    if ($member === true) {
-        q('INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES (?, ?, 1)', 'ii', [$siteId, $id]);
+    $memberOf ??= $siteId;
+    if ($memberOf > 0) {
+        q('INSERT INTO `tblUserSites` (`siteID`, `userID`, `isActive`) VALUES (?, ?, 1)', 'ii', [$memberOf, $id]);
     }
     q('INSERT INTO `tblLocalAccounts` (`userID`, `username`, `passwordHash`, `isVerified`) VALUES (?, ?, ?, 1)', 'iss', [$id, $mark . '-' . $key . '-' . $run, password_hash($password, PASSWORD_DEFAULT)]);
     $people[$key] = ['id' => $id, 'email' => $email, 'name' => $name, 'login' => $mark . '-' . $key . '-' . $run];
@@ -456,20 +559,30 @@ $makePerson('asker', 'Ada Asker');
 $makePerson('asked', 'Bea Asked');
 $makePerson('third', 'Cal Third');
 $makePerson('off', 'Dot Switchedoff');
-$makePerson('outsider', 'Eve Outsider', false);
+$makePerson('outsider', 'Eve Outsider', 0);
 $makePerson('gone', 'Fay Suspended');
 q('UPDATE `tblUsers` SET `isActive` = 0 WHERE `userID` = ?', 'i', [$people['gone']['id']]);
+$makePerson('noaddr', 'Gus Noaddress', null, false);
+$makePerson('otherorg', 'Hal Otherorg', $siteB);
 
 $roleName = 'Selftest swap duty ' . $run;
 q('INSERT INTO `tblRotaRoleType` (`siteID`, `name`) VALUES (?, ?)', 'is', [$siteId, $roleName]);
 $roleType = (int) $db->insert_id;
 
 $nextDay = 10;
-/** A new duty for `$owner`, on a date no other duty in this run uses, so each e-mail can be told apart by its subject. */
-$newSlot = static function (int $owner) use (&$nextDay, $siteId, $roleType): array {
-    $date = gmdate('Y-m-d', time() + 86400 * $nextDay);
-    $nextDay++;
-    q('INSERT INTO `tblRotaSlot` (`siteID`, `roleTypeID`, `slotDate`, `startTime`, `endTime`, `assignedToID`, `reminderSentAt`) VALUES (?, ?, ?, ?, ?, ?, NOW())', 'issssi', [$siteId, $roleType, $date, '10:00:00', '12:00:00', $owner]);
+/**
+ * A new duty for `$owner`, on a date no other duty in this run uses, so each
+ * e-mail can be told apart by its subject. `$daysAgo` puts it in the PAST
+ * instead (section Q); `$notes` marks it for a scratch trigger (section U).
+ */
+$newSlot = static function (int $owner, string $notes = '', int $daysAgo = 0, ?int $site = null, ?int $role = null) use (&$nextDay, $siteId, $roleType): array {
+    if ($daysAgo > 0) {
+        $date = gmdate('Y-m-d', time() - 86400 * $daysAgo);
+    } else {
+        $date = gmdate('Y-m-d', time() + 86400 * $nextDay);
+        $nextDay++;
+    }
+    q('INSERT INTO `tblRotaSlot` (`siteID`, `roleTypeID`, `slotDate`, `startTime`, `endTime`, `assignedToID`, `notes`, `reminderSentAt`) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())', 'iisssis', [$site ?? $siteId, $role ?? $roleType, $date, '10:00:00', '12:00:00', $owner, $notes]);
 
     return ['id' => (int) $GLOBALS['db']->insert_id, 'date' => $date, 'words' => gmdate('l j F Y', (int) strtotime($date . ' 12:00:00 UTC'))];
 };
@@ -479,7 +592,6 @@ $swap   = static fn (int $id): array => q('SELECT * FROM `tblRotaSwapRequest` WH
 $mails  = static function (string $who, string $subject) use (&$people): int {
     return count(q('SELECT `emailLogID` FROM `tblEmailLog` WHERE `toRecipients` = ? AND `subject` LIKE CONCAT(?, \'%\')', 'ss', [$people[$who]['email'] ?? '', $subject]));
 };
-$allMail = static fn (): int => (int) (q("SELECT COUNT(*) AS `n` FROM `tblEmailLog` WHERE `toRecipients` LIKE '" . $mark . "-%'")[0]['n'] ?? 0);
 
 /** Sign in through the REAL form. */
 $signIn = static function (string $who) use (&$people, $password, $child): void {
@@ -588,7 +700,7 @@ $scnAcceptOnce = static function () use ($newSlot, $ask, $answer, $holder, $swap
         'bSees'         => str_contains($bPage, '/rota/swap?slot=' . $slot['id'] . '"'),
         'aNoLonger'     => str_contains($aPage, '/rota/swap?slot=' . $slot['id'] . '"') === false,
         'aSeesAccepted' => preg_match('#data-swap-mine="' . $req['swapId'] . '" data-swap-status="accepted"#', $aPage) === 1
-            && str_contains($aPage, 'the duty is now with ' . $people['asked']['name']),
+            && str_contains($aPage, 'it is now with ' . $people['asked']['name']),
         'toldOnce'      => $told === 1,
         'secondRefused' => $holder($slot['id']) === $B && str_contains($second['flash'], 'already been answered'),
         'notToldTwice'  => $toldAfter === 1,
@@ -658,7 +770,63 @@ $scnChangedHands = static function () use ($newSlot, $ask, $answer, $holder, $sw
  * own process and must WAIT; the duty is moved to C while it waits; the
  * accept must then be refused and the duty stay with C.
  */
-$scnLock = static function () use ($newSlot, $ask, $holder, $swap, $child, $copyCore, $siteId, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $A, $B, $C, &$state): array {
+/**
+ * Start the real `RotaSwaps::respond()` (accept) in its own PROCESS, as
+ * `$userId`. Answers the process, its output pipe, and the file it writes its
+ * connection's thread id into BEFORE it asks for any row.
+ *
+ * @return array{proc:mixed, pipe:mixed, tidFile:string}
+ */
+$startWorker = static function (int $swapId, int $userId) use ($child, $copyCore, $siteId, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, &$state): array {
+    $tidFile = $child . DIRECTORY_SEPARATOR . 'worker-tid-' . bin2hex(random_bytes(3));
+    $proc    = proc_open(
+        [PHP_BINARY, $child . DIRECTORY_SEPARATOR . 'worker.php', rtrim($copyCore, DIRECTORY_SEPARATOR), (string) $siteId, (string) $swapId, (string) $userId, $tidFile],
+        [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $child . DIRECTORY_SEPARATOR . 'worker.log', 'a']],
+        $wPipes,
+        $child,
+        ['W_HOST' => $dbHost, 'W_USER' => $dbUser, 'W_PASS' => $dbPass, 'W_NAME' => $dbName, 'W_PORT' => (string) $dbPort, 'PATH' => (string) getenv('PATH')]
+    );
+    $state['workers'][] = $proc;
+
+    return ['proc' => $proc, 'pipe' => $wPipes[1], 'tidFile' => $tidFile];
+};
+
+/**
+ * ⏳ A PREMISE, not a sleep: is the worker's own connection really in the
+ * state named — `LOCK WAIT` (waiting for a row) or `User sleep` (inside the
+ * scratch trigger's SLEEP)? Asked of information_schema for up to ten
+ * seconds. Without this, a worker that had not started yet would pass every
+ * check after it in either state.
+ */
+$workerIs = static function (array $worker, string $what): bool {
+    for ($i = 0; $i < 100; $i++) {
+        $tid = is_file($worker['tidFile']) === true ? (int) file_get_contents($worker['tidFile']) : 0;
+        if ($tid > 0) {
+            $sql = $what === 'LOCK WAIT'
+                ? "SELECT COUNT(*) AS `n` FROM information_schema.INNODB_TRX WHERE `trx_mysql_thread_id` = {$tid} AND `trx_state` = 'LOCK WAIT'"
+                : "SELECT COUNT(*) AS `n` FROM information_schema.PROCESSLIST WHERE `ID` = {$tid} AND `STATE` = 'User sleep'";
+            if ((int) ($GLOBALS['db']->query($sql)->fetch_assoc()['n'] ?? 0) > 0) {
+                return true;
+            }
+        }
+        usleep(100000);
+    }
+
+    return false;
+};
+
+/** Wait for a worker to finish and decode what `respond()` answered. */
+$finishWorker = static function (array $worker) use (&$state): array {
+    $said = (string) stream_get_contents($worker['pipe']);
+    fclose($worker['pipe']);
+    proc_close($worker['proc']);
+    $state['workers'] = array_values(array_filter($state['workers'], static fn (mixed $p): bool => $p !== $worker['proc']));
+    $answer = json_decode($said, true);
+
+    return is_array($answer) === true ? $answer + ['raw' => $said] : ['outcome' => '(no answer)', 'reason' => '', 'raw' => $said];
+};
+
+$scnLock = static function () use ($newSlot, $ask, $holder, $swap, $startWorker, $workerIs, $finishWorker, $dbHost, $dbUser, $dbPass, $dbName, $dbPort, $A, $B, $C, &$state): array {
     $slot = $newSlot($A);
     $req  = $ask('asker', $slot, $B, 'Lock test');
 
@@ -668,31 +836,8 @@ $scnLock = static function () use ($newSlot, $ask, $holder, $swap, $child, $copy
     $hold->begin_transaction();
     $hold->query('SELECT `assignedToID` FROM `tblRotaSlot` WHERE `slotID` = ' . (int) $slot['id'] . ' FOR UPDATE')->fetch_all();
 
-    $tidFile = $child . DIRECTORY_SEPARATOR . 'worker-tid-' . bin2hex(random_bytes(3));
-    $state['worker'] = proc_open(
-        [PHP_BINARY, $child . DIRECTORY_SEPARATOR . 'worker.php', rtrim($copyCore, DIRECTORY_SEPARATOR), (string) $siteId, (string) $req['swapId'], (string) $B, $tidFile],
-        [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', $child . DIRECTORY_SEPARATOR . 'worker.log', 'a']],
-        $wPipes,
-        $child,
-        ['W_HOST' => $dbHost, 'W_USER' => $dbUser, 'W_PASS' => $dbPass, 'W_NAME' => $dbName, 'W_PORT' => (string) $dbPort, 'PATH' => (string) getenv('PATH')]
-    );
-
-    // ⏳ A PREMISE, not a sleep: is the worker's own connection really
-    //    waiting for a lock? Asked of information_schema for up to ten seconds.
-    //    Without this, a worker that had not started yet would pass every
-    //    check below in either state.
-    $waiting = false;
-    for ($i = 0; $i < 100; $i++) {
-        $tid = is_file($tidFile) === true ? (int) file_get_contents($tidFile) : 0;
-        if ($tid > 0) {
-            $w = $GLOBALS['db']->query("SELECT COUNT(*) AS `n` FROM information_schema.INNODB_TRX WHERE `trx_mysql_thread_id` = {$tid} AND `trx_state` = 'LOCK WAIT'")->fetch_assoc();
-            if ((int) ($w['n'] ?? 0) > 0) {
-                $waiting = true;
-                break;
-            }
-        }
-        usleep(100000);
-    }
+    $worker  = $startWorker($req['swapId'], $B);
+    $waiting = $workerIs($worker, 'LOCK WAIT');
 
     // An administrator moves the duty while the answer waits.
     $hold->query('UPDATE `tblRotaSlot` SET `assignedToID` = ' . (int) $C . ' WHERE `slotID` = ' . (int) $slot['id']);
@@ -700,17 +845,313 @@ $scnLock = static function () use ($newSlot, $ask, $holder, $swap, $child, $copy
     $hold->close();
     $state['hold'] = null;
 
-    $said = stream_get_contents($wPipes[1]);
-    fclose($wPipes[1]);
-    proc_close($state['worker']);
-    $state['worker'] = null;
-    $answer = json_decode((string) $said, true);
+    $answer = $finishWorker($worker);
 
     return [
         'waited'  => $waiting,
-        'refused' => is_array($answer) === true && ($answer['outcome'] ?? '') === 'refused' && ($answer['reason'] ?? '') === 'changed-hands',
+        'refused' => ($answer['outcome'] ?? '') === 'refused' && ($answer['reason'] ?? '') === 'changed-hands',
         'kept'    => $holder($slot['id']) === $C && ($swap($req['swapId'])['status'] ?? '') === 'pending',
-        'detail'  => 'the worker said ' . trim((string) $said) . '; the duty is with ' . var_export($holder($slot['id']), true),
+        'detail'  => 'the worker said ' . trim($answer['raw']) . '; the duty is with ' . var_export($holder($slot['id']), true),
+    ];
+};
+
+/**
+ * U: two members take ONE open request at the same moment, each through the
+ * real respond() in its own process. A scratch trigger makes the first
+ * taker's write to the duty SLEEP for two seconds, so the second really
+ * arrives while the first is part-way through; both states are asked of the
+ * database. Exactly one may get the duty.
+ */
+$scnTwoTakers = static function () use ($newSlot, $ask, $holder, $swap, $startWorker, $workerIs, $finishWorker, $A, $B, $C): array {
+    $slot = $newSlot($A, 'U-slow');
+    $req  = $ask('asker', $slot, 0, 'Two takers');
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapSlowTrg`');
+    $GLOBALS['db']->query("CREATE TRIGGER `zzRotaSwapSlowTrg` BEFORE UPDATE ON `tblRotaSlot` FOR EACH ROW BEGIN IF OLD.`notes` = 'U-slow' THEN DO SLEEP(2); END IF; END");
+    $first       = $startWorker($req['swapId'], $B);
+    $firstInside = $workerIs($first, 'User sleep');
+    $second      = $startWorker($req['swapId'], $C);
+    $secondWaits = $workerIs($second, 'LOCK WAIT');
+    $a1 = $finishWorker($first);
+    $a2 = $finishWorker($second);
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapSlowTrg`');
+    $outcomes = [($a1['outcome'] ?? ''), ($a2['outcome'] ?? '')];
+    sort($outcomes);
+
+    return [
+        'premise'  => $firstInside && $secondWaits,
+        'oneWins'  => $outcomes === ['done', 'refused'],
+        'firstWon' => ($a1['outcome'] ?? '') === 'done' && $holder($slot['id']) === $B && ($swap($req['swapId'])['status'] ?? '') === 'accepted',
+        'detail'   => 'first: ' . trim($a1['raw']) . '; second: ' . trim($a2['raw']) . '; holder ' . var_export($holder($slot['id']), true)
+            . '; first inside its write: ' . var_export($firstInside, true) . '; second waiting: ' . var_export($secondWaits, true),
+    ];
+};
+
+/**
+ * V: the read and the writes are ONE unit. A scratch trigger refuses the
+ * SECOND write (marking the request accepted); the first write (moving the
+ * duty) must be undone with it. Driven through the real page.
+ */
+$scnAllOrNothing = static function () use ($newSlot, $ask, $answer, $holder, $swap, $A, $B): array {
+    $slot = $newSlot($A);
+    $req  = $ask('asker', $slot, $B, 'V-fail');
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapFailTrg`');
+    $GLOBALS['db']->query("CREATE TRIGGER `zzRotaSwapFailTrg` BEFORE UPDATE ON `tblRotaSwapRequest` FOR EACH ROW BEGIN IF NEW.`status` = 'accepted' AND OLD.`requestMessage` = 'V-fail' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'refused on purpose by tools/rota-swaps-selftest.php'; END IF; END");
+    $res = $answer('asked', $req['swapId'], 'accept');
+    $GLOBALS['db']->query('DROP TRIGGER IF EXISTS `zzRotaSwapFailTrg`');
+
+    return [
+        'undone' => $holder($slot['id']) === $A && ($swap($req['swapId'])['status'] ?? '') === 'pending',
+        'said'   => str_contains($res['flash'], 'could not be answered just now'),
+        'detail' => 'holder ' . var_export($holder($slot['id']), true) . ', status ' . ($swap($req['swapId'])['status'] ?? '?') . ', said: ' . $res['flash'],
+    ];
+};
+
+/** L: a post with no form token, or a wrong one, changes nothing — on both pages. */
+$scnTokens = static function () use ($newSlot, $ask, $holder, $swap, $roster, $A, $B): array {
+    $slot   = $newSlot($A);
+    $path   = '/rota/swap?slot=' . $slot['id'];
+    $count  = static fn (): int => count(q('SELECT `swapID` FROM `tblRotaSwapRequest` WHERE `slotID` = ?', 'i', [$slot['id']]));
+    $none   = http('asker', 'POST', $path, ['targetUserID' => (string) $B, 'requestMessage' => 'no token']);
+    $wrong  = http('asker', 'POST', $path, ['csrf_token' => str_repeat('0', 64), 'targetUserID' => (string) $B, 'requestMessage' => 'wrong token']);
+    $askOk  = $count() === 0 && str_contains($none['body'], 'form had expired') && str_contains($wrong['body'], 'form had expired');
+
+    $req    = $ask('asker', $slot, $B, 'Token test');
+    $r1     = http('asked', 'POST', '/rota/swap-respond', ['swapID' => (string) $req['swapId'], 'action' => 'accept']);
+    $r2     = http('asked', 'POST', '/rota/swap-respond', ['csrf_token' => str_repeat('0', 64), 'swapID' => (string) $req['swapId'], 'action' => 'accept']);
+    $said   = $roster('asked')['flash'];
+    $answerOk = $holder($slot['id']) === $A && ($swap($req['swapId'])['status'] ?? '') === 'pending' && str_contains($said, 'form had expired');
+
+    return ['askRefused' => $askOk, 'answerRefused' => $answerOk, 'detail' => 'requests ' . $count() . ', holder ' . var_export($holder($slot['id']), true) . ', said: ' . $said . ' (HTTP ' . $r1['status'] . '/' . $r2['status'] . ')'];
+};
+
+/**
+ * O: a member of THIS organisation posts the number of an open request that
+ * belongs to ANOTHER organisation. They must get exactly the answer a number
+ * that does not exist gets, and nothing may change.
+ */
+$scnOtherOrganisation = static function () use ($newSlot, $answer, $holder, $swap, $siteB, $people): array {
+    $other   = $people['otherorg']['id'];
+    $roleB   = (int) (q("SELECT `roleTypeID` FROM `tblRotaRoleType` WHERE `siteID` = ? AND `name` LIKE 'Selftest swap duty B%' LIMIT 1", 'i', [$siteB])[0]['roleTypeID'] ?? 0);
+    if ($roleB === 0) {
+        q('INSERT INTO `tblRotaRoleType` (`siteID`, `name`) VALUES (?, ?)', 'is', [$siteB, 'Selftest swap duty B ' . bin2hex(random_bytes(2))]);
+        $roleB = (int) $GLOBALS['db']->insert_id;
+    }
+    $slotB = $newSlot($other, '', 0, $siteB, $roleB);
+    q("INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`) VALUES (?, ?, NULL, 'Other organisation')", 'ii', [$slotB['id'], $other]);
+    $swapB   = (int) $GLOBALS['db']->insert_id;
+    $missing = (int) (q('SELECT COALESCE(MAX(`swapID`), 0) + 1000 AS `m` FROM `tblRotaSwapRequest`')[0]['m'] ?? 0);
+    $forB    = $answer('third', $swapB, 'accept');
+    $forNone = $answer('third', $missing, 'accept');
+
+    return [
+        'sameAnswer' => $forB['flash'] === $forNone['flash'] && str_contains($forB['flash'], 'could not be found'),
+        'unchanged'  => $holder($slotB['id']) === $other && ($swap($swapB)['status'] ?? '') === 'pending',
+        'detail'     => 'their request: "' . $forB['flash'] . '"; a missing one: "' . $forNone['flash'] . '"; holder ' . var_export($holder($slotB['id']), true),
+    ];
+};
+
+/** Q: a duty whose date has passed cannot be swapped, by either road. */
+$scnPast = static function () use ($newSlot, $answer, $holder, $swap, $A, $B): array {
+    $slot = $newSlot($A, '', 5);
+    q("INSERT INTO `tblRotaSwapRequest` (`slotID`, `requestedByID`, `targetUserID`, `requestMessage`) VALUES (?, ?, ?, 'Past duty')", 'iii', [$slot['id'], $A, $B]);
+    $req  = (int) $GLOBALS['db']->insert_id;
+    $res  = $answer('asked', $req, 'accept');
+    $page = http('asker', 'GET', '/rota/swap?slot=' . $slot['id']);
+
+    return [
+        'acceptRefused' => $holder($slot['id']) === $A && ($swap($req)['status'] ?? '') === 'pending' && str_contains($res['flash'], 'already passed'),
+        'askRefused'    => $page['status'] === 403,
+        'detail'        => 'holder ' . var_export($holder($slot['id']), true) . ', said: ' . $res['flash'] . '; asking page HTTP ' . $page['status'],
+    ];
+};
+
+/** The part of a Duty Roster page that draws ONE request's row. */
+$rowOf = static function (string $body, string $marker): string {
+    $at = strpos($body, $marker);
+    if ($at === false) {
+        return '';
+    }
+    $end = strlen($body);
+    foreach (['data-swap-for-me=', 'data-swap-open=', 'data-swap-mine=', 'id="swap-requests-mine"', 'My upcoming duties'] as $next) {
+        $n = strpos($body, $next, $at + strlen($marker));
+        if ($n !== false && $n < $end) {
+            $end = $n;
+        }
+    }
+
+    return substr($body, $at, $end - $at);
+};
+
+/**
+ * R1: the page asks the rule before drawing a button. A request whose duty
+ * has already moved is shown with the reason and NO Accept (Decline stays,
+ * because saying no moves nothing).
+ */
+$scnPageAsks = static function () use ($newSlot, $ask, $roster, $rowOf, $A, $B, $C): array {
+    $slot = $newSlot($A);
+    $req  = $ask('asker', $slot, $B, 'Page asks test');
+    q('UPDATE `tblRotaSlot` SET `assignedToID` = ? WHERE `slotID` = ?', 'ii', [$C, $slot['id']]);
+    $row  = $rowOf($roster('asked')['body'], 'data-swap-for-me="' . $req['swapId'] . '"');
+
+    return [
+        'noAccept' => $row !== '' && str_contains($row, 'value="accept"') === false && str_contains($row, 'data-swap-cannot-accept') && str_contains($row, 'no longer with the person who asked'),
+        'decline'  => str_contains($row, 'value="decline"'),
+        'detail'   => substr(preg_replace('/\s+/', ' ', strip_tags($row)) ?? '', 0, 300),
+    ];
+};
+
+/**
+ * R2: with open requests switched OFF, an open request posted while they were
+ * on cannot be taken — not offered on the page, refused by the handler — and
+ * the asker can still withdraw it.
+ */
+$scnOpenSwitchedOff = static function () use ($newSlot, $ask, $answer, $roster, $rowOf, $holder, $swap, $A): array {
+    $slot = $newSlot($A);
+    $req  = $ask('asker', $slot, 0, 'Open then switched off');
+    setting('rota.allow_open_swap', '0');
+    $row   = $rowOf($roster('third')['body'], 'data-swap-open="' . $req['swapId'] . '"');
+    $take  = $answer('third', $req['swapId'], 'accept');
+    $kept  = $holder($slot['id']) === $A && ($swap($req['swapId'])['status'] ?? '') === 'pending';
+    $mine  = $rowOf($roster('asker')['body'], 'data-swap-mine="' . $req['swapId'] . '"');
+    $wd    = $answer('asker', $req['swapId'], 'withdraw');
+    setting('rota.allow_open_swap', '1');
+
+    return [
+        'notOffered' => $row !== '' && str_contains($row, 'value="accept"') === false && str_contains($row, 'switched off'),
+        'refused'    => $kept && str_contains($take['flash'], 'switched off'),
+        'withdraw'   => str_contains($mine, 'value="withdraw"') && ($swap($req['swapId'])['status'] ?? '') === 'cancelled',
+        'detail'     => 'take said: ' . $take['flash'] . '; withdraw said: ' . $wd['flash'],
+    ];
+};
+
+/**
+ * W: a decline after an administrator has moved the duty must NOT tell the
+ * asker "the duty is still yours" — on the page (here) or in the e-mail (M).
+ */
+$scnWhereNow = static function () use ($newSlot, $ask, $answer, $roster, $rowOf, $A, $B, $C, $people): array {
+    $slot = $newSlot($A);
+    $req  = $ask('asker', $slot, $B, 'Where now');
+    q('UPDATE `tblRotaSlot` SET `assignedToID` = ? WHERE `slotID` = ?', 'ii', [$C, $slot['id']]);
+    $answer('asked', $req['swapId'], 'decline');
+    $row = $rowOf($roster('asker')['body'], 'data-swap-mine="' . $req['swapId'] . '"');
+
+    return [
+        'true'   => str_contains($row, 'data-swap-status="declined"') && str_contains($row, 'it is now with ' . $people['third']['name']) && stripos($row, 'still yours') === false,
+        'slot'   => $slot,
+        'swapId' => $req['swapId'],
+        'detail' => substr(preg_replace('/\s+/', ' ', strip_tags($row)) ?? '', 0, 300),
+    ];
+};
+
+/** D-141: an open request is e-mailed to every active member with the switch on, and nobody else. */
+$scnOpenMail = static function () use ($newSlot, $ask, $mails, $roleName, $A): array {
+    $slot    = $newSlot($A);
+    $req     = $ask('asker', $slot, 0, 'Anyone? (D-141)');
+    $subject = 'Open rota swap request: ' . $roleName . ' on ' . $slot['words'];
+    $count   = [];
+    foreach (['asked', 'third', 'off', 'gone', 'outsider', 'otherorg', 'noaddr', 'asker'] as $who) {
+        $count[$who] = $mails($who, $subject);
+    }
+
+    return [
+        'made'      => $req['swapId'] > 0,
+        'members'   => $count['asked'] === 1 && $count['third'] === 1,
+        'switchOff' => $count['off'] === 0,
+        'suspended' => $count['gone'] === 0,
+        'outside'   => $count['outsider'] === 0 && $count['otherorg'] === 0,
+        'noAddress' => $count['noaddr'] === 0,
+        'notAsker'  => $count['asker'] === 0,
+        'detail'    => json_encode($count),
+    ];
+};
+
+// ── Section M's mail route: a REAL route pointed at a server that is DOWN ────
+// With no server named (the rest of this test) Mailer only logs a subject and
+// an address. To read what would really be SENT — the text, how it is marked
+// up, and its use-by moment — the route is filled in and pointed at a port
+// nobody listens on. The connection is refused, so the message is KEPT in the
+// mail queue (`tblMailQueue`), sealed with the installation's key, exactly as
+// it would be on a portal whose mail server was briefly down. Nothing leaves
+// this machine.
+$keyText = (string) file_get_contents($child . $sep . 'web' . $sep . '_auth_keys' . $sep . 'enc.key');
+$seal    = static function (string $plain) use ($keyText): string {
+    $nonce = random_bytes(SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
+
+    return base64_encode($nonce . sodium_crypto_secretbox($plain, $nonce, sodium_hex2bin(hash('sha256', $keyText))));
+};
+$unseal  = static function (?string $stored) use ($keyText): string {
+    $bin = base64_decode((string) $stored, true);
+    if ($bin === false || strlen($bin) <= SODIUM_CRYPTO_SECRETBOX_NONCEBYTES) {
+        return '';
+    }
+    $plain = sodium_crypto_secretbox_open(substr($bin, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), substr($bin, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), sodium_hex2bin(hash('sha256', $keyText)));
+    // The queue seals "mq1\n" + the body (MailQueue::SEAL).
+    return $plain === false ? '' : (str_starts_with($plain, "mq1\n") === true ? substr($plain, 4) : $plain);
+};
+$routeDown = static function (bool $on) use ($seal): void {
+    if ($on === false) {
+        setting('mail.provider', 'smtp');
+        setting('mail.smtp.host', '');
+
+        return;
+    }
+    $server = stream_socket_server('tcp://127.0.0.1:0');
+    $free   = (int) substr((string) strrchr((string) stream_socket_get_name($server, false), ':'), 1);
+    fclose($server);
+    setting('mail.provider', 'smtp');
+    setting('mail.smtp.host', '127.0.0.1');
+    setting('mail.smtp.port', (string) $free);
+    setting('mail.smtp.security', 'starttls');
+    setting('mail.smtp.username', 'selftest-rota-mailbox');
+    setting('mail.smtp.password', $seal('selftest-' . bin2hex(random_bytes(6))), 1);
+    setting('mail.defaultFromAddress', 'office@rotaswaps.selftest.invalid');
+    setting('mail.defaultFromName', 'Selftest Rota Office');
+    setting('mail.defaultReplyTo', '');
+    setting('mail.limit.perHour', '');
+    setting('mail.fallbackProvider', '');
+};
+/** The newest message KEPT for one person whose subject starts with `$subject`, opened. */
+$kept = static function (string $who, string $subject) use (&$people, $unseal): ?array {
+    $rows = q('SELECT `bodyText`, `bodyHtml`, `expiresAt` FROM `tblMailQueue` WHERE `toRecipients` LIKE CONCAT(\'%\', ?, \'%\') AND `subject` LIKE CONCAT(?, \'%\') ORDER BY `queueID` DESC LIMIT 1', 'ss', [$people[$who]['email'], $subject]);
+    if ($rows === []) {
+        return null;
+    }
+
+    return ['text' => $unseal($rows[0]['bodyText']), 'html' => $unseal($rows[0]['bodyHtml']), 'expiresAt' => $rows[0]['expiresAt']];
+};
+/** The use-by moment the e-mail about a duty on `$date` must carry: the start of the next day on this organisation's clock, in UTC. */
+$expectedUseBy = static function (string $date) use ($siteId): string {
+    $zone = (string) (q('SELECT `timezone` FROM `tblSites` WHERE `siteID` = ?', 'i', [$siteId])[0]['timezone'] ?? '');
+    if (in_array($zone, timezone_identifiers_list(), true) === false) {
+        $zone = 'UTC';
+    }
+    $next = (new DateTimeImmutable($date . ' 00:00:00', new DateTimeZone('UTC')))->modify('+1 day')->format('Y-m-d');
+
+    return (new DateTimeImmutable($next . ' 00:00:00', new DateTimeZone($zone)))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+};
+
+/**
+ * M: what the e-mails really say and carry. A message quoting the asker's
+ * own words `<b>x</b>` must go as TEXT (shown as typed, never as markup); it
+ * must carry its use-by moment; and the decline e-mail after the duty has
+ * been moved must say where it is now.
+ */
+$scnMailContent = static function () use ($routeDown, $kept, $expectedUseBy, $newSlot, $ask, $answer, $scnWhereNow, $roleName, $A, $B, $people): array {
+    $routeDown(true);
+    $slot = $newSlot($A);
+    $ask('asker', $slot, $B, 'Can you <b>x</b> cover?');
+    $msg  = $kept('asked', 'Rota swap request: ' . $roleName . ' on ' . $slot['words']);
+    $w    = $scnWhereNow();
+    $decl = $kept('asker', 'Your rota swap was declined: ' . $roleName . ' on ' . $w['slot']['words']);
+    $routeDown(false);
+
+    return [
+        'kept'    => $msg !== null,
+        'asText'  => $msg !== null && str_contains($msg['text'], 'Can you <b>x</b> cover?')
+            && str_contains($msg['html'], 'Can you &lt;b&gt;x&lt;/b&gt; cover?') && str_contains($msg['html'], '<b>x</b>') === false,
+        'useBy'   => $msg !== null && (string) $msg['expiresAt'] === $expectedUseBy($slot['date']),
+        'whereNow' => $decl !== null && str_contains($decl['text'], 'it is now with ' . $people['third']['name']) && stripos($decl['text'], 'still yours') === false,
+        'detail'  => json_encode(['expiresAt' => $msg['expiresAt'] ?? null, 'expected' => $expectedUseBy($slot['date']), 'text' => substr($msg['text'] ?? '', 0, 400), 'decline' => substr($decl['text'] ?? '', 0, 400)]),
     ];
 };
 
@@ -748,6 +1189,21 @@ setting('rota.allow_open_swap', '1');
 check('A12 with open requests switched off, an open request is refused even when posted by hand', $openOff['swapId'] === 0 && str_contains($openOff['shown'], 'switched off'), json_encode($openOff));
 $notMine = http('third', 'GET', '/rota/swap?slot=' . $slotX['id']);
 check('A13 nobody can ask about a duty that is not theirs', $notMine['status'] === 403, 'HTTP ' . $notMine['status']);
+/** A14: a member whose address is not an e-mail address can still be asked (they see it on the page), but no e-mail is ATTEMPTED to that text. */
+$scnNoAddress = static function () use ($newSlot, $ask, $A, $people): array {
+    // Counted before AND after, so an attempt left by an earlier run of this
+    // scenario (during the plants) is not counted against this one.
+    $attempts = static fn (): int => count(q('SELECT `emailLogID` FROM `tblEmailLog` WHERE `toRecipients` LIKE CONCAT(\'%\', ?, \'%\')', 's', [$people['noaddr']['email']]))
+        + count(q('SELECT `queueID` FROM `tblMailQueue` WHERE `toRecipients` LIKE CONCAT(\'%\', ?, \'%\')', 's', [$people['noaddr']['email']]));
+    $before = $attempts();
+    $slot   = $newSlot($A);
+    $req    = $ask('asker', $slot, $people['noaddr']['id'], 'No address test');
+    $sent   = $attempts() - $before;
+
+    return ['made' => $req['swapId'] > 0, 'notSent' => $sent === 0, 'detail' => "attempts to that address: {$sent}"];
+};
+$na = $scnNoAddress();
+check('A14 a member with no usable e-mail address can be asked, but no e-mail is attempted', $na['made'] && $na['notSent'], $na['detail']);
 
 // =============================================================================
 section('B  the person asked sees it; a third person does not');
@@ -788,7 +1244,7 @@ $res = $answer('asked', $swapA, 'decline', 'Sorry, away too');
 check('E1 the person who declines is told the duty stays with the asker', str_contains($res['flash'], 'Swap declined'), $res['flash']);
 check('E2 the duty is still the asker\'s, and the request is marked declined with the reply kept', $holder($slotA['id']) === $A && ($swap($swapA)['status'] ?? '') === 'declined' && ($swap($swapA)['responseMessage'] ?? '') === 'Sorry, away too');
 $aPage = $roster('asker')['body'];
-check('E3 the asker sees it was declined and that the duty is still theirs', preg_match('#data-swap-mine="' . $swapA . '" data-swap-status="declined"#', $aPage) === 1 && str_contains($aPage, 'the duty is still yours') && str_contains($aPage, '/rota/swap?slot=' . $slotA['id'] . '"'));
+check('E3 the asker sees it was declined and that the duty is still theirs', preg_match('#data-swap-mine="' . $swapA . '" data-swap-status="declined"#', $aPage) === 1 && str_contains($aPage, 'The duty is still yours.') && str_contains($aPage, '/rota/swap?slot=' . $slotA['id'] . '"'));
 check('E4 the asker is e-mailed that it was declined', $mails('asker', 'Your rota swap was declined: ' . $roleName . ' on ' . $slotA['words']) === 1);
 check('E5 the request no longer waits on the person asked\'s page', str_contains($roster('asked')['body'], 'data-swap-for-me="' . $swapA . '"') === false);
 
@@ -848,12 +1304,19 @@ check('H4 it no longer waits on the person asked\'s page', str_contains($roster(
 // =============================================================================
 section('I  an open request');
 // =============================================================================
-$mailBefore = $allMail();
 $slotI = $newSlot($A);
 $reqI  = $ask('asker', $slotI, 0, 'Anyone?');
 $rowI = $swap($reqI['swapId']);
 check('I1 an open request is saved with nobody named', $reqI['swapId'] > 0 && array_key_exists('targetUserID', $rowI) === true && $rowI['targetUserID'] === null, json_encode($rowI));
-check('I2 nobody is e-mailed about an open request', $allMail() === $mailBefore, ($allMail() - $mailBefore) . ' e-mail(s) attempted');
+$iSaid = $roster('asker')['flash'];
+check('I2 the asker is told the request was e-mailed to every member with rota swap e-mails switched on (D-141)', str_contains($iSaid, 'Every member who has rota swap e-mails switched on'), $iSaid);
+$om = $scnOpenMail();
+check('I2a (D-141) members of the organisation with the switch on are each e-mailed — one message each', $om['made'] && $om['members'], $om['detail']);
+check('I2b …a member who switched the e-mails off is not', $om['switchOff'], $om['detail']);
+check('I2c …a SUSPENDED member is not', $om['suspended'], $om['detail']);
+check('I2d …somebody outside the organisation, and a member of ANOTHER organisation, are not', $om['outside'], $om['detail']);
+check('I2e …a member with no usable e-mail address is not', $om['noAddress'], $om['detail']);
+check('I2f …and the asker is not', $om['notAsker'], $om['detail']);
 check('I3 another member sees it, offered to take it', str_contains($roster('third')['body'], 'data-swap-open="' . $reqI['swapId'] . '"'));
 check('I4 the asker is not offered their own open request to take', str_contains($roster('asker')['body'], 'data-swap-open="' . $reqI['swapId'] . '"') === false);
 $decl = $answer('third', $reqI['swapId'], 'decline');
@@ -886,6 +1349,53 @@ $answer('asked', $toB['swapId'], 'accept');
 check('K3 the other person asked can no longer take it', $holder($slotK['id']) === $C);
 
 // =============================================================================
+section('L  a post without the right form token changes nothing');
+// =============================================================================
+$l = $scnTokens();
+check('L1 asking with no form token, or a wrong one, saves no request and says the form had expired', $l['askRefused'], $l['detail']);
+check('L2 answering with no form token, or a wrong one, moves nothing and says the form had expired', $l['answerRefused'], $l['detail']);
+
+// =============================================================================
+section('O  another organisation\'s request');
+// =============================================================================
+$o = $scnOtherOrganisation();
+check('O1 posting the number of ANOTHER organisation\'s request gets exactly the answer a number that does not exist gets', $o['sameAnswer'], $o['detail']);
+check('O2 …and nothing about that request or its duty changes', $o['unchanged'], $o['detail']);
+
+// =============================================================================
+section('Q  a duty whose date has passed');
+// =============================================================================
+$qp = $scnPast();
+check('Q1 a waiting request for a duty in the PAST cannot be accepted, and says why', $qp['acceptRefused'], $qp['detail']);
+check('Q2 a duty in the past cannot be offered for a swap at all', $qp['askRefused'], $qp['detail']);
+
+// =============================================================================
+section('R  the page offers only what the handler would allow');
+// =============================================================================
+$r1 = $scnPageAsks();
+check('R1 a request whose duty has already moved is shown with the reason and NO Accept button', $r1['noAccept'], $r1['detail']);
+check('R2 …and can still be declined', $r1['decline'], $r1['detail']);
+$r2 = $scnOpenSwitchedOff();
+check('R3 with open requests switched OFF, an open request posted earlier is not offered to take', $r2['notOffered'], $r2['detail']);
+check('R4 …the handler refuses it too, and nothing moves', $r2['refused'], $r2['detail']);
+check('R5 …and the asker can still withdraw it', $r2['withdraw'], $r2['detail']);
+
+// =============================================================================
+section('W  where the duty is now, after a decline');
+// =============================================================================
+$w = $scnWhereNow();
+check('W1 a decline after an administrator moved the duty does NOT tell the asker "still yours": it names who has it', $w['true'], $w['detail']);
+
+// =============================================================================
+section('M  what the e-mails really say and carry');
+// =============================================================================
+$m = $scnMailContent();
+check('M1 (the premise) with the mail server down, the e-mail is KEPT in the mail queue, where it can be read', $m['kept'], $m['detail']);
+check('M2 the asker\'s own words go as TEXT: shown as typed in the text part, escaped in the HTML part, never as markup', $m['asText'], $m['detail']);
+check('M3 the e-mail carries its use-by moment: the start of the day after the duty, on the organisation\'s clock', $m['useBy'], $m['detail']);
+check('M4 the decline e-mail after the duty was moved says who has it now, not "still yours"', $m['whereNow'], $m['detail']);
+
+// =============================================================================
 section('T  the lock: two answers at once');
 // =============================================================================
 $t = $scnLock();
@@ -894,39 +1404,111 @@ check('T2 once the duty had moved, the waiting accept was REFUSED as no longer t
 check('T3 the duty stayed with the person it was moved to, and the request still waits', $t['kept'], $t['detail']);
 
 // =============================================================================
+section('U  two members take one open request at the same moment');
+// =============================================================================
+$u = $scnTwoTakers();
+check('U1 (the premise) the first taker was inside its write, and the second was WAITING for it — both asked of the database', $u['premise'], $u['detail']);
+check('U2 exactly one of them got the duty; the other was refused', $u['oneWins'], $u['detail']);
+check('U3 the duty is with the one who got it, and the request is marked accepted', $u['firstWon'], $u['detail']);
+
+// =============================================================================
+section('V  the answer is all or nothing');
+// =============================================================================
+$v = $scnAllOrNothing();
+check('V1 when the second write fails, the duty\'s move is UNDONE and the request still waits', $v['undone'], $v['detail']);
+check('V2 …and the member is told it could not be answered, not that it worked', $v['said'], $v['detail']);
+
+// =============================================================================
 section('P  the plants: each fault must turn its check red');
 // =============================================================================
-$classFile = $copyCore . 'RotaSwaps.php';
-$original  = (string) file_get_contents($classFile);
-$plants = [
-    'P1 the lock removed (no FOR UPDATE)' => [
+// Each plant names the file in the COPY of web/ it edits, the exact text it
+// replaces (each piece must be found exactly once, or the plant is reported
+// as not applied rather than silently doing nothing), and the scenario that
+// must go red while it is in place and green again once it is taken out.
+$copyWeb = $child . $sep . 'web' . $sep;
+$plants  = [
+    'P1 the lock removed (no FOR UPDATE)' => ['_core/RotaSwaps.php',
         ["                . 'FOR UPDATE'\n", "                . ''\n"],
         static fn (): bool => ($r = $scnLock())['refused'] && $r['kept'],
     ],
-    'P2 the "only the person asked" gate removed' => [
+    'P2 the "only the person asked" gate removed' => ['_core/RotaSwaps.php',
         ['if ($target !== null && $target !== $userId) {', 'if (false) {'],
-        static fn (): bool => ($r = $scnThirdPerson())['thirdAccept'],
+        static fn (): bool => $scnThirdPerson()['thirdAccept'],
     ],
-    'P3 the notification switch ignored' => [
+    'P3 the notification switch ignored' => ['_core/RotaSwaps.php',
         ['WebPush::notifyPrefAllows($prefs, self::PREF_KEY) === false', 'false'],
         static fn (): bool => $scnSwitchedOff()['notTold'],
     ],
-    'P4 the suspended / removed check removed' => [
+    'P4 the suspended / removed check removed' => ['_core/RotaSwaps.php',
         ["if ((int) (\$person['isActive'] ?? 0) !== 1) {", 'if (false) {', 'Site::isOwnOrganisation($userId, $siteId, $db) === false', 'false'],
         static fn (): bool => $scnGoneAsker('suspended')['notSent'] && $scnGoneAsker('removed')['notSent'],
     ],
-    'P5 the "still waiting?" test removed' => [
+    'P5 the "still waiting?" test removed' => ['_core/RotaSwaps.php',
         ["if (\$facts['status'] !== 'pending') {", 'if (false) {'],
         static fn (): bool => ($r = $scnAcceptOnce())['secondRefused'] && $r['notToldTwice'],
     ],
-    'P6 the "duty changed hands" test removed' => [
+    'P6 the "duty changed hands" test removed' => ['_core/RotaSwaps.php',
         ["if (\$facts['assignedToID'] === null || \$facts['assignedToID'] !== \$asker) {", 'if (false) {'],
         static fn (): bool => $scnChangedHands()['refused'],
     ],
+    'P7 the transaction removed (each statement commits on its own)' => ['_core/RotaSwaps.php',
+        ['$began = $db->begin_transaction();', '$began = true;'],
+        static fn (): bool => $scnAllOrNothing()['undone'],
+    ],
+    'P8 the form-token check on the asking page removed' => ['_apps/rota/swap.php',
+        ["if (Auth::verifyCsrf(\$_POST['csrf_token'] ?? '') === false) {", 'if (false) {'],
+        static fn (): bool => $scnTokens()['askRefused'],
+    ],
+    'P9 the form-token check on the answering page removed' => ['_apps/rota/swap-respond.php',
+        ["if (Auth::verifyCsrf(\$_POST['csrf_token'] ?? '') === false) {", 'if (false) {'],
+        static fn (): bool => $scnTokens()['answerRefused'],
+    ],
+    'P10 the organisation removed from the locked read' => ['_core/RotaSwaps.php',
+        ["                . 'WHERE `w`.`swapID` = ? AND `s`.`siteID` = ? '\n                . 'FOR UPDATE'", "                . 'WHERE `w`.`swapID` = ? AND ? > 0 '\n                . 'FOR UPDATE'"],
+        static fn (): bool => ($r = $scnOtherOrganisation())['sameAnswer'] && $r['unchanged'],
+    ],
+    'P11 the "date has passed" refusal removed from the rule' => ['_core/RotaSwaps.php',
+        ["if (strcmp(\$facts['slotDate'], \$today) < 0) {", 'if (false) {'],
+        static fn (): bool => $scnPast()['acceptRefused'],
+    ],
+    'P12 the "date has passed" refusal removed from the asking page' => ['_apps/rota/swap.php',
+        ["if (strcmp((string) \$slot['slotDate'], RotaSwaps::today(\$siteId)) < 0) {", 'if (false) {'],
+        static fn (): bool => $scnPast()['askRefused'],
+    ],
+    'P13 the e-mail no longer marked as plain text (bodyIsText)' => ['_core/RotaSwaps.php',
+        ["\$options = ['siteId' => \$siteId, 'bodyIsText' => true];", "\$options = ['siteId' => \$siteId];"],
+        static fn (): bool => $scnMailContent()['asText'],
+    ],
+    'P14 the use-by moment no longer passed' => ['_core/RotaSwaps.php',
+        ["\$options['expiresAt'] = \$useBy;", '$ignored = $useBy;'],
+        static fn (): bool => $scnMailContent()['useBy'],
+    ],
+    'P15 the "usable address" check removed' => ['_core/RotaSwaps.php',
+        ["if (filter_var((string) (\$person['emailAddress'] ?? ''), FILTER_VALIDATE_EMAIL) === false) {", 'if (false) {'],
+        static fn (): bool => $scnNoAddress()['notSent'],
+    ],
+    'P16 the page no longer asks the rule before drawing Accept' => ['_apps/rota/index.php',
+        ['$acceptWhy  = $whyNot($w, RotaSwaps::ACCEPT);', "\$acceptWhy  = '';"],
+        static fn (): bool => $scnPageAsks()['noAccept'],
+    ],
+    'P17 "where the duty is now" no longer asks who holds it' => ['_core/RotaSwaps.php',
+        ['if ($holderId !== null && $askerId !== null && $holderId === $askerId) {', 'if (true) {'],
+        static fn (): bool => $scnWhereNow()['true'] && $scnMailContent()['whereNow'],
+    ],
+    'P18 the "open requests switched off" refusal removed' => ['_core/RotaSwaps.php',
+        ['if ($target === null && $openAllowed === false) {', 'if (false) {'],
+        static fn (): bool => ($r = $scnOpenSwitchedOff())['notOffered'] && $r['refused'],
+    ],
+    'P19 the open-request e-mail no longer asks who may be told (D-141)' => ['_core/RotaSwaps.php',
+        ["if (\$who === null || self::whyNotTold(\$db, \$siteId, \$id, \$who) !== '') {", 'if ($who === null) {'],
+        static fn (): bool => ($r = $scnOpenMail())['switchOff'] && $r['suspended'] && $r['noAddress'],
+    ],
 ];
-foreach ($plants as $name => [$edits, $guard]) {
-    $planted = $original;
-    $applied = true;
+foreach ($plants as $name => [$file, $edits, $guard]) {
+    $path     = $copyWeb . str_replace('/', $sep, $file);
+    $original = (string) file_get_contents($path);
+    $planted  = $original;
+    $applied  = true;
     for ($i = 0; $i < count($edits); $i += 2) {
         if (substr_count($planted, $edits[$i]) !== 1) {
             $applied = false;
@@ -938,13 +1520,23 @@ foreach ($plants as $name => [$edits, $guard]) {
     if ($applied === false) {
         continue;
     }
-    file_put_contents($classFile, $planted);
-    $greenWhilePlanted = $guard();
-    file_put_contents($classFile, $original);
+    file_put_contents($path, $planted);
+    try {
+        $greenWhilePlanted = $guard();
+    } finally {
+        file_put_contents($path, $original);
+    }
     check($name . ' — CAUGHT: its check goes red', $greenWhilePlanted === false);
     check($name . ' — and green again once put back', $guard() === true);
 }
-check('P7 the copy of the class is byte-for-byte what the repository holds after every plant', (string) file_get_contents($classFile) === (string) file_get_contents($repo . $sep . 'web' . $sep . '_core' . $sep . 'RotaSwaps.php'));
+$untouched = true;
+foreach (['_core/RotaSwaps.php', '_apps/rota/swap.php', '_apps/rota/swap-respond.php', '_apps/rota/index.php'] as $file) {
+    $rel = str_replace('/', $sep, $file);
+    if ((string) file_get_contents($copyWeb . $rel) !== (string) file_get_contents($repo . $sep . 'web' . $sep . $rel)) {
+        $untouched = false;
+    }
+}
+check('P20 every planted file in the copy is byte-for-byte what the repository holds afterwards', $untouched);
 
 // ── Nothing went to the error log the test did not expect ──────────────────
 $errors = is_file($child . $sep . 'php-errors.log') === true ? trim((string) file_get_contents($child . $sep . 'php-errors.log')) : '';

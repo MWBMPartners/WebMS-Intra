@@ -80,6 +80,18 @@ if ($stmt !== false) {
 //    buttons below are drawn from the same lists `respond()` judges, and
 //    `respond()` asks again under a lock, so a stale page cannot do harm.
 $swaps = RotaSwaps::forPage($db, $siteId, $userId);
+$swapToday   = RotaSwaps::today($siteId);
+$openAllowed = (string) (App::settings()['rota']['allow_open_swap'] ?? '1') === '1';
+
+/**
+ * Why `$action` would be refused for this row, or '' — asked of the SAME rule
+ * `respond()` asks under its lock, so the page never offers a button the
+ * handler would refuse on the facts the page was drawn from. (The facts can
+ * still change before the button is pressed; the locked answer counts.)
+ */
+$whyNot = static function (array $w, string $action) use ($userId, $swapToday, $openAllowed): string {
+    return RotaSwaps::whyNotAllowed(RotaSwaps::factsFrom($w), $userId, $action, $swapToday, $openAllowed);
+};
 
 // The answer to the last thing this person did here (set by swap.php and
 // swap-respond.php, which redirect back to this page).
@@ -141,14 +153,27 @@ $respondUrl = Site::url('rota/swap-respond');
                         <?php endif; ?>
                     </div>
                     <div class="col-md-7">
+                        <?php
+                        $acceptWhy  = $whyNot($w, RotaSwaps::ACCEPT);
+                        $declineWhy = $whyNot($w, RotaSwaps::DECLINE);
+                        ?>
+                        <?php if ($acceptWhy !== ''): ?>
+                            <div class="small text-muted mb-1" data-swap-cannot-accept><?php echo htmlspecialchars(RotaSwaps::refusalWords($acceptWhy), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endif; ?>
+                        <?php if ($acceptWhy === '' || $declineWhy === ''): ?>
                         <form method="post" action="<?php echo htmlspecialchars($respondUrl, ENT_QUOTES, 'UTF-8'); ?>" class="d-flex flex-wrap gap-2 align-items-center">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="swapID" value="<?php echo (int) $w['swapID']; ?>">
                             <label class="visually-hidden" for="swap-reply-<?php echo (int) $w['swapID']; ?>">Reply (optional)</label>
                             <input type="text" name="responseMessage" id="swap-reply-<?php echo (int) $w['swapID']; ?>" class="form-control form-control-sm w-auto flex-grow-1" maxlength="500" placeholder="Reply (optional)">
-                            <button type="submit" name="action" value="accept" class="btn btn-sm btn-success">Accept</button>
-                            <button type="submit" name="action" value="decline" class="btn btn-sm btn-outline-secondary">Decline</button>
+                            <?php if ($acceptWhy === ''): ?>
+                                <button type="submit" name="action" value="accept" class="btn btn-sm btn-success">Accept</button>
+                            <?php endif; ?>
+                            <?php if ($declineWhy === ''): ?>
+                                <button type="submit" name="action" value="decline" class="btn btn-sm btn-outline-secondary">Decline</button>
+                            <?php endif; ?>
                         </form>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>
@@ -162,11 +187,16 @@ $respondUrl = Site::url('rota/swap-respond');
                         <?php endif; ?>
                     </div>
                     <div class="col-md-7">
+                        <?php $takeWhy = $whyNot($w, RotaSwaps::ACCEPT); ?>
+                        <?php if ($takeWhy !== ''): ?>
+                            <div class="small text-muted" data-swap-cannot-accept><?php echo htmlspecialchars(RotaSwaps::refusalWords($takeWhy), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php else: ?>
                         <form method="post" action="<?php echo htmlspecialchars($respondUrl, ENT_QUOTES, 'UTF-8'); ?>" class="d-flex flex-wrap gap-2 align-items-center">
                             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf, ENT_QUOTES, 'UTF-8'); ?>">
                             <input type="hidden" name="swapID" value="<?php echo (int) $w['swapID']; ?>">
                             <button type="submit" name="action" value="accept" class="btn btn-sm btn-success">Take this duty</button>
                         </form>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endforeach; ?>
@@ -182,21 +212,28 @@ $respondUrl = Site::url('rota/swap-respond');
         <div class="portal-data-list">
             <?php foreach ($swaps['mine'] as $w): ?>
                 <?php
-                // 🗣️ What happened, in words. For an accepted request the
-                //    duty's CURRENT holder is named, which is the true answer
-                //    to "who has it now" even if an administrator has moved it
-                //    again since; an open request records nobody else.
-                $status = (string) $w['status'];
+                // 🗣️ What happened, in words, and where the duty is NOW. The
+                //    second half is `RotaSwaps::whereDutyIsNow()`, built from
+                //    the duty's CURRENT holder — the same sentence the e-mail
+                //    uses. It used to say "the duty is still yours" after every
+                //    decline, which was untrue once an administrator had moved
+                //    the duty while the request waited.
+                $status   = (string) $w['status'];
+                $nowWords = RotaSwaps::whereDutyIsNow(
+                    $w['assignedToID'] === null ? null : (int) $w['assignedToID'],
+                    trim((string) ($w['holderName'] ?? '')),
+                    $userId
+                );
                 if ($status === 'pending') {
                     $statusWords = $w['targetUserID'] === null
                         ? 'Waiting — open to anyone'
                         : 'Waiting for ' . (string) ($w['targetName'] ?? 'the member you asked') . ' to answer';
                 } elseif ($status === 'accepted') {
-                    $statusWords = 'Accepted — the duty is now with ' . (string) ($w['holderName'] ?? 'somebody else');
+                    $statusWords = 'Accepted. ' . $nowWords;
                 } elseif ($status === 'declined') {
-                    $statusWords = 'Declined by ' . (string) ($w['targetName'] ?? 'the member you asked') . ' — the duty is still yours';
+                    $statusWords = 'Declined by ' . (string) ($w['targetName'] ?? 'the member you asked') . '. ' . $nowWords;
                 } else {
-                    $statusWords = 'Withdrawn or no longer needed';
+                    $statusWords = 'Withdrawn or no longer needed. ' . $nowWords;
                 }
                 ?>
                 <div class="row py-2 align-items-center border-bottom" data-swap-mine="<?php echo (int) $w['swapID']; ?>" data-swap-status="<?php echo htmlspecialchars($status, ENT_QUOTES, 'UTF-8'); ?>">

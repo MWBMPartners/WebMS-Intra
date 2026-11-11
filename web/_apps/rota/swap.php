@@ -21,7 +21,9 @@
  *     at somebody in another organisation;
  *   - refuses a duty whose date has already passed;
  *   - tells the person asked by e-mail, through their notification
- *     preferences (`RotaSwaps::tellAsked()`);
+ *     preferences (`RotaSwaps::tellAsked()`) — or, for an OPEN request, every
+ *     active member with the switch on (the owner, 11 November 2026 — D-141).
+ *     The e-mails go after the request is saved, outside any transaction;
  *   - answers a successful post with a REDIRECT, so pressing Refresh cannot
  *     send the same request (and the same e-mail) twice.
  *
@@ -121,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 RotaSwaps::tellAsked($db, $siteId, $swapId);
                 $_SESSION['rota_flash'] = $targetUserID > 0
                     ? 'Swap request sent. It is waiting on their Duty Roster page for them to accept or decline. The duty stays yours until they accept.'
-                    : 'Open swap request posted. Any member can accept it from the Duty Roster page; nobody is sent an e-mail about an open request. The duty stays yours until somebody accepts.';
+                    : 'Open swap request posted. Every member who has rota swap e-mails switched on is sent an e-mail about it, and any member can take it from their Duty Roster page. The duty stays yours until somebody takes it.';
                 $_SESSION['rota_flash_type'] = 'success';
                 header('Location: ' . Site::url('rota'));
                 exit();
