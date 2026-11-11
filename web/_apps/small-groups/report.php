@@ -74,12 +74,20 @@ if ($groupId > 0 && $group === null) {
     return;
 }
 
+// 📅 A day that is not REAL falls back to the default, like an empty one
+//    (#891, #892). The shape test alone let '2026-02-31' through to
+//    SmallGroups::attendanceStats(), whose `meetingDate BETWEEN ? AND ?`
+//    answers such a day differently on MySQL 8.0/8.4 (no meetings) and on 9.7
+//    and MariaDB (some), measured. checkdate() decides it; export.php does the
+//    same, so the CSV link below always carries a range this page used.
+$realDay = static fn (string $d): bool => preg_match('/\A(\d{4})-(\d{2})-(\d{2})\z/', $d, $p) === 1
+    && checkdate((int) $p[2], (int) $p[3], (int) $p[1]) === true;
 $from = trim((string) ($_GET['from'] ?? ''));
 $to   = trim((string) ($_GET['to'] ?? ''));
-if ($from === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/', $from) !== 1) {
+if ($realDay($from) === false) {
     $from = date('Y-m-d', strtotime('-12 weeks'));
 }
-if ($to === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/', $to) !== 1) {
+if ($realDay($to) === false) {
     $to = date('Y-m-d');
 }
 

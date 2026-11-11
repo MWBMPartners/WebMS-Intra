@@ -235,10 +235,15 @@ class Giving
     {
         // 🛡️ Reject anything that isn't a real, ordered date range before
         // it touches SQL or a filename — statementPeriodKey() below trusts
-        // its callers to have already done this.
+        // its callers to have already done this. isRealDay() first:
+        // strtotime() alone accepted '2026-02-31' (#891, #892), and the gifts
+        // below are read with BETWEEN, which answers differently for such a
+        // day on different database engines -- see isRealDay().
         $fromTs = strtotime($fromDate);
         $toTs   = strtotime($toDate);
-        if ($fromTs === false || $toTs === false || $fromTs > $toTs) {
+        if (self::isRealDay($fromDate) === false || self::isRealDay($toDate) === false
+            || $fromTs === false || $toTs === false || $fromTs > $toTs
+        ) {
             return false;
         }
 
@@ -422,6 +427,37 @@ class Giving
             }
             throw $e;
         }
+    }
+
+    /**
+     * 📅 Is this a REAL day, written `YYYY-MM-DD` and nothing else (#891, #892)?
+     *
+     * THE ONE TEST the giving pages use on a date a person typed or put in an
+     * address, before it reaches a query. It exists because every giving range
+     * ends up in `donatedAt BETWEEN ? AND ?`, and BETWEEN does NOT treat a day
+     * that does not exist the same way on every engine. Measured with the
+     * portal's own strict mode, gifts on 15 Feb, 2 Mar, 10 Mar and 1 Jun 2026:
+     *
+     *   range                               MySQL 8.0/8.4   MySQL 9.7, MariaDB 11.4
+     *   '2026-02-31' .. '2026-12-31'        0 rows          3 rows
+     *   '2026-01-01' .. '2026-02-31'        0 rows          1 row
+     *   ''           .. '2026-12-31'        0 rows          4 rows
+     *
+     * So the same address gave an empty Gift Aid file on one server and a full
+     * one on another. (Plain `<`, `<=`, `>`, `>=` and `=` agree on all four;
+     * it is BETWEEN, and a comparison whose column side is an expression, that
+     * split.) The pages used to check with strtotime(), or not at all, and
+     * strtotime() ACCEPTS '2026-02-31' (it rolls it to 3 March), so it was
+     * never a test of whether a day exists.
+     *
+     * `\A…\z`, not `^…$`: `$` lets a trailing newline through. Anything that is
+     * not a string (an address can send `from[]=…`) is not a day.
+     */
+    public static function isRealDay(mixed $value): bool
+    {
+        return is_string($value) === true
+            && preg_match('/\A(\d{4})-(\d{2})-(\d{2})\z/', $value, $part) === 1
+            && checkdate((int) $part[2], (int) $part[3], (int) $part[1]) === true;
     }
 
     /**

@@ -6078,8 +6078,19 @@ class GdprEraser
         }
         $prefix = 'statement-' . $donorId . '-';
         $period = substr($fileName, strlen($prefix), -4);
+        // A period whose days do not EXIST gives no period either (#891,
+        // #892). Its two ends are handed to `donatedAt BETWEEN ? AND ?` below,
+        // and BETWEEN answers an impossible day differently by engine: none of
+        // the donor's gifts on MySQL 8.0/8.4, so the file was DELETED; some on
+        // MySQL 9.7 and MariaDB, so it could be KEPT (measured). One file, two
+        // outcomes, decided by the server. It now takes the same answer as a
+        // name with no period at all -- kept, because keeping is the mistake
+        // that can be put right. (Giving::renderStatementPdf() refuses such a
+        // range since this change, so only a file written before it can
+        // carry one.)
         if (str_starts_with($fileName, $prefix) === false
             || preg_match('/^(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})$/', $period, $m) !== 1
+            || Giving::isRealDay($m[1]) === false || Giving::isRealDay($m[2]) === false
         ) {
             // The name does not give a period, so it cannot be matched to a
             // statement record. Kept: see eraseGivingStatementFiles().

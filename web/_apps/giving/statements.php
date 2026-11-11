@@ -47,9 +47,15 @@ $currency = (string) ($settings['currency'] ?? 'GBP');
 // there is no server-side tax-year logic anywhere in this codebase to
 // reuse, so the preset is deliberately just a form-filler (see the plan).
 $defaultYear = (int) date('Y') - 1;
-$from = (string) ($_GET['from'] ?? ($defaultYear . '-01-01'));
-$to   = (string) ($_GET['to']   ?? ($defaultYear . '-12-31'));
-if (strtotime($from) === false || strtotime($to) === false || strtotime($from) > strtotime($to)) {
+// A range this page cannot use falls back to the default year, as it always
+// has. Giving::isRealDay() is asked first (#891, #892): strtotime() accepts
+// '2026-02-31', and the preview below reads gifts with BETWEEN, which answers
+// such a day differently on MySQL 8.0/8.4 and on 9.7 and MariaDB (measured).
+$from = $_GET['from'] ?? ($defaultYear . '-01-01');
+$to   = $_GET['to']   ?? ($defaultYear . '-12-31');
+if (Giving::isRealDay($from) === false || Giving::isRealDay($to) === false
+    || strtotime($from) === false || strtotime($to) === false || strtotime($from) > strtotime($to)
+) {
     $from = $defaultYear . '-01-01';
     $to   = $defaultYear . '-12-31';
 }

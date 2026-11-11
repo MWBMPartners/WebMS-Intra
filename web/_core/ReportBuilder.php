@@ -784,10 +784,27 @@ final class ReportBuilder
             return [$s, 's'];
         }
         if ($type === 'datetime') {
-            $s = (string) $raw;
-            $dt = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $s);
-            if ($dt === false) {
-                $dt = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $s);
+            // 📅 A date-and-time that does not EXIST is refused (#951, #891,
+            //    #892). createFromFormat() alone accepted '2027-02-31 10:00:00'
+            //    by rolling it into 3 March, and the IMPOSSIBLE text was then
+            //    bound into the filter -- where `col BETWEEN ? AND ?` answers it
+            //    differently on MySQL 8.0/8.4 (no rows) and on 9.7 and MariaDB
+            //    (rows), measured. So the parse must give back EXACTLY what was
+            //    written, the same round-trip test AssetRegister's
+            //    parseOptionalDateTime() uses; a rolled date, or 25:00, comes
+            //    back different and is refused with this method's own message.
+            //    Read in UTC ON PURPOSE: UTC has no clock changes. In PHP's
+            //    default zone a real reading in the hour the clocks skip
+            //    (01:30 on the spring morning in London) would come back as
+            //    02:30 and be refused as if it did not exist (#777).
+            $s   = (string) $raw;
+            $utc = new \DateTimeZone('UTC');
+            $dt  = \DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $s, $utc);
+            if ($dt === false || $dt->format('Y-m-d H:i:s') !== $s) {
+                $dt = \DateTimeImmutable::createFromFormat('!Y-m-d H:i', $s, $utc);
+                if ($dt !== false && $dt->format('Y-m-d H:i') !== $s) {
+                    $dt = false;
+                }
             }
             if ($dt === false) {
                 throw new \InvalidArgumentException('Expected a date/time (YYYY-MM-DD HH:MM[:SS]).');

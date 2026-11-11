@@ -51,8 +51,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || Auth::verifyCsrf($_POST['csrf_token
 $siteId = Site::id();
 $userId = (int) ($_SESSION['user_id'] ?? 0);
 
-$from = (string) ($_POST['from'] ?? '');
-$to   = (string) ($_POST['to']   ?? '');
+// Giving::isRealDay() first (#891, #892): strtotime() alone accepted
+// '2026-02-31', and everything below reads gifts with BETWEEN, which answers
+// such a day differently on MySQL 8.0/8.4 (no donors) and on 9.7 and MariaDB
+// (donors, then a statement-log row the DATE column refuses), measured.
+$realDays = Giving::isRealDay($_POST['from'] ?? null) && Giving::isRealDay($_POST['to'] ?? null);
+$from = $realDays === true ? (string) $_POST['from'] : '';
+$to   = $realDays === true ? (string) $_POST['to'] : '';
 $fromTs = strtotime($from);
 $toTs   = strtotime($to);
 // 🛡️ Real, ordered, sane-sized (≤ 5 years) range only — mirrors the sanity

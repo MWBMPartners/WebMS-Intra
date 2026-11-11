@@ -262,5 +262,47 @@ $reCheck('grouped tasks definition with IN + BETWEEN filters', [
     'sort' => ['col' => 'count_dueDate', 'dir' => 'desc'],
 ], 7);
 
+echo "\n=== PART Z — a date that does not EXIST is refused, never rolled (#951, #891, #892) ===\n";
+// Why it matters: the filter value is bound AS TYPED, and `col BETWEEN ? AND ?`
+// answers an impossible day differently by engine -- no rows on MySQL 8.0/8.4,
+// rows on MySQL 9.7 and MariaDB 11.4 (measured). The `date` type always used
+// checkdate(); the `datetime` type used createFromFormat(), which ROLLS
+// '2027-02-31 10:00:00' into 3 March and said yes. These go red if the
+// round-trip test in ReportBuilder::coerceValue() is taken out.
+$tasksWith = static fn (array $row): array => [
+    'v' => 1, 'source' => 'tasks', 'columns' => ['priority'],
+    'filters' => ['conjunction' => 'AND', 'rows' => [$row]],
+];
+foreach ([
+    ['completedAt', 'between', ['2027-02-31 10:00:00', '2027-12-31 23:59:59'], '31 February, start of a datetime range'],
+    ['completedAt', 'between', ['2027-01-01 00:00:00', '2027-04-31 10:00'], '31 April, end of a datetime range (minutes only)'],
+    ['completedAt', 'gte', ['2027-00-10 10:00:00'], 'month 00 on a datetime'],
+    ['completedAt', 'lt', ['2027-03-01 25:00:00'], 'hour 25 on a datetime'],
+    ['dueDate', 'between', ['2027-02-29', '2027-12-31'], '29 February in a year that has none, on a date'],
+] as [$col, $op, $vals, $what]) {
+    expectThrows('Z: ' . $what . ' is refused', static function () use ($tasksWith, $col, $op, $vals): void {
+        ReportBuilder::compile($tasksWith(['col' => $col, 'op' => $op, 'vals' => $vals]), 1);
+    });
+}
+// ...and the over-reach direction: real values still compile, INCLUDING a
+// reading in the hour London's clocks skip. The check is made in UTC so that
+// reading is not mistaken for an impossible one; PHP's own zone is set to
+// London for this case on purpose, and put back afterwards.
+$zoneWas = date_default_timezone_get();
+date_default_timezone_set('Europe/London');
+foreach ([
+    [['2028-02-29 10:00:00', '2028-03-26 01:30:00'], 'a leap day, and 01:30 on the morning London skips it'],
+    [['2027-01-01 00:00', '2027-12-31 23:59'], 'minutes-only values'],
+] as [$vals, $what]) {
+    $compiled = null;
+    try {
+        $compiled = ReportBuilder::compile($tasksWith(['col' => 'completedAt', 'op' => 'between', 'vals' => $vals]), 1);
+    } catch (\Throwable $e) {
+        $compiled = null;
+    }
+    assertTrue('Z: real values still compile -- ' . $what, $compiled !== null && in_array($vals[1], $compiled['params'], true) === true);
+}
+date_default_timezone_set($zoneWas);
+
 echo "\n" . ($failures === 0 ? "ALL PASS ({$failures} failures)\n" : "{$failures} FAILURE(S)\n");
 exit($failures === 0 ? 0 : 1);

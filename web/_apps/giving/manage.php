@@ -27,8 +27,22 @@ $siteId   = Site::id();
 $settings = App::settings()['giving'] ?? [];
 $currency = (string) ($settings['currency'] ?? 'GBP');
 
-$from = (string) ($_GET['from'] ?? date('Y-01-01'));
-$to   = (string) ($_GET['to']   ?? date('Y-m-d'));
+// 📅 THE RANGE IS CHECKED BEFORE ANY QUERY (#891, #892) -- the same rule,
+//    for the same reason, as giving/reports.php: both ends go into
+//    `donatedAt BETWEEN ? AND ?`, which answers a day that does not exist
+//    differently on MySQL 8.0/8.4 (no gifts) and on 9.7 and MariaDB (some),
+//    measured. An emptied box counts as not chosen; anything else must be a
+//    real day (Giving::isRealDay()) or the page refuses with 400 and runs no
+//    query. (The HMRC link below carries these same two values, so it can
+//    only ever be handed a range this page accepted.)
+$from = $_GET['from'] ?? '';
+$to   = $_GET['to']   ?? '';
+$from = $from === '' ? date('Y-01-01') : $from;
+$to   = $to === '' ? date('Y-m-d') : $to;
+if (Giving::isRealDay($from) === false || Giving::isRealDay($to) === false) {
+    Router::renderError(400);
+    return;
+}
 $catId = (int)    ($_GET['cat']  ?? 0);
 $donorQ = trim((string) ($_GET['donor'] ?? ''));
 

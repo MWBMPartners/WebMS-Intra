@@ -88,7 +88,7 @@
 declare(strict_types=1);
 
 /** How many checks a full run makes. A different number means a block was skipped or ran twice. */
-const EXPECTED = 88;
+const EXPECTED = 102; // 88, then 14 in part G (#891, #892)
 
 /** Every row this test inserts has this number, or the next ones. */
 const BASE   = 925001;
@@ -290,7 +290,7 @@ const WORLD = [
     ['tblSmallGroupMembers', 'membershipID'], ['tblSmallGroups', 'groupID'], ['tblFormFields', 'fieldID'], ['tblForms', 'formID'],
     ['tblVenueRooms', 'roomID'], ['tblVenues', 'venueID'], ['tblServicePlanItems', 'itemID'], ['tblServicePlans', 'planID'],
     ['tblServicePlan', 'planID'], ['tblLivestreamSchedule', 'scheduleID'], ['tblLivestreamChannel', 'channelID'],
-    ['tblGivingCategory', 'categoryID'], ['tblPathways', 'pathwayID'], ['tblEvents', 'eventID'], ['tblEventSeries', 'seriesID'],
+    ['tblGivingEntry', 'entryID'], ['tblGivingCategory', 'categoryID'], ['tblPathways', 'pathwayID'], ['tblEvents', 'eventID'], ['tblEventSeries', 'seriesID'],
     ['tblLocalAccounts', 'userID'], ['tblUserSites', 'userID'], ['tblUsers', 'userID'],
 ];
 
@@ -595,6 +595,14 @@ q("INSERT INTO tblVenues (venueID, siteID, venueName, countryCode, timezone, isA
 q('INSERT INTO tblVenueRooms (roomID, siteID, venueID, roomName, isActive) VALUES (?, ?, ?, ?, 1)', 'iiis', [$n, $site, $n, 'Page Scripts Selftest Room']);
 q('INSERT INTO tblPathways (pathwayID, siteID, name, isActive) VALUES (?, ?, ?, 1)', 'iis', [$n, $site, 'Page Scripts Selftest Pathway']);
 q('INSERT INTO tblGivingCategory (categoryID, siteID, name, isActive) VALUES (?, ?, ?, 1)', 'iis', [$n, $site, 'Page Scripts Selftest Fund']);
+// Part G's gifts (#891, #892): four, in a year two before this one, so no page's DEFAULT range ever reaches them
+// and only a range somebody asked for can. 15 February, 2 March, 10 March and 1 June -- the same four days the
+// engines were measured on, so "31 February as one end" would include some of them on MySQL 9.7 and MariaDB.
+$giftYear = (int) $now->format('Y') - 2;
+foreach (['-02-15', '-03-02', '-03-10', '-06-01'] as $g => $day) {
+    q('INSERT INTO `tblGivingEntry` (`entryID`, `siteID`, `donorName`, `categoryID`, `amountPence`, `donatedAt`, `method`) VALUES (?, ?, ?, ?, 1000, ?, \'cash\')',
+        'iisis', [$n + $g, $site, 'Page Scripts Selftest Giver', $n, $giftYear . $day]);
+}
 q('INSERT INTO tblLivestreamChannel (channelID, siteID, name, platform, channelOrVideoId) VALUES (?, ?, ?, \'youtube\', \'selftestvideo\')', 'iis', [$n, $site, 'Page Scripts Selftest Channel']);
 q('INSERT INTO tblLivestreamSchedule (scheduleID, channelID, dayOfWeek, startTime, endTime, timezone, isActive) VALUES (?, ?, ?, \'10:00:00\', \'12:00:00\', ?, 1)', 'iiis', [$n, $n, $tomorrow, $zone]);
 
@@ -901,6 +909,77 @@ foreach ($plants as [$label, $path, $find, $put, $address, $words]) {
         $answer['status'] === 200 && $planted['rule'] === 'standard' && $caught === true && $back['status'] === 200 && $clean['wrong'] === [] && $clean['marked'] >= 2,
         'planted: HTTP ' . $answer['status'] . ', ' . faults($planted) . ' | taken out: HTTP ' . $back['status'] . ', ' . faults($clean));
 }
+
+// =============================================================================
+// G. A DATE RANGE NAMING A DAY THAT DOES NOT EXIST IS REFUSED (#891, #892)
+// =============================================================================
+// Why here: this is the test that signs an administrator in and drives the real
+// giving, small-group and venue pages, and nothing else drove these at all. The
+// fault: each page bound the dates as typed into `BETWEEN ? AND ?` (or
+// DATE_SUB/DATE_ADD), and BETWEEN answers 31 February differently by engine --
+// no gifts on MySQL 8.0/8.4, some on MySQL 9.7 and MariaDB 11.4 (measured). So
+// each must REFUSE such a day in PHP, by the page's own way (a 400, or falling
+// back to its default range), and not hand it to a query (read in the pages:
+// the check comes before the first statement). Each refusal check goes
+// red with its page's check taken out, on every engine, because a 200 (or the
+// impossible text drawn back into the box) is what the old code gave.
+head('G. A date range that names a day that does not exist is refused, never handed to the database');
+$jar  = signIn('admin');
+$bad  = $giftYear . '-02-31';
+$real = static fn (string $md): string => $giftYear . $md;
+$answer = req($jar, 'GET', '/giving/reports?from=' . $bad . '&to=' . $real('-12-31'));
+ok('G01 /giving/reports refuses a FROM of 31 February with 400', $answer['status'] === 400, 'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/giving/reports?from=' . $real('-01-01') . '&to=' . $bad);
+ok('G02 /giving/reports refuses a TO of 31 February with 400', $answer['status'] === 400, 'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/giving/manage?from=' . $bad . '&to=' . $real('-12-31'));
+ok('G03 /giving/manage refuses a FROM of 31 February with 400', $answer['status'] === 400, 'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/giving/hmrc-export?from=' . $bad . '&to=' . $real('-12-31'));
+ok('G04 /giving/hmrc-export (the Gift Aid file) refuses a FROM of 31 February with its own 400 "Bad date range"',
+    $answer['status'] === 400 && str_contains($answer['body'], 'Bad date range') === true, 'HTTP ' . $answer['status'] . ', ' . substr($answer['body'], 0, 80));
+$answer = req($jar, 'GET', '/giving/hmrc-export?from=' . $real('-01-01') . '&to=' . $giftYear . '-00-10');
+ok('G05 ...and a TO of month 00, which MySQL 8.0 and 8.4 read as a real December day (measured)', $answer['status'] === 400, 'HTTP ' . $answer['status']);
+// The over-reach direction: a real range still works, and shows the gifts it should.
+$answer = req($jar, 'GET', '/giving/manage?from=' . $real('-01-01') . '&to=' . $real('-12-31'));
+ok('G06 control: /giving/manage with a REAL range answers 200 and lists the made-up gifts', $answer['status'] === 200 && str_contains($answer['body'], 'Page Scripts Selftest Giver') === true,
+    'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/giving/hmrc-export?from=' . $real('-01-01') . '&to=' . $real('-12-31'));
+ok('G07 control: the Gift Aid file with a REAL range answers 200 as a CSV', $answer['status'] === 200 && preg_match('#^Content-Type:\s*text/csv#mi', $answer['head']) === 1,
+    'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/giving/reports?from=&to=');
+ok('G08 control: /giving/reports with both boxes EMPTIED (the date picker cleared) answers 200 on its default range, rather than a 400',
+    $answer['status'] === 200, 'HTTP ' . $answer['status']);
+$defaultYear = (int) date('Y') - 1;
+$answer = req($jar, 'GET', '/giving/statements?from=' . $bad . '&to=' . $real('-12-31'));
+ok('G09 /giving/statements falls back to its default year for 31 February, as it always did for a range it cannot use, and never draws the impossible day back',
+    $answer['status'] === 200 && str_contains($answer['body'], 'value="' . $bad . '"') === false && str_contains($answer['body'], 'value="' . $defaultYear . '-01-01"') === true,
+    'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/small-groups/report?id=' . BASE . '&from=' . $bad . '&to=' . $real('-03-31'));
+ok('G10 /small-groups/report puts its default in place of 31 February and keeps the real TO',
+    $answer['status'] === 200 && str_contains($answer['body'], 'value="' . $bad . '"') === false && str_contains($answer['body'], 'value="' . $real('-03-31') . '"') === true,
+    'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/small-groups/export?type=attendance&id=' . BASE . '&from=' . $bad . '&to=' . $real('-03-31'));
+ok('G11 /small-groups/export does the same: the file is named for the range it really used, never 31 February',
+    $answer['status'] === 200 && str_contains($answer['head'], $bad) === false && str_contains($answer['head'], $real('-03-31')) === true,
+    'HTTP ' . $answer['status'] . ', ' . (preg_match('/^Content-Disposition:.*$/mi', $answer['head'], $cd) === 1 ? $cd[0] : 'no Content-Disposition'));
+$answer = req($jar, 'GET', '/venues/booking?venue=' . BASE . '&date=' . $bad);
+ok('G12 /venues/booking ignores a ?date= of 31 February (round 1 of #892): the date box is left empty, never filled with the impossible day',
+    $answer['status'] === 200 && str_contains($answer['body'], 'value="' . $bad . '"') === false && str_contains($answer['body'], 'name="bookingDate" required') === true,
+    'HTTP ' . $answer['status']);
+$answer = req($jar, 'GET', '/venues/booking?venue=' . BASE . '&date=' . $real('-03-02'));
+ok('G13 control: a REAL ?date= is still put in the date box', $answer['status'] === 200 && str_contains($answer['body'], 'value="' . $real('-03-02') . '"') === true, 'HTTP ' . $answer['status']);
+// Generating statements is a POST that WRITES (a statement record per donor, in DATE columns). With 31 February the
+// old gate (strtotime) let it through: on MySQL 8.0/8.4 BETWEEN found no donors and it reported nothing done; on 9.7
+// and MariaDB it found donors and the DATE column then refused the impossible day -- a failure part-way. It must stop
+// at the gate with the page's own "Invalid date range." and write nothing.
+$tok    = token(req($jar, 'GET', '/giving/statements')['body']);
+$before = (int) (one('SELECT COUNT(*) AS n FROM `tblGivingStatementLog` WHERE `siteID` = ?', 'i', [$site])['n'] ?? 0);
+$answer = req($jar, 'POST', '/giving/statements-generate', ['csrf_token' => $tok, 'action' => 'generate', 'from' => $bad, 'to' => $real('-12-31')]);
+$after  = (int) (one('SELECT COUNT(*) AS n FROM `tblGivingStatementLog` WHERE `siteID` = ?', 'i', [$site])['n'] ?? 0);
+$shown  = req($jar, 'GET', '/giving/statements');
+ok('G14 generating statements for a range starting 31 February stops at the gate: sent back with "Invalid date range.", and no statement record written',
+    $answer['status'] === 302 && str_contains($answer['location'], 'giving/statements') === true && $after === $before
+    && str_contains($shown['body'], 'Invalid date range.') === true,
+    'HTTP ' . $answer['status'] . ' ' . $answer['location'] . ', records ' . $before . ' -> ' . $after);
 
 // =============================================================================
 // 🧹 Errors, and the clean-up

@@ -1236,14 +1236,17 @@ at($FRI20);
 //    caught the fault while 3 March 2027 was still AHEAD: from March 2027 it
 //    would have read as "already passed" and been refused for the wrong
 //    reason, and C7 would have gone green on 9.7 with the fault still there.
-//    Each is therefore at least a year ahead of $FRI20, so that if an engine
-//    (or a broken check in Sms::hold()) reads it as a real date, it is a
-//    date still to come, and the text is wrongly KEPT -- which is what turns
-//    C7 red.
+//    Each is written in the year AFTER NEXT (the year of $FRI20, plus two),
+//    so that whatever an engine (or a broken check in Sms::hold()) reads it
+//    as, it is ALWAYS still to come, and the text is wrongly KEPT -- which is
+//    what turns C7 red. The closest of them is month 00, which is read as
+//    10 December of the NEXT year: from a $FRI20 on 31 December that is about 344
+//    days ahead, so "always in the future", but not "at least a year" (a
+//    first version of this comment said that, and it was untrue).
 //      31 February   9.7 rolls it into March; 8.0, 8.4 and MariaDB say NULL
 //      month 00      8.0 and 8.4 answer a NUMBER for it too (measured), so
-//                    this one was never only 9.7's; two years ahead, because
-//                    month 00 of a year reads as December of the year before
+//                    this one was never only 9.7's; read as December of the
+//                    year before the one written
 //      day 00        the same, for the day
 //      hour 25       every engine measured (MySQL 8.0, 8.4, 9.7, MariaDB
 //                    11.4) says NULL for it, so this case CANNOT tell the

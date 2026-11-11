@@ -27,8 +27,26 @@ $siteId   = Site::id();
 $settings = App::settings()['giving'] ?? [];
 $currency = (string) ($settings['currency'] ?? 'GBP');
 
-$from = (string) ($_GET['from'] ?? date('Y-01-01'));
-$to   = (string) ($_GET['to']   ?? date('Y-m-d'));
+// 📅 THE RANGE IS CHECKED BEFORE ANY QUERY (#891, #892). Both ends go into
+//    `donatedAt BETWEEN ? AND ?` below, and until this change they went in
+//    exactly as typed. BETWEEN does not treat a day that does not exist the
+//    same way everywhere: '2026-02-31' as either end gives NO gifts on MySQL
+//    8.0 and 8.4 and SOME on MySQL 9.7 and MariaDB (measured), so one address
+//    showed different totals on different servers.
+//    - An EMPTY box (the date picker cleared) counts as not chosen, exactly as
+//      a missing one does: it used to reach BETWEEN as '' too, which was
+//      "nothing" on one engine and "everything" on another.
+//    - Anything else must be a real day (Giving::isRealDay(), the one test),
+//      or the page refuses with the giving app's own 400 (as reconcile/match
+//      does) and runs no query at all.
+$from = $_GET['from'] ?? '';
+$to   = $_GET['to']   ?? '';
+$from = $from === '' ? date('Y-01-01') : $from;
+$to   = $to === '' ? date('Y-m-d') : $to;
+if (Giving::isRealDay($from) === false || Giving::isRealDay($to) === false) {
+    Router::renderError(400);
+    return;
+}
 
 $byCategory = [];
 $stmt = $db->prepare(

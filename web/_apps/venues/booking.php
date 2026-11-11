@@ -74,11 +74,14 @@ if ($bookingId > 0) {
     // 📅 A day from the address is kept only when it is a REAL day (#891,
     //    #892). It is bound below into DATE_SUB(?, ...) / DATE_ADD(?, ...) to
     //    choose which events the picker offers, and until this change the
-    //    DATABASE was left to make sense of whatever was typed. MySQL 8.0,
-    //    8.4 and MariaDB answer NULL for a day that does not exist, so the
-    //    picker came up empty; MySQL 9.7 does NOT (measured on 9.7.4:
-    //    '2027-02-31 10:00:00' bound into DATE_SUB/DATE_ADD gives 2 and 4
-    //    March), so the same address offered events from another week.
+    //    DATABASE was left to make sense of whatever was typed, and the
+    //    engines do not agree. For 31 February, MySQL 8.0, 8.4 and MariaDB
+    //    answer NULL, so the picker came up empty; MySQL 9.7 does NOT
+    //    (measured on 9.7.4: '2027-02-31 10:00:00' bound into
+    //    DATE_SUB/DATE_ADD gives 2 and 4 March), so the same address offered
+    //    events from another week. And NULL was never the rule for every
+    //    impossible day: MySQL 8.0 and 8.4 read a month or day of 00 as a
+    //    real date too (also measured), as Sms::hold()'s note records.
     //    Nothing was ever STORED wrongly -- the save handler's own column
     //    refuses an impossible date on every engine measured, 9.7 included
     //    -- but which events are offered must not depend on the engine.

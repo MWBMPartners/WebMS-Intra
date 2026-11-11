@@ -2006,7 +2006,13 @@ final class MailRoutes
         }
         $off      = $check['mode'] === self::CHECK_OFF;
         $stored   = self::value('mail.smtp.certCheckOffAt');
-        $isMoment = preg_match('/\A\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\z/', $stored) === 1;
+        // A REAL moment, not just its shape (#951, #891, #892): the stored text
+        // is handed to TIMESTAMPDIFF below, and MySQL 9.7 reads a bound
+        // impossible date as a real one where 8.0, 8.4 and MariaDB say NULL.
+        // Only this portal writes the value (DATE_FORMAT(UTC_TIMESTAMP())), so
+        // only a hand-edited row could differ; checking costs nothing.
+        $isMoment = preg_match('/\A(\d{4})-(\d\d)-(\d\d) ([01]\d|2[0-3]):[0-5]\d:[0-5]\d\z/', $stored, $storedPart) === 1
+            && checkdate((int) $storedPart[2], (int) $storedPart[3], (int) $storedPart[1]) === true;
         $since    = $isMoment === true ? MailQueue::shown($stored, $zone) : '';
         $by       = '';
         $named    = false;

@@ -23,9 +23,16 @@ if (Giving::canManage() === false) {
 }
 
 $siteId = Site::id();
-$from = (string) ($_GET['from'] ?? date('Y-01-01'));
-$to   = (string) ($_GET['to']   ?? date('Y-12-31'));
-if (strtotime($from) === false || strtotime($to) === false) {
+// 📅 Each end must be a REAL day (#891, #892). This used to ask strtotime(),
+//    which accepts '2026-02-31' by rolling it to 3 March, and the export then
+//    ran `donatedAt BETWEEN ? AND ?` with the impossible text -- which MySQL
+//    8.0 and 8.4 answer with NO gifts and MySQL 9.7 and MariaDB answer WITH
+//    them (measured). So the same link made an empty Gift Aid file on one
+//    server and a full one on another. Giving::isRealDay() is the one test;
+//    a refusal is this page's own 400, and nothing reaches the query.
+$from = $_GET['from'] ?? date('Y-01-01');
+$to   = $_GET['to']   ?? date('Y-12-31');
+if (Giving::isRealDay($from) === false || Giving::isRealDay($to) === false) {
     http_response_code(400);
     exit('Bad date range');
 }
