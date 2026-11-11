@@ -1991,6 +1991,36 @@ jobs:
         if: always()
         run: python3 -I tools/audit-checks/check_one_password_writer.py
 
+      # 🧪 EVERY AUDIT CHECK'S OWN SELF-TEST, FOUND RATHER THAN LISTED (#919).
+      #
+      # Several checks above carry a self-test (planted faults each must report,
+      # correct code each must not), and until #919 GitHub ran only the ones a
+      # step here happened to name. check_inline_scripts_have_nonce.py
+      # --self-test was named by NO workflow at all, and bind_param_arity's and
+      # backup_column_types' only in workflows GitHub has never registered
+      # (#754), so for those three a check that had stopped catching anything
+      # would have passed here unnoticed.
+      #
+      # tools/audit-check-selftests.py reads every tools/audit-checks/*.py with
+      # Python's parser, runs each one that takes --self-test or --selftest (nine
+      # on 11 November 2026), and fails on any not green. It ALSO fails when it
+      # cannot trust its own finding: a flag spelled some third way, a self-test
+      # function no flag reaches, both spellings in one check, a check it cannot
+      # parse, or none found. So a new check's self-test is gated here with no
+      # edit to this file. Needs php on the runner (the sign-in check's
+      # self-test reads PHP with PHP's own tokeniser), which ubuntu-latest has,
+      # as the sign-in step above already relies on.
+      #
+      # The steps above that already run six of these self-tests by name STAY,
+      # on purpose: each pairs a check with its own self-test under that
+      # check's own name, so a failure is reported where a reader looks first,
+      # and they do not depend on this finder working. The cost is about six
+      # seconds of running those six twice.
+      - name: 'Every audit check''s own self-test passes (hard gate, #919)'
+        id: audit_check_selftests
+        if: always()
+        run: python3 -I tools/audit-check-selftests.py
+
 
       # =====================================================================
       # Summary in the Actions UI
@@ -2003,6 +2033,11 @@ jobs:
       #    was about.
       - name: Job summary
         if: always()
+        # 🧾 New lines take their outcome through `env:`, never `${{ ... }}`
+        #    inside the script: the whole script counts towards GitHub's
+        #    21,000-character ceiling once it holds one expression (#745).
+        env:
+          AUDIT_SELFTESTS_OUTCOME: ${{ steps.audit_check_selftests.outcome }}
         run: |
           {
             echo "### PR Security Checks"
@@ -2032,6 +2067,7 @@ jobs:
             echo "- A day is not always 86,400 seconds: ${{ steps.clock_change_arithmetic.outcome }} (hard gate, #549)"
             echo "- The form token really reaches every carrier, in a browser: ${{ steps.csrf_carriers_browser.outcome }} (#768)"
             echo "- Brand colours read in a real browser: ${{ steps.brand_colour_browser.outcome }} (D-091)"
+            echo "- Every audit check's own self-test passes: ${AUDIT_SELFTESTS_OUTCOME} (hard gate, #919)"
             # The ten guards wired by #646, as ONE line unless something failed.
             # Ten separate lines would bury the rest of the summary; what a
             # reader needs is to tell "they all passed" from "they are not
